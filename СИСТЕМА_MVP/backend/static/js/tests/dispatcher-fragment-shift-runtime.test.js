@@ -7,16 +7,16 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 
-const TEMPLATE_SOURCE = fs.readFileSync(
+const RUNTIME_SOURCE = fs.readFileSync(
     path.resolve(
         __dirname,
         "..",
-        "..",
-        "..",
-        "templates",
-        "trips",
-        "dispatcher_control.html"
+        "dispatcher-control-v1.js"
     ),
+    "utf8"
+);
+const TEMPLATE_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "..", "..", "templates", "trips", "dispatcher_control.html"),
     "utf8"
 );
 
@@ -177,22 +177,22 @@ function createRuntime(initialShiftOpen, freshShiftOpen) {
         fetchCount: 0,
     };
     const syncSource = extractBraceBlock(
-        TEMPLATE_SOURCE,
+        RUNTIME_SOURCE,
         "function syncDispatcherShiftRuntime(freshBoard)",
         "Dispatcher shift runtime sync"
     );
     const bindDragSource = extractBraceBlock(
-        TEMPLATE_SOURCE,
+        RUNTIME_SOURCE,
         "function bindDragTile(tile)",
         "Dispatcher drag source bind"
     );
     const bindDropSource = extractBraceBlock(
-        TEMPLATE_SOURCE,
+        RUNTIME_SOURCE,
         "function bindDispatcherComplexDrop(zone)",
         "Dispatcher complex drop bind"
     );
     const bindAllSource = extractBraceBlock(
-        TEMPLATE_SOURCE,
+        RUNTIME_SOURCE,
         "function bindDispatcherDesktopInteractions()",
         "Dispatcher desktop interactions bind"
     );
@@ -271,21 +271,118 @@ test("open to closed fragment blocks dispatcher drag-and-drop with fetch count z
 
 test("fragment refresh synchronizes shift runtime before replacement and rebind", () => {
     const refreshSource = extractBraceBlock(
-        TEMPLATE_SOURCE,
+        RUNTIME_SOURCE,
         "function refreshDispatcherDesktopBoardFromServer(options)",
         "Dispatcher fragment refresh"
     );
     const parseIndex = refreshSource.indexOf("AppOperationalFragment.parseRoot");
     const syncIndex = refreshSource.indexOf("syncDispatcherShiftRuntime(freshBoard)");
-    const replaceIndex = refreshSource.indexOf("currentBoard.replaceWith(freshBoard)");
+    const reconcileIndex = refreshSource.indexOf("reconcileDispatcherDesktopBoard(currentBoard, freshBoard)");
+    const fallbackIndex = refreshSource.indexOf("currentBoard.replaceWith(freshBoard)");
     const bindIndex = refreshSource.indexOf("bindDispatcherDesktopInteractions()");
 
     assert.ok(parseIndex >= 0);
     assert.ok(syncIndex > parseIndex);
-    assert.ok(replaceIndex > syncIndex);
-    assert.ok(bindIndex > replaceIndex);
+    assert.ok(reconcileIndex > syncIndex);
+    assert.ok(fallbackIndex > reconcileIndex, "whole-board replacement is fallback-only");
+    assert.ok(bindIndex > fallbackIndex);
     assert.match(
         TEMPLATE_SOURCE,
         /data-dispatcher-shift-open="\{% if dispatcher_header\.active_shift %\}true/
+    );
+});
+
+test("dispatcher fragment reconciliation is keyed by equipment and complex identity", () => {
+    const reconcileSource = extractBraceBlock(
+        RUNTIME_SOURCE,
+        "function reconcileDispatcherDesktopBoard(currentBoard, freshBoard)",
+        "Dispatcher keyed board reconciliation"
+    );
+
+    assert.match(reconcileSource, /\.dispatcher-excavators/);
+    assert.match(reconcileSource, /\.dispatcher-zone-grid/);
+    assert.match(reconcileSource, /\.dispatcher-trucks/);
+    assert.match(reconcileSource, /key:\s*"equipmentId"/);
+    assert.match(reconcileSource, /key:\s*"zoneId"/);
+    assert.doesNotMatch(reconcileSource, /currentBoard\.replaceWith/);
+});
+
+test("one changed truck replaces only that keyed tile", () => {
+    const helperNames = [
+        "function dispatcherNodeMarkup(node)",
+        "function dispatcherMarkupFingerprint(markup)",
+        "function seedDispatcherServerFingerprint(node)",
+        "function seedDispatcherBoardFingerprints(boardNode)",
+        "function dispatcherServerMarkupMatches(currentNode, freshNode)",
+        "function syncDispatcherNodeAttributes(currentNode, freshNode)",
+        "function dispatcherItemKey(node, keyName, index)",
+        "function reconcileDispatcherKeyedRegion(currentBoard, freshBoard, definition)",
+        "function reconcileDispatcherDesktopBoard(currentBoard, freshBoard)",
+    ];
+    const helpers = helperNames.map((signature) => (
+        extractBraceBlock(RUNTIME_SOURCE, signature, signature)
+    )).join("\n");
+    function node(markup, dataset = {}) {
+        return {
+            outerHTML: markup,
+            dataset: {...dataset},
+            attributes: [],
+            replacements: [],
+            children: {},
+            lists: {},
+            hasAttribute() { return false; },
+            removeAttribute() {},
+            setAttribute() {},
+            querySelector(selector) { return this.children[selector] || null; },
+            querySelectorAll(selector) { return this.lists[selector] || []; },
+            replaceWith(replacement) { this.replacements.push(replacement); },
+        };
+    }
+    const definitions = [
+        [".dispatcher-excavators", ".dispatcher-equipment-tile", "equipmentId", "7"],
+        [".dispatcher-zone-grid", ".dispatcher-complex-card[data-zone-id]", "zoneId", "2"],
+        [".dispatcher-trucks", ".dispatcher-truck-tile[data-equipment-id]", "equipmentId", "15"],
+    ];
+    const currentBoard = node("board-old");
+    const freshBoard = node("board-new");
+    currentBoard.children[".dispatcher-topbar"] = node("topbar");
+    freshBoard.children[".dispatcher-topbar"] = node("topbar");
+    let changedTruck = null;
+    definitions.forEach(([regionSelector, itemSelector, keyName, key]) => {
+        const currentRegion = node(`${regionSelector}-old`);
+        const freshRegion = node(`${regionSelector}-new`);
+        const currentItem = node(
+            regionSelector === ".dispatcher-trucks" ? "truck-old" : `${regionSelector}-same`,
+            {[keyName]: key}
+        );
+        const freshItem = node(
+            regionSelector === ".dispatcher-trucks" ? "truck-new" : `${regionSelector}-same`,
+            {[keyName]: key}
+        );
+        currentRegion.lists[itemSelector] = [currentItem];
+        freshRegion.lists[itemSelector] = [freshItem];
+        currentBoard.children[regionSelector] = currentRegion;
+        freshBoard.children[regionSelector] = freshRegion;
+        if (regionSelector === ".dispatcher-trucks") changedTruck = currentItem;
+    });
+    const context = {Array, Math};
+    vm.runInNewContext(helpers, context);
+
+    definitions.forEach(([regionSelector, itemSelector]) => {
+        const currentItem = currentBoard.children[regionSelector].lists[itemSelector][0];
+        context.seedDispatcherServerFingerprint(currentItem);
+        currentItem.outerHTML += "-runtime-mutated";
+    });
+
+    const result = context.reconcileDispatcherDesktopBoard(currentBoard, freshBoard);
+
+    assert.equal(result, currentBoard);
+    assert.equal(changedTruck.replacements.length, 1);
+    assert.equal(currentBoard.replacements.length, 0);
+    assert.equal(currentBoard.children[".dispatcher-topbar"].replacements.length, 0);
+    assert.equal(
+        currentBoard.children[".dispatcher-excavators"].lists[".dispatcher-equipment-tile"][0].replacements.length,
+        0,
+        "runtime-only DOM mutations must not replace an unchanged excavator tile"
     );
 });

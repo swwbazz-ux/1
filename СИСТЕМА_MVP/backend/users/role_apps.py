@@ -8,7 +8,7 @@ from django.http import HttpResponse, JsonResponse
 
 
 APP_CONTRACT_VERSION = 'pwa-contract-v1'
-STATIC_ASSET_RELEASE = 'ready-core-traffic-v7'
+STATIC_ASSET_RELEASE = 'ready-core-traffic-v11'
 READY_TRAFFIC_ROLE_CODES = frozenset({
     'admin',
     'oup',
@@ -21,10 +21,7 @@ READY_TRAFFIC_ROLE_CODES = frozenset({
 })
 RELEASE_STATIC_SERVICE_WORKER_JS = r"""
 const STATIC_ASSET_RELEASE = "__STATIC_ASSET_RELEASE__";
-const RELEASE_STATIC_PATHS = new Set([
-  "/static/css/app.css",
-  "/static/js/realtime-client.js"
-]);
+const RELEASE_STATIC_PATHS = new Set(__RELEASE_STATIC_PATHS__);
 
 function isReleaseStaticRequest(url) {
   return RELEASE_STATIC_PATHS.has(url.pathname)
@@ -49,7 +46,10 @@ async function cacheFirstReleaseStatic(request) {
     });
   }
 }
+""".strip()
 
+
+RELEASE_STATIC_INSTALL_JS = r"""
 self.addEventListener("install", event => {
   const releaseAssets = Array.from(
     RELEASE_STATIC_PATHS,
@@ -132,7 +132,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v127',
+        shell_version='excavator-mobile-shell-v133',
     ),
     RoleApp(
         role_code='mining_master',
@@ -148,7 +148,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v120',
+        shell_version='mining-master-mobile-shell-v122',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
@@ -180,7 +180,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v41',
+        shell_version='dispatcher-desktop-shell-v46',
     ),
     RoleApp(
         role_code='settlement_clerk',
@@ -214,7 +214,7 @@ ROLE_APPS = (
         icon_slug='oup',
         manifest_url='/oup.webmanifest',
         service_worker_url='/oup-sw.js',
-        shell_version='oup-shell-v21',
+        shell_version='oup-shell-v22',
     ),
     RoleApp(
         role_code='timekeeper',
@@ -294,7 +294,7 @@ ROLE_APPS = (
         icon_slug='admin',
         manifest_url='/system-admin.webmanifest',
         service_worker_url='/system-admin-sw.js',
-        shell_version='system-admin-shell-v19',
+        shell_version='system-admin-shell-v20',
     ),
 )
 
@@ -514,8 +514,21 @@ self.addEventListener("message", event => {{
 '''.strip()
 
 
-def add_release_static_cache(worker_script):
+def add_release_static_cache(worker_script, role_code):
+    release_static_paths = ['/static/js/realtime-client.js']
+    if role_code != 'dispatcher':
+        release_static_paths.insert(0, '/static/css/app.css')
     release_helper = RELEASE_STATIC_SERVICE_WORKER_JS.replace(
+        '__STATIC_ASSET_RELEASE__',
+        STATIC_ASSET_RELEASE,
+    ).replace(
+        '__RELEASE_STATIC_PATHS__',
+        json.dumps(release_static_paths),
+    )
+    release_install_helper = ''
+    if role_code != 'dispatcher':
+        release_install_helper = RELEASE_STATIC_INSTALL_JS
+    worker_script = worker_script.replace(
         '__STATIC_ASSET_RELEASE__',
         STATIC_ASSET_RELEASE,
     )
@@ -536,14 +549,18 @@ def add_release_static_cache(worker_script):
         'event.respondWith(networkFirstStatic(request));',
         'event.respondWith(isReleaseStaticRequest(url) ? cacheFirstReleaseStatic(request) : networkFirstStatic(request));',
     )
-    return f'{release_helper}\n\n{worker_script}'
+    worker_parts = [release_helper]
+    if release_install_helper:
+        worker_parts.append(release_install_helper)
+    worker_parts.append(worker_script)
+    return '\n\n'.join(worker_parts)
 
 
 def role_app_service_worker_response(request, role_code, script=None):
     app = ROLE_APPS_BY_CODE[role_code]
     worker_script = script or build_basic_role_service_worker(role_code)
     if role_code in READY_TRAFFIC_ROLE_CODES:
-        worker_script = add_release_static_cache(worker_script)
+        worker_script = add_release_static_cache(worker_script, role_code)
     response = HttpResponse(
         worker_script,
         content_type='application/javascript; charset=utf-8',

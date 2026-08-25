@@ -1,13 +1,20 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Сотрудники{% endblock %}
 {% block body_class %}system-admin-employees-screen{% endblock %}
+{% block extra_head %}
+{% include "users/includes/system_admin_workspace_styles.html" %}
+<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260718-4">
+<link rel="stylesheet" href="{% static 'css/oup-responsive-layout-v2.css' %}?v=20260718-2">
+<link rel="stylesheet" href="{% static 'css/admin-employee-filters-v1.css' %}?v=20260824-2">
+{% endblock %}
 
 {% block body %}
 <div class="admin-shell admin-exports-shell admin-employees-shell admin-day" data-admin-theme>
     <header class="admin-console-header" aria-label="Административная шапка">
         <section class="admin-console-identity">
-            <span class="admin-console-avatar">{{ access.employee.full_name|first }}</span>
+            {% include "users/includes/system_admin_avatar.html" %}
             <span>
                 <strong>{{ access.employee.full_name }}</strong>
                 <em>Системный администратор</em>
@@ -24,6 +31,7 @@
                 <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
                 <a class="is-active" href="{% url 'system_admin_employees' %}">Сотрудники</a>
                 <a href="{% url 'system_admin_references' %}">Справочники</a>
+                <a href="{% url 'system_admin_live_monitor' %}">Смена онлайн</a>
                 <a href="{% url 'system_admin_conflicts' %}">Конфликты</a>
                 <a href="{% url 'system_admin_logs' %}">Журнал</a>
                 <a href="{% url 'system_admin_exports' %}">Выгрузки</a>
@@ -60,9 +68,21 @@
                 <input id="employee-search" name="q" value="{{ query }}" placeholder="Введите ФИО" autocomplete="off" data-auto-filter-search>
             </div>
             <div class="field select-field">
-                <label for="employee-role">Роль</label>
+                <label for="employee-personnel-position">Кадровая должность</label>
+                <select id="employee-personnel-position" name="personnel_position">
+                    <option value="">Все должности</option>
+                    {% for value, label in personnel_position_groups %}
+                        <option value="{{ value }}" {% if selected_personnel_position == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                    {% for position in personnel_positions %}
+                        <option value="{{ position.id }}" {% if selected_personnel_position == position.id|stringformat:"s" %}selected{% endif %}>{{ position.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="field select-field">
+                <label for="employee-role">Доступ в приложение</label>
                 <select id="employee-role" name="role">
-                    <option value="">Все роли</option>
+                    <option value="">Все доступы</option>
                     {% for role in roles %}
                         <option value="{{ role.id }}" {% if selected_role == role.id|stringformat:"s" %}selected{% endif %}>{{ role.name }}</option>
                     {% endfor %}
@@ -92,100 +112,37 @@
         </form>
     </section>
 
-    <section class="admin-employee-workspace">
-        <div class="admin-employee-list-card">
-            <div class="admin-section-title section-title-row">
-                <div>
-                    <h2>Список сотрудников</h2>
-                    <p class="muted">Двойной клик открывает карточку. Цвет строки показывает состояние.</p>
-                </div>
-                <span class="admin-chip admin-chip-info" data-employee-count>{{ employees|length }} найдено</span>
+    <section class="oup-register-card admin-employees-register" data-admin-employee-register>
+        <div class="admin-section-title section-title-row">
+            <div>
+                <h2>Список сотрудников</h2>
+                <p class="muted">Нажмите строку, чтобы открыть кадровую карточку сотрудника.</p>
             </div>
-
-            <div class="admin-employee-list" data-employee-list>
-                {% for employee in employees %}
-                    <article class="admin-employee-row status-{{ employee.status }}" draggable="true" tabindex="0" data-employee-row data-employee-id="{{ employee.id }}" data-detail-url="{% url 'system_admin_employee_detail' employee.id %}" data-employee-name="{{ employee.full_name }}" data-employee-status="{{ employee.get_status_display }}" data-employee-status-code="{{ employee.status }}" data-access-status="{% with primary_access=employee.accesses.all.0 %}{% if primary_access %}{{ primary_access.get_status_display }}{% else %}Нет доступа{% endif %}{% endwith %}">
-                        <div class="employee-mini-cell">
-                            <div class="employee-mini-card">
-                                <span class="employee-mini-avatar">
-                                    {% if employee.photo %}
-                                        <img src="{{ employee.photo.url }}" alt="Фото {{ employee.full_name }}">
-                                    {% else %}
-                                        <span>{{ employee.full_name|slice:":1" }}</span>
-                                    {% endif %}
-                                </span>
-                                <span class="employee-mini-main">
-                                    <strong>{{ employee.full_name }}</strong>
-                                    <small>
-                                        {% for access_item in employee.accesses.all %}
-                                            {{ access_item.role.name }}{% if not forloop.last %}, {% endif %}
-                                        {% empty %}
-                                            Роль не назначена
-                                        {% endfor %}
-                                    </small>
-                                </span>
-                            </div>
-                        </div>
-
-                        <span class="employee-state-cell">
-                            <span class="employee-state-badge employee-state-{{ employee.status }}">
-                                <span class="chip-label">Сотрудник</span>
-                                {{ employee.get_status_display }}
-                            </span>
-                        </span>
-
-                        <span class="employee-mini-phone">{{ employee.phone|default:"Телефон не указан" }}</span>
-
-                        <span class="employee-mini-accesses">
-                            {% for access_item in employee.accesses.all %}
-                                <span class="status-chip access-{{ access_item.status }}">
-                                    <span class="chip-label">Вход</span>
-                                    {{ access_item.get_status_display }}
-                                </span>
-                            {% empty %}
-                                <span class="status-chip access-not_activated">
-                                    <span class="chip-label">Вход</span>
-                                    Нет доступа
-                                </span>
-                            {% endfor %}
-                        </span>
-
-                        <span class="employee-mini-residence">{{ employee.residence_text|default:"-" }}</span>
-
-                        {% with primary_access=employee.accesses.all.0 %}
-                            {% if primary_access %}
-                                <form hidden method="post" action="{% url 'system_admin_access_action' primary_access.id 'block' %}" data-dnd-form="block_access" data-confirm="Заблокировать доступ сотрудника?">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                                    <input type="hidden" name="reason" data-block-reason>
-                                </form>
-                                {% if employee.status != "archived" and employee.status != "dismissed" and employee.status != "deleted" %}
-                                    <form hidden method="post" action="{% url 'system_admin_access_action' primary_access.id 'unblock' %}" data-dnd-form="unblock_access" data-confirm="Разблокировать доступ сотрудника?">
-                                        {% csrf_token %}
-                                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                                    </form>
-                                {% endif %}
-                            {% endif %}
-                        {% endwith %}
-                        <form hidden method="post" action="{% url 'system_admin_employee_status_action' employee.id 'deactivate' %}" data-dnd-form="deactivate" data-confirm="Деактивировать сотрудника? Его доступы будут отключены.">
-                            {% csrf_token %}
-                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                        </form>
-                        <form hidden method="post" action="{% url 'system_admin_employee_status_action' employee.id 'archive' %}" data-dnd-form="archive" data-confirm="Отправить сотрудника в архив? Его доступы будут отключены.">
-                            {% csrf_token %}
-                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                        </form>
-                    </article>
-                {% empty %}
-                    <div class="empty-state">Сотрудников по выбранным фильтрам не найдено.</div>
-                {% endfor %}
-            </div>
+            <span class="admin-chip admin-chip-info" data-employee-count>{{ employees|length }} найдено</span>
         </div>
 
-        <aside class="admin-dnd-panel" aria-label="Drag-and-drop действия">
+        <div class="oup-register-head" aria-hidden="true">
+            <span>Сотрудник</span>
+            <span>Работа</span>
+            <span>Контакты</span>
+            <span>Состояние</span>
+        </div>
+        <div class="oup-register-list" data-employee-list>
+            {% for employee in employees %}
+                {% include "users/includes/employee_register_row.html" with detail_url_name="system_admin_employee_detail" admin_employee_row=True %}
+            {% empty %}
+                <div class="oup-empty-state">
+                    <strong>Сотрудники не найдены</strong>
+                    <p>Измените фильтры или сбросьте их.</p>
+                </div>
+            {% endfor %}
+        </div>
+    </section>
+
+        <aside class="admin-dnd-panel admin-dnd-overlay" aria-label="Быстрые административные действия" aria-hidden="true" data-admin-dnd-panel>
             <div class="dnd-panel-head">
-                <h2>Действия</h2>
-                <p class="muted">Перетащите сотрудника в нужную зону.</p>
+                <h2>Быстрые действия</h2>
+                <p class="muted">Отпустите карточку сотрудника в нужной зоне.</p>
             </div>
             <div class="dnd-group-label">Доступ</div>
             <button class="dnd-zone success" type="button" data-dnd-action="unblock_access" data-dnd-unavailable-hint="Сначала восстановите сотрудника" aria-disabled="false">
@@ -205,9 +162,8 @@
                 <strong>В архив</strong>
                 <span>Убрать из активных</span>
             </button>
-            <div class="dnd-hint">Карточка — двойной клик по строке. Удаление остается только внутри карточки.</div>
+            <div class="dnd-hint">В обычном режиме панель скрыта. Остальные действия доступны внутри карточки.</div>
         </aside>
-    </section>
     </main>
     <div class="dnd-reason-modal" data-dnd-reason-modal hidden>
     <div class="dnd-reason-dialog" role="dialog" aria-modal="true" aria-labelledby="dnd-reason-title">
@@ -232,6 +188,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var transparentDragImage = null;
     var rows = document.querySelectorAll("[data-employee-row]");
     var zones = document.querySelectorAll("[data-dnd-action]");
+    var dndPanel = document.querySelector("[data-admin-dnd-panel]");
     var reasonModal = document.querySelector("[data-dnd-reason-modal]");
     var reasonInput = reasonModal ? reasonModal.querySelector("[data-dnd-reason-input]") : null;
     var reasonError = reasonModal ? reasonModal.querySelector("[data-dnd-reason-error]") : null;
@@ -407,7 +364,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function renderNameHighlight(row, query) {
-        var nameNode = row.querySelector(".employee-mini-main strong");
+        var nameNode = row.querySelector(".oup-person-cell strong");
         if (!nameNode) {
             return;
         }
@@ -462,8 +419,8 @@ document.addEventListener("DOMContentLoaded", function () {
         var visibleCount = 0;
 
         rows.forEach(function (row) {
-            var employeeName = row.dataset.employeeName || "";
-            var matches = !normalizedQuery || findWordStartMatch(employeeName.toLocaleLowerCase("ru-RU"), normalizedQuery) >= 0;
+            var employeeSearch = row.dataset.employeeSearch || row.dataset.employeeName || "";
+            var matches = !normalizedQuery || employeeSearch.toLocaleLowerCase("ru-RU").indexOf(normalizedQuery) >= 0;
             row.hidden = !matches;
             if (matches) {
                 visibleCount += 1;
@@ -495,7 +452,11 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
     rows.forEach(function (row) {
-        row.addEventListener("dblclick", function () {
+        row.addEventListener("click", function () {
+            var dragEndedAt = Number(row.dataset.dragEndedAt || 0);
+            if (Date.now() - dragEndedAt < 250) {
+                return;
+            }
             if (row.dataset.detailUrl) {
                 window.location.href = row.dataset.detailUrl;
             }
@@ -511,11 +472,13 @@ document.addEventListener("DOMContentLoaded", function () {
         row.addEventListener("dragstart", function (event) {
             draggedId = row.dataset.employeeId || "";
             row.classList.add("is-dragging");
+            if (shell) shell.classList.add("is-dnd-active");
+            if (dndPanel) dndPanel.setAttribute("aria-hidden", "false");
             setDndZoneAvailability(row);
             event.dataTransfer.effectAllowed = "move";
             event.dataTransfer.setData("text/plain", draggedId);
             removeDragPreview();
-            var avatar = row.querySelector(".employee-mini-avatar");
+            var avatar = row.querySelector(".oup-person-avatar");
             var badge = document.createElement("div");
             badge.className = "employee-drag-preview is-visible";
             if (avatar) {
@@ -546,7 +509,10 @@ document.addEventListener("DOMContentLoaded", function () {
         });
 
         row.addEventListener("dragend", function () {
+            row.dataset.dragEndedAt = String(Date.now());
             row.classList.remove("is-dragging");
+            if (shell) shell.classList.remove("is-dnd-active");
+            if (dndPanel) dndPanel.setAttribute("aria-hidden", "true");
             removeDragPreview();
             draggedId = "";
             setDndZoneAvailability(null);

@@ -11,6 +11,10 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="{{ login_role_app.short_name }}">
     <link rel="apple-touch-icon" href="{{ login_role_app.icon_180_url }}">
+    {% if role_app %}
+    <link rel="stylesheet" href="{% static 'css/role-app-install-v1.css' %}?v=2">
+    <script src="{% static 'js/role-app-install-v1.js' %}?v=2" defer></script>
+    {% endif %}
     {% endif %}
 {% endblock %}
 {% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% endblock %}
@@ -54,9 +58,20 @@
             </label>
         </fieldset>
         <div class="app-confirm-actions">
-            <a class="secondary" href="{% url 'interface_map' %}">Карта</a>
+            <a class="secondary" href="{{ app_catalog_url }}">Приложения</a>
             <button class="danger" type="submit">Войти</button>
         </div>
+        {% if role_app and login_role_app %}
+        <section class="role-app-install" data-role-app-install data-app-name="{{ login_role_app.name }}" aria-label="Установка приложения">
+            <button class="role-app-install__button" type="button" data-install-button>
+                <span aria-hidden="true">↓</span>
+                Установить приложение
+            </button>
+            <p class="role-app-install__status" data-install-status aria-live="polite">
+                Приложение можно добавить на главный экран телефона.
+            </p>
+        </section>
+        {% endif %}
     </form>
     {% for message in messages %}
         <div class="message error">{{ message }}</div>

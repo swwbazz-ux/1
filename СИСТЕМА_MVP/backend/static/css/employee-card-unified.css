@@ -340,17 +340,18 @@
 }
 
 .employee-card-photo-placeholder span {
-    top: 40px;
-    width: 54px;
-    height: 54px;
+    top: 18%;
+    width: 32%;
+    height: auto;
+    aspect-ratio: 1;
     border-radius: 50%;
 }
 
 .employee-card-photo-placeholder i {
-    bottom: 28px;
-    width: 94px;
-    height: 58px;
-    border-radius: 45px 45px 10px 10px;
+    bottom: 14%;
+    width: 58%;
+    height: 40%;
+    border-radius: 50% 50% 12% 12% / 62% 62% 12% 12%;
 }
 
 .employee-card-photo-actions {
@@ -361,15 +362,39 @@
 }
 
 .employee-card-photo-action {
+    position: relative;
     display: inline-flex;
+    flex: 0 0 36px;
     align-items: center;
     justify-content: center;
-    width: 38px;
-    height: 32px;
+    box-sizing: border-box;
+    width: 36px;
+    height: 36px;
+    margin: 0;
+    padding: 0;
     border-radius: 5px;
-    font-size: 22px;
-    font-weight: 700;
-    line-height: 1;
+    appearance: none;
+    font-size: 0;
+    line-height: 0;
+    vertical-align: middle;
+}
+
+.employee-card-photo-action::before,
+.employee-card-photo-action.is-add::after {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 14px;
+    height: 2px;
+    border-radius: 999px;
+    background: currentColor;
+    content: "";
+    transform: translate(-50%, -50%);
+}
+
+.employee-card-photo-action.is-add::after {
+    width: 2px;
+    height: 14px;
 }
 
 .employee-card-photo-action.is-add {
@@ -1120,18 +1145,6 @@ summary.employee-card-section-heading {
         height: 148px;
     }
 
-    .employee-card-photo-placeholder span {
-        top: 30px;
-        width: 46px;
-        height: 46px;
-    }
-
-    .employee-card-photo-placeholder i {
-        bottom: 20px;
-        width: 78px;
-        height: 48px;
-    }
-
     .employee-card-identity-grid,
     .employee-card-field-grid,
     .employee-card-assignment-grid,
@@ -1207,7 +1220,11 @@ summary.employee-card-section-heading {
     }
 
     .employee-card-field-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .employee-card-field-grid > .employee-card-work-profile-field {
+        grid-column: span 1;
     }
 }
 
@@ -1250,6 +1267,19 @@ summary.employee-card-section-heading {
 }
 
 @media (max-width: 760px) {
+    .employee-card-shell .admin-console-main > *,
+    .employee-card-shell .admin-console-title,
+    .employee-card-shell .admin-console-nav {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .employee-card-shell .admin-console-title h1,
+    .employee-card-shell .admin-console-identity strong {
+        overflow-wrap: anywhere;
+        white-space: normal;
+    }
+
     .employee-card-page {
         padding: 8px;
     }

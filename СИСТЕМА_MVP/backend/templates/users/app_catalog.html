@@ -1,0 +1,90 @@
+{% load static %}
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0b1722">
+    <title>Рабочие приложения · Коппер Рисорсез</title>
+    <link rel="icon" href="{% static 'favicon.ico' %}">
+    <link rel="stylesheet" href="{% static 'css/app-catalog-v1.css' %}?v=6">
+    <script src="{% static 'js/app-catalog-v1.js' %}?v=6" defer></script>
+</head>
+<body class="app-catalog-page">
+<main class="app-catalog-shell">
+    <header class="app-catalog-header">
+        <div class="app-catalog-brand" aria-label="ООО Коппер Рисорсез">
+            <span class="app-catalog-brand__mark" aria-hidden="true">CR</span>
+            <span>
+                <strong>Коппер Рисорсез</strong>
+                <small>Рабочие приложения</small>
+            </span>
+        </div>
+        <div class="app-catalog-heading">
+            <p class="app-catalog-eyebrow">Выберите своё приложение</p>
+            <h1>Приложения для работы</h1>
+            <p class="app-catalog-instruction app-catalog-instruction--desktop">
+                Нажмите на приложение — появятся QR-код и ссылка для отправки сотруднику.
+            </p>
+            <p class="app-catalog-instruction app-catalog-instruction--mobile">
+                Нажмите на приложение — покажите QR-код или отправьте ссылку сотруднику.
+            </p>
+        </div>
+    </header>
+
+    <section class="app-catalog-grid" aria-label="Доступные рабочие приложения">
+        {% for app in catalog_apps %}
+        <a
+            class="app-catalog-card"
+            href="?app={{ app.role_code }}#connect"
+            data-app-card
+            data-role-code="{{ app.role_code }}"
+            data-app-name="{{ app.label }}"
+            data-app-url="{{ app.target_url }}"
+            data-app-qr="{{ app.qr_asset_url }}"
+            data-app-qr-target="{{ app.qr_target_url }}"
+            style="--app-accent: {{ app.theme_color }}"
+            aria-label="Показать способы подключения к приложению {{ app.label }}"
+        >
+            <span class="app-catalog-card__icon-wrap" aria-hidden="true">
+                <img class="app-catalog-card__icon" src="{{ app.icon_url }}" width="112" height="112" alt="">
+            </span>
+            <span class="app-catalog-card__name">{{ app.label }}</span>
+            <span class="app-catalog-card__action">
+                <span>Подключить</span>
+                <span aria-hidden="true">→</span>
+            </span>
+        </a>
+        {% endfor %}
+    </section>
+
+    <footer class="app-catalog-footer">
+        <span aria-hidden="true">●</span>
+        Здесь показаны только готовые к использованию модули.
+    </footer>
+</main>
+
+<dialog id="connect" class="app-catalog-dialog{% if selected_app %} app-catalog-dialog--server-open{% endif %}" data-app-dialog aria-labelledby="app-dialog-title"{% if selected_app %} open{% endif %}>
+    <a class="app-catalog-dialog__close" href="{% url 'app_catalog' %}" data-dialog-close aria-label="Закрыть">×</a>
+    <div class="app-catalog-dialog__content">
+        <div class="app-catalog-dialog__qr-wrap">
+            <img data-dialog-qr width="296" height="296"{% if selected_app %} src="{{ selected_app.qr_asset_url }}" alt="QR-код для приложения «{{ selected_app.label }}»"{% else %} alt=""{% endif %}>
+        </div>
+        <div class="app-catalog-dialog__details">
+            <p class="app-catalog-dialog__eyebrow">Установка на телефон</p>
+            <h2 id="app-dialog-title" data-dialog-title>{% if selected_app %}{{ selected_app.label }}{% endif %}</h2>
+            <p>Покажите QR-код сотруднику или отправьте ему ссылку. Ссылка откроет страницу установки и входа в приложение.</p>
+            <p class="app-catalog-dialog__qr-target" data-dialog-qr-target>{% if selected_app %}QR откроет: {{ selected_app.qr_target_url }}{% endif %}</p>
+            <label class="app-catalog-dialog__url-label" for="app-dialog-url">Прямая ссылка</label>
+            <input id="app-dialog-url" data-dialog-url type="text" value="{% if selected_app %}{{ selected_app.target_url }}{% endif %}" readonly>
+            <p class="app-catalog-dialog__status" data-copy-status aria-live="polite"></p>
+            <div class="app-catalog-dialog__actions">
+                <button class="app-catalog-dialog__share" type="button" data-share-link>Отправить ссылку</button>
+                <button class="app-catalog-dialog__copy" type="button" data-copy-link>Копировать ссылку</button>
+                <a class="app-catalog-dialog__open" data-dialog-open href="{% if selected_app %}{{ selected_app.target_url }}{% else %}/{% endif %}">Открыть приложение</a>
+            </div>
+        </div>
+    </div>
+</dialog>
+</body>
+</html>

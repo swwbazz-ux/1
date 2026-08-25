@@ -2,12 +2,15 @@
 
 {% block title %}Конфликты админки{% endblock %}
 {% block body_class %}system-admin-conflicts-screen{% endblock %}
+{% block extra_head %}
+{% include "users/includes/system_admin_workspace_styles.html" %}
+{% endblock %}
 
 {% block body %}
 <div class="admin-shell admin-exports-shell admin-conflicts-shell admin-day" data-admin-theme>
     <header class="admin-console-header" aria-label="Административная шапка">
         <section class="admin-console-identity">
-            <span class="admin-console-avatar">{{ access.employee.full_name|first }}</span>
+            {% include "users/includes/system_admin_avatar.html" %}
             <span>
                 <strong>{{ access.employee.full_name }}</strong>
                 <em>Системный администратор</em>
@@ -24,6 +27,7 @@
                 <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
                 <a href="{% url 'system_admin_employees' %}">Сотрудники</a>
                 <a href="{% url 'system_admin_references' %}">Справочники</a>
+                <a href="{% url 'system_admin_live_monitor' %}">Смена онлайн</a>
                 <a class="is-active" href="{% url 'system_admin_conflicts' %}">Конфликты</a>
                 <a href="{% url 'system_admin_logs' %}">Журнал</a>
                 <a href="{% url 'system_admin_exports' %}">Выгрузки</a>

@@ -144,6 +144,7 @@ function createRuntime(options) {
         dataset: {
             roleAccessActive: "true",
             operationalStateVersion: "7",
+            appRoleCode: runtimeOptions.appRoleCode || "driver",
         },
         classList: new FakeClassList(),
     };
@@ -522,6 +523,11 @@ test("irrelevant delta advances version without events GET, custom refresh or HT
         new URL(runtime.fetchCalls[0].url).searchParams.get("include_events"),
         "1",
         "the light state request must already carry the server-filtered delta"
+    );
+    assert.equal(
+        new URL(runtime.fetchCalls[0].url).searchParams.get("role_app_code"),
+        "driver",
+        "the poll must request the contract of the visible role application"
     );
     assert.equal(customRefreshCalls.length, 0);
     assert.equal(runtime.reloads.length, 0);

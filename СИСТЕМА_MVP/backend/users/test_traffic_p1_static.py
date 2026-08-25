@@ -4,7 +4,7 @@ from pathlib import Path
 from django.conf import settings
 from django.test import Client, SimpleTestCase, override_settings
 
-from .role_apps import READY_TRAFFIC_ROLE_CODES, ROLE_APPS_BY_CODE
+from .role_apps import READY_TRAFFIC_ROLE_CODES, ROLE_APPS_BY_CODE, STATIC_ASSET_RELEASE
 
 
 READY_ROLE_CODES = (
@@ -17,11 +17,23 @@ READY_ROLE_CODES = (
     'driver',
     'manager',
 )
-EXPECTED_RELEASE = 'ready-core-traffic-v7'
+EXPECTED_RELEASE = STATIC_ASSET_RELEASE
 
 
 @override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
 class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
+    def test_dispatcher_blocking_recovery_keeps_hidden_label_out_of_layout(self):
+        css = (
+            Path(settings.BASE_DIR) / 'static' / 'css' / 'dispatcher-control-v1.css'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn(
+            '.dispatcher-blocking-shift-recovery .visually-hidden',
+            css,
+        )
+        self.assertIn('position: absolute !important;', css)
+        self.assertIn('clip: rect(0, 0, 0, 0) !important;', css)
+
     def test_base_uses_one_stable_release_url_across_repeated_rendering(self):
         first = Client().get('/', HTTP_HOST='driver.localhost')
         second = Client().get('/', HTTP_HOST='driver.localhost')
@@ -72,8 +84,33 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                 )
                 self.assertIsNotNone(core_assets)
                 self.assertNotIn('/static/css/app.css', core_assets.group(1))
-                self.assertNotIn('/static/js/realtime-client.js', core_assets.group(1))
-                self.assertIn('cache.delete(path)', script)
+                if role_code == 'dispatcher':
+                    self.assertEqual(
+                        script.count('self.addEventListener("install"'),
+                        1,
+                    )
+                    self.assertNotIn('Promise.allSettled', script)
+                    self.assertIn(
+                        f'/static/js/realtime-client.js?v={EXPECTED_RELEASE}',
+                        core_assets.group(1),
+                    )
+                    self.assertIn(
+                        'const RELEASE_STATIC_PATHS = new Set(["/static/js/realtime-client.js"]);',
+                        script,
+                    )
+                    self.assertIn('/static/css/dispatcher-control-v1.css', core_assets.group(1))
+                    self.assertIn('/static/js/dispatcher-control-v1.js', core_assets.group(1))
+                else:
+                    self.assertEqual(
+                        script.count('self.addEventListener("install"'),
+                        2,
+                    )
+                    self.assertNotIn('/static/js/realtime-client.js', core_assets.group(1))
+                    self.assertIn(
+                        'const RELEASE_STATIC_PATHS = new Set(["/static/css/app.css", "/static/js/realtime-client.js"]);',
+                        script,
+                    )
+                    self.assertIn('cache.delete(path)', script)
                 self.assertIn('request.mode === "navigate"', script)
                 self.assertIn('networkFirstStatic(request)', script)
 

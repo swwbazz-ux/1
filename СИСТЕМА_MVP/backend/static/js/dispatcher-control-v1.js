@@ -1,0 +1,5311 @@
+/* Dispatcher desktop PWA runtime. Generated from the shared dispatcher template; no Django syntax is allowed here. */
+document.addEventListener("DOMContentLoaded", function () {
+    var shell = document.querySelector("[data-dispatcher-theme]");
+    var themeToggles = document.querySelectorAll("[data-dispatcher-theme-toggle]");
+    var saved = localStorage.getItem("dispatcher-theme") || "night";
+    var runtimeConfig = shell ? shell.dataset : {};
+    var staticPrefix = runtimeConfig.staticPrefix || "/static/";
+    var dispatcherMoveExcavatorUrl = runtimeConfig.dispatcherMoveUrl || "";
+    var dispatcherAssignTruckUrl = runtimeConfig.dispatcherAssignUrl || "";
+    var initialDispatcherBoard = document.querySelector(".dispatcher-board");
+    var dispatcherShiftOpen = Boolean(initialDispatcherBoard && initialDispatcherBoard.dataset.dispatcherShiftOpen === "true");
+    function syncDispatcherShiftRuntime(freshBoard) {
+        if (!freshBoard) return dispatcherShiftOpen;
+        var fragmentShiftOpen = freshBoard.dataset
+            ? freshBoard.dataset.dispatcherShiftOpen
+            : "";
+        if (fragmentShiftOpen === "true") {
+            dispatcherShiftOpen = true;
+        } else if (fragmentShiftOpen === "false") {
+            dispatcherShiftOpen = false;
+        } else {
+            dispatcherShiftOpen = !freshBoard.classList.contains("is-readonly");
+        }
+        return dispatcherShiftOpen;
+    }
+    var equipmentCardsNode = document.getElementById("gd-equipment-cards-data");
+    var equipmentCards = equipmentCardsNode ? JSON.parse(equipmentCardsNode.textContent) : {};
+    var equipmentStatesNode = document.getElementById("gd-equipment-states-data");
+    var equipmentStates = equipmentStatesNode ? JSON.parse(equipmentStatesNode.textContent) : {};
+    var detailLayer = document.querySelector("[data-gd-equipment-detail]");
+    var detailIconSlot = document.querySelector("[data-gd-detail-icon-slot]");
+    var detailType = document.querySelector("[data-gd-detail-type]");
+    var detailTitle = document.querySelector("[data-gd-detail-title]");
+    var detailStatus = document.querySelector("[data-gd-detail-status]");
+    var detailZone = document.querySelector("[data-gd-detail-zone]");
+    var detailList = document.querySelector("[data-gd-detail-list]");
+    var detailEmployee = document.querySelector("[data-gd-detail-employee]");
+    var detailEmployeeImg = document.querySelector("[data-gd-detail-employee-img]");
+    var detailEmployeeInitials = document.querySelector("[data-gd-detail-employee-initials]");
+    var detailEmployeeName = document.querySelector("[data-gd-detail-employee-name]");
+    var detailEmployeePhone = document.querySelector("[data-gd-detail-employee-phone]");
+    var detailShiftReport = document.querySelector("[data-gd-detail-shift-report]");
+    var detailMetrics = document.querySelector("[data-gd-detail-metrics]");
+    var detailTabs = document.querySelector("[data-gd-detail-tabs]");
+    var detailDashboard = document.querySelector("[data-gd-detail-dashboard]");
+    var detailLoadState = document.querySelector("[data-gd-detail-load-state]");
+    var detailLoadMessage = document.querySelector("[data-gd-detail-load-message]");
+    var detailRetry = document.querySelector("[data-gd-detail-retry]");
+    var detailRequestController = null;
+    var detailRequestToken = 0;
+    var detailRetryAction = null;
+    function getCookie(name) {
+        var value = "; " + document.cookie;
+        var parts = value.split("; " + name + "=");
+        if (parts.length === 2) return parts.pop().split(";").shift();
+        return "";
+    }
+    function getCsrfToken() {
+        var input = document.querySelector("[name=csrfmiddlewaretoken]");
+        return getCookie("csrftoken") || (input ? input.value : "");
+    }
+    function dispatcherEquipmentState(code) {
+        var key = code || "inactive";
+        return equipmentStates[key] || equipmentStates.inactive || {
+            code: key,
+            label: "",
+            color_group: "gray",
+            allows_assignment: false,
+            allows_drag: false,
+            blocks_operation: true
+        };
+    }
+    function dispatcherEquipmentStateColor(code) {
+        var color = dispatcherEquipmentState(code).color_group || "gray";
+        return ["green", "yellow", "blue", "orange", "red", "gray"].indexOf(color) >= 0 ? color : "gray";
+    }
+    function dispatcherEquipmentStateClass(code) {
+        return "status-" + dispatcherEquipmentStateColor(code);
+    }
+    function dispatcherEquipmentStateLabel(code) {
+        return dispatcherEquipmentState(code).label || "";
+    }
+    function dispatcherEquipmentStateIconColor(code) {
+        var color = dispatcherEquipmentStateColor(code);
+        return color === "orange" ? "yellow" : color;
+    }
+    function dispatcherNeutralEquipmentIcon(equipmentType) {
+        var prefix = equipmentType === "excavator" ? "excavator" : "truck";
+        return staticPrefix + "img/equipment/" + prefix + "-gray.png";
+    }
+    function setDispatcherNodeEquipmentState(node, code, equipmentType) {
+        if (!node) return;
+        var state = dispatcherEquipmentState(code);
+        node.classList.remove("status-red", "status-yellow", "status-green", "status-blue", "status-orange", "status-gray", "status-normal", "status-risk", "status-danger");
+        node.classList.add(dispatcherEquipmentStateClass(state.code));
+        node.dataset.equipmentState = state.code;
+        if (node.dataset.mmMobileEquipmentState !== undefined) {
+            node.dataset.mmMobileEquipmentState = state.code;
+        }
+        var label = node.querySelector("span");
+        if (label && state.label) label.textContent = state.label;
+        var img = node.querySelector("img");
+        if (img && equipmentType) {
+            img.src = dispatcherNeutralEquipmentIcon(equipmentType);
+        }
+    }
+    var dispatcherSyncPendingCount = 0;
+    var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v1";
+    var dispatcherSyncQueueFlushing = false;
+    var dispatcherSyncFlushTimer = null;
+    var dispatcherMobileSyncFlushDelayMs = 300;
+    var dispatcherSyncRequestTimeoutMs = 12000;
+    var dispatcherRefreshRequestTimeoutMs = 12000;
+    var dispatcherRealtimeConnected = true;
+    var dispatcherRealtimeLastSuccessAt = 0;
+    var dispatcherRealtimeLastReason = "";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v120";
+    function readDispatcherSyncQueue() {
+        try {
+            return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
+        } catch (error) {
+            return [];
+        }
+    }
+    function writeDispatcherSyncQueue(queue) {
+        try {
+            window.localStorage.setItem(dispatcherSyncQueueKey, JSON.stringify(queue || []));
+        } catch (error) {}
+        updateDispatcherSyncIndicator();
+    }
+    function getDispatcherSyncQueueState() {
+        var queue = readDispatcherSyncQueue();
+        var now = Date.now();
+        var oldestAgeMs = 0;
+        queue.forEach(function (item) {
+            var createdAt = Number(item && item.createdAt ? item.createdAt : 0);
+            var age = createdAt ? Math.max(0, now - createdAt) : 0;
+            if (!oldestAgeMs || age > oldestAgeMs) oldestAgeMs = age;
+        });
+        return {
+            length: queue.length,
+            oldestAgeMs: oldestAgeMs,
+            isFlushing: dispatcherSyncQueueFlushing,
+            pendingCount: dispatcherSyncPendingCount
+        };
+    }
+    function updateDispatcherSyncIndicator() {
+        var mobileShell = document.querySelector(".mm-mobile-shell");
+        var queueState = getDispatcherSyncQueueState();
+        var isPending = dispatcherSyncPendingCount > 0 || queueState.length > 0 || dispatcherSyncQueueFlushing;
+        if (mobileShell) {
+            mobileShell.classList.toggle("is-sync-pending", isPending);
+            mobileShell.classList.toggle("is-realtime-stale", !dispatcherRealtimeConnected);
+            mobileShell.dataset.mmSyncQueueLength = String(queueState.length);
+            mobileShell.dataset.mmRealtimeConnected = dispatcherRealtimeConnected ? "true" : "false";
+        }
+        var desktopBoard = document.querySelector(".dispatcher-board");
+        if (desktopBoard) {
+            desktopBoard.classList.toggle("is-realtime-stale", !dispatcherRealtimeConnected);
+        }
+    }
+    function setDispatcherSyncPending(isPending) {
+        dispatcherSyncPendingCount = Math.max(0, dispatcherSyncPendingCount + (isPending ? 1 : -1));
+        updateDispatcherSyncIndicator();
+    }
+    function dispatcherRoleIsReadonly() {
+        return (
+            typeof window.isAppRoleReadonly === "function"
+            && window.isAppRoleReadonly()
+        );
+    }
+    function dispatcherInactiveRoleError() {
+        var error = new Error("Роль неактивна — доступен только просмотр");
+        error.isServerResponse = true;
+        error.code = "inactive_role";
+        return error;
+    }
+    function enqueueDispatcherSyncRequest(request, delayMs) {
+        if (dispatcherRoleIsReadonly()) {
+            return false;
+        }
+        var queue = readDispatcherSyncQueue();
+        queue.push(Object.assign({
+            id: "sync-" + Date.now() + "-" + Math.random().toString(16).slice(2),
+            createdAt: Date.now(),
+            attempts: 0
+        }, request || {}));
+        writeDispatcherSyncQueue(queue);
+        scheduleDispatcherSyncFlush(delayMs);
+        return true;
+    }
+    function sendDispatcherSyncRequest(request) {
+        if (dispatcherRoleIsReadonly()) {
+            return Promise.reject(dispatcherInactiveRoleError());
+        }
+        var headers = { "X-CSRFToken": getCsrfToken() };
+        var body = null;
+        var controller = window.AbortController ? new AbortController() : null;
+        var timeoutId = null;
+        if (request.kind === "form") {
+            body = new FormData();
+            Object.keys(request.fields || {}).forEach(function (key) {
+                body.append(key, request.fields[key]);
+            });
+        } else {
+            headers["Content-Type"] = "application/json";
+            body = JSON.stringify(request.data || {});
+        }
+        if (controller) {
+            timeoutId = window.setTimeout(function () {
+                try {
+                    controller.abort();
+                } catch (error) {}
+            }, dispatcherSyncRequestTimeoutMs);
+        }
+        return fetch(request.url, {
+            method: "POST",
+            headers: headers,
+            body: body,
+            credentials: "same-origin",
+            cache: "no-store",
+            signal: controller ? controller.signal : undefined
+        }).then(function (response) {
+            if (!response.ok) {
+                return response.json().catch(function () { return {}; }).then(function (payload) {
+                    var error = new Error(payload.error || "Действие не выполнено.");
+                    error.isServerResponse = true;
+                    throw error;
+                });
+            }
+            return response.json().catch(function () { return { ok: true }; });
+        }).finally(function () {
+            if (timeoutId) {
+                window.clearTimeout(timeoutId);
+            }
+        });
+    }
+    function dispatcherFetchWithTimeout(url, options, timeoutMs) {
+        var controller = window.AbortController ? new AbortController() : null;
+        var timeoutId = null;
+        var fetchOptions = Object.assign({}, options || {});
+        if (controller) {
+            fetchOptions.signal = controller.signal;
+            timeoutId = window.setTimeout(function () {
+                try {
+                    controller.abort();
+                } catch (error) {}
+            }, timeoutMs || dispatcherRefreshRequestTimeoutMs);
+        }
+        return fetch(url, fetchOptions).finally(function () {
+            if (timeoutId) {
+                window.clearTimeout(timeoutId);
+            }
+        });
+    }
+    function flushDispatcherSyncQueue() {
+        if (dispatcherRoleIsReadonly()) {
+            updateDispatcherSyncIndicator();
+            return;
+        }
+        if (dispatcherSyncQueueFlushing) {
+            updateDispatcherSyncIndicator();
+            return;
+        }
+        var queue = readDispatcherSyncQueue();
+        if (!queue.length) {
+            updateDispatcherSyncIndicator();
+            return;
+        }
+        dispatcherSyncQueueFlushing = true;
+        setDispatcherSyncPending(true);
+        var request = queue[0];
+        request.attempts = (request.attempts || 0) + 1;
+        sendDispatcherSyncRequest(request).then(function () {
+            var freshQueue = readDispatcherSyncQueue();
+            if (freshQueue.length && freshQueue[0].id === request.id) {
+                freshQueue.shift();
+            } else {
+                freshQueue = freshQueue.filter(function (item) {
+                    return item.id !== request.id;
+                });
+            }
+            writeDispatcherSyncQueue(freshQueue);
+            if (request.refreshMobileBoard && !freshQueue.length) {
+                Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
+            }
+        }).catch(function (error) {
+            if (error && error.isServerResponse) {
+                var freshQueue = readDispatcherSyncQueue().filter(function (item) {
+                    return item.id !== request.id;
+                });
+                writeDispatcherSyncQueue(freshQueue);
+                showDispatcherDnDError(error);
+                if (request.refreshMobileBoard && !freshQueue.length) {
+                    Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
+                }
+            } else {
+                var retryQueue = readDispatcherSyncQueue();
+                if (retryQueue.length && retryQueue[0].id === request.id) {
+                    retryQueue[0].attempts = request.attempts;
+                    writeDispatcherSyncQueue(retryQueue);
+                }
+            }
+        }).finally(function () {
+            dispatcherSyncQueueFlushing = false;
+            setDispatcherSyncPending(false);
+            if (readDispatcherSyncQueue().length) {
+                window.setTimeout(flushDispatcherSyncQueue, 1200);
+            }
+        });
+    }
+    function scheduleDispatcherSyncFlush(delayMs) {
+        updateDispatcherSyncIndicator();
+        if (dispatcherSyncFlushTimer) {
+            window.clearTimeout(dispatcherSyncFlushTimer);
+        }
+        dispatcherSyncFlushTimer = window.setTimeout(function () {
+            dispatcherSyncFlushTimer = null;
+            flushDispatcherSyncQueue();
+        }, typeof delayMs === "number" ? delayMs : 80);
+    }
+    function dispatcherPost(url, data) {
+        if (dispatcherRoleIsReadonly()) {
+            return Promise.reject(dispatcherInactiveRoleError());
+        }
+        var payload = Object.assign({}, data || {});
+        if (!payload.client_action_id) {
+            payload.client_action_id = "mm-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+        }
+        var request = {
+            kind: "json",
+            url: url,
+            data: payload
+        };
+        setDispatcherSyncPending(true);
+        return sendDispatcherSyncRequest(request).catch(function (error) {
+            if (error && error.isServerResponse) throw error;
+            enqueueDispatcherSyncRequest(request);
+            return { queued: true };
+        }).finally(function () {
+            setDispatcherSyncPending(false);
+        });
+    }
+    function dispatcherPostQueued(url, data, delayMs) {
+        if (dispatcherRoleIsReadonly()) {
+            return Promise.reject(dispatcherInactiveRoleError());
+        }
+        var payload = Object.assign({}, data || {});
+        if (!payload.client_action_id) {
+            payload.client_action_id = "mm-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+        }
+        if (!enqueueDispatcherSyncRequest({
+            kind: "json",
+            url: url,
+            data: payload,
+            refreshMobileBoard: true
+        }, typeof delayMs === "number" ? delayMs : dispatcherMobileSyncFlushDelayMs)) {
+            return Promise.reject(dispatcherInactiveRoleError());
+        }
+        return Promise.resolve({ queued: true });
+    }
+    window.addEventListener("focus", scheduleDispatcherSyncFlush);
+    window.addEventListener("pageshow", scheduleDispatcherSyncFlush);
+    document.addEventListener("visibilitychange", function () {
+        if (!document.hidden) scheduleDispatcherSyncFlush();
+    });
+    function reloadDispatcherBoardAsFallback() {
+        if (typeof window.showAppSyncOverlay === "function") {
+            window.showAppSyncOverlay({
+                title: "Синхронизируем диспетчерский экран",
+                text: "Сервер отдал состояние, которое нельзя безопасно применить точечно. Загружаем свежую версию."
+            });
+        }
+        window.setTimeout(function () {
+            window.location.reload();
+        }, 80);
+    }
+    var miningMasterRealtimeStorageKey = "operational-state-version";
+    var miningMasterRealtimeLastVersion = readRenderedOperationalStateVersion() || readMiningMasterRealtimeVersion();
+    function readRenderedOperationalStateVersion() {
+        var parsed = parseInt(document.body ? document.body.dataset.operationalStateVersion || "0" : "0", 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    }
+    function readMiningMasterRealtimeVersion() {
+        try {
+            var raw = window.sessionStorage.getItem(miningMasterRealtimeStorageKey);
+            var parsed = parseInt(raw || "0", 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+        } catch (error) {
+            return 0;
+        }
+    }
+    function storeMiningMasterRealtimeVersion(version) {
+        var parsed = parseInt(version || "0", 10);
+        if (!Number.isFinite(parsed) || parsed <= 0) return;
+        miningMasterRealtimeLastVersion = parsed;
+        if (document.body) {
+            document.body.dataset.operationalStateVersion = String(parsed);
+        }
+        try {
+            window.sessionStorage.setItem(miningMasterRealtimeStorageKey, String(parsed));
+        } catch (error) {}
+    }
+    function hasMiningMasterRelevantEvents(events) {
+        return Array.isArray(events) && events.length > 0;
+    }
+    function getMobileShellScreen(shell) {
+        if (!shell) return "home";
+        return shell.dataset.mobileScreen || shell.dataset.mmMobileScreen || "home";
+    }
+    function setMobileShellScreen(shell, screenName) {
+        if (!shell) return;
+        var value = screenName || "home";
+        shell.dataset.mobileScreen = value;
+        shell.dataset.mmMobileScreen = value;
+    }
+    function captureMobileShellState(currentShell) {
+        if (!currentShell) return {};
+        var activePanel = currentShell.querySelector("[data-mm-mobile-panel]:not([hidden])");
+        var activeFill = currentShell.querySelector("[data-mm-mobile-fill]:not([hidden])");
+        var homeView = currentShell.querySelector("[data-mm-mobile-view='home']");
+        var mobileScreen = getMobileShellScreen(currentShell);
+        if (activeFill) {
+            mobileScreen = "fill";
+        } else if (activePanel) {
+            mobileScreen = activePanel.dataset.mmMobilePanel || mobileScreen;
+        } else if (homeView && !homeView.hidden) {
+            mobileScreen = "home";
+        }
+        return {
+            mobileScreen: mobileScreen || "home",
+            activeComplex: currentShell.dataset.activeComplex || (activeFill && activeFill.dataset.mmMobileFill) || "",
+            scrollTop: currentShell.scrollTop || 0,
+            panelScrollTop: activePanel ? activePanel.scrollTop || 0 : 0,
+            panelGridScrollTop: activePanel && activePanel.querySelector(".mm-mobile-detail-trucks")
+                ? activePanel.querySelector(".mm-mobile-detail-trucks").scrollTop || 0
+                : 0,
+            fillScrollTop: activeFill ? activeFill.scrollTop || 0 : 0,
+            fillGarageScrollTop: activeFill && activeFill.querySelector(".mm-mobile-fill-truck-garage")
+                ? activeFill.querySelector(".mm-mobile-fill-truck-garage").scrollTop || 0
+                : 0
+        };
+    }
+    function restoreMobileShellState(freshShell, state) {
+        if (!freshShell || !state) return;
+        var homeView = freshShell.querySelector("[data-mm-mobile-view='home']");
+        var panels = Array.prototype.slice.call(freshShell.querySelectorAll("[data-mm-mobile-panel]"));
+        var fills = Array.prototype.slice.call(freshShell.querySelectorAll("[data-mm-mobile-fill]"));
+        var screenName = state.mobileScreen || "home";
+        var restored = false;
+        panels.forEach(function (panel) {
+            panel.hidden = true;
+        });
+        fills.forEach(function (fill) {
+            fill.hidden = true;
+        });
+        if (screenName === "fill" && state.activeComplex) {
+            var targetFill = freshShell.querySelector("[data-mm-mobile-fill='" + CSS.escape(String(state.activeComplex)) + "']");
+            if (targetFill) {
+                if (homeView) homeView.hidden = true;
+                targetFill.hidden = false;
+                setMobileShellScreen(freshShell, "fill");
+                freshShell.dataset.activeComplex = String(state.activeComplex);
+                targetFill.scrollTop = state.fillScrollTop || 0;
+                var targetFillGarage = targetFill.querySelector(".mm-mobile-fill-truck-garage");
+                if (targetFillGarage) targetFillGarage.scrollTop = state.fillGarageScrollTop || 0;
+                restored = true;
+            }
+        } else if (screenName && screenName !== "home") {
+            var targetPanel = freshShell.querySelector("[data-mm-mobile-panel='" + CSS.escape(String(screenName)) + "']");
+            if (targetPanel) {
+                if (homeView) homeView.hidden = true;
+                targetPanel.hidden = false;
+                setMobileShellScreen(freshShell, screenName);
+                delete freshShell.dataset.activeComplex;
+                targetPanel.scrollTop = state.panelScrollTop || 0;
+                var targetPanelGrid = targetPanel.querySelector(".mm-mobile-detail-trucks");
+                if (targetPanelGrid) targetPanelGrid.scrollTop = state.panelGridScrollTop || 0;
+                restored = true;
+            }
+        }
+        if (!restored) {
+            if (homeView) homeView.hidden = false;
+            setMobileShellScreen(freshShell, "home");
+            delete freshShell.dataset.activeComplex;
+            screenName = "home";
+        }
+        freshShell.querySelectorAll("[data-mm-mobile-nav]").forEach(function (item) {
+            var isTarget = item.dataset.mmMobileNav === (screenName === "fill" ? "home" : screenName);
+            item.classList.toggle("is-active", isTarget && !item.classList.contains("is-disabled"));
+        });
+        freshShell.scrollTop = state.scrollTop || 0;
+    }
+    var miningMasterMobileRefreshPromise = null;
+    function refreshMobileBoardFromServer(options) {
+        options = options || {};
+        if (miningMasterMobileRefreshPromise) {
+            return miningMasterMobileRefreshPromise;
+        }
+        var currentShell = document.querySelector(".mm-mobile-shell");
+        if (!currentShell || !window.AppOperationalFragment) return Promise.resolve(false);
+        var state = captureMobileShellState(currentShell);
+        miningMasterMobileRefreshPromise = window.AppOperationalFragment.request(
+            "mining_master",
+            Number(options.version || 0)
+        ).then(function (payload) {
+            if (isMobileOperationalRefreshUnsafe()) return false;
+            var freshShell = window.AppOperationalFragment.parseRoot(
+                payload.html,
+                ".mm-mobile-shell"
+            );
+            var currentShell = document.querySelector(".mm-mobile-shell");
+            if (!freshShell || !currentShell) return false;
+            var freshVersion = parseInt(payload.version || "0", 10);
+            if (Number.isFinite(freshVersion) && freshVersion > 0) {
+                storeMiningMasterRealtimeVersion(freshVersion);
+                if (window.AppRealtime && typeof window.AppRealtime.markApplied === "function") {
+                    window.AppRealtime.markApplied(freshVersion);
+                }
+            }
+            if (payload.equipment_cards && equipmentCardsNode) {
+                equipmentCardsNode.textContent = JSON.stringify(payload.equipment_cards);
+                try {
+                    equipmentCards = JSON.parse(equipmentCardsNode.textContent || "{}");
+                } catch (error) {
+                    equipmentCards = {};
+                }
+            }
+            if (options.preserveScreen) {
+                restoreMobileShellState(freshShell, state);
+            }
+            currentShell.replaceWith(freshShell);
+            bindMiningMasterMobileScreens();
+            refreshMiningMasterUpdateIndicatorFromStorage();
+            var replacedShell = document.querySelector(".mm-mobile-shell");
+            if (replacedShell && options.preserveScreen) {
+                replacedShell.scrollTop = state.scrollTop || 0;
+            }
+            updateDispatcherSyncIndicator();
+            return true;
+        }).finally(function () {
+            miningMasterMobileRefreshPromise = null;
+        });
+    }
+    function isMobileOperationalRefreshUnsafe() {
+        var mobileShell = document.querySelector(".mm-mobile-shell");
+        if (!mobileShell) return false;
+        var active = document.activeElement;
+        var activeTag = active && active.tagName ? active.tagName.toLowerCase() : "";
+        if (active && (active.isContentEditable || activeTag === "input" || activeTag === "textarea" || activeTag === "select")) {
+            return true;
+        }
+        if (isDispatcherSyncQueueBlockingRefresh()) {
+            return true;
+        }
+        if (document.body.classList.contains("modal-open")) {
+            return true;
+        }
+        if (document.querySelector(".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), .mm-mobile-update-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden])")) {
+            return true;
+        }
+        if (mobileShell.querySelector(".is-dragging, .is-hold-pending, .is-hold-ready, .is-work-swiping, .is-swiping, .is-truck-swiping, .is-fill-swiping, .is-create-swiping, .is-activating, .is-removing, .is-releasing, .is-releasing-trucks")) {
+            return true;
+        }
+        if (mobileShell.classList.contains("is-fill-target-peeking") || mobileShell.classList.contains("is-create-complex-peeking") || mobileShell.classList.contains("is-truck-garage-peeking") || mobileShell.classList.contains("is-excavator-garage-peeking")) {
+            return true;
+        }
+        return false;
+    }
+    window.miningMasterHasPendingWork = isMobileOperationalRefreshUnsafe;
+    if (
+        window.AppPwaContractGuard
+        && typeof window.AppPwaContractGuard.registerUnsafeCheck === "function"
+    ) {
+        window.AppPwaContractGuard.registerUnsafeCheck(isMobileOperationalRefreshUnsafe);
+    }
+    var miningMasterRealtimeHardLagLimit = 150;
+    var dispatcherRealtimeHardLagLimit = 150;
+    var dispatcherLocalAssignmentAppliedUntil = 0;
+    var dispatcherIncomingRefreshQueueGraceMs = 15000;
+    var dispatcherSyncQueueWakeThrottleMs = 1500;
+    var dispatcherLastSyncQueueWakeAt = 0;
+    function wakeDispatcherSyncQueueForRefresh() {
+        var now = Date.now();
+        if (now - dispatcherLastSyncQueueWakeAt < dispatcherSyncQueueWakeThrottleMs) return;
+        dispatcherLastSyncQueueWakeAt = now;
+        scheduleDispatcherSyncFlush(0);
+    }
+    function isDispatcherSyncQueueBlockingRefresh() {
+        if (dispatcherSyncQueueFlushing || dispatcherSyncPendingCount > 0) {
+            return true;
+        }
+        var queue = readDispatcherSyncQueue();
+        if (!queue.length) {
+            return false;
+        }
+        wakeDispatcherSyncQueueForRefresh();
+        if (navigator && navigator.onLine === false) {
+            return true;
+        }
+        var now = Date.now();
+        return queue.some(function (item) {
+            var createdAt = Number(item && item.createdAt ? item.createdAt : 0);
+            return !createdAt || now - createdAt < dispatcherIncomingRefreshQueueGraceMs;
+        });
+    }
+    function isElementRendered(node) {
+        if (!node) return false;
+        var style = window.getComputedStyle(node);
+        if (!style || style.display === "none" || style.visibility === "hidden") return false;
+        return node.getClientRects().length > 0;
+    }
+    function isDispatcherDesktopPage() {
+        return isElementRendered(document.querySelector(".dispatcher-board"));
+    }
+    function isMiningMasterMobilePage() {
+        return isElementRendered(document.querySelector(".mm-mobile-shell"));
+    }
+    function markDispatcherLocalAssignmentApplied() {
+        dispatcherLocalAssignmentAppliedUntil = Date.now() + 8000;
+    }
+    function hasDispatcherRelevantEvents(events) {
+        return Array.isArray(events) && events.length > 0;
+    }
+    function canTrustLocalDispatcherAssignmentEvents(events) {
+        if (!Array.isArray(events) || !events.length) return false;
+        if (Date.now() > dispatcherLocalAssignmentAppliedUntil) return false;
+        return events.every(function (event) {
+            return event && event.type === "assignment_changed";
+        });
+    }
+    function isDispatcherOperationalRefreshUnsafe() {
+        if (!isDispatcherDesktopPage()) return false;
+        var active = document.activeElement;
+        var activeTag = active && active.tagName ? active.tagName.toLowerCase() : "";
+        if (active && (active.isContentEditable || activeTag === "input" || activeTag === "textarea" || activeTag === "select")) {
+            return true;
+        }
+        if (isDispatcherSyncQueueBlockingRefresh()) {
+            return true;
+        }
+        if (document.body.classList.contains("modal-open")) {
+            return true;
+        }
+        if (document.querySelector(".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), .mm-mobile-update-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden])")) {
+            return true;
+        }
+        if (document.querySelector(".dispatcher-dragging, .dispatcher-drop-target, .is-dragging")) {
+            return true;
+        }
+        return false;
+    }
+    function captureDispatcherDesktopState(currentBoard) {
+        var selectors = [
+            ".dispatcher-left",
+            ".dispatcher-excavators",
+            ".dispatcher-complexes",
+            ".dispatcher-zone-grid",
+            ".dispatcher-right",
+            ".dispatcher-trucks"
+        ];
+        var state = {
+            scrollX: window.scrollX || 0,
+            scrollY: window.scrollY || 0,
+            scrolls: {},
+            activeDetailCardId: "",
+            detailScrollTop: 0
+        };
+        selectors.forEach(function (selector) {
+            var node = currentBoard ? currentBoard.querySelector(selector) : document.querySelector(selector);
+            if (!node) return;
+            state.scrolls[selector] = {
+                top: node.scrollTop || 0,
+                left: node.scrollLeft || 0
+            };
+        });
+        if (detailLayer && !detailLayer.hidden) {
+            state.activeDetailCardId = detailLayer.dataset.gdActiveCardId || "";
+            var panel = detailLayer.querySelector(".mm-equipment-detail-panel");
+            state.detailScrollTop = panel ? panel.scrollTop || 0 : 0;
+        }
+        return state;
+    }
+    function restoreDispatcherDesktopState(freshBoard, state) {
+        if (!state) return;
+        Object.keys(state.scrolls || {}).forEach(function (selector) {
+            var node = freshBoard ? freshBoard.querySelector(selector) : document.querySelector(selector);
+            var saved = state.scrolls[selector];
+            if (!node || !saved) return;
+            node.scrollTop = saved.top || 0;
+            node.scrollLeft = saved.left || 0;
+        });
+        window.scrollTo(state.scrollX || 0, state.scrollY || 0);
+        if (state.activeDetailCardId && equipmentCards[String(state.activeDetailCardId || "")]) {
+            openEquipmentCard(state.activeDetailCardId);
+            var panel = detailLayer ? detailLayer.querySelector(".mm-equipment-detail-panel") : null;
+            if (panel) panel.scrollTop = state.detailScrollTop || 0;
+        }
+    }
+    function dispatcherNodeMarkup(node) {
+        return node && typeof node.outerHTML === "string" ? node.outerHTML : "";
+    }
+    function dispatcherMarkupFingerprint(markup) {
+        var value = String(markup || "");
+        var hash = 2166136261;
+        for (var index = 0; index < value.length; index += 1) {
+            hash ^= value.charCodeAt(index);
+            hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0).toString(16) + ":" + value.length;
+    }
+    function seedDispatcherServerFingerprint(node) {
+        if (!node) return "";
+        if (!node.__dispatcherServerFingerprint) {
+            node.__dispatcherServerFingerprint = dispatcherMarkupFingerprint(dispatcherNodeMarkup(node));
+        }
+        return node.__dispatcherServerFingerprint;
+    }
+    function seedDispatcherBoardFingerprints(boardNode) {
+        if (!boardNode) return;
+        boardNode.querySelectorAll(
+            ".dispatcher-equipment-tile, .dispatcher-complex-card[data-zone-id], .dispatcher-truck-tile[data-equipment-id]"
+        ).forEach(seedDispatcherServerFingerprint);
+    }
+    function dispatcherServerMarkupMatches(currentNode, freshNode) {
+        var currentFingerprint = seedDispatcherServerFingerprint(currentNode);
+        var freshFingerprint = dispatcherMarkupFingerprint(dispatcherNodeMarkup(freshNode));
+        freshNode.__dispatcherServerFingerprint = freshFingerprint;
+        return currentFingerprint === freshFingerprint;
+    }
+    function syncDispatcherNodeAttributes(currentNode, freshNode) {
+        if (!currentNode || !freshNode) return false;
+        Array.prototype.slice.call(currentNode.attributes || []).forEach(function (attribute) {
+            if (!freshNode.hasAttribute(attribute.name)) {
+                currentNode.removeAttribute(attribute.name);
+            }
+        });
+        Array.prototype.slice.call(freshNode.attributes || []).forEach(function (attribute) {
+            currentNode.setAttribute(attribute.name, attribute.value);
+        });
+        return true;
+    }
+    function dispatcherItemKey(node, keyName, index) {
+        if (!node || !node.dataset) return "__position:" + index;
+        return String(node.dataset[keyName] || "__position:" + index);
+    }
+    function reconcileDispatcherKeyedRegion(currentBoard, freshBoard, definition) {
+        var currentRegion = currentBoard.querySelector(definition.region);
+        var freshRegion = freshBoard.querySelector(definition.region);
+        if (!currentRegion || !freshRegion) return false;
+        var currentItems = Array.prototype.slice.call(currentRegion.querySelectorAll(definition.items));
+        var freshItems = Array.prototype.slice.call(freshRegion.querySelectorAll(definition.items));
+        var currentKeys = currentItems.map(function (node, index) {
+            return dispatcherItemKey(node, definition.key, index);
+        });
+        var freshKeys = freshItems.map(function (node, index) {
+            return dispatcherItemKey(node, definition.key, index);
+        });
+        var keysMatch = currentKeys.length === freshKeys.length
+            && currentKeys.every(function (key, index) {
+                return key === freshKeys[index];
+            });
+        if (!keysMatch) {
+            seedDispatcherBoardFingerprints(freshRegion);
+            currentRegion.replaceWith(freshRegion);
+            return true;
+        }
+        currentItems.forEach(function (currentItem, index) {
+            var freshItem = freshItems[index];
+            if (!dispatcherServerMarkupMatches(currentItem, freshItem)) {
+                currentItem.replaceWith(freshItem);
+            }
+        });
+        syncDispatcherNodeAttributes(currentRegion, freshRegion);
+        return true;
+    }
+    function reconcileDispatcherDesktopBoard(currentBoard, freshBoard) {
+        if (!currentBoard || !freshBoard) return null;
+        var regions = [
+            {
+                region: ".dispatcher-excavators",
+                items: ".dispatcher-equipment-tile",
+                key: "equipmentId"
+            },
+            {
+                region: ".dispatcher-zone-grid",
+                items: ".dispatcher-complex-card[data-zone-id]",
+                key: "zoneId"
+            },
+            {
+                region: ".dispatcher-trucks",
+                items: ".dispatcher-truck-tile[data-equipment-id]",
+                key: "equipmentId"
+            }
+        ];
+        var currentTopbar = currentBoard.querySelector(".dispatcher-topbar");
+        var freshTopbar = freshBoard.querySelector(".dispatcher-topbar");
+        var completeContract = currentTopbar && freshTopbar && regions.every(function (definition) {
+            return currentBoard.querySelector(definition.region)
+                && freshBoard.querySelector(definition.region);
+        });
+        if (!completeContract) return null;
+        var reconciled = regions.every(function (definition) {
+            return reconcileDispatcherKeyedRegion(currentBoard, freshBoard, definition);
+        });
+        if (!reconciled) return null;
+        syncDispatcherNodeAttributes(currentBoard, freshBoard);
+        return currentBoard;
+    }
+    function refreshDispatcherDesktopBoardFromServer(options) {
+        options = options || {};
+        if (!isDispatcherDesktopPage()) return Promise.resolve(false);
+        var currentBoard = document.querySelector(".dispatcher-board");
+        var desktopState = captureDispatcherDesktopState(currentBoard);
+        if (!window.AppOperationalFragment) return Promise.resolve(false);
+        return window.AppOperationalFragment.request(
+            "dispatcher",
+            Number(options.version || 0)
+        ).then(function (payload) {
+            if (isDispatcherOperationalRefreshUnsafe()) return false;
+            var freshBoard = window.AppOperationalFragment.parseRoot(
+                payload.html,
+                ".dispatcher-board"
+            );
+            currentBoard = document.querySelector(".dispatcher-board");
+            if (!freshBoard || !currentBoard) return false;
+            syncDispatcherShiftRuntime(freshBoard);
+            if (payload.equipment_cards && equipmentCardsNode) {
+                equipmentCardsNode.textContent = JSON.stringify(payload.equipment_cards);
+                try {
+                    equipmentCards = JSON.parse(equipmentCardsNode.textContent || "{}");
+                } catch (error) {
+                    equipmentCards = {};
+                }
+            }
+            var refreshedBoard = options.forceFullBoard
+                ? null
+                : reconcileDispatcherDesktopBoard(currentBoard, freshBoard);
+            if (!refreshedBoard) {
+                seedDispatcherBoardFingerprints(freshBoard);
+                currentBoard.replaceWith(freshBoard);
+                refreshedBoard = freshBoard;
+            }
+            bindDispatcherDesktopInteractions();
+            if (typeof window.initAppConfirmForms === "function") {
+                window.initAppConfirmForms();
+            }
+            if (typeof window.initDispatcherThemeControls === "function") {
+                window.initDispatcherThemeControls();
+            }
+            if (typeof window.initDispatcherRadialClocks === "function") {
+                window.initDispatcherRadialClocks();
+            }
+            restoreDispatcherDesktopState(refreshedBoard, desktopState);
+            refreshDesktopBoardIntegrity();
+            updateDispatcherSyncIndicator();
+            return true;
+        });
+    }
+    function applyDispatcherOperationalStateRefresh(context) {
+        if (isDispatcherOperationalRefreshUnsafe()) {
+            return Promise.resolve({ deferred: true, reason: "dispatcher_busy" });
+        }
+        var targetVersion = context && context.version;
+        var events = context && context.events;
+        var currentStoredVersion = miningMasterRealtimeLastVersion || readMiningMasterRealtimeVersion();
+        var versionGap = targetVersion && currentStoredVersion ? targetVersion - currentStoredVersion : 0;
+        if (context && context.eventsTruncated || versionGap > dispatcherRealtimeHardLagLimit) {
+            return refreshDispatcherDesktopBoardFromServer({ version: targetVersion, forceFullBoard: true }).then(function (applied) {
+                if (!applied) return { deferred: true, reason: "dispatcher_refresh_failed" };
+                storeMiningMasterRealtimeVersion(targetVersion);
+                return { applied: true };
+            }).catch(function () {
+                return { deferred: true, reason: "dispatcher_refresh_error" };
+            });
+        }
+        if (!hasDispatcherRelevantEvents(events) || canTrustLocalDispatcherAssignmentEvents(events)) {
+            storeMiningMasterRealtimeVersion(targetVersion);
+            return Promise.resolve({ applied: true });
+        }
+        return refreshDispatcherDesktopBoardFromServer({ version: targetVersion }).then(function (applied) {
+            if (!applied) return { deferred: true, reason: "dispatcher_refresh_failed" };
+            storeMiningMasterRealtimeVersion(targetVersion);
+            return { applied: true };
+        }).catch(function () {
+            return { deferred: true, reason: "dispatcher_refresh_error" };
+        });
+    }
+    window.applyOperationalStateRefresh = function (context) {
+        if (isDispatcherDesktopPage()) {
+            return applyDispatcherOperationalStateRefresh(context);
+        }
+        if (!isMiningMasterMobilePage()) return false;
+        if (isMobileOperationalRefreshUnsafe()) {
+            return Promise.resolve({ deferred: true, reason: "mobile_busy" });
+        }
+        var targetVersion = context && context.version;
+        var events = context && context.events;
+        var currentStoredVersion = miningMasterRealtimeLastVersion || readMiningMasterRealtimeVersion();
+        var versionGap = targetVersion && currentStoredVersion ? targetVersion - currentStoredVersion : 0;
+        if (context && context.eventsTruncated || versionGap > miningMasterRealtimeHardLagLimit) {
+            return refreshMobileBoardFromServer({ preserveScreen: true, version: targetVersion }).then(function (applied) {
+                if (!applied) return { deferred: true, reason: "mobile_refresh_failed" };
+                storeMiningMasterRealtimeVersion(targetVersion);
+                return { applied: true };
+            }).catch(function () {
+                return { deferred: true, reason: "mobile_refresh_error" };
+            });
+        }
+        if (!hasMiningMasterRelevantEvents(events)) {
+            storeMiningMasterRealtimeVersion(targetVersion);
+            return Promise.resolve({ applied: true });
+        }
+        return refreshMobileBoardFromServer({ preserveScreen: true, version: targetVersion }).then(function (applied) {
+            if (!applied) return { deferred: true, reason: "mobile_refresh_failed" };
+            storeMiningMasterRealtimeVersion(targetVersion);
+            return { applied: true };
+        }).catch(function () {
+            return { deferred: true, reason: "mobile_refresh_error" };
+        });
+    };
+    var dispatcherNotice = document.querySelector("[data-dispatcher-notice]");
+    var dispatcherNoticeMessage = document.querySelector("[data-dispatcher-notice-message]");
+    var dispatcherNoticeClose = document.querySelector("[data-dispatcher-notice-close]");
+    function closeDispatcherNotice() {
+        if (dispatcherNotice) dispatcherNotice.hidden = true;
+    }
+    function showDispatcherNotice(message) {
+        if (!dispatcherNotice || !dispatcherNoticeMessage) return false;
+        dispatcherNoticeMessage.textContent = message || "Действие не выполнено.";
+        dispatcherNotice.hidden = false;
+        if (dispatcherNoticeClose) dispatcherNoticeClose.focus();
+        return true;
+    }
+    if (dispatcherNoticeClose) {
+        dispatcherNoticeClose.addEventListener("click", closeDispatcherNotice);
+    }
+    if (dispatcherNotice) {
+        dispatcherNotice.addEventListener("click", function (event) {
+            if (event.target === dispatcherNotice) closeDispatcherNotice();
+        });
+    }
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") closeDispatcherNotice();
+    });
+    function showDispatcherDnDError(error) {
+        var message = error && error.message ? error.message : "Действие не выполнено.";
+        if (!showDispatcherNotice(message)) {
+            console.warn(message);
+        }
+    }
+    var miningMasterUpdateModal = document.querySelector("[data-mm-pwa-update-modal]");
+    var miningMasterUpdateText = document.querySelector("[data-mm-pwa-update-text]");
+    var miningMasterUpdateStatus = document.querySelector("[data-mm-pwa-update-status]");
+    var miningMasterUpdateCurrent = document.querySelector("[data-mm-pwa-current-version]");
+    var miningMasterUpdateNew = document.querySelector("[data-mm-pwa-new-version]");
+    var miningMasterUpdateLater = document.querySelector("[data-mm-pwa-update-later]");
+    var miningMasterUpdateApply = document.querySelector("[data-mm-pwa-update-apply]");
+    var miningMasterServiceWorkerRegistration = null;
+    var miningMasterWaitingWorker = null;
+    var miningMasterWaitingInspectionGeneration = 0;
+    var miningMasterContractSyncGeneration = 0;
+    var miningMasterUpdateStorageKey = "mining-master-pwa-update-available";
+    var miningMasterManualUpdatePromise = null;
+    function formatMiningMasterVersion(version) {
+        return String(version || "неизвестно").replace("mining-master-mobile-shell-", "");
+    }
+    function setMiningMasterVisibleVersion(version) {
+        document.querySelectorAll("[data-mm-pwa-current-shell-version]").forEach(function (node) {
+            node.textContent = formatMiningMasterVersion(version || miningMasterShellVersion);
+        });
+        refreshMiningMasterUpdateIndicatorFromStorage(version || miningMasterShellVersion);
+    }
+    function setMiningMasterCheckUpdateButtonsDisabled(isDisabled) {
+        document.querySelectorAll("[data-mm-pwa-check-update]").forEach(function (button) {
+            button.disabled = !!isDisabled;
+        });
+    }
+    function setMiningMasterUpdateButtonsAttention(isAvailable) {
+        document.querySelectorAll("[data-mm-pwa-check-update]").forEach(function (button) {
+            button.classList.toggle("has-pwa-update", !!isAvailable);
+            button.textContent = isAvailable ? "Обновить" : "Проверить обновления";
+            button.setAttribute(
+                "aria-label",
+                isAvailable ? "Обновить приложение Горного мастера" : "Проверить обновления приложения Горного мастера"
+            );
+        });
+    }
+    function getMiningMasterVersionNumber(version) {
+        var match = String(version || "").match(/(?:shell-v|v)(\d+)$/);
+        return match ? parseInt(match[1], 10) : 0;
+    }
+    function isMiningMasterVersionNewer(newVersion, currentVersion) {
+        var newNumber = getMiningMasterVersionNumber(newVersion);
+        var currentNumber = getMiningMasterVersionNumber(currentVersion || miningMasterShellVersion);
+        return newNumber > currentNumber;
+    }
+    function readMiningMasterStoredUpdate() {
+        try {
+            return JSON.parse(localStorage.getItem(miningMasterUpdateStorageKey) || "{}") || {};
+        } catch (error) {
+            return {};
+        }
+    }
+    function rememberMiningMasterUpdate(newVersion, currentVersion) {
+        try {
+            localStorage.setItem(miningMasterUpdateStorageKey, JSON.stringify({
+                newVersion: newVersion || "",
+                currentVersion: currentVersion || miningMasterShellVersion,
+                savedAt: Date.now()
+            }));
+        } catch (error) {}
+    }
+    function clearMiningMasterStoredUpdate() {
+        try {
+            localStorage.removeItem(miningMasterUpdateStorageKey);
+        } catch (error) {}
+    }
+    function setMiningMasterUpdateIndicator(isAvailable, newVersion, currentVersion) {
+        var visible = !!(isAvailable && isMiningMasterVersionNewer(newVersion, currentVersion || miningMasterShellVersion));
+        document.querySelectorAll("[data-mm-pwa-update-badge]").forEach(function (badge) {
+            badge.hidden = !visible;
+        });
+        document.querySelectorAll("[data-mm-pwa-update-nav-target]").forEach(function (item) {
+            item.classList.toggle("has-pwa-update", visible);
+            if (visible) {
+                item.setAttribute("aria-label", "Отчеты. Доступна новая версия приложения");
+                item.title = "Доступна новая версия приложения";
+            } else {
+                item.removeAttribute("aria-label");
+                item.removeAttribute("title");
+            }
+        });
+        setMiningMasterUpdateButtonsAttention(visible);
+        if (visible) {
+            rememberMiningMasterUpdate(newVersion, currentVersion);
+        } else {
+            clearMiningMasterStoredUpdate();
+        }
+    }
+    function refreshMiningMasterUpdateIndicatorFromStorage(currentVersion) {
+        var storedUpdate = readMiningMasterStoredUpdate();
+        if (storedUpdate.newVersion && isMiningMasterVersionNewer(storedUpdate.newVersion, currentVersion || storedUpdate.currentVersion || miningMasterShellVersion)) {
+            setMiningMasterUpdateIndicator(true, storedUpdate.newVersion, currentVersion || storedUpdate.currentVersion || miningMasterShellVersion);
+        } else if (storedUpdate.newVersion) {
+            setMiningMasterUpdateIndicator(false);
+        }
+    }
+    function requestMiningMasterWorkerVersion(worker) {
+        if (!worker || !window.MessageChannel) {
+            return Promise.resolve("");
+        }
+        return new Promise(function (resolve) {
+            var channel = new MessageChannel();
+            var timer = window.setTimeout(function () {
+                resolve("");
+            }, 900);
+            channel.port1.onmessage = function (event) {
+                window.clearTimeout(timer);
+                var data = event.data || {};
+                resolve(data.version || "");
+            };
+            try {
+                worker.postMessage({ type: "GET_VERSION" }, [channel.port2]);
+            } catch (error) {
+                window.clearTimeout(timer);
+                resolve("");
+            }
+        });
+    }
+    function setMiningMasterUpdateInstalling(isInstalling) {
+        if (!miningMasterUpdateModal) return;
+        miningMasterUpdateModal.classList.toggle("is-installing", !!isInstalling);
+        if (miningMasterUpdateApply) miningMasterUpdateApply.disabled = !!isInstalling;
+        if (miningMasterUpdateLater) miningMasterUpdateLater.disabled = !!isInstalling;
+    }
+    function closeMiningMasterUpdateModal() {
+        if (miningMasterUpdateModal) miningMasterUpdateModal.hidden = true;
+        setMiningMasterUpdateInstalling(false);
+    }
+    function showMiningMasterUpdateModal(waitingWorker, newVersion, currentVersion) {
+        if (!miningMasterUpdateModal) return;
+        miningMasterWaitingWorker = waitingWorker || null;
+        setMiningMasterUpdateIndicator(true, newVersion, currentVersion);
+        var title = document.getElementById("mm-pwa-update-title");
+        if (title) {
+            title.textContent = "Доступна новая версия";
+        }
+        if (miningMasterUpdateCurrent) {
+            miningMasterUpdateCurrent.textContent = formatMiningMasterVersion(currentVersion || (navigator.serviceWorker.controller ? "текущая" : miningMasterShellVersion));
+        }
+        if (miningMasterUpdateNew) {
+            miningMasterUpdateNew.textContent = formatMiningMasterVersion(newVersion || "новая");
+        }
+        if (miningMasterUpdateText) {
+            miningMasterUpdateText.textContent = "Сервер загрузил новую оболочку Горного мастера. Установите ее, чтобы телефон работал на актуальной версии.";
+        }
+        if (miningMasterUpdateStatus) {
+            miningMasterUpdateStatus.textContent = waitingWorker
+                ? "Обновление займет несколько секунд."
+                : "Браузер еще готовит установку. Повторите проверку через несколько секунд.";
+        }
+        if (miningMasterUpdateApply) {
+            miningMasterUpdateApply.textContent = "Обновить";
+        }
+        if (miningMasterUpdateLater) {
+            miningMasterUpdateLater.hidden = false;
+        }
+        setMiningMasterUpdateInstalling(false);
+        if (miningMasterUpdateApply) {
+            miningMasterUpdateApply.disabled = !waitingWorker;
+        }
+        miningMasterUpdateModal.hidden = false;
+        if (waitingWorker && miningMasterUpdateApply) miningMasterUpdateApply.focus();
+    }
+    function showMiningMasterNoUpdateModal(currentVersion) {
+        if (!miningMasterUpdateModal) return;
+        miningMasterWaitingWorker = null;
+        setMiningMasterUpdateIndicator(false);
+        var title = document.getElementById("mm-pwa-update-title");
+        if (title) {
+            title.textContent = "Установлена последняя версия приложения";
+        }
+        if (miningMasterUpdateCurrent) {
+            miningMasterUpdateCurrent.textContent = formatMiningMasterVersion(currentVersion || miningMasterShellVersion);
+        }
+        if (miningMasterUpdateNew) {
+            miningMasterUpdateNew.textContent = "не требуется";
+        }
+        if (miningMasterUpdateText) {
+            miningMasterUpdateText.textContent = "У вас установлена последняя версия приложения Горного мастера.";
+        }
+        if (miningMasterUpdateStatus) {
+            miningMasterUpdateStatus.textContent = "Дополнительных обновлений сейчас нет.";
+        }
+        if (miningMasterUpdateApply) {
+            miningMasterUpdateApply.textContent = "ОК";
+            miningMasterUpdateApply.disabled = false;
+        }
+        if (miningMasterUpdateLater) {
+            miningMasterUpdateLater.hidden = true;
+            miningMasterUpdateLater.disabled = false;
+        }
+        setMiningMasterUpdateInstalling(false);
+        miningMasterUpdateModal.hidden = false;
+        if (miningMasterUpdateApply) miningMasterUpdateApply.focus();
+    }
+    function inspectMiningMasterWaitingWorker(registration, worker, options) {
+        if (
+            !registration
+            || !worker
+            || registration.waiting !== worker
+            || worker === navigator.serviceWorker.controller
+            || worker.state === "activated"
+        ) {
+            return Promise.resolve(false);
+        }
+        var inspectionGeneration = ++miningMasterWaitingInspectionGeneration;
+        return Promise.all([
+            requestMiningMasterWorkerVersion(registration.active || navigator.serviceWorker.controller),
+            requestMiningMasterWorkerVersion(worker)
+        ]).then(function (versions) {
+            if (
+                inspectionGeneration !== miningMasterWaitingInspectionGeneration
+                || miningMasterServiceWorkerRegistration !== registration
+                || registration.waiting !== worker
+                || worker === navigator.serviceWorker.controller
+                || worker.state === "activated"
+            ) {
+                return false;
+            }
+            showMiningMasterUpdateModal(worker, versions[1], versions[0]);
+            return true;
+        }).catch(function () {
+            if (options && options.manual && miningMasterUpdateStatus) {
+                miningMasterUpdateStatus.textContent = "Не удалось проверить обновление. Проверьте связь и повторите.";
+            }
+            return false;
+        });
+    }
+    function miningMasterServerContractVersion() {
+        var guard = window.AppPwaContractGuard;
+        var state = guard && typeof guard.getState === "function"
+            ? guard.getState()
+            : null;
+        var version = state && state.server ? state.server.shellVersion : "";
+        return /^mining-master-mobile-shell-v\d+$/.test(String(version || ""))
+            ? String(version)
+            : "";
+    }
+    function getMiningMasterCurrentWorkerVersion() {
+        if (!("serviceWorker" in navigator)) {
+            return Promise.resolve(miningMasterShellVersion);
+        }
+        var registrationPromise = miningMasterServiceWorkerRegistration
+            ? Promise.resolve(miningMasterServiceWorkerRegistration)
+            : navigator.serviceWorker.getRegistration("/mining-master/");
+        return registrationPromise.then(function (registration) {
+            if (registration) {
+                miningMasterServiceWorkerRegistration = registration;
+            }
+            return requestMiningMasterWorkerVersion((registration && registration.active) || navigator.serviceWorker.controller);
+        }).then(function (version) {
+            return version || miningMasterShellVersion;
+        }).catch(function () {
+            return miningMasterShellVersion;
+        });
+    }
+    function syncMiningMasterPwaContractState() {
+        var syncGeneration = ++miningMasterContractSyncGeneration;
+        if (
+            miningMasterWaitingWorker
+            && (
+                !miningMasterServiceWorkerRegistration
+                || miningMasterServiceWorkerRegistration.waiting !== miningMasterWaitingWorker
+                || miningMasterWaitingWorker === navigator.serviceWorker.controller
+                || miningMasterWaitingWorker.state === "activated"
+            )
+        ) {
+            miningMasterWaitingInspectionGeneration += 1;
+            miningMasterWaitingWorker = null;
+            closeMiningMasterUpdateModal();
+            setMiningMasterUpdateIndicator(false);
+        }
+        refreshMiningMasterUpdateIndicatorFromStorage();
+        var controllerSnapshot = navigator.serviceWorker.controller;
+        var registrationSnapshot = miningMasterServiceWorkerRegistration;
+        var activeWorkerSnapshot = registrationSnapshot && registrationSnapshot.active;
+        function isCurrentSync() {
+            return (
+                syncGeneration === miningMasterContractSyncGeneration
+                && navigator.serviceWorker.controller === controllerSnapshot
+                && miningMasterServiceWorkerRegistration === registrationSnapshot
+                && (
+                    !registrationSnapshot
+                    || registrationSnapshot.active === activeWorkerSnapshot
+                )
+            );
+        }
+        return getMiningMasterCurrentWorkerVersion().then(function (currentVersion) {
+            if (!isCurrentSync()) return false;
+            currentVersion = currentVersion || miningMasterShellVersion;
+            var serverVersion = miningMasterServerContractVersion();
+            setMiningMasterVisibleVersion(currentVersion);
+            if (!serverVersion) {
+                return false;
+            }
+            if (isMiningMasterVersionNewer(serverVersion, currentVersion)) {
+                setMiningMasterUpdateIndicator(true, serverVersion, currentVersion);
+                return true;
+            }
+            if (formatMiningMasterVersion(currentVersion) === formatMiningMasterVersion(serverVersion)) {
+                setMiningMasterUpdateIndicator(false);
+            }
+            return false;
+        }).catch(function () {
+            if (!isCurrentSync()) return false;
+            refreshMiningMasterUpdateIndicatorFromStorage(miningMasterShellVersion);
+            return false;
+        });
+    }
+    function checkMiningMasterPwaUpdateManually() {
+        if (!("serviceWorker" in navigator)) {
+            showMiningMasterNoUpdateModal(miningMasterShellVersion);
+            return Promise.resolve(false);
+        }
+        if (miningMasterManualUpdatePromise) {
+            return miningMasterManualUpdatePromise;
+        }
+        setMiningMasterCheckUpdateButtonsDisabled(true);
+        if (miningMasterUpdateStatus) {
+            miningMasterUpdateStatus.textContent = "Проверяем новую версию приложения...";
+        }
+        var guard = window.AppPwaContractGuard;
+        var registrationSource = miningMasterServiceWorkerRegistration
+            ? Promise.resolve(miningMasterServiceWorkerRegistration)
+            : guard && typeof guard.getRegistration === "function"
+                ? guard.getRegistration()
+                : navigator.serviceWorker.getRegistration("/mining-master/");
+        var currentVersion = "";
+        miningMasterManualUpdatePromise = Promise.resolve(registrationSource).then(function (registration) {
+            if (!registration) throw new Error("Service worker недоступен.");
+            miningMasterServiceWorkerRegistration = registration;
+            return requestMiningMasterWorkerVersion(
+                registration.active || navigator.serviceWorker.controller
+            ).then(function (version) {
+                currentVersion = version || miningMasterShellVersion;
+                var update = guard && typeof guard.requestManualUpdate === "function"
+                    ? guard.requestManualUpdate()
+                    : registration.update
+                        ? registration.update().then(function () {
+                            return {status: "current", registration: registration};
+                        })
+                        : Promise.resolve({status: "unavailable", registration: registration});
+                return Promise.resolve(update);
+            }).then(function (result) {
+                registration = result && result.registration
+                    ? result.registration
+                    : registration;
+                if (registration.waiting) {
+                    return inspectMiningMasterWaitingWorker(registration, registration.waiting, { manual: true });
+                }
+                var serverVersion = miningMasterServerContractVersion();
+                if (
+                    !serverVersion
+                    || formatMiningMasterVersion(currentVersion)
+                        === formatMiningMasterVersion(serverVersion)
+                ) {
+                    showMiningMasterNoUpdateModal(currentVersion);
+                    return true;
+                }
+                setMiningMasterUpdateIndicator(true, serverVersion, currentVersion);
+                showMiningMasterUpdateModal(null, serverVersion, currentVersion);
+                return false;
+            });
+        }).catch(function () {
+            if (miningMasterUpdateStatus) {
+                miningMasterUpdateStatus.textContent = "Не удалось проверить обновление. Проверьте связь и повторите.";
+            }
+            return false;
+        }).finally(function () {
+            setMiningMasterCheckUpdateButtonsDisabled(false);
+            miningMasterManualUpdatePromise = null;
+        });
+        return miningMasterManualUpdatePromise;
+    }
+    function applyMiningMasterPwaUpdate() {
+        var waitingWorker = miningMasterWaitingWorker;
+        if (!waitingWorker) {
+            closeMiningMasterUpdateModal();
+            return;
+        }
+        if (
+            !miningMasterServiceWorkerRegistration
+            || miningMasterServiceWorkerRegistration.waiting !== waitingWorker
+            || waitingWorker === navigator.serviceWorker.controller
+            || waitingWorker.state === "activated"
+        ) {
+            miningMasterWaitingWorker = null;
+            closeMiningMasterUpdateModal();
+            syncMiningMasterPwaContractState();
+            return;
+        }
+        if (!miningMasterUpdateStatus) return;
+        if (readDispatcherSyncQueue().length || dispatcherSyncPendingCount > 0 || dispatcherSyncQueueFlushing) {
+            miningMasterUpdateStatus.textContent = "Сначала дождитесь синхронизации текущих действий. После этого обновление можно установить.";
+            return;
+        }
+        setMiningMasterUpdateInstalling(true);
+        miningMasterUpdateStatus.textContent = "Устанавливаем новую версию приложения...";
+        if (miningMasterUpdateModal) miningMasterUpdateModal.hidden = true;
+        miningMasterWaitingWorker = null;
+        try {
+            waitingWorker.postMessage({ type: "SKIP_WAITING" });
+        } catch (error) {
+            if (
+                miningMasterServiceWorkerRegistration
+                && miningMasterServiceWorkerRegistration.waiting === waitingWorker
+                && waitingWorker !== navigator.serviceWorker.controller
+                && waitingWorker.state !== "activated"
+            ) {
+                miningMasterWaitingWorker = waitingWorker;
+            }
+            miningMasterUpdateStatus.textContent = "Не удалось запустить обновление. Закройте и снова откройте приложение.";
+            setMiningMasterUpdateInstalling(false);
+        }
+    }
+    if (miningMasterUpdateLater) {
+        miningMasterUpdateLater.addEventListener("click", closeMiningMasterUpdateModal);
+    }
+    if (miningMasterUpdateApply) {
+        miningMasterUpdateApply.addEventListener("click", applyMiningMasterPwaUpdate);
+    }
+    document.addEventListener("click", function (event) {
+        var button = event.target && event.target.closest ? event.target.closest("[data-mm-pwa-check-update]") : null;
+        if (!button) return;
+        event.preventDefault();
+        checkMiningMasterPwaUpdateManually();
+    });
+    if (miningMasterUpdateModal) {
+        miningMasterUpdateModal.addEventListener("click", function (event) {
+            if (event.target === miningMasterUpdateModal && !miningMasterUpdateModal.classList.contains("is-installing")) {
+                closeMiningMasterUpdateModal();
+            }
+        });
+    }
+    refreshMiningMasterUpdateIndicatorFromStorage();
+    window.MiningMasterPwaUpdates = {
+        checkNow: syncMiningMasterPwaContractState,
+        hydrateIndicator: refreshMiningMasterUpdateIndicatorFromStorage,
+        getState: function () {
+            return {
+                currentVersion: miningMasterShellVersion,
+                storedUpdate: readMiningMasterStoredUpdate()
+            };
+        }
+    };
+    function setTheme(theme) {
+        if (!shell) return;
+        shell.classList.toggle("dispatcher-night", theme === "night");
+        shell.classList.toggle("dispatcher-day", theme !== "night");
+        localStorage.setItem("dispatcher-theme", theme);
+    }
+    setTheme(saved);
+    themeToggles.forEach(function (toggle) {
+        toggle.addEventListener("click", function () {
+            setTheme(shell.classList.contains("dispatcher-night") ? "day" : "night");
+        });
+    });
+
+    function normalizeTileStatus(status) {
+        var directColors = ["green", "yellow", "blue", "orange", "red", "gray"];
+        var legacyCodes = {
+            normal: "working",
+            danger: "breakdown",
+            risk: "waiting",
+            reserved: "assigned",
+            empty: "inactive"
+        };
+        if (directColors.indexOf(status) >= 0) return status;
+        return dispatcherEquipmentStateColor(legacyCodes[status] || status || "inactive");
+    }
+
+    function cleanDetailTile(tile) {
+        tile.classList.remove("is-assigned", "is-placeholder", "dispatcher-dragging");
+        tile.classList.add("gd-detail-slot-clone");
+        tile.removeAttribute("id");
+        tile.removeAttribute("role");
+        tile.removeAttribute("tabindex");
+        tile.removeAttribute("draggable");
+        Array.from(tile.attributes).forEach(function (attr) {
+            if (attr.name.indexOf("data-") === 0) {
+                tile.removeAttribute(attr.name);
+            }
+        });
+        return tile;
+    }
+
+    function findSourceGarageTile(cardId) {
+        if (!cardId || !window.CSS || !CSS.escape) return null;
+        return document.querySelector("[data-equipment-card-id='" + CSS.escape(String(cardId)) + "'][data-garage-item]:not(.is-assigned):not(.is-placeholder)");
+    }
+
+    function buildDetailGarageTile(data) {
+        var status = normalizeTileStatus(data.status_key);
+        var isTruck = String(data.type || "").toLowerCase().indexOf("самосвал") !== -1;
+        var plan = data.plan || {};
+        var loopProgress = plan.progress_loop_percent;
+        var completedLoops = Number(plan.progress_completed_loops || 0);
+        var tile = document.createElement("article");
+        tile.className = isTruck
+            ? "dispatcher-truck-tile status-" + status
+            : "dispatcher-equipment-tile dispatcher-excavator-garage-tile status-" + status;
+        if (completedLoops > 0) tile.classList.add("is-plan-overrun");
+        tile.style.setProperty("--tile-progress", String(loopProgress === null || loopProgress === undefined || loopProgress === "" ? data.percent || 0 : loopProgress) + "%");
+        tile.style.setProperty("--tile-total-progress", String(data.percent || 0) + "%");
+        if (loopProgress !== null && loopProgress !== undefined && loopProgress !== "") tile.dataset.planLoopPercent = String(loopProgress);
+        tile.dataset.planCompletedLoops = String(completedLoops);
+        if (plan.progress_phase) tile.dataset.planProgressPhase = plan.progress_phase;
+        tile.innerHTML =
+            "<strong>" + escapeHtml(data.number || "") + "</strong>" +
+            '<img src="' + escapeHtml(dispatcherNeutralEquipmentIcon(isTruck ? "truck" : "excavator")) + '" alt="">' +
+            "<span>" + escapeHtml(data.status_label || "") + "</span>" +
+            (completedLoops > 0 ? '<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: ' + completedLoops + '">×' + completedLoops + '</b>' : "");
+        return tile;
+    }
+
+    function renderDetailGarageIcon(cardId, data) {
+        if (!detailIconSlot) return;
+        detailIconSlot.innerHTML = "";
+        var source = findSourceGarageTile(cardId);
+        var tile = source ? source.cloneNode(true) : buildDetailGarageTile(data);
+        detailIconSlot.appendChild(cleanDetailTile(tile));
+    }
+
+    function buildDetailChartShell(chart) {
+        var card = document.createElement("div");
+        card.className = "gd-detail-chart-card gd-detail-chart-" + (chart.type || "bar");
+        var title = document.createElement("div");
+        title.className = "gd-detail-report-title";
+        title.textContent = chart.title || "";
+        card.appendChild(title);
+        if (chart.type === "donut-list") {
+            return card;
+        }
+        var gauges = document.createElement("div");
+        gauges.className = "gd-detail-gauge-strip";
+        chart.rows.slice(0, 3).forEach(function (row) {
+            var item = document.createElement("div");
+            item.className = "gd-detail-gauge-summary accent-" + (row.accent || "green");
+            item.style.setProperty("--gauge-pct", Math.max(0, Math.min(100, Number(row.percent || 0))) + "%");
+            item.innerHTML =
+                "<div class=\"gd-detail-gauge\"><strong>" + escapeHtml(row.value || "") + "</strong></div>" +
+                "<span>" + escapeHtml(row.target || row.label || row.source || "") + "</span>";
+            gauges.appendChild(item);
+        });
+        card.appendChild(gauges);
+        return card;
+    }
+
+    function renderDetailChart(chart) {
+        if (!detailDashboard) return;
+        detailDashboard.innerHTML = "";
+        if (!chart || !chart.rows || !chart.rows.length) return;
+        var card = buildDetailChartShell(chart);
+        if (chart.type === "matrix") {
+            var groupedRows = {};
+            chart.rows.forEach(function (row) {
+                var key = row.label || "не указан";
+                if (!groupedRows[key]) {
+                    groupedRows[key] = [];
+                }
+                groupedRows[key].push(row);
+            });
+            Object.keys(groupedRows).forEach(function (label) {
+                var rows = groupedRows[label];
+                var matrix = document.createElement("div");
+                matrix.className = "gd-detail-matrix-row is-grouped";
+                var face = document.createElement("div");
+                face.className = "gd-detail-matrix-face";
+                face.textContent = label;
+                var cell = document.createElement("div");
+                cell.className = "gd-detail-matrix-cell gd-detail-matrix-pie-cell";
+                var pie = document.createElement("div");
+                pie.className = "gd-detail-pie";
+                var cursor = 0;
+                var totalPercent = rows.reduce(function (sum, row) {
+                    return sum + Math.max(0, Number(row.percent || 0));
+                }, 0) || 100;
+                var stops = rows.map(function (row) {
+                    var raw = Math.max(0, Number(row.percent || 0));
+                    var size = Math.max(4, Math.min(100, (raw / totalPercent) * 100));
+                    var start = cursor;
+                    cursor += size;
+                    return "var(--pie-" + (row.accent || "green") + ") " + start + "% " + cursor + "%";
+                });
+                if (cursor < 100) {
+                    stops.push("rgba(142, 158, 166, .16) " + cursor + "% 100%");
+                }
+                pie.style.backgroundImage = "radial-gradient(circle at center, var(--gd-detail-panel) 0 50%, transparent 51%), conic-gradient(" + stops.join(", ") + ")";
+                var total = document.createElement("strong");
+                total.textContent = rows.length + " напр.";
+                pie.appendChild(total);
+                var legend = document.createElement("div");
+                legend.className = "gd-detail-pie-legend";
+                rows.forEach(function (row) {
+                    var item = document.createElement("div");
+                    item.className = "gd-detail-pie-item accent-" + (row.accent || "green");
+                    item.innerHTML = "<span></span><strong>" + escapeHtml(row.target || "") + "</strong><em>" + escapeHtml(row.value || "") + "</em><small>" + escapeHtml(row.meta || "") + "</small>";
+                    legend.appendChild(item);
+                });
+                cell.appendChild(pie);
+                cell.appendChild(legend);
+                matrix.appendChild(face);
+                matrix.appendChild(cell);
+                card.appendChild(matrix);
+            });
+            detailDashboard.appendChild(card);
+            return;
+        }
+        if (chart.type === "donut-list") {
+            var breakdown = document.createElement("div");
+            breakdown.className = "gd-detail-breakdown";
+            var stack = document.createElement("div");
+            stack.className = "gd-detail-stack";
+            var totalPercent = chart.rows.reduce(function (sum, row) {
+                return sum + Math.max(0, Number(row.percent || 0));
+            }, 0) || 100;
+            chart.rows.forEach(function (row) {
+                var segment = document.createElement("i");
+                segment.className = "accent-" + (row.accent || "green");
+                segment.style.setProperty("--segment-share", Math.max(4, Math.min(100, (Math.max(0, Number(row.percent || 0)) / totalPercent) * 100)) + "%");
+                stack.appendChild(segment);
+            });
+            breakdown.appendChild(stack);
+            var donutGrid = document.createElement("div");
+            donutGrid.className = "gd-detail-breakdown-grid";
+            chart.rows.forEach(function (row) {
+                var item = document.createElement("div");
+                item.className = "gd-detail-breakdown-row accent-" + (row.accent || "green");
+                item.style.setProperty("--bar-pct", Math.max(0, Math.min(100, Number(row.percent || 0))) + "%");
+                item.innerHTML =
+                    "<div class=\"gd-detail-breakdown-mark\"></div>" +
+                    "<div class=\"gd-detail-breakdown-main\"><strong>" + escapeHtml(row.label || "") + "</strong><span>" + escapeHtml(row.meta || "") + "</span><em><i></i></em></div>" +
+                    "<b>" + escapeHtml(row.value || "") + "</b>";
+                donutGrid.appendChild(item);
+            });
+            breakdown.appendChild(donutGrid);
+            card.appendChild(breakdown);
+            detailDashboard.appendChild(card);
+            return;
+        }
+        if (chart.type === "truck-ledger") {
+            var ledger = document.createElement("div");
+            ledger.className = "gd-detail-truck-ledger";
+            ["current", "removed"].forEach(function (stateKey) {
+                var stateRows = chart.rows.filter(function (row) { return row.state_key === stateKey; });
+                if (!stateRows.length) return;
+                var group = document.createElement("div");
+                group.className = "gd-detail-truck-group is-" + stateKey;
+                var groupTitle = document.createElement("strong");
+                groupTitle.textContent = stateKey === "current" ? "В составе сейчас" : "Работали и выведены";
+                group.appendChild(groupTitle);
+                stateRows.forEach(function (row) {
+                    var item = document.createElement("div");
+                    item.className = "gd-detail-truck-ledger-row accent-" + (row.accent || "green");
+                    item.style.setProperty("--tile-progress", Math.max(0, Math.min(100, Number(row.percent || 0))) + "%");
+                    item.innerHTML =
+                        "<div class=\"gd-detail-truck-mini\"><b>" + escapeHtml(row.truck || row.label || "") + "</b><span>" + escapeHtml(row.state || "") + "</span></div>" +
+                        "<div class=\"gd-detail-truck-route\"><strong>" + escapeHtml(row.target || "") + "</strong><span>" + escapeHtml(row.rock || "") + "</span><em><i></i></em></div>" +
+                        "<div class=\"gd-detail-truck-value\">" + escapeHtml(row.value || "") + "</div>";
+                    group.appendChild(item);
+                });
+                ledger.appendChild(group);
+            });
+            card.appendChild(ledger);
+            detailDashboard.appendChild(card);
+            return;
+        }
+        chart.rows.forEach(function (row) {
+            if (chart.type === "route") {
+                var route = document.createElement("div");
+                route.className = "gd-detail-route-row accent-" + (row.accent || "green");
+                route.style.setProperty("--gauge-pct", Math.max(0, Math.min(100, Number(row.percent || 0))) + "%");
+                var source = document.createElement("div");
+                source.className = "gd-detail-route-node";
+                source.textContent = row.source || "";
+                var flow = document.createElement("div");
+                flow.className = "gd-detail-route-flow";
+                flow.innerHTML = "<i></i>";
+                var target = document.createElement("div");
+                target.className = "gd-detail-route-node";
+                target.textContent = row.target || "";
+                var gauge = document.createElement("div");
+                gauge.className = "gd-detail-gauge";
+                gauge.innerHTML = "<strong>" + escapeHtml(row.value || "") + "</strong>";
+                var meta = document.createElement("div");
+                meta.className = "gd-detail-route-meta";
+                meta.textContent = row.meta || "";
+                route.appendChild(source);
+                route.appendChild(flow);
+                route.appendChild(target);
+                route.appendChild(gauge);
+                route.appendChild(meta);
+                card.appendChild(route);
+                return;
+            }
+            var line = document.createElement("div");
+            line.className = "gd-detail-chart-row accent-" + (row.accent || "green");
+            line.style.setProperty("--bar-pct", Math.max(0, Math.min(100, Number(row.percent || 0))) + "%");
+            var head = document.createElement("div");
+            head.className = "gd-detail-chart-head";
+            var label = document.createElement("strong");
+            var value = document.createElement("span");
+            label.textContent = row.label || "";
+            value.textContent = row.value || "";
+            head.appendChild(label);
+            head.appendChild(value);
+            var meta = document.createElement("div");
+            meta.className = "gd-detail-chart-meta";
+            meta.textContent = row.meta || "";
+            var bar = document.createElement("div");
+            bar.className = "gd-detail-chart-bar";
+            bar.appendChild(document.createElement("i"));
+            line.appendChild(head);
+            line.appendChild(meta);
+            line.appendChild(bar);
+            card.appendChild(line);
+        });
+        detailDashboard.appendChild(card);
+    }
+
+    function renderDetailShiftReport(report) {
+        if (!detailShiftReport || !detailMetrics || !detailTabs || !detailDashboard) return;
+        var metrics = (report && report.metrics) || [];
+        var charts = ((report && report.charts) || []).filter(function (chart) {
+            return chart && chart.rows && chart.rows.length;
+        });
+        detailMetrics.innerHTML = "";
+        detailTabs.innerHTML = "";
+        detailDashboard.innerHTML = "";
+        metrics.forEach(function (metric) {
+            if (!metric || !metric.value) return;
+            var item = document.createElement("div");
+            var label = document.createElement("span");
+            var value = document.createElement("strong");
+            label.textContent = metric.label || "";
+            value.textContent = metric.value || "";
+            item.appendChild(label);
+            item.appendChild(value);
+            detailMetrics.appendChild(item);
+        });
+        charts.forEach(function (chart, index) {
+            var button = document.createElement("button");
+            button.type = "button";
+            button.className = "gd-detail-tab" + (index === 0 ? " is-active" : "");
+            button.textContent = chart.title || ("Отчет " + (index + 1));
+            button.addEventListener("click", function () {
+                var panel = detailLayer ? detailLayer.querySelector(".mm-equipment-detail-panel") : null;
+                var savedScrollTop = panel ? panel.scrollTop : 0;
+                detailTabs.querySelectorAll(".gd-detail-tab").forEach(function (node) {
+                    node.classList.remove("is-active");
+                });
+                button.classList.add("is-active");
+                renderDetailChart(chart);
+                if (panel) {
+                    panel.scrollTop = savedScrollTop;
+                }
+            });
+            detailTabs.appendChild(button);
+        });
+        renderDetailChart(charts[0]);
+        detailTabs.hidden = charts.length < 2;
+        detailShiftReport.hidden = metrics.length === 0 && charts.length === 0;
+    }
+
+    function currentDispatcherBoardVersion() {
+        var currentBoard = document.querySelector(".dispatcher-board");
+        var parsed = Number(currentBoard && currentBoard.dataset
+            ? currentBoard.dataset.operationalStateVersion
+            : 0);
+        return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    }
+
+    function setDetailLoadState(message, canRetry) {
+        if (detailLoadMessage) detailLoadMessage.textContent = message || "";
+        if (detailRetry) detailRetry.hidden = !canRetry;
+        if (detailLoadState) detailLoadState.hidden = !message;
+    }
+
+    function resetDetailContent() {
+        if (detailEmployee) detailEmployee.hidden = true;
+        if (detailList) detailList.innerHTML = "";
+        if (detailShiftReport) detailShiftReport.hidden = true;
+    }
+
+    function renderEquipmentCard(cardId, data) {
+        if (!data || !detailLayer) return false;
+        detailLayer.dataset.gdActiveCardId = String(cardId || "");
+        detailLayer.removeAttribute("aria-busy");
+        setDetailLoadState("", false);
+        renderDetailGarageIcon(cardId, data);
+        if (detailType) detailType.textContent = data.type || "";
+        if (detailTitle) detailTitle.textContent = data.label || "";
+        if (detailStatus) detailStatus.textContent = data.status_label || "";
+        if (detailZone) detailZone.textContent = data.zone || "";
+        if (detailEmployee) {
+            var employee = data.employee || {};
+            if (data.category === "complex") {
+                detailEmployee.hidden = true;
+            } else {
+            detailEmployee.hidden = false;
+            if (detailEmployeeName) detailEmployeeName.textContent = employee.name || "Сотрудник не назначен";
+            if (detailEmployeePhone) {
+                detailEmployeePhone.textContent = employee.phone || "телефон не указан";
+                if (employee.phone) {
+                    detailEmployeePhone.href = "tel:" + employee.phone.replace(/[^\d+]/g, "");
+                    detailEmployeePhone.removeAttribute("aria-disabled");
+                } else {
+                    detailEmployeePhone.removeAttribute("href");
+                    detailEmployeePhone.setAttribute("aria-disabled", "true");
+                }
+            }
+            if (detailEmployeeImg && detailEmployeeInitials) {
+                if (employee.photo) {
+                    detailEmployeeImg.src = employee.photo;
+                    detailEmployeeImg.hidden = false;
+                    detailEmployeeInitials.hidden = true;
+                } else {
+                    detailEmployeeImg.removeAttribute("src");
+                    detailEmployeeImg.hidden = true;
+                    detailEmployeeInitials.textContent = employee.initials || "--";
+                    detailEmployeeInitials.hidden = false;
+                }
+            }
+            }
+        }
+        if (detailList) {
+            detailList.innerHTML = "";
+            (data.details || []).forEach(function (row) {
+                if (!row || !row.value) return;
+                var term = document.createElement("dt");
+                var value = document.createElement("dd");
+                term.textContent = row.label || "";
+                value.textContent = row.value || "";
+                detailList.appendChild(term);
+                detailList.appendChild(value);
+            });
+        }
+        renderDetailShiftReport(data.shift_report || {});
+        detailLayer.hidden = false;
+        return true;
+    }
+
+    function dispatcherDetailUrl(trigger, boardVersion) {
+        if (!trigger || !runtimeConfig.dispatcherDetailUrlTemplate) return "";
+        var equipmentId = String(trigger.dataset.equipmentId || "");
+        if (!/^\d+$/.test(equipmentId)) return "";
+        var category = trigger.dataset.dispatcherDrag === "complex" ? "complex" : "equipment";
+        var template = String(runtimeConfig.dispatcherDetailUrlTemplate || "");
+        var path = template.replace(/equipment\/0\/$/, category + "/" + equipmentId + "/");
+        if (path === template) return "";
+        return path + "?state_version=" + encodeURIComponent(String(boardVersion));
+    }
+
+    function detailErrorMessage(status) {
+        if (status === 401) return "Сессия завершена. Войдите в систему снова.";
+        if (status === 403 || status === 404) return "Карточка недоступна.";
+        if (status === 409) return "Данные изменились — закройте карточку и откройте её снова.";
+        return "Нет связи с сервером.";
+    }
+
+    function openEquipmentCard(cardId, trigger) {
+        if (!detailLayer) return false;
+        var cardKey = String(cardId || "");
+        trigger = trigger || document.querySelector(
+            "[data-equipment-card-id='" + CSS.escape(cardKey) + "'][data-equipment-id]"
+        );
+        var boardVersion = currentDispatcherBoardVersion();
+        var url = dispatcherDetailUrl(trigger, boardVersion);
+        if (!url) return false;
+
+        detailRequestToken += 1;
+        var requestToken = detailRequestToken;
+        if (detailRequestController) detailRequestController.abort();
+        detailRequestController = new AbortController();
+        delete equipmentCards[cardKey];
+        detailLayer.dataset.gdActiveCardId = cardKey;
+        detailLayer.dataset.gdRequestedVersion = String(boardVersion);
+        detailLayer.setAttribute("aria-busy", "true");
+        resetDetailContent();
+        if (detailType) detailType.textContent = trigger.dataset.dispatcherDrag === "complex" ? "Комплекс" : "Техника";
+        if (detailTitle) detailTitle.textContent = trigger.dataset.equipmentName || "Карточка";
+        if (detailStatus) detailStatus.textContent = "";
+        if (detailZone) detailZone.textContent = "";
+        renderDetailGarageIcon(cardKey, {
+            type: trigger.dataset.dispatcherDrag === "truck" ? "Самосвал" : "Экскаватор",
+            status_key: "gray"
+        });
+        setDetailLoadState("Загружаю свежие данные…", false);
+        detailLayer.hidden = false;
+        detailRetryAction = function () {
+            openEquipmentCard(cardKey, trigger);
+        };
+
+        fetch(url, {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store",
+            signal: detailRequestController.signal,
+            headers: {
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest"
+            }
+        }).then(function (response) {
+            if (!response.ok) {
+                var requestError = new Error("detail_request_failed");
+                requestError.status = response.status;
+                throw requestError;
+            }
+            return response.json();
+        }).then(function (payload) {
+            var debugState = window.AppRealtime && typeof window.AppRealtime.getDebugState === "function"
+                ? window.AppRealtime.getDebugState()
+                : null;
+            var pendingVersion = Number(debugState && debugState.pendingVersion ? debugState.pendingVersion : 0);
+            if (
+                requestToken !== detailRequestToken
+                || !payload
+                || payload.contract !== "dispatcher-equipment-detail-v1"
+                || String(payload.card_key || "") !== cardKey
+                || Number(payload.operational_state_version || 0) !== boardVersion
+                || currentDispatcherBoardVersion() !== boardVersion
+                || pendingVersion > boardVersion
+            ) {
+                var staleError = new Error("stale_detail");
+                staleError.status = 409;
+                throw staleError;
+            }
+            equipmentCards[cardKey] = payload.card;
+            renderEquipmentCard(cardKey, payload.card);
+        }).catch(function (error) {
+            if (error && error.name === "AbortError") return;
+            if (requestToken !== detailRequestToken || detailLayer.hidden) return;
+            resetDetailContent();
+            detailLayer.removeAttribute("aria-busy");
+            var status = Number(error && error.status ? error.status : 0);
+            setDetailLoadState(detailErrorMessage(status), status === 0 || status >= 500);
+        });
+        return true;
+    }
+
+    function closeEquipmentCard() {
+        detailRequestToken += 1;
+        if (detailRequestController) detailRequestController.abort();
+        detailRequestController = null;
+        detailRetryAction = null;
+        if (detailLayer) {
+            detailLayer.hidden = true;
+            detailLayer.removeAttribute("aria-busy");
+            delete detailLayer.dataset.gdActiveCardId;
+            delete detailLayer.dataset.gdRequestedVersion;
+        }
+        if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+            window.AppRealtime.wake("dispatcher_detail_closed");
+        }
+    }
+
+    if (detailRetry) {
+        detailRetry.addEventListener("click", function () {
+            if (typeof detailRetryAction === "function") detailRetryAction();
+        });
+    }
+
+    document.querySelectorAll("[data-gd-detail-close]").forEach(function (node) {
+        node.addEventListener("click", closeEquipmentCard);
+    });
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") closeEquipmentCard();
+    });
+
+    function bindMiningMasterMobileScreens() {
+        var shell = document.querySelector(".mm-mobile-shell");
+        if (!shell) return;
+        var home = shell.querySelector("[data-mm-mobile-view='home']");
+        var tabPanels = Array.from(shell.querySelectorAll("[data-mm-mobile-panel]"));
+        var fillScreens = Array.from(shell.querySelectorAll("[data-mm-mobile-fill]"));
+        function isMiningMasterMobileReadonly() {
+            return (
+                (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly())
+                || shell.dataset.mmMobileReadonly === "true"
+                || shell.classList.contains("is-readonly")
+            );
+        }
+        function isMobileEditableTarget(target) {
+            return Boolean(target && target.closest && target.closest("input, textarea, select, [contenteditable='true']"));
+        }
+        if (shell.dataset.mmMobileCopyGuardBound !== "true") {
+            shell.dataset.mmMobileCopyGuardBound = "true";
+            ["copy", "cut", "contextmenu", "selectstart"].forEach(function (eventName) {
+                shell.addEventListener(eventName, function (event) {
+                    if (isMobileEditableTarget(event.target)) return;
+                    event.preventDefault();
+                });
+            });
+        }
+        function getMobileGarageItemCount(panelName) {
+            var panel = shell.querySelector("[data-mm-mobile-panel='" + CSS.escape(String(panelName || "")) + "']");
+            if (!panel) return 0;
+            if (panelName === "excavators") {
+                return Array.prototype.slice.call(panel.querySelectorAll("[data-mm-mobile-activate-excavator]")).filter(function (button) {
+                    return !button.hidden && button.style.display !== "none";
+                }).length;
+            }
+            if (panelName === "trucks") {
+                return Array.prototype.slice.call(panel.querySelectorAll(".mm-mobile-truck-card")).filter(function (button) {
+                    return !button.hidden && button.style.display !== "none";
+                }).length;
+            }
+            return 1;
+        }
+        function canOpenMobileTab(panelName) {
+            if (panelName === "excavators" || panelName === "trucks") {
+                return getMobileGarageItemCount(panelName) > 0;
+            }
+            return true;
+        }
+        function syncMobileGarageNavState() {
+            shell.querySelectorAll("[data-mm-mobile-nav]").forEach(function (item) {
+                var targetName = item.dataset.mmMobileNav;
+                var isDisabled = (targetName === "excavators" || targetName === "trucks") && !canOpenMobileTab(targetName);
+                item.classList.toggle("is-disabled", isDisabled);
+                if (isDisabled) {
+                    item.classList.remove("is-active");
+                    item.setAttribute("aria-disabled", "true");
+                    item.setAttribute("tabindex", "-1");
+                } else {
+                    item.removeAttribute("aria-disabled");
+                    item.removeAttribute("tabindex");
+                }
+            });
+        }
+        function setActiveMobileNav(targetName) {
+            syncMobileGarageNavState();
+            shell.querySelectorAll("[data-mm-mobile-nav]").forEach(function (item) {
+                var isTarget = item.dataset.mmMobileNav === targetName;
+                item.classList.toggle("is-active", isTarget && !item.classList.contains("is-disabled"));
+            });
+        }
+        function hideTabPanels() {
+            tabPanels.forEach(function (panel) {
+                panel.hidden = true;
+            });
+        }
+        function closeDetails() {
+            shell.classList.remove("is-fill-target-peeking", "is-fill-target-ready", "is-create-complex-peeking", "is-create-complex-ready");
+            fillScreens.forEach(function (screen) {
+                screen.hidden = true;
+            });
+            hideTabPanels();
+            if (home) home.hidden = false;
+            shell.dataset.mobileScreen = "home";
+            delete shell.dataset.activeComplex;
+            setActiveMobileNav("home");
+        }
+        function openFill(detailId) {
+            var target = shell.querySelector("[data-mm-mobile-fill='" + CSS.escape(String(detailId || "")) + "']");
+            if (!target) return;
+            syncMobileFillScreenFromHome(target);
+            shell.classList.remove("is-fill-target-peeking", "is-fill-target-ready", "is-create-complex-peeking", "is-create-complex-ready");
+            if (home) home.hidden = true;
+            hideTabPanels();
+            fillScreens.forEach(function (screen) {
+                screen.hidden = screen !== target;
+            });
+            shell.dataset.mobileScreen = "fill";
+            shell.dataset.activeComplex = String(detailId || "");
+            setActiveMobileNav("home");
+            shell.scrollTop = 0;
+            window.requestAnimationFrame(function () {
+                updateMobileFillAssignedLayout(target);
+            });
+        }
+        function ensureMobileLocalFillScreen(fillId, complexTitle, excavatorId, statusClass) {
+            if (!fillId || !excavatorId) return null;
+            var existing = shell.querySelector("[data-mm-mobile-fill='" + CSS.escape(String(fillId)) + "']");
+            if (existing) return existing;
+            var sample = shell.querySelector(".mm-mobile-fill-screen");
+            var screen = sample ? sample.cloneNode(true) : document.createElement("section");
+            screen.className = "mm-mobile-fill-screen " + (statusClass || dispatcherEquipmentStateClass("assigned"));
+            screen.dataset.mmMobileFill = fillId;
+            screen.hidden = true;
+            if (!sample) {
+                screen.innerHTML = [
+                    '<header class="mm-mobile-detail-header">',
+                        '<button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>',
+                        '<div class="mm-mobile-detail-title mm-mobile-fill-title"><h1>Набор самосвалов</h1></div>',
+                        '<div class="mm-mobile-header-actions"><div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: 0%;" role="img" aria-label="Выполнение плана смены 0%">0%</div><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
+                    '</header>',
+                    '<div class="mm-mobile-fill-save-overlay" aria-hidden="true">Сохранить</div>',
+                    '<div class="mm-mobile-fill-shake-overlay" aria-hidden="true">Стряхнуть</div>',
+                    '<div class="mm-mobile-fill-zone" data-mm-mobile-fill-drop>',
+                        '<div class="mm-mobile-fill-zone-head"><strong>Комплекс</strong></div>',
+                        '<div class="mm-mobile-fill-assigned" data-mm-mobile-fill-assigned aria-label="Самосвалы комплекса"></div>',
+                    '</div>',
+                    '<div class="mm-mobile-fill-garage-zone">',
+                        '<div class="mm-mobile-fill-garage-rail"><strong>Гараж - самосвалов</strong></div>',
+                        '<div class="mm-mobile-fill-truck-garage" aria-label="Гараж самосвалов"><div class="mm-mobile-detail-empty">самосвалов в гараже нет</div></div>',
+                    '</div>'
+                ].join("");
+                var currentRing = shell.querySelector(".mm-mobile-plan-ring");
+                var localRing = screen.querySelector(".mm-mobile-plan-ring");
+                if (currentRing && localRing) {
+                    localRing.style.cssText = currentRing.style.cssText;
+                    localRing.textContent = currentRing.textContent;
+                    localRing.setAttribute("aria-label", currentRing.getAttribute("aria-label") || "Выполнение плана смены");
+                }
+                shell.querySelectorAll("[data-mm-mobile-panel='trucks'] .mm-mobile-truck-card[data-equipment-card-id]").forEach(function (source) {
+                    ensureMobileFillGarageTruck(screen, source);
+                });
+            }
+            var title = screen.querySelector(".mm-mobile-fill-zone-head strong");
+            if (title) {
+                var number = String(complexTitle || "").replace(/[^\d]+/g, "");
+                title.textContent = number ? "Комплекс - " + number : "Комплекс";
+            }
+            var drop = screen.querySelector("[data-mm-mobile-fill-drop]");
+            if (drop) {
+                drop.dataset.mmMobileFillExcavatorId = excavatorId;
+                drop.classList.remove("status-red", "status-yellow", "status-green", "status-blue", "status-orange", "status-gray", "status-danger", "status-risk", "status-normal", "status-empty");
+                drop.classList.add(statusClass || dispatcherEquipmentStateClass("assigned"));
+            }
+            var assigned = screen.querySelector("[data-mm-mobile-fill-assigned]");
+            if (assigned) {
+                assigned.innerHTML = "";
+                updateMobileFillAssignedLayout(assigned);
+            }
+            screen.querySelectorAll(".mm-mobile-fill-truck").forEach(function (truck) {
+                delete truck.dataset.mmMobileFillTruckBound;
+                delete truck.dataset.cardBound;
+                truck.classList.remove("is-assigned", "is-assigning", "is-dragging", "is-hold-pending", "is-hold-ready");
+                if (!truck.dataset.equipmentCardId && truck.dataset.mmMobileFillTruckId) {
+                    truck.dataset.equipmentCardId = truck.dataset.mmMobileFillTruckId;
+                }
+                bindMobileFillTruckDrag(truck);
+                bindEquipmentCardTrigger(truck);
+            });
+            screen.querySelectorAll("[data-mm-mobile-fill-back]").forEach(function (button) {
+                button.addEventListener("click", function (event) {
+                    event.preventDefault();
+                    closeDetails();
+                });
+            });
+            screen.querySelectorAll("[data-mm-mobile-fill-drop]").forEach(bindMobileFillFinishSwipe);
+            shell.appendChild(screen);
+            fillScreens.push(screen);
+            return screen;
+        }
+        function updateMobileFillAssignedLayout(screenOrAssigned) {
+            var assigned = screenOrAssigned && screenOrAssigned.matches && screenOrAssigned.matches("[data-mm-mobile-fill-assigned]")
+                ? screenOrAssigned
+                : screenOrAssigned && screenOrAssigned.querySelector && screenOrAssigned.querySelector("[data-mm-mobile-fill-assigned]");
+            if (!assigned) return;
+            var count = assigned.querySelectorAll(".mm-mobile-truck-mini").length;
+            var columns = 3;
+            var rows = Math.max(1, Math.ceil((count || 1) / columns));
+            assigned.dataset.mmMobileFillCount = String(count);
+            assigned.style.setProperty("--mm-fill-assigned-columns", columns);
+            assigned.style.setProperty("--mm-fill-assigned-rows", rows);
+        }
+        function updateMobileHomeTruckPreviewLayout(preview) {
+            if (!preview) return;
+            var tiles = preview.querySelectorAll(".mm-mobile-truck-mini").length;
+            preview.dataset.mmMobileTruckCount = String(tiles);
+            var empty = preview.querySelector(".mm-mobile-truck-empty");
+            if (empty) empty.hidden = tiles > 0;
+            if (!tiles) {
+                delete preview.dataset.mmMobilePreviewRows;
+                preview.style.removeProperty("--mm-mobile-preview-columns");
+                preview.style.removeProperty("--mm-mobile-preview-tile");
+                preview.style.removeProperty("--mm-mobile-preview-gap");
+                preview.style.removeProperty("--mm-mobile-preview-font");
+                return;
+            }
+            var width = preview.clientWidth;
+            var height = preview.clientHeight;
+            if (!width || !height) return;
+            var gap = tiles > 9 ? 2 : 4;
+            var maxColumns = tiles > 9 ? 5 : 3;
+            var bestColumns = tiles > 9 ? 1 : 3;
+            var bestRows = Math.ceil(tiles / bestColumns);
+            var bestSize = 0;
+            var bestWaste = Infinity;
+            for (var columns = tiles > 9 ? 1 : 3; columns <= maxColumns; columns += 1) {
+                var rows = Math.ceil(tiles / columns);
+                var size = Math.floor(Math.min(
+                    (width - gap * (columns - 1)) / columns,
+                    (height - gap * (rows - 1)) / rows
+                ));
+                var waste = (columns * rows) - tiles;
+                if (
+                    size > bestSize ||
+                    (size === bestSize && waste < bestWaste) ||
+                    (size === bestSize && waste === bestWaste && columns > bestColumns)
+                ) {
+                    bestColumns = columns;
+                    bestRows = rows;
+                    bestSize = size;
+                    bestWaste = waste;
+                }
+            }
+            bestSize = Math.max(34, bestSize);
+            preview.dataset.mmMobilePreviewRows = String(bestRows);
+            preview.style.setProperty("--mm-mobile-preview-columns", bestColumns);
+            preview.style.setProperty("--mm-mobile-preview-tile", bestSize + "px");
+            preview.style.setProperty("--mm-mobile-preview-gap", gap + "px");
+            preview.style.setProperty("--mm-mobile-preview-font", Math.max(12, Math.min(28, Math.round(bestSize * .34))) + "px");
+        }
+        var mobileLayoutReconcileTimer = null;
+        function reconcileMobileLocalLayout() {
+            shell.querySelectorAll("[data-mm-mobile-open-complex]").forEach(bindMobileComplexCardInteractions);
+            shell.querySelectorAll(".mm-mobile-truck-preview").forEach(updateMobileHomeTruckPreviewLayout);
+            shell.querySelectorAll("[data-mm-mobile-fill-assigned]").forEach(updateMobileFillAssignedLayout);
+            sortMobileTruckGarageViews();
+            updateMobileExcavatorGarageGridLayout();
+            syncMobileGarageNavState();
+        }
+        function scheduleMobileLocalLayoutReconcile() {
+            if (mobileLayoutReconcileTimer) {
+                window.clearTimeout(mobileLayoutReconcileTimer);
+            }
+            window.requestAnimationFrame(function () {
+                window.requestAnimationFrame(reconcileMobileLocalLayout);
+            });
+            mobileLayoutReconcileTimer = window.setTimeout(function () {
+                mobileLayoutReconcileTimer = null;
+                reconcileMobileLocalLayout();
+            }, 180);
+        }
+        function ensureMobileTruckPreviewEmpty(preview) {
+            if (!preview) return;
+            var empty = preview.querySelector(".mm-mobile-truck-empty");
+            if (!empty) {
+                empty = document.createElement("span");
+                empty.className = "mm-mobile-truck-empty";
+                empty.textContent = "нет";
+                preview.appendChild(empty);
+            }
+            empty.hidden = preview.querySelectorAll(".mm-mobile-truck-mini").length > 0;
+        }
+        function syncMobileHomeComplexFromFill(screen) {
+            if (!screen) return;
+            var detailId = screen.dataset.mmMobileFill || "";
+            var card = detailId ? shell.querySelector("[data-mm-mobile-open-complex='" + CSS.escape(String(detailId)) + "']") : null;
+            var preview = card && card.querySelector(".mm-mobile-truck-preview");
+            var assigned = screen.querySelector("[data-mm-mobile-fill-assigned]");
+            var zone = screen.querySelector("[data-mm-mobile-fill-drop]");
+            if (!preview || !assigned) return;
+            var excavatorId = (zone && zone.dataset.mmMobileFillExcavatorId) || (card && card.dataset.mmMobileExcavatorId) || "";
+            preview.querySelectorAll(".mm-mobile-truck-mini, .mm-mobile-truck-empty").forEach(function (node) {
+                node.remove();
+            });
+            Array.from(assigned.querySelectorAll("[data-mm-mobile-assigned-truck-id]")).forEach(function (source) {
+                var mini = document.createElement("span");
+                mini.className = "mm-mobile-truck-mini " + getMobileAssignedTruckStatusClass(source);
+                mini.dataset.mmMobileHomeTruckId = source.dataset.mmMobileAssignedTruckId || "";
+                mini.dataset.mmMobileHomeTruckNumber = source.dataset.mmMobileAssignedTruckNumber || source.textContent || "";
+                mini.dataset.mmMobileHomeSourceExcavatorId = excavatorId;
+                mini.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+                mini.textContent = mini.dataset.mmMobileHomeTruckNumber || "";
+                syncMobilePlanVisual(source, mini);
+                preview.appendChild(mini);
+                bindMobileHomeTruckDrag(mini);
+                removeMobileTruckFromGarages(mini.dataset.mmMobileHomeTruckId);
+            });
+            ensureMobileTruckPreviewEmpty(preview);
+            updateMobileHomeTruckPreviewLayout(preview);
+        }
+        function getMobileTruckStatusClass(node) {
+            return Array.from((node && node.classList) || []).filter(function (name) {
+                return name.indexOf("status-") === 0;
+            }).join(" ");
+        }
+        function getMobileAssignedTruckStatusClass(node) {
+            if (node && node.dataset && node.dataset.mmMobileEquipmentState) return dispatcherEquipmentStateClass(node.dataset.mmMobileEquipmentState);
+            if (node && node.dataset && node.dataset.mmMobileFillAdded === "true") return dispatcherEquipmentStateClass("sync_pending");
+            return getMobileTruckStatusClass(node) || "status-yellow";
+        }
+        function getMobileGarageTruckStatusClass(node) {
+            if (node && node.dataset && node.dataset.mmMobileEquipmentState) return dispatcherEquipmentStateClass(node.dataset.mmMobileEquipmentState);
+            if (node && (node.classList.contains("status-danger") || node.classList.contains("status-red"))) return "status-red";
+            if (node && (node.classList.contains("status-normal") || node.classList.contains("status-green"))) return "status-green";
+            if (node && (node.classList.contains("status-risk") || node.classList.contains("status-yellow"))) return "status-yellow";
+            if (node && node.classList.contains("status-blue")) return "status-blue";
+            if (node && node.classList.contains("status-orange")) return "status-orange";
+            if (node && node.classList.contains("status-gray")) return "status-gray";
+            return "status-yellow";
+        }
+        function getMobileGarageTruckIcon(node) {
+            if (node && node.dataset && node.dataset.mmMobileEquipmentState) {
+                return "/static/img/equipment/truck-" + dispatcherEquipmentStateIconColor(node.dataset.mmMobileEquipmentState) + ".png";
+            }
+            var statusClass = getMobileGarageTruckStatusClass(node);
+            if (statusClass === "status-red") return "/static/img/equipment/truck-red.png";
+            if (statusClass === "status-green") return "/static/img/equipment/truck-green.png";
+            if (statusClass === "status-blue") return "/static/img/equipment/truck-blue.png";
+            if (statusClass === "status-yellow") return "/static/img/equipment/truck-yellow.png";
+            if (statusClass === "status-orange") return "/static/img/equipment/truck-yellow.png";
+            return "/static/img/equipment/truck-gray.png";
+        }
+        function getMobileTruckSortValue(node) {
+            var raw = (node && node.dataset && node.dataset.mmMobileTruckSort) ||
+                (node && node.dataset && (node.dataset.mmMobileFillTruckNumber || node.dataset.mmMobileHomeTruckNumber || node.dataset.mmMobileAssignedTruckNumber)) ||
+                (node && node.textContent) ||
+                "";
+            var parsed = parseInt(String(raw).replace(/[^\d-]/g, ""), 10);
+            return Number.isFinite(parsed) ? parsed : 9999;
+        }
+        function sortMobileTruckCards(container, selector) {
+            if (!container) return;
+            var cards = Array.from(container.querySelectorAll(selector));
+            cards.sort(function (left, right) {
+                var leftSort = getMobileTruckSortValue(left);
+                var rightSort = getMobileTruckSortValue(right);
+                if (leftSort !== rightSort) return leftSort - rightSort;
+                return String(left.textContent || "").localeCompare(String(right.textContent || ""), "ru", { numeric: true });
+            });
+            cards.forEach(function (card) {
+                container.appendChild(card);
+            });
+        }
+        function syncMobileTruckGarageEmpty(container) {
+            if (!container) return;
+            var empty = container.querySelector(".mm-mobile-detail-empty");
+            var hasCards = Boolean(container.querySelector(".mm-mobile-truck-card"));
+            if (empty) {
+                empty.hidden = hasCards;
+            }
+        }
+        function sortMobileTruckGarageViews() {
+            shell.querySelectorAll(".mm-mobile-fill-truck-garage").forEach(function (garage) {
+                sortMobileTruckCards(garage, ".mm-mobile-fill-truck");
+                syncMobileTruckGarageEmpty(garage);
+            });
+            var truckPanelGrid = shell.querySelector("[data-mm-mobile-panel='trucks'] .mm-mobile-detail-trucks");
+            if (truckPanelGrid) {
+                sortMobileTruckCards(truckPanelGrid, ".mm-mobile-truck-card[data-equipment-card-id]");
+                syncMobileTruckGarageEmpty(truckPanelGrid);
+            }
+        }
+        function syncMobilePlanVisual(source, target) {
+            if (!source || !target) return target;
+            ["planPercent", "planLoopPercent", "planCompletedLoops", "planProgressPhase"].forEach(function (key) {
+                var value = source.dataset[key] || "";
+                if (value) {
+                    target.dataset[key] = value;
+                } else {
+                    delete target.dataset[key];
+                }
+            });
+            var loopProgress = source.dataset.planLoopPercent || "";
+            var completedLoops = parseInt(source.dataset.planCompletedLoops || "0", 10);
+            if (!Number.isFinite(completedLoops)) completedLoops = 0;
+            target.classList.toggle("has-plan-progress", loopProgress !== "");
+            target.classList.toggle("is-plan-overrun", completedLoops > 0);
+            if (loopProgress !== "") {
+                target.style.setProperty("--mm-mobile-plan-progress", loopProgress + "%");
+            } else {
+                target.style.removeProperty("--mm-mobile-plan-progress");
+            }
+            var ringLayer = target.querySelector(".mm-mobile-plan-ring-layer");
+            if (loopProgress !== "") {
+                if (!ringLayer) {
+                    ringLayer = document.createElement("i");
+                    ringLayer.className = "mm-mobile-plan-ring-layer";
+                    ringLayer.setAttribute("aria-hidden", "true");
+                    target.appendChild(ringLayer);
+                }
+            } else if (ringLayer) {
+                ringLayer.remove();
+            }
+            var badge = target.querySelector(".mm-mobile-plan-loop-badge");
+            if (completedLoops > 0) {
+                if (!badge) {
+                    badge = document.createElement("b");
+                    badge.className = "mm-mobile-plan-loop-badge";
+                    target.appendChild(badge);
+                }
+                badge.textContent = "×" + completedLoops;
+            } else if (badge) {
+                badge.remove();
+            }
+            return target;
+        }
+        function ensureMobileTruckPanelGarageTruck(source) {
+            var grid = shell.querySelector("[data-mm-mobile-panel='trucks'] .mm-mobile-detail-trucks");
+            if (!grid || !source) return null;
+            var truckId = source.dataset.mmMobileAssignedTruckId || source.dataset.mmMobileHomeTruckId || source.dataset.mmMobileFillTruckId || source.dataset.equipmentCardId || "";
+            if (!truckId) return null;
+            var truckNumber = source.dataset.mmMobileAssignedTruckNumber || source.dataset.mmMobileHomeTruckNumber || source.dataset.mmMobileFillTruckNumber || source.dataset.mmMobileTruckSort || (source.querySelector("strong") && source.querySelector("strong").textContent) || source.textContent || "";
+            var card = grid.querySelector("[data-equipment-card-id='" + CSS.escape(String(truckId)) + "']");
+            if (!card) {
+                card = document.createElement("article");
+                card.setAttribute("role", "button");
+                card.tabIndex = 0;
+                card.dataset.equipmentCardId = truckId;
+                var img = document.createElement("img");
+                img.alt = "";
+                var strong = document.createElement("strong");
+                var status = document.createElement("span");
+                card.appendChild(img);
+                card.appendChild(strong);
+                card.appendChild(status);
+                grid.appendChild(card);
+                bindEquipmentCardTrigger(card);
+            }
+            card.className = "mm-mobile-truck-card " + getMobileGarageTruckStatusClass(source);
+            card.hidden = false;
+            card.style.display = "";
+            card.dataset.mmMobileTruckSort = truckNumber;
+            card.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+            var image = card.querySelector("img");
+            if (image) image.src = getMobileGarageTruckIcon(source);
+            var title = card.querySelector("strong");
+            if (title) title.textContent = truckNumber;
+            syncMobilePlanVisual(source, card);
+            return card;
+        }
+        function restoreMobileTruckToGarages(source) {
+            if (!source) return;
+            shell.querySelectorAll("[data-mm-mobile-fill]").forEach(function (screen) {
+                ensureMobileFillGarageTruck(screen, source);
+            });
+            ensureMobileTruckPanelGarageTruck(source);
+            sortMobileTruckGarageViews();
+            syncMobileGarageNavState();
+        }
+        function removeMobileTruckFromGarages(truckId) {
+            if (!truckId) return;
+            shell.querySelectorAll("[data-mm-mobile-fill-truck-id='" + CSS.escape(String(truckId)) + "']").forEach(function (button) {
+                button.remove();
+            });
+            shell.querySelectorAll("[data-mm-mobile-panel='trucks'] [data-equipment-card-id='" + CSS.escape(String(truckId)) + "']").forEach(function (card) {
+                card.remove();
+            });
+            syncMobileGarageNavState();
+        }
+        function ensureMobileFillGarageTruck(screen, source) {
+            var garage = screen && screen.querySelector(".mm-mobile-fill-truck-garage");
+            if (!garage || !source) return null;
+            var truckId = source.dataset.mmMobileAssignedTruckId || source.dataset.mmMobileHomeTruckId || source.dataset.mmMobileFillTruckId || source.dataset.equipmentCardId || "";
+            if (!truckId) return null;
+            var truckNumber = source.dataset.mmMobileAssignedTruckNumber || source.dataset.mmMobileHomeTruckNumber || source.dataset.mmMobileFillTruckNumber || source.dataset.mmMobileTruckSort || (source.querySelector("strong") && source.querySelector("strong").textContent) || source.textContent || "";
+            var existing = garage.querySelector("[data-mm-mobile-fill-truck-id='" + CSS.escape(String(truckId)) + "']");
+            if (existing) {
+                existing.classList.remove("is-assigned", "is-assigning", "is-dragging", "is-hold-pending", "is-hold-ready");
+                existing.classList.remove("status-red", "status-yellow", "status-green", "status-blue", "status-orange", "status-gray", "status-normal", "status-risk", "status-danger");
+                existing.classList.add(getMobileGarageTruckStatusClass(source));
+                existing.dataset.mmMobileTruckSort = truckNumber;
+                existing.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+                var existingImage = existing.querySelector("img");
+                if (existingImage) existingImage.src = getMobileGarageTruckIcon(source);
+                existing.hidden = false;
+                syncMobilePlanVisual(source, existing);
+                return existing;
+            }
+            var button = document.createElement("button");
+            button.type = "button";
+            button.className = "mm-mobile-truck-card mm-mobile-fill-truck " + getMobileGarageTruckStatusClass(source);
+            button.dataset.mmMobileFillTruckId = truckId;
+            button.dataset.equipmentCardId = truckId;
+            button.dataset.mmMobileFillTruckNumber = truckNumber;
+            button.dataset.mmMobileTruckSort = button.dataset.mmMobileFillTruckNumber || "";
+            button.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+            var img = document.createElement("img");
+            img.src = getMobileGarageTruckIcon(source);
+            img.alt = "";
+            var strong = document.createElement("strong");
+            strong.textContent = button.dataset.mmMobileFillTruckNumber || "";
+            var status = document.createElement("span");
+            button.appendChild(img);
+            button.appendChild(strong);
+            button.appendChild(status);
+            var empty = garage.querySelector(".mm-mobile-detail-empty");
+            if (empty) empty.remove();
+            garage.prepend(button);
+            bindMobileFillTruckDrag(button);
+            bindEquipmentCardTrigger(button);
+            sortMobileTruckCards(garage, ".mm-mobile-fill-truck");
+            syncMobilePlanVisual(source, button);
+            return button;
+        }
+        function removeMobileFillGarageTruck(screen, truckId) {
+            var garage = screen && screen.querySelector(".mm-mobile-fill-truck-garage");
+            var button = garage && truckId ? garage.querySelector("[data-mm-mobile-fill-truck-id='" + CSS.escape(String(truckId)) + "']") : null;
+            if (button) button.remove();
+        }
+        function createMobileFillAssignedFromHomeTruck(homeTruck) {
+            var mini = document.createElement("span");
+            mini.className = "mm-mobile-truck-mini " + getMobileTruckStatusClass(homeTruck);
+            mini.dataset.mmMobileAssignedTruckId = homeTruck.dataset.mmMobileHomeTruckId || "";
+            mini.dataset.mmMobileAssignedTruckNumber = homeTruck.dataset.mmMobileHomeTruckNumber || homeTruck.textContent || "";
+            mini.dataset.mmMobileEquipmentState = homeTruck.dataset.mmMobileEquipmentState || "";
+            mini.dataset.mmMobileFillOriginal = "true";
+            mini.textContent = mini.dataset.mmMobileAssignedTruckNumber || "";
+            syncMobilePlanVisual(homeTruck, mini);
+            return mini;
+        }
+        function syncMobileFillScreenFromHome(screen) {
+            if (!screen) return;
+            var detailId = screen.dataset.mmMobileFill || "";
+            var card = detailId ? shell.querySelector("[data-mm-mobile-open-complex='" + CSS.escape(String(detailId)) + "']") : null;
+            var preview = card && card.querySelector(".mm-mobile-truck-preview");
+            var assigned = screen.querySelector("[data-mm-mobile-fill-assigned]");
+            if (!preview || !assigned) return;
+            var homeTrucks = Array.from(preview.querySelectorAll("[data-mm-mobile-home-truck-id]:not(.is-more)"));
+            var activeIds = new Set(homeTrucks.map(function (truck) {
+                return truck.dataset.mmMobileHomeTruckId || "";
+            }).filter(Boolean));
+            Array.from(assigned.querySelectorAll("[data-mm-mobile-assigned-truck-id]")).forEach(function (mini) {
+                var truckId = mini.dataset.mmMobileAssignedTruckId || "";
+                if (truckId && !activeIds.has(truckId)) {
+                    ensureMobileFillGarageTruck(screen, mini);
+                }
+                mini.remove();
+            });
+            homeTrucks.forEach(function (homeTruck) {
+                var truckId = homeTruck.dataset.mmMobileHomeTruckId || "";
+                if (!truckId) return;
+                removeMobileFillGarageTruck(screen, truckId);
+                var mini = createMobileFillAssignedFromHomeTruck(homeTruck);
+                assigned.appendChild(mini);
+                bindMobileFillAssignedTruckRelease(mini);
+            });
+            updateMobileFillAssignedLayout(assigned);
+            syncMobileGarageNavState();
+        }
+        function confirmMobileFillScreen(screen) {
+            if (isMiningMasterMobileReadonly()) return;
+            if (!screen) return;
+            var zone = screen.querySelector("[data-mm-mobile-fill-drop]");
+            syncMobileFillAssignmentsToServer(screen);
+            syncMobileHomeComplexFromFill(screen);
+            screen.classList.remove("is-save-peeking", "is-save-ready", "is-shake-peeking", "is-shake-ready");
+            if (zone) {
+                zone.classList.remove("is-finish-ready", "is-shaking-added");
+                zone.style.removeProperty("--mm-mobile-fill-exit-y");
+            }
+            closeDetails();
+            window.requestAnimationFrame(function () {
+                updateMobileHomeComplexGridLayout();
+                scheduleMobileLocalLayoutReconcile();
+            });
+        }
+        function syncMobileFillAssignmentsToServer(screen) {
+            if (!screen) return;
+            var zone = screen.querySelector("[data-mm-mobile-fill-drop]");
+            var excavatorId = zone && zone.dataset.mmMobileFillExcavatorId;
+            Array.from(screen.querySelectorAll("[data-mm-mobile-assigned-truck-id][data-mm-mobile-fill-added='true']")).forEach(function (mini) {
+                var truckId = mini.dataset.mmMobileAssignedTruckId || "";
+                if (!truckId || !excavatorId) return;
+                dispatcherPostQueued(dispatcherAssignTruckUrl, {
+                    action: "assign",
+                    truck_id: truckId,
+                    excavator_id: excavatorId
+                }).catch(showDispatcherDnDError);
+            });
+            Array.from(screen.querySelectorAll(".mm-mobile-fill-truck[data-mm-mobile-fill-was-assigned='true']")).forEach(function (button) {
+                var truckId = button.dataset.mmMobileFillTruckId || "";
+                if (!truckId) return;
+                dispatcherPostQueued(dispatcherAssignTruckUrl, {
+                    action: "release",
+                    truck_id: truckId
+                }).catch(showDispatcherDnDError);
+                delete button.dataset.mmMobileFillWasAssigned;
+            });
+        }
+        function moveMobileHomeTruckLocal(mini, targetCard) {
+            var sourcePreview = mini.closest(".mm-mobile-truck-preview");
+            var sourceCard = mini.closest(".mm-mobile-complex-card");
+            var targetPreview = targetCard && targetCard.querySelector(".mm-mobile-truck-preview");
+            var sourceNext = mini.nextSibling;
+            var sourceExcavatorId = mini.dataset.mmMobileHomeSourceExcavatorId || "";
+            var targetExcavatorId = targetCard && targetCard.dataset.mmMobileExcavatorId || "";
+            var placeholder = null;
+            var movedTile = mini;
+            if (targetPreview) {
+                placeholder = document.createTextNode("");
+                sourcePreview.insertBefore(placeholder, mini);
+                var targetEmpty = targetPreview.querySelector(".mm-mobile-truck-empty");
+                if (targetEmpty) targetEmpty.hidden = true;
+                movedTile.dataset.mmMobileHomeSourceExcavatorId = targetExcavatorId;
+                movedTile.classList.remove("is-moving", "is-hold-pending", "is-hold-ready", "is-dragging");
+                targetPreview.appendChild(movedTile);
+                bindMobileHomeTruckDrag(movedTile);
+            } else {
+                restoreMobileTruckToGarages(movedTile);
+                movedTile.remove();
+            }
+            ensureMobileTruckPreviewEmpty(sourcePreview);
+            if (targetPreview) ensureMobileTruckPreviewEmpty(targetPreview);
+            scheduleMobileLocalLayoutReconcile();
+            function rollbackMobileTruckMove() {
+                if (targetPreview && movedTile) {
+                    movedTile.dataset.mmMobileHomeSourceExcavatorId = sourceExcavatorId;
+                    if (placeholder && placeholder.parentNode) {
+                        placeholder.parentNode.insertBefore(movedTile, placeholder);
+                        placeholder.remove();
+                    } else if (sourceNext && sourceNext.parentNode === sourcePreview) {
+                        sourcePreview.insertBefore(movedTile, sourceNext);
+                    } else {
+                        sourcePreview.appendChild(movedTile);
+                    }
+                    bindMobileHomeTruckDrag(movedTile);
+                    ensureMobileTruckPreviewEmpty(targetPreview);
+                } else if (!targetPreview && movedTile && sourcePreview) {
+                    if (sourceNext && sourceNext.parentNode === sourcePreview) {
+                        sourcePreview.insertBefore(movedTile, sourceNext);
+                    } else {
+                        sourcePreview.appendChild(movedTile);
+                    }
+                    movedTile.dataset.mmMobileHomeSourceExcavatorId = sourceExcavatorId;
+                    bindMobileHomeTruckDrag(movedTile);
+                    removeMobileTruckFromGarages(movedTile.dataset.mmMobileHomeTruckId || "");
+                }
+                ensureMobileTruckPreviewEmpty(sourcePreview);
+                if (targetPreview) ensureMobileTruckPreviewEmpty(targetPreview);
+                scheduleMobileLocalLayoutReconcile();
+            }
+            rollbackMobileTruckMove.commit = function commitMobileTruckMove() {
+                if (placeholder && placeholder.parentNode) placeholder.remove();
+            };
+            return rollbackMobileTruckMove;
+        }
+        function updateMobileHomeComplexGridLayout() {
+            var grid = shell.querySelector(".mm-mobile-complex-grid");
+            if (!grid) return;
+            var activeCards = Array.prototype.slice.call(grid.querySelectorAll(".mm-mobile-complex-card:not(.status-empty)")).filter(function (card) {
+                return !card.hidden && card.style.display !== "none";
+            });
+            var activeCount = activeCards.length;
+            var visibleEmptyCount = activeCount === 0 ? 1 : (activeCount >= 4 ? activeCount % 2 : 0);
+            var emptyCards = Array.prototype.slice.call(grid.querySelectorAll(".mm-mobile-complex-card.status-empty"));
+            while (emptyCards.length < visibleEmptyCount) {
+                var emptyCard = document.createElement("article");
+                emptyCard.className = "mm-mobile-complex-card status-empty";
+                emptyCard.setAttribute("aria-disabled", "true");
+                grid.appendChild(emptyCard);
+                bindMobileEmptyComplexSwipe(emptyCard);
+                emptyCards.push(emptyCard);
+            }
+            activeCards.forEach(function (card) {
+                grid.appendChild(card);
+            });
+            emptyCards.forEach(function (card) {
+                grid.appendChild(card);
+            });
+            grid.dataset.mmMobileActiveComplexCount = String(activeCount);
+            emptyCards.forEach(function (card, index) {
+                card.classList.toggle("is-primary-empty", activeCount === 0 && index === 0);
+                card.hidden = index >= visibleEmptyCount;
+                card.style.display = card.hidden ? "none" : "";
+            });
+            window.requestAnimationFrame(function () {
+                activeCards.forEach(function (card) {
+                    updateMobileHomeTruckPreviewLayout(card.querySelector(".mm-mobile-truck-preview"));
+                });
+            });
+        }
+        function updateMobileExcavatorGarageGridLayout() {
+            var grid = shell.querySelector(".mm-mobile-excavator-garage-grid");
+            if (!grid) return;
+            var excavators = Array.prototype.slice.call(grid.querySelectorAll("[data-mm-mobile-activate-excavator]")).filter(function (button) {
+                return !button.hidden && button.style.display !== "none";
+            }).sort(function (left, right) {
+                var leftOrder = parseInt(left.dataset.mmMobileExcavatorSort || "", 10);
+                var rightOrder = parseInt(right.dataset.mmMobileExcavatorSort || "", 10);
+                if (!Number.isFinite(leftOrder)) leftOrder = 9999;
+                if (!Number.isFinite(rightOrder)) rightOrder = 9999;
+                if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+                return String(left.textContent || "").localeCompare(String(right.textContent || ""), "ru", { numeric: true });
+            });
+            var emptySlots = Array.prototype.slice.call(grid.querySelectorAll(".mm-mobile-garage-slot.status-empty"));
+            var count = excavators.length;
+            excavators.forEach(function (button) {
+                grid.appendChild(button);
+            });
+            emptySlots.forEach(function (slot) {
+                grid.appendChild(slot);
+            });
+            grid.dataset.mmMobileExcavatorCount = String(count);
+            emptySlots.forEach(function (slot) {
+                slot.hidden = count > 0;
+            });
+        }
+        function createMobileGarageExcavatorFromHome(card) {
+            var grid = shell.querySelector(".mm-mobile-excavator-garage-grid");
+            var excavatorId = card && card.dataset.mmMobileExcavatorId;
+            if (!grid || !card || !excavatorId) return null;
+            var titleText = (card.querySelector("h2") && card.querySelector("h2").textContent || "").trim();
+            var numberMatch = titleText.match(/(\d+)/);
+            var sortNumber = numberMatch ? parseInt(numberMatch[1], 10) : 9999;
+            var labelText = numberMatch ? "Экс " + numberMatch[1] : titleText.replace(/^К/i, "Экс") || "Экс";
+            var statusClass = "status-gray";
+            var button = grid.querySelector("[data-mm-mobile-activate-excavator='" + CSS.escape(String(excavatorId)) + "']");
+            var created = false;
+            if (!button) {
+                button = document.createElement("button");
+                button.type = "button";
+                button.className = "mm-mobile-garage-excavator " + statusClass;
+                button.dataset.mmMobileActivateExcavator = excavatorId;
+                button.dataset.equipmentCardId = excavatorId;
+                button.setAttribute("aria-label", "Вернуть экскаватор " + labelText + " в активную смену");
+                button.innerHTML = '<span></span><img src="' + staticPrefix + 'img/equipment/excavator-gray.png" alt="">';
+                var firstEmpty = grid.querySelector(".mm-mobile-garage-slot.status-empty");
+                if (firstEmpty) {
+                    grid.insertBefore(button, firstEmpty);
+                } else {
+                    grid.appendChild(button);
+                }
+                bindMobileGarageExcavatorSwipe(button);
+                bindEquipmentCardTrigger(button);
+                created = true;
+            }
+            button.classList.remove("status-red", "status-yellow", "status-green", "status-blue", "status-orange", "status-gray", "is-activating", "is-removing", "is-work-swiping", "is-work-ready");
+            button.classList.add(statusClass);
+            button.dataset.mmMobileEquipmentState = "garage";
+            button.disabled = false;
+            button.hidden = false;
+            button.style.display = "";
+            button.dataset.mmMobileExcavatorSort = Number.isFinite(sortNumber) ? String(sortNumber) : "9999";
+            button.style.removeProperty("--mm-excavator-work-exit-x");
+            button.style.removeProperty("--mm-excavator-work-exit-y");
+            button.style.removeProperty("--mm-excavator-work-swipe-x");
+            button.style.removeProperty("--mm-excavator-work-swipe-y");
+            var label = button.querySelector("span");
+            if (label) label.textContent = labelText;
+            updateMobileExcavatorGarageGridLayout();
+            syncMobileGarageNavState();
+            scheduleMobileLocalLayoutReconcile();
+            return {
+                button: button,
+                created: created
+            };
+        }
+        function hideMobileGarageExcavatorButton(button) {
+            if (!button) return;
+            window.setTimeout(function () {
+                button.hidden = true;
+                button.style.display = "none";
+                button.disabled = false;
+                button.classList.remove("is-activating", "is-removing", "is-work-swiping", "is-work-ready");
+                button.style.removeProperty("--mm-excavator-work-exit-x");
+                button.style.removeProperty("--mm-excavator-work-exit-y");
+                button.style.removeProperty("--mm-excavator-work-swipe-x");
+                button.style.removeProperty("--mm-excavator-work-swipe-y");
+                updateMobileExcavatorGarageGridLayout();
+                syncMobileGarageNavState();
+                scheduleMobileLocalLayoutReconcile();
+            }, 180);
+        }
+        function clearMobileHomeTruckDropState() {
+            shell.classList.remove("is-truck-garage-peeking", "is-truck-garage-ready");
+            shell.querySelectorAll(".mm-mobile-complex-card.is-mobile-truck-drop-target").forEach(function (card) {
+                card.classList.remove("is-mobile-truck-drop-target");
+            });
+        }
+        function bindMobileHomeTruckDrag(mini) {
+            if (!mini || mini.dataset.mmMobileHomeTruckBound === "true") return;
+            mini.dataset.mmMobileHomeTruckBound = "true";
+            var activeTouchId = null;
+            var activePointerId = null;
+            var startX = 0;
+            var startY = 0;
+            var lastY = 0;
+            var holdTimer = null;
+            var holdReady = false;
+            var dragging = false;
+            var ghost = null;
+            var currentTargetCard = null;
+            var currentDropMode = "";
+            var scrollGrid = null;
+            function clearHoldTimer() {
+                if (holdTimer) {
+                    window.clearTimeout(holdTimer);
+                    holdTimer = null;
+                }
+            }
+            function resetState() {
+                if (activePointerId !== null && mini.releasePointerCapture) {
+                    try {
+                        mini.releasePointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+                clearHoldTimer();
+                holdReady = false;
+                dragging = false;
+                activeTouchId = null;
+                activePointerId = null;
+                currentTargetCard = null;
+                currentDropMode = "";
+                mini.classList.remove("is-hold-pending", "is-hold-ready", "is-dragging");
+                if (ghost) ghost.remove();
+                ghost = null;
+                clearMobileHomeTruckDropState();
+            }
+            function resetOnInactiveRole(event) {
+                if (!mini.isConnected) {
+                    window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
+                    return;
+                }
+                if (!event.detail || event.detail.active === false) {
+                    resetState();
+                }
+            }
+            window.addEventListener("active-role-state-changed", resetOnInactiveRole);
+            function getTrackedTouch(event) {
+                var touches = event.changedTouches || event.touches || [];
+                for (var index = 0; index < touches.length; index += 1) {
+                    if (touches[index].identifier === activeTouchId) return touches[index];
+                }
+                return null;
+            }
+            function startDrag(clientX, clientY) {
+                if (isMiningMasterMobileReadonly()) {
+                    resetState();
+                    return;
+                }
+                if (dragging || !holdReady) return;
+                dragging = true;
+                mini.classList.remove("is-hold-pending");
+                mini.classList.add("is-dragging");
+                ghost = mini.cloneNode(true);
+                ghost.classList.add("mm-mobile-home-truck-ghost");
+                ghost.style.width = mini.getBoundingClientRect().width + "px";
+                ghost.style.height = mini.getBoundingClientRect().height + "px";
+                ghost.style.left = clientX + "px";
+                ghost.style.top = clientY + "px";
+                document.body.appendChild(ghost);
+            }
+            function findDropCard(clientX, clientY) {
+                var nodes = document.elementsFromPoint(clientX, clientY);
+                for (var index = 0; index < nodes.length; index += 1) {
+                    var card = nodes[index].closest && nodes[index].closest("[data-mm-mobile-open-complex]");
+                    if (!card || card.classList.contains("status-empty")) continue;
+                    if (card.dataset.mmMobileExcavatorId === mini.dataset.mmMobileHomeSourceExcavatorId) continue;
+                    return card;
+                }
+                return null;
+            }
+            function updateDrag(clientX, clientY, dx) {
+                if (ghost) {
+                    ghost.style.left = clientX + "px";
+                    ghost.style.top = clientY + "px";
+                    ghost.style.setProperty("--mm-mobile-home-truck-ghost-rotate", Math.max(-11, Math.min(11, dx * .08)) + "deg");
+                }
+                clearMobileHomeTruckDropState();
+                currentTargetCard = null;
+                currentDropMode = "";
+                var inTruckGarage = clientX >= window.innerWidth - 86;
+                if (inTruckGarage) {
+                    currentDropMode = "garage";
+                    shell.classList.add("is-truck-garage-peeking", "is-truck-garage-ready");
+                    return;
+                }
+                var targetCard = findDropCard(clientX, clientY);
+                if (targetCard) {
+                    currentDropMode = "complex";
+                    currentTargetCard = targetCard;
+                    targetCard.classList.add("is-mobile-truck-drop-target");
+                }
+            }
+            function finish(clientX, clientY, cancelled) {
+                if (isMiningMasterMobileReadonly()) {
+                    resetState();
+                    return;
+                }
+                if (!dragging || cancelled) {
+                    resetState();
+                    return;
+                }
+                updateDrag(clientX, clientY, clientX - startX);
+                var truckId = mini.dataset.mmMobileHomeTruckId;
+                var sourceExcavatorId = mini.dataset.mmMobileHomeSourceExcavatorId || "";
+                var payload = null;
+                if (currentDropMode === "garage") {
+                    payload = { action: "release", truck_id: truckId, expected_source_excavator_id: sourceExcavatorId };
+                } else if (currentDropMode === "complex" && currentTargetCard) {
+                    payload = {
+                        action: "assign",
+                        truck_id: truckId,
+                        excavator_id: currentTargetCard.dataset.mmMobileExcavatorId,
+                        expected_source_excavator_id: sourceExcavatorId
+                    };
+                }
+                if (!payload || !truckId) {
+                    resetState();
+                    return;
+                }
+                var rollbackOptimisticMove = moveMobileHomeTruckLocal(mini, currentDropMode === "complex" ? currentTargetCard : null);
+                if (ghost) ghost.classList.add("is-dropping");
+                clearMobileHomeTruckDropState();
+                window.setTimeout(resetState, 140);
+                dispatcherPostQueued(dispatcherAssignTruckUrl, payload)
+                    .then(function () {
+                        if (rollbackOptimisticMove && rollbackOptimisticMove.commit) rollbackOptimisticMove.commit();
+                    })
+                    .catch(function (error) {
+                        if (rollbackOptimisticMove) rollbackOptimisticMove();
+                        showDispatcherDnDError(error);
+                    });
+            }
+            mini.addEventListener("touchstart", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
+                if (activeTouchId !== null || mini.classList.contains("is-moving")) return;
+                if (!event.changedTouches || !event.changedTouches.length) return;
+                event.stopPropagation();
+                var touch = event.changedTouches[0];
+                activeTouchId = touch.identifier;
+                activePointerId = null;
+                startX = touch.clientX;
+                startY = touch.clientY;
+                lastY = touch.clientY;
+                scrollGrid = mini.closest(".mm-mobile-complex-grid");
+                holdReady = false;
+                dragging = false;
+                mini.classList.add("is-hold-pending");
+                clearHoldTimer();
+                holdTimer = window.setTimeout(function () {
+                    if (
+                        activeTouchId === touch.identifier
+                        && !isMiningMasterMobileReadonly()
+                    ) {
+                        holdReady = true;
+                        mini.classList.add("is-hold-ready");
+                    }
+                }, 220);
+            }, { passive: true });
+            mini.addEventListener("touchmove", function (event) {
+                if (isMiningMasterMobileReadonly()) {
+                    resetState();
+                    return;
+                }
+                if (activeTouchId === null) return;
+                var touch = getTrackedTouch(event);
+                if (!touch) return;
+                var dx = touch.clientX - startX;
+                var dy = touch.clientY - startY;
+                if (!dragging) {
+                    if (!holdReady) {
+                        if (Math.hypot(dx, dy) > 8) {
+                            clearHoldTimer();
+                            mini.classList.remove("is-hold-pending", "is-hold-ready");
+                            if (scrollGrid) {
+                                scrollGrid.scrollTop += lastY - touch.clientY;
+                            }
+                            lastY = touch.clientY;
+                        }
+                        return;
+                    }
+                    if (Math.hypot(dx, dy) < 8) {
+                        event.preventDefault();
+                        return;
+                    }
+                    startDrag(touch.clientX, touch.clientY);
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                updateDrag(touch.clientX, touch.clientY, dx);
+            }, { passive: false });
+            mini.addEventListener("touchend", function (event) {
+                if (activeTouchId === null) return;
+                event.stopPropagation();
+                var touch = getTrackedTouch(event);
+                if (!touch && event.changedTouches && event.changedTouches.length) touch = event.changedTouches[0];
+                finish(touch ? touch.clientX : startX, touch ? touch.clientY : startY, false);
+            }, { passive: false });
+            mini.addEventListener("touchcancel", function (event) {
+                if (activeTouchId === null) return;
+                event.stopPropagation();
+                var touch = getTrackedTouch(event);
+                finish(touch ? touch.clientX : startX, touch ? touch.clientY : startY, true);
+            }, { passive: false });
+            mini.addEventListener("pointerdown", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
+                if (event.pointerType === "touch") return;
+                if (event.pointerType === "mouse" && event.button !== 0) return;
+                if (mini.classList.contains("is-moving")) return;
+                event.stopPropagation();
+                activePointerId = event.pointerId;
+                activeTouchId = null;
+                startX = event.clientX;
+                startY = event.clientY;
+                holdReady = false;
+                dragging = false;
+                mini.classList.add("is-hold-pending");
+                clearHoldTimer();
+                holdTimer = window.setTimeout(function () {
+                    if (
+                        activePointerId === event.pointerId
+                        && !isMiningMasterMobileReadonly()
+                    ) {
+                        holdReady = true;
+                        mini.classList.add("is-hold-ready");
+                    }
+                }, 220);
+                if (mini.setPointerCapture) {
+                    try {
+                        mini.setPointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+            });
+            mini.addEventListener("pointermove", function (event) {
+                if (isMiningMasterMobileReadonly()) {
+                    resetState();
+                    return;
+                }
+                if (event.pointerType === "touch") return;
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                var dx = event.clientX - startX;
+                var dy = event.clientY - startY;
+                if (!dragging) {
+                    if (!holdReady) {
+                        if (Math.hypot(dx, dy) > 8) {
+                            resetState();
+                        }
+                        return;
+                    }
+                    if (Math.hypot(dx, dy) < 8) return;
+                    startDrag(event.clientX, event.clientY);
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                updateDrag(event.clientX, event.clientY, dx);
+            });
+            mini.addEventListener("pointerup", function (event) {
+                if (event.pointerType === "touch") return;
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                event.stopPropagation();
+                finish(event.clientX, event.clientY, false);
+            });
+            mini.addEventListener("pointercancel", function (event) {
+                if (event.pointerType === "touch") return;
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                event.stopPropagation();
+                finish(event.clientX, event.clientY, true);
+            });
+            mini.addEventListener("mm-mobile-complex-swipe-takeover", resetState);
+        }
+        function openTabPanel(panelName) {
+            var panel = shell.querySelector("[data-mm-mobile-panel='" + CSS.escape(String(panelName || "")) + "']");
+            if (!panel) return;
+            if (!canOpenMobileTab(panelName)) {
+                closeDetails();
+                return;
+            }
+            shell.classList.remove("is-fill-target-peeking", "is-fill-target-ready", "is-create-complex-peeking", "is-create-complex-ready");
+            if (home) home.hidden = true;
+            fillScreens.forEach(function (screen) {
+                screen.hidden = true;
+            });
+            tabPanels.forEach(function (screen) {
+                screen.hidden = screen !== panel;
+            });
+            shell.dataset.mobileScreen = panelName;
+            setActiveMobileNav(panelName);
+            shell.scrollTop = 0;
+        }
+        function clearMobileGarageExcavatorWorkZones() {
+            shell.classList.remove("is-excavator-work-left", "is-excavator-work-right", "is-excavator-work-up", "is-excavator-work-ready");
+        }
+        function resetMobileGarageExcavatorSwipe(button) {
+            button.classList.remove("is-work-swiping", "is-work-ready");
+            button.style.removeProperty("--mm-excavator-work-swipe-x");
+            button.style.removeProperty("--mm-excavator-work-swipe-y");
+            clearMobileGarageExcavatorWorkZones();
+        }
+        function createMobileHomeComplexFromGarage(button) {
+            var grid = shell.querySelector(".mm-mobile-complex-grid");
+            var excavatorId = button && button.dataset.mmMobileActivateExcavator;
+            if (!grid || !button || !excavatorId) return null;
+            var existing = grid.querySelector("[data-mm-mobile-excavator-id='" + CSS.escape(String(excavatorId)) + "']");
+            if (existing) return existing;
+            var labelText = (button.querySelector("span") && button.querySelector("span").textContent || "").trim();
+            var numberMatch = labelText.match(/(\d+)/);
+            var complexTitle = numberMatch ? "К-" + numberMatch[1] : labelText.replace(/^Экс\s*/i, "К-") || "К";
+            var targetCard = grid.querySelector(".mm-mobile-complex-card.status-empty:not([hidden])") || grid.querySelector(".mm-mobile-complex-card.status-empty");
+            var card = document.createElement("article");
+            var stateCode = "assigned";
+            card.className = "mm-mobile-complex-card " + dispatcherEquipmentStateClass(stateCode);
+            card.setAttribute("role", "button");
+            card.setAttribute("tabindex", "0");
+            var localFillId = "local-complex-" + excavatorId;
+            card.dataset.mmMobileOpenComplex = localFillId;
+            card.dataset.mmMobileExcavatorId = excavatorId;
+            card.dataset.mmMobileEquipmentState = stateCode;
+            card.innerHTML =
+                '<div class="mm-mobile-complex-card-head">' +
+                    '<h2></h2>' +
+                    '<span class="mm-mobile-status-chip">' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
+                '</div>' +
+                '<div class="mm-mobile-complex-visual" aria-hidden="true" data-mm-mobile-release-trucks>' +
+                    '<img src="' + staticPrefix + 'img/equipment/excavator-gray.png" alt="">' +
+                '</div>' +
+                '<div class="mm-mobile-truck-preview" aria-label="Самосвалы комплекса" data-mm-mobile-truck-count="0">' +
+                    '<span class="mm-mobile-truck-empty">нет</span>' +
+                '</div>';
+            var title = card.querySelector("h2");
+            if (title) title.textContent = complexTitle;
+            if (targetCard && targetCard.parentNode === grid) {
+                grid.insertBefore(card, targetCard);
+                targetCard.hidden = true;
+                targetCard.style.display = "none";
+            } else {
+                grid.appendChild(card);
+            }
+            bindMobileComplexCardInteractions(card);
+            ensureMobileLocalFillScreen(localFillId, complexTitle, excavatorId, dispatcherEquipmentStateClass(stateCode));
+            updateMobileHomeTruckPreviewLayout(card.querySelector(".mm-mobile-truck-preview"));
+            updateMobileHomeComplexGridLayout();
+            scheduleMobileLocalLayoutReconcile();
+            return card;
+        }
+        function activateMobileGarageExcavator(button, direction, returnPanel) {
+            if (isMiningMasterMobileReadonly()) return;
+            if (!button || button.disabled || button.classList.contains("is-activating")) return;
+            var excavatorId = button.dataset.mmMobileActivateExcavator;
+            if (!excavatorId) return;
+            button.disabled = true;
+            button.classList.remove("is-work-swiping", "is-work-ready");
+            button.classList.add("is-activating", "is-removing");
+            clearMobileGarageExcavatorWorkZones();
+            button.style.setProperty("--mm-excavator-work-exit-x", direction === 0 ? "0px" : direction < 0 ? "-132px" : "132px");
+            button.style.setProperty("--mm-excavator-work-exit-y", returnPanel === "home" ? "-132px" : "0px");
+            var existingCard = shell.querySelector("[data-mm-mobile-excavator-id='" + CSS.escape(String(excavatorId)) + "']");
+            var createdCard = createMobileHomeComplexFromGarage(button);
+            if (!createdCard) {
+                button.disabled = false;
+                button.classList.remove("is-activating", "is-removing");
+                button.style.removeProperty("--mm-excavator-work-exit-x");
+                button.style.removeProperty("--mm-excavator-work-exit-y");
+                resetMobileGarageExcavatorSwipe(button);
+                showDispatcherDnDError(new Error("Не удалось добавить экскаватор на пульт."));
+                return;
+            }
+            createdCard.hidden = false;
+            createdCard.style.display = "";
+            hideMobileGarageExcavatorButton(button);
+            if (returnPanel === "home") {
+                window.setTimeout(function () {
+                    closeDetails();
+                    createdCard.hidden = false;
+                    createdCard.style.display = "";
+                    bindMobileComplexCardInteractions(createdCard);
+                    updateMobileHomeComplexGridLayout();
+                    scheduleMobileLocalLayoutReconcile();
+                }, 120);
+            } else {
+                updateMobileExcavatorGarageGridLayout();
+                syncMobileGarageNavState();
+                scheduleMobileLocalLayoutReconcile();
+            }
+            function preserveExcavatorReturnPanel() {
+                try {
+                    if (returnPanel === "home") {
+                        window.sessionStorage.removeItem("mm-mobile-return-panel");
+                    } else {
+                        window.sessionStorage.setItem("mm-mobile-return-panel", "excavators");
+                    }
+                } catch (error) {}
+            }
+            preserveExcavatorReturnPanel();
+            dispatcherPostQueued(dispatcherMoveExcavatorUrl, {
+                excavator_id: excavatorId,
+                zone: "active"
+            }).catch(function (error) {
+                if (!existingCard && createdCard && createdCard.parentNode) {
+                    createdCard.remove();
+                }
+                button.hidden = false;
+                button.style.display = "";
+                button.disabled = false;
+                button.classList.remove("is-activating", "is-removing");
+                button.style.removeProperty("--mm-excavator-work-exit-x");
+                button.style.removeProperty("--mm-excavator-work-exit-y");
+                updateMobileHomeComplexGridLayout();
+                updateMobileExcavatorGarageGridLayout();
+                scheduleMobileLocalLayoutReconcile();
+                showDispatcherDnDError(error);
+            });
+        }
+        function bindMobileGarageExcavatorSwipe(button) {
+            if (!window.PointerEvent) return;
+            var startX = 0;
+            var startY = 0;
+            var activePointerId = null;
+            var dragging = false;
+            var moved = false;
+            var dragMode = "";
+            function finishSwipe(event, cancelled) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                var offset = parseFloat(button.style.getPropertyValue("--mm-excavator-work-swipe-x") || "0");
+                var offsetY = parseFloat(button.style.getPropertyValue("--mm-excavator-work-swipe-y") || "0");
+                var threshold = Math.min(118, Math.max(72, button.offsetWidth * .42));
+                if (button.releasePointerCapture) {
+                    try {
+                        button.releasePointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+                activePointerId = null;
+                dragging = false;
+                dragMode = "";
+                if (moved) {
+                    button.dataset.mmMobileSwipeIgnoreClick = "true";
+                    window.setTimeout(function () {
+                        delete button.dataset.mmMobileSwipeIgnoreClick;
+                    }, 360);
+                }
+                if (!cancelled && offsetY <= -threshold) {
+                    activateMobileGarageExcavator(button, 0, "home");
+                    return;
+                }
+                if (!cancelled && Math.abs(offset) >= threshold) {
+                    activateMobileGarageExcavator(button, offset < 0 ? -1 : 1, "excavators");
+                    return;
+                }
+                resetMobileGarageExcavatorSwipe(button);
+            }
+            function resetOnInactiveRole(event) {
+                if (!button.isConnected) {
+                    window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
+                    return;
+                }
+                if (event.detail && event.detail.active !== false) {
+                    return;
+                }
+                if (activePointerId !== null) {
+                    finishSwipe({pointerId: activePointerId}, true);
+                } else {
+                    resetMobileGarageExcavatorSwipe(button);
+                }
+            }
+            window.addEventListener("active-role-state-changed", resetOnInactiveRole);
+            button.addEventListener("pointerdown", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
+                if (event.pointerType === "mouse" && event.button !== 0) return;
+                if (button.disabled || button.classList.contains("is-activating")) return;
+                activePointerId = event.pointerId;
+                startX = event.clientX;
+                startY = event.clientY;
+                dragging = false;
+                moved = false;
+                dragMode = "";
+                button.style.setProperty("--mm-excavator-work-swipe-x", "0px");
+                button.style.setProperty("--mm-excavator-work-swipe-y", "0px");
+                if (button.setPointerCapture) {
+                    try {
+                        button.setPointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+            });
+            button.addEventListener("pointermove", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                var dx = event.clientX - startX;
+                var dy = event.clientY - startY;
+                if (!dragging) {
+                    if (Math.hypot(dx, dy) < 10) return;
+                    if (dy < 0 && Math.abs(dy) >= Math.abs(dx) * 1.15) {
+                        dragMode = "up";
+                    } else if (Math.abs(dx) >= Math.abs(dy) * 1.15) {
+                        dragMode = "horizontal";
+                    } else {
+                        return;
+                    }
+                    dragging = true;
+                    button.classList.add("is-work-swiping");
+                }
+                event.preventDefault();
+                moved = true;
+                var limit = Math.max(92, button.offsetWidth * .72);
+                var threshold = Math.min(118, Math.max(72, button.offsetWidth * .42));
+                if (dragMode === "up") {
+                    var offsetY = Math.max(-limit, Math.min(0, dy));
+                    button.style.setProperty("--mm-excavator-work-swipe-x", "0px");
+                    button.style.setProperty("--mm-excavator-work-swipe-y", offsetY + "px");
+                    button.classList.toggle("is-work-ready", Math.abs(offsetY) >= threshold);
+                    shell.classList.remove("is-excavator-work-left", "is-excavator-work-right");
+                    shell.classList.add("is-excavator-work-up");
+                    shell.classList.toggle("is-excavator-work-ready", Math.abs(offsetY) >= threshold);
+                } else {
+                    var offset = Math.max(-limit, Math.min(limit, dx));
+                    button.style.setProperty("--mm-excavator-work-swipe-x", offset + "px");
+                    button.style.setProperty("--mm-excavator-work-swipe-y", "0px");
+                    button.classList.toggle("is-work-ready", Math.abs(offset) >= threshold);
+                    shell.classList.remove("is-excavator-work-up");
+                    shell.classList.toggle("is-excavator-work-left", offset < 0);
+                    shell.classList.toggle("is-excavator-work-right", offset > 0);
+                    shell.classList.toggle("is-excavator-work-ready", Math.abs(offset) >= threshold);
+                }
+            });
+            button.addEventListener("pointerup", function (event) {
+                finishSwipe(event, false);
+            });
+            button.addEventListener("pointercancel", function (event) {
+                finishSwipe(event, true);
+            });
+        }
+        function resetMobileComplexSwipe(card) {
+            card.classList.remove("is-swiping", "is-swipe-ready", "is-fill-swiping", "is-fill-ready", "is-create-swiping", "is-create-ready");
+            card.style.removeProperty("--mm-mobile-swipe-x");
+            card.style.removeProperty("--mm-mobile-fill-swipe-y");
+            shell.classList.remove("is-excavator-garage-peeking");
+            shell.classList.remove("is-fill-target-peeking", "is-fill-target-ready", "is-create-complex-peeking", "is-create-complex-ready");
+        }
+        function getMobileComplexTitle(card) {
+            var title = card && card.querySelector(".mm-mobile-complex-card-head h2");
+            return title ? (title.textContent || "").trim() : "комплекс";
+        }
+        function requestMobileDangerConfirmation(options) {
+            options = options || {};
+            var message = options.message || "Подтвердить действие?";
+            var acceptLabel = options.acceptLabel || "Подтвердить";
+            var action = typeof options.action === "function" ? options.action : null;
+            if (!action) return;
+            if (typeof window.openAppConfirmDialog === "function") {
+                window.openAppConfirmDialog(message, action, 0, acceptLabel, {
+                    confirmTitle: options.title || "Опасное действие",
+                    confirmDescription: message
+                });
+                return;
+            }
+            if (typeof showDispatcherDnDError === "function") {
+                showDispatcherDnDError(new Error("Подтверждение действия недоступно. Обновите страницу."));
+            }
+        }
+        function releaseMobileComplexToGarage(card) {
+            if (isMiningMasterMobileReadonly()) return;
+            var excavatorId = card.dataset.mmMobileExcavatorId;
+            if (!excavatorId || card.classList.contains("is-releasing")) return;
+            var complexTitle = getMobileComplexTitle(card);
+            resetMobileComplexSwipe(card);
+            requestMobileDangerConfirmation({
+                title: "Расформировать комплекс?",
+                message: "Расформировать " + complexTitle + "? Экскаватор уйдет в гараж, все самосвалы этого комплекса будут сброшены в гараж самосвалов.",
+                acceptLabel: "Расформировать",
+                action: function () {
+                    executeMobileComplexToGarage(card);
+                }
+            });
+        }
+        function executeMobileComplexToGarage(card) {
+            if (isMiningMasterMobileReadonly()) return;
+            var excavatorId = card.dataset.mmMobileExcavatorId;
+            if (!excavatorId || card.classList.contains("is-releasing")) return;
+            card.classList.remove("is-swiping", "is-swipe-ready");
+            card.classList.add("is-releasing");
+            shell.classList.add("is-excavator-garage-peeking");
+            shell.classList.remove("is-truck-garage-peeking");
+            card.style.setProperty("--mm-mobile-swipe-x", "-105%");
+            var flightTime = animateMobileComplexTrucksToGarage(card);
+            var preview = card.querySelector(".mm-mobile-truck-preview");
+            var removedTrucks = preview ? Array.from(preview.querySelectorAll(".mm-mobile-truck-mini:not(.is-more)")) : [];
+            removedTrucks.forEach(restoreMobileTruckToGarages);
+            var garageReturn = createMobileGarageExcavatorFromHome(card);
+            window.setTimeout(function () {
+                card.hidden = true;
+                card.style.display = "none";
+                resetMobileComplexSwipe(card);
+                updateMobileHomeComplexGridLayout();
+                scheduleMobileLocalLayoutReconcile();
+                var grid = shell.querySelector(".mm-mobile-complex-grid");
+                if (grid) grid.scrollTop = 0;
+            }, Math.min(260, flightTime));
+            dispatcherPostQueued(dispatcherMoveExcavatorUrl, {
+                excavator_id: excavatorId,
+                zone: "inactive"
+            })
+                .then(function () {
+                    window.setTimeout(function () {
+                        shell.classList.remove("is-truck-garage-peeking");
+                    }, flightTime + 160);
+                })
+                .catch(function (error) {
+                    card.hidden = false;
+                    card.style.display = "";
+                    card.classList.remove("is-releasing");
+                    removedTrucks.forEach(function (truck) {
+                        removeMobileTruckFromGarages(truck.dataset.mmMobileHomeTruckId || "");
+                    });
+                    if (garageReturn && garageReturn.created && garageReturn.button) {
+                        garageReturn.button.remove();
+                    } else if (garageReturn && garageReturn.button) {
+                        garageReturn.button.hidden = true;
+                        garageReturn.button.style.display = "none";
+                    }
+                    resetMobileComplexSwipe(card);
+                    card.classList.remove("is-trucks-flying");
+                    updateMobileHomeComplexGridLayout();
+                    updateMobileExcavatorGarageGridLayout();
+                    syncMobileGarageNavState();
+                    scheduleMobileLocalLayoutReconcile();
+                    showDispatcherDnDError(error);
+                });
+        }
+        function animateMobileComplexTrucksToGarage(card) {
+            var trucks = Array.from(card.querySelectorAll(".mm-mobile-truck-mini:not(.is-more)"));
+            if (!trucks.length) return 720;
+            card.classList.add("is-trucks-flying");
+            shell.classList.add("is-truck-garage-peeking");
+            var shellRect = shell.getBoundingClientRect();
+            var targetX = Math.max(window.innerWidth - 28, shellRect.right + 20);
+            var spreadBase = shellRect.top + (shellRect.height * .48);
+            var maxEnd = 0;
+            trucks.forEach(function (truck, index) {
+                var rect = truck.getBoundingClientRect();
+                var clone = truck.cloneNode(true);
+                var row = Math.floor(index / 4);
+                var col = index % 4;
+                var direction = index % 2 === 0 ? -1 : 1;
+                var verticalSpread = direction * (118 + (col * 42)) + ((row % 2) * 58);
+                var firstLift = direction * (-72 - (col * 24));
+                var secondSweep = -direction * (92 + (row * 24));
+                var driftX = targetX - rect.left + 78 + (col * 34);
+                var driftY = (spreadBase + verticalSpread) - rect.top;
+                clone.classList.add("mm-mobile-flying-truck");
+                clone.style.left = rect.left + "px";
+                clone.style.top = rect.top + "px";
+                clone.style.width = rect.width + "px";
+                clone.style.height = rect.height + "px";
+                document.body.appendChild(clone);
+                var delay = index * 84;
+                var duration = 1880 + (col * 130) + (row * 92);
+                var rotation = direction * (420 + col * 118 + row * 74);
+                maxEnd = Math.max(maxEnd, delay + duration);
+                clone.animate([
+                    { opacity: 1, transform: "translate(0, 0) scale(1) rotate(0deg)", offset: 0 },
+                    { opacity: 1, transform: "translate(" + (driftX * .18) + "px, " + firstLift + "px) scale(1.08) rotate(" + (rotation * .24) + "deg)", offset: .22 },
+                    { opacity: .98, transform: "translate(" + (driftX * .43) + "px, " + secondSweep + "px) scale(1) rotate(" + (rotation * .58) + "deg)", offset: .5 },
+                    { opacity: .92, transform: "translate(" + (driftX * .72) + "px, " + (driftY * .58) + "px) scale(.82) rotate(" + rotation + "deg)", offset: .78 },
+                    { opacity: .55, transform: "translate(" + (driftX * .91) + "px, " + (driftY * .88) + "px) scale(.62) rotate(" + (rotation * 1.24) + "deg)", offset: .92 },
+                    { opacity: 0, transform: "translate(" + driftX + "px, " + driftY + "px) scale(.42) rotate(" + (rotation * 1.5) + "deg)", offset: 1 }
+                ], {
+                    delay: delay,
+                    duration: duration,
+                    easing: "cubic-bezier(.16, .84, .18, 1)",
+                    fill: "forwards"
+                }).finished.catch(function () {}).then(function () {
+                    clone.remove();
+                });
+            });
+            return Math.max(maxEnd, 1900);
+        }
+        function resetMobileComplexTruckSwipe(card) {
+            card.classList.remove("is-truck-swiping", "is-truck-swipe-ready", "is-releasing-trucks");
+            card.style.removeProperty("--mm-mobile-truck-swipe-x");
+            shell.classList.remove("is-truck-garage-peeking");
+        }
+        function releaseMobileComplexTrucks(card) {
+            if (isMiningMasterMobileReadonly()) return;
+            var excavatorId = card.dataset.mmMobileExcavatorId;
+            if (!excavatorId || card.classList.contains("is-releasing-trucks")) return;
+            var preview = card.querySelector(".mm-mobile-truck-preview");
+            var truckCount = preview ? preview.querySelectorAll(".mm-mobile-truck-mini:not(.is-more)").length : 0;
+            if (!truckCount) {
+                resetMobileComplexTruckSwipe(card);
+                return;
+            }
+            var complexTitle = getMobileComplexTitle(card);
+            resetMobileComplexTruckSwipe(card);
+            requestMobileDangerConfirmation({
+                title: "Сбросить самосвалы?",
+                message: "Сбросить все самосвалы из " + complexTitle + " в гараж? Экскаватор останется на пульте, состав комплекса будет очищен.",
+                acceptLabel: "Сбросить",
+                action: function () {
+                    executeMobileComplexTrucksRelease(card);
+                }
+            });
+        }
+        function executeMobileComplexTrucksRelease(card) {
+            if (isMiningMasterMobileReadonly()) return;
+            var excavatorId = card.dataset.mmMobileExcavatorId;
+            if (!excavatorId || card.classList.contains("is-releasing-trucks")) return;
+            card.classList.remove("is-truck-swiping", "is-truck-swipe-ready");
+            card.classList.add("is-releasing-trucks");
+            shell.classList.add("is-truck-garage-peeking");
+            shell.classList.remove("is-excavator-garage-peeking");
+            card.style.setProperty("--mm-mobile-truck-swipe-x", "105%");
+            var preview = card.querySelector(".mm-mobile-truck-preview");
+            var removedTrucks = preview ? Array.from(preview.querySelectorAll(".mm-mobile-truck-mini:not(.is-more)")) : [];
+            var nextNodes = removedTrucks.map(function (truck) {
+                return { truck: truck, next: truck.nextSibling };
+            });
+            removedTrucks.forEach(restoreMobileTruckToGarages);
+            removedTrucks.forEach(function (truck) {
+                truck.remove();
+            });
+            ensureMobileTruckPreviewEmpty(preview);
+            updateMobileHomeTruckPreviewLayout(preview);
+            scheduleMobileLocalLayoutReconcile();
+            dispatcherPostQueued(dispatcherAssignTruckUrl, {
+                action: "release_complex",
+                excavator_id: excavatorId
+            })
+                .then(function () {
+                    window.setTimeout(function () {
+                        resetMobileComplexTruckSwipe(card);
+                    }, 180);
+                })
+                .catch(function (error) {
+                    nextNodes.forEach(function (item) {
+                        if (!preview || !item.truck) return;
+                        removeMobileTruckFromGarages(item.truck.dataset.mmMobileHomeTruckId || "");
+                        if (item.next && item.next.parentNode === preview) {
+                            preview.insertBefore(item.truck, item.next);
+                        } else {
+                            preview.appendChild(item.truck);
+                        }
+                        bindMobileHomeTruckDrag(item.truck);
+                    });
+                    ensureMobileTruckPreviewEmpty(preview);
+                    updateMobileHomeTruckPreviewLayout(preview);
+                    resetMobileComplexTruckSwipe(card);
+                    scheduleMobileLocalLayoutReconcile();
+                    showDispatcherDnDError(error);
+                });
+        }
+        function addMobileFillAssignedTruck(screen, truckButton) {
+            var assigned = screen.querySelector("[data-mm-mobile-fill-assigned]");
+            if (!assigned || !truckButton) return;
+            var stateCode = "assigned";
+            var mini = document.createElement("span");
+            mini.className = "mm-mobile-truck-mini " + dispatcherEquipmentStateClass(stateCode);
+            mini.dataset.mmMobileAssignedTruckId = truckButton.dataset.mmMobileFillTruckId || "";
+            mini.dataset.mmMobileAssignedTruckNumber = truckButton.dataset.mmMobileFillTruckNumber || (truckButton.querySelector("strong") && truckButton.querySelector("strong").textContent) || "";
+            mini.dataset.mmMobileEquipmentState = stateCode;
+            if (truckButton.dataset.mmMobileFillWasAssigned === "true") {
+                mini.dataset.mmMobileFillOriginal = "true";
+            } else {
+                mini.dataset.mmMobileFillAdded = "true";
+            }
+            mini.textContent = truckButton.dataset.mmMobileFillTruckNumber || (truckButton.querySelector("strong") && truckButton.querySelector("strong").textContent) || "";
+            syncMobilePlanVisual(truckButton, mini);
+            assigned.appendChild(mini);
+            bindMobileFillAssignedTruckRelease(mini);
+            updateMobileFillAssignedLayout(assigned);
+        }
+        function getMobileFillTruckIcon(mini) {
+            if (!mini) return "/static/img/equipment/truck-gray.png";
+            if (mini.dataset && mini.dataset.mmMobileEquipmentState) {
+                return "/static/img/equipment/truck-" + dispatcherEquipmentStateIconColor(mini.dataset.mmMobileEquipmentState) + ".png";
+            }
+            if (mini.classList.contains("status-danger") || mini.classList.contains("status-red")) return "/static/img/equipment/truck-red.png";
+            if (mini.classList.contains("status-risk") || mini.classList.contains("status-yellow")) return "/static/img/equipment/truck-yellow.png";
+            if (mini.classList.contains("status-normal") || mini.classList.contains("status-green")) return "/static/img/equipment/truck-green.png";
+            if (mini.classList.contains("status-blue")) return "/static/img/equipment/truck-blue.png";
+            if (mini.classList.contains("status-orange")) return "/static/img/equipment/truck-yellow.png";
+            return "/static/img/equipment/truck-gray.png";
+        }
+        function restoreMobileFillTruckToGarage(screen, mini) {
+            var garage = screen && screen.querySelector(".mm-mobile-fill-truck-garage");
+            if (!garage || !mini) return null;
+            var stateCode = "free";
+            var button = document.createElement("button");
+            button.type = "button";
+            button.className = "mm-mobile-truck-card mm-mobile-fill-truck " + dispatcherEquipmentStateClass(stateCode);
+            button.dataset.mmMobileFillTruckId = mini.dataset.mmMobileAssignedTruckId || "";
+            button.dataset.equipmentCardId = button.dataset.mmMobileFillTruckId || "";
+            button.dataset.mmMobileFillTruckNumber = mini.dataset.mmMobileAssignedTruckNumber || mini.textContent || "";
+            button.dataset.mmMobileTruckSort = button.dataset.mmMobileFillTruckNumber || "";
+            button.dataset.mmMobileEquipmentState = stateCode;
+            if (mini.dataset.mmMobileFillOriginal === "true") {
+                button.dataset.mmMobileFillWasAssigned = "true";
+            }
+            var img = document.createElement("img");
+            img.src = staticPrefix + "img/equipment/truck-" + dispatcherEquipmentStateIconColor(stateCode) + ".png";
+            img.alt = "";
+            var strong = document.createElement("strong");
+            strong.textContent = button.dataset.mmMobileFillTruckNumber || "";
+            var status = document.createElement("span");
+            status.textContent = dispatcherEquipmentStateLabel(stateCode);
+            button.appendChild(img);
+            button.appendChild(strong);
+            button.appendChild(status);
+            syncMobilePlanVisual(mini, button);
+            garage.prepend(button);
+            bindMobileFillTruckDrag(button);
+            bindEquipmentCardTrigger(button);
+            sortMobileTruckCards(garage, ".mm-mobile-fill-truck");
+            return button;
+        }
+        function releaseMobileFillAssignedTruck(mini) {
+            if (isMiningMasterMobileReadonly()) return Promise.resolve(false);
+            var screen = mini && mini.closest("[data-mm-mobile-fill]");
+            var truckId = mini && mini.dataset.mmMobileAssignedTruckId;
+            if (!screen || !truckId || mini.classList.contains("is-releasing")) return Promise.resolve(false);
+            var assigned = mini.closest("[data-mm-mobile-fill-assigned]");
+            mini.classList.add("is-releasing");
+            restoreMobileFillTruckToGarage(screen, mini);
+            ensureMobileTruckPanelGarageTruck(mini);
+            mini.remove();
+            updateMobileFillAssignedLayout(screen);
+            syncMobileGarageNavState();
+            if (assigned) assigned.dataset.mmMobileFillTouched = "true";
+            return Promise.resolve(true);
+        }
+        function clearMobileFillAssignedTrucks(screen) {
+            if (isMiningMasterMobileReadonly()) return Promise.resolve(false);
+            if (!screen || screen.classList.contains("is-clearing-added")) return Promise.resolve(false);
+            var assigned = Array.from(screen.querySelectorAll("[data-mm-mobile-assigned-truck-id]"));
+            if (!assigned.length) return Promise.resolve(false);
+            screen.classList.add("is-clearing-added");
+            return Promise.all(assigned.map(releaseMobileFillAssignedTruck)).then(function (results) {
+                screen.classList.remove("is-clearing-added");
+                return results.some(Boolean);
+            });
+        }
+        function bindMobileFillAssignedTruckRelease(mini) {
+            if (!window.PointerEvent || !mini || mini.dataset.mmMobileReleaseBound === "true") return;
+            mini.dataset.mmMobileReleaseBound = "true";
+            var startX = 0;
+            var startY = 0;
+            var activePointerId = null;
+            var dragging = false;
+            var dragMode = "";
+            var holdTimer = null;
+            var holdReady = false;
+            var ghost = null;
+            function clearHoldState() {
+                if (holdTimer) {
+                    window.clearTimeout(holdTimer);
+                    holdTimer = null;
+                }
+                holdReady = false;
+                mini.classList.remove("is-hold-pending", "is-hold-ready");
+            }
+            function setMiniZoneSwipeState(mini, direction, offset) {
+                var screen = mini.closest("[data-mm-mobile-fill]");
+                var zone = screen && screen.querySelector("[data-mm-mobile-fill-drop]");
+                var distance = Math.abs(offset);
+                if (!screen || !zone) return;
+                screen.classList.toggle("is-save-peeking", direction === "save");
+                screen.classList.toggle("is-save-ready", direction === "save" && distance >= 72);
+                screen.classList.toggle("is-shake-peeking", direction === "shake");
+                screen.classList.toggle("is-shake-ready", direction === "shake" && distance >= 72);
+                zone.classList.toggle("is-finish-ready", distance >= 72);
+                zone.style.setProperty("--mm-mobile-fill-exit-y", offset + "px");
+            }
+            function resetMiniZoneSwipeState(mini) {
+                var screen = mini.closest("[data-mm-mobile-fill]");
+                var zone = screen && screen.querySelector("[data-mm-mobile-fill-drop]");
+                if (!screen || !zone) return;
+                screen.classList.remove("is-save-peeking", "is-save-ready", "is-shake-peeking", "is-shake-ready");
+                zone.classList.remove("is-finish-ready");
+                zone.style.removeProperty("--mm-mobile-fill-exit-y");
+            }
+            function reset() {
+                clearHoldState();
+                mini.classList.remove("is-pulling-down", "is-release-ready");
+                mini.style.removeProperty("--mm-mobile-assigned-release-y");
+                resetMiniZoneSwipeState(mini);
+                removeGhost();
+                var screen = mini.closest("[data-mm-mobile-fill]");
+                var zone = screen && screen.querySelector("[data-mm-mobile-fill-drop]");
+                if (zone) zone.classList.remove("is-shaking-added");
+            }
+            function resetOnInactiveRole(event) {
+                if (!mini.isConnected) {
+                    window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
+                    return;
+                }
+                if (event.detail && event.detail.active !== false) {
+                    return;
+                }
+                if (activePointerId !== null && mini.releasePointerCapture) {
+                    try {
+                        mini.releasePointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+                activePointerId = null;
+                dragging = false;
+                dragMode = "";
+                reset();
+            }
+            window.addEventListener("active-role-state-changed", resetOnInactiveRole);
+            function removeGhost() {
+                if (ghost) ghost.remove();
+                ghost = null;
+            }
+            function startReleaseGhost(clientX, clientY) {
+                if (ghost) return;
+                var rect = mini.getBoundingClientRect();
+                ghost = mini.cloneNode(true);
+                ghost.classList.add("mm-mobile-fill-truck-ghost", "mm-mobile-fill-assigned-truck-ghost");
+                ghost.style.width = rect.width + "px";
+                ghost.style.height = rect.height + "px";
+                ghost.style.left = clientX + "px";
+                ghost.style.top = clientY + "px";
+                document.body.appendChild(ghost);
+            }
+            function updateReleaseGhost(clientX, clientY, dx) {
+                if (!ghost) return;
+                ghost.style.left = clientX + "px";
+                ghost.style.top = clientY + "px";
+                ghost.style.setProperty("--mm-mobile-fill-ghost-rotate", Math.max(-10, Math.min(10, dx * .08)) + "deg");
+            }
+            function finish(event, cancelled) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                var screen = mini.closest("[data-mm-mobile-fill]");
+                var zone = screen && screen.querySelector("[data-mm-mobile-fill-drop]");
+                var zoneOffset = parseFloat((zone && zone.style.getPropertyValue("--mm-mobile-fill-exit-y")) || "0");
+                var offset = parseFloat(mini.style.getPropertyValue("--mm-mobile-assigned-release-y") || "0");
+                if (mini.releasePointerCapture) {
+                    try {
+                        mini.releasePointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+                activePointerId = null;
+                dragging = false;
+                clearHoldState();
+                if (!cancelled && dragMode === "save" && Math.abs(zoneOffset) >= 72) {
+                    confirmMobileFillScreen(screen);
+                    return;
+                }
+                if (!cancelled && dragMode === "shake" && Math.abs(zoneOffset) >= 72) {
+                    if (zone) zone.classList.add("is-shaking-added");
+                    var didCleanup = false;
+                    function cleanupMiniShake() {
+                        if (didCleanup) return;
+                        didCleanup = true;
+                        clearHoldState();
+                        mini.classList.remove("is-pulling-down", "is-release-ready");
+                        mini.style.removeProperty("--mm-mobile-assigned-release-y");
+                        if (screen) screen.classList.remove("is-save-peeking", "is-save-ready", "is-shake-peeking", "is-shake-ready");
+                        if (zone) {
+                            zone.classList.remove("is-finish-ready", "is-shaking-added");
+                            zone.style.removeProperty("--mm-mobile-fill-exit-y");
+                        }
+                    }
+                    window.setTimeout(cleanupMiniShake, 160);
+                    clearMobileFillAssignedTrucks(screen).then(cleanupMiniShake).catch(cleanupMiniShake);
+                    return;
+                }
+                if (!cancelled && dragMode === "release" && offset >= 58) {
+                    if (ghost) ghost.classList.add("is-dropping");
+                    window.setTimeout(removeGhost, 140);
+                    releaseMobileFillAssignedTruck(mini);
+                    return;
+                }
+                dragMode = "";
+                reset();
+            }
+            mini.addEventListener("pointerdown", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
+                if (event.pointerType === "mouse" && event.button !== 0) return;
+                event.stopPropagation();
+                activePointerId = event.pointerId;
+                startX = event.clientX;
+                startY = event.clientY;
+                dragging = false;
+                dragMode = "";
+                holdReady = false;
+                mini.classList.add("is-hold-pending");
+                holdTimer = window.setTimeout(function () {
+                    holdTimer = null;
+                    if (isMiningMasterMobileReadonly()) {
+                        reset();
+                        return;
+                    }
+                    holdReady = true;
+                    mini.classList.remove("is-hold-pending");
+                    mini.classList.add("is-hold-ready");
+                }, 220);
+                mini.style.setProperty("--mm-mobile-assigned-release-y", "0px");
+                if (mini.setPointerCapture) {
+                    try {
+                        mini.setPointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+            });
+            mini.addEventListener("pointermove", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                var dy = event.clientY - startY;
+                var dx = event.clientX - startX;
+                if (!dragging) {
+                    if (Math.abs(dy) < 8) return;
+                    dragging = true;
+                    if (!holdReady) {
+                        clearHoldState();
+                    }
+                    dragMode = holdReady && dy > 0 ? "release" : dy < 0 ? "save" : "shake";
+                    if (dragMode === "release") {
+                        mini.classList.add("is-pulling-down");
+                        startReleaseGhost(event.clientX, event.clientY);
+                    }
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                if (dragMode === "save") {
+                    var saveOffset = Math.max(-118, Math.min(0, dy));
+                    mini.classList.remove("is-pulling-down", "is-release-ready");
+                    mini.style.setProperty("--mm-mobile-assigned-release-y", "0px");
+                    setMiniZoneSwipeState(mini, "save", saveOffset);
+                } else if (dragMode === "release") {
+                    var offset = Math.max(0, Math.min(108, dy));
+                    resetMiniZoneSwipeState(mini);
+                    mini.style.setProperty("--mm-mobile-assigned-release-y", offset + "px");
+                    mini.classList.toggle("is-release-ready", offset >= 58);
+                    updateReleaseGhost(event.clientX, event.clientY, dx);
+                } else {
+                    var shakeOffset = Math.max(0, Math.min(118, dy));
+                    mini.classList.remove("is-pulling-down", "is-release-ready");
+                    mini.style.setProperty("--mm-mobile-assigned-release-y", "0px");
+                    setMiniZoneSwipeState(mini, "shake", shakeOffset);
+                }
+            });
+            mini.addEventListener("pointerup", function (event) {
+                finish(event, false);
+            });
+            mini.addEventListener("pointercancel", function (event) {
+                finish(event, true);
+            });
+        }
+        function assignMobileFillTruck(screen, truckButton) {
+            if (isMiningMasterMobileReadonly()) return;
+            if (!screen || !truckButton || truckButton.classList.contains("is-assigning") || truckButton.classList.contains("is-assigned")) return;
+            var drop = screen.querySelector("[data-mm-mobile-fill-drop]");
+            var truckId = truckButton.dataset.mmMobileFillTruckId;
+            var excavatorId = drop && drop.dataset.mmMobileFillExcavatorId;
+            if (!truckId || !excavatorId) return;
+            var wasAssigned = truckButton.dataset.mmMobileFillWasAssigned === "true";
+            truckButton.classList.add("is-assigning");
+            addMobileFillAssignedTruck(screen, truckButton);
+            if (wasAssigned) {
+                removeMobileTruckFromGarages(truckId);
+            }
+            truckButton.classList.remove("is-assigning");
+            truckButton.classList.add("is-assigned");
+            window.setTimeout(function () {
+                truckButton.remove();
+                syncMobileGarageNavState();
+            }, 120);
+        }
+        function bindMobileFillTruckDrag(button) {
+            if (!window.PointerEvent) return;
+            var startX = 0;
+            var startY = 0;
+            var activePointerId = null;
+            var activeTouchId = null;
+            var dragging = false;
+            var holdTimer = null;
+            var holdReady = false;
+            var ghost = null;
+            function clearHoldTimer() {
+                if (holdTimer) {
+                    window.clearTimeout(holdTimer);
+                    holdTimer = null;
+                }
+            }
+            function removeGhost() {
+                if (ghost) ghost.remove();
+                ghost = null;
+            }
+            function startDragAt(clientX, clientY) {
+                if (dragging || !holdReady) return;
+                dragging = true;
+                button.classList.remove("is-hold-pending");
+                button.classList.add("is-dragging");
+                if (activePointerId !== null && button.setPointerCapture) {
+                    try {
+                        button.setPointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+                ghost = button.cloneNode(true);
+                ghost.classList.add("mm-mobile-fill-truck-ghost");
+                ghost.style.width = button.getBoundingClientRect().width + "px";
+                ghost.style.height = button.getBoundingClientRect().height + "px";
+                ghost.style.left = clientX + "px";
+                ghost.style.top = clientY + "px";
+                document.body.appendChild(ghost);
+            }
+            function updateDragAt(clientX, clientY, dx) {
+                if (ghost) {
+                    ghost.style.left = clientX + "px";
+                    ghost.style.top = clientY + "px";
+                    ghost.style.setProperty("--mm-mobile-fill-ghost-rotate", Math.max(-10, Math.min(10, dx * .08)) + "deg");
+                }
+                var screen = button.closest("[data-mm-mobile-fill]");
+                var drop = screen && screen.querySelector("[data-mm-mobile-fill-drop]");
+                var dropRect = drop && drop.getBoundingClientRect();
+                var inDrop = !!(dropRect && clientX >= dropRect.left && clientX <= dropRect.right && clientY >= dropRect.top && clientY <= dropRect.bottom);
+                if (drop) drop.classList.toggle("is-drop-ready", inDrop);
+                return inDrop;
+            }
+            function finishAt(clientX, clientY, cancelled) {
+                clearHoldTimer();
+                if (button.releasePointerCapture) {
+                    try {
+                        button.releasePointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+                var screen = button.closest("[data-mm-mobile-fill]");
+                var drop = screen && screen.querySelector("[data-mm-mobile-fill-drop]");
+                var dropRect = drop && drop.getBoundingClientRect();
+                var inDrop = !!(dropRect && clientX >= dropRect.left && clientX <= dropRect.right && clientY >= dropRect.top && clientY <= dropRect.bottom);
+                activePointerId = null;
+                activeTouchId = null;
+                holdReady = false;
+                button.classList.remove("is-hold-pending", "is-hold-ready", "is-dragging");
+                if (drop) drop.classList.remove("is-drop-ready");
+                removeGhost();
+                if (!cancelled && dragging && inDrop) {
+                    assignMobileFillTruck(screen, button);
+                }
+                dragging = false;
+            }
+            function resetOnInactiveRole(event) {
+                if (!button.isConnected) {
+                    window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
+                    return;
+                }
+                if (event.detail && event.detail.active !== false) {
+                    return;
+                }
+                finishAt(startX, startY, true);
+            }
+            window.addEventListener("active-role-state-changed", resetOnInactiveRole);
+            function finish(event, cancelled) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                finishAt(event.clientX, event.clientY, cancelled);
+            }
+            function getTrackedTouch(event) {
+                var touches = event.changedTouches || event.touches || [];
+                for (var index = 0; index < touches.length; index += 1) {
+                    if (touches[index].identifier === activeTouchId) return touches[index];
+                }
+                return null;
+            }
+            button.addEventListener("pointerdown", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
+                if (event.pointerType === "touch") return;
+                if (event.pointerType === "mouse" && event.button !== 0) return;
+                if (button.classList.contains("is-assigning") || button.classList.contains("is-assigned")) return;
+                activePointerId = event.pointerId;
+                activeTouchId = null;
+                startX = event.clientX;
+                startY = event.clientY;
+                dragging = false;
+                holdReady = false;
+                button.classList.add("is-hold-pending");
+                clearHoldTimer();
+                holdTimer = window.setTimeout(function () {
+                    if (
+                        activePointerId === event.pointerId
+                        && !isMiningMasterMobileReadonly()
+                    ) {
+                        holdReady = true;
+                        button.classList.add("is-hold-ready");
+                    }
+                }, 220);
+            });
+            button.addEventListener("pointermove", function (event) {
+                if (event.pointerType === "touch") return;
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                var dx = event.clientX - startX;
+                var dy = event.clientY - startY;
+                if (!dragging) {
+                    if (!holdReady) {
+                        if (Math.hypot(dx, dy) > 8) {
+                            clearHoldTimer();
+                            button.classList.remove("is-hold-pending", "is-hold-ready");
+                        }
+                        return;
+                    }
+                    if (Math.hypot(dx, dy) < 8) return;
+                    startDragAt(event.clientX, event.clientY);
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                updateDragAt(event.clientX, event.clientY, dx);
+            });
+            button.addEventListener("pointerup", function (event) {
+                finish(event, false);
+            });
+            button.addEventListener("pointercancel", function (event) {
+                finish(event, true);
+            });
+            button.addEventListener("touchstart", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
+                if (activeTouchId !== null || button.classList.contains("is-assigning") || button.classList.contains("is-assigned")) return;
+                if (!event.changedTouches || !event.changedTouches.length) return;
+                var touch = event.changedTouches[0];
+                activeTouchId = touch.identifier;
+                activePointerId = null;
+                startX = touch.clientX;
+                startY = touch.clientY;
+                dragging = false;
+                holdReady = false;
+                button.classList.add("is-hold-pending");
+                clearHoldTimer();
+                holdTimer = window.setTimeout(function () {
+                    if (
+                        activeTouchId === touch.identifier
+                        && !isMiningMasterMobileReadonly()
+                    ) {
+                        holdReady = true;
+                        button.classList.add("is-hold-ready");
+                    }
+                }, 220);
+            }, { passive: true });
+            button.addEventListener("touchmove", function (event) {
+                if (activeTouchId === null) return;
+                var touch = getTrackedTouch(event);
+                if (!touch) return;
+                var dx = touch.clientX - startX;
+                var dy = touch.clientY - startY;
+                if (!dragging) {
+                    if (!holdReady) {
+                        if (Math.hypot(dx, dy) > 8) {
+                            clearHoldTimer();
+                            activeTouchId = null;
+                            button.classList.remove("is-hold-pending", "is-hold-ready");
+                        }
+                        return;
+                    }
+                    if (Math.hypot(dx, dy) < 8) {
+                        event.preventDefault();
+                        return;
+                    }
+                    startDragAt(touch.clientX, touch.clientY);
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                updateDragAt(touch.clientX, touch.clientY, dx);
+            }, { passive: false });
+            button.addEventListener("touchend", function (event) {
+                if (activeTouchId === null) return;
+                var touch = getTrackedTouch(event);
+                if (!touch && event.changedTouches && event.changedTouches.length) touch = event.changedTouches[0];
+                finishAt(touch ? touch.clientX : startX, touch ? touch.clientY : startY, false);
+            }, { passive: false });
+            button.addEventListener("touchcancel", function (event) {
+                if (activeTouchId === null) return;
+                var touch = getTrackedTouch(event);
+                finishAt(touch ? touch.clientX : startX, touch ? touch.clientY : startY, true);
+            }, { passive: false });
+        }
+        function bindMobileFillFinishSwipe(zone) {
+            if (!window.PointerEvent) return;
+            var startY = 0;
+            var activePointerId = null;
+            var dragging = false;
+            function setSaveState(zone, direction, offset) {
+                var screen = zone.closest("[data-mm-mobile-fill]");
+                if (!screen) return;
+                screen.classList.toggle("is-save-peeking", direction === "save");
+                screen.classList.toggle("is-save-ready", direction === "save" && offset >= 72);
+                screen.classList.toggle("is-shake-peeking", direction === "shake");
+                screen.classList.toggle("is-shake-ready", direction === "shake" && offset >= 72);
+            }
+            function resetSaveState(zone) {
+                var screen = zone.closest("[data-mm-mobile-fill]");
+                if (!screen) return;
+                screen.classList.remove("is-save-peeking", "is-save-ready", "is-shake-peeking", "is-shake-ready");
+            }
+            function finish(event, cancelled) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                var offset = parseFloat(zone.style.getPropertyValue("--mm-mobile-fill-exit-y") || "0");
+                var direction = offset < 0 ? "save" : "shake";
+                var distance = Math.abs(offset);
+                var screen = zone.closest("[data-mm-mobile-fill]");
+                if (zone.releasePointerCapture) {
+                    try {
+                        zone.releasePointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+                activePointerId = null;
+                dragging = false;
+                zone.classList.remove("is-finish-ready");
+                if (!cancelled && direction === "save" && distance >= 72) {
+                    setSaveState(zone, "save", distance);
+                    confirmMobileFillScreen(screen);
+                    return;
+                }
+                if (!cancelled && direction === "shake" && distance >= 72) {
+                    setSaveState(zone, "shake", distance);
+                    var didCleanup = false;
+                    function cleanupShake() {
+                        if (didCleanup) return;
+                        didCleanup = true;
+                        resetSaveState(zone);
+                        zone.style.removeProperty("--mm-mobile-fill-exit-y");
+                        zone.classList.remove("is-shaking-added");
+                    }
+                    zone.classList.add("is-shaking-added");
+                    window.setTimeout(cleanupShake, 160);
+                    clearMobileFillAssignedTrucks(screen).then(cleanupShake).catch(cleanupShake);
+                    return;
+                }
+                resetSaveState(zone);
+                zone.style.removeProperty("--mm-mobile-fill-exit-y");
+            }
+            function resetOnInactiveRole(event) {
+                if (!zone.isConnected) {
+                    window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
+                    return;
+                }
+                if (event.detail && event.detail.active !== false) {
+                    return;
+                }
+                if (activePointerId !== null) {
+                    finish({pointerId: activePointerId}, true);
+                    return;
+                }
+                resetSaveState(zone);
+                zone.classList.remove("is-finish-ready", "is-shaking-added");
+                zone.style.removeProperty("--mm-mobile-fill-exit-y");
+            }
+            window.addEventListener("active-role-state-changed", resetOnInactiveRole);
+            zone.addEventListener("pointerdown", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
+                if (event.pointerType === "mouse" && event.button !== 0) return;
+                if (event.target && event.target.closest && event.target.closest("[data-mm-mobile-assigned-truck-id]")) return;
+                activePointerId = event.pointerId;
+                startY = event.clientY;
+                dragging = false;
+                resetSaveState(zone);
+                zone.style.setProperty("--mm-mobile-fill-exit-y", "0px");
+                if (zone.setPointerCapture) {
+                    try {
+                        zone.setPointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+            }, true);
+            zone.addEventListener("pointermove", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                var dy = event.clientY - startY;
+                if (!dragging) {
+                    if (Math.abs(dy) < 10) return;
+                    dragging = true;
+                }
+                event.preventDefault();
+                var offset = dy < 0 ? Math.max(-118, dy) : Math.min(118, dy);
+                var distance = Math.abs(offset);
+                var direction = offset < 0 ? "save" : "shake";
+                zone.style.setProperty("--mm-mobile-fill-exit-y", offset + "px");
+                zone.classList.toggle("is-finish-ready", distance >= 72);
+                setSaveState(zone, direction, distance);
+            });
+            zone.addEventListener("pointerup", function (event) {
+                finish(event, false);
+            });
+            zone.addEventListener("pointercancel", function (event) {
+                finish(event, true);
+            });
+        }
+        function bindMobileComplexSwipe(card) {
+            if (!window.PointerEvent || !card.dataset.mmMobileExcavatorId) return;
+            if (card.dataset.mmMobileComplexSwipeBound === "true") return;
+            card.dataset.mmMobileComplexSwipeBound = "true";
+            var startX = 0;
+            var startY = 0;
+            var activePointerId = null;
+            var activeTouchId = null;
+            var touchTakeoverTarget = null;
+            var touchTakeoverSent = false;
+            var touchSwipeDeadline = 0;
+            var dragging = false;
+            var moved = false;
+            var dragMode = "";
+            function getSwipeTouch(event) {
+                var list = event.changedTouches && event.changedTouches.length ? event.changedTouches : event.touches;
+                if (!list) return null;
+                for (var index = 0; index < list.length; index += 1) {
+                    if (list[index].identifier === activeTouchId) return list[index];
+                }
+                return null;
+            }
+            function sendTouchTakeover() {
+                if (touchTakeoverSent || !touchTakeoverTarget || activeTouchId === null) return;
+                touchTakeoverSent = true;
+                touchTakeoverTarget.dispatchEvent(new CustomEvent("mm-mobile-complex-swipe-takeover"));
+            }
+            function startSwipe(clientX, clientY) {
+                startX = clientX;
+                startY = clientY;
+                dragging = false;
+                moved = false;
+                dragMode = "";
+                touchTakeoverSent = false;
+                card.style.setProperty("--mm-mobile-swipe-x", "0px");
+                card.style.setProperty("--mm-mobile-truck-swipe-x", "0px");
+                card.style.setProperty("--mm-mobile-fill-swipe-y", "0px");
+            }
+            function moveSwipe(clientX, clientY, event) {
+                var dx = clientX - startX;
+                var dy = clientY - startY;
+                if (!dragging) {
+                    var absDx = Math.abs(dx);
+                    var absDy = Math.abs(dy);
+                    if (absDx + absDy < 10) return false;
+
+                    if (absDy >= absDx * 0.8 && dy < 0) {
+                        dragging = true;
+                        dragMode = "fill";
+                    } else if (absDy >= absDx * 0.8 && dy > 0) {
+                        dragging = true;
+                        dragMode = "create";
+                    } else if (absDx >= absDy * 0.8) {
+                        dragging = true;
+                        dragMode = dx < 0 ? "release" : "release-trucks";
+                    } else if (absDx > absDy) {
+                        dragging = true;
+                        dragMode = dx < 0 ? "release" : "release-trucks";
+                    } else if (absDy > absDx) {
+                        dragging = true;
+                        dragMode = dy < 0 ? "fill" : "create";
+                    } else {
+                        return false;
+                    }
+                    sendTouchTakeover();
+                }
+                if (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                moved = true;
+                if (dragMode === "fill") {
+                    var fillOffset = Math.min(0, Math.max(-118, dy));
+                    card.classList.remove("is-swiping", "is-swipe-ready", "is-create-swiping", "is-create-ready");
+                    card.classList.add("is-fill-swiping");
+                    shell.classList.add("is-fill-target-peeking");
+                    shell.classList.toggle("is-fill-target-ready", Math.abs(fillOffset) >= 72);
+                    shell.classList.remove("is-excavator-garage-peeking", "is-truck-garage-peeking", "is-create-complex-peeking", "is-create-complex-ready");
+                    card.style.setProperty("--mm-mobile-swipe-x", "0px");
+                    card.style.setProperty("--mm-mobile-truck-swipe-x", "0px");
+                    card.style.setProperty("--mm-mobile-fill-swipe-y", fillOffset + "px");
+                    card.classList.toggle("is-fill-ready", Math.abs(fillOffset) >= 72);
+                } else if (dragMode === "create") {
+                    var createOffset = Math.max(0, Math.min(118, dy));
+                    card.classList.remove("is-swiping", "is-swipe-ready", "is-fill-swiping", "is-fill-ready");
+                    card.classList.add("is-create-swiping");
+                    shell.classList.add("is-create-complex-peeking");
+                    shell.classList.toggle("is-create-complex-ready", createOffset >= 72);
+                    shell.classList.remove("is-excavator-garage-peeking", "is-truck-garage-peeking", "is-fill-target-peeking", "is-fill-target-ready");
+                    card.style.setProperty("--mm-mobile-swipe-x", "0px");
+                    card.style.setProperty("--mm-mobile-truck-swipe-x", "0px");
+                    card.style.setProperty("--mm-mobile-fill-swipe-y", createOffset + "px");
+                    card.classList.toggle("is-create-ready", createOffset >= 72);
+                } else if (dragMode === "release-trucks") {
+                    var truckOffset = Math.min(dx, card.offsetWidth);
+                    var truckThreshold = Math.min(120, Math.max(72, card.offsetWidth * .34));
+                    card.classList.remove("is-swiping", "is-swipe-ready", "is-fill-swiping", "is-fill-ready", "is-create-swiping", "is-create-ready");
+                    card.classList.add("is-truck-swiping");
+                    shell.classList.add("is-truck-garage-peeking");
+                    shell.classList.remove("is-excavator-garage-peeking", "is-fill-target-peeking", "is-fill-target-ready", "is-create-complex-peeking", "is-create-complex-ready");
+                    card.style.setProperty("--mm-mobile-swipe-x", "0px");
+                    card.style.setProperty("--mm-mobile-truck-swipe-x", truckOffset + "px");
+                    card.style.setProperty("--mm-mobile-fill-swipe-y", "0px");
+                    card.classList.toggle("is-truck-swipe-ready", truckOffset >= truckThreshold);
+                } else {
+                    dragging = true;
+                    card.classList.remove("is-fill-swiping", "is-fill-ready", "is-create-swiping", "is-create-ready", "is-truck-swiping", "is-truck-swipe-ready");
+                    card.classList.add("is-swiping");
+                    shell.classList.add("is-excavator-garage-peeking");
+                    shell.classList.remove("is-truck-garage-peeking", "is-fill-target-peeking", "is-fill-target-ready", "is-create-complex-peeking", "is-create-complex-ready");
+                    var offset = Math.max(dx, -card.offsetWidth);
+                    var threshold = Math.min(120, Math.max(72, card.offsetWidth * .38));
+                    card.style.setProperty("--mm-mobile-swipe-x", offset + "px");
+                    card.style.setProperty("--mm-mobile-truck-swipe-x", "0px");
+                    card.classList.toggle("is-swipe-ready", Math.abs(offset) >= threshold);
+                }
+                return true;
+            }
+            function finishSwipe(cancelled) {
+                if (activePointerId === null && activeTouchId === null) return;
+                var offset = parseFloat(card.style.getPropertyValue("--mm-mobile-swipe-x") || "0");
+                var truckOffset = parseFloat(card.style.getPropertyValue("--mm-mobile-truck-swipe-x") || "0");
+                var fillOffset = parseFloat(card.style.getPropertyValue("--mm-mobile-fill-swipe-y") || "0");
+                var threshold = Math.min(120, Math.max(72, card.offsetWidth * .38));
+                var truckThreshold = Math.min(120, Math.max(72, card.offsetWidth * .34));
+                if (activePointerId !== null && card.releasePointerCapture) {
+                    try {
+                        card.releasePointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+                activePointerId = null;
+                activeTouchId = null;
+                touchTakeoverTarget = null;
+                touchTakeoverSent = false;
+                touchSwipeDeadline = 0;
+                dragging = false;
+                dragMode = "";
+                if (moved) {
+                    card.dataset.mmMobileSwipeIgnoreClick = "true";
+                    window.setTimeout(function () {
+                        delete card.dataset.mmMobileSwipeIgnoreClick;
+                    }, 420);
+                }
+                if (!cancelled && fillOffset <= -72) {
+                    shell.classList.remove("is-fill-target-peeking", "is-fill-target-ready", "is-create-complex-peeking", "is-create-complex-ready");
+                    resetMobileComplexSwipe(card);
+                    resetMobileComplexTruckSwipe(card);
+                    card.classList.remove("is-fill-swiping", "is-fill-ready", "is-create-swiping", "is-create-ready");
+                    card.style.removeProperty("--mm-mobile-fill-swipe-y");
+                    openFill(card.dataset.mmMobileOpenComplex);
+                    return;
+                }
+                if (!cancelled && fillOffset >= 72) {
+                    resetMobileComplexSwipe(card);
+                    resetMobileComplexTruckSwipe(card);
+                    openTabPanel("excavators");
+                    return;
+                }
+                if (!cancelled && truckOffset >= truckThreshold) {
+                    releaseMobileComplexTrucks(card);
+                    return;
+                }
+                if (!cancelled && Math.abs(offset) >= threshold) {
+                    releaseMobileComplexToGarage(card);
+                    return;
+                }
+                resetMobileComplexSwipe(card);
+                resetMobileComplexTruckSwipe(card);
+                shell.classList.remove("is-fill-target-peeking", "is-fill-target-ready", "is-create-complex-peeking", "is-create-complex-ready");
+                card.classList.remove("is-fill-swiping", "is-fill-ready", "is-create-swiping", "is-create-ready");
+                card.style.removeProperty("--mm-mobile-fill-swipe-y");
+            }
+            function resetOnInactiveRole(event) {
+                if (!card.isConnected) {
+                    window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
+                    return;
+                }
+                if (event.detail && event.detail.active !== false) {
+                    return;
+                }
+                if (activePointerId !== null || activeTouchId !== null) {
+                    finishSwipe(true);
+                    return;
+                }
+                resetMobileComplexSwipe(card);
+                resetMobileComplexTruckSwipe(card);
+            }
+            window.addEventListener("active-role-state-changed", resetOnInactiveRole);
+            card.addEventListener("pointerdown", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
+                if (event.pointerType === "mouse" && event.button !== 0) return;
+                if (card.classList.contains("is-releasing")) return;
+                activePointerId = event.pointerId;
+                activeTouchId = null;
+                touchTakeoverTarget = null;
+                startSwipe(event.clientX, event.clientY);
+                if (card.setPointerCapture) {
+                    try {
+                        card.setPointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+            }, true);
+            card.addEventListener("pointermove", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                moveSwipe(event.clientX, event.clientY, event);
+            });
+            card.addEventListener("pointerup", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                finishSwipe(false);
+            });
+            card.addEventListener("pointercancel", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                finishSwipe(true);
+            });
+            card.addEventListener("touchstart", function (event) {
+                if (isMiningMasterMobileReadonly()) return;
+                if (activeTouchId !== null || card.classList.contains("is-releasing")) return;
+                if (!event.changedTouches || !event.changedTouches.length) return;
+                var touch = event.changedTouches[0];
+                activeTouchId = touch.identifier;
+                activePointerId = null;
+                touchTakeoverTarget = event.target && event.target.closest ? event.target.closest("[data-mm-mobile-home-truck-id]") : event.target;
+                touchSwipeDeadline = window.performance && window.performance.now ? window.performance.now() + 220 : Date.now() + 220;
+                startSwipe(touch.clientX, touch.clientY);
+            }, { passive: true, capture: true });
+            card.addEventListener("touchmove", function (event) {
+                if (activeTouchId === null) return;
+                var touch = getSwipeTouch(event);
+                if (!touch) return;
+                var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
+                if (!dragging && touchTakeoverTarget && now > touchSwipeDeadline) return;
+                moveSwipe(touch.clientX, touch.clientY, event);
+            }, { passive: false, capture: true });
+            card.addEventListener("touchend", function (event) {
+                if (activeTouchId === null) return;
+                if (dragging || moved) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                finishSwipe(false);
+            }, { passive: false, capture: true });
+            card.addEventListener("touchcancel", function (event) {
+                if (activeTouchId === null) return;
+                if (dragging || moved) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                finishSwipe(true);
+            }, { passive: false, capture: true });
+        }
+        function bindMobileComplexCardInteractions(card) {
+            if (!card || !card.dataset || !card.dataset.mmMobileOpenComplex) return;
+            bindMobileComplexSwipe(card);
+            if (card.dataset.mmMobileComplexOpenBound === "true") return;
+            card.dataset.mmMobileComplexOpenBound = "true";
+            card.addEventListener("click", function (event) {
+                if (card.dataset.mmMobileSwipeIgnoreClick === "true" || card.classList.contains("is-releasing") || card.classList.contains("is-releasing-trucks")) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                openFill(card.dataset.mmMobileOpenComplex);
+            });
+            card.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                openFill(card.dataset.mmMobileOpenComplex);
+            });
+        }
+        function bindMobileEmptyComplexSwipe(card) {
+            if (!window.PointerEvent) return;
+            var startX = 0;
+            var startY = 0;
+            var activePointerId = null;
+            var dragging = false;
+            var moved = false;
+            function finishSwipe(event, cancelled) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                var createOffset = parseFloat(card.style.getPropertyValue("--mm-mobile-fill-swipe-y") || "0");
+                if (card.releasePointerCapture) {
+                    try {
+                        card.releasePointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+                activePointerId = null;
+                dragging = false;
+                if (!cancelled && createOffset >= 72) {
+                    card.classList.remove("is-create-swiping", "is-create-ready");
+                    card.style.removeProperty("--mm-mobile-fill-swipe-y");
+                    shell.classList.remove("is-create-complex-peeking", "is-create-complex-ready");
+                    openTabPanel("excavators");
+                    return;
+                }
+                card.classList.remove("is-create-swiping", "is-create-ready");
+                card.style.removeProperty("--mm-mobile-fill-swipe-y");
+                shell.classList.remove("is-create-complex-peeking", "is-create-complex-ready");
+                if (moved) {
+                    card.dataset.mmMobileSwipeIgnoreClick = "true";
+                    window.setTimeout(function () {
+                        delete card.dataset.mmMobileSwipeIgnoreClick;
+                    }, 420);
+                }
+            }
+            card.addEventListener("pointerdown", function (event) {
+                if (event.pointerType === "mouse" && event.button !== 0) return;
+                if (card.hidden) return;
+                activePointerId = event.pointerId;
+                startX = event.clientX;
+                startY = event.clientY;
+                dragging = false;
+                moved = false;
+                card.style.setProperty("--mm-mobile-fill-swipe-y", "0px");
+                if (card.setPointerCapture) {
+                    try {
+                        card.setPointerCapture(activePointerId);
+                    } catch (error) {}
+                }
+            });
+            card.addEventListener("pointermove", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                var dx = event.clientX - startX;
+                var dy = event.clientY - startY;
+                if (!dragging) {
+                    if (Math.hypot(dx, dy) < 10) return;
+                    if (dy > 0 && Math.abs(dy) >= Math.abs(dx) * 1.15) {
+                        dragging = true;
+                    } else {
+                        return;
+                    }
+                }
+                event.preventDefault();
+                moved = true;
+                var createOffset = Math.max(0, Math.min(118, dy));
+                card.classList.add("is-create-swiping");
+                shell.classList.add("is-create-complex-peeking");
+                shell.classList.toggle("is-create-complex-ready", createOffset >= 72);
+                shell.classList.remove("is-excavator-garage-peeking", "is-truck-garage-peeking", "is-fill-target-peeking", "is-fill-target-ready");
+                card.style.setProperty("--mm-mobile-fill-swipe-y", createOffset + "px");
+                card.classList.toggle("is-create-ready", createOffset >= 72);
+            });
+            card.addEventListener("pointerup", function (event) {
+                finishSwipe(event, false);
+            });
+            card.addEventListener("pointercancel", function (event) {
+                finishSwipe(event, true);
+            });
+        }
+        shell.querySelectorAll("[data-mm-mobile-open-complex]").forEach(function (card) {
+            bindMobileComplexCardInteractions(card);
+        });
+        shell.querySelectorAll(".mm-mobile-complex-card.status-empty").forEach(bindMobileEmptyComplexSwipe);
+        shell.querySelectorAll("[data-mm-mobile-back]").forEach(function (button) {
+            button.addEventListener("click", function (event) {
+                event.preventDefault();
+                closeDetails();
+            });
+        });
+        shell.querySelectorAll("[data-mm-mobile-activate-excavator]").forEach(function (button) {
+            bindMobileGarageExcavatorSwipe(button);
+            bindEquipmentCardTrigger(button);
+            button.addEventListener("click", function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            });
+        });
+        shell.querySelectorAll("[data-mm-mobile-panel='trucks'] .mm-mobile-truck-card[data-equipment-card-id]").forEach(bindEquipmentCardTrigger);
+        shell.querySelectorAll("[data-mm-mobile-fill-back]").forEach(function (button) {
+            button.addEventListener("click", function (event) {
+                event.preventDefault();
+                var screen = button.closest("[data-mm-mobile-fill]");
+                if (!screen) return closeDetails();
+                closeDetails();
+            });
+        });
+        shell.querySelectorAll("[data-mm-mobile-fill-drop]").forEach(bindMobileFillFinishSwipe);
+        shell.querySelectorAll(".mm-mobile-fill-truck").forEach(bindMobileFillTruckDrag);
+        shell.querySelectorAll("[data-mm-mobile-assigned-truck-id]").forEach(bindMobileFillAssignedTruckRelease);
+        shell.querySelectorAll("[data-mm-mobile-fill-assigned]").forEach(updateMobileFillAssignedLayout);
+        shell.querySelectorAll(".mm-mobile-truck-preview").forEach(updateMobileHomeTruckPreviewLayout);
+        shell.querySelectorAll("[data-mm-mobile-home-truck-id]").forEach(bindMobileHomeTruckDrag);
+        updateMobileHomeComplexGridLayout();
+        updateMobileExcavatorGarageGridLayout();
+        shell.querySelectorAll("[data-mm-mobile-nav]").forEach(function (item) {
+            item.addEventListener("click", function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                var targetName = item.dataset.mmMobileNav;
+                if (item.classList.contains("is-disabled") || item.getAttribute("aria-disabled") === "true") {
+                    return;
+                }
+                if (targetName === "home") {
+                    closeDetails();
+                } else if (targetName === "excavators" || targetName === "trucks" || targetName === "reports") {
+                    openTabPanel(targetName);
+                }
+            });
+        });
+        shell.querySelectorAll(".mm-mobile-shift-form").forEach(function (form) {
+            form.addEventListener("submit", function () {
+                setDispatcherSyncPending(true);
+            });
+        });
+        window.addEventListener("mm-mobile-sync-garage-nav", syncMobileGarageNavState);
+        window.addEventListener("resize", function () {
+            updateMobileHomeComplexGridLayout();
+            scheduleMobileLocalLayoutReconcile();
+        });
+        if (window.ResizeObserver) {
+            var mobileLayoutObserver = new ResizeObserver(scheduleMobileLocalLayoutReconcile);
+            var mobileComplexGrid = shell.querySelector(".mm-mobile-complex-grid");
+            if (mobileComplexGrid) mobileLayoutObserver.observe(mobileComplexGrid);
+            shell.querySelectorAll(".mm-mobile-truck-preview, [data-mm-mobile-fill-assigned], .mm-mobile-complex-card").forEach(function (node) {
+                mobileLayoutObserver.observe(node);
+            });
+        }
+        sortMobileTruckGarageViews();
+        syncMobileGarageNavState();
+        scheduleMobileLocalLayoutReconcile();
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && shell.dataset.mobileScreen === "fill") {
+                closeDetails();
+            }
+        });
+        try {
+            var returnPanel = window.sessionStorage.getItem("mm-mobile-return-panel");
+            if (returnPanel) {
+                window.sessionStorage.removeItem("mm-mobile-return-panel");
+                if (canOpenMobileTab(returnPanel)) {
+                    openTabPanel(returnPanel);
+                } else {
+                    closeDetails();
+                }
+            }
+        } catch (error) {}
+    }
+    bindMiningMasterMobileScreens();
+
+    if ("serviceWorker" in navigator) {
+
+        navigator.serviceWorker.register("/dispatcher-sw.js", {
+            scope: runtimeConfig.dispatcherServiceWorkerScope || "/dispatcher/"
+        }).then(function (registration) {
+            registration.update().catch(function () {});
+            if (registration.waiting) {
+                registration.waiting.postMessage({type: "SKIP_WAITING"});
+            }
+            registration.addEventListener("updatefound", function () {
+                var installing = registration.installing;
+                if (!installing) return;
+                installing.addEventListener("statechange", function () {
+                    if (installing.state === "installed" && navigator.serviceWorker.controller) {
+                        (registration.waiting || installing).postMessage({type: "SKIP_WAITING"});
+                    }
+                });
+            });
+            document.addEventListener("visibilitychange", function () {
+                if (!document.hidden) {
+                    registration.update().catch(function () {});
+                }
+            });
+        }).catch(function () {});
+
+    }
+    updateDispatcherSyncIndicator();
+    window.addEventListener("online", scheduleDispatcherSyncFlush);
+    window.addEventListener("operational-state-connection", function (event) {
+        var detail = event.detail || {};
+        dispatcherRealtimeConnected = detail.connected !== false;
+        dispatcherRealtimeLastReason = detail.reason || "";
+        if (dispatcherRealtimeConnected) {
+            dispatcherRealtimeLastSuccessAt = detail.lastSuccessAt || Date.now();
+            scheduleDispatcherSyncFlush(0);
+        }
+        updateDispatcherSyncIndicator();
+    });
+    window.addEventListener("storage", function (event) {
+        if (event.key === dispatcherSyncQueueKey) updateDispatcherSyncIndicator();
+    });
+    scheduleDispatcherSyncFlush();
+    window.MiningMasterSyncDebug = {
+        queueKey: dispatcherSyncQueueKey,
+        getState: function () {
+            return {
+                realtimeConnected: dispatcherRealtimeConnected,
+                realtimeLastSuccessAt: dispatcherRealtimeLastSuccessAt,
+                realtimeLastReason: dispatcherRealtimeLastReason,
+                syncQueue: getDispatcherSyncQueueState(),
+                appRealtime: window.AppRealtime && typeof window.AppRealtime.getDebugState === "function"
+                    ? window.AppRealtime.getDebugState()
+                    : null
+            };
+        },
+        wake: function () {
+            scheduleDispatcherSyncFlush(0);
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("manual_debug");
+            }
+        }
+    };
+
+    var draggedTile = null;
+    var board = document.querySelector(".dispatcher-board");
+    var excavatorGarage = document.querySelector("[data-dispatcher-excavator-garage]");
+    var dragGhost = null;
+    function refreshExcavatorGarage() {
+        if (!board || !excavatorGarage) return;
+        sortDesktopEquipmentList(excavatorGarage.querySelector(".dispatcher-excavators"), ".dispatcher-excavator-garage-tile:not(.is-placeholder)");
+        var activeTiles = excavatorGarage.querySelectorAll("[data-garage-item='excavator']:not(.is-assigned)");
+        board.classList.toggle("is-excavator-garage-empty", activeTiles.length === 0);
+    }
+    function getDesktopEquipmentSortNumber(tile) {
+        if (!tile) return 999999;
+        var candidates = [
+            tile.dataset.excavatorSlot,
+            tile.dataset.equipmentSort,
+            tile.dataset.equipmentNumber,
+            tile.dataset.equipmentName,
+            tile.querySelector("strong") ? tile.querySelector("strong").textContent : ""
+        ];
+        for (var index = 0; index < candidates.length; index += 1) {
+            var match = String(candidates[index] || "").match(/\d+/);
+            if (match) return parseInt(match[0], 10);
+        }
+        return 999999;
+    }
+    function getDesktopEquipmentSortLabel(tile) {
+        if (!tile) return "";
+        return String(tile.dataset.equipmentName || (tile.textContent || "")).trim();
+    }
+    function compareDesktopEquipmentTiles(a, b) {
+        var numberDiff = getDesktopEquipmentSortNumber(a) - getDesktopEquipmentSortNumber(b);
+        if (numberDiff !== 0) return numberDiff;
+        return getDesktopEquipmentSortLabel(a).localeCompare(getDesktopEquipmentSortLabel(b), "ru", { numeric: true });
+    }
+    function sortDesktopEquipmentList(container, selector) {
+        if (!container) return;
+        Array.from(container.querySelectorAll(selector))
+            .sort(compareDesktopEquipmentTiles)
+            .forEach(function (tile) {
+                var firstPlaceholder = container.querySelector(".is-placeholder");
+                var empty = container.querySelector(".complex-truck-empty");
+                if (firstPlaceholder) {
+                    container.insertBefore(tile, firstPlaceholder);
+                } else if (empty) {
+                    container.insertBefore(tile, empty);
+                } else {
+                    container.appendChild(tile);
+                }
+            });
+    }
+    function dispatcherSelectorValue(value) {
+        var stringValue = String(value || "");
+        if (window.CSS && typeof window.CSS.escape === "function") {
+            return window.CSS.escape(stringValue);
+        }
+        return stringValue.replace(/["\\]/g, "\\$&");
+    }
+    function removeDuplicateDesktopTruckTiles(truckId, keepTile) {
+        if (!truckId) return;
+        var selector = '[data-dispatcher-drag="truck"][data-equipment-id="' + dispatcherSelectorValue(truckId) + '"]';
+        document.querySelectorAll(selector).forEach(function (tile) {
+            if (tile !== keepTile) {
+                tile.remove();
+            }
+        });
+    }
+    function reconcileDesktopTruckUniqueness() {
+        var seen = {};
+        document.querySelectorAll('[data-dispatcher-drag="truck"][data-equipment-id]').forEach(function (tile) {
+            var truckId = tile.dataset.equipmentId || "";
+            if (!truckId) return;
+            if (seen[truckId]) {
+                tile.remove();
+                return;
+            }
+            seen[truckId] = true;
+        });
+    }
+    function refreshDesktopBoardIntegrity() {
+        reconcileDesktopTruckUniqueness();
+        refreshTruckGarage();
+        refreshAllComplexTruckRacks();
+    }
+    function refreshTruckGarage() {
+        if (!board) return;
+        document.querySelectorAll(".dispatcher-truck-tile.is-placeholder").forEach(function (slot) {
+            slot.remove();
+        });
+        var garage = document.querySelector(".dispatcher-trucks");
+        sortDesktopEquipmentList(garage, "[data-garage-item='truck']:not(.is-placeholder)");
+        var freeTrucks = document.querySelectorAll("[data-garage-item='truck']:not(.is-assigned)");
+        var columns = Math.max(1, Math.min(3, Math.ceil(freeTrucks.length / 12)));
+        var scrollNeeded = freeTrucks.length > columns * 12;
+        board.style.setProperty("--truck-garage-columns", String(columns));
+        board.style.setProperty("--truck-garage-scrollbar-w", scrollNeeded ? "14px" : "0px");
+        board.classList.toggle("is-truck-garage-empty", freeTrucks.length === 0);
+        if (!garage || freeTrucks.length === 0) return;
+        var visibleCapacity = columns * 12;
+        var placeholderCount = Math.max(0, visibleCapacity - freeTrucks.length);
+        for (var index = 0; index < placeholderCount; index += 1) {
+            var slot = document.createElement("article");
+            slot.className = "dispatcher-truck-tile is-placeholder";
+            slot.setAttribute("aria-hidden", "true");
+            slot.innerHTML = '<img src="/static/img/equipment/truck-gray.png" alt="">';
+            garage.appendChild(slot);
+        }
+    }
+    function clearDragGhost() {
+        if (!dragGhost) return;
+        dragGhost.remove();
+        dragGhost = null;
+    }
+    function escapeHtml(value) {
+        return String(value || "").replace(/[&<>"']/g, function (char) {
+            return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[char];
+        });
+    }
+    function normalizeComplexGrid() {
+        var grid = document.querySelector(".dispatcher-zone-grid");
+        if (!grid) return;
+        var cards = Array.from(grid.querySelectorAll(".dispatcher-complex-card"));
+        function sortWeight(card) {
+            if (card.classList.contains("status-red") || card.classList.contains("status-danger")) return 0;
+            if (card.classList.contains("status-orange")) return 1;
+            if (card.classList.contains("status-yellow") || card.classList.contains("status-risk")) return 2;
+            if (card.classList.contains("status-blue")) return 3;
+            if (card.classList.contains("status-green") || card.classList.contains("status-normal")) return 4;
+            return 5;
+        }
+        var active = cards
+            .filter(function (card) { return !card.classList.contains("status-empty"); })
+            .sort(function (a, b) {
+                var statusDiff = sortWeight(a) - sortWeight(b);
+                if (statusDiff !== 0) return statusDiff;
+                return (parseInt(a.dataset.excavatorSlot || "999", 10) || 999) - (parseInt(b.dataset.excavatorSlot || "999", 10) || 999);
+            });
+        var empty = cards.filter(function (card) { return card.classList.contains("status-empty"); });
+        active.concat(empty).forEach(function (card) {
+            grid.appendChild(card);
+        });
+    }
+    function refreshComplexTruckRack(rack) {
+        if (!rack) return;
+        sortDesktopEquipmentList(rack, ".complex-truck-tile");
+        var tiles = Array.from(rack.querySelectorAll(".complex-truck-tile"));
+        var empty = rack.querySelector(".complex-truck-empty");
+        if (!empty && tiles.length === 0) {
+            empty = document.createElement("em");
+            empty.className = "complex-truck-empty";
+            empty.textContent = "самосвалы не назначены";
+            rack.appendChild(empty);
+        }
+        rack.classList.remove("truck-fill-1", "truck-fill-2", "truck-fill-3", "truck-fill-4");
+        rack.classList.add(tiles.length <= 6 ? "truck-fill-1" : tiles.length <= 12 ? "truck-fill-2" : tiles.length <= 18 ? "truck-fill-3" : "truck-fill-4");
+        var columns = tiles.length === 0 ? 6 : Math.min(6, Math.max(1, tiles.length));
+        if (tiles.length > 6) columns = 6;
+        var gap = tiles.length > 10 ? 5 : 6;
+        var garageTiles = Array.from(document.querySelectorAll("[data-garage-item='truck']"));
+        var garageRect = null;
+        garageTiles.some(function (garageTile) {
+            var rect = garageTile.getBoundingClientRect();
+            if (rect.width > 20 && rect.height > 20) {
+                garageRect = rect;
+                return true;
+            }
+            return false;
+        });
+        var boardStyles = getComputedStyle(document.querySelector(".dispatcher-board") || document.documentElement);
+        var cssGarageWidth = parseFloat(boardStyles.getPropertyValue("--gd-truck-slot-w")) || 74;
+        var cssGarageHeight = parseFloat(boardStyles.getPropertyValue("--gd-truck-slot-h")) || 74;
+        var garageWidth = garageRect ? garageRect.width : cssGarageWidth;
+        var garageHeight = garageRect ? garageRect.height : cssGarageHeight;
+        var rackWidth = rack.clientWidth || rack.getBoundingClientRect().width || 1;
+        var fittedWidth = Math.floor((rackWidth - (gap * (columns - 1))) / columns);
+        var stepWidth = tiles.length <= 6 ? garageWidth : tiles.length <= 12 ? Math.min(garageWidth, 66) : tiles.length <= 18 ? Math.min(garageWidth, 58) : Math.min(garageWidth, 50);
+        var width = Math.max(24, Math.min(garageWidth, stepWidth, fittedWidth));
+        var scale = garageWidth > 0 ? width / garageWidth : 1;
+        var height = Math.max(24, Math.min(garageHeight, Math.floor(garageHeight * scale)));
+        var justify = tiles.length >= 5 ? "space-between" : "start";
+        rack.style.setProperty("--complex-truck-cols", String(columns));
+        rack.style.setProperty("--complex-truck-gap", gap + "px");
+        rack.style.setProperty("--complex-truck-w", width + "px");
+        rack.style.setProperty("--complex-truck-h", height + "px");
+        rack.style.setProperty("--complex-truck-justify", justify);
+        if (empty) empty.hidden = tiles.length > 0;
+    }
+    function refreshAllComplexTruckRacks() {
+        document.querySelectorAll(".complex-assigned-trucks").forEach(refreshComplexTruckRack);
+    }
+    function findTruckGarageList() {
+        return document.querySelector(".dispatcher-trucks");
+    }
+    function findComplexTruckRack(complexCard) {
+        return complexCard ? complexCard.querySelector(".complex-assigned-trucks") : null;
+    }
+    function getFirstTruckGaragePlaceholder() {
+        var garage = findTruckGarageList();
+        return garage ? garage.querySelector(".dispatcher-truck-tile.is-placeholder") : null;
+    }
+    function moveDesktopTruckToGarage(tile) {
+        var garage = findTruckGarageList();
+        if (!garage || !tile) return false;
+        removeDuplicateDesktopTruckTiles(tile.dataset.equipmentId, tile);
+        tile.classList.remove("complex-truck-tile", "dispatcher-dragging");
+        setDispatcherNodeEquipmentState(tile, "free", "truck");
+        tile.dataset.dispatcherDrag = "truck";
+        tile.dataset.garageItem = "truck";
+        tile.setAttribute("draggable", "true");
+        tile.removeAttribute("aria-disabled");
+        delete tile.dataset.complexTruck;
+        delete tile.dataset.assignedZone;
+        var firstPlaceholder = getFirstTruckGaragePlaceholder();
+        if (firstPlaceholder && firstPlaceholder.parentNode === garage) {
+            garage.insertBefore(tile, firstPlaceholder);
+        } else {
+            garage.appendChild(tile);
+        }
+        bindDragTile(tile);
+        bindEquipmentCardTrigger(tile);
+        refreshDesktopBoardIntegrity();
+        return true;
+    }
+    function moveDesktopTruckToComplex(tile, complexCard) {
+        var rack = findComplexTruckRack(complexCard);
+        if (!rack || !tile) return false;
+        var sourceRack = tile.closest(".complex-assigned-trucks");
+        var zoneId = complexCard.dataset.zoneId || "";
+        removeDuplicateDesktopTruckTiles(tile.dataset.equipmentId, tile);
+        tile.classList.add("complex-truck-tile");
+        tile.classList.remove("dispatcher-dragging", "is-placeholder");
+        setDispatcherNodeEquipmentState(tile, "assigned", "truck");
+        tile.dataset.dispatcherDrag = "truck";
+        tile.dataset.complexTruck = "true";
+        tile.dataset.assignedZone = zoneId;
+        tile.setAttribute("draggable", "true");
+        tile.removeAttribute("aria-disabled");
+        delete tile.dataset.garageItem;
+        var empty = rack.querySelector(".complex-truck-empty");
+        if (empty) empty.hidden = true;
+        rack.appendChild(tile);
+        if (sourceRack && sourceRack !== rack) {
+            refreshComplexTruckRack(sourceRack);
+        }
+        bindDragTile(tile);
+        bindEquipmentCardTrigger(tile);
+        refreshDesktopBoardIntegrity();
+        return true;
+    }
+    function releaseDesktopComplexTrucks(complexCard) {
+        var rack = findComplexTruckRack(complexCard);
+        if (!rack) return false;
+        var trucks = Array.from(rack.querySelectorAll(".complex-truck-tile"));
+        if (!trucks.length) {
+            refreshComplexTruckRack(rack);
+            return true;
+        }
+        trucks.forEach(moveDesktopTruckToGarage);
+        refreshComplexTruckRack(rack);
+        refreshTruckGarage();
+        return true;
+    }
+    function findExcavatorGarageList() {
+        return document.querySelector(".dispatcher-excavators");
+    }
+    function getFirstExcavatorGaragePlaceholder() {
+        var garage = findExcavatorGarageList();
+        return garage ? garage.querySelector(".dispatcher-excavator-garage-tile.is-placeholder") : null;
+    }
+    function resetDesktopComplexCardToEmpty(complexCard) {
+        if (!complexCard) return false;
+        var zoneId = complexCard.dataset.zoneId || "";
+        complexCard.className = "dispatcher-complex-card status-empty";
+        complexCard.style.setProperty("--complex-progress", "0%");
+        complexCard.dataset.dispatcherDrop = "complex";
+        complexCard.dataset.zoneId = zoneId;
+        delete complexCard.dataset.dispatcherDrag;
+        delete complexCard.dataset.equipmentCardId;
+        delete complexCard.dataset.sourceEquipmentCardId;
+        delete complexCard.dataset.equipmentId;
+        delete complexCard.dataset.equipmentName;
+        delete complexCard.dataset.equipmentState;
+        delete complexCard.dataset.excavatorSlot;
+        delete complexCard.dataset.dragBound;
+        delete complexCard.dataset.cardBound;
+        complexCard.removeAttribute("role");
+        complexCard.removeAttribute("tabindex");
+        complexCard.removeAttribute("draggable");
+        complexCard.innerHTML = '<div class="complex-empty" aria-hidden="true"></div>';
+        return true;
+    }
+    function buildDesktopExcavatorGarageTile(complexCard) {
+        var tile = document.createElement("article");
+        var slot = complexCard.dataset.excavatorSlot || "";
+        var name = complexCard.dataset.equipmentName || ("Экскаватор " + slot).trim();
+        var cardId = complexCard.dataset.equipmentId || complexCard.dataset.equipmentCardId || complexCard.dataset.sourceEquipmentCardId || "";
+        var stateCode = "garage";
+        tile.className = "dispatcher-equipment-tile dispatcher-excavator-garage-tile " + dispatcherEquipmentStateClass(stateCode) + " is-sync-pending";
+        tile.style.setProperty("--tile-progress", "0%");
+        tile.setAttribute("role", "button");
+        tile.setAttribute("tabindex", "0");
+        tile.setAttribute("draggable", "true");
+        tile.dataset.dispatcherDrag = "excavator";
+        tile.dataset.equipmentCardId = cardId;
+        tile.dataset.equipmentId = cardId;
+        tile.dataset.equipmentName = name;
+        tile.dataset.equipmentState = stateCode;
+        tile.dataset.excavatorSlot = slot;
+        tile.dataset.garageItem = "excavator";
+        tile.innerHTML =
+            (slot ? "<strong>" + escapeHtml(slot) + "</strong>" : "") +
+            '<img src="' + escapeHtml(dispatcherNeutralEquipmentIcon("excavator")) + '" alt="">' +
+            "<span>" + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + "</span>";
+        return tile;
+    }
+    function moveDesktopComplexToExcavatorGarage(complexCard) {
+        var garage = findExcavatorGarageList();
+        if (!garage || !complexCard || complexCard.classList.contains("status-empty")) return false;
+        releaseDesktopComplexTrucks(complexCard);
+        var tile = buildDesktopExcavatorGarageTile(complexCard);
+        var firstPlaceholder = getFirstExcavatorGaragePlaceholder();
+        if (firstPlaceholder && firstPlaceholder.parentNode === garage) {
+            garage.insertBefore(tile, firstPlaceholder);
+        } else {
+            garage.appendChild(tile);
+        }
+        resetDesktopComplexCardToEmpty(complexCard);
+        bindDragTile(tile);
+        bindEquipmentCardTrigger(tile);
+        refreshExcavatorGarage();
+        refreshTruckGarage();
+        refreshAllComplexTruckRacks();
+        normalizeComplexGrid();
+        return true;
+    }
+    function activateDesktopComplexFromExcavatorTile(tile, complexCard) {
+        if (!tile || !complexCard) return false;
+        var targetCard = complexCard.classList.contains("status-empty")
+            ? complexCard
+            : document.querySelector(".dispatcher-complex-card.status-empty");
+        if (!targetCard) return false;
+        var zoneId = targetCard.dataset.zoneId || "К";
+        var cardId = tile.dataset.equipmentId || tile.dataset.equipmentCardId || "";
+        var name = tile.dataset.equipmentName || "";
+        var slot = tile.dataset.excavatorSlot || (tile.querySelector("strong") && tile.querySelector("strong").textContent) || "";
+        var stateCode = "assigned";
+        targetCard.className = "dispatcher-complex-card " + dispatcherEquipmentStateClass(stateCode) + " is-sync-pending";
+        targetCard.style.setProperty("--complex-progress", "0%");
+        targetCard.dataset.dispatcherDrop = "complex";
+        targetCard.dataset.zoneId = zoneId;
+        targetCard.dataset.dispatcherDrag = "complex";
+        targetCard.dataset.equipmentCardId = cardId;
+        targetCard.dataset.sourceEquipmentCardId = cardId;
+        targetCard.dataset.equipmentId = cardId;
+        targetCard.dataset.equipmentName = name;
+        targetCard.dataset.equipmentState = stateCode;
+        targetCard.dataset.excavatorSlot = slot;
+        delete targetCard.dataset.dragBound;
+        delete targetCard.dataset.cardBound;
+        targetCard.setAttribute("role", "button");
+        targetCard.setAttribute("tabindex", "0");
+        targetCard.setAttribute("draggable", "true");
+        targetCard.innerHTML =
+            '<div class="complex-work-head">' +
+                '<div class="complex-title-state">' +
+                    "<h2>" + escapeHtml(zoneId) + "</h2>" +
+                    '<span class="complex-state-chip">' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
+                '</div>' +
+                '<div class="complex-context">' +
+                    '<span class="complex-info-chip chip-horizon">Гор. -</span>' +
+                    '<span class="complex-info-chip chip-block">Блок -</span>' +
+                    '<span class="complex-info-chip chip-rock">порода не указана</span>' +
+                "</div>" +
+            "</div>" +
+            '<div class="complex-assigned-trucks truck-fill-1" style="--complex-truck-cols: 6;" aria-label="Активные самосвалы комплекса">' +
+                '<em class="complex-truck-empty">самосвалы не назначены</em>' +
+            "</div>";
+        tile.remove();
+        bindDragTile(targetCard);
+        bindEquipmentCardTrigger(targetCard);
+        refreshExcavatorGarage();
+        refreshTruckGarage();
+        refreshAllComplexTruckRacks();
+        normalizeComplexGrid();
+        return true;
+    }
+    function confirmDesktopOptimisticBoardAction(response) {
+        if (response && response.queued) return response;
+        markDispatcherLocalAssignmentApplied();
+        return response;
+    }
+    function refreshDesktopBoardAfterStructuralAction(response, localFallback) {
+        if (response && response.queued) {
+            if (typeof localFallback === "function") {
+                localFallback();
+            }
+            markDispatcherLocalAssignmentApplied();
+            return response;
+        }
+        return refreshDispatcherDesktopBoardFromServer().then(function (applied) {
+            if (!applied) {
+                if (typeof localFallback === "function") {
+                    localFallback();
+                }
+                markDispatcherLocalAssignmentApplied();
+            }
+            return response;
+        }).catch(function (error) {
+            if (typeof localFallback === "function") {
+                localFallback();
+                markDispatcherLocalAssignmentApplied();
+            } else {
+                throw error;
+            }
+            return response;
+        });
+    }
+    function handleDesktopOptimisticBoardError(error) {
+        showDispatcherDnDError(error);
+        return refreshDispatcherDesktopBoardFromServer();
+    }
+    function applyDesktopTruckAction(response, action) {
+        if (response && response.queued) return response;
+        if (!action || !action.type) return response;
+        var applied = false;
+        if (action.type === "assign") {
+            applied = moveDesktopTruckToComplex(action.truckTile, action.complexCard);
+        } else if (action.type === "release") {
+            applied = moveDesktopTruckToGarage(action.truckTile);
+        } else if (action.type === "release_complex") {
+            applied = releaseDesktopComplexTrucks(action.complexCard);
+        }
+        if (!applied) {
+            refreshDispatcherDesktopBoardFromServer().catch(reloadDispatcherBoardAsFallback);
+        } else {
+            markDispatcherLocalAssignmentApplied();
+        }
+        return response;
+    }
+    refreshExcavatorGarage();
+    refreshTruckGarage();
+    function bindDragTile(tile) {
+        if (tile.dataset.dragBound === "true") return;
+        tile.dataset.dragBound = "true";
+        tile.addEventListener("dragstart", function (event) {
+            if (!dispatcherShiftOpen) {
+                event.preventDefault();
+                draggedTile = null;
+                return;
+            }
+            if (tile.dataset.complexTruck === "true") event.stopPropagation();
+            if (tile.classList.contains("is-assigned") || tile.classList.contains("is-placeholder")) {
+                event.preventDefault();
+                draggedTile = null;
+                return;
+            }
+            draggedTile = tile;
+            tile.classList.add("dispatcher-dragging");
+            if (board && tile.dataset.dispatcherDrag === "complex") {
+                board.classList.add("is-complex-dragging");
+                var progress = tile.querySelector(".equipment-progress-complex");
+                if (progress) {
+                    dragGhost = progress.cloneNode(true);
+                    dragGhost.className = "dispatcher-drag-ghost";
+                    document.body.appendChild(dragGhost);
+                    event.dataTransfer.setDragImage(dragGhost, 28, 28);
+                }
+            }
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", tile.dataset.equipmentName || "");
+        });
+        tile.addEventListener("dragend", function (event) {
+            if (tile.dataset.complexTruck === "true") event.stopPropagation();
+            tile.classList.remove("dispatcher-dragging");
+            if (board) board.classList.remove("is-complex-dragging");
+            clearDragGhost();
+            draggedTile = null;
+            document.querySelectorAll(".dispatcher-drop-target").forEach(function (target) {
+                target.classList.remove("dispatcher-drop-target");
+            });
+        });
+    }
+    function bindEquipmentCardTrigger(node) {
+        if (!node || node.dataset.cardBound === "true") return;
+        node.dataset.cardBound = "true";
+        var mobileTapPointerId = null;
+        var mobileTapStartX = 0;
+        var mobileTapStartY = 0;
+        var mobileLongTapTimer = null;
+        var mobileLongTapOpened = false;
+        var shouldUsePointerTap = Boolean(node.closest(".mm-mobile-shell")) && (
+            node.classList.contains("mm-mobile-truck-card") ||
+            node.classList.contains("mm-mobile-garage-excavator")
+        );
+        function isEquipmentCardTapBlocked(event) {
+            var control = event.target && event.target.closest ? event.target.closest("button, a, input, form") : null;
+            return node.classList.contains("is-placeholder") ||
+                Boolean(control && control !== node);
+        }
+        function clearMobileLongTapTimer() {
+            if (!mobileLongTapTimer) return;
+            window.clearTimeout(mobileLongTapTimer);
+            mobileLongTapTimer = null;
+        }
+        function pulseMobileEquipmentCard() {
+            node.classList.remove("is-mobile-tap-feedback");
+            void node.offsetWidth;
+            node.classList.add("is-mobile-tap-feedback");
+            window.setTimeout(function () {
+                node.classList.remove("is-mobile-tap-feedback");
+            }, 260);
+        }
+        function openMobileEquipmentCard(event) {
+            if (!openEquipmentCard(node.dataset.equipmentCardId, node)) return false;
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            return true;
+        }
+        if (shouldUsePointerTap && window.PointerEvent) {
+            node.addEventListener("pointerdown", function (event) {
+                if (event.pointerType === "mouse" || isEquipmentCardTapBlocked(event)) return;
+                mobileTapPointerId = event.pointerId;
+                mobileTapStartX = event.clientX;
+                mobileTapStartY = event.clientY;
+                mobileLongTapOpened = false;
+                clearMobileLongTapTimer();
+                mobileLongTapTimer = window.setTimeout(function () {
+                    if (mobileTapPointerId !== event.pointerId) return;
+                    mobileLongTapOpened = openMobileEquipmentCard(event);
+                }, 520);
+            });
+            node.addEventListener("pointermove", function (event) {
+                if (mobileTapPointerId === null || event.pointerId !== mobileTapPointerId) return;
+                var dx = event.clientX - mobileTapStartX;
+                var dy = event.clientY - mobileTapStartY;
+                if (Math.hypot(dx, dy) > 10) {
+                    clearMobileLongTapTimer();
+                }
+            });
+            node.addEventListener("pointerup", function (event) {
+                if (mobileTapPointerId === null || event.pointerId !== mobileTapPointerId) return;
+                var dx = event.clientX - mobileTapStartX;
+                var dy = event.clientY - mobileTapStartY;
+                clearMobileLongTapTimer();
+                mobileTapPointerId = null;
+                if (Math.hypot(dx, dy) > 10 || isEquipmentCardTapBlocked(event)) return;
+                if (!mobileLongTapOpened) {
+                    pulseMobileEquipmentCard();
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+            });
+            node.addEventListener("pointercancel", function () {
+                clearMobileLongTapTimer();
+                mobileTapPointerId = null;
+                mobileLongTapOpened = false;
+            });
+        }
+        node.addEventListener("click", function (event) {
+            if (shouldUsePointerTap) {
+                event.preventDefault();
+                event.stopPropagation();
+                return;
+            }
+            if (isEquipmentCardTapBlocked(event)) return;
+            if (node.dataset.complexTruck === "true") event.stopPropagation();
+            openMobileEquipmentCard(event);
+        });
+        node.addEventListener("keydown", function (event) {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            if (openEquipmentCard(node.dataset.equipmentCardId, node)) {
+                event.preventDefault();
+            }
+        });
+    }
+    function bindDispatcherComplexDrop(zone) {
+        if (!zone || zone.dataset.dispatcherDropBound === "true") return;
+        zone.dataset.dispatcherDropBound = "true";
+        zone.addEventListener("dragover", function (event) {
+            if (!draggedTile) return;
+            if (draggedTile.dataset.dispatcherDrag === "complex") return;
+            event.preventDefault();
+            zone.classList.add("dispatcher-drop-target");
+        });
+        zone.addEventListener("dragleave", function () {
+            zone.classList.remove("dispatcher-drop-target");
+        });
+        zone.addEventListener("drop", function (event) {
+            event.preventDefault();
+            zone.classList.remove("dispatcher-drop-target");
+            if (!draggedTile) return;
+            if (draggedTile.dataset.dispatcherDrag === "complex") return;
+            if (draggedTile.dataset.dispatcherDrag === "excavator") {
+                var activatedExcavatorTile = draggedTile;
+                var targetComplexCard = zone;
+                dispatcherPost(dispatcherMoveExcavatorUrl, {
+                    excavator_id: activatedExcavatorTile.dataset.equipmentId,
+                    zone: "active"
+                }).then(function (response) {
+                    return refreshDesktopBoardAfterStructuralAction(response, function () {
+                        activateDesktopComplexFromExcavatorTile(activatedExcavatorTile, targetComplexCard);
+                    });
+                }).catch(handleDesktopOptimisticBoardError);
+                return;
+            }
+            if (draggedTile.dataset.dispatcherDrag === "truck") {
+                if (!zone.dataset.equipmentId) {
+                    return;
+                }
+                var assignedTruckTile = draggedTile;
+                var targetComplexCard = zone;
+                dispatcherPost(dispatcherAssignTruckUrl, {
+                    action: "assign",
+                    truck_id: assignedTruckTile.dataset.equipmentId,
+                    excavator_id: zone.dataset.equipmentId
+                }).then(function (response) {
+                    return applyDesktopTruckAction(response, {
+                        type: "assign",
+                        truckTile: assignedTruckTile,
+                        complexCard: targetComplexCard
+                    });
+                }).catch(showDispatcherDnDError);
+                return;
+            }
+        });
+    }
+    function bindDispatcherExcavatorGarageDrop(garage) {
+        if (!garage || garage.dataset.dispatcherDropBound === "true") return;
+        garage.dataset.dispatcherDropBound = "true";
+        garage.addEventListener("dragover", function (event) {
+            if (!draggedTile || draggedTile.dataset.dispatcherDrag !== "complex") return;
+            event.preventDefault();
+            garage.classList.add("dispatcher-drop-target");
+        });
+        garage.addEventListener("dragleave", function () {
+            garage.classList.remove("dispatcher-drop-target");
+        });
+        garage.addEventListener("drop", function (event) {
+            event.preventDefault();
+            garage.classList.remove("dispatcher-drop-target");
+            if (!draggedTile || draggedTile.dataset.dispatcherDrag !== "complex") return;
+            var inactiveComplexCard = draggedTile;
+            var inactiveExcavatorId = inactiveComplexCard.dataset.equipmentId;
+            dispatcherPost(dispatcherMoveExcavatorUrl, {
+                excavator_id: inactiveExcavatorId,
+                zone: "inactive"
+            }).then(function (response) {
+                return refreshDesktopBoardAfterStructuralAction(response, function () {
+                    moveDesktopComplexToExcavatorGarage(inactiveComplexCard);
+                });
+            }).catch(handleDesktopOptimisticBoardError);
+        });
+    }
+    function bindDispatcherTruckGarageDrop(garage) {
+        if (!garage || garage.dataset.dispatcherDropBound === "true") return;
+        garage.dataset.dispatcherDropBound = "true";
+        garage.addEventListener("dragover", function (event) {
+            if (!draggedTile || (draggedTile.dataset.complexTruck !== "true" && draggedTile.dataset.dispatcherDrag !== "complex")) return;
+            event.preventDefault();
+            garage.classList.add("dispatcher-drop-target");
+        });
+        garage.addEventListener("dragleave", function () {
+            garage.classList.remove("dispatcher-drop-target");
+        });
+        garage.addEventListener("drop", function (event) {
+            event.preventDefault();
+            garage.classList.remove("dispatcher-drop-target");
+            if (!draggedTile) return;
+            if (draggedTile.dataset.dispatcherDrag === "complex") {
+                var complexCard = draggedTile;
+                dispatcherPost(dispatcherAssignTruckUrl, {
+                    action: "release_complex",
+                    excavator_id: complexCard.dataset.equipmentId
+                }).then(function (response) {
+                    return applyDesktopTruckAction(response, {
+                        type: "release_complex",
+                        complexCard: complexCard
+                    });
+                }).catch(showDispatcherDnDError);
+                return;
+            }
+            if (draggedTile.dataset.complexTruck !== "true") return;
+            var releasedTruckTile = draggedTile;
+            dispatcherPost(dispatcherAssignTruckUrl, {
+                action: "release",
+                truck_id: releasedTruckTile.dataset.equipmentId
+            }).then(function (response) {
+                return applyDesktopTruckAction(response, {
+                    type: "release",
+                    truckTile: releasedTruckTile
+                });
+            }).catch(showDispatcherDnDError);
+        });
+    }
+    function bindDispatcherDesktopInteractions() {
+        board = document.querySelector(".dispatcher-board");
+        excavatorGarage = document.querySelector("[data-dispatcher-excavator-garage]");
+        document.querySelectorAll("[data-dispatcher-drag]").forEach(bindDragTile);
+        document.querySelectorAll("[data-equipment-card-id]").forEach(bindEquipmentCardTrigger);
+        normalizeComplexGrid();
+        refreshExcavatorGarage();
+        refreshTruckGarage();
+        refreshAllComplexTruckRacks();
+        if (!dispatcherShiftOpen) return;
+        document.querySelectorAll("[data-dispatcher-drop='complex']").forEach(bindDispatcherComplexDrop);
+        document.querySelectorAll("[data-dispatcher-drop='excavator-garage']").forEach(bindDispatcherExcavatorGarageDrop);
+        document.querySelectorAll("[data-dispatcher-drop='truck-garage']").forEach(bindDispatcherTruckGarageDrop);
+    }
+    seedDispatcherBoardFingerprints(document.querySelector(".dispatcher-board"));
+    bindDispatcherDesktopInteractions();
+    window.addEventListener("resize", refreshAllComplexTruckRacks);
+});

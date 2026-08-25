@@ -16,7 +16,13 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
-from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment
+from assignments.models import (
+    AssignmentStatus,
+    EquipmentAssignment,
+    ExcavatorPlacement,
+    HaulAssignment,
+    HaulAssignmentAction,
+)
 from assignments.services import (
     get_active_equipment_assignment,
     reconcile_due_haul_assignments,
@@ -40,8 +46,10 @@ from shifts.models import EmployeeShift, ShiftClientAction
 from shifts.models import PlanAssignmentStatus, PlanCalculationMode
 from shifts.services import (
     ExcavatorShiftError,
+    aggregate_completed_trip_facts_by_shift,
     assign_shift_plan_snapshot,
     calculate_open_shift_progress,
+    calculate_progress_from_snapshot_facts,
     calculate_truck_shift_progress,
     close_excavator_shift,
     equipment_is_truck,
@@ -454,36 +462,29 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v41";
+const CACHE_NAME = "dispatcher-desktop-shell-v46";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
   APP_SHELL_URL,
   MANIFEST_URL,
-  "/static/js/realtime-client.js",
+  "/static/js/realtime-client.js?v=__STATIC_ASSET_RELEASE__",
   "/static/js/role-readonly.js",
-  "/static/css/app.css",
+  "/static/js/dispatcher-control-v1.js",
+  "/static/css/dispatcher-control-v1.css",
   "/static/favicon.ico",
   "/static/img/pwa/dispatcher-180.png",
   "/static/img/pwa/dispatcher-192.png",
   "/static/img/pwa/dispatcher-512.png",
   "/static/img/pwa/dispatcher-maskable-512.png",
   "/static/img/equipment/excavator-gray.png",
-  "/static/img/equipment/excavator-green.png",
-  "/static/img/equipment/excavator-yellow.png",
-  "/static/img/equipment/excavator-blue.png",
-  "/static/img/equipment/excavator-red.png",
-  "/static/img/equipment/truck-gray.png",
-  "/static/img/equipment/truck-green.png",
-  "/static/img/equipment/truck-yellow.png",
-  "/static/img/equipment/truck-blue.png",
-  "/static/img/equipment/truck-red.png"
+  "/static/img/equipment/truck-gray.png"
 ];
 
 self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" }))).catch(() => undefined))
+      .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" }))))
       .then(() => self.skipWaiting())
   );
 });
@@ -640,7 +641,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v127";
+const CACHE_NAME = "excavator-mobile-shell-v133";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -671,6 +672,7 @@ self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" }))).catch(() => undefined))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -1289,7 +1291,20 @@ def build_dispatcher_equipment_card(
     }
 
 
-def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pending_assignments, accepted_assignments, recent_completed_trips, open_shifts, open_mechanic_downtimes, trucks, excavators, recent_dispatcher_actions):
+def build_dispatcher_dashboard_context(
+    *,
+    dispatcher_shift,
+    active_trips,
+    pending_assignments,
+    accepted_assignments,
+    recent_completed_trips,
+    open_shifts,
+    open_mechanic_downtimes,
+    trucks,
+    excavators,
+    recent_dispatcher_actions,
+    equipment_card_ids=None,
+):
     active_trips_list = list(active_trips)
     pending_assignments_list = list(pending_assignments)
     accepted_assignments_list = list(accepted_assignments)
@@ -1335,6 +1350,21 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
     for shift in open_shifts:
         if shift.equipment_id and shift.equipment_id not in open_shift_by_equipment_id:
             open_shift_by_equipment_id[shift.equipment_id] = shift
+    truck_equipment_ids = {truck.id for truck in trucks_list}
+    excavator_equipment_ids = {excavator.id for excavator in excavators_list}
+    selected_equipment_shifts = list(open_shift_by_equipment_id.values())
+    snapshot_trip_facts = aggregate_completed_trip_facts_by_shift(
+        unloading_shift_ids=(
+            shift.id
+            for shift in selected_equipment_shifts
+            if shift.equipment_id in truck_equipment_ids
+        ),
+        loading_shift_ids=(
+            shift.id
+            for shift in selected_equipment_shifts
+            if shift.equipment_id in excavator_equipment_ids and shift.plan_status
+        ),
+    )
     plan_by_equipment_id = {}
 
     def dispatcher_plan_for_equipment(equipment):
@@ -1343,8 +1373,16 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             return plan_progress_display_context(None)
         if equipment_id not in plan_by_equipment_id:
             shift = open_shift_by_equipment_id.get(equipment_id)
-            if shift and equipment_is_truck(shift.equipment):
-                progress = calculate_truck_shift_progress(equipment, reference_shift=shift)
+            if shift and equipment_id in truck_equipment_ids:
+                progress = calculate_progress_from_snapshot_facts(
+                    shift,
+                    snapshot_trip_facts['unloading'].get(shift.id),
+                )
+            elif shift and equipment_id in excavator_equipment_ids and shift.plan_status:
+                progress = calculate_progress_from_snapshot_facts(
+                    shift,
+                    snapshot_trip_facts['loading'].get(shift.id),
+                )
             else:
                 progress = calculate_dispatcher_snapshot_progress(shift, equipment=equipment)
             plan_by_equipment_id[equipment_id] = plan_progress_display_context(progress)
@@ -1379,6 +1417,17 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
     for assignment in accepted_assignments_list + pending_assignments_list:
         assignment_by_truck_id.setdefault(assignment.truck_id, assignment)
     equipment_cards = {}
+    requested_equipment_card_ids = (
+        None
+        if equipment_card_ids is None
+        else {str(card_id) for card_id in equipment_card_ids}
+    )
+
+    def equipment_card_requested(card_id):
+        return (
+            requested_equipment_card_ids is None
+            or str(card_id) in requested_equipment_card_ids
+        )
     equipment_state_map = get_equipment_state_ui_map()
 
     def equipment_state_for(code):
@@ -1531,7 +1580,11 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
         .values_list('excavator_id', flat=True)
     )
     active_excavator_ids = set(active_placement_ids)
-    active_excavator_ids.update(assignment.excavator_id for assignment in pending_assignments_list + accepted_assignments_list if assignment.excavator_id)
+    active_excavator_ids.update(
+        assignment.excavator_id
+        for assignment in pending_assignments_list + accepted_assignments_list
+        if assignment.excavator_id and assignment.action != HaulAssignmentAction.RELEASE
+    )
     active_excavator_ids.update(trip.excavator_id for trip in active_trips_list if trip.excavator_id)
 
     def garage_number_int(equipment):
@@ -2021,7 +2074,11 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
 
     for tile in excavator_tiles:
         equipment = tile.get('equipment')
-        if not equipment or not tile.get('card_id'):
+        if (
+            not equipment
+            or not tile.get('card_id')
+            or not equipment_card_requested(tile['card_id'])
+        ):
             continue
         downtime = downtime_by_equipment_id.get(equipment.id)
         active_trip = active_trip_by_excavator_id.get(equipment.id)
@@ -2065,6 +2122,8 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
         )
 
     for card in complex_cards:
+        if not equipment_card_requested(card['card_id']):
+            continue
         complex_report = dispatcher_complex_shift_report(card)
         details = [
             {'label': 'Экскаватор', 'value': card.get('excavator_name')},
@@ -2106,7 +2165,11 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
     for complex_card in complex_cards:
         for tile in complex_card.get('active_truck_tiles', []):
             card_id = str(tile.get('card_id') or '')
-            if not card_id or card_id in equipment_cards:
+            if (
+                not card_id
+                or card_id in equipment_cards
+                or not equipment_card_requested(card_id)
+            ):
                 continue
             equipment = truck_by_id.get(int(card_id)) if card_id.isdigit() else None
             status_label = status_label_for(tile.get('status'), tile.get('label'))
@@ -2143,6 +2206,8 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
         for mobile_tile in mobile_truck_garage_tiles
         if mobile_tile.get('card_id') and str(mobile_tile.get('card_id')) not in equipment_cards
     ]:
+        if not equipment_card_requested(tile.get('card_id')):
+            continue
         equipment = tile.get('equipment')
         status_label = status_label_for(tile.get('status'), tile.get('label'))
         details = dispatcher_plan_details(tile.get('plan'))
@@ -3524,10 +3589,10 @@ def work_assignment_error_message(state):
     if state in {'employee_inactive', 'access_inactive'}:
         return 'Рабочий доступ неактивен. Обратитесь к администратору.'
     if state == 'equipment_inactive':
-        return 'Назначенная техника неактивна. Обратитесь к руководителю.'
+        return 'Техника неактивна. Обратитесь к руководителю.'
     if state == 'assignment_conflict':
-        return 'Назначенная техника уже занята в открытой смене. Обратитесь к руководителю.'
-    return 'Смена и техника не назначены. Обратитесь к руководителю.'
+        return 'Техника занята в другой смене.'
+    return 'Смена и техника не назначены.'
 
 
 def get_previous_closed_equipment_shift(equipment):
@@ -4428,12 +4493,96 @@ def excavator_downtime_action_view(request):
     action_label = 'downtime_updated' if active_event else 'downtime_started'
     return JsonResponse(downtime_event_payload(event, action=action_label))
 
-def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher_access=True, dispatcher_header_override=None, context_overrides=None):
+def protect_dispatcher_equipment_detail_response(response):
+    response['Cache-Control'] = 'private, no-store, max-age=0'
+    response['Pragma'] = 'no-cache'
+    response['X-Content-Type-Options'] = 'nosniff'
+    response['Vary'] = 'Cookie'
+    return response
+
+
+def dispatcher_equipment_detail_error(code, *, status):
+    return protect_dispatcher_equipment_detail_response(JsonResponse(
+        {
+            'contract': 'dispatcher-equipment-detail-v1',
+            'error': code,
+        },
+        status=status,
+    ))
+
+
+@require_http_methods(['GET'])
+def dispatcher_equipment_detail_view(request, category, equipment_id):
+    access_id = request.session.get('employee_access_id')
+    access = (
+        EmployeeAccess.objects
+        .select_related('employee', 'role')
+        .filter(id=access_id, is_active=True)
+        .first()
+        if access_id
+        else None
+    )
+    if not access:
+        return dispatcher_equipment_detail_error('authentication_required', status=401)
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return dispatcher_equipment_detail_error('forbidden', status=403)
+    if category not in {'equipment', 'complex'}:
+        return dispatcher_equipment_detail_error('card_not_found', status=404)
+    try:
+        state_version = int(request.GET.get('state_version', ''))
+    except (TypeError, ValueError):
+        state_version = -1
+    if state_version < 0:
+        return dispatcher_equipment_detail_error('invalid_state_version', status=400)
+
+    equipment = (
+        Equipment.objects
+        .filter(
+            pk=equipment_id,
+            is_active=True,
+            equipment_type__name__in={'Самосвал', 'Экскаватор'},
+        )
+        .select_related('equipment_type')
+        .first()
+    )
+    if not equipment:
+        return dispatcher_equipment_detail_error('card_not_found', status=404)
+    if category == 'complex':
+        if equipment.equipment_type.name != 'Экскаватор':
+            return dispatcher_equipment_detail_error('card_not_found', status=404)
+        match = re.search(r'\d+', str(equipment.garage_number or ''))
+        if not match:
+            return dispatcher_equipment_detail_error('card_not_found', status=404)
+        card_key = f'complex-K-{int(match.group(0))}'
+    else:
+        card_key = str(equipment.pk)
+
+    return dispatcher_control_view(
+        request,
+        access_override=access,
+        equipment_detail={
+            'card_key': card_key,
+            'state_version': state_version,
+        },
+    )
+
+
+def dispatcher_control_view(
+    request,
+    *,
+    access_override=None,
+    enforce_dispatcher_access=True,
+    dispatcher_header_override=None,
+    context_overrides=None,
+    equipment_detail=None,
+):
     requested_fragment = request.GET.get('_operational_fragment', '').strip()
     reconcile_due_haul_assignments()
     if access_override is None:
         access_id = request.session.get('employee_access_id')
         if not access_id:
+            if equipment_detail:
+                return dispatcher_equipment_detail_error('authentication_required', status=401)
             if requested_fragment in {'dispatcher', 'mining_master'}:
                 return JsonResponse({'authenticated': False}, status=401)
             return redirect('login')
@@ -4441,9 +4590,17 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     else:
         access = access_override
     if not access:
+        if equipment_detail:
+            return dispatcher_equipment_detail_error('authentication_required', status=401)
         return redirect('role_home')
     if enforce_dispatcher_access and access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        if equipment_detail:
+            return dispatcher_equipment_detail_error('forbidden', status=403)
         return redirect('role_home')
+    if equipment_detail:
+        equipment_detail['state_version_before'] = get_operational_state_version()
+        if equipment_detail['state_version_before'] != equipment_detail['state_version']:
+            return dispatcher_equipment_detail_error('stale_board', status=409)
     dispatcher_header = dispatcher_header_override or build_dispatcher_header_context(access, request)
     dispatcher_shift = dispatcher_header.get('active_shift')
 
@@ -4456,7 +4613,15 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     active_trips = (
         Trip.objects
         .filter(status__in=OPEN_TRIP_STATUSES)
-        .select_related('truck', 'excavator', 'rock_type', 'dump_point', 'excavator_operator')
+        .select_related(
+            'truck',
+            'truck__equipment_type',
+            'excavator',
+            'excavator__equipment_type',
+            'rock_type',
+            'dump_point',
+            'excavator_operator',
+        )
         .order_by('created_at')
     )
     if not dispatcher_shift:
@@ -4471,7 +4636,13 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     pending_assignments = (
         HaulAssignment.objects
         .filter(status=AssignmentStatus.PENDING, ended_at__isnull=True)
-        .select_related('truck', 'excavator', 'assigned_by')
+        .select_related(
+            'truck',
+            'truck__equipment_type',
+            'excavator',
+            'excavator__equipment_type',
+            'assigned_by',
+        )
         .order_by('assigned_at')
     )
     if truck_id:
@@ -4484,7 +4655,13 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     accepted_assignments = (
         HaulAssignment.objects
         .filter(status=AssignmentStatus.ACCEPTED, ended_at__isnull=True)
-        .select_related('truck', 'excavator', 'assigned_by')
+        .select_related(
+            'truck',
+            'truck__equipment_type',
+            'excavator',
+            'excavator__equipment_type',
+            'assigned_by',
+        )
         .order_by('-accepted_at')
     )
     if truck_id:
@@ -4506,7 +4683,15 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
             completed_at__gte=production_shift_start,
             completed_at__lt=production_shift_end,
         )
-        .select_related('truck', 'excavator', 'rock_type', 'dump_point', 'driver')
+        .select_related(
+            'truck',
+            'truck__equipment_type',
+            'excavator',
+            'excavator__equipment_type',
+            'rock_type',
+            'dump_point',
+            'driver',
+        )
         .order_by('-completed_at')
     )
     if not dispatcher_shift:
@@ -4543,8 +4728,18 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     for shift in open_shifts:
         shift.role_name = role_by_employee_id.get(shift.employee_id, '-')
 
-    trucks = Equipment.objects.filter(equipment_type__name='Самосвал', is_active=True).order_by('garage_number')
-    excavators = Equipment.objects.filter(equipment_type__name='Экскаватор', is_active=True).order_by('garage_number')
+    trucks = (
+        Equipment.objects
+        .filter(equipment_type__name='Самосвал', is_active=True)
+        .select_related('equipment_type', 'model')
+        .order_by('garage_number')
+    )
+    excavators = (
+        Equipment.objects
+        .filter(equipment_type__name='Экскаватор', is_active=True)
+        .select_related('equipment_type', 'model')
+        .order_by('garage_number')
+    )
     recent_dispatcher_actions = (
         DispatcherActionLog.objects
         .select_related('actor')
@@ -4553,13 +4748,18 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     open_mechanic_downtimes = (
         DowntimeEvent.objects
         .filter(ended_at__isnull=True)
-        .select_related('equipment', 'reason', 'employee')
+        .select_related('equipment', 'equipment__equipment_type', 'reason', 'employee')
         .order_by('started_at')
     )
     downtime_equipment_ids = [equipment_id for equipment_id in [truck_id, excavator_id] if equipment_id]
     if downtime_equipment_ids:
         open_mechanic_downtimes = open_mechanic_downtimes.filter(equipment_id__in=downtime_equipment_ids)
     open_mechanic_downtimes_count = open_mechanic_downtimes.count()
+    equipment_card_ids = None
+    if not (context_overrides or {}).get('mining_master_mobile_enabled'):
+        equipment_card_ids = set()
+    if equipment_detail:
+        equipment_card_ids = {equipment_detail['card_key']}
     dispatcher_dashboard = build_dispatcher_dashboard_context(
         dispatcher_shift=dispatcher_shift,
         active_trips=active_trips,
@@ -4571,9 +4771,30 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
         trucks=trucks,
         excavators=excavators,
         recent_dispatcher_actions=recent_dispatcher_actions,
+        equipment_card_ids=equipment_card_ids,
     )
 
     operational_state_version = get_operational_state_version()
+    if equipment_detail:
+        requested_version = equipment_detail['state_version']
+        if (
+            operational_state_version != equipment_detail['state_version_before']
+            or operational_state_version != requested_version
+        ):
+            return dispatcher_equipment_detail_error(
+                'state_changed',
+                status=409,
+            )
+        card = dispatcher_dashboard['equipment_cards'].get(equipment_detail['card_key'])
+        if not card:
+            return dispatcher_equipment_detail_error('card_not_found', status=404)
+        response = JsonResponse({
+            'contract': 'dispatcher-equipment-detail-v1',
+            'card_key': equipment_detail['card_key'],
+            'operational_state_version': operational_state_version,
+            'card': card,
+        })
+        return protect_dispatcher_equipment_detail_response(response)
     context = {
             'access': access,
             'dispatcher_header': dispatcher_header,
@@ -4619,12 +4840,15 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     response = render(request, 'trips/dispatcher_control.html', context)
     if requested_fragment in {'dispatcher', 'mining_master'}:
         selector = '.dispatcher-board' if requested_fragment == 'dispatcher' else '.mm-mobile-shell'
+        fragment_extra = {}
+        if requested_fragment == 'mining_master':
+            fragment_extra['equipment_cards'] = dispatcher_dashboard['equipment_cards']
         return operational_fragment_response(
             response,
             screen=requested_fragment,
             selector=selector,
             version=operational_state_version,
-            extra={'equipment_cards': dispatcher_dashboard['equipment_cards']},
+            extra=fragment_extra,
         )
     return response
 

@@ -47,6 +47,11 @@ class OupEmployeeForm(EmployeeCardForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._is_existing_employee = bool(self.instance and self.instance.pk)
+        self.fields['personnel_number'].widget = forms.TextInput(attrs={
+            'autocomplete': 'off',
+            'maxlength': '64',
+            'placeholder': 'Например, 573',
+        })
         self.fields['access_role'].queryset = (
             Role.objects.filter(is_active=True)
             .exclude(code='admin')

@@ -80,6 +80,70 @@ class OperationalStateVersionViewTests(TestCase):
         self.assertNotIn('reason', payload)
         self.assertNotIn('updated_at', payload)
 
+    def test_generic_host_reports_requested_dispatcher_contract(self):
+        self.authorize()
+
+        response = self.client.get(
+            self.url,
+            {'include_events': '0', 'role_app_code': 'dispatcher'},
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload['role_active'])
+        self.assertEqual(payload['session_role_code'], 'dispatcher')
+        self.assertEqual(payload['role_app_code'], 'dispatcher')
+        self.assertTrue(payload['role_shell_version'].startswith('dispatcher-'))
+
+    def test_old_dispatcher_screen_is_readonly_after_session_role_changes(self):
+        admin_role = Role.objects.create(
+            code='admin',
+            name='Администратор',
+            is_active=True,
+        )
+        self.access.role = admin_role
+        self.access.save(update_fields=['role'])
+        self.authorize()
+
+        response = self.client.get(
+            self.url,
+            {'include_events': '0', 'role_app_code': 'dispatcher'},
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload['role_active'])
+        self.assertEqual(payload['session_role_code'], 'admin')
+        self.assertEqual(payload['role_app_code'], 'dispatcher')
+        self.assertTrue(payload['role_shell_version'].startswith('dispatcher-'))
+
+    @override_settings(
+        ROLE_APP_BASE_DOMAINS=('localhost',),
+        ALLOWED_HOSTS=['dispatcher.localhost'],
+    )
+    def test_isolated_host_wins_over_requested_role_contract(self):
+        admin_role = Role.objects.create(
+            code='admin',
+            name='Администратор',
+            is_active=True,
+        )
+        self.access.role = admin_role
+        self.access.save(update_fields=['role'])
+        self.authorize()
+
+        response = self.client.get(
+            self.url,
+            {'include_events': '0', 'role_app_code': 'admin'},
+            HTTP_HOST='dispatcher.localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload['role_active'])
+        self.assertEqual(payload['role_app_code'], 'dispatcher')
+
     def test_equipment_save_bumps_operational_state_version(self):
         equipment_type = EquipmentType.objects.create(name='Экскаватор')
 

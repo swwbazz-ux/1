@@ -1,0 +1,76 @@
+{% url detail_url_name employee.id as employee_detail_url %}
+{% if admin_employee_row %}
+<article class="oup-employee-row admin-oup-employee-row status-{{ employee.status }}"
+         draggable="true"
+         tabindex="0"
+         role="link"
+         data-oup-employee-row
+         data-employee-row
+         data-employee-id="{{ employee.id }}"
+         data-detail-url="{{ employee_detail_url }}"
+         data-employee-name="{{ employee.full_name }}"
+         data-employee-status="{{ employee.get_status_display }}"
+         data-employee-status-code="{{ employee.status }}"
+         data-access-status="{% with primary_access=employee.accesses.all.0 %}{% if primary_access %}{{ primary_access.get_status_display }}{% else %}Нет доступа{% endif %}{% endwith %}"
+         data-employee-search="{{ employee.full_name }} {{ employee.personnel_number }} {{ employee.phone }} {{ employee.position }} {{ employee.department_label }}">
+{% else %}
+<a class="oup-employee-row status-{{ employee.status }}"
+   href="{{ employee_detail_url }}"
+   data-oup-employee-row
+   data-employee-id="{{ employee.id }}"
+   data-employee-search="{{ employee.full_name }} {{ employee.personnel_number }} {{ employee.phone }} {{ employee.position }} {{ employee.department_label }}">
+{% endif %}
+    <span class="oup-person-cell">
+        <span class="oup-person-avatar" aria-hidden="true">
+            {% if employee.photo %}
+                <img src="{{ employee.photo.url }}" alt="" loading="lazy" decoding="async">
+            {% else %}
+                {{ employee.full_name|first }}
+            {% endif %}
+        </span>
+        <span>
+            <strong>{{ employee.full_name }}</strong>
+            <small>{% if admin_employee_row and employee.personnel_number %}Таб. №{{ employee.personnel_number }} · {% endif %}{{ employee.get_work_category_display }}</small>
+        </span>
+    </span>
+    <span class="oup-work-cell">
+        <strong>{{ employee.position|default:"Должность не указана" }}</strong>
+        <small>{{ employee.department_label|default:"Подразделение не указано" }} · {{ employee.work_schedule_label|default:"График не указан" }}{% if employee.brigade_number %} · {{ employee.get_brigade_number_display }}{% endif %} · {{ employee.watch_composition|default:"Состав вахты не указан" }}</small>
+    </span>
+    <span class="oup-contact-cell">
+        <strong>{{ employee.phone|default:"Телефон не указан" }}</strong>
+        <small>Принят {{ employee.hired_at|date:"d.m.Y"|default:"—" }}</small>
+    </span>
+    <span class="oup-state-cell">
+        <span class="oup-status-chip status-{{ employee.status }}">{{ employee.get_status_display }}</span>
+        <small>{{ employee.get_work_category_display }}</small>
+    </span>
+    <span class="oup-row-arrow" aria-hidden="true">›</span>
+{% if admin_employee_row %}
+    {% with primary_access=employee.accesses.all.0 %}
+        {% if primary_access %}
+            <form hidden method="post" action="{% url 'system_admin_access_action' primary_access.id 'block' %}" data-dnd-form="block_access" data-confirm="Заблокировать доступ сотрудника?">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <input type="hidden" name="reason" data-block-reason>
+            </form>
+            {% if employee.status != "archived" and employee.status != "dismissed" and employee.status != "deleted" %}
+                <form hidden method="post" action="{% url 'system_admin_access_action' primary_access.id 'unblock' %}" data-dnd-form="unblock_access" data-confirm="Разблокировать доступ сотрудника?">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                </form>
+            {% endif %}
+        {% endif %}
+    {% endwith %}
+    <form hidden method="post" action="{% url 'system_admin_employee_status_action' employee.id 'deactivate' %}" data-dnd-form="deactivate" data-confirm="Деактивировать сотрудника? Его доступы будут отключены.">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    </form>
+    <form hidden method="post" action="{% url 'system_admin_employee_status_action' employee.id 'archive' %}" data-dnd-form="archive" data-confirm="Отправить сотрудника в архив? Его доступы будут отключены.">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    </form>
+</article>
+{% else %}
+</a>
+{% endif %}

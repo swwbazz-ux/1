@@ -76,7 +76,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v120";
+const CACHE_NAME = "mining-master-mobile-shell-v122";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -88,6 +88,7 @@ const CORE_ASSETS = [
   MANIFEST_URL,
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
+  "/static/js/role-app-install-v1.js",
   "/static/css/app.css",
   "/static/favicon.ico",
   "/static/img/pwa/mining-master-180.png",
@@ -95,15 +96,7 @@ const CORE_ASSETS = [
   "/static/img/pwa/mining-master-512.png",
   "/static/img/pwa/mining-master-maskable-512.png",
   "/static/img/equipment/excavator-gray.png",
-  "/static/img/equipment/excavator-blue.png",
-  "/static/img/equipment/excavator-green.png",
-  "/static/img/equipment/excavator-yellow.png",
-  "/static/img/equipment/excavator-red.png",
-  "/static/img/equipment/truck-gray.png",
-  "/static/img/equipment/truck-blue.png",
-  "/static/img/equipment/truck-green.png",
-  "/static/img/equipment/truck-yellow.png",
-  "/static/img/equipment/truck-red.png"
+  "/static/img/equipment/truck-gray.png"
 ];
 
 self.addEventListener("install", event => {

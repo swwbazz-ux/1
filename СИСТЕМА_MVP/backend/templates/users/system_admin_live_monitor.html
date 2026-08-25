@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Смена онлайн{% endblock %}
+{% block body_class %}system-admin-live-monitor-screen{% endblock %}
+{% block extra_head %}
+{% include "users/includes/system_admin_workspace_styles.html" %}
+{% include "includes/role_app_pwa_head.html" with role_code="admin" manifest_url="/system-admin.webmanifest" service_worker_url="/system-admin-sw.js" legacy_scope="/system-admin/" theme_color="#53616F" apple_title="Админка" icon_180="img/pwa/admin-180.png" %}
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-live-monitor-shell admin-day" data-admin-theme>
+    <header class="admin-console-header" aria-label="Административная шапка">
+        <section class="admin-console-identity">
+            {% include "users/includes/system_admin_avatar.html" %}
+            <span>
+                <strong>{{ access.employee.full_name }}</strong>
+                <em>Системный администратор</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Админка MVP</span>
+                <h1>Смена онлайн</h1>
+                <p>Карта активных приложений, смен и подключённых сотрудников.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы админки">
+                <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
+                <a href="{% url 'system_admin_employees' %}">Сотрудники</a>
+                <a href="{% url 'system_admin_references' %}">Справочники</a>
+                <a class="is-active" href="{% url 'system_admin_live_monitor' %}">Смена онлайн</a>
+                <a href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+                <a href="{% url 'system_admin_logs' %}">Журнал</a>
+                <a href="{% url 'system_admin_exports' %}">Выгрузки</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions">
+            <button type="button" class="admin-theme-button" data-admin-theme-toggle data-theme-icon="sun" aria-label="Переключить дневной и ночной режим" title="Переключить дневной и ночной режим"></button>
+            <a class="admin-utility-link" href="{% url 'system_admin_dashboard' %}">Назад</a>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page admin-live-monitor-page">
+        {% for message in messages %}
+            <div class="message {{ message.tags|default:'success' }}">{{ message }}</div>
+        {% endfor %}
+
+        <section class="admin-live-monitor-intro">
+            <div>
+                <span class="admin-live-monitor-kicker">Контроль работы</span>
+                <h2>Все готовые приложения на одном экране</h2>
+                <p>Наблюдение открывает настоящий рабочий экран сотрудника без права изменять данные. Служебное завершение смены и отключение сотрудника всегда фиксируются в журнале.</p>
+            </div>
+            <div class="admin-live-monitor-refresh" aria-live="polite">
+                <span class="admin-live-monitor-pulse" aria-hidden="true"></span>
+                <span>Обновление каждые 10 секунд</span>
+                <time data-live-monitor-updated>{{ monitor_generated_at|date:"H:i:s" }}</time>
+            </div>
+        </section>
+
+        <div data-live-monitor-grid>
+            {% include "users/includes/system_admin_live_monitor_grid.html" %}
+        </div>
+    </main>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var grid = document.querySelector("[data-live-monitor-grid]");
+    var updated = document.querySelector("[data-live-monitor-updated]");
+    if (!grid) return;
+    var refreshInFlight = false;
+
+    function userIsWorking() {
+        return Boolean(
+            document.querySelector("details[open]")
+            || document.querySelector("input:focus, textarea:focus, select:focus")
+        );
+    }
+
+    function refreshMonitor() {
+        if (refreshInFlight || userIsWorking() || document.hidden) return;
+        refreshInFlight = true;
+        var url = new URL(window.location.href);
+        url.searchParams.set("fragment", "1");
+        window.fetch(url.toString(), {
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: {"X-Requested-With": "XMLHttpRequest"}
+        }).then(function (response) {
+            if (!response.ok) throw new Error("monitor " + response.status);
+            return response.text();
+        }).then(function (html) {
+            grid.innerHTML = html;
+            if (updated) updated.textContent = new Date().toLocaleTimeString("ru-RU");
+        }).catch(function () {
+            if (updated) updated.textContent = "нет связи";
+        }).finally(function () {
+            refreshInFlight = false;
+        });
+    }
+
+    window.setInterval(refreshMonitor, 10000);
+});
+</script>
+{% endblock %}

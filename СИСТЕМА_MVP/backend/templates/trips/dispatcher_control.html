@@ -2,6 +2,13 @@
 {% load static %}
 
 {% block title %}{% if dispatcher_page_title %}{{ dispatcher_page_title }}{% else %}Горный диспетчер{% endif %}{% endblock %}
+{% block app_stylesheets %}
+    {% if mining_master_mobile_enabled %}
+        {{ block.super }}
+    {% else %}
+        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}">
+    {% endif %}
+{% endblock %}
 {% block extra_head %}
     {% if mining_master_mobile_enabled %}
         <link rel="manifest" href="{% url 'mining_master_manifest' %}">
@@ -11,6 +18,7 @@
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
         <meta name="apple-mobile-web-app-title" content="Горный мастер">
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
+        <script src="{% static 'js/role-app-install-v1.js' %}?v=2" defer></script>
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
         <meta name="theme-color" content="#B33A4C">
@@ -24,7 +32,16 @@
 {% block body_class %}dispatcher-control-screen{% if mining_master_mobile_enabled %} mining-master-mobile-screen{% endif %}{% endblock %}
 
 {% block body %}
-<main class="dispatcher-shell" data-dispatcher-theme>
+{% spaceless %}
+<main
+    class="dispatcher-shell"
+    data-dispatcher-theme
+    data-static-prefix="{% static '' %}"
+    data-dispatcher-move-url="{{ dispatcher_move_excavator_url }}"
+    data-dispatcher-assign-url="{{ dispatcher_assign_truck_url }}"
+    data-dispatcher-detail-url-template="{% url 'dispatcher_equipment_detail' category='equipment' equipment_id=0 %}"
+    data-dispatcher-service-worker-scope="{% if role_app.role_code == 'dispatcher' %}/{% else %}/dispatcher/{% endif %}"
+>
     <h1 class="dispatcher-compat-title">{% if dispatcher_compat_title %}{{ dispatcher_compat_title }}{% else %}Диспетчерский пульт{% endif %}</h1>
     {% if messages %}
         <div class="dispatcher-messages">
@@ -34,7 +51,7 @@
         </div>
     {% endif %}
 
-    <section class="dispatcher-board{% if not dispatcher_header.active_shift %} is-readonly{% endif %}" data-dispatcher-shift-open="{% if dispatcher_header.active_shift %}true{% else %}false{% endif %}" aria-label="{% if dispatcher_board_label %}{{ dispatcher_board_label }}{% else %}Горный диспетчер{% endif %}">
+    <section class="dispatcher-board{% if not dispatcher_header.active_shift %} is-readonly{% endif %}" data-dispatcher-shift-open="{% if dispatcher_header.active_shift %}true{% else %}false{% endif %}" data-dispatcher-own-shift-open="{% if dispatcher_header.shift_is_open %}true{% else %}false{% endif %}" data-operational-state-version="{{ operational_state_version|default:0 }}" aria-label="{% if dispatcher_board_label %}{{ dispatcher_board_label }}{% else %}Горный диспетчер{% endif %}">
         <header class="dispatcher-topbar dispatcher-unified-topbar">
             {% include "includes/dispatcher_header.html" with dispatcher_nav_active="control" %}
         </header>
@@ -49,7 +66,7 @@
                 {% for tile in dispatcher_dashboard.excavator_garage_tiles %}
                     <article class="dispatcher-equipment-tile dispatcher-excavator-garage-tile status-{{ tile.status }}{% if tile.is_placeholder %} is-placeholder{% endif %}{% if tile.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ tile.percent|default:0 }}%;" {% if not tile.is_placeholder %}role="button" tabindex="0" draggable="true" data-dispatcher-drag="excavator" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-excavator-slot="{{ tile.display_name }}" data-garage-item="excavator" data-plan-status="{{ tile.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ tile.percent|default:0 }}" data-plan-loop-percent="{% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ tile.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if tile.plan_has_plan %}{{ tile.plan_visual.phase }}{% endif %}" data-plan-mode="{{ tile.plan_calculation_mode|default:'' }}" data-plan-value="{{ tile.plan_value|default:'' }}" data-plan-fact="{{ tile.plan_fact_value|default:'' }}" data-plan-unit="{{ tile.plan_unit|default:'' }}" data-plan-group="{{ tile.plan_group_name|default:'' }}"{% endif %}>
                         {% if tile.display_name %}<strong>{{ tile.display_name }}</strong>{% endif %}
-                        <img src="{% static tile.icon %}" alt="">
+                        <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
                         {% if not tile.is_placeholder %}<span>{{ tile.label }}</span>{% endif %}
                         {% if not tile.is_placeholder %}
                             <em class="dispatcher-tile-plan-percent">{{ tile.plan_percent_label|default:"Не назначен" }}</em>
@@ -104,7 +121,7 @@
                             {% for truck in complex.active_truck_tiles %}
                                 <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-complex-truck="true" data-assigned-zone="{{ complex.id }}" data-plan-status="{{ truck.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ truck.percent|default:0 }}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" data-plan-mode="{{ truck.plan_calculation_mode|default:'' }}" data-plan-value="{{ truck.plan_value|default:'' }}" data-plan-fact="{{ truck.plan_fact_value|default:'' }}" data-plan-unit="{{ truck.plan_unit|default:'' }}" data-plan-group="{{ truck.plan_group_name|default:'' }}">
                                     <strong>{{ truck.name }}</strong>
-                                    <img src="{% static truck.icon %}" alt="">
+                                    <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                                     <span>{{ truck.label }}</span>
                                     {% if truck.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ truck.plan_visual.completed_loops }}">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
                                 </article>
@@ -128,7 +145,7 @@
                 {% for tile in dispatcher_dashboard.truck_garage_tiles %}
                     <article class="dispatcher-truck-tile status-{{ tile.status }}{% if tile.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ tile.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-garage-item="truck" data-plan-status="{{ tile.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ tile.percent|default:0 }}" data-plan-loop-percent="{% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ tile.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if tile.plan_has_plan %}{{ tile.plan_visual.phase }}{% endif %}" data-plan-mode="{{ tile.plan_calculation_mode|default:'' }}" data-plan-value="{{ tile.plan_value|default:'' }}" data-plan-fact="{{ tile.plan_fact_value|default:'' }}" data-plan-unit="{{ tile.plan_unit|default:'' }}" data-plan-group="{{ tile.plan_group_name|default:'' }}">
                         <strong>{{ tile.name }}</strong>
-                        <img src="{% static tile.icon %}" alt="">
+                        <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                         <span>{{ tile.label }}</span>
                         {% if tile.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ tile.plan_visual.completed_loops }}">×{{ tile.plan_visual.completed_loops }}</b>{% endif %}
                     </article>
@@ -150,7 +167,7 @@
                 <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                     {{ dispatcher_dashboard.completion_percent|default:0 }}%
                 </div>
-                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
+                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
             </div>
         </header>
 
@@ -182,7 +199,7 @@
                             </div>
                         </div>
                         <div class="mm-mobile-complex-visual" aria-hidden="true" data-mm-mobile-release-trucks>
-                            <img src="{% static complex.excavator_icon %}" alt="">
+                            <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
                         </div>
                         <div class="mm-mobile-truck-preview" aria-label="Самосвалы комплекса" data-mm-mobile-truck-count="{% if complex.mobile_truck_overflow %}17{% else %}{{ complex.active_truck_tiles|length }}{% endif %}">
                             {% for truck in complex.active_truck_tiles|slice:":16" %}
@@ -233,7 +250,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
                 </div>
             </header>
 
@@ -248,7 +265,7 @@
                     {% if not excavator.is_placeholder %}
                         <button type="button" class="mm-mobile-garage-excavator status-{{ excavator.status }}" data-mm-mobile-activate-excavator="{{ excavator.card_id }}" data-equipment-card-id="{{ excavator.card_id }}" data-mm-mobile-excavator-sort="{{ excavator.board_number|default:9999 }}" data-mm-mobile-equipment-state="{{ excavator.equipment_state_code }}" title="{{ excavator.label }}" aria-label="Вернуть экскаватор {{ excavator.display_name }} в активную смену">
                             <span>Экс {{ excavator.display_name }}</span>
-                            <img src="{% static excavator.icon %}" alt="">
+                            <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
                         </button>
                     {% else %}
                         <article class="mm-mobile-garage-slot status-empty" aria-disabled="true"></article>
@@ -287,7 +304,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
                 </div>
             </header>
 
@@ -298,7 +315,7 @@
             <div class="mm-mobile-detail-trucks" aria-label="Гараж самосвалов">
                 {% for truck in dispatcher_dashboard.mobile_truck_garage_tiles %}
                     <article class="mm-mobile-truck-card status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} role="button" tabindex="0" data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
-                        <img src="{% static truck.icon %}" alt="">
+                        <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                         <strong>{{ truck.name }}</strong>
                         <span></span>
                         {% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}
@@ -340,7 +357,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
                 </div>
             </header>
 
@@ -403,7 +420,7 @@
 
             <div class="mm-mobile-version-strip" aria-label="Версия приложения">
                 <span>Версия приложения</span>
-                <strong data-mm-pwa-current-shell-version>v118</strong>
+                <strong data-mm-pwa-current-shell-version>v122</strong>
                 <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
             </div>
 
@@ -440,7 +457,7 @@
                             <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                                 {{ dispatcher_dashboard.completion_percent|default:0 }}%
                             </div>
-                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v118</span>
+                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
                         </div>
                     </header>
 
@@ -465,7 +482,7 @@
                         <div class="mm-mobile-fill-truck-garage" aria-label="Гараж самосвалов">
                             {% for truck in dispatcher_dashboard.mobile_truck_garage_tiles %}
                                 <button type="button" class="mm-mobile-truck-card mm-mobile-fill-truck status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-number="{{ truck.name }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
-                                    <img src="{% static truck.icon %}" alt="">
+                                    <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                                     <strong>{{ truck.name }}</strong>
                                     <span></span>
                                     {% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}
@@ -494,6 +511,22 @@
     </div>
 
     {% if mining_master_mobile_enabled %}
+    <div class="mm-mobile-update-modal" data-pwa-browser-mode-warning hidden>
+        <section class="mm-mobile-update-dialog" role="alertdialog" aria-modal="true" aria-labelledby="mm-yandex-pwa-title" aria-describedby="mm-yandex-pwa-text">
+            <div class="mm-mobile-update-pulse" aria-hidden="true"></div>
+            <div class="mm-mobile-update-copy">
+                <span>Режим браузера</span>
+                <h2 id="mm-yandex-pwa-title">Открыто не как приложение</h2>
+                <p id="mm-yandex-pwa-text">Яндекс Браузер запустил обычную страницу. Удалите этот ярлык, откройте адрес в Google Chrome и выберите «Установить приложение».</p>
+                <div class="mm-mobile-update-status" data-pwa-browser-warning-copy-status>После правильной установки нижней строки браузера не будет.</div>
+            </div>
+            <div class="mm-mobile-update-actions">
+                <button type="button" class="secondary" data-pwa-browser-warning-close>Пока продолжить</button>
+                <button type="button" class="primary" data-pwa-browser-warning-copy>Скопировать адрес</button>
+            </div>
+        </section>
+    </div>
+
     <div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>
         <section class="mm-mobile-update-dialog" role="alertdialog" aria-modal="true" aria-labelledby="mm-pwa-update-title" aria-describedby="mm-pwa-update-text">
             <div class="mm-mobile-update-pulse" aria-hidden="true"></div>
@@ -782,6 +815,10 @@
                 </div>
             </div>
             <dl class="mm-detail-list" data-gd-detail-list></dl>
+            <div class="gd-detail-load-state" data-gd-detail-load-state hidden>
+                <span data-gd-detail-load-message>Загружаю свежие данные…</span>
+                <button type="button" data-gd-detail-retry hidden>Повторить</button>
+            </div>
             <div class="gd-detail-shift-report" data-gd-detail-shift-report hidden>
                 <div class="gd-detail-section-title">Смена на текущий момент</div>
                 <div class="gd-detail-metrics" data-gd-detail-metrics></div>
@@ -791,11 +828,13 @@
         </section>
     </div>
 </main>
+{% endspaceless %}
 
 {{ dispatcher_dashboard.equipment_cards|json_script:"gd-equipment-cards-data" }}
 {{ dispatcher_dashboard.equipment_state_ui|json_script:"gd-equipment-states-data" }}
 {% get_static_prefix as static_prefix %}
 
+{% if mining_master_mobile_enabled %}
 <script>
 document.addEventListener("DOMContentLoaded", function () {
     var shell = document.querySelector("[data-dispatcher-theme]");
@@ -887,7 +926,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (label && state.label) label.textContent = state.label;
         var img = node.querySelector("img");
         if (img && equipmentType) {
-            img.src = staticPrefix + "img/equipment/" + equipmentType + "-" + dispatcherEquipmentStateIconColor(state.code) + ".png";
+            img.src = staticPrefix + "img/equipment/" + equipmentType + "-gray.png";
         }
     }
     var dispatcherSyncPendingCount = 0;
@@ -900,7 +939,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v120";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v122";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -2774,14 +2813,9 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         function getMobileGarageTruckIcon(node) {
             if (node && node.dataset && node.dataset.mmMobileEquipmentState) {
-                return "/static/img/equipment/truck-" + dispatcherEquipmentStateIconColor(node.dataset.mmMobileEquipmentState) + ".png";
+                return "/static/img/equipment/truck-gray.png";
             }
             var statusClass = getMobileGarageTruckStatusClass(node);
-            if (statusClass === "status-red") return "/static/img/equipment/truck-red.png";
-            if (statusClass === "status-green") return "/static/img/equipment/truck-green.png";
-            if (statusClass === "status-blue") return "/static/img/equipment/truck-blue.png";
-            if (statusClass === "status-yellow") return "/static/img/equipment/truck-yellow.png";
-            if (statusClass === "status-orange") return "/static/img/equipment/truck-yellow.png";
             return "/static/img/equipment/truck-gray.png";
         }
         function getMobileTruckSortValue(node) {
@@ -4023,13 +4057,8 @@ document.addEventListener("DOMContentLoaded", function () {
         function getMobileFillTruckIcon(mini) {
             if (!mini) return "/static/img/equipment/truck-gray.png";
             if (mini.dataset && mini.dataset.mmMobileEquipmentState) {
-                return "/static/img/equipment/truck-" + dispatcherEquipmentStateIconColor(mini.dataset.mmMobileEquipmentState) + ".png";
+                return "/static/img/equipment/truck-gray.png";
             }
-            if (mini.classList.contains("status-danger") || mini.classList.contains("status-red")) return "/static/img/equipment/truck-red.png";
-            if (mini.classList.contains("status-risk") || mini.classList.contains("status-yellow")) return "/static/img/equipment/truck-yellow.png";
-            if (mini.classList.contains("status-normal") || mini.classList.contains("status-green")) return "/static/img/equipment/truck-green.png";
-            if (mini.classList.contains("status-blue")) return "/static/img/equipment/truck-blue.png";
-            if (mini.classList.contains("status-orange")) return "/static/img/equipment/truck-yellow.png";
             return "/static/img/equipment/truck-gray.png";
         }
         function restoreMobileFillTruckToGarage(screen, mini) {
@@ -4048,7 +4077,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 button.dataset.mmMobileFillWasAssigned = "true";
             }
             var img = document.createElement("img");
-            img.src = staticPrefix + "img/equipment/truck-" + dispatcherEquipmentStateIconColor(stateCode) + ".png";
+            img.src = staticPrefix + "img/equipment/truck-gray.png";
             img.alt = "";
             var strong = document.createElement("strong");
             strong.textContent = button.dataset.mmMobileFillTruckNumber || "";
@@ -5474,7 +5503,7 @@ document.addEventListener("DOMContentLoaded", function () {
         tile.dataset.garageItem = "excavator";
         tile.innerHTML =
             (slot ? "<strong>" + escapeHtml(slot) + "</strong>" : "") +
-            '<img src="/static/img/equipment/excavator-' + dispatcherEquipmentStateIconColor(stateCode) + '.png" alt="">' +
+            '<img src="/static/img/equipment/excavator-gray.png" alt="">' +
             "<span>" + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + "</span>";
         return tile;
     }
@@ -5877,4 +5906,7 @@ document.addEventListener("DOMContentLoaded", function () {
     window.addEventListener("resize", refreshAllComplexTruckRacks);
 });
 </script>
+{% else %}
+<script src="{% static 'js/dispatcher-control-v1.js' %}" defer></script>
+{% endif %}
 {% endblock %}

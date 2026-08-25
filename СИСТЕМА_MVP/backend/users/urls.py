@@ -23,8 +23,16 @@ from .oup_views import (
     oup_shift_start_view,
     oup_temporary_work_transfer_review_view,
 )
+from .live_monitor_views import (
+    application_session_heartbeat_view,
+    system_admin_force_close_shift_view,
+    system_admin_force_end_sessions_view,
+    system_admin_live_monitor_view,
+)
 from .views import (
     activate_access_view,
+    app_catalog_qr_view,
+    app_catalog_view,
     driver_accept_assignment_view,
     driver_downtime_action_view,
     driver_close_shift_view,
@@ -60,8 +68,11 @@ from .views import (
 )
 
 urlpatterns = [
+    path('session-heartbeat/', application_session_heartbeat_view, name='application_session_heartbeat'),
     path('', login_view, name='login'),
     path('activate-access/', activate_access_view, name='activate_access'),
+    path('apps/', app_catalog_view, name='app_catalog'),
+    path('apps/qr/<slug:role_code>/', app_catalog_qr_view, name='app_catalog_qr'),
     path('interfaces/', interface_map_view, name='interface_map'),
     path('home/', role_home_view, name='role_home'),
     path('oup/', oup_home_view, name='oup_home'),
@@ -93,6 +104,17 @@ urlpatterns = [
     path('driver/downtime/', driver_downtime_action_view, name='driver_downtime_action'),
     path('driver/assignment/<int:assignment_id>/accept/', driver_accept_assignment_view, name='driver_accept_assignment'),
     path('system-admin/', system_admin_dashboard_view, name='system_admin_dashboard'),
+    path('system-admin/live/', system_admin_live_monitor_view, name='system_admin_live_monitor'),
+    path(
+        'system-admin/live/shifts/<int:shift_id>/force-close/',
+        system_admin_force_close_shift_view,
+        name='system_admin_force_close_shift',
+    ),
+    path(
+        'system-admin/live/accesses/<int:access_id>/force-end/',
+        system_admin_force_end_sessions_view,
+        name='system_admin_force_end_sessions',
+    ),
     path('system-admin/reset-shift-test-data/', system_admin_reset_shift_test_data_view, name='system_admin_reset_shift_test_data'),
     path('system-admin/employees/', system_admin_employees_view, name='system_admin_employees'),
     path('system-admin/references/', system_admin_references_view, name='system_admin_references'),
