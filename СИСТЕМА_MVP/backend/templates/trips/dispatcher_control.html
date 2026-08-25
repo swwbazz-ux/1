@@ -9,6 +9,7 @@
         <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}">
     {% endif %}
 {% endblock %}
+{% block viewport_extra %}{% if mining_master_mobile_enabled %}, viewport-fit=cover{% endif %}{% endblock %}
 {% block extra_head %}
     {% if mining_master_mobile_enabled %}
         <link rel="manifest" href="{% url 'mining_master_manifest' %}">

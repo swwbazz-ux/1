@@ -6,6 +6,7 @@
 {% block realtime_screen %}driver-shift{% endblock %}
 {% block realtime_mode %}custom{% endblock %}
 {% block realtime_role %}driver{% endblock %}
+{% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <meta name="theme-color" content="#147D7E">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -197,7 +198,7 @@ body.driver-mobile-screen .driver-header-id {
     font-weight: 900;
     white-space: nowrap;
     text-wrap: nowrap;
-    text-overflow: clip;
+    text-overflow: ellipsis;
     text-shadow: 0 0 14px rgba(140, 255, 46, 0.55), 0 0 30px rgba(140, 255, 46, 0.20);
 }
 
@@ -4391,6 +4392,22 @@ window.bindDriverMobileShell = function () {
             );
         });
     }
+    function fitDriverHeaderId() {
+        var headerId = shell.querySelector(".driver-header-id");
+        if (!headerId) return;
+        headerId.style.removeProperty("font-size");
+        var maxSize = parseFloat(window.getComputedStyle(headerId).fontSize);
+        if (!(maxSize > 0)) return;
+        var available = headerId.clientWidth;
+        var needed = headerId.scrollWidth;
+        if (!(available > 0) || needed <= available) return;
+        var size = Math.max(11, Math.floor(maxSize * (available / needed)));
+        headerId.style.fontSize = size + "px";
+        while (size > 11 && headerId.scrollWidth > headerId.clientWidth) {
+            size -= 1;
+            headerId.style.fontSize = size + "px";
+        }
+    }
     function fitDriverViewport() {
         var height = driverVisualViewportHeight();
         var viewport = window.visualViewport;
@@ -4407,6 +4424,7 @@ window.bindDriverMobileShell = function () {
             ? "tight"
             : (height < 780 || width < 390 ? "compact" : "normal");
         window.requestAnimationFrame(function () {
+            fitDriverHeaderId();
             var panel = shell.querySelector("[data-driver-tab-panel].is-active");
             if (driverPanelOverflows(panel)) {
                 shell.dataset.driverDensity = shell.dataset.driverDensity === "normal" ? "compact" : "tight";

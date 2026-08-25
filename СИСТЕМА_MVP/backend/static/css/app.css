@@ -30652,6 +30652,23 @@ body.excavator-operator-screen {
 
 .eo-dashboard-empty {
     min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.eo-dashboard-empty img {
+    flex: 0 1 auto;
+    min-height: 0;
+}
+
+/* Below this height the decorative truck shrinks to an unreadable sliver. */
+@media (max-height: 620px) {
+    .eo-dashboard-empty img {
+        display: none;
+    }
 }
 
 .eo-dashboard-divider {
