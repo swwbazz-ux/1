@@ -1,0 +1,504 @@
+/* Review queue for dispatcher actions recorded on behalf of employees. */
+.management-intervention-board {
+    grid-template-rows: auto auto auto auto minmax(0, 1fr);
+}
+
+.management-intervention-board .management-dashboard-header {
+    grid-template-columns: minmax(390px, 1fr) minmax(280px, auto) minmax(260px, auto);
+}
+
+.management-intervention-board .management-dashboard-header-title h1 {
+    overflow: visible;
+    font-size: 30px;
+    line-height: 1;
+    text-overflow: clip;
+    white-space: normal;
+}
+
+.management-intervention-scopes {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.management-intervention-scopes a {
+    min-height: 34px;
+    padding: 9px 13px;
+    border: 1px solid var(--gd-line);
+    border-radius: 5px;
+    background: var(--gd-panel-soft);
+    color: var(--gd-muted);
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    text-decoration: none;
+    text-transform: uppercase;
+}
+
+.management-intervention-scopes a.is-active {
+    border-color: var(--gd-blue);
+    background: var(--gd-blue-soft);
+    color: var(--gd-ink);
+}
+
+.management-intervention-messages {
+    display: grid;
+    gap: 6px;
+}
+
+.management-intervention-messages p {
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--gd-line);
+    border-left: 4px solid var(--gd-blue);
+    border-radius: 5px;
+    background: var(--gd-panel);
+    color: var(--gd-ink);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.management-intervention-messages p.is-error {
+    border-left-color: var(--gd-red);
+}
+
+.management-intervention-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.management-intervention-summary div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 54px;
+    padding: 10px 14px;
+    border: 1px solid var(--gd-line);
+    border-left: 4px solid var(--gd-blue);
+    border-radius: 6px;
+    background: var(--gd-panel);
+}
+
+.management-intervention-summary div.is-warning {
+    border-left-color: var(--gd-yellow);
+}
+
+.management-intervention-summary div.is-danger {
+    border-left-color: var(--gd-red);
+}
+
+.management-intervention-summary span {
+    color: var(--gd-muted);
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.management-intervention-summary strong {
+    color: var(--gd-ink);
+    font-size: 24px;
+    line-height: 1;
+}
+
+.management-intervention-list {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    min-width: 0;
+}
+
+.management-intervention-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(290px, 360px);
+    min-width: 0;
+    border: 1px solid var(--gd-line);
+    border-left: 5px solid var(--gd-blue);
+    border-radius: 7px;
+    background: var(--gd-panel);
+    box-shadow: var(--gd-shadow);
+}
+
+.management-intervention-item.is-disputed,
+.management-intervention-item.is-under_review {
+    border-left-color: var(--gd-yellow);
+}
+
+.management-intervention-item.is-overdue {
+    border-left-color: var(--gd-red);
+}
+
+.management-intervention-main,
+.management-intervention-review {
+    min-width: 0;
+    padding: 14px;
+}
+
+.management-intervention-review {
+    display: grid;
+    align-content: start;
+    gap: 9px;
+    border-left: 1px solid var(--gd-line-soft);
+    background: color-mix(in srgb, var(--gd-panel-soft) 70%, transparent);
+}
+
+.management-intervention-title {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+}
+
+.management-intervention-title h2,
+.management-intervention-title p {
+    margin: 0;
+}
+
+.management-intervention-title h2 {
+    color: var(--gd-ink);
+    font-size: 18px;
+    line-height: 1.1;
+}
+
+.management-intervention-title p {
+    margin-top: 4px;
+    color: var(--gd-muted);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.management-intervention-id,
+.management-intervention-status {
+    padding: 5px 7px;
+    border: 1px solid var(--gd-line);
+    border-radius: 4px;
+    background: var(--gd-panel-soft);
+    color: var(--gd-muted);
+    font-size: 10px;
+    font-weight: 900;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.management-intervention-status {
+    border-color: var(--gd-blue);
+    color: var(--gd-ink);
+}
+
+.management-intervention-facts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px;
+    margin: 12px 0 0;
+}
+
+.management-intervention-facts div,
+.management-intervention-deadline {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid var(--gd-line-soft);
+    border-radius: 5px;
+    background: var(--gd-panel-soft);
+}
+
+.management-intervention-facts dt,
+.management-intervention-deadline span {
+    color: var(--gd-muted);
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.management-intervention-facts dd,
+.management-intervention-deadline strong {
+    min-width: 0;
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: var(--gd-ink);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.management-intervention-deadline small {
+    color: var(--gd-muted);
+    font-size: 11px;
+}
+
+.management-intervention-deadline.is-overdue {
+    border-color: var(--gd-red);
+    background: var(--gd-red-soft);
+}
+
+.management-intervention-comment {
+    margin: 9px 0 0;
+    padding: 9px 10px;
+    border-left: 3px solid var(--gd-blue);
+    background: var(--gd-panel-soft);
+    color: var(--gd-ink);
+    font-size: 13px;
+    line-height: 1.35;
+}
+
+.management-intervention-impact-list {
+    display: grid;
+    gap: 5px;
+    margin-top: 9px;
+}
+
+.management-intervention-impact {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(130px, auto);
+    align-items: center;
+    gap: 10px;
+    min-height: 34px;
+    padding: 6px 9px;
+    border: 1px solid var(--gd-line-soft);
+    border-radius: 4px;
+}
+
+.management-intervention-impact.is-correction {
+    border-style: dashed;
+    border-color: var(--gd-yellow);
+}
+
+.management-intervention-impact span,
+.management-intervention-impact em {
+    color: var(--gd-muted);
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 800;
+}
+
+.management-intervention-impact strong {
+    color: var(--gd-ink);
+    font-size: 13px;
+}
+
+.management-intervention-action,
+.management-intervention-history {
+    border: 1px solid var(--gd-line);
+    border-radius: 5px;
+    background: var(--gd-panel);
+}
+
+.management-intervention-action summary,
+.management-intervention-history summary {
+    padding: 9px 10px;
+    color: var(--gd-ink);
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.management-intervention-action form {
+    display: grid;
+    gap: 7px;
+    padding: 9px;
+    border-top: 1px solid var(--gd-line-soft);
+}
+
+.management-intervention-action label {
+    display: grid;
+    gap: 4px;
+}
+
+.management-intervention-action label span {
+    color: var(--gd-muted);
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.management-intervention-action select,
+.management-intervention-action textarea,
+.management-intervention-action input {
+    width: 100%;
+    min-height: 36px;
+    padding: 7px 8px;
+    border: 1px solid var(--gd-line);
+    border-radius: 4px;
+    background: var(--gd-panel-soft);
+    color: var(--gd-ink);
+    font: inherit;
+    font-size: 13px;
+}
+
+.management-intervention-action textarea {
+    resize: vertical;
+}
+
+.management-intervention-action button,
+.management-intervention-inline-action button {
+    min-height: 38px;
+    padding: 8px 10px;
+    border: 1px solid var(--gd-green);
+    border-radius: 4px;
+    background: var(--gd-green-soft);
+    color: var(--gd-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.management-intervention-action button.is-warning {
+    border-color: var(--gd-yellow);
+    background: var(--gd-yellow-soft);
+}
+
+.management-intervention-action button.is-danger {
+    border-color: var(--gd-red);
+    background: var(--gd-red-soft);
+}
+
+.management-intervention-history ol {
+    display: grid;
+    gap: 5px;
+    margin: 0;
+    padding: 0 10px 10px;
+    list-style: none;
+}
+
+.management-intervention-history li {
+    display: grid;
+    grid-template-columns: 70px minmax(0, 1fr);
+    gap: 5px 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--gd-line-soft);
+    color: var(--gd-ink);
+    font-size: 11px;
+}
+
+.management-intervention-history time,
+.management-intervention-history small {
+    color: var(--gd-muted);
+}
+
+.management-intervention-history small {
+    grid-column: 2;
+}
+
+.management-intervention-empty {
+    display: grid;
+    place-items: center;
+    gap: 7px;
+    min-height: 180px;
+    padding: 20px;
+    border: 1px dashed var(--gd-line);
+    border-radius: 7px;
+    color: var(--gd-muted);
+    text-align: center;
+}
+
+.management-intervention-empty strong {
+    color: var(--gd-ink);
+    font-size: 18px;
+}
+
+@media (max-width: 1100px) {
+    .management-intervention-screen {
+        overflow: auto;
+    }
+
+    .management-intervention-board .management-dashboard-header {
+        grid-template-columns: 1fr;
+    }
+
+    .management-intervention-board .management-dashboard-header-actions {
+        justify-self: stretch;
+    }
+
+    .management-intervention-board .dispatcher-analytics-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .management-intervention-scopes {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    .management-intervention-scopes a {
+        flex: 1;
+        text-align: center;
+    }
+
+    .management-intervention-item {
+        grid-template-columns: 1fr;
+    }
+
+    .management-intervention-facts {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .management-intervention-review {
+        border-top: 1px solid var(--gd-line-soft);
+        border-left: 0;
+    }
+}
+
+@media (max-width: 820px) {
+    .management-intervention-screen {
+        overflow: auto;
+    }
+
+    .management-intervention-board .management-dashboard-header {
+        grid-template-columns: 1fr;
+    }
+
+    .management-intervention-board .management-dashboard-header-actions {
+        justify-self: stretch;
+    }
+
+    .management-intervention-board .dispatcher-analytics-toolbar,
+    .management-intervention-item {
+        grid-template-columns: 1fr;
+    }
+
+    .management-intervention-board .dispatcher-analytics-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .management-intervention-scopes {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    .management-intervention-scopes a {
+        flex: 1;
+        text-align: center;
+    }
+
+    .management-intervention-review {
+        border-top: 1px solid var(--gd-line-soft);
+        border-left: 0;
+    }
+}
+
+@media (max-width: 560px) {
+    .management-intervention-summary,
+    .management-intervention-facts {
+        grid-template-columns: 1fr;
+    }
+
+    .management-intervention-title {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .management-intervention-status {
+        grid-column: 1 / -1;
+        width: fit-content;
+    }
+
+    .management-intervention-impact {
+        grid-template-columns: 1fr auto;
+    }
+
+    .management-intervention-impact em {
+        grid-column: 1 / -1;
+    }
+}

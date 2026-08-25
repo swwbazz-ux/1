@@ -23,6 +23,9 @@
             <a class="{% if active_nav == 'logs' %}is-active{% endif %}"
                href="{% url 'oup_logs' %}"
                {% if active_nav == 'logs' %}aria-current="page"{% endif %}>Журнал действий</a>
+            <a class="{% if active_nav == 'interventions' %}is-active{% endif %}"
+               href="{% url 'oup_intervention_queue' %}"
+               {% if active_nav == 'interventions' %}aria-current="page"{% endif %}>Вмешательства</a>
         </nav>
     </section>
 

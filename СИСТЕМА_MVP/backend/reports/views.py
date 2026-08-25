@@ -6,14 +6,15 @@ from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -32,10 +33,19 @@ from shifts.services import (
     shift_plan_totals_for_dates,
 )
 from trips.dispatcher_header import build_dispatcher_header_context
+from trips.interventions import (
+    acknowledge_intervention_by_proxy,
+    resolve_intervention,
+    start_intervention_review,
+)
 from trips.models import (
     DispatcherActionLog,
     DispatcherActionType,
+    InterventionAcknowledgementChannel,
+    InterventionEscalationLevel,
+    InterventionReviewStatus,
     OPEN_TRIP_STATUSES,
+    OperationalIntervention,
     Trip,
     TripStatus,
 )
@@ -5678,6 +5688,190 @@ def customer_daily_report_export_view(request):
     response['Content-Disposition'] = 'attachment; filename=\"customer_daily_report.xlsx\"'
     workbook.save(response)
     return response
+
+
+INTERVENTION_REVIEW_READ_ROLES = {'manager', 'admin', 'oup'}
+INTERVENTION_REVIEW_DECISION_ROLES = {'manager', 'admin'}
+INTERVENTION_REVIEW_ACKNOWLEDGEMENT_ROLES = {'manager', 'admin'}
+INTERVENTION_REVIEW_ACTIVE_STATUSES = {
+    InterventionReviewStatus.AWAITING_DELIVERY,
+    InterventionReviewStatus.AWAITING_OBJECTION,
+    InterventionReviewStatus.DISPUTED,
+    InterventionReviewStatus.UNDER_REVIEW,
+}
+
+
+def management_intervention_scope(access):
+    queryset = OperationalIntervention.objects.all()
+    if access.role.code == 'oup':
+        queryset = queryset.filter(
+            escalation_level=InterventionEscalationLevel.PERSONNEL_ACCOUNTING,
+        )
+    return queryset
+
+
+def management_intervention_queue_view(request):
+    access = get_reports_access(request, INTERVENTION_REVIEW_READ_ROLES)
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+    is_oup_route = request.resolver_match.url_name == 'oup_intervention_queue'
+    if access.role.code == 'oup' and not is_oup_route:
+        return redirect('oup_intervention_queue')
+    if access.role.code != 'oup' and is_oup_route:
+        return redirect('management_intervention_queue')
+
+    selected_scope = (request.GET.get('scope') or 'active').strip()
+    if selected_scope not in {'active', 'resolved', 'all'}:
+        selected_scope = 'active'
+    base_queryset = management_intervention_scope(access)
+    queryset = (
+        base_queryset
+        .select_related(
+            'actor',
+            'subject_employee',
+            'equipment',
+            'reviewer',
+            'resolved_by',
+            'acknowledged_by',
+        )
+        .prefetch_related('impacts', 'review_events__actor')
+    )
+    if selected_scope == 'active':
+        queryset = queryset.filter(review_status__in=INTERVENTION_REVIEW_ACTIVE_STATUSES)
+    elif selected_scope == 'resolved':
+        queryset = queryset.exclude(review_status__in=INTERVENTION_REVIEW_ACTIVE_STATUSES)
+
+    now = timezone.now()
+    interventions = list(queryset.order_by('-recorded_at')[:100])
+    for intervention in interventions:
+        intervention.is_review_overdue = bool(
+            intervention.review_due_at
+            and intervention.review_due_at <= now
+            and intervention.review_status in {
+                InterventionReviewStatus.DISPUTED,
+                InterventionReviewStatus.UNDER_REVIEW,
+            }
+        )
+
+    return render(request, 'reports/management_intervention_queue.html', {
+        'access': access,
+        'interventions': interventions,
+        'selected_scope': selected_scope,
+        'can_resolve': access.role.code in INTERVENTION_REVIEW_DECISION_ROLES,
+        'can_acknowledge': access.role.code in INTERVENTION_REVIEW_ACKNOWLEDGEMENT_ROLES,
+        'queue_url_name': (
+            'oup_intervention_queue'
+            if access.role.code == 'oup'
+            else 'management_intervention_queue'
+        ),
+        'active_count': base_queryset.filter(
+            review_status__in=INTERVENTION_REVIEW_ACTIVE_STATUSES,
+        ).count(),
+        'disputed_count': base_queryset.filter(
+            review_status__in={
+                InterventionReviewStatus.DISPUTED,
+                InterventionReviewStatus.UNDER_REVIEW,
+            },
+        ).count(),
+        'escalated_count': base_queryset.filter(
+            escalation_level=InterventionEscalationLevel.PERSONNEL_ACCOUNTING,
+            review_status__in=INTERVENTION_REVIEW_ACTIVE_STATUSES,
+        ).count(),
+        'acknowledgement_channels': [
+            (value, label)
+            for value, label in InterventionAcknowledgementChannel.choices
+            if value != InterventionAcknowledgementChannel.PWA
+        ],
+        'current_time': timezone.localtime(now).strftime('%H:%M'),
+        'current_date': timezone.localdate().strftime('%d.%m.%Y'),
+    })
+
+
+def intervention_queue_redirect():
+    return redirect('management_intervention_queue')
+
+
+@require_POST
+@transaction.atomic
+def management_intervention_proxy_acknowledge_view(request, intervention_id):
+    access = get_reports_access(request, INTERVENTION_REVIEW_ACKNOWLEDGEMENT_ROLES)
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+    barrier = reports_mutation_role_barrier(request, access)
+    if barrier:
+        return barrier
+    intervention = get_object_or_404(
+        management_intervention_scope(access),
+        pk=intervention_id,
+    )
+    try:
+        acknowledge_intervention_by_proxy(
+            intervention,
+            acknowledged_by=access.employee,
+            channel=request.POST.get('channel'),
+            comment=request.POST.get('comment'),
+        )
+    except ValidationError as error:
+        messages.error(request, '; '.join(error.messages))
+    else:
+        messages.success(request, 'Ознакомление сотрудника зарегистрировано.')
+    return intervention_queue_redirect()
+
+
+@require_POST
+@transaction.atomic
+def management_intervention_start_review_view(request, intervention_id):
+    access = get_reports_access(request, INTERVENTION_REVIEW_DECISION_ROLES)
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+    barrier = reports_mutation_role_barrier(request, access)
+    if barrier:
+        return barrier
+    intervention = get_object_or_404(OperationalIntervention, pk=intervention_id)
+    try:
+        start_intervention_review(
+            intervention,
+            reviewer=access.employee,
+            comment=request.POST.get('comment'),
+        )
+    except ValidationError as error:
+        messages.error(request, '; '.join(error.messages))
+    else:
+        messages.success(request, 'Спор принят в рассмотрение.')
+    return intervention_queue_redirect()
+
+
+@require_POST
+@transaction.atomic
+def management_intervention_resolve_view(request, intervention_id):
+    access = get_reports_access(request, INTERVENTION_REVIEW_DECISION_ROLES)
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+    barrier = reports_mutation_role_barrier(request, access)
+    if barrier:
+        return barrier
+    intervention = get_object_or_404(
+        OperationalIntervention.objects.prefetch_related('impacts'),
+        pk=intervention_id,
+    )
+    adjusted_values = {
+        impact.id: request.POST.get(f'impact_{impact.id}')
+        for impact in intervention.impacts.all()
+        if impact.correction_for_id is None
+    }
+    try:
+        resolve_intervention(
+            intervention,
+            reviewer=access.employee,
+            decision=(request.POST.get('decision') or '').strip(),
+            comment=request.POST.get('comment'),
+            adjusted_values=adjusted_values,
+        )
+    except ValidationError as error:
+        messages.error(request, '; '.join(error.messages))
+    else:
+        messages.success(request, 'Решение по спору зарегистрировано без изменения операционного события.')
+    return intervention_queue_redirect()
 
 
 def management_dashboard_context(request, access):

@@ -30,8 +30,22 @@ class DowntimeReasonAdmin(admin.ModelAdmin):
 
 @admin.register(DowntimeEvent)
 class DowntimeEventAdmin(admin.ModelAdmin):
-    list_display = ('equipment', 'reason', 'employee', 'started_at', 'ended_at')
-    search_fields = ('equipment__garage_number', 'reason__name', 'employee__full_name')
-    list_filter = ('reason', 'equipment__equipment_type')
+    list_display = (
+        'equipment',
+        'reason',
+        'subject_employee',
+        'recorded_by',
+        'source',
+        'started_at',
+        'ended_at',
+    )
+    search_fields = (
+        'equipment__garage_number',
+        'reason__name',
+        'employee__full_name',
+        'subject_employee__full_name',
+        'recorded_by__full_name',
+    )
+    list_filter = ('source', 'reason', 'equipment__equipment_type')
 
 # Register your models here.

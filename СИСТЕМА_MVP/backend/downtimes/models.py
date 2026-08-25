@@ -1,10 +1,18 @@
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 
 from .defaults import (
     downtime_reason_color_group_for_state_code,
     infer_downtime_reason_state_code,
 )
+
+
+class DowntimeEventSource(models.TextChoices):
+    EMPLOYEE = 'employee', 'Сотрудник'
+    DISPATCHER_OVERRIDE = 'dispatcher_override', 'Служебное действие диспетчера'
+    TELEMETRY = 'telemetry', 'Телеметрия'
+    SYSTEM = 'system', 'Система'
 
 
 class DowntimeReason(models.Model):
@@ -61,11 +69,40 @@ class DowntimeReason(models.Model):
 
 class DowntimeEvent(models.Model):
     equipment = models.ForeignKey('references.Equipment', verbose_name='Техника', on_delete=models.PROTECT)
-    employee = models.ForeignKey('users.Employee', verbose_name='Кто зафиксировал', on_delete=models.PROTECT, null=True, blank=True)
+    employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Сотрудник (совместимость отчётов)',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+    subject_employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кого затрагивает',
+        on_delete=models.PROTECT,
+        related_name='subject_downtime_events',
+        null=True,
+        blank=True,
+    )
+    recorded_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кто зарегистрировал',
+        on_delete=models.PROTECT,
+        related_name='recorded_downtime_events',
+        null=True,
+        blank=True,
+    )
+    source = models.CharField(
+        'Источник',
+        max_length=32,
+        choices=DowntimeEventSource.choices,
+        default=DowntimeEventSource.EMPLOYEE,
+    )
     reason = models.ForeignKey(DowntimeReason, verbose_name='Причина', on_delete=models.PROTECT)
     started_at = models.DateTimeField('Начало')
     ended_at = models.DateTimeField('Окончание', null=True, blank=True)
     comment = models.TextField('Комментарий', blank=True)
+    recorded_at = models.DateTimeField('Зарегистрировано', default=timezone.now, editable=False)
 
     class Meta:
         verbose_name = 'Событие простоя'

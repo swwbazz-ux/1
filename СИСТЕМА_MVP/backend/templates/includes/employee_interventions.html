@@ -1,0 +1,53 @@
+{% if employee_interventions %}
+<aside class="employee-interventions" aria-label="Служебные действия диспетчера">
+    {% for intervention in employee_interventions %}
+    <details class="employee-intervention{% if intervention.review_status == 'disputed' or intervention.review_status == 'under_review' %} is-disputed{% endif %}"{% if forloop.first and intervention.review_status == 'awaiting_delivery' %} open{% endif %}>
+        <summary>
+            <span>Служебное действие</span>
+            <strong>{{ intervention.get_action_type_display }}</strong>
+        </summary>
+        <div class="employee-intervention__body">
+            <dl>
+                <div><dt>Техника</dt><dd>{{ intervention.equipment|default:'-' }}</dd></div>
+                <div><dt>Фактическое время</dt><dd>{{ intervention.occurred_at|date:'d.m.Y H:i' }}</dd></div>
+                <div><dt>Зарегистрировал</dt><dd>{{ intervention.actor|default:'Система' }}</dd></div>
+                <div><dt>Причина</dt><dd>{{ intervention.reason }}</dd></div>
+            </dl>
+            <p>{{ intervention.comment }}</p>
+            {% if intervention.impacts.all %}
+            <div class="employee-intervention__impacts" aria-label="Расчётные последствия">
+                {% for impact in intervention.impacts.all %}
+                <span>{{ impact.get_metric_code_display }}: {{ impact.value|floatformat:"-3" }} {{ impact.unit }} · {{ impact.get_status_display }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if intervention.review_status == 'awaiting_delivery' %}
+            <form method="post" action="{% url 'intervention_acknowledge' intervention.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.path }}">
+                <button type="submit">Ознакомлен</button>
+            </form>
+            {% endif %}
+
+            {% if intervention.review_status == 'awaiting_delivery' or intervention.review_status == 'awaiting_objection' %}
+            {% if intervention.objection_deadline %}
+            <p class="employee-intervention__deadline">Оспорить можно до {{ intervention.objection_deadline|date:'d.m.Y H:i' }}</p>
+            {% endif %}
+            <form class="employee-intervention__dispute" method="post" action="{% url 'intervention_dispute' intervention.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.path }}">
+                <label>
+                    <span>Что указано неверно</span>
+                    <textarea name="comment" rows="2" maxlength="500" required></textarea>
+                </label>
+                <button type="submit">Оспорить</button>
+            </form>
+            {% elif intervention.review_status == 'disputed' or intervention.review_status == 'under_review' %}
+            <strong class="employee-intervention__review-state">Возражение на рассмотрении</strong>
+            {% endif %}
+        </div>
+    </details>
+    {% endfor %}
+</aside>
+{% endif %}

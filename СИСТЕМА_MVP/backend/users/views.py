@@ -11,13 +11,14 @@ from django.forms import modelform_factory
 from django.forms.models import construct_instance
 from django.db import transaction
 from django.db.models import Count, Q
-from django.http import HttpResponse, JsonResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.shortcuts import redirect, render
+from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 from openpyxl import Workbook
 
 from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
@@ -31,7 +32,7 @@ from assignments.services import (
 )
 from core.models import OperationalStateEvent, OperationalStateVersion, bump_operational_state
 from core.operational_fragments import operational_fragment_response
-from downtimes.models import DowntimeEvent, DowntimeReason
+from downtimes.models import DowntimeEvent, DowntimeEventSource, DowntimeReason
 from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
 from reports.forms import RatingPeriodReferenceForm
 from reports.models import RatingPeriod, ReportTemplate
@@ -58,9 +59,16 @@ from shifts.services import (
     progress_cycle_visual_context,
     recent_shift_reading_corrections,
 )
+from trips.interventions import employee_interventions_for
 from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 
 from .access_auth import find_employee_access_by_credentials
+from .app_catalog import (
+    APP_CATALOG_ROLE_CODES,
+    app_catalog_public_url,
+    app_catalog_items,
+    role_app_qr_asset_path,
+)
 from .active_role import (
     ACTIVE_ROLE_CODE_SESSION_KEY,
     ACTIVE_ROLE_GENERATION_SESSION_KEY,
@@ -207,7 +215,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v120'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v116'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -263,8 +271,6 @@ const CORE_ASSETS = [
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
     "/static/favicon.ico",
-    "/static/img/equipment/truck-green.png",
-    "/static/img/equipment/excavator-green.png",
     "/static/img/pwa/driver-180.png",
     "/static/img/pwa/driver-192.png",
     "/static/img/pwa/driver-512.png",
@@ -273,9 +279,7 @@ const CORE_ASSETS = [
 
 self.addEventListener("install", (event) => {{
     event.waitUntil(
-        caches.open(CACHE_NAME)
-            .then((cache) => cache.addAll(CORE_ASSETS))
-            .then(() => self.skipWaiting())
+        caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS))
     );
 }});
 
@@ -491,6 +495,38 @@ def interface_map_view(request):
             'demo_access_codes': DEMO_ACCESS_CODES,
         },
     )
+
+
+@require_GET
+def app_catalog_view(request):
+    if get_role_app_for_request(request):
+        return redirect(app_catalog_public_url(request))
+    catalog_apps = app_catalog_items(request)
+    selected_role_code = (request.GET.get('app') or '').strip()
+    selected_app = next(
+        (item for item in catalog_apps if item['role_code'] == selected_role_code),
+        None,
+    )
+    response = render(
+        request,
+        'users/app_catalog.html',
+        {
+            'catalog_apps': catalog_apps,
+            'selected_app': selected_app,
+        },
+    )
+    response['Cache-Control'] = 'no-cache'
+    return response
+
+
+@require_GET
+def app_catalog_qr_view(request, role_code):
+    if role_code not in APP_CATALOG_ROLE_CODES:
+        raise Http404
+    response = redirect(static(role_app_qr_asset_path(role_code)))
+    response['Cache-Control'] = 'public, max-age=86400'
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response
 
 
 def _masked_activation_phone(value):
@@ -3328,6 +3364,7 @@ def driver_shift_view(request):
             'shift_downtime_report_total_label': shift_downtime_report_total_label,
             'active_downtime_status_key': active_downtime_status_key,
             'downtime_reasons': downtime_reasons,
+            'employee_interventions': employee_interventions_for(access.employee),
             'shift_trips': shift_trips,
             'shift_trip_count': shift_trip_count,
             'driver_shift_report_trip_rows': driver_shift_report_trip_rows,
@@ -3611,6 +3648,9 @@ def driver_downtime_action_view(request):
         event = DowntimeEvent.objects.create(
             equipment=open_shift.equipment,
             employee=access.employee,
+            subject_employee=access.employee,
+            recorded_by=access.employee,
+            source=DowntimeEventSource.EMPLOYEE,
             reason=reason,
             started_at=timezone.now(),
             comment='Зафиксировано водителем самосвала',

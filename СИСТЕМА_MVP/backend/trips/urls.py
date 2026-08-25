@@ -12,6 +12,8 @@ from .views import (
     dispatcher_assign_truck_view,
     dispatcher_complete_trip_view,
     dispatcher_control_view,
+    dispatcher_equipment_detail_view,
+    dispatcher_equipment_downtime_view,
     dispatcher_manifest_view,
     dispatcher_move_excavator_view,
     dispatcher_service_worker_view,
@@ -27,6 +29,8 @@ from .views import (
     excavator_work_settings_view,
     excavator_truck_loaded_view,
     excavator_work_view,
+    intervention_acknowledge_view,
+    intervention_dispute_view,
 )
 
 urlpatterns = [
@@ -35,6 +39,16 @@ urlpatterns = [
     path('excavator.webmanifest', excavator_manifest_view, name='excavator_manifest'),
     path('excavator-sw.js', excavator_service_worker_view, name='excavator_service_worker'),
     path('dispatcher/control/', dispatcher_control_view, name='dispatcher_control'),
+    path(
+        'dispatcher/control/card/<str:category>/<int:equipment_id>/',
+        dispatcher_equipment_detail_view,
+        name='dispatcher_equipment_detail',
+    ),
+    path(
+        'dispatcher/control/equipment/<int:equipment_id>/downtime/',
+        dispatcher_equipment_downtime_view,
+        name='dispatcher_equipment_downtime',
+    ),
     path('dispatcher/control/excavator/move/', dispatcher_move_excavator_view, name='dispatcher_move_excavator'),
     path('dispatcher/control/truck/assign/', dispatcher_assign_truck_view, name='dispatcher_assign_truck'),
     path('dispatcher/shift/toggle/', dispatcher_toggle_shift_view, name='dispatcher_toggle_shift'),
@@ -50,6 +64,8 @@ urlpatterns = [
     path('excavator/downtime/', excavator_downtime_action_view, name='excavator_downtime_action'),
     path('driver/trip/<int:trip_id>/change-unload-point/', driver_change_unload_point_view, name='driver_change_unload_point'),
     path('driver/trip/<int:trip_id>/complete/', driver_complete_trip_view, name='driver_complete_trip'),
+    path('interventions/<int:intervention_id>/acknowledge/', intervention_acknowledge_view, name='intervention_acknowledge'),
+    path('interventions/<int:intervention_id>/dispute/', intervention_dispute_view, name='intervention_dispute'),
     path('api/achievements/current/', achievement_current_view, name='achievement_current'),
     path('api/achievements/<int:unlock_id>/image/', achievement_prize_image_view, name='achievement_prize_image'),
     path('api/achievements/<int:unlock_id>/download/', achievement_prize_download_view, name='achievement_prize_download'),

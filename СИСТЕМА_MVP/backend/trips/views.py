@@ -6,7 +6,7 @@ from collections import defaultdict
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.contrib import messages
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import Coalesce
@@ -14,9 +14,17 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods, require_POST
 
-from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment
+from assignments.models import (
+    AssignmentStatus,
+    EquipmentAssignment,
+    ExcavatorPlacement,
+    HaulAssignment,
+    HaulAssignmentAction,
+)
 from assignments.services import (
     get_active_equipment_assignment,
     reconcile_due_haul_assignments,
@@ -33,15 +41,17 @@ from core.production_time import (
     production_shift_type,
     production_work_date,
 )
-from downtimes.models import DowntimeEvent, DowntimeReason
+from downtimes.models import DowntimeEvent, DowntimeEventSource, DowntimeReason
 from references.equipment_states import DEFAULT_EQUIPMENT_STATES
 from references.models import DumpPoint, Equipment, EquipmentState, RockType
 from shifts.models import EmployeeShift, ShiftClientAction
 from shifts.models import PlanAssignmentStatus, PlanCalculationMode
 from shifts.services import (
     ExcavatorShiftError,
+    aggregate_completed_trip_facts_by_shift,
     assign_shift_plan_snapshot,
     calculate_open_shift_progress,
+    calculate_progress_from_snapshot_facts,
     calculate_truck_shift_progress,
     close_excavator_shift,
     equipment_is_truck,
@@ -62,7 +72,26 @@ from users.session_device import get_session_device_kind, set_session_device_kin
 
 from .forms import TripCreateForm
 from .dispatcher_header import build_dispatcher_header_context, close_dispatcher_shift, get_active_dispatcher_shift, open_dispatcher_shift
-from .models import DispatcherActionLog, DispatcherActionType, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
+from .interventions import (
+    acknowledge_intervention,
+    create_dispatcher_override,
+    dispute_intervention,
+    downtime_close_impacts,
+    employee_interventions_for,
+    trip_completion_impacts,
+)
+from .models import (
+    DispatcherActionLog,
+    DispatcherActionType,
+    InterventionActionType,
+    InterventionReasonCode,
+    InterventionReviewStatus,
+    OPEN_TRIP_STATUSES,
+    OperationalIntervention,
+    Trip,
+    TripClientAction,
+    TripStatus,
+)
 from .trip_creation import (
     calculate_trip_volume_and_tonnage,
     create_loaded_waiting_unload_trip,
@@ -454,36 +483,29 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v41";
+const CACHE_NAME = "dispatcher-desktop-shell-v47";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
   APP_SHELL_URL,
   MANIFEST_URL,
-  "/static/js/realtime-client.js",
+  "/static/js/realtime-client.js?v=__STATIC_ASSET_RELEASE__",
   "/static/js/role-readonly.js",
-  "/static/css/app.css",
+  "/static/js/dispatcher-control-v1.js",
+  "/static/css/dispatcher-control-v1.css",
   "/static/favicon.ico",
   "/static/img/pwa/dispatcher-180.png",
   "/static/img/pwa/dispatcher-192.png",
   "/static/img/pwa/dispatcher-512.png",
   "/static/img/pwa/dispatcher-maskable-512.png",
   "/static/img/equipment/excavator-gray.png",
-  "/static/img/equipment/excavator-green.png",
-  "/static/img/equipment/excavator-yellow.png",
-  "/static/img/equipment/excavator-blue.png",
-  "/static/img/equipment/excavator-red.png",
-  "/static/img/equipment/truck-gray.png",
-  "/static/img/equipment/truck-green.png",
-  "/static/img/equipment/truck-yellow.png",
-  "/static/img/equipment/truck-blue.png",
-  "/static/img/equipment/truck-red.png"
+  "/static/img/equipment/truck-gray.png"
 ];
 
 self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" }))).catch(() => undefined))
+      .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" }))))
       .then(() => self.skipWaiting())
   );
 });
@@ -640,7 +662,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v127";
+const CACHE_NAME = "excavator-mobile-shell-v128";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -1254,6 +1276,7 @@ def build_dispatcher_equipment_card(
     shift_report=None,
     category='equipment',
     plan=None,
+    service_actions=None,
 ):
     card_details = []
     seen_labels = set()
@@ -1286,10 +1309,25 @@ def build_dispatcher_equipment_card(
         'shift_report': shift_report or {},
         'category': category,
         'plan': dispatcher_plan_api_payload(plan),
+        'service_actions': service_actions or {},
     }
 
 
-def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pending_assignments, accepted_assignments, recent_completed_trips, open_shifts, open_mechanic_downtimes, trucks, excavators, recent_dispatcher_actions):
+def build_dispatcher_dashboard_context(
+    *,
+    dispatcher_shift,
+    active_trips,
+    pending_assignments,
+    accepted_assignments,
+    recent_completed_trips,
+    open_shifts,
+    open_mechanic_downtimes,
+    trucks,
+    excavators,
+    recent_dispatcher_actions,
+    equipment_card_ids=None,
+    service_actions_enabled=False,
+):
     active_trips_list = list(active_trips)
     pending_assignments_list = list(pending_assignments)
     accepted_assignments_list = list(accepted_assignments)
@@ -1335,6 +1373,21 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
     for shift in open_shifts:
         if shift.equipment_id and shift.equipment_id not in open_shift_by_equipment_id:
             open_shift_by_equipment_id[shift.equipment_id] = shift
+    truck_equipment_ids = {truck.id for truck in trucks_list}
+    excavator_equipment_ids = {excavator.id for excavator in excavators_list}
+    selected_equipment_shifts = list(open_shift_by_equipment_id.values())
+    snapshot_trip_facts = aggregate_completed_trip_facts_by_shift(
+        unloading_shift_ids=(
+            shift.id
+            for shift in selected_equipment_shifts
+            if shift.equipment_id in truck_equipment_ids
+        ),
+        loading_shift_ids=(
+            shift.id
+            for shift in selected_equipment_shifts
+            if shift.equipment_id in excavator_equipment_ids and shift.plan_status
+        ),
+    )
     plan_by_equipment_id = {}
 
     def dispatcher_plan_for_equipment(equipment):
@@ -1343,8 +1396,16 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
             return plan_progress_display_context(None)
         if equipment_id not in plan_by_equipment_id:
             shift = open_shift_by_equipment_id.get(equipment_id)
-            if shift and equipment_is_truck(shift.equipment):
-                progress = calculate_truck_shift_progress(equipment, reference_shift=shift)
+            if shift and equipment_id in truck_equipment_ids:
+                progress = calculate_progress_from_snapshot_facts(
+                    shift,
+                    snapshot_trip_facts['unloading'].get(shift.id),
+                )
+            elif shift and equipment_id in excavator_equipment_ids and shift.plan_status:
+                progress = calculate_progress_from_snapshot_facts(
+                    shift,
+                    snapshot_trip_facts['loading'].get(shift.id),
+                )
             else:
                 progress = calculate_dispatcher_snapshot_progress(shift, equipment=equipment)
             plan_by_equipment_id[equipment_id] = plan_progress_display_context(progress)
@@ -1366,6 +1427,36 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
     downtime_by_equipment_id = {}
     for downtime in open_downtime_list:
         downtime_by_equipment_id.setdefault(downtime.equipment_id, downtime)
+
+    def service_actions_for(equipment):
+        if not service_actions_enabled or not equipment:
+            return {}
+        subject_shift = open_shift_by_equipment_id.get(equipment.id)
+        if not subject_shift:
+            return {
+                'enabled': False,
+                'message': 'Служебное управление простоем доступно только при открытой смене сотрудника.',
+            }
+        if equipment.equipment_type.name == 'Самосвал':
+            workplace_code = 'truck_driver'
+        elif equipment.equipment_type.name == 'Экскаватор':
+            workplace_code = 'excavator_operator'
+        else:
+            return {}
+        active_downtime = downtime_by_equipment_id.get(equipment.id)
+        reasons = [
+            {'id': reason.id, 'label': reason.button_label}
+            for reason in DowntimeReason.for_workplace(workplace_code, equipment.equipment_type)
+        ]
+        return {
+            'enabled': True,
+            'url': reverse('dispatcher_equipment_downtime', args=[equipment.id]),
+            'active': bool(active_downtime),
+            'active_reason': str(active_downtime.reason) if active_downtime else '',
+            'active_started_at': active_downtime.started_at.isoformat() if active_downtime else '',
+            'employee': str(subject_shift.employee),
+            'reasons': reasons,
+        }
     active_trip_by_truck_id = {}
     active_trip_by_excavator_id = {}
     for trip in active_trips_list:
@@ -1379,6 +1470,17 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
     for assignment in accepted_assignments_list + pending_assignments_list:
         assignment_by_truck_id.setdefault(assignment.truck_id, assignment)
     equipment_cards = {}
+    requested_equipment_card_ids = (
+        None
+        if equipment_card_ids is None
+        else {str(card_id) for card_id in equipment_card_ids}
+    )
+
+    def equipment_card_requested(card_id):
+        return (
+            requested_equipment_card_ids is None
+            or str(card_id) in requested_equipment_card_ids
+        )
     equipment_state_map = get_equipment_state_ui_map()
 
     def equipment_state_for(code):
@@ -1531,7 +1633,11 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
         .values_list('excavator_id', flat=True)
     )
     active_excavator_ids = set(active_placement_ids)
-    active_excavator_ids.update(assignment.excavator_id for assignment in pending_assignments_list + accepted_assignments_list if assignment.excavator_id)
+    active_excavator_ids.update(
+        assignment.excavator_id
+        for assignment in pending_assignments_list + accepted_assignments_list
+        if assignment.excavator_id and assignment.action != HaulAssignmentAction.RELEASE
+    )
     active_excavator_ids.update(trip.excavator_id for trip in active_trips_list if trip.excavator_id)
 
     def garage_number_int(equipment):
@@ -2021,7 +2127,11 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
 
     for tile in excavator_tiles:
         equipment = tile.get('equipment')
-        if not equipment or not tile.get('card_id'):
+        if (
+            not equipment
+            or not tile.get('card_id')
+            or not equipment_card_requested(tile['card_id'])
+        ):
             continue
         downtime = downtime_by_equipment_id.get(equipment.id)
         active_trip = active_trip_by_excavator_id.get(equipment.id)
@@ -2062,9 +2172,12 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
                 shift_trips=shift_trips,
             ),
             plan=tile.get('plan'),
+            service_actions=service_actions_for(equipment),
         )
 
     for card in complex_cards:
+        if not equipment_card_requested(card['card_id']):
+            continue
         complex_report = dispatcher_complex_shift_report(card)
         details = [
             {'label': 'Экскаватор', 'value': card.get('excavator_name')},
@@ -2106,7 +2219,11 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
     for complex_card in complex_cards:
         for tile in complex_card.get('active_truck_tiles', []):
             card_id = str(tile.get('card_id') or '')
-            if not card_id or card_id in equipment_cards:
+            if (
+                not card_id
+                or card_id in equipment_cards
+                or not equipment_card_requested(card_id)
+            ):
                 continue
             equipment = truck_by_id.get(int(card_id)) if card_id.isdigit() else None
             status_label = status_label_for(tile.get('status'), tile.get('label'))
@@ -2136,6 +2253,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
                     shift_trips=shift_trips,
                 ),
                 plan=tile.get('plan'),
+                service_actions=service_actions_for(equipment),
             )
 
     for tile in truck_garage_tiles + [
@@ -2143,6 +2261,8 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
         for mobile_tile in mobile_truck_garage_tiles
         if mobile_tile.get('card_id') and str(mobile_tile.get('card_id')) not in equipment_cards
     ]:
+        if not equipment_card_requested(tile.get('card_id')):
+            continue
         equipment = tile.get('equipment')
         status_label = status_label_for(tile.get('status'), tile.get('label'))
         details = dispatcher_plan_details(tile.get('plan'))
@@ -2189,6 +2309,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
                     shift_trips=shift_trips,
                 ),
                 plan=tile.get('plan'),
+                service_actions=service_actions_for(equipment),
             )
         equipment_cards[str(tile['card_id'])] = card
 
@@ -2299,7 +2420,7 @@ def build_dispatcher_dashboard_context(*, dispatcher_shift, active_trips, pendin
 
 
 def log_dispatcher_action(*, actor, action_type, target_summary, trip=None, shift=None, haul_assignment=None, reason=''):
-    DispatcherActionLog.objects.create(
+    return DispatcherActionLog.objects.create(
         actor=actor,
         action_type=action_type,
         trip=trip,
@@ -2308,6 +2429,62 @@ def log_dispatcher_action(*, actor, action_type, target_summary, trip=None, shif
         target_summary=target_summary,
         reason=str(reason or '').strip(),
     )
+
+
+def dispatcher_intervention_reason(request):
+    reason_code = (request.POST.get('intervention_reason_code') or '').strip()
+    valid_reason_codes = set(InterventionReasonCode.values)
+    if reason_code and reason_code not in valid_reason_codes:
+        raise ValidationError('Выберите доступную причину служебного действия.')
+    if not reason_code:
+        reason_code = InterventionReasonCode.OTHER
+    legacy_reason = (request.POST.get('reason') or '').strip()
+    comment = (request.POST.get('intervention_comment') or legacy_reason).strip()
+    if not comment:
+        raise ValidationError('Укажите комментарий к служебному действию.')
+    reason_label = InterventionReasonCode(reason_code).label
+    return reason_code, reason_label, comment
+
+
+def dispatcher_intervention_occurred_at(request, *, not_before=()):
+    raw_value = (request.POST.get('occurred_at') or '').strip()
+    occurred_at = timezone.now()
+    if raw_value:
+        occurred_at = parse_datetime(raw_value)
+        if occurred_at is None:
+            raise ValidationError('Некорректное фактическое время события.')
+        if timezone.is_naive(occurred_at):
+            occurred_at = timezone.make_aware(occurred_at, timezone.get_current_timezone())
+    now = timezone.now()
+    if occurred_at > now:
+        raise ValidationError('Фактическое время события не может быть в будущем.')
+    lower_bound = max((value for value in not_before if value is not None), default=None)
+    if lower_bound and occurred_at < lower_bound:
+        raise ValidationError('Фактическое время события не может быть раньше начала рейса или смены.')
+    return occurred_at
+
+
+def intervention_access_from_request(request):
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return None
+    return (
+        EmployeeAccess.objects
+        .select_related('employee', 'role')
+        .filter(pk=access_id, is_active=True)
+        .first()
+    )
+
+
+def intervention_return_url(request):
+    candidate = (request.POST.get('next') or '').strip()
+    if candidate and url_has_allowed_host_and_scheme(
+        candidate,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return candidate
+    return reverse('role_home')
 
 
 def get_dispatcher_control_url(request):
@@ -2742,6 +2919,8 @@ def start_excavator_auto_downtime(excavator, employee, reason_name, *, replace_a
         return DowntimeEvent.objects.create(
             equipment=excavator,
             employee=employee,
+            subject_employee=employee,
+            source=DowntimeEventSource.SYSTEM,
             reason=reason,
             started_at=now,
             comment=EXCAVATOR_AUTO_DOWNTIME_COMMENT,
@@ -2975,7 +3154,7 @@ def excavator_json_payload(request):
     return request.POST
 
 
-def finalize_trip_unloaded(trip, *, driver, unloading_shift):
+def finalize_trip_unloaded(trip, *, driver, unloading_shift, completed_at=None):
     if trip.status not in OPEN_TRIP_STATUSES:
         return False
     volume, tonnage = calculate_trip_volume_and_tonnage(
@@ -2990,7 +3169,7 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift):
         trip.tonnage = trip.tonnage if trip.tonnage is not None else tonnage
     trip.status = TripStatus.COMPLETED
     trip.driver = driver
-    trip.completed_at = timezone.now()
+    trip.completed_at = completed_at or timezone.now()
     trip.unloading_shift = unloading_shift
     if trip.actual_dump_point_id is None:
         trip.actual_dump_point = trip.dump_point
@@ -4240,6 +4419,7 @@ def excavator_work_view(request):
             'first_ready_assignment_id': first_ready_assignment_id,
             'legacy_trip_client_action_id': legacy_trip_client_action_id,
             'truck_detail_cards': truck_detail_cards,
+            'employee_interventions': employee_interventions_for(access.employee),
             'dump_cards': dump_cards,
             'dump_choice_cards': dump_choice_cards,
             'rock_choices': rock_choices,
@@ -4421,6 +4601,9 @@ def excavator_downtime_action_view(request):
         event = DowntimeEvent.objects.create(
             equipment=current_excavator,
             employee=access.employee,
+            subject_employee=access.employee,
+            recorded_by=access.employee,
+            source=DowntimeEventSource.EMPLOYEE,
             reason=reason,
             started_at=timezone.now(),
             comment=(payload.get('comment') or '')[:255],
@@ -4428,12 +4611,96 @@ def excavator_downtime_action_view(request):
     action_label = 'downtime_updated' if active_event else 'downtime_started'
     return JsonResponse(downtime_event_payload(event, action=action_label))
 
-def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher_access=True, dispatcher_header_override=None, context_overrides=None):
+def protect_dispatcher_equipment_detail_response(response):
+    response['Cache-Control'] = 'private, no-store, max-age=0'
+    response['Pragma'] = 'no-cache'
+    response['X-Content-Type-Options'] = 'nosniff'
+    response['Vary'] = 'Cookie'
+    return response
+
+
+def dispatcher_equipment_detail_error(code, *, status):
+    return protect_dispatcher_equipment_detail_response(JsonResponse(
+        {
+            'contract': 'dispatcher-equipment-detail-v1',
+            'error': code,
+        },
+        status=status,
+    ))
+
+
+@require_http_methods(['GET'])
+def dispatcher_equipment_detail_view(request, category, equipment_id):
+    access_id = request.session.get('employee_access_id')
+    access = (
+        EmployeeAccess.objects
+        .select_related('employee', 'role')
+        .filter(id=access_id, is_active=True)
+        .first()
+        if access_id
+        else None
+    )
+    if not access:
+        return dispatcher_equipment_detail_error('authentication_required', status=401)
+    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        return dispatcher_equipment_detail_error('forbidden', status=403)
+    if category not in {'equipment', 'complex'}:
+        return dispatcher_equipment_detail_error('card_not_found', status=404)
+    try:
+        state_version = int(request.GET.get('state_version', ''))
+    except (TypeError, ValueError):
+        state_version = -1
+    if state_version < 0:
+        return dispatcher_equipment_detail_error('invalid_state_version', status=400)
+
+    equipment = (
+        Equipment.objects
+        .filter(
+            pk=equipment_id,
+            is_active=True,
+            equipment_type__name__in={'Самосвал', 'Экскаватор'},
+        )
+        .select_related('equipment_type')
+        .first()
+    )
+    if not equipment:
+        return dispatcher_equipment_detail_error('card_not_found', status=404)
+    if category == 'complex':
+        if equipment.equipment_type.name != 'Экскаватор':
+            return dispatcher_equipment_detail_error('card_not_found', status=404)
+        match = re.search(r'\d+', str(equipment.garage_number or ''))
+        if not match:
+            return dispatcher_equipment_detail_error('card_not_found', status=404)
+        card_key = f'complex-K-{int(match.group(0))}'
+    else:
+        card_key = str(equipment.pk)
+
+    return dispatcher_control_view(
+        request,
+        access_override=access,
+        equipment_detail={
+            'card_key': card_key,
+            'state_version': state_version,
+        },
+    )
+
+
+def dispatcher_control_view(
+    request,
+    *,
+    access_override=None,
+    enforce_dispatcher_access=True,
+    dispatcher_header_override=None,
+    context_overrides=None,
+    equipment_detail=None,
+):
     requested_fragment = request.GET.get('_operational_fragment', '').strip()
     reconcile_due_haul_assignments()
     if access_override is None:
         access_id = request.session.get('employee_access_id')
         if not access_id:
+            if equipment_detail:
+                return dispatcher_equipment_detail_error('authentication_required', status=401)
             if requested_fragment in {'dispatcher', 'mining_master'}:
                 return JsonResponse({'authenticated': False}, status=401)
             return redirect('login')
@@ -4441,9 +4708,17 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     else:
         access = access_override
     if not access:
+        if equipment_detail:
+            return dispatcher_equipment_detail_error('authentication_required', status=401)
         return redirect('role_home')
     if enforce_dispatcher_access and access.role.code not in {'dispatcher', 'admin', 'manager'}:
+        if equipment_detail:
+            return dispatcher_equipment_detail_error('forbidden', status=403)
         return redirect('role_home')
+    if equipment_detail:
+        equipment_detail['state_version_before'] = get_operational_state_version()
+        if equipment_detail['state_version_before'] != equipment_detail['state_version']:
+            return dispatcher_equipment_detail_error('stale_board', status=409)
     dispatcher_header = dispatcher_header_override or build_dispatcher_header_context(access, request)
     dispatcher_shift = dispatcher_header.get('active_shift')
 
@@ -4456,7 +4731,15 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     active_trips = (
         Trip.objects
         .filter(status__in=OPEN_TRIP_STATUSES)
-        .select_related('truck', 'excavator', 'rock_type', 'dump_point', 'excavator_operator')
+        .select_related(
+            'truck',
+            'truck__equipment_type',
+            'excavator',
+            'excavator__equipment_type',
+            'rock_type',
+            'dump_point',
+            'excavator_operator',
+        )
         .order_by('created_at')
     )
     if not dispatcher_shift:
@@ -4471,7 +4754,13 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     pending_assignments = (
         HaulAssignment.objects
         .filter(status=AssignmentStatus.PENDING, ended_at__isnull=True)
-        .select_related('truck', 'excavator', 'assigned_by')
+        .select_related(
+            'truck',
+            'truck__equipment_type',
+            'excavator',
+            'excavator__equipment_type',
+            'assigned_by',
+        )
         .order_by('assigned_at')
     )
     if truck_id:
@@ -4484,7 +4773,13 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     accepted_assignments = (
         HaulAssignment.objects
         .filter(status=AssignmentStatus.ACCEPTED, ended_at__isnull=True)
-        .select_related('truck', 'excavator', 'assigned_by')
+        .select_related(
+            'truck',
+            'truck__equipment_type',
+            'excavator',
+            'excavator__equipment_type',
+            'assigned_by',
+        )
         .order_by('-accepted_at')
     )
     if truck_id:
@@ -4506,7 +4801,15 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
             completed_at__gte=production_shift_start,
             completed_at__lt=production_shift_end,
         )
-        .select_related('truck', 'excavator', 'rock_type', 'dump_point', 'driver')
+        .select_related(
+            'truck',
+            'truck__equipment_type',
+            'excavator',
+            'excavator__equipment_type',
+            'rock_type',
+            'dump_point',
+            'driver',
+        )
         .order_by('-completed_at')
     )
     if not dispatcher_shift:
@@ -4543,8 +4846,18 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     for shift in open_shifts:
         shift.role_name = role_by_employee_id.get(shift.employee_id, '-')
 
-    trucks = Equipment.objects.filter(equipment_type__name='Самосвал', is_active=True).order_by('garage_number')
-    excavators = Equipment.objects.filter(equipment_type__name='Экскаватор', is_active=True).order_by('garage_number')
+    trucks = (
+        Equipment.objects
+        .filter(equipment_type__name='Самосвал', is_active=True)
+        .select_related('equipment_type', 'model')
+        .order_by('garage_number')
+    )
+    excavators = (
+        Equipment.objects
+        .filter(equipment_type__name='Экскаватор', is_active=True)
+        .select_related('equipment_type', 'model')
+        .order_by('garage_number')
+    )
     recent_dispatcher_actions = (
         DispatcherActionLog.objects
         .select_related('actor')
@@ -4553,13 +4866,18 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     open_mechanic_downtimes = (
         DowntimeEvent.objects
         .filter(ended_at__isnull=True)
-        .select_related('equipment', 'reason', 'employee')
+        .select_related('equipment', 'equipment__equipment_type', 'reason', 'employee')
         .order_by('started_at')
     )
     downtime_equipment_ids = [equipment_id for equipment_id in [truck_id, excavator_id] if equipment_id]
     if downtime_equipment_ids:
         open_mechanic_downtimes = open_mechanic_downtimes.filter(equipment_id__in=downtime_equipment_ids)
     open_mechanic_downtimes_count = open_mechanic_downtimes.count()
+    equipment_card_ids = None
+    if not (context_overrides or {}).get('mining_master_mobile_enabled'):
+        equipment_card_ids = set()
+    if equipment_detail:
+        equipment_card_ids = {equipment_detail['card_key']}
     dispatcher_dashboard = build_dispatcher_dashboard_context(
         dispatcher_shift=dispatcher_shift,
         active_trips=active_trips,
@@ -4571,9 +4889,35 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
         trucks=trucks,
         excavators=excavators,
         recent_dispatcher_actions=recent_dispatcher_actions,
+        equipment_card_ids=equipment_card_ids,
+        service_actions_enabled=(
+            access.role.code in {'dispatcher', 'admin'}
+            and role_session_state(request, access)['is_active']
+            and bool(dispatcher_shift)
+        ),
     )
 
     operational_state_version = get_operational_state_version()
+    if equipment_detail:
+        requested_version = equipment_detail['state_version']
+        if (
+            operational_state_version != equipment_detail['state_version_before']
+            or operational_state_version != requested_version
+        ):
+            return dispatcher_equipment_detail_error(
+                'state_changed',
+                status=409,
+            )
+        card = dispatcher_dashboard['equipment_cards'].get(equipment_detail['card_key'])
+        if not card:
+            return dispatcher_equipment_detail_error('card_not_found', status=404)
+        response = JsonResponse({
+            'contract': 'dispatcher-equipment-detail-v1',
+            'card_key': equipment_detail['card_key'],
+            'operational_state_version': operational_state_version,
+            'card': card,
+        })
+        return protect_dispatcher_equipment_detail_response(response)
     context = {
             'access': access,
             'dispatcher_header': dispatcher_header,
@@ -4619,12 +4963,15 @@ def dispatcher_control_view(request, *, access_override=None, enforce_dispatcher
     response = render(request, 'trips/dispatcher_control.html', context)
     if requested_fragment in {'dispatcher', 'mining_master'}:
         selector = '.dispatcher-board' if requested_fragment == 'dispatcher' else '.mm-mobile-shell'
+        fragment_extra = {}
+        if requested_fragment == 'mining_master':
+            fragment_extra['equipment_cards'] = dispatcher_dashboard['equipment_cards']
         return operational_fragment_response(
             response,
             screen=requested_fragment,
             selector=selector,
             version=operational_state_version,
-            extra={'equipment_cards': dispatcher_dashboard['equipment_cards']},
+            extra=fragment_extra,
         )
     return response
 
@@ -4683,6 +5030,268 @@ def dispatcher_toggle_shift_view(request):
 
     messages.error(request, 'Неизвестное действие со сменой диспетчера.')
     return redirect(redirect_url)
+
+
+@require_POST
+@transaction.atomic
+def dispatcher_equipment_downtime_view(request, equipment_id):
+    access = dispatcher_access_from_request(request)
+    if not access or access.role.code not in {'dispatcher', 'admin'}:
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к служебному управлению.'}, status=403)
+    shift_error = dispatcher_shift_required_response(access)
+    if shift_error:
+        return shift_error
+
+    shift_reference = (
+        EmployeeShift.objects
+        .filter(equipment_id=equipment_id, closed_at__isnull=True)
+        .values('id', 'employee_id')
+        .order_by('-opened_at')
+        .first()
+    )
+    if not shift_reference:
+        return JsonResponse(
+            {'ok': False, 'error': 'По технике нет открытой смены сотрудника.'},
+            status=409,
+        )
+
+    locked_employee_ids = list(
+        Employee.objects
+        .select_for_update()
+        .filter(pk__in={access.employee_id, shift_reference['employee_id']})
+        .order_by('pk')
+        .values_list('pk', flat=True)
+    )
+    if not role_session_state(request, access)['is_active']:
+        return JsonResponse(
+            {'ok': False, 'error': 'Роль неактивна — доступен только просмотр.', 'code': 'inactive_role'},
+            status=409,
+        )
+
+    subject_shift = (
+        EmployeeShift.objects
+        .select_for_update(of=('self',))
+        .select_related('employee', 'equipment', 'equipment__equipment_type')
+        .filter(pk=shift_reference['id'], closed_at__isnull=True, equipment_id=equipment_id)
+        .first()
+    )
+    if not subject_shift or subject_shift.employee_id not in locked_employee_ids:
+        return JsonResponse(
+            {'ok': False, 'error': 'Смена по технике изменилась. Обновите карточку.'},
+            status=409,
+        )
+    equipment = (
+        Equipment.objects
+        .select_for_update(of=('self',))
+        .select_related('equipment_type')
+        .get(pk=equipment_id)
+    )
+    if equipment.equipment_type.name == 'Самосвал':
+        workplace_code = 'truck_driver'
+    elif equipment.equipment_type.name == 'Экскаватор':
+        workplace_code = 'excavator_operator'
+    else:
+        return JsonResponse(
+            {'ok': False, 'error': 'Служебное управление простоем для этого вида техники не поддерживается.'},
+            status=400,
+        )
+
+    try:
+        reason_code, reason_label, intervention_comment = dispatcher_intervention_reason(request)
+    except ValidationError as error:
+        return JsonResponse({'ok': False, 'error': '; '.join(error.messages)}, status=400)
+
+    action = (request.POST.get('action') or '').strip()
+    active_event = (
+        DowntimeEvent.objects
+        .select_for_update()
+        .select_related('reason', 'subject_employee', 'employee')
+        .filter(equipment=equipment, ended_at__isnull=True)
+        .order_by('-started_at')
+        .first()
+    )
+    actor_shift = get_active_dispatcher_shift(access)
+
+    if action == 'start':
+        if active_event:
+            return JsonResponse(
+                {'ok': False, 'error': f'По технике уже открыт простой: {active_event.reason}.'},
+                status=409,
+            )
+        downtime_reason = (
+            DowntimeReason.for_workplace(workplace_code, equipment.equipment_type)
+            .filter(pk=request.POST.get('reason_id'))
+            .first()
+        )
+        if not downtime_reason:
+            return JsonResponse({'ok': False, 'error': 'Выберите доступную причину простоя.'}, status=400)
+        try:
+            occurred_at = dispatcher_intervention_occurred_at(
+                request,
+                not_before=(subject_shift.opened_at,),
+            )
+        except ValidationError as error:
+            return JsonResponse({'ok': False, 'error': '; '.join(error.messages)}, status=400)
+
+        downtime_event = DowntimeEvent.objects.create(
+            equipment=equipment,
+            employee=subject_shift.employee,
+            subject_employee=subject_shift.employee,
+            recorded_by=access.employee,
+            source=DowntimeEventSource.DISPATCHER_OVERRIDE,
+            reason=downtime_reason,
+            started_at=occurred_at,
+            comment=intervention_comment,
+        )
+        dispatcher_action = log_dispatcher_action(
+            actor=access.employee,
+            action_type=DispatcherActionType.START_DOWNTIME,
+            target_summary=f'{equipment} / {downtime_reason}',
+            shift=subject_shift,
+            reason=intervention_comment,
+        )
+        intervention, _ = create_dispatcher_override(
+            action_type=InterventionActionType.START_DOWNTIME,
+            actor=access.employee,
+            subject_employee=subject_shift.employee,
+            equipment=equipment,
+            subject_shift=subject_shift,
+            actor_shift=actor_shift,
+            downtime_event=downtime_event,
+            dispatcher_action_log=dispatcher_action,
+            occurred_at=occurred_at,
+            reason_code=reason_code,
+            reason=reason_label,
+            comment=intervention_comment,
+            idempotency_key=f'dispatcher-start-downtime:{downtime_event.id}',
+            metadata={
+                'downtime_reason_id': downtime_reason.id,
+                'downtime_reason': downtime_reason.name,
+            },
+        )
+        return JsonResponse({
+            'ok': True,
+            'action': 'downtime_started',
+            'equipment_id': equipment.id,
+            'downtime_event_id': downtime_event.id,
+            'intervention_id': intervention.id,
+            'version': get_operational_state_version(),
+            'message': f'Простой по {equipment} открыт служебно.',
+        })
+
+    if action == 'close':
+        if not active_event:
+            return JsonResponse({'ok': False, 'error': 'Активный простой не найден.'}, status=409)
+        active_subject_id = active_event.subject_employee_id or active_event.employee_id
+        if active_subject_id and active_subject_id != subject_shift.employee_id:
+            return JsonResponse(
+                {
+                    'ok': False,
+                    'error': 'Активный простой относится к другой смене сотрудника. Требуется разбор конфликта.',
+                    'code': 'downtime_subject_conflict',
+                },
+                status=409,
+            )
+        try:
+            occurred_at = dispatcher_intervention_occurred_at(
+                request,
+                not_before=(subject_shift.opened_at, active_event.started_at),
+            )
+        except ValidationError as error:
+            return JsonResponse({'ok': False, 'error': '; '.join(error.messages)}, status=400)
+
+        impact_started_at = max(active_event.started_at, subject_shift.opened_at)
+        active_event.ended_at = occurred_at
+        active_event.save(update_fields=['ended_at'])
+        dispatcher_action = log_dispatcher_action(
+            actor=access.employee,
+            action_type=DispatcherActionType.CLOSE_DOWNTIME,
+            target_summary=f'{equipment} / {active_event.reason}',
+            shift=subject_shift,
+            reason=intervention_comment,
+        )
+        intervention, _ = create_dispatcher_override(
+            action_type=InterventionActionType.CLOSE_DOWNTIME,
+            actor=access.employee,
+            subject_employee=subject_shift.employee,
+            equipment=equipment,
+            subject_shift=subject_shift,
+            actor_shift=actor_shift,
+            downtime_event=active_event,
+            dispatcher_action_log=dispatcher_action,
+            occurred_at=occurred_at,
+            reason_code=reason_code,
+            reason=reason_label,
+            comment=intervention_comment,
+            idempotency_key=f'dispatcher-close-downtime:{active_event.id}',
+            metadata={
+                'downtime_reason_id': active_event.reason_id,
+                'downtime_reason': active_event.reason.name,
+                'full_started_at': active_event.started_at.isoformat(),
+                'impact_started_at': impact_started_at.isoformat(),
+            },
+            impacts=downtime_close_impacts(
+                started_at=impact_started_at,
+                ended_at=occurred_at,
+            ),
+        )
+        return JsonResponse({
+            'ok': True,
+            'action': 'downtime_closed',
+            'equipment_id': equipment.id,
+            'downtime_event_id': active_event.id,
+            'intervention_id': intervention.id,
+            'version': get_operational_state_version(),
+            'message': f'Простой по {equipment} завершён служебно.',
+        })
+
+    return JsonResponse({'ok': False, 'error': 'Некорректное действие с простоем.'}, status=400)
+
+
+@require_POST
+def intervention_acknowledge_view(request, intervention_id):
+    access = intervention_access_from_request(request)
+    if not access:
+        return redirect('login')
+    intervention = get_object_or_404(
+        OperationalIntervention.objects.select_related('subject_employee'),
+        pk=intervention_id,
+    )
+    try:
+        acknowledge_intervention(intervention, employee=access.employee, channel='pwa')
+    except PermissionDenied:
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к этому уведомлению.'}, status=403)
+    except ValidationError as error:
+        messages.error(request, '; '.join(error.messages))
+    else:
+        messages.success(request, 'Ознакомление зарегистрировано. Срок возражения начат.')
+    return redirect(intervention_return_url(request))
+
+
+@require_POST
+def intervention_dispute_view(request, intervention_id):
+    access = intervention_access_from_request(request)
+    if not access:
+        return redirect('login')
+    intervention = get_object_or_404(
+        OperationalIntervention.objects.select_related('subject_employee'),
+        pk=intervention_id,
+    )
+    comment = (request.POST.get('comment') or '').strip()
+    if not comment:
+        messages.error(request, 'Для возражения требуется комментарий.')
+        return redirect(intervention_return_url(request))
+    try:
+        if intervention.review_status == InterventionReviewStatus.AWAITING_DELIVERY:
+            intervention = acknowledge_intervention(intervention, employee=access.employee, channel='pwa')
+        dispute_intervention(intervention, employee=access.employee, comment=comment)
+    except PermissionDenied:
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к этому уведомлению.'}, status=403)
+    except ValidationError as error:
+        messages.error(request, '; '.join(error.messages))
+    else:
+        messages.success(request, 'Возражение зарегистрировано и направлено на рассмотрение.')
+    return redirect(intervention_return_url(request))
 
 
 @transaction.atomic
@@ -4964,12 +5573,10 @@ def dispatcher_complete_trip_view(request, trip_id):
     shift_error = dispatcher_shift_required_redirect(request, access, redirect_url)
     if shift_error:
         return shift_error
-    reason = request.POST.get('reason', '').strip()
-    if not reason:
-        messages.error(
-            request,
-            'Укажите причину служебного завершения рейса.',
-        )
+    try:
+        reason_code, reason_label, intervention_comment = dispatcher_intervention_reason(request)
+    except ValidationError as error:
+        messages.error(request, '; '.join(error.messages))
         return redirect(redirect_url)
 
     trip_reference = (
@@ -5032,13 +5639,47 @@ def dispatcher_complete_trip_view(request, trip_id):
         messages.error(request, 'Активный рейс уже завершен другим действием.')
         return redirect(redirect_url)
 
-    finalize_trip_unloaded(trip, driver=unloading_shift.employee, unloading_shift=unloading_shift)
-    log_dispatcher_action(
+    try:
+        occurred_at = dispatcher_intervention_occurred_at(
+            request,
+            not_before=(trip.created_at, unloading_shift.opened_at),
+        )
+    except ValidationError as error:
+        messages.error(request, '; '.join(error.messages))
+        return redirect(redirect_url)
+
+    finalize_trip_unloaded(
+        trip,
+        driver=unloading_shift.employee,
+        unloading_shift=unloading_shift,
+        completed_at=occurred_at,
+    )
+    dispatcher_action = log_dispatcher_action(
         actor=access.employee,
         action_type=DispatcherActionType.COMPLETE_TRIP,
         trip=trip,
         target_summary=f'{trip.truck} -> {trip.dump_point}',
-        reason=reason,
+        reason=intervention_comment,
+    )
+    create_dispatcher_override(
+        action_type=InterventionActionType.COMPLETE_TRIP,
+        actor=access.employee,
+        subject_employee=unloading_shift.employee,
+        equipment=trip.truck,
+        subject_shift=unloading_shift,
+        actor_shift=get_active_dispatcher_shift(access),
+        trip=trip,
+        dispatcher_action_log=dispatcher_action,
+        occurred_at=occurred_at,
+        reason_code=reason_code,
+        reason=reason_label,
+        comment=intervention_comment,
+        idempotency_key=f'dispatcher-complete-trip:{trip.id}',
+        metadata={
+            'assigned_dump_point_id': trip.assigned_dump_point_id or trip.dump_point_id,
+            'actual_dump_point_id': trip.actual_dump_point_id or trip.dump_point_id,
+        },
+        impacts=trip_completion_impacts(trip),
     )
     bump_operational_state(
         'Trip:dispatcher_complete_trip',

@@ -29,6 +29,9 @@
         <a class="{% if active == 'daily' %}is-active{% endif %}" href="{% url 'customer_daily_report' %}">Сутки</a>
         <a class="{% if active == 'volume' %}is-active{% endif %}" href="{% url 'volume_report' %}">Объемы</a>
         <a class="{% if active == 'downtime' %}is-active{% endif %}" href="{% url 'downtime_report' %}">Простои</a>
+        {% if access.role.code == 'manager' or access.role.code == 'admin' %}
+            <a class="{% if active == 'interventions' %}is-active{% endif %}" href="{% url 'management_intervention_queue' %}">Вмешательства</a>
+        {% endif %}
         <a class="{% if active == 'mechanic' %}is-active{% endif %}" href="{% url 'mechanic_dashboard' %}">Механики</a>
         <a class="{% if active == 'pilot' %}is-active{% endif %}" href="{% url 'pilot_report_checklist' %}">Пилот</a>
         <a class="{% if active == 'feedback' %}is-active{% endif %}" href="{% url 'pilot_feedback' %}">Замечания</a>

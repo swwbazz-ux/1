@@ -40,6 +40,9 @@
                 <a href="{% url 'customer_daily_report' %}?date={{ selected_date|date:'Y-m-d' }}">Сутки</a>
                 <a href="{% url 'volume_report' %}">Объемы</a>
                 <a href="{% url 'downtime_report' %}">Простои</a>
+                {% if access.role.code == 'manager' or access.role.code == 'admin' %}
+                    <a href="{% url 'management_intervention_queue' %}">Вмешательства</a>
+                {% endif %}
                 <a href="{% url 'mechanic_dashboard' %}">Механики</a>
                 <a href="{% url 'pilot_report_checklist' %}">Пилот</a>
                 <a href="{% url 'pilot_feedback' %}">Замечания</a>

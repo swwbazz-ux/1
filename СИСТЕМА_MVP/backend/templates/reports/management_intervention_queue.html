@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Служебные вмешательства{% endblock %}
+{% block body_class %}dispatcher-control-screen management-intervention-screen{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/management-interventions-v1.css' %}?v=2">
+{% if access.role.code == 'manager' %}
+    {% include "includes/role_app_pwa_head.html" with role_code="manager" manifest_url="/management.webmanifest" service_worker_url="/management-sw.js" legacy_scope="/reports/management/" theme_color="#5058A4" apple_title="Руководство" icon_180="img/pwa/management-180.png" %}
+{% elif access.role.code == 'oup' %}
+    {% include "includes/role_app_pwa_head.html" with role_code="oup" manifest_url="/oup.webmanifest" service_worker_url="/oup-sw.js" legacy_scope="/oup/" theme_color="#2E7D52" apple_title="ОУП" icon_180="img/pwa/oup-180.png" %}
+{% endif %}
+{% endblock %}
+
+{% block body %}
+<main class="dispatcher-shell dispatcher-analytics-shell" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board management-intervention-board" aria-label="Очередь служебных вмешательств">
+        <header class="management-dashboard-header">
+            <div class="management-dashboard-header-title">
+                <span>{% if access.role.code == 'oup' %}ОУП{% else %}Руководство MVP{% endif %}</span>
+                <h1>Служебные вмешательства</h1>
+                <p>Разбор действий, выполненных диспетчером вместо сотрудника.</p>
+            </div>
+            <div class="management-dashboard-header-meta" aria-label="Состояние очереди">
+                <div><span>Активные</span><strong>{{ active_count }}</strong></div>
+                <div><span>Сформировано</span><strong>{{ current_date }} {{ current_time }}</strong></div>
+            </div>
+            <div class="management-dashboard-header-actions">
+                <button type="button" class="management-dashboard-theme" data-dispatcher-theme-toggle data-theme-icon="moon" aria-label="Включить дневную тему" title="Дневной режим"></button>
+                <a href="{% url 'role_home' %}">Главная</a>
+                <a href="{% url 'logout' %}">Выйти</a>
+            </div>
+        </header>
+
+        <div class="dispatcher-analytics-toolbar">
+            <nav class="dispatcher-subnav" aria-label="Разделы очереди">
+                {% if access.role.code == 'manager' or access.role.code == 'admin' %}
+                    <a href="{% url 'management_dashboard' %}">Сводка</a>
+                {% endif %}
+                <a class="is-active" href="{% url queue_url_name %}">Вмешательства</a>
+            </nav>
+            <nav class="management-intervention-scopes" aria-label="Фильтр состояния">
+                <a class="{% if selected_scope == 'active' %}is-active{% endif %}" href="?scope=active">Активные</a>
+                <a class="{% if selected_scope == 'resolved' %}is-active{% endif %}" href="?scope=resolved">Решённые</a>
+                <a class="{% if selected_scope == 'all' %}is-active{% endif %}" href="?scope=all">Все</a>
+            </nav>
+        </div>
+
+        {% include "reports/includes/management_report_theme.html" %}
+
+        {% if messages %}
+            <div class="management-intervention-messages" aria-live="polite">
+                {% for message in messages %}<p class="is-{{ message.tags|default:'info' }}">{{ message }}</p>{% endfor %}
+            </div>
+        {% endif %}
+
+        <section class="management-intervention-summary" aria-label="Сводка очереди">
+            <div><span>Активные</span><strong>{{ active_count }}</strong></div>
+            <div class="is-warning"><span>Споры</span><strong>{{ disputed_count }}</strong></div>
+            <div class="is-danger"><span>Передано в ОУП</span><strong>{{ escalated_count }}</strong></div>
+        </section>
+
+        <section class="management-intervention-list" aria-label="Служебные действия">
+            {% for intervention in interventions %}
+                <article class="management-intervention-item is-{{ intervention.review_status }}{% if intervention.is_review_overdue %} is-overdue{% endif %}">
+                    <div class="management-intervention-main">
+                        <div class="management-intervention-title">
+                            <span class="management-intervention-id">№ {{ intervention.id }}</span>
+                            <div>
+                                <h2>{{ intervention.get_action_type_display }}</h2>
+                                <p>
+                                    {% if intervention.equipment %}{{ intervention.equipment }}{% else %}Без техники{% endif %}
+                                    {% if intervention.subject_employee %} · {{ intervention.subject_employee.full_name }}{% endif %}
+                                </p>
+                            </div>
+                            <span class="management-intervention-status">{{ intervention.get_review_status_display }}</span>
+                        </div>
+
+                        <dl class="management-intervention-facts">
+                            <div><dt>Событие</dt><dd>{{ intervention.occurred_at|date:"d.m.Y H:i" }}</dd></div>
+                            <div><dt>Зарегистрировано</dt><dd>{{ intervention.recorded_at|date:"d.m.Y H:i" }}</dd></div>
+                            <div><dt>Диспетчер</dt><dd>{% if intervention.actor %}{{ intervention.actor.full_name }}{% else %}-{% endif %}</dd></div>
+                            <div><dt>Причина</dt><dd>{{ intervention.reason }}</dd></div>
+                        </dl>
+                        <p class="management-intervention-comment">{{ intervention.comment }}</p>
+
+                        <div class="management-intervention-impact-list" aria-label="Расчётные последствия">
+                            {% for impact in intervention.impacts.all %}
+                                <div class="management-intervention-impact{% if impact.correction_for_id %} is-correction{% endif %}">
+                                    <span>{{ impact.get_metric_code_display }}</span>
+                                    <strong>{{ impact.value|floatformat:"-3" }} {{ impact.unit }}</strong>
+                                    <em>{{ impact.get_status_display }}</em>
+                                </div>
+                            {% empty %}
+                                <p>Расчётных последствий нет.</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <aside class="management-intervention-review" aria-label="Проверка вмешательства">
+                        <div class="management-intervention-deadline">
+                            <span>Ознакомление</span>
+                            <strong>{% if intervention.acknowledged_at %}{{ intervention.acknowledged_at|date:"d.m.Y H:i" }}{% else %}не подтверждено{% endif %}</strong>
+                            {% if intervention.acknowledgement_channel %}<small>{{ intervention.get_acknowledgement_channel_display }}</small>{% endif %}
+                        </div>
+                        <div class="management-intervention-deadline{% if intervention.is_review_overdue %} is-overdue{% endif %}">
+                            <span>Срок разбора</span>
+                            <strong>{% if intervention.review_due_at %}{{ intervention.review_due_at|date:"d.m.Y H:i" }}{% else %}-{% endif %}</strong>
+                            <small>{{ intervention.get_escalation_level_display }}</small>
+                        </div>
+
+                        {% if can_acknowledge and intervention.review_status == 'awaiting_delivery' %}
+                            <details class="management-intervention-action">
+                                <summary>Зафиксировать ознакомление</summary>
+                                <form method="post" action="{% url 'management_intervention_proxy_acknowledge' intervention.id %}">
+                                    {% csrf_token %}
+                                    <label><span>Канал</span>
+                                        <select name="channel" required>
+                                            <option value="">Выберите</option>
+                                            {% for value, label in acknowledgement_channels %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                                        </select>
+                                    </label>
+                                    <label><span>Подтверждение</span><textarea name="comment" rows="2" required placeholder="Кто подтвердил ознакомление и при каких обстоятельствах"></textarea></label>
+                                    <button type="submit">Зарегистрировать</button>
+                                </form>
+                            </details>
+                        {% endif %}
+
+                        {% if can_resolve and intervention.review_status == 'disputed' %}
+                            <form class="management-intervention-inline-action" method="post" action="{% url 'management_intervention_start_review' intervention.id %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="comment" value="Спор принят руководителем в рассмотрение.">
+                                <button type="submit">Взять в работу</button>
+                            </form>
+                        {% endif %}
+
+                        {% if can_resolve and intervention.review_status == 'under_review' %}
+                            <details class="management-intervention-action is-decision">
+                                <summary>Принять решение</summary>
+                                <form method="post" action="{% url 'management_intervention_resolve' intervention.id %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="decision" value="uphold">
+                                    <label><span>Обоснование</span><textarea name="comment" rows="2" required></textarea></label>
+                                    <button type="submit">Подтвердить действие</button>
+                                </form>
+                                <form method="post" action="{% url 'management_intervention_resolve' intervention.id %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="decision" value="adjust">
+                                    {% for impact in intervention.impacts.all %}
+                                        {% if not impact.correction_for_id %}
+                                            <label><span>{{ impact.get_metric_code_display }}, {{ impact.unit }}</span><input type="number" step="0.001" name="impact_{{ impact.id }}" value="{{ impact.value|stringformat:'s' }}" required></label>
+                                        {% endif %}
+                                    {% endfor %}
+                                    <label><span>Обоснование</span><textarea name="comment" rows="2" required></textarea></label>
+                                    <button type="submit" class="is-warning">Скорректировать</button>
+                                </form>
+                                <form method="post" action="{% url 'management_intervention_resolve' intervention.id %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="decision" value="reject">
+                                    <label><span>Обоснование</span><textarea name="comment" rows="2" required></textarea></label>
+                                    <button type="submit" class="is-danger">Исключить из расчёта</button>
+                                </form>
+                            </details>
+                        {% endif %}
+
+                        <details class="management-intervention-history">
+                            <summary>История проверки</summary>
+                            <ol>
+                                {% for event in intervention.review_events.all %}
+                                    <li><time>{{ event.created_at|date:"d.m H:i" }}</time><span>{{ event.get_event_type_display }}</span>{% if event.actor %}<small>{{ event.actor.full_name }}</small>{% endif %}</li>
+                                {% empty %}<li>Событий проверки нет.</li>{% endfor %}
+                            </ol>
+                        </details>
+                    </aside>
+                </article>
+            {% empty %}
+                <div class="management-intervention-empty">
+                    <strong>В выбранной очереди записей нет</strong>
+                    <span>Операционный журнал остаётся доступен без ручного подтверждения каждого обычного события.</span>
+                </div>
+            {% endfor %}
+        </section>
+    </section>
+</main>
+{% endblock %}

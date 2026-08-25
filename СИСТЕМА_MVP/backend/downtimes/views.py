@@ -9,7 +9,7 @@ from trips.models import OPEN_TRIP_STATUSES, Trip
 from users.models import EmployeeAccess
 
 from .forms import MechanicDowntimeCreateForm
-from .models import DowntimeEvent
+from .models import DowntimeEvent, DowntimeEventSource
 
 
 def equipment_is_truck(equipment):
@@ -154,6 +154,8 @@ def mechanic_create_downtime_view(request, trip_id):
     DowntimeEvent.objects.create(
         equipment=equipment,
         employee=access.employee,
+        recorded_by=access.employee,
+        source=DowntimeEventSource.EMPLOYEE,
         reason=form.cleaned_data['reason'],
         started_at=timezone.now(),
         comment=form.cleaned_data['comment'],
