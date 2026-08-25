@@ -88,6 +88,11 @@ class ActiveRoleSessionMiddleware:
         # Taking the session back is the one action an inactive role must still
         # be able to perform — otherwise there is no way out but retyping the PIN.
         '/reclaim-session/',
+        # Подписка на уведомления и отметка о показе ничего не меняют в работе,
+        # но должны работать и когда роль переведена в просмотр.
+        '/push/subscribe/',
+        '/push/unsubscribe/',
+        '/push/shown/',
         '/logout/',
         '/clerk/login/',
         '/settlement/login/',

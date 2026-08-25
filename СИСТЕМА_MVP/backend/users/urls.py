@@ -29,6 +29,13 @@ from .live_monitor_views import (
     system_admin_force_end_sessions_view,
     system_admin_live_monitor_view,
 )
+from .push_views import (
+    push_mark_shown_view,
+    push_pending_view,
+    push_public_key_view,
+    push_subscribe_view,
+    push_unsubscribe_view,
+)
 from .views import (
     activate_access_view,
     app_catalog_qr_view,
@@ -70,6 +77,11 @@ from .views import (
 
 urlpatterns = [
     path('session-heartbeat/', application_session_heartbeat_view, name='application_session_heartbeat'),
+    path('push/key/', push_public_key_view, name='push_public_key'),
+    path('push/subscribe/', push_subscribe_view, name='push_subscribe'),
+    path('push/unsubscribe/', push_unsubscribe_view, name='push_unsubscribe'),
+    path('push/pending/', push_pending_view, name='push_pending'),
+    path('push/shown/', push_mark_shown_view, name='push_mark_shown'),
     path('', login_view, name='login'),
     path('activate-access/', activate_access_view, name='activate_access'),
     path('reclaim-session/', reclaim_role_session_view, name='reclaim_role_session'),

@@ -8,7 +8,7 @@ from django.http import HttpResponse, JsonResponse
 
 
 APP_CONTRACT_VERSION = 'pwa-contract-v1'
-STATIC_ASSET_RELEASE = 'ready-core-traffic-v15'
+STATIC_ASSET_RELEASE = 'ready-core-traffic-v16'
 READY_TRAFFIC_ROLE_CODES = frozenset({
     'admin',
     'oup',
@@ -46,6 +46,86 @@ async function cacheFirstReleaseStatic(request) {
     });
   }
 }
+""".strip()
+
+
+# Push приходит пустым: сервер только будит телефон, а текст уведомления
+# фоновый модуль забирает сам. Так содержимое не проходит через чужой
+# push-сервис и всегда показывается актуальным.
+PUSH_SERVICE_WORKER_JS = r"""
+async function showPendingNotifications() {
+  let payload = null;
+  try {
+    const response = await fetch("/push/pending/", {
+      credentials: "include",
+      cache: "no-store",
+      headers: { "X-Requested-With": "XMLHttpRequest" }
+    });
+    if (response.ok) payload = await response.json();
+  } catch (error) {}
+
+  // Без текста всё равно обязаны показать уведомление: иначе браузер
+  // накажет приложение и со временем отключит push.
+  if (!payload || !payload.ok || !Array.isArray(payload.notifications) || !payload.notifications.length) {
+    await self.registration.showNotification("Новое событие в смене", {
+      body: "Откройте приложение, чтобы посмотреть.",
+      icon: "/static/img/pwa/" + ROLE_ICON_SLUG + "-192.png",
+      badge: "/static/img/pwa/" + ROLE_ICON_SLUG + "-192.png",
+      tag: "app-event",
+      renotify: true,
+      data: { url: START_URL }
+    });
+    return;
+  }
+
+  const shownIds = [];
+  for (const item of payload.notifications) {
+    shownIds.push(item.id);
+    await self.registration.showNotification(item.title || "Событие в смене", {
+      body: item.body || "",
+      icon: "/static/img/pwa/" + ROLE_ICON_SLUG + "-192.png",
+      badge: "/static/img/pwa/" + ROLE_ICON_SLUG + "-192.png",
+      tag: item.tag || ("app-event-" + item.id),
+      renotify: true,
+      requireInteraction: false,
+      vibrate: [200, 100, 200],
+      data: { url: item.url || START_URL, id: item.id }
+    });
+  }
+
+  if (self.registration.navigator && self.registration.navigator.setAppBadge) {
+    try { await self.registration.navigator.setAppBadge(payload.badge || 0); } catch (error) {}
+  }
+
+  try {
+    await fetch("/push/shown/", {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
+      body: JSON.stringify({ ids: shownIds })
+    });
+  } catch (error) {}
+}
+
+self.addEventListener("push", event => {
+  event.waitUntil(showPendingNotifications());
+});
+
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || START_URL;
+  event.waitUntil((async () => {
+    const clientList = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of clientList) {
+      if ("focus" in client) {
+        try { await client.navigate(target); } catch (error) {}
+        return client.focus();
+      }
+    }
+    if (self.clients.openWindow) return self.clients.openWindow(target);
+  })());
+});
 """.strip()
 
 
@@ -116,7 +196,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v146',
+        shell_version='driver-mobile-shell-v147',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -454,6 +534,8 @@ const CACHE_PREFIX = {json.dumps(app.shell_version.rsplit("-v", 1)[0] + "-")};
 const CACHE_NAME = {json.dumps(app.shell_version)};
 const MANIFEST_URL = {json.dumps(app.manifest_url)};
 const CORE_ASSETS = {json.dumps(assets)};
+const ROLE_ICON_SLUG = {json.dumps(app.icon_slug)};
+const START_URL = {json.dumps(app.start_url)};
 
 self.addEventListener("install", event => {{
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(
@@ -461,6 +543,8 @@ self.addEventListener("install", event => {{
   )));
   self.skipWaiting();
 }});
+
+{PUSH_SERVICE_WORKER_JS}
 
 self.addEventListener("activate", event => {{
   event.waitUntil(

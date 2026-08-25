@@ -621,4 +621,70 @@ class DriverPrimaryRegistration(models.Model):
     def __str__(self):
         return f'{self.employee} / {self.dormitory_section}'
 
-# Create your models here.
+
+class WebPushSubscription(models.Model):
+    """Телефон сотрудника, подписанный на уведомления.
+
+    У одного человека может быть несколько устройств, поэтому уникален адрес
+    подписки, а не сотрудник.
+    """
+
+    employee = models.ForeignKey(
+        Employee,
+        verbose_name='Сотрудник',
+        on_delete=models.CASCADE,
+        related_name='push_subscriptions',
+    )
+    endpoint = models.URLField('Адрес подписки', max_length=500, unique=True)
+    p256dh = models.CharField('Ключ устройства', max_length=200, blank=True)
+    auth = models.CharField('Секрет устройства', max_length=100, blank=True)
+    role_code = models.CharField('Роль', max_length=64, blank=True)
+    user_agent = models.CharField('Устройство', max_length=300, blank=True)
+    is_active = models.BooleanField('Активна', default=True)
+    failure_count = models.PositiveSmallIntegerField('Неудач подряд', default=0)
+    created_at = models.DateTimeField('Создана', auto_now_add=True)
+    last_success_at = models.DateTimeField('Последняя доставка', null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Подписка на уведомления'
+        verbose_name_plural = 'Подписки на уведомления'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['employee', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f'{self.employee} / {self.endpoint[:40]}'
+
+
+class PushNotification(models.Model):
+    """Текст уведомления, который телефон забирает после сигнала.
+
+    Сам push отправляется пустым, поэтому содержимое хранится здесь и выдаётся
+    приложению уже по защищённому сеансу.
+    """
+
+    employee = models.ForeignKey(
+        Employee,
+        verbose_name='Сотрудник',
+        on_delete=models.CASCADE,
+        related_name='push_notifications',
+    )
+    title = models.CharField('Заголовок', max_length=120)
+    body = models.CharField('Текст', max_length=300, blank=True)
+    url = models.CharField('Куда открыть', max_length=300, blank=True)
+    tag = models.CharField('Метка замены', max_length=64, blank=True)
+    kind = models.CharField('Событие', max_length=64, blank=True)
+    created_at = models.DateTimeField('Создано', auto_now_add=True)
+    shown_at = models.DateTimeField('Показано', null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Push-уведомление'
+        verbose_name_plural = 'Push-уведомления'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['employee', 'shown_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.employee}: {self.title}'

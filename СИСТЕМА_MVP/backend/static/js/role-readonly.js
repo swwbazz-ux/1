@@ -7,7 +7,11 @@
         "/activate-access/": true,
         // Taking the session back must work while read-only, otherwise the
         // only way out is retyping the PIN.
-        "/reclaim-session/": true
+        "/reclaim-session/": true,
+        // Уведомления не меняют рабочие данные и нужны в любом режиме.
+        "/push/subscribe/": true,
+        "/push/unsubscribe/": true,
+        "/push/shown/": true
     };
     var SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
     var BLOCKED_ATTRIBUTE = "data-role-readonly-blocked";

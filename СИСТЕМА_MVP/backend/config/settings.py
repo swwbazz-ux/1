@@ -154,6 +154,12 @@ ROLE_APP_PERSONAL_SESSION_AGE = int(
     os.getenv('DJANGO_ROLE_APP_PERSONAL_SESSION_AGE', str(60 * 60 * 24 * 365))
 )
 
+# Ключи для push-уведомлений. Приватный ключ хранится только в .env на сервере;
+# без него уведомления просто не отправляются, остальное работает как раньше.
+WEBPUSH_VAPID_PRIVATE_KEY = os.getenv('DJANGO_WEBPUSH_VAPID_PRIVATE_KEY', '').strip()
+WEBPUSH_VAPID_PUBLIC_KEY = os.getenv('DJANGO_WEBPUSH_VAPID_PUBLIC_KEY', '').strip()
+WEBPUSH_CONTACT = os.getenv('DJANGO_WEBPUSH_CONTACT', 'mailto:admin@driverform.ru').strip()
+
 WSGI_APPLICATION = 'config.wsgi.application'
 
 

@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 import re
 import secrets
@@ -75,6 +76,8 @@ from .trip_creation import (
     calculate_trip_volume_and_tonnage,
     create_loaded_waiting_unload_trip,
 )
+
+logger = logging.getLogger(__name__)
 
 
 DISPATCHER_FILTER_KEYS = (
@@ -3115,6 +3118,47 @@ def trip_loaded_payload(trip, *, client_action_id=''):
     }
 
 
+def notify_driver_truck_loaded(trip):
+    """Сообщает водителю, что его самосвал загружен и куда ехать.
+
+    Главное в уведомлении — точка разгрузки: именно её водитель ждёт от
+    экскаваторщика. Ошибки отправки намеренно проглатываются: уведомление не
+    должно ломать саму погрузку.
+    """
+    from users.webpush import notify_employee
+
+    try:
+        driver_shift = (
+            EmployeeShift.objects
+            .select_related('employee')
+            .filter(equipment_id=trip.truck_id, closed_at__isnull=True)
+            .filter(
+                Q(workplace_code='driver')
+                | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
+            )
+            .order_by('-opened_at')
+            .first()
+        )
+        if not driver_shift or not driver_shift.employee_id:
+            return
+        dump_point = trip.assigned_dump_point or trip.dump_point
+        dump_name = getattr(dump_point, 'name', '') or 'не указана'
+        rock_name = getattr(trip.rock_type, 'name', '') or ''
+        body = f'Точка разгрузки: {dump_name}'
+        if rock_name:
+            body = f'{body} · {rock_name}'
+        notify_employee(
+            driver_shift.employee,
+            title='Самосвал загружен',
+            body=body,
+            url='/driver/',
+            tag='driver-trip-loaded',
+            kind='driver_trip_loaded',
+        )
+    except Exception:
+        logger.exception('Не удалось отправить водителю уведомление о погрузке.')
+
+
 @require_POST
 def excavator_truck_loaded_view(request):
     access = excavator_access_from_request(request)
@@ -3293,6 +3337,7 @@ def excavator_truck_loaded_view(request):
             },
         )
 
+    notify_driver_truck_loaded(trip)
     response_payload = trip_loaded_payload(trip, client_action_id=client_action_id)
     response_payload['version'] = state.version
     response_payload['downtime_status'] = excavator_downtime_status_payload(current_excavator, open_shift)
