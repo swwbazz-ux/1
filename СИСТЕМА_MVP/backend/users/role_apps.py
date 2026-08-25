@@ -116,7 +116,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v142',
+        shell_version='driver-mobile-shell-v143',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -408,6 +408,11 @@ def build_role_app_manifest(request, role_code):
         'scope': role_app_scope(request, role_code),
         'display': 'standalone',
         'display_override': ['standalone', 'fullscreen'],
+        # После установки ссылка на приложение должна открывать само приложение,
+        # а не браузер с адресной строкой: человек переходит по той же ссылке из
+        # рабочей группы и попадает уже в установленное приложение.
+        'handle_links': 'preferred',
+        'launch_handler': {'client_mode': 'navigate-existing'},
         'orientation': app.orientation,
         'background_color': app.background_color,
         'theme_color': app.theme_color,
