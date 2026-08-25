@@ -20,6 +20,42 @@
 {% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% endblock %}
 
 {% block body %}
+{% if role_app and login_role_app %}
+<style>
+    /* В обычном браузере показывается только установка. В установленном
+       приложении (standalone) — сразу форма входа. Медиазапросом, а не
+       скриптом, чтобы не мигало при загрузке. */
+    body.login-page .unified-login-form { display: none; }
+    body.login-page .login-install-gate { display: grid; gap: 14px; justify-items: stretch; }
+    @media (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) {
+        body.login-page .unified-login-form { display: grid; }
+        body.login-page .login-install-gate { display: none; }
+    }
+    /* iOS Safari и ручное раскрытие формы. */
+    body.login-page.is-app-installed .unified-login-form,
+    body.login-page.is-login-form-forced .unified-login-form { display: grid; }
+    body.login-page.is-app-installed .login-install-gate,
+    body.login-page.is-login-form-forced .login-install-gate { display: none; }
+
+    .login-install-gate__lead {
+        margin: 0;
+        color: #cbd5e1;
+        font-size: 15px;
+        line-height: 1.35;
+        text-align: center;
+    }
+    .login-install-gate__skip {
+        justify-self: center;
+        border: 0;
+        padding: 10px 12px;
+        background: none;
+        color: #93a7ae;
+        font: 600 14px/1.2 inherit;
+        text-decoration: underline;
+        cursor: pointer;
+    }
+</style>
+{% endif %}
 <main class="shared-shift-dialog unified-login-dialog">
     <div class="shared-shift-accent" aria-hidden="true"></div>
     <form method="post" data-validated-login class="app-confirm-content unified-login-form">
@@ -32,36 +68,39 @@
         </div>
         {% endif %}
         <h2>{% if login_role_app %}{{ login_role_app.name }}{% else %}Единый вход{% endif %}</h2>
-        <p>Телефон и пинкод сотрудника.</p>
         <label class="shared-shift-login-field" for="login-phone">
             <span>Телефон</span>
             <span class="shared-shift-phone-shell">
                 <span class="shared-shift-country-code">+7 <span aria-hidden="true">⌄</span></span>
-                <input id="login-phone" name="phone" type="text" inputmode="numeric" autocomplete="tel" placeholder="999-000-00-00" maxlength="13" pattern="[0-9]{3}-[0-9]{3}-[0-9]{2}-[0-9]{2}" data-phone-input data-hint="Введите номер телефона в формате +7 XXX-XXX-XX-XX" autofocus>
+                {# Введённый телефон возвращается в поле: раньше при неверном
+                   пинкоде сбрасывалось всё и номер приходилось набирать заново. #}
+                <input id="login-phone" name="phone" type="text" inputmode="numeric" autocomplete="tel" placeholder="999-000-00-00" maxlength="13" pattern="[0-9]{3}-[0-9]{3}-[0-9]{2}-[0-9]{2}" data-phone-input data-hint="10 цифр номера" value="{{ submitted_phone }}"{% if not submitted_phone %} autofocus{% endif %}>
             </span>
-            <small class="input-hint" data-input-hint-for="login-phone">Введите номер телефона в формате +7 XXX-XXX-XX-XX</small>
+            <small class="input-hint" data-input-hint-for="login-phone">10 цифр номера</small>
         </label>
         <label class="shared-shift-login-field" for="login-pin">
             <span>Пинкод</span>
-            <input id="login-pin" name="access_code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="00-00-00" maxlength="8" pattern="[0-9]{2}-[0-9]{2}-[0-9]{2}" data-pin-input data-hint="Код состоит из 6 цифр.">
-            <small class="input-hint" data-input-hint-for="login-pin">Код состоит из 6 цифр</small>
+            <input id="login-pin" name="access_code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="00-00-00" maxlength="8" pattern="[0-9]{2}-[0-9]{2}-[0-9]{2}" data-pin-input data-hint="6 цифр из сообщения"{% if submitted_phone %} autofocus{% endif %}>
+            <small class="input-hint" data-input-hint-for="login-pin">6 цифр из сообщения</small>
         </label>
-        <fieldset class="login-device-choice shared-shift-device-choice">
-            <legend>Устройство</legend>
-            <label class="login-device-option shared-shift-device-option">
-                <input type="radio" name="device_kind" value="personal" {% if selected_device_kind == "personal" %}checked{% endif %}>
-                <span>Личное</span>
-            </label>
-            <label class="login-device-option shared-shift-device-option">
-                <input type="radio" name="device_kind" value="shared" {% if selected_device_kind != "personal" %}checked{% endif %}>
-                <span>Общее</span>
-            </label>
-        </fieldset>
-        <div class="app-confirm-actions">
-            <a class="secondary" href="{{ app_catalog_url }}">Приложения</a>
-            <button class="danger" type="submit">Войти</button>
+        {# Тип устройства определяется по браузеру: на телефоне — личное, на общем
+           компьютере — общее. Отдельный выбор только путал и занимал строку. #}
+        <input type="hidden" name="device_kind" value="{{ selected_device_kind }}">
+        <div class="unified-login-actions">
+            <button class="unified-login-submit" type="submit">Войти</button>
         </div>
-        {% if role_app and login_role_app %}
+    </form>
+    {% if role_app and login_role_app %}
+    {# Пока приложение не установлено, в браузере показывается только установка:
+       вход происходит уже внутри приложения, без адресной строки. Ссылка
+       "Войти без установки" оставлена для компьютеров, где установки нет. #}
+    <section class="login-install-gate" data-login-install-gate>
+        <div class="unified-login-role-identity">
+            <img src="{{ login_role_app.icon_180_url }}" width="72" height="72" alt="">
+            <span>Copper Resources</span>
+        </div>
+        <h2>{{ login_role_app.name }}</h2>
+        <p class="login-install-gate__lead">Установите приложение на телефон — вход будет уже в нём.</p>
         <section class="role-app-install" data-role-app-install data-app-name="{{ login_role_app.name }}" aria-label="Установка приложения">
             <button class="role-app-install__button" type="button" data-install-button>
                 <span aria-hidden="true">↓</span>
@@ -71,8 +110,36 @@
                 Приложение можно добавить на главный экран телефона.
             </p>
         </section>
-        {% endif %}
-    </form>
+        <button class="login-install-gate__skip" type="button" data-login-show-form>Войти без установки</button>
+    </section>
+    <script>
+    (function (window, document) {
+        "use strict";
+        var body = document.body;
+        /* iOS Safari в standalone не всегда матчит display-mode. */
+        if (window.navigator && window.navigator.standalone === true) {
+            body.classList.add("is-app-installed");
+        }
+        /* Если вход уже пробовали и он не удался, форму прячем зря. */
+        if (document.querySelector("[data-validated-login] [data-phone-input]") &&
+            document.querySelector("[data-validated-login] [data-phone-input]").value) {
+            body.classList.add("is-login-form-forced");
+        }
+        var skip = document.querySelector("[data-login-show-form]");
+        if (skip) {
+            skip.addEventListener("click", function () {
+                body.classList.add("is-login-form-forced");
+                var phone = document.querySelector("[data-phone-input]");
+                if (phone && phone.focus) phone.focus();
+            });
+        }
+        /* После установки сразу показываем вход, чтобы человек не искал иконку. */
+        window.addEventListener("appinstalled", function () {
+            body.classList.add("is-app-installed");
+        });
+    })(window, document);
+    </script>
+    {% endif %}
     {% for message in messages %}
         <div class="message error">{{ message }}</div>
     {% endfor %}

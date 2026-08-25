@@ -214,7 +214,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v143'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v144'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -586,6 +586,10 @@ def login_view(
     selected_device_kind = request.POST.get('device_kind') if request.method == 'POST' else detect_session_device_kind(request)
     if selected_device_kind not in {'personal', 'shared'}:
         selected_device_kind = detect_session_device_kind(request)
+    # Номер возвращаем в форму: при неверном пинкоде набирать его заново незачем.
+    submitted_phone = (
+        request.POST.get('phone', '').strip() if request.method == 'POST' else ''
+    )
     if request.method == 'POST':
         phone = request.POST.get('phone', '').strip()
         access_code = request.POST.get('access_code', '').strip()
@@ -651,6 +655,7 @@ def login_view(
                         'selected_device_kind': selected_device_kind,
                         'next_url': next_url,
                         'login_role_app': login_role_app,
+                        'submitted_phone': submitted_phone,
                     },
                 )
             request.session.cycle_key()
@@ -678,6 +683,7 @@ def login_view(
             'selected_device_kind': selected_device_kind,
             'next_url': next_url,
             'login_role_app': login_role_app,
+            'submitted_phone': submitted_phone,
         },
     )
 
