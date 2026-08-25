@@ -4,19 +4,11 @@
 {% block body_class %}dispatcher-control-screen{% endblock %}
 
 {% block body %}
-<main class="dispatcher-shell dispatcher-analytics-shell" data-dispatcher-theme>
-    <section class="dispatcher-analytics-board" aria-label="Журнал смены диспетчера">
+<main class="dispatcher-shell dispatcher-analytics-shell dispatcher-design-pilot" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board dispatcher-analytics-board--compact-actions" aria-label="Журнал смены диспетчера">
         <header class="dispatcher-topbar dispatcher-unified-topbar">
-            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="shift_log" dispatcher_header_screen="Журнал смены" %}
+            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="shift_log" dispatcher_header_screen="Журнал смены" design_system_pilot=True %}
         </header>
-        <div class="dispatcher-analytics-toolbar">
-            <span class="dispatcher-toolbar-spacer"></span>
-            <div class="dispatcher-report-actions">
-                <a href="{% url 'dispatcher_shift_log_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
-                <button type="button" onclick="window.print()">Печать</button>
-            </div>
-        </div>
-
         <form class="dispatcher-report-filters" method="get" data-auto-filter-form>
             <label>
                 <span>Дата</span>
@@ -31,6 +23,10 @@
                 </select>
             </label>
             <button type="submit">Показать</button>
+            <div class="dispatcher-report-actions">
+                <a href="{% url 'dispatcher_shift_log_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
+                <button type="button" onclick="window.print()">Печать</button>
+            </div>
         </form>
 
         <section class="dispatcher-analytics-grid dispatcher-shift-log-grid">

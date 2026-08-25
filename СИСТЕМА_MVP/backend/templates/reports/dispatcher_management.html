@@ -4,17 +4,13 @@
 {% block body_class %}dispatcher-control-screen{% endblock %}
 
 {% block body %}
-<main class="dispatcher-shell dispatcher-analytics-shell" data-dispatcher-theme>
+<main class="dispatcher-shell dispatcher-analytics-shell dispatcher-design-pilot" data-dispatcher-theme>
     <section class="dispatcher-analytics-board dispatcher-management-board" aria-label="Витрина диспетчерской">
         <header class="dispatcher-topbar dispatcher-unified-topbar">
-            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="management" dispatcher_header_screen="Витрина" %}
+            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="management" dispatcher_header_screen="Витрина" design_system_pilot=True %}
         </header>
         <div class="dispatcher-analytics-toolbar">
             {% include "includes/dispatcher_analytics_tabs.html" with dispatcher_nav_active="management" %}
-            <div class="dispatcher-report-actions">
-                <a href="{% url 'dispatcher_management_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
-                <button type="button" onclick="window.print()">Печать</button>
-            </div>
         </div>
 
         <form class="dispatcher-report-filters" method="get" data-auto-filter-form>
@@ -31,6 +27,10 @@
                 </select>
             </label>
             <button type="submit">Показать</button>
+            <div class="dispatcher-report-actions">
+                <a href="{% url 'dispatcher_management_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
+                <button type="button" onclick="window.print()">Печать</button>
+            </div>
         </form>
 
         <section class="dispatcher-management-layout">

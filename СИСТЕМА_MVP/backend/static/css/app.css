@@ -19255,31 +19255,30 @@ body.dispatcher-control-screen.dispatcher-design-pilot-night {
 }
 
 .dispatcher-command-time-range {
-    position: relative;
-    padding-left: 25px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding-left: 0;
 }
 
 .dispatcher-command-time-range::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 50%;
-    width: 16px;
-    height: 16px;
-    transform: translateY(-50%);
-    border: 1.7px solid #8fa1aa;
-    border-radius: 50%;
+    content: none;
 }
 
 .dispatcher-command-time-range::after {
-    content: "";
-    position: absolute;
-    left: 7px;
-    top: calc(50% - 5px);
-    width: 5px;
-    height: 7px;
-    border-left: 1.7px solid #8fa1aa;
-    border-bottom: 1.7px solid #8fa1aa;
+    content: none;
+}
+
+.dispatcher-command-time-icon {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
+    color: #8fa1aa;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
 .dispatcher-header-row .dispatcher-nav {
@@ -19866,6 +19865,10 @@ body.dispatcher-control-screen.dispatcher-design-pilot-night {
     min-height: 34px;
 }
 
+.dispatcher-report-filters > .dispatcher-report-actions {
+    margin-left: auto;
+}
+
 .dispatcher-report-actions a,
 .dispatcher-report-actions button {
     flex: 0 0 auto;
@@ -19877,6 +19880,10 @@ body.dispatcher-control-screen.dispatcher-design-pilot-night {
 
 .dispatcher-analytics-board {
     grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
+.dispatcher-analytics-board--compact-actions {
+    grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .dispatcher-report-filters {
@@ -19919,6 +19926,16 @@ body.dispatcher-control-screen.dispatcher-design-pilot-night {
     padding: 0 22px;
     color: var(--gd-green);
     cursor: pointer;
+}
+
+.dispatcher-report-filters > .dispatcher-report-actions a,
+.dispatcher-report-filters > .dispatcher-report-actions button {
+    min-width: 82px;
+    padding: 0 10px;
+}
+
+.dispatcher-report-filters > .dispatcher-report-actions button {
+    color: var(--gd-text);
 }
 
 .dispatcher-report-filters[data-auto-filter-form] button[type="submit"] {
@@ -32974,4 +32991,120 @@ body.excavator-operator-screen .mm-mobile-nav-item span {
     body.mining-master-mobile-screen .mm-mobile-fill-truck-ghost {
         box-shadow: 0 18px 30px rgba(0, 0, 0, .54), 0 0 24px rgba(40, 199, 183, .28);
     }
+}
+
+/* Dispatcher stage 2: one grouped utility panel across all dispatcher tabs. */
+.dispatcher-command-utility.dispatcher-command-utility--grouped {
+    grid-template-columns: 38px 38px repeat(2, minmax(0, 1fr));
+    column-gap: 0;
+    width: calc(100% + 42px);
+    max-width: 342px;
+    min-height: 38px;
+    border: 1px solid color-mix(in srgb, var(--ds-brand, #28c7b7) 34%, var(--gd-line));
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--gd-panel) 86%, var(--ds-brand-dark, #08766c));
+    overflow: hidden;
+}
+
+.dispatcher-command-actions--grouped .dispatcher-shift-slot {
+    width: calc(100% + 42px);
+    max-width: 342px;
+}
+
+.dispatcher-command-utility--grouped .dispatcher-theme-button,
+.dispatcher-command-utility--grouped .dispatcher-utility-link {
+    width: 100%;
+    min-width: 0;
+    height: 38px;
+    min-height: 38px;
+    margin: 0;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--ds-brand-on-dark, #46e0d1);
+}
+
+.dispatcher-command-utility--grouped > :not(:first-child) {
+    border-left: 1px solid color-mix(in srgb, var(--ds-brand, #28c7b7) 24%, var(--gd-line));
+}
+
+.dispatcher-command-utility--grouped .dispatcher-theme-button[data-dispatcher-theme-toggle] {
+    background: color-mix(in srgb, var(--ds-brand, #28c7b7) 12%, transparent);
+}
+
+.dispatcher-command-utility--grouped .dispatcher-theme-button:hover,
+.dispatcher-command-utility--grouped .dispatcher-utility-link:hover,
+.dispatcher-command-utility--grouped .dispatcher-theme-button:focus-visible,
+.dispatcher-command-utility--grouped .dispatcher-utility-link:focus-visible {
+    border-color: color-mix(in srgb, var(--ds-brand, #28c7b7) 24%, var(--gd-line));
+    background: color-mix(in srgb, var(--ds-brand, #28c7b7) 18%, var(--gd-panel));
+    color: var(--ds-brand-on-dark, #46e0d1);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ds-brand, #28c7b7) 52%, transparent);
+    animation: none;
+    filter: none;
+}
+
+.dispatcher-command-utility--grouped .dispatcher-theme-button::before,
+.dispatcher-command-utility--grouped .dispatcher-theme-button::after {
+    display: none;
+}
+
+.dispatcher-command-utility--grouped .app-action-icon {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.dispatcher-command-utility--grouped .app-theme-icon {
+    display: none;
+}
+
+.dispatcher-command-utility--grouped .dispatcher-theme-button:not([data-theme-icon]) .app-theme-icon--moon,
+.dispatcher-command-utility--grouped .dispatcher-theme-button[data-theme-icon="moon"] .app-theme-icon--moon,
+.dispatcher-command-utility--grouped .dispatcher-theme-button[data-theme-icon="sun"] .app-theme-icon--sun {
+    display: block;
+}
+
+.dispatcher-command-utility--grouped .app-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+.dispatcher-day .dispatcher-command-utility.dispatcher-command-utility--grouped {
+    border-color: color-mix(in srgb, var(--ds-brand-dark, #08766c) 30%, #c8d4d8);
+    background: color-mix(in srgb, #eef4f5 92%, var(--ds-brand-soft, #ddf7f3));
+}
+
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-theme-button,
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-utility-link {
+    color: var(--ds-brand-dark, #08766c);
+}
+
+.dispatcher-day .dispatcher-command-utility--grouped > :not(:first-child) {
+    border-left-color: color-mix(in srgb, var(--ds-brand-dark, #08766c) 20%, #c8d4d8);
+}
+
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-theme-button[data-dispatcher-theme-toggle] {
+    background: color-mix(in srgb, var(--ds-brand, #28c7b7) 11%, transparent);
+}
+
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-theme-button:hover,
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-utility-link:hover,
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-theme-button:focus-visible,
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-utility-link:focus-visible {
+    background: color-mix(in srgb, var(--ds-brand, #28c7b7) 15%, #eef4f5);
+    color: var(--ds-brand-dark, #08766c);
 }
