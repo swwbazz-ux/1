@@ -35,7 +35,15 @@ from shifts.models import AchievementPrize, EmployeeShift, EquipmentPlanGroup, E
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
 
 from .forms import AdminEmployeeEditForm
-from .models import AdminActionLog, AdminConflict, DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+from .models import (
+    AdminActionLog,
+    AdminConflict,
+    DriverPrimaryRegistration,
+    Employee,
+    EmployeeAccess,
+    PersonnelPosition,
+    Role,
+)
 
 
 class AccessLoginTests(TestCase):
@@ -383,6 +391,34 @@ class AccessLoginTests(TestCase):
         self.assertContains(dashboard_response, 'href="/system-admin/employees/?access_status=deactivated"')
         self.assertContains(dashboard_response, 'Журнал действий')
 
+    def test_system_admin_header_uses_employee_photo_with_initial_fallback(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(
+            full_name='Тест Админ Я',
+            status=Employee.Status.ACTIVE,
+            photo='employee_photos/admin-avatar.jpg',
+        )
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1001',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        self.client.post('/', {'access_code': '1001'}, follow=True, HTTP_HOST='localhost')
+
+        response_with_photo = self.client.get('/system-admin/', HTTP_HOST='localhost')
+
+        self.assertContains(response_with_photo, 'src="/media/employee_photos/admin-avatar.jpg"')
+        self.assertContains(response_with_photo, '-admin-header-avatar-v2')
+
+        admin_employee.photo = ''
+        admin_employee.save(update_fields=['photo'])
+        response_without_photo = self.client.get('/system-admin/', HTTP_HOST='localhost')
+
+        self.assertContains(response_without_photo, 'class="admin-console-avatar"')
+        self.assertContains(response_without_photo, 'Т')
+        self.assertNotContains(response_without_photo, '<img src="/media/employee_photos/admin-avatar.jpg"')
+
     def test_admin_can_reset_shift_test_data_without_deleting_base_data(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
         driver_role = Role.objects.create(code='driver_reset_test', name='Водитель самосвала')
@@ -516,6 +552,94 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, 'Активный водитель')
         self.assertContains(response, 'name="access_status"')
 
+    def test_admin_employee_list_separates_personnel_position_from_app_access(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        dispatcher_role = Role.objects.create(code='dispatcher_filter', name='Диспетчер')
+        dispatcher_position, _created = PersonnelPosition.objects.get_or_create(
+            name='Горный диспетчер',
+            defaults={'code': 'mining-dispatcher-filter'},
+        )
+        transport_dispatcher_position, _created = PersonnelPosition.objects.get_or_create(
+            name='Диспетчер по горно-транспортному оборудованию',
+            defaults={'code': 'transport-dispatcher-filter'},
+        )
+        manager_position, _created = PersonnelPosition.objects.get_or_create(
+            name='Начальник участка',
+            defaults={'code': 'site-manager-filter'},
+        )
+        admin_employee = Employee.objects.create(
+            full_name='Администратор MVP',
+            status=Employee.Status.ACTIVE,
+        )
+        dispatcher_without_access = Employee.objects.create(
+            full_name='Диспетчер без доступа',
+            personnel_position=dispatcher_position,
+            position=dispatcher_position.name,
+            status=Employee.Status.ACTIVE,
+        )
+        transport_dispatcher_without_access = Employee.objects.create(
+            full_name='Диспетчер ГТО без доступа',
+            personnel_position=transport_dispatcher_position,
+            position=transport_dispatcher_position.name,
+            status=Employee.Status.ACTIVE,
+        )
+        employee_with_dispatcher_access = Employee.objects.create(
+            full_name='Руководитель с доступом диспетчера',
+            personnel_position=manager_position,
+            status=Employee.Status.ACTIVE,
+        )
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=employee_with_dispatcher_access,
+            role=dispatcher_role,
+            access_code='2000',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        position_response = self.client.get(
+            f'/system-admin/employees/?personnel_position={dispatcher_position.id}',
+            HTTP_HOST='localhost',
+        )
+        access_response = self.client.get(
+            f'/system-admin/employees/?role={dispatcher_role.id}',
+            HTTP_HOST='localhost',
+        )
+        dispatcher_group_response = self.client.get(
+            '/system-admin/employees/?personnel_position=group%3Adispatchers',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertContains(position_response, 'Диспетчер без доступа')
+        self.assertNotContains(position_response, 'Диспетчер ГТО без доступа')
+        self.assertNotContains(position_response, 'Руководитель с доступом диспетчера')
+        self.assertContains(access_response, 'Руководитель с доступом диспетчера')
+        self.assertNotContains(access_response, 'Диспетчер без доступа')
+        self.assertContains(dispatcher_group_response, 'Диспетчер без доступа')
+        self.assertContains(dispatcher_group_response, 'Диспетчер ГТО без доступа')
+        self.assertNotContains(
+            dispatcher_group_response,
+            'Руководитель с доступом диспетчера',
+        )
+        self.assertContains(position_response, 'Кадровая должность')
+        self.assertContains(position_response, 'Доступ в приложение')
+        self.assertContains(position_response, 'Статус сотрудника')
+        self.assertContains(position_response, 'Статус доступа')
+        self.assertContains(position_response, '>Диспетчеры<', html=False)
+        self.assertNotContains(position_response, '<optgroup', html=False)
+        self.assertContains(position_response, 'css/oup-workplace-v1.css?v=20260718-4')
+        self.assertContains(position_response, 'css/admin-employee-filters-v1.css?v=20260824-1')
+        self.assertContains(position_response, 'class="oup-employee-row admin-oup-employee-row status-active"')
+        self.assertContains(position_response, 'Горный диспетчер')
+        self.assertNotContains(position_response, 'Роль не назначена')
+
     def test_admin_cannot_block_own_access(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
         admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
@@ -619,7 +743,11 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '2468')
         self.assertContains(response, 'ожидает первого входа')
         self.assertContains(response, 'employee-login-share')
-        self.assertContains(response, 'https://driverform.ru')
+        self.assertContains(response, 'data-login-url="https://driverform.ru"')
+        self.assertContains(response, '<span>https://driverform.ru</span>', html=False)
+        self.assertNotContains(response, 'data-login-url="https://driverform.ru/apps/"')
+        self.assertContains(response, 'js/employee-card-unified.js?v=20260824-1')
+        self.assertContains(response, 'css/employee-card-unified.css?v=20260824-3')
         self.assertContains(response, 'Телефон: +79990000000')
         self.assertContains(response, 'Пин код: 246824')
         self.assertContains(response, 'Скопировать')
@@ -1533,13 +1661,17 @@ class AccessLoginTests(TestCase):
             'name="brigade_number"',
             'name="residence_text"',
             'name="role"',
-            'name="assignment_shift_type"',
-            'name="assignment_equipment"',
             'name="comment"',
             'name="hr_data"',
         ]
         positions = [html.index(marker) for marker in expected_order]
         self.assertEqual(positions, sorted(positions))
+        canonical_end = html.index('</form>', html.index('data-canonical-employee-card'))
+        role_tools_start = html.index('data-role-tools', canonical_end)
+        assignment_start = html.index('data-admin-assignment-editor', role_tools_start)
+        self.assertLess(role_tools_start, assignment_start)
+        self.assertGreater(html.index('name="assignment_shift_type"'), assignment_start)
+        self.assertGreater(html.index('name="assignment_equipment"'), assignment_start)
 
     def test_admin_creates_employee_with_work_shift_and_equipment_assignment(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')

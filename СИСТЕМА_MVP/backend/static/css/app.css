@@ -12777,10 +12777,12 @@ body.employees-admin-screen {
 }
 
 .admin-console-avatar {
+    position: relative;
     display: grid;
     place-items: center;
     width: 52px;
     height: 52px;
+    overflow: hidden;
     border: 1px solid color-mix(in srgb, var(--admin-green) 45%, var(--admin-line));
     border-radius: 8px;
     background: var(--admin-green-soft);
@@ -12788,6 +12790,15 @@ body.employees-admin-screen {
     font-size: 22px;
     font-weight: 900;
     text-transform: uppercase;
+}
+
+.admin-console-avatar img {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .admin-console-identity strong,

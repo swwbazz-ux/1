@@ -185,7 +185,11 @@ class EmployeeCardForm(forms.ModelForm):
         }
         widgets = {
             'birth_date': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
-            'personnel_number': forms.HiddenInput(),
+            'personnel_number': forms.TextInput(attrs={
+                'autocomplete': 'off',
+                'maxlength': '64',
+                'placeholder': 'Например, 573',
+            }),
             'position': forms.HiddenInput(),
             'work_category': forms.HiddenInput(),
             'base_specialization': ProductionSpecializationSelect,
@@ -206,7 +210,9 @@ class EmployeeCardForm(forms.ModelForm):
             'comment': forms.Textarea(attrs={'rows': 3}),
             'hr_data': forms.Textarea(attrs={'rows': 3}),
             'photo': forms.FileInput(attrs={
-                'accept': 'image/jpeg,image/png,image/webp',
+                # Keep capture unset: on mobile this asks the operating system
+                # for a source and lets the user choose camera or gallery.
+                'accept': 'image/*',
                 'class': 'employee-photo-input',
                 'data-employee-photo-input': '1',
                 'aria-label': 'Выбрать фото сотрудника',
@@ -497,6 +503,8 @@ class AdminEmployeeForm(EmployeeCardForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['generate_access'].widget.attrs['form'] = 'employee-card-form'
+        self.fields['assignment_shift_type'].widget.attrs['form'] = 'employee-card-form'
+        self.fields['assignment_equipment'].widget.attrs['form'] = 'employee-card-form'
         equipment_ids = set()
         for role_code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES:
             equipment_ids.update(equipment_queryset_for_work_role(role_code).values_list('id', flat=True))
@@ -625,6 +633,12 @@ class AdminEmployeeEditForm(EmployeeCardForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        for field_name in (
+            'assignment_role',
+            'assignment_shift_type',
+            'assignment_equipment',
+        ):
+            self.fields[field_name].widget.attrs['form'] = 'employee-card-form'
         employee = self.instance if self.instance and self.instance.pk else None
         if not employee:
             return

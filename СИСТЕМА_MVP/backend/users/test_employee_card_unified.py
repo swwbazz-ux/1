@@ -262,6 +262,13 @@ class UnifiedEmployeeCardTests(TestCase):
                 employee = form.save()
                 self.assertEqual(employee.sex, Employee.Sex.FEMALE)
 
+    def test_employee_photo_picker_allows_mobile_camera_or_gallery(self):
+        for form_class in (EmployeeCardForm, OupEmployeeForm, AdminEmployeeForm, AdminEmployeeEditForm):
+            with self.subTest(form=form_class.__name__):
+                widget = form_class().fields['photo'].widget
+                self.assertEqual(widget.attrs.get('accept'), 'image/*')
+                self.assertNotIn('capture', widget.attrs)
+
     def test_legacy_edit_without_sex_preserves_explicit_value(self):
         employee = Employee.objects.create(
             full_name='Сотрудник с явно заданным полом',
@@ -294,12 +301,31 @@ class UnifiedEmployeeCardTests(TestCase):
         exported = next(row for row in rows[1:] if row[0] == self.employee.full_name)
         self.assertEqual(exported[rows[0].index('Пол')], 'Женский')
 
-    def test_personnel_number_is_not_a_visible_card_field(self):
+    def test_personnel_number_is_visible_in_admin_card_with_copy_action(self):
         self.login_as(self.admin_access)
         response = self.client.get(reverse('system_admin_employee_detail', args=[self.employee.id]))
 
-        self.assertNotContains(response, 'Табельный номер')
-        self.assertContains(response, 'type="hidden" name="personnel_number"', html=False)
+        self.assertContains(response, 'Табельный номер')
+        self.assertContains(response, 'name="personnel_number"', html=False)
+        self.assertContains(response, 'data-copy-target="#id_personnel_number"', html=False)
+        self.assertNotContains(response, 'type="hidden" name="personnel_number"', html=False)
+
+    def test_admin_employee_list_shows_and_searches_exact_personnel_number_for_duplicate_names(self):
+        self.employee.full_name = 'Петров Евгений Александрович'
+        self.employee.personnel_number = '472'
+        self.employee.save(update_fields=['full_name', 'personnel_number', 'updated_at'])
+        second = Employee.objects.create(
+            full_name='Петров Евгений Александрович',
+            personnel_number='1133',
+            status=Employee.Status.ACTIVE,
+        )
+        self.login_as(self.admin_access)
+
+        response = self.client.get(reverse('system_admin_employees'), {'q': '1133'})
+
+        self.assertEqual(list(response.context['employees']), [second])
+        self.assertContains(response, 'Таб. №1133')
+        self.assertNotContains(response, 'Таб. №472')
 
     def test_phone_validation_is_identical_for_admin_and_oup(self):
         common = {

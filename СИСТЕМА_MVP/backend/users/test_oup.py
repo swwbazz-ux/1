@@ -2134,6 +2134,71 @@ class OupOpenShiftAdminSafetyTests(TestCase):
             html=False,
         )
 
+    def test_admin_and_oup_share_canonical_employee_card_contract(self):
+        admin_detail = self.client.get(
+            reverse('system_admin_employee_detail', args=[self.oup_employee.id]),
+        )
+
+        self.assertEqual(admin_detail.status_code, 200)
+        admin_html = admin_detail.content.decode()
+        canonical_start = admin_html.index('data-canonical-employee-card')
+        canonical_end = admin_html.index('</form>', canonical_start)
+        admin_card = admin_html[canonical_start:canonical_end]
+        role_tools_start = admin_html.index('data-role-tools', canonical_end)
+
+        self.assertIn('data-card-schema="employee-card-v1"', admin_card)
+        self.assertIn('data-canonical-assignment-summary', admin_card)
+        self.assertIn('id="employee-assignment-role-readonly"', admin_card)
+        self.assertNotIn('name="assignment_role"', admin_card)
+        self.assertNotIn('name="assignment_shift_type"', admin_card)
+        self.assertNotIn('name="assignment_equipment"', admin_card)
+        self.assertGreater(admin_html.index('data-admin-assignment-editor'), role_tools_start)
+        self.assertIn('name="assignment_role"', admin_html[role_tools_start:])
+        self.assertIn('form="employee-card-form"', admin_html[role_tools_start:])
+
+        session = self.client.session
+        session['employee_access_id'] = self.oup_access.id
+        session.save()
+        oup_detail = self.client.get(
+            reverse('oup_employee_detail', args=[self.oup_employee.id]),
+        )
+
+        self.assertEqual(oup_detail.status_code, 200)
+        oup_html = oup_detail.content.decode()
+        oup_canonical_start = oup_html.index('data-canonical-employee-card')
+        oup_canonical_end = oup_html.index('</form>', oup_canonical_start)
+        oup_card = oup_html[oup_canonical_start:oup_canonical_end]
+
+        self.assertIn('data-card-schema="employee-card-v1"', oup_card)
+        self.assertIn('data-canonical-assignment-summary', oup_card)
+        self.assertIn('id="employee-assignment-role-readonly"', oup_card)
+        self.assertNotIn('data-admin-assignment-editor', oup_html)
+
+        shared_field_ids = (
+            'id_full_name',
+            'id_birth_date',
+            'id_sex',
+            'id_phone',
+            'id_personnel_position',
+            'id_personnel_department',
+            'id_base_specialization',
+            'employee-status-readonly',
+            'id_hired_at',
+            'id_dismissed_at',
+            'id_work_schedule',
+            'id_brigade_number',
+            'id_watch_composition',
+            'id_residence_text',
+            'employee-assignment-role-readonly',
+            'employee-assignment-shift-readonly',
+            'employee-assignment-equipment-readonly',
+            'id_comment',
+            'id_hr_data',
+        )
+        for card_html in (admin_card, oup_card):
+            positions = [card_html.index(field_id) for field_id in shared_field_ids]
+            self.assertEqual(positions, sorted(positions))
+
 
 class OupPhotoUploadTests(TestCase):
     def setUp(self):

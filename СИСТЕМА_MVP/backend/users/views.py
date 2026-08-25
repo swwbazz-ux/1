@@ -138,6 +138,14 @@ ROLE_INTERFACE_NAMES = {
 }
 
 
+ADMIN_PERSONNEL_POSITION_GROUPS = {
+    'group:dispatchers': {
+        'label': 'Диспетчеры',
+        'position_codes': ('position_012', 'position_014'),
+    },
+}
+
+
 ADMIN_RESTORABLE_EMPLOYEE_STATUSES = {
     Employee.Status.DEACTIVATED,
     Employee.Status.ARCHIVED,
@@ -1897,10 +1905,22 @@ def system_admin_employees_view(request):
     if not access:
         return redirect('role_home')
 
-    employees = Employee.objects.prefetch_related('accesses__role').order_by('full_name')
+    employees = (
+        Employee.objects
+        .select_related(
+            'personnel_department',
+            'work_schedule',
+            'watch_composition',
+            'personnel_position',
+            'base_specialization',
+        )
+        .prefetch_related('accesses__role')
+        .order_by('full_name')
+    )
     status = request.GET.get('status', '').strip()
     access_status = request.GET.get('access_status', '').strip()
     role_id = request.GET.get('role', '').strip()
+    personnel_position_id = request.GET.get('personnel_position', '').strip()
     query = request.GET.get('q', '').strip()
     if status:
         employees = employees.filter(status=status)
@@ -1908,8 +1928,23 @@ def system_admin_employees_view(request):
         employees = employees.filter(accesses__status=access_status).distinct()
     if role_id.isdigit():
         employees = employees.filter(accesses__role_id=int(role_id)).distinct()
+    personnel_position_group = ADMIN_PERSONNEL_POSITION_GROUPS.get(
+        personnel_position_id,
+    )
+    if personnel_position_group:
+        employees = employees.filter(
+            personnel_position__code__in=personnel_position_group['position_codes'],
+        )
+    elif personnel_position_id.isdigit():
+        employees = employees.filter(personnel_position_id=int(personnel_position_id))
     if query:
-        employees = employees.filter(full_name__icontains=query)
+        employees = employees.filter(
+            Q(full_name__icontains=query)
+            | Q(personnel_number__icontains=query)
+            | Q(phone__icontains=query)
+            | Q(position__icontains=query)
+            | Q(personnel_department__name__icontains=query)
+        )
 
     return render(
         request,
@@ -1920,9 +1955,15 @@ def system_admin_employees_view(request):
             'statuses': Employee.Status.choices,
             'access_statuses': EmployeeAccess.Status.choices,
             'roles': Role.objects.filter(is_active=True).order_by('name'),
+            'personnel_positions': PersonnelPosition.objects.filter(is_active=True).order_by('name'),
+            'personnel_position_groups': [
+                (value, item['label'])
+                for value, item in ADMIN_PERSONNEL_POSITION_GROUPS.items()
+            ],
             'selected_status': status,
             'selected_access_status': access_status,
             'selected_role': role_id,
+            'selected_personnel_position': personnel_position_id,
             'query': query,
         },
     )
@@ -2120,6 +2161,7 @@ def system_admin_employee_detail_view(request, employee_id):
             'block_form': AdminAccessBlockForm(),
             'employee_accesses': employee_accesses,
             'current_role_access': current_role_access,
+            'employee_card_access': current_role_access,
             'active_equipment_assignment': active_equipment_assignment,
             'work_assignment_role': work_assignment_role,
             'work_assignment_supports_equipment': bool(
