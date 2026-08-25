@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <symbol id="icon-control" viewBox="0 0 24 24">
+    <path d="M4 5h16v14H4zM8 9h8M8 13h5M8 17h8"/>
+  </symbol>
+  <symbol id="icon-analytics" viewBox="0 0 24 24">
+    <path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>
+  </symbol>
+  <symbol id="icon-journal" viewBox="0 0 24 24">
+    <path d="M6 3h12v18H6zM9 7h6M9 11h6M9 15h4"/>
+  </symbol>
+  <symbol id="icon-reports" viewBox="0 0 24 24">
+    <path d="M6 2h8l4 4v16H6zM14 2v5h5M9 12h6M9 16h6"/>
+  </symbol>
+  <symbol id="icon-rating" viewBox="0 0 24 24">
+    <path d="M4 19v-6h5v6M9.5 19V9h5v10M15 19V5h5v14M3 19.5h18"/>
+  </symbol>
+  <symbol id="icon-sun" viewBox="0 0 24 24">
+    <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/>
+    <circle cx="12" cy="12" r="4"/>
+  </symbol>
+  <symbol id="icon-moon" viewBox="0 0 24 24">
+    <path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z"/>
+  </symbol>
+  <symbol id="icon-back" viewBox="0 0 24 24">
+    <path d="m10 6-6 6 6 6M4 12h16"/>
+  </symbol>
+  <symbol id="icon-logout" viewBox="0 0 24 24">
+    <path d="M10 4H5v16h5M14 8l4 4-4 4M18 12H9"/>
+  </symbol>
+  <symbol id="icon-work" viewBox="0 0 24 24">
+    <path d="M10 17h4V5H2v12h3M14 9h4l4 4v4h-2"/>
+    <circle cx="7.5" cy="17.5" r="2.5"/>
+    <circle cx="17.5" cy="17.5" r="2.5"/>
+  </symbol>
+  <symbol id="icon-shift" viewBox="0 0 24 24">
+    <rect x="8" y="2" width="8" height="4" rx="1"/>
+    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 14l2 2 4-4"/>
+  </symbol>
+  <symbol id="icon-clock" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="9"/>
+    <path d="M12 7v5l3 2"/>
+  </symbol>
+  <symbol id="icon-downtime" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="10"/>
+    <path d="M10 9v6M14 9v6"/>
+  </symbol>
+  <symbol id="icon-manifest" viewBox="0 0 24 24">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6M8 13h8M8 17h8"/>
+  </symbol>
+  <symbol id="icon-refresh" viewBox="0 0 24 24">
+    <path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>
+  </symbol>
+  <symbol id="icon-play" viewBox="0 0 24 24">
+    <path d="m8 5 11 7-11 7Z"/>
+  </symbol>
+  <symbol id="icon-pause" viewBox="0 0 24 24">
+    <path d="M9 5v14M15 5v14"/>
+  </symbol>
+  <symbol id="icon-face" viewBox="0 0 24 24">
+    <path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/>
+    <circle cx="12" cy="10" r="3"/>
+  </symbol>
+  <symbol id="icon-excavator" viewBox="0 0 24 24">
+    <path d="M3 18h13M5 18l2-5h7l2 5M9 13V7h5l3 3M14 7V4h3l4 5-4 4M4 21h13"/>
+  </symbol>
+  <symbol id="icon-truck" viewBox="0 0 24 24">
+    <path d="M3 6h11v11H3zM14 10h4l3 3v4h-2M5 17h1M11 17h5"/>
+    <circle cx="8.5" cy="17.5" r="2.5"/>
+    <circle cx="18.5" cy="17.5" r="2.5"/>
+  </symbol>
+  <symbol id="icon-assignment" viewBox="0 0 24 24">
+    <path d="M5 4h14v16H5zM8 8h8M8 12h5M8 16h3M16 14v5M13.5 16.5h5"/>
+  </symbol>
+</svg>

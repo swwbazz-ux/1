@@ -1,3 +1,4 @@
+{% load static %}
 <nav class="dispatcher-nav" aria-label="{% if dispatcher_nav_label %}{{ dispatcher_nav_label }}{% else %}Навигация диспетчера{% endif %}">
     {% if dispatcher_nav_items %}
         {% for item in dispatcher_nav_items %}
@@ -7,15 +8,19 @@
         {% endfor %}
     {% else %}
         <a class="{% if dispatcher_nav_active == 'control' %}is-active{% endif %}" href="{% url 'dispatcher_control' %}">
+            {% if design_system_pilot %}<svg class="app-action-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-control"></use></svg>{% endif %}
             <span>Пульт</span>
         </a>
         <a class="{% if dispatcher_nav_active == 'management' or dispatcher_nav_active == 'mining' or dispatcher_nav_active == 'transport' or dispatcher_nav_active == 'downtimes' %}is-active{% endif %}" href="{% url 'dispatcher_management' %}">
+            {% if design_system_pilot %}<svg class="app-action-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-analytics"></use></svg>{% endif %}
             <span>Аналитика</span>
         </a>
         <a class="{% if dispatcher_nav_active == 'shift_log' %}is-active{% endif %}" href="{% url 'dispatcher_shift_log' %}">
+            {% if design_system_pilot %}<svg class="app-action-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-journal"></use></svg>{% endif %}
             <span>Журнал</span>
         </a>
         <a class="{% if dispatcher_nav_active == 'reports' %}is-active{% endif %}" href="{% url 'dispatcher_reports' %}">
+            {% if design_system_pilot %}<svg class="app-action-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-reports"></use></svg>{% endif %}
             <span>Отчеты</span>
         </a>
     {% endif %}

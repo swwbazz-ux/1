@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v128">
 <link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v128">
 <link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v128">
-<meta name="theme-color" content="#D58B14">
+<meta name="theme-color" content="#08766C">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
 <link rel="apple-touch-icon" href="{% static 'img/pwa/excavator-180.png' %}">
@@ -70,7 +70,7 @@
                 <div class="eo-shift-update-group">
                     <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 117</span>
                     <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
-                        <span aria-hidden="true"></span>
+                        <svg class="eo-action-icon eo-update-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-refresh"></use></svg>
                         <b data-eo-pwa-update-check-label>Обновить</b>
                         <em data-eo-pwa-update-check-version hidden></em>
                     </button>
@@ -359,16 +359,12 @@
         <section class="eo-screen" data-eo-screen="events">
             <div class="eo-title-row">
                 <h1>Простои</h1>
-                <button class="eo-refresh-button" type="button" aria-label="Обновить" data-eo-refresh-work>↻</button>
+                <button class="eo-refresh-button" type="button" aria-label="Обновить" data-eo-refresh-work><svg class="eo-action-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-refresh"></use></svg></button>
             </div>
             <div class="eo-downtime-card status-{{ active_downtime_state.color_group }}{% if active_downtime %} is-active{% endif %}" data-eo-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-eo-active-started-at="{{ active_downtime_started_at }}" data-eo-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-eo-shift-downtime-seconds="{{ shift_downtime_total_seconds }}" data-eo-downtime-state="{% if active_downtime %}{{ active_downtime_state.code }}{% endif %}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Простои за смену: {{ shift_downtime_total_label }}{% endif %}">
                 <span class="eo-downtime-state-dot" data-eo-downtime-indicator aria-hidden="true">
-                    <svg class="eo-downtime-state-icon eo-downtime-state-icon-play" viewBox="0 0 24 24" focusable="false">
-                        <path d="M7 4.8v14.4L19 12 7 4.8Z"></path>
-                    </svg>
-                    <svg class="eo-downtime-state-icon eo-downtime-state-icon-pause" viewBox="0 0 24 24" focusable="false">
-                        <path d="M6.5 5h4v14h-4V5Zm7 0h4v14h-4V5Z"></path>
-                    </svg>
+                    <svg class="eo-downtime-state-icon eo-downtime-state-icon-play" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-play"></use></svg>
+                    <svg class="eo-downtime-state-icon eo-downtime-state-icon-pause" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-pause"></use></svg>
                 </span>
                 <b data-eo-active-duration>{% if active_downtime %}{{ active_downtime_elapsed_label }}{% else %}{{ shift_downtime_total_label }}{% endif %}</b>
             </div>
@@ -389,42 +385,26 @@
     <nav class="mm-mobile-bottom-nav" aria-label="Навигация экскаваторщика">
         <button class="mm-mobile-nav-item" type="button" data-eo-tab="trucks" aria-label="Работа">
             <span class="mm-mobile-nav-icon" aria-hidden="true">
-                <svg class="lucide lucide-truck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M10 17h4V5H2v12h3"></path>
-                    <path d="M14 9h4l4 4v4h-2"></path>
-                    <circle cx="7.5" cy="17.5" r="2.5"></circle>
-                    <circle cx="17.5" cy="17.5" r="2.5"></circle>
-                </svg>
+                <svg class="eo-action-icon"><use href="{% static 'icons/app-actions.svg' %}#icon-work"></use></svg>
             </span>
             <span class="mm-mobile-nav-label">Работа</span>
         </button>
         <button class="mm-mobile-nav-item" type="button" data-eo-tab="shift" data-eo-pwa-update-nav-target aria-label="Смена">
             <span class="mm-mobile-nav-icon" aria-hidden="true">
-                <svg class="lucide lucide-clipboard-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect width="8" height="4" x="8" y="2" rx="1"></rect>
-                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
-                    <path d="m9 14 2 2 4-4"></path>
-                </svg>
+                <svg class="eo-action-icon"><use href="{% static 'icons/app-actions.svg' %}#icon-shift"></use></svg>
                 <span class="mm-mobile-update-badge" data-eo-pwa-update-badge hidden></span>
             </span>
             <span class="mm-mobile-nav-label">Смена</span>
         </button>
         <button class="mm-mobile-nav-item" type="button" data-eo-tab="face" aria-label="Забой">
             <span class="mm-mobile-nav-icon" aria-hidden="true">
-                <svg class="lucide lucide-map-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0"></path>
-                    <circle cx="12" cy="10" r="3"></circle>
-                </svg>
+                <svg class="eo-action-icon"><use href="{% static 'icons/app-actions.svg' %}#icon-face"></use></svg>
             </span>
             <span class="mm-mobile-nav-label">Забой</span>
         </button>
         <button class="mm-mobile-nav-item" type="button" data-eo-tab="events" aria-label="Простой">
             <span class="mm-mobile-nav-icon" aria-hidden="true">
-                <svg class="lucide lucide-circle-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <path d="M10 15V9"></path>
-                    <path d="M14 15V9"></path>
-                </svg>
+                <svg class="eo-action-icon"><use href="{% static 'icons/app-actions.svg' %}#icon-downtime"></use></svg>
             </span>
             <span class="mm-mobile-nav-label">Простой</span>
         </button>

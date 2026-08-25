@@ -1,4 +1,5 @@
-<div class="dispatcher-header-row dispatcher-command-header">
+{% load static %}
+<div class="dispatcher-header-row dispatcher-command-header{% if design_system_pilot %} dispatcher-command-header--design-pilot{% endif %}">
     <section class="dispatcher-command-identity" aria-label="{% if dispatcher_identity_label %}{{ dispatcher_identity_label }}{% else %}Активный диспетчер{% endif %}">
         {% include "includes/dispatcher_active_badge.html" %}
     </section>
@@ -8,16 +9,16 @@
             <strong>{% if dispatcher_header_screen %}{{ dispatcher_header_screen }}{% else %}Пульт смены{% endif %}</strong>
             <span class="dispatcher-command-shift-name">{% if dispatcher_header_shift_label %}{{ dispatcher_header_shift_label }}{% elif dispatcher_header.shift_label == "Ночная" %}Ночная смена{% elif dispatcher_header.shift_label == "Дневная" %}Дневная смена{% elif shift_label == "Ночная" %}Ночная смена{% elif shift_label == "Дневная" %}Дневная смена{% else %}Дневная смена{% endif %}</span>
             <span class="dispatcher-command-date">{% if current_date %}{{ current_date }}{% elif dispatcher_header.current_date %}{{ dispatcher_header.current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
-            <span class="dispatcher-command-time-range">{% if dispatcher_header_time_range %}{{ dispatcher_header_time_range }}{% elif dispatcher_header.dispatcher_header_time_range %}{{ dispatcher_header.dispatcher_header_time_range }}{% else %}07:00-19:00{% endif %}</span>
+            <span class="dispatcher-command-time-range"><svg class="app-action-icon dispatcher-command-time-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-clock"></use></svg>{% if dispatcher_header_time_range %}{{ dispatcher_header_time_range }}{% elif dispatcher_header.dispatcher_header_time_range %}{{ dispatcher_header.dispatcher_header_time_range }}{% else %}07:00-19:00{% endif %}</span>
         </div>
         {% include "includes/dispatcher_nav.html" %}
     </section>
 
-    <section class="dispatcher-command-actions" aria-label="{% if dispatcher_actions_label %}{{ dispatcher_actions_label }}{% else %}Действия смены{% endif %}">
+    <section class="dispatcher-command-actions{% if access.role.code == 'dispatcher' %} dispatcher-command-actions--grouped{% endif %}" aria-label="{% if dispatcher_actions_label %}{{ dispatcher_actions_label }}{% else %}Действия смены{% endif %}">
         <span class="dispatcher-shift-slot">
             {% include "includes/dispatcher_shift_action.html" %}
         </span>
-        <div class="dispatcher-command-utility"{% if access.role.code == 'dispatcher' %} style="width: calc(100% + 42px); max-width: 342px; grid-template-columns: 38px 38px repeat(2, minmax(0, 1fr)); column-gap: 8px;"{% endif %}>
+        <div class="dispatcher-command-utility{% if access.role.code == 'dispatcher' %} dispatcher-command-utility--grouped{% endif %}">
             {% if access.role.code == 'dispatcher' %}
                 <a
                     class="dispatcher-theme-button"
@@ -27,14 +28,12 @@
                     aria-label="Рейтинг водителей"
                     title="Рейтинг водителей"
                 >
-                    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-                        <path d="M4 19V13H9V19M9.5 19V9H14.5V19M15 19V5H20V19M3 19.5H21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
-                    </svg>
+                    <svg class="app-action-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-rating"></use></svg>
                 </a>
             {% endif %}
-            <button type="button" class="dispatcher-theme-button" data-dispatcher-theme-toggle title="День / Ночь">Д/Н</button>
-            <a class="dispatcher-utility-link dispatcher-utility-back" href="{% url 'role_home' %}"><span aria-hidden="true"></span>Назад</a>
-            <a class="dispatcher-utility-link dispatcher-utility-exit" href="{% url 'logout' %}"><span aria-hidden="true"></span>Выйти</a>
+            <button type="button" class="dispatcher-theme-button" data-dispatcher-theme-toggle title="День / Ночь" aria-label="Переключить дневной и ночной режим">{% if design_system_pilot or access.role.code == 'dispatcher' %}<svg class="app-action-icon app-theme-icon app-theme-icon--sun" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-sun"></use></svg><svg class="app-action-icon app-theme-icon app-theme-icon--moon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-moon"></use></svg><span class="app-visually-hidden">День / Ночь</span>{% else %}Д/Н{% endif %}</button>
+            <a class="dispatcher-utility-link dispatcher-utility-back" href="{% url 'role_home' %}">{% if design_system_pilot or access.role.code == 'dispatcher' %}<svg class="app-action-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-back"></use></svg>{% else %}<span aria-hidden="true"></span>{% endif %}Назад</a>
+            <a class="dispatcher-utility-link dispatcher-utility-exit" href="{% url 'logout' %}">{% if design_system_pilot or access.role.code == 'dispatcher' %}<svg class="app-action-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-logout"></use></svg>{% else %}<span aria-hidden="true"></span>{% endif %}Выйти</a>
         </div>
     </section>
 

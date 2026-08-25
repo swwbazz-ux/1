@@ -720,15 +720,52 @@ def aggregate_trip_facts(trips):
         volume_m3=Sum('volume_m3'),
         tonnage=Sum('tonnage'),
     )
+    return normalize_trip_facts(facts)
+
+
+def normalize_trip_facts(facts=None):
+    facts = facts or {}
     return {
-        'trip_count': facts['trip_count'] or 0,
-        'volume_m3': facts['volume_m3'] or Decimal('0'),
-        'tonnage': facts['tonnage'] or Decimal('0'),
+        'trip_count': facts.get('trip_count') or 0,
+        'volume_m3': facts.get('volume_m3') or Decimal('0'),
+        'tonnage': facts.get('tonnage') or Decimal('0'),
     }
 
 
-def calculate_progress_from_snapshot(shift, trips):
-    facts = aggregate_trip_facts(trips)
+def aggregate_completed_trip_facts_by_shift(*, unloading_shift_ids=(), loading_shift_ids=()):
+    """Return completed-trip facts for many shift snapshots in two grouped queries."""
+
+    def grouped_facts(shift_field, shift_ids):
+        shift_ids = tuple(dict.fromkeys(shift_id for shift_id in shift_ids if shift_id))
+        if not shift_ids:
+            return {}
+        shift_key = f'{shift_field}_id'
+        rows = (
+            Trip.objects
+            .filter(
+                status=TripStatus.COMPLETED,
+                **{f'{shift_key}__in': shift_ids},
+            )
+            .values(shift_key)
+            .annotate(
+                trip_count=Count('id'),
+                volume_m3=Sum('volume_m3'),
+                tonnage=Sum('tonnage'),
+            )
+        )
+        return {
+            row[shift_key]: normalize_trip_facts(row)
+            for row in rows
+        }
+
+    return {
+        'unloading': grouped_facts('unloading_shift', unloading_shift_ids),
+        'loading': grouped_facts('loading_shift', loading_shift_ids),
+    }
+
+
+def calculate_progress_from_snapshot_facts(shift, facts=None):
+    facts = normalize_trip_facts(facts)
     date = production_work_date(shift.opened_at) if shift and shift.opened_at else None
     result = {
         'equipment': shift.equipment if shift else None,
@@ -756,6 +793,10 @@ def calculate_progress_from_snapshot(shift, trips):
         progress_percent = percent(result['volume_m3'], shift.plan_value)
     result['progress_percent'] = progress_percent
     return result
+
+
+def calculate_progress_from_snapshot(shift, trips):
+    return calculate_progress_from_snapshot_facts(shift, aggregate_trip_facts(trips))
 
 
 def calculate_progress_from_trip_queryset(equipment, date, shift_type, trips):

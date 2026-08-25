@@ -18,7 +18,6 @@
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
         <meta name="apple-mobile-web-app-title" content="Горный мастер">
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
-        <script src="{% static 'js/role-app-install-v1.js' %}?v=2" defer></script>
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
         <meta name="theme-color" content="#B33A4C">
@@ -34,7 +33,7 @@
 {% block body %}
 {% spaceless %}
 <main
-    class="dispatcher-shell"
+    class="dispatcher-shell{% if not mining_master_mobile_enabled %} dispatcher-design-pilot{% endif %}"
     data-dispatcher-theme
     data-static-prefix="{% static '' %}"
     data-dispatcher-move-url="{{ dispatcher_move_excavator_url }}"
@@ -53,7 +52,11 @@
 
     <section class="dispatcher-board{% if not dispatcher_header.active_shift %} is-readonly{% endif %}" data-dispatcher-shift-open="{% if dispatcher_header.active_shift %}true{% else %}false{% endif %}" data-dispatcher-own-shift-open="{% if dispatcher_header.shift_is_open %}true{% else %}false{% endif %}" data-operational-state-version="{{ operational_state_version|default:0 }}" aria-label="{% if dispatcher_board_label %}{{ dispatcher_board_label }}{% else %}Горный диспетчер{% endif %}">
         <header class="dispatcher-topbar dispatcher-unified-topbar">
-            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="control" %}
+            {% if mining_master_mobile_enabled %}
+                {% include "includes/dispatcher_header.html" with dispatcher_nav_active="control" %}
+            {% else %}
+                {% include "includes/dispatcher_header.html" with dispatcher_nav_active="control" design_system_pilot=True %}
+            {% endif %}
         </header>
 
         <aside class="dispatcher-left" data-dispatcher-excavator-garage>
@@ -233,19 +236,19 @@
 
         <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
             <a class="mm-mobile-nav-item is-active" href="#" data-mm-mobile-nav="home">
-                <span class="mm-mobile-nav-icon mm-mobile-nav-icon-pult" aria-hidden="true"></span>
+                <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-control"></use></svg>
                 <span>Пульт</span>
             </a>
             <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="excavators">
-                <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
+                <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-excavator"></use></svg>
                 <span>Экс</span>
             </a>
             <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="trucks">
-                <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
+                <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-truck"></use></svg>
                 <span>Самосвалы</span>
             </a>
             <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
-                <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
+                <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-reports"></use></svg>
                 <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
                 <span>Отчеты</span>
             </a>
@@ -254,7 +257,7 @@
 
         <section class="mm-mobile-tab-panel" data-mm-mobile-panel="excavators" hidden>
             <header class="mm-mobile-detail-header">
-                <button type="button" class="mm-mobile-back-button" data-mm-mobile-nav="home" aria-label="Назад">←</button>
+                <button type="button" class="mm-mobile-back-button" data-mm-mobile-nav="home" aria-label="Назад"><svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-back"></use></svg></button>
                 <div class="mm-mobile-detail-title">
                     <h1>Экскаваторы</h1>
                 </div>
@@ -287,19 +290,19 @@
 
             <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="home">
-                    <span class="mm-mobile-nav-icon mm-mobile-nav-icon-pult" aria-hidden="true"></span>
+                    <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-control"></use></svg>
                     <span>Пульт</span>
                 </a>
                 <a class="mm-mobile-nav-item is-active" href="#" data-mm-mobile-nav="excavators">
-                    <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
+                    <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-excavator"></use></svg>
                     <span>Экс</span>
                 </a>
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="trucks">
-                    <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
+                    <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-truck"></use></svg>
                     <span>Самосвалы</span>
                 </a>
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
-                    <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
+                    <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-reports"></use></svg>
                     <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
                     <span>Отчеты</span>
                 </a>
@@ -308,7 +311,7 @@
 
         <section class="mm-mobile-tab-panel" data-mm-mobile-panel="trucks" hidden>
             <header class="mm-mobile-detail-header">
-                <button type="button" class="mm-mobile-back-button" data-mm-mobile-nav="home" aria-label="Назад">←</button>
+                <button type="button" class="mm-mobile-back-button" data-mm-mobile-nav="home" aria-label="Назад"><svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-back"></use></svg></button>
                 <div class="mm-mobile-detail-title">
                     <h1>Самосвалы</h1>
                 </div>
@@ -340,19 +343,19 @@
 
             <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="home">
-                    <span class="mm-mobile-nav-icon mm-mobile-nav-icon-pult" aria-hidden="true"></span>
+                    <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-control"></use></svg>
                     <span>Пульт</span>
                 </a>
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="excavators">
-                    <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
+                    <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-excavator"></use></svg>
                     <span>Экс</span>
                 </a>
                 <a class="mm-mobile-nav-item is-active" href="#" data-mm-mobile-nav="trucks">
-                    <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
+                    <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-truck"></use></svg>
                     <span>Самосвалы</span>
                 </a>
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
-                    <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
+                    <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-reports"></use></svg>
                     <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
                     <span>Отчеты</span>
                 </a>
@@ -361,7 +364,7 @@
 
         <section class="mm-mobile-tab-panel" data-mm-mobile-panel="reports" hidden>
             <header class="mm-mobile-detail-header">
-                <button type="button" class="mm-mobile-back-button" data-mm-mobile-nav="home" aria-label="Назад">←</button>
+                <button type="button" class="mm-mobile-back-button" data-mm-mobile-nav="home" aria-label="Назад"><svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-back"></use></svg></button>
                 <div class="mm-mobile-detail-title">
                     <h1>Отчеты</h1>
                 </div>
@@ -438,19 +441,19 @@
 
             <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="home">
-                    <span class="mm-mobile-nav-icon mm-mobile-nav-icon-pult" aria-hidden="true"></span>
+                    <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-control"></use></svg>
                     <span>Пульт</span>
                 </a>
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="excavators">
-                    <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
+                    <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-excavator"></use></svg>
                     <span>Экс</span>
                 </a>
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="trucks">
-                    <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
+                    <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-truck"></use></svg>
                     <span>Самосвалы</span>
                 </a>
                 <a class="mm-mobile-nav-item is-active" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
-                    <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
+                    <svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-reports"></use></svg>
                     <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
                     <span>Отчеты</span>
                 </a>
@@ -461,7 +464,7 @@
             {% if not complex.is_empty %}
                 <section class="mm-mobile-fill-screen status-{{ complex.status_key }}" data-mm-mobile-fill="{{ complex.card_id }}" hidden>
                     <header class="mm-mobile-detail-header">
-                        <button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>
+                        <button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад"><svg class="mm-mobile-app-icon" aria-hidden="true" focusable="false"><use href="{% static 'icons/app-actions.svg' %}#icon-back"></use></svg></button>
                         <div class="mm-mobile-detail-title mm-mobile-fill-title">
                             <h1>Набор самосвалов</h1>
                         </div>
@@ -2127,8 +2130,13 @@ document.addEventListener("DOMContentLoaded", function () {
     };
     function setTheme(theme) {
         if (!shell) return;
-        shell.classList.toggle("dispatcher-night", theme === "night");
-        shell.classList.toggle("dispatcher-day", theme !== "night");
+        var isNight = theme === "night";
+        shell.classList.toggle("dispatcher-night", isNight);
+        shell.classList.toggle("dispatcher-day", !isNight);
+        if (shell.classList.contains("dispatcher-design-pilot")) {
+            document.body.classList.toggle("dispatcher-design-pilot-night", isNight);
+            document.body.classList.toggle("dispatcher-design-pilot-day", !isNight);
+        }
         localStorage.setItem("dispatcher-theme", theme);
     }
     setTheme(saved);

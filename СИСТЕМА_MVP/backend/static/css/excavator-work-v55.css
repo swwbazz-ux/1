@@ -43,28 +43,12 @@ body.excavator-operator-screen .eo-shift-update-button {
     box-sizing: border-box;
 }
 
-body.excavator-operator-screen .eo-shift-update-button > span {
+body.excavator-operator-screen .eo-shift-update-button > .eo-update-icon {
     position: relative;
     display: block;
     width: 14px;
     height: 14px;
-    border: 2px solid currentColor;
-    border-left-color: transparent;
-    border-radius: 50%;
     opacity: .82;
-}
-
-body.excavator-operator-screen .eo-shift-update-button > span::after {
-    content: "";
-    position: absolute;
-    top: -3px;
-    right: -4px;
-    width: 0;
-    height: 0;
-    border-top: 4px solid transparent;
-    border-bottom: 4px solid transparent;
-    border-left: 5px solid currentColor;
-    transform: rotate(-35deg);
 }
 
 body.excavator-operator-screen .eo-shift-update-button b,
@@ -78,7 +62,7 @@ body.excavator-operator-screen .eo-shift-update-button em {
 
 body.excavator-operator-screen .eo-shift-update-button em {
     grid-column: 1 / -1;
-    color: #58df52;
+    color: #28c7b7;
     font-size: 10px;
     font-weight: 700;
     letter-spacing: .02em;
@@ -91,11 +75,11 @@ body.excavator-operator-screen .eo-shift-update-button.has-pwa-update {
 }
 
 body.excavator-operator-screen .eo-shift-update-button.is-current {
-    border-color: rgba(88, 223, 82, .5);
-    color: #58df52;
+    border-color: rgba(40, 199, 183, .5);
+    color: #28c7b7;
 }
 
-body.excavator-operator-screen .eo-shift-update-button.is-checking > span {
+body.excavator-operator-screen .eo-shift-update-button.is-checking > .eo-update-icon {
     animation: eo-update-spin .78s linear infinite;
 }
 
@@ -2546,14 +2530,14 @@ body.excavator-operator-screen .eo-dashboard-truck-card.is-inactive span {
 }
 
 body.excavator-operator-screen .eo-dashboard-unload-card.is-selected {
-    outline: 2px solid rgba(84, 248, 99, .72) !important;
+    outline: 2px solid rgba(40, 199, 183, .72) !important;
     outline-offset: -2px !important;
 }
 
 body.excavator-operator-screen .eo-dashboard-unload-card.is-last-dump {
     box-shadow:
-        inset 0 0 0 2px rgba(84, 248, 99, .72),
-        0 0 24px rgba(84, 248, 99, .28) !important;
+        inset 0 0 0 2px rgba(40, 199, 183, .72),
+        0 0 24px rgba(40, 199, 183, .28) !important;
 }
 
 body.excavator-operator-screen .eo-dashboard-unload-card.is-selected,
@@ -2935,9 +2919,9 @@ body.excavator-operator-screen .eo-dump-queue-item {
     place-items: center !important;
     gap: 4px !important;
     min-height: 78px !important;
-    border: 1px dashed rgba(77, 255, 89, .62) !important;
+    border: 1px dashed rgba(40, 199, 183, .62) !important;
     border-radius: 12px !important;
-    background: rgba(8, 24, 17, .68) !important;
+    background: rgba(5, 34, 32, .68) !important;
     color: var(--eo-green) !important;
     font-weight: 900 !important;
     touch-action: none !important;
@@ -2964,7 +2948,7 @@ body.excavator-operator-screen .eo-dump-return-zone {
 body.excavator-operator-screen .eo-dump-return-zone.is-drop-ready {
     border-color: var(--eo-green) !important;
     color: var(--eo-green) !important;
-    box-shadow: inset 0 0 0 1px rgba(77, 255, 89, .22) !important;
+    box-shadow: inset 0 0 0 1px rgba(40, 199, 183, .22) !important;
 }
 
 body.excavator-operator-screen .eo-dump-return-zone strong {

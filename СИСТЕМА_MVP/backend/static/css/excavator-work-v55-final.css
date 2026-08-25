@@ -226,15 +226,15 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-check-panel {
     flex: 1.08 1 0 !important;
-    border-color: rgba(103, 231, 123, .42) !important;
-    background: linear-gradient(180deg, rgba(13, 28, 24, .72), rgba(10, 17, 21, .9)) !important;
+    border-color: rgba(40, 199, 183, .42) !important;
+    background: linear-gradient(180deg, rgba(5, 34, 32, .72), rgba(10, 17, 21, .9)) !important;
     box-shadow: inset 0 0 0 1px rgba(207, 245, 219, .05) !important;
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-panel {
     flex: .94 1 0 !important;
-    border-color: rgba(80, 255, 94, .42) !important;
-    background: linear-gradient(180deg, rgba(9, 25, 16, .48), rgba(8, 14, 18, .86)) !important;
+    border-color: rgba(40, 199, 183, .42) !important;
+    background: linear-gradient(180deg, rgba(5, 34, 32, .48), rgba(8, 14, 18, .86)) !important;
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-check-panel .eo-shift-section-head {
@@ -406,8 +406,8 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-check-p
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-panel {
-    border-color: rgba(80, 255, 94, .5) !important;
-    background: linear-gradient(180deg, rgba(9, 27, 16, .52), rgba(8, 14, 18, .86)) !important;
+    border-color: rgba(40, 199, 183, .5) !important;
+    background: linear-gradient(180deg, rgba(5, 34, 32, .52), rgba(8, 14, 18, .86)) !important;
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head {
@@ -606,15 +606,15 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-check-panel {
     flex: 1.08 1 0 !important;
-    border-color: rgba(103, 231, 123, .42) !important;
-    background: linear-gradient(180deg, rgba(13, 28, 24, .72), rgba(10, 17, 21, .9)) !important;
+    border-color: rgba(40, 199, 183, .42) !important;
+    background: linear-gradient(180deg, rgba(5, 34, 32, .72), rgba(10, 17, 21, .9)) !important;
     box-shadow: inset 0 0 0 1px rgba(207, 245, 219, .05) !important;
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-panel {
     flex: .94 1 0 !important;
-    border-color: rgba(80, 255, 94, .42) !important;
-    background: linear-gradient(180deg, rgba(9, 25, 16, .48), rgba(8, 14, 18, .86)) !important;
+    border-color: rgba(40, 199, 183, .42) !important;
+    background: linear-gradient(180deg, rgba(5, 34, 32, .48), rgba(8, 14, 18, .86)) !important;
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-check-panel .eo-shift-section-head {
@@ -932,7 +932,7 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-ch
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-panel {
-    border-color: rgba(80, 255, 94, .48) !important;
+    border-color: rgba(40, 199, 183, .48) !important;
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div {
@@ -1119,8 +1119,8 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-check-p
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-panel {
-    border-color: rgba(80, 255, 94, .5) !important;
-    background: linear-gradient(180deg, rgba(9, 27, 16, .52), rgba(8, 14, 18, .86)) !important;
+    border-color: rgba(40, 199, 183, .5) !important;
+    background: linear-gradient(180deg, rgba(5, 34, 32, .52), rgba(8, 14, 18, .86)) !important;
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-section-head {
@@ -1513,7 +1513,7 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-ch
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-panel {
-    border-color: rgba(80, 255, 94, .48) !important;
+    border-color: rgba(40, 199, 183, .48) !important;
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid {
@@ -1991,9 +1991,9 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-pa
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-panel {
-    border-color: rgba(80, 255, 94, .54) !important;
+    border-color: rgba(40, 199, 183, .54) !important;
     background:
-        linear-gradient(180deg, rgba(80, 255, 94, .075), rgba(3, 8, 10, .18)),
+        linear-gradient(180deg, rgba(40, 199, 183, .075), rgba(3, 8, 10, .18)),
         rgba(8, 16, 20, .78) !important;
 }
 
@@ -2421,8 +2421,8 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-dump-ch
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-panel {
-    border-color: rgba(80, 255, 94, .5) !important;
-    background: linear-gradient(180deg, rgba(9, 27, 16, .52), rgba(8, 14, 18, .86)) !important;
+    border-color: rgba(40, 199, 183, .5) !important;
+    background: linear-gradient(180deg, rgba(5, 34, 32, .52), rgba(8, 14, 18, .86)) !important;
 }
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid {

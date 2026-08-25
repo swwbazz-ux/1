@@ -1286,7 +1286,9 @@ document.addEventListener("DOMContentLoaded", function () {
         document.querySelectorAll("[data-dispatcher-theme-toggle]").forEach(function (toggle) {
             var shell = toggle.closest("[data-dispatcher-theme]") || document.querySelector("[data-dispatcher-theme]");
             var isNight = shell ? shell.classList.contains("dispatcher-night") : (localStorage.getItem("dispatcher-theme") || "night") === "night";
-            toggle.textContent = "";
+            if (!toggle.querySelector(".app-theme-icon")) {
+                toggle.textContent = "";
+            }
             toggle.dataset.themeIcon = isNight ? "moon" : "sun";
             toggle.setAttribute("aria-label", isNight ? "Переключить на дневной режим" : "Переключить на ночной режим");
             toggle.setAttribute("title", isNight ? "Дневной режим" : "Ночной режим");

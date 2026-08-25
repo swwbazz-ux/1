@@ -11,10 +11,6 @@
         </header>
         <div class="dispatcher-analytics-toolbar">
             {% include "includes/dispatcher_analytics_tabs.html" with dispatcher_nav_active="transport" %}
-            <div class="dispatcher-report-actions">
-                <a href="{% url 'dispatcher_transport_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
-                <button type="button" onclick="window.print()">Печать</button>
-            </div>
         </div>
 
         <form class="dispatcher-report-filters" method="get" data-auto-filter-form>
@@ -31,6 +27,10 @@
                 </select>
             </label>
             <button type="submit">Показать</button>
+            <div class="dispatcher-report-actions">
+                <a href="{% url 'dispatcher_transport_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
+                <button type="button" onclick="window.print()">Печать</button>
+            </div>
         </form>
 
         <section class="dispatcher-analytics-grid dispatcher-transport-grid">

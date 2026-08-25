@@ -1,3 +1,11 @@
+@font-face {
+    font-family: "Manrope Local";
+    src: url("../fonts/manrope/Manrope-VariableFont_wght.ttf") format("truetype");
+    font-style: normal;
+    font-weight: 200 800;
+    font-display: swap;
+}
+
 :root {
     --bg: #f3f6f8;
     --panel: #ffffff;
@@ -12,6 +20,202 @@
     --danger: #e84b4b;
     --ok: #20b894;
     --shadow: 0 18px 55px rgba(16, 24, 32, .10);
+}
+
+/* Design-system pilot: dispatcher control only. */
+.dispatcher-shell.dispatcher-design-pilot {
+    --ds-brand: #28c7b7;
+    --ds-brand-dark: #08766c;
+    --ds-brand-on-dark: #46e0d1;
+    --ds-brand-soft: #ddf7f3;
+    --ds-brand-hover: #1aae9f;
+    --dp-plan-strip-bg: color-mix(in srgb, var(--complex-accent) 11%, rgba(4, 13, 18, .82));
+    --dp-plan-percent-bg: color-mix(in srgb, currentColor 18%, rgba(4, 13, 18, .88));
+    --dp-plan-loop-badge-bg: rgba(4, 13, 18, .94);
+    --dp-plan-loop-badge-shadow: 0 0 10px var(--dispatcher-plan-glow, rgba(250, 204, 21, .38)), 0 3px 8px rgba(0, 0, 0, .36);
+    --dp-truck-title-shadow: 0 1px 2px rgba(0, 0, 0, .92), 0 0 7px rgba(4, 13, 18, .95);
+    font-family: "Manrope Local", "Segoe UI", Arial, sans-serif;
+    font-variant-numeric: tabular-nums;
+}
+
+.dispatcher-shell.dispatcher-design-pilot.dispatcher-night {
+    --ds-brand-soft: rgba(70, 224, 209, .14);
+    --dp-plan-strip-bg: color-mix(in srgb, var(--complex-accent) 11%, rgba(4, 13, 18, .82));
+    --dp-plan-percent-bg: color-mix(in srgb, currentColor 18%, rgba(4, 13, 18, .88));
+    --dp-plan-loop-badge-bg: rgba(4, 13, 18, .94);
+    --dp-plan-loop-badge-shadow: 0 0 10px var(--dispatcher-plan-glow, rgba(250, 204, 21, .38)), 0 3px 8px rgba(0, 0, 0, .36);
+    --dp-truck-title-shadow: 0 1px 2px rgba(0, 0, 0, .92), 0 0 7px rgba(4, 13, 18, .95);
+}
+
+.dispatcher-shell.dispatcher-design-pilot.dispatcher-day {
+    --dp-plan-strip-bg: color-mix(in srgb, var(--complex-accent) 11%, #eef3f7 88%);
+    --dp-plan-percent-bg: color-mix(in srgb, currentColor 18%, #f5fafc 82%);
+    --dp-plan-loop-badge-bg: rgba(248, 252, 255, .9);
+    --dp-plan-loop-badge-shadow: 0 0 10px var(--dispatcher-plan-glow, rgba(250, 204, 21, .38)), 0 3px 8px rgba(36, 52, 61, .18);
+    --dp-truck-title-shadow: 0 1px 2px rgba(255, 255, 255, .62), 0 0 6px rgba(32, 46, 56, .42);
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot {
+    --gd-header-identity-width: clamp(340px, 23vw, 380px);
+    --gd-header-actions-width: clamp(260px, 18vw, 300px);
+    --gd-header-clock-width: clamp(140px, 10vw, 176px);
+    border: 1px solid color-mix(in srgb, var(--ds-brand) 42%, var(--gd-line));
+    background: var(--gd-top);
+    font-family: inherit;
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ds-brand-dark) 18%, transparent);
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-command-main {
+    padding-inline: 16px;
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-command-context {
+    grid-template-columns: minmax(180px, 1fr) auto auto auto;
+    gap: 0 10px;
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-active-text strong {
+    overflow: visible;
+    line-height: 1.05;
+    text-overflow: clip;
+    white-space: normal;
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-command-identity {
+    border-right-color: color-mix(in srgb, var(--ds-brand) 42%, var(--gd-line));
+    background:
+        radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--ds-brand) 15%, transparent), transparent 38%),
+        color-mix(in srgb, var(--gd-top) 88%, var(--ds-brand-dark));
+}
+
+.dispatcher-design-pilot.dispatcher-day .dispatcher-command-header--design-pilot .dispatcher-command-identity {
+    background:
+        radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--ds-brand) 18%, transparent), transparent 38%),
+        color-mix(in srgb, var(--gd-top) 92%, var(--ds-brand-soft));
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-active-avatar {
+    border-color: var(--ds-brand);
+    background: var(--ds-brand-soft);
+    color: var(--ds-brand-on-dark);
+}
+
+.dispatcher-design-pilot.dispatcher-day .dispatcher-command-header--design-pilot .dispatcher-active-avatar {
+    color: var(--ds-brand-dark);
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-active-text strong {
+    color: var(--ds-brand-on-dark);
+}
+
+.dispatcher-design-pilot.dispatcher-day .dispatcher-command-header--design-pilot .dispatcher-active-text strong {
+    color: var(--ds-brand-dark);
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-nav a {
+    gap: 7px;
+    font-family: inherit;
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-nav a::after {
+    background: var(--ds-brand);
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-nav a:hover {
+    color: var(--ds-brand-on-dark);
+}
+
+.dispatcher-design-pilot.dispatcher-day .dispatcher-command-header--design-pilot .dispatcher-nav a:hover {
+    color: var(--ds-brand-dark);
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-nav a.is-active {
+    border-bottom-color: var(--ds-brand);
+    color: var(--ds-brand-on-dark);
+}
+
+.dispatcher-design-pilot.dispatcher-day .dispatcher-command-header--design-pilot .dispatcher-nav a.is-active {
+    color: var(--ds-brand-dark);
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-command-utility .dispatcher-theme-button,
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-utility-link {
+    grid-auto-flow: column;
+    gap: 6px;
+    border-color: color-mix(in srgb, var(--ds-brand) 34%, var(--gd-line));
+    background: color-mix(in srgb, var(--ds-brand-soft) 46%, transparent);
+    color: var(--ds-brand-on-dark);
+    font-family: inherit;
+}
+
+.dispatcher-design-pilot.dispatcher-day .dispatcher-command-header--design-pilot .dispatcher-command-utility .dispatcher-theme-button,
+.dispatcher-design-pilot.dispatcher-day .dispatcher-command-header--design-pilot .dispatcher-utility-link {
+    color: var(--ds-brand-dark);
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-command-utility .dispatcher-theme-button:hover,
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-utility-link:hover {
+    border-color: var(--ds-brand);
+    background: color-mix(in srgb, var(--ds-brand) 18%, var(--gd-panel));
+    color: var(--ds-brand-on-dark);
+    box-shadow: 0 0 16px color-mix(in srgb, var(--ds-brand) 24%, transparent);
+}
+
+.dispatcher-design-pilot.dispatcher-day .dispatcher-command-header--design-pilot .dispatcher-command-utility .dispatcher-theme-button:hover,
+.dispatcher-design-pilot.dispatcher-day .dispatcher-command-header--design-pilot .dispatcher-utility-link:hover {
+    color: var(--ds-brand-dark);
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-theme-button::before,
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-theme-button::after {
+    display: none;
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .app-theme-icon {
+    display: none;
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-theme-button:not([data-theme-icon]) .app-theme-icon--moon,
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-theme-button[data-theme-icon="moon"] .app-theme-icon--moon,
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-theme-button[data-theme-icon="sun"] .app-theme-icon--sun {
+    display: block;
+}
+
+.dispatcher-design-pilot .dispatcher-command-header--design-pilot .dispatcher-radial-clock-progress {
+    stroke: var(--ds-brand-on-dark);
+}
+
+.dispatcher-design-pilot.dispatcher-day .dispatcher-command-header--design-pilot .dispatcher-radial-clock-progress {
+    stroke: var(--ds-brand-dark);
+}
+
+.dispatcher-design-pilot .app-action-icon {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    overflow: visible;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.dispatcher-design-pilot .dispatcher-nav .app-action-icon {
+    width: 18px;
+    height: 18px;
+    flex-basis: 18px;
+}
+
+.dispatcher-design-pilot .app-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
 }
 
 * {
@@ -16591,6 +16795,14 @@ body.system-admin-reference-detail-screen .admin-page {
     overflow: hidden;
 }
 
+body.dispatcher-control-screen.dispatcher-design-pilot-day {
+    background: #dce4e7;
+}
+
+body.dispatcher-control-screen.dispatcher-design-pilot-night {
+    background: #050b0f;
+}
+
 .dispatcher-shell {
     --gd-header-h: clamp(108px, 11vh, 126px);
     --gd-header-scrollbar-comp: 17px;
@@ -19043,31 +19255,30 @@ body.system-admin-reference-detail-screen .admin-page {
 }
 
 .dispatcher-command-time-range {
-    position: relative;
-    padding-left: 25px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding-left: 0;
 }
 
 .dispatcher-command-time-range::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 50%;
-    width: 16px;
-    height: 16px;
-    transform: translateY(-50%);
-    border: 1.7px solid #8fa1aa;
-    border-radius: 50%;
+    content: none;
 }
 
 .dispatcher-command-time-range::after {
-    content: "";
-    position: absolute;
-    left: 7px;
-    top: calc(50% - 5px);
-    width: 5px;
-    height: 7px;
-    border-left: 1.7px solid #8fa1aa;
-    border-bottom: 1.7px solid #8fa1aa;
+    content: none;
+}
+
+.dispatcher-command-time-icon {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
+    color: #8fa1aa;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
 .dispatcher-header-row .dispatcher-nav {
@@ -19654,6 +19865,10 @@ body.system-admin-reference-detail-screen .admin-page {
     min-height: 34px;
 }
 
+.dispatcher-report-filters > .dispatcher-report-actions {
+    margin-left: auto;
+}
+
 .dispatcher-report-actions a,
 .dispatcher-report-actions button {
     flex: 0 0 auto;
@@ -19665,6 +19880,10 @@ body.system-admin-reference-detail-screen .admin-page {
 
 .dispatcher-analytics-board {
     grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
+.dispatcher-analytics-board--compact-actions {
+    grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .dispatcher-report-filters {
@@ -19707,6 +19926,16 @@ body.system-admin-reference-detail-screen .admin-page {
     padding: 0 22px;
     color: var(--gd-green);
     cursor: pointer;
+}
+
+.dispatcher-report-filters > .dispatcher-report-actions a,
+.dispatcher-report-filters > .dispatcher-report-actions button {
+    min-width: 82px;
+    padding: 0 10px;
+}
+
+.dispatcher-report-filters > .dispatcher-report-actions button {
+    color: var(--gd-text);
 }
 
 .dispatcher-report-filters[data-auto-filter-form] button[type="submit"] {
@@ -23484,7 +23713,7 @@ body.management-dynamics-chart-modal-open {
     padding: 4px 7px;
     border: 1px solid color-mix(in srgb, var(--complex-accent) 44%, transparent);
     border-radius: 5px;
-    background: color-mix(in srgb, var(--complex-accent) 11%, rgba(4, 13, 18, .82));
+    background: var(--dp-plan-strip-bg);
     color: var(--gd-ink);
 }
 
@@ -23508,7 +23737,7 @@ body.management-dynamics-chart-modal-open {
     min-height: 12px;
     padding: 1px 4px;
     border-radius: 4px;
-    background: color-mix(in srgb, currentColor 18%, rgba(4, 13, 18, .88));
+    background: var(--dp-plan-percent-bg);
     color: currentColor;
     font-size: 8px;
     font-style: normal;
@@ -23711,8 +23940,8 @@ body.dispatcher-control-screen .dispatcher-truck-tile[data-plan-progress-phase]:
     padding: 2px 5px;
     border: 1px solid var(--dispatcher-plan-color, rgba(250, 204, 21, .9));
     border-radius: 999px;
-    background: rgba(4, 13, 18, .94);
-    box-shadow: 0 0 10px var(--dispatcher-plan-glow, rgba(250, 204, 21, .38)), 0 3px 8px rgba(0, 0, 0, .36);
+    background: var(--dp-plan-loop-badge-bg);
+    box-shadow: var(--dp-plan-loop-badge-shadow);
     color: var(--dispatcher-plan-color, #facc15);
     font-size: 9px;
     font-style: normal;
@@ -24058,7 +24287,7 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     font-size: clamp(11px, .8vw, 14px);
     font-weight: 900;
     line-height: 1;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, .92), 0 0 7px rgba(4, 13, 18, .95);
+    text-shadow: var(--dp-truck-title-shadow);
     transform: translate(-50%, -56%);
     pointer-events: none;
 }
@@ -32771,4 +33000,277 @@ body.excavator-operator-screen .mm-mobile-nav-item span {
     .achievement-prize-stage.is-celebrating .achievement-prize-burst {
         animation-duration: 1.45s;
     }
+}
+
+/* Keep the pilot on the bundled font even where legacy dispatcher rules set a font explicitly. */
+.dispatcher-shell.dispatcher-design-pilot,
+.dispatcher-shell.dispatcher-design-pilot * {
+    font-family: "Manrope Local", "Segoe UI", Arial, sans-serif;
+}
+
+/* Mining Master mobile design-system rollout. Desktop dispatcher board is intentionally untouched. */
+@media (max-width: 760px) {
+    body.mining-master-mobile-screen {
+        --mm-brand: #28c7b7;
+        --mm-brand-dark: #08766c;
+        --mm-brand-bright: #46e0d1;
+        --mm-brand-soft: #ddf7f3;
+        --mm-brand-hover: #1aae9f;
+    }
+
+    body.mining-master-mobile-screen .dispatcher-shell {
+        font-family: "Manrope Local", "Segoe UI", Arial, sans-serif;
+        background:
+            radial-gradient(circle at 25% 12%, rgba(40, 199, 183, .09), transparent 34%),
+            linear-gradient(180deg, #07151d 0%, #030a0f 100%);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-shell,
+    body.mining-master-mobile-screen .mm-mobile-shell button,
+    body.mining-master-mobile-screen .mm-mobile-shell input,
+    body.mining-master-mobile-screen .mm-mobile-shell select,
+    body.mining-master-mobile-screen .mm-mobile-shell textarea {
+        font-family: "Manrope Local", "Segoe UI", Arial, sans-serif;
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-app-icon {
+        width: 24px;
+        height: 24px;
+        flex: 0 0 24px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-back-button .mm-mobile-app-icon {
+        width: 22px;
+        height: 22px;
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-nav-item.is-active,
+    body.mining-master-mobile-screen .mm-mobile-shift-button,
+    body.mining-master-mobile-screen .mm-mobile-version-strip button,
+    body.mining-master-mobile-screen .mm-mobile-truck-mini.is-more {
+        color: var(--mm-brand);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-nav-item.is-active {
+        background: rgba(40, 199, 183, .06);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-nav-item.is-active::before,
+    body.mining-master-mobile-screen .mm-mobile-update-badge,
+    body.mining-master-mobile-screen .mm-mobile-excavator-panel span::before {
+        background: var(--mm-brand);
+        box-shadow: 0 0 12px rgba(40, 199, 183, .7);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-shift-button,
+    body.mining-master-mobile-screen .mm-mobile-excavator-panel,
+    body.mining-master-mobile-screen .mm-mobile-fill-zone {
+        border-color: var(--mm-brand);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-report-grid article {
+        background:
+            radial-gradient(circle at 50% 58%, rgba(40, 199, 183, .09), transparent 52%),
+            linear-gradient(180deg, rgba(17, 39, 49, .94), rgba(7, 18, 25, .96));
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-home::before,
+    body.mining-master-mobile-screen .mm-mobile-fill-screen::before,
+    body.mining-master-mobile-screen .mm-mobile-excavator-work-up-target {
+        background:
+            radial-gradient(ellipse at 50% 100%, rgba(70, 224, 209, .46) 0%, rgba(40, 199, 183, .32) 34%, rgba(8, 118, 108, .16) 64%, rgba(7, 28, 25, 0) 86%),
+            linear-gradient(180deg, rgba(8, 58, 54, .72), rgba(26, 174, 159, .34) 48%, rgba(8, 24, 22, 0));
+        box-shadow: 0 18px 42px rgba(40, 199, 183, .22), inset 0 -20px 38px rgba(70, 224, 209, .16), inset 0 22px 40px rgba(2, 14, 13, .18);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-create-complex-target,
+    body.mining-master-mobile-screen .mm-mobile-fill-screen::after {
+        background-color: transparent;
+        box-shadow: 0 -18px 42px rgba(40, 199, 183, .2), inset 0 20px 38px rgba(70, 224, 209, .14), inset 0 -20px 40px rgba(2, 14, 13, .2);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-create-complex-target {
+        background:
+            url("/static/img/equipment/excavator-green.png") calc(50% - 92px) 54% / 54px auto no-repeat,
+            radial-gradient(ellipse at 50% 0%, rgba(70, 224, 209, .42) 0%, rgba(40, 199, 183, .3) 38%, rgba(8, 118, 108, .14) 66%, rgba(7, 28, 25, 0) 88%),
+            linear-gradient(0deg, rgba(8, 58, 54, .72), rgba(26, 174, 159, .34) 48%, rgba(8, 24, 22, 0));
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-tab-panel[data-mm-mobile-panel="excavators"]::before {
+        background: radial-gradient(ellipse at 0% 50%, rgba(70, 224, 209, .46) 0%, rgba(40, 199, 183, .34) 30%, rgba(8, 118, 108, .16) 62%, rgba(7, 28, 25, 0) 84%);
+        box-shadow: 10px 0 34px rgba(40, 199, 183, .24);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-tab-panel[data-mm-mobile-panel="excavators"]::after,
+    body.mining-master-mobile-screen .mm-mobile-complex-grid::after {
+        background: radial-gradient(ellipse at 100% 50%, rgba(70, 224, 209, .46) 0%, rgba(40, 199, 183, .34) 30%, rgba(8, 118, 108, .16) 62%, rgba(7, 28, 25, 0) 84%);
+        box-shadow: -10px 0 34px rgba(40, 199, 183, .24);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-home::after,
+    body.mining-master-mobile-screen .mm-mobile-create-complex-target strong,
+    body.mining-master-mobile-screen .mm-mobile-excavator-work-up-target,
+    body.mining-master-mobile-screen .mm-mobile-fill-save-overlay,
+    body.mining-master-mobile-screen .mm-mobile-fill-shake-overlay {
+        text-shadow: 0 2px 16px rgba(0, 0, 0, .7), 0 0 18px rgba(40, 199, 183, .42);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-create-complex-target span {
+        border-color: rgba(70, 224, 209, .72);
+        background: rgba(8, 118, 108, .42);
+        color: var(--mm-brand-soft);
+        box-shadow: 0 0 20px rgba(40, 199, 183, .28);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-detail-trucks,
+    body.mining-master-mobile-screen .mm-mobile-fill-assigned,
+    body.mining-master-mobile-screen .mm-mobile-fill-truck-garage,
+    body.mining-master-mobile-screen .mm-mobile-complex-grid {
+        scrollbar-color: rgba(40, 199, 183, .55) rgba(13, 27, 36, .35);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-detail-trucks::-webkit-scrollbar-thumb,
+    body.mining-master-mobile-screen .mm-mobile-complex-grid::-webkit-scrollbar-thumb {
+        background: rgba(40, 199, 183, .55);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-fill-zone.is-finish-ready,
+    body.mining-master-mobile-screen .mm-mobile-fill-assigned .mm-mobile-truck-mini.is-releasing,
+    body.mining-master-mobile-screen .mm-mobile-complex-card.is-mobile-truck-drop-target,
+    body.mining-master-mobile-screen .mm-mobile-complex-card.is-releasing-trucks::after,
+    body.mining-master-mobile-screen .mm-mobile-garage-excavator.is-work-ready {
+        border-color: var(--mm-brand);
+        box-shadow: inset 0 0 30px rgba(40, 199, 183, .14), 0 0 24px rgba(40, 199, 183, .32);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-fill-truck.is-hold-ready,
+    body.mining-master-mobile-screen .mm-mobile-complex-card.is-create-ready,
+    body.mining-master-mobile-screen .mm-mobile-complex-card.is-fill-ready {
+        box-shadow: inset 0 0 24px rgba(40, 199, 183, .12), 0 0 20px rgba(40, 199, 183, .28);
+    }
+
+    body.mining-master-mobile-screen .mm-mobile-fill-truck-ghost {
+        box-shadow: 0 18px 30px rgba(0, 0, 0, .54), 0 0 24px rgba(40, 199, 183, .28);
+    }
+}
+
+/* Dispatcher stage 2: one grouped utility panel across all dispatcher tabs. */
+.dispatcher-command-utility.dispatcher-command-utility--grouped {
+    grid-template-columns: 38px 38px repeat(2, minmax(0, 1fr));
+    column-gap: 0;
+    width: calc(100% + 42px);
+    max-width: 342px;
+    min-height: 38px;
+    border: 1px solid color-mix(in srgb, var(--ds-brand, #28c7b7) 34%, var(--gd-line));
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--gd-panel) 86%, var(--ds-brand-dark, #08766c));
+    overflow: hidden;
+}
+
+.dispatcher-command-actions--grouped .dispatcher-shift-slot {
+    width: calc(100% + 42px);
+    max-width: 342px;
+}
+
+.dispatcher-command-utility--grouped .dispatcher-theme-button,
+.dispatcher-command-utility--grouped .dispatcher-utility-link {
+    width: 100%;
+    min-width: 0;
+    height: 38px;
+    min-height: 38px;
+    margin: 0;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--ds-brand-on-dark, #46e0d1);
+}
+
+.dispatcher-command-utility--grouped > :not(:first-child) {
+    border-left: 1px solid color-mix(in srgb, var(--ds-brand, #28c7b7) 24%, var(--gd-line));
+}
+
+.dispatcher-command-utility--grouped .dispatcher-theme-button[data-dispatcher-theme-toggle] {
+    background: color-mix(in srgb, var(--ds-brand, #28c7b7) 12%, transparent);
+}
+
+.dispatcher-command-utility--grouped .dispatcher-theme-button:hover,
+.dispatcher-command-utility--grouped .dispatcher-utility-link:hover,
+.dispatcher-command-utility--grouped .dispatcher-theme-button:focus-visible,
+.dispatcher-command-utility--grouped .dispatcher-utility-link:focus-visible {
+    border-color: color-mix(in srgb, var(--ds-brand, #28c7b7) 24%, var(--gd-line));
+    background: color-mix(in srgb, var(--ds-brand, #28c7b7) 18%, var(--gd-panel));
+    color: var(--ds-brand-on-dark, #46e0d1);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ds-brand, #28c7b7) 52%, transparent);
+    animation: none;
+    filter: none;
+}
+
+.dispatcher-command-utility--grouped .dispatcher-theme-button::before,
+.dispatcher-command-utility--grouped .dispatcher-theme-button::after {
+    display: none;
+}
+
+.dispatcher-command-utility--grouped .app-action-icon {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.dispatcher-command-utility--grouped .app-theme-icon {
+    display: none;
+}
+
+.dispatcher-command-utility--grouped .dispatcher-theme-button:not([data-theme-icon]) .app-theme-icon--moon,
+.dispatcher-command-utility--grouped .dispatcher-theme-button[data-theme-icon="moon"] .app-theme-icon--moon,
+.dispatcher-command-utility--grouped .dispatcher-theme-button[data-theme-icon="sun"] .app-theme-icon--sun {
+    display: block;
+}
+
+.dispatcher-command-utility--grouped .app-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+.dispatcher-day .dispatcher-command-utility.dispatcher-command-utility--grouped {
+    border-color: color-mix(in srgb, var(--ds-brand-dark, #08766c) 30%, #c8d4d8);
+    background: color-mix(in srgb, #eef4f5 92%, var(--ds-brand-soft, #ddf7f3));
+}
+
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-theme-button,
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-utility-link {
+    color: var(--ds-brand-dark, #08766c);
+}
+
+.dispatcher-day .dispatcher-command-utility--grouped > :not(:first-child) {
+    border-left-color: color-mix(in srgb, var(--ds-brand-dark, #08766c) 20%, #c8d4d8);
+}
+
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-theme-button[data-dispatcher-theme-toggle] {
+    background: color-mix(in srgb, var(--ds-brand, #28c7b7) 11%, transparent);
+}
+
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-theme-button:hover,
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-utility-link:hover,
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-theme-button:focus-visible,
+.dispatcher-day .dispatcher-command-utility--grouped .dispatcher-utility-link:focus-visible {
+    background: color-mix(in srgb, var(--ds-brand, #28c7b7) 15%, #eef4f5);
+    color: var(--ds-brand-dark, #08766c);
 }
