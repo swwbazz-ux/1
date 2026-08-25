@@ -214,7 +214,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v133'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v136'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -680,6 +680,51 @@ def login_view(
             'login_role_app': login_role_app,
         },
     )
+
+
+@require_POST
+def reclaim_role_session_view(request):
+    """Return the active session to this device.
+
+    Only one session per employee may act at a time, so logging in elsewhere
+    leaves this screen read-only with no way back except retyping the PIN. This
+    lets the person already authenticated here take the session back in one tap.
+    It re-activates the very access this session is already signed in as, so it
+    grants nothing new; switching between different roles still goes through
+    activate_role_session's checks for open shifts, trips and downtimes.
+    """
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return JsonResponse(
+            {'ok': False, 'error': 'Сессия не найдена. Войдите заново.'},
+            status=401,
+        )
+    access = (
+        EmployeeAccess.objects
+        .select_related('employee', 'role')
+        .filter(
+            id=access_id,
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+            role__is_active=True,
+            employee__is_active=True,
+            employee__status=Employee.Status.ACTIVE,
+        )
+        .first()
+    )
+    if not access:
+        return JsonResponse(
+            {'ok': False, 'error': 'Доступ отключен. Обратитесь к администратору.'},
+            status=403,
+        )
+    try:
+        activate_role_session(request, access)
+    except ValidationError as error:
+        return JsonResponse(
+            {'ok': False, 'error': '; '.join(error.messages)},
+            status=409,
+        )
+    return JsonResponse({'ok': True})
 
 
 def activate_access_view(request):

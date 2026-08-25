@@ -4,7 +4,10 @@
     var SAFE_PATHS = {
         "/": true,
         "/logout/": true,
-        "/activate-access/": true
+        "/activate-access/": true,
+        // Taking the session back must work while read-only, otherwise the
+        // only way out is retyping the PIN.
+        "/reclaim-session/": true
     };
     var SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
     var BLOCKED_ATTRIBUTE = "data-role-readonly-blocked";
@@ -214,17 +217,152 @@
         });
     }
 
+    var INACTIVE_BANNER_VISIBLE_MS = 6000;
+    var inactiveBannerHideTimer = null;
+
+    function cookieValue(name) {
+        var prefix = name + "=";
+        var item = document.cookie.split(";").map(function (part) {
+            return part.trim();
+        }).find(function (part) {
+            return part.indexOf(prefix) === 0;
+        });
+        return item ? decodeURIComponent(item.slice(prefix.length)) : "";
+    }
+
+    function cancelInactiveBannerTimer() {
+        if (inactiveBannerHideTimer !== null && typeof window.clearTimeout === "function") {
+            window.clearTimeout(inactiveBannerHideTimer);
+        }
+        inactiveBannerHideTimer = null;
+    }
+
+    function hideInactiveBannerSoon(banner) {
+        cancelInactiveBannerTimer();
+        if (typeof window.setTimeout !== "function") {
+            return;
+        }
+        inactiveBannerHideTimer = window.setTimeout(function () {
+            banner.classList.add("is-idle");
+        }, INACTIVE_BANNER_VISIBLE_MS);
+    }
+
+    function revealInactiveBanner(banner) {
+        banner.classList.remove("is-idle");
+        hideInactiveBannerSoon(banner);
+    }
+
+    function buildInactiveBanner() {
+        var banner = document.createElement("div");
+        banner.className = "app-inactive-role-banner";
+        banner.dataset.inactiveRoleBanner = "";
+        banner.setAttribute("role", "status");
+        banner.setAttribute("aria-live", "polite");
+        var text = document.createElement("span");
+        text.dataset.inactiveRoleText = "";
+        text.textContent = "Вы вошли с другого устройства — доступен только просмотр";
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "app-inactive-role-reclaim";
+        button.dataset.inactiveRoleReclaim = "";
+        button.textContent = "Продолжить здесь";
+        banner.appendChild(text);
+        banner.appendChild(button);
+        return banner;
+    }
+
+    /* No screen has room to park this permanently, so it behaves as a toast:
+       it says its piece, steps aside, and returns the moment a blocked control
+       is pressed. The button gives the driver a way out in one tap instead of
+       leaving them to guess that only retyping the PIN helps. */
+    function bindInactiveBanner(banner) {
+        if (banner.dataset.inactiveRoleBound === "true") {
+            return;
+        }
+        banner.dataset.inactiveRoleBound = "true";
+        hideInactiveBannerSoon(banner);
+
+        /* Blocked controls are click-through, so their taps arrive here on the
+           panel behind them. Working navigation is excluded — nagging someone
+           for switching tabs helps nobody. */
+        document.addEventListener("click", function (event) {
+            if (
+                typeof document.body.contains === "function"
+                && !document.body.contains(banner)
+            ) {
+                return;
+            }
+            var node = event.target;
+            while (node && node !== document.body) {
+                if (node.hasAttribute && node.hasAttribute("data-inactive-role-reclaim")) {
+                    return;
+                }
+                if (node.matches && node.matches("nav, [data-driver-bottom-nav], .mm-mobile-bottom-nav")) {
+                    return;
+                }
+                node = node.parentNode;
+            }
+            revealInactiveBanner(banner);
+        }, true);
+
+        var button = banner.querySelector("[data-inactive-role-reclaim]");
+        var textNode = banner.querySelector("[data-inactive-role-text]");
+        if (!button) {
+            return;
+        }
+        button.addEventListener("click", function () {
+            cancelInactiveBannerTimer();
+            banner.classList.remove("is-idle");
+            button.disabled = true;
+            button.textContent = "Возвращаем…";
+            var token = cookieValue("csrftoken")
+                || (document.querySelector('meta[name="csrf-token"]') || {}).content
+                || "";
+            window.fetch("/reclaim-session/", {
+                method: "POST",
+                credentials: "same-origin",
+                cache: "no-store",
+                headers: {
+                    "X-CSRFToken": token,
+                    "X-Requested-With": "XMLHttpRequest"
+                }
+            }).then(function (response) {
+                return response.json().catch(function () {
+                    return {};
+                });
+            }).then(function (payload) {
+                if (payload && payload.ok) {
+                    window.location.reload();
+                    return;
+                }
+                if (textNode) {
+                    textNode.textContent = (payload && payload.error)
+                        || "Не удалось вернуть смену на это устройство.";
+                }
+                button.disabled = false;
+                button.textContent = "Повторить";
+                hideInactiveBannerSoon(banner);
+            }).catch(function () {
+                if (textNode) {
+                    textNode.textContent = "Нет связи с сервером. Попробуйте ещё раз.";
+                }
+                button.disabled = false;
+                button.textContent = "Повторить";
+                hideInactiveBannerSoon(banner);
+            });
+        });
+    }
+
     function ensureInactiveBanner(readonly) {
         var banner = document.querySelector("[data-inactive-role-banner]");
         if (readonly && !banner && document.body) {
-            banner = document.createElement("div");
-            banner.className = "app-inactive-role-banner";
-            banner.dataset.inactiveRoleBanner = "";
-            banner.setAttribute("role", "status");
-            banner.setAttribute("aria-live", "polite");
-            banner.textContent = "Роль неактивна — доступен только просмотр";
+            banner = buildInactiveBanner();
             document.body.insertBefore(banner, document.body.firstChild);
+        }
+        if (readonly && banner) {
+            bindInactiveBanner(banner);
         } else if (!readonly && banner) {
+            cancelInactiveBannerTimer();
             banner.remove();
         }
     }

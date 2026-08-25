@@ -183,6 +183,28 @@
             top: 50%;
             transform: translate(-50%, calc(-50% + 72px));
             transition: opacity 240ms ease;
+            display: grid;
+            gap: 10px;
+            justify-items: center;
+        }
+        /* The banner itself is click-through; only this control accepts taps. */
+        .app-inactive-role-reclaim {
+            pointer-events: auto;
+            min-height: 40px;
+            padding: 8px 18px;
+            border: 1px solid #fbbf24;
+            border-radius: 8px;
+            background: #fbbf24;
+            color: #422006;
+            font: 800 14px/1.2 system-ui, sans-serif;
+            cursor: pointer;
+        }
+        .app-inactive-role-reclaim:disabled {
+            opacity: .6;
+            cursor: progress;
+        }
+        .app-inactive-role-banner.is-idle .app-inactive-role-reclaim {
+            pointer-events: none;
         }
         /* No screen has a free area big enough to park this permanently, so it
            behaves as a toast: it says its piece, gets out of the way, and comes
@@ -195,6 +217,10 @@
         }
         body[data-role-readonly="true"] [data-role-readonly-blocked] {
             cursor: not-allowed !important;
+            /* Disabled controls swallow taps silently, so the driver gets no
+               hint at all. Letting the tap fall through to the panel behind
+               lets us bring the explanation back instead. */
+            pointer-events: none;
         }
         body[data-role-readonly="true"] button[data-role-readonly-blocked],
         body[data-role-readonly="true"] input[data-role-readonly-blocked],
@@ -847,7 +873,7 @@
     })(window, document);
     /* APP_PWA_CONTRACT_GUARD_END */
     </script>
-    <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v3"></script>
+    <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v5"></script>
     {% if observer_mode %}<script src="{% static 'js/observer-mode.js' %}?v=observer-mode-v1" defer></script>{% endif %}
     {% if role_session_authenticated and not observer_mode %}<script src="{% static 'js/application-session-heartbeat.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% block extra_head %}{% endblock %}
@@ -862,43 +888,9 @@
 {% endif %}
 {% if role_access_is_active == False %}
 <div class="app-inactive-role-banner" data-inactive-role-banner role="status" aria-live="polite">
-    Роль неактивна — доступен только просмотр
+    <span data-inactive-role-text>Вы вошли с другого устройства — доступен только просмотр</span>
+    <button type="button" class="app-inactive-role-reclaim" data-inactive-role-reclaim>Продолжить здесь</button>
 </div>
-<script>
-(function (window, document) {
-    "use strict";
-    var banner = document.querySelector("[data-inactive-role-banner]");
-    if (!banner) return;
-    var visibleMs = 6000;
-    var hideTimer = null;
-
-    function hideSoon() {
-        window.clearTimeout(hideTimer);
-        hideTimer = window.setTimeout(function () {
-            banner.classList.add("is-idle");
-        }, visibleMs);
-    }
-
-    function reveal() {
-        banner.classList.remove("is-idle");
-        hideSoon();
-    }
-
-    hideSoon();
-    /* Capture phase: the banner ignores pointer events, so this fires for the
-       control the driver actually pressed — the one that will do nothing. */
-    document.addEventListener("click", function (event) {
-        var node = event.target;
-        while (node && node !== document.body) {
-            if (node.matches && node.matches("button, a, input, select, textarea, [role=\"button\"]")) {
-                reveal();
-                return;
-            }
-            node = node.parentNode;
-        }
-    }, true);
-})(window, document);
-</script>
 {% endif %}
 {% block body %}{% endblock %}
 

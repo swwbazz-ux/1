@@ -85,6 +85,9 @@ class ActiveRoleSessionMiddleware:
     allowed_unsafe_paths = {
         '/',
         '/activate-access/',
+        # Taking the session back is the one action an inactive role must still
+        # be able to perform — otherwise there is no way out but retyping the PIN.
+        '/reclaim-session/',
         '/logout/',
         '/clerk/login/',
         '/settlement/login/',

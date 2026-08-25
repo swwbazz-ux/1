@@ -368,10 +368,16 @@ class ActiveRoleSwitchRegressionTests(RoleRegressionFixtureMixin, TestCase):
             )
         with self.subTest('old realtime GET remains readable'):
             self.assertEqual(old_driver_get.status_code, 200)
-            self.assertTrue(
-                'Роль неактивна — доступен только просмотр'
-                in old_driver_get.content.decode('utf-8'),
+            old_driver_html = old_driver_get.content.decode('utf-8')
+            self.assertIn(
+                'доступен только просмотр',
+                old_driver_html,
                 'Старая PWA не перешла в явно обозначенный read-only.',
+            )
+            self.assertIn(
+                'data-inactive-role-reclaim',
+                old_driver_html,
+                'Старой PWA не предложен возврат сессии на это устройство.',
             )
         with self.subTest('old working POST is rejected server-side'):
             self.assertIn(old_driver_post.status_code, {403, 409})
