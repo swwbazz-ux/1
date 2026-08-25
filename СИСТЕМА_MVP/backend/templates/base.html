@@ -182,6 +182,13 @@
         .app-inactive-role-banner {
             top: 50%;
             transform: translate(-50%, calc(-50% + 72px));
+            transition: opacity 240ms ease;
+        }
+        /* No screen has a free area big enough to park this permanently, so it
+           behaves as a toast: it says its piece, gets out of the way, and comes
+           back the moment a blocked control is pressed. */
+        .app-inactive-role-banner.is-idle {
+            opacity: 0;
         }
         body[data-app-contract-locked="true"] [data-app-contract-mutation] {
             cursor: not-allowed !important;
@@ -857,6 +864,41 @@
 <div class="app-inactive-role-banner" data-inactive-role-banner role="status" aria-live="polite">
     Роль неактивна — доступен только просмотр
 </div>
+<script>
+(function (window, document) {
+    "use strict";
+    var banner = document.querySelector("[data-inactive-role-banner]");
+    if (!banner) return;
+    var visibleMs = 6000;
+    var hideTimer = null;
+
+    function hideSoon() {
+        window.clearTimeout(hideTimer);
+        hideTimer = window.setTimeout(function () {
+            banner.classList.add("is-idle");
+        }, visibleMs);
+    }
+
+    function reveal() {
+        banner.classList.remove("is-idle");
+        hideSoon();
+    }
+
+    hideSoon();
+    /* Capture phase: the banner ignores pointer events, so this fires for the
+       control the driver actually pressed — the one that will do nothing. */
+    document.addEventListener("click", function (event) {
+        var node = event.target;
+        while (node && node !== document.body) {
+            if (node.matches && node.matches("button, a, input, select, textarea, [role=\"button\"]")) {
+                reveal();
+                return;
+            }
+            node = node.parentNode;
+        }
+    }, true);
+})(window, document);
+</script>
 {% endif %}
 {% block body %}{% endblock %}
 
