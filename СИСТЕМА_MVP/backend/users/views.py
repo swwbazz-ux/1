@@ -214,7 +214,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v136'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v142'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -3256,10 +3256,14 @@ def driver_shift_view(request):
             .order_by('-created_at')
             .first()
         )
-    driver_header_label = (
-        f'Самосвал {driver_equipment_number(header_truck)} · {driver_employee_short_name(access.employee)}'
+    driver_header_truck_label = (
+        f'Самосвал {driver_equipment_number(header_truck)}'
         if header_truck
-        else f'Самосвал · {driver_employee_short_name(access.employee)}'
+        else 'Самосвал'
+    )
+    driver_header_person_label = driver_employee_short_name(access.employee)
+    driver_header_label = (
+        f'{driver_header_truck_label} · {driver_header_person_label}'
     )
     driver_context_rock = (
         getattr(driver_trip_context_source, 'rock_type', None)
@@ -3432,6 +3436,8 @@ def driver_shift_view(request):
             'driver_status_class': driver_status_class,
             'driver_target_label': driver_target_label,
             'driver_header_label': driver_header_label,
+            'driver_header_truck_label': driver_header_truck_label,
+            'driver_header_person_label': driver_header_person_label,
             'driver_excavator_label': driver_excavator_label,
             'driver_complex_label': driver_complex_label,
             'driver_geology_parts': driver_geology_parts,

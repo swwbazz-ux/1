@@ -310,6 +310,21 @@
                 role: screen ? screen.role : null
             }, detail || {});
             document.body.classList.toggle("is-realtime-stale", !isConnected);
+            /* Три состояния для индикатора связи в шапке: связь есть, связь
+               пропадает (первые неудачные опросы) и связь потеряна. */
+            document.body.dataset.connectionState = isConnected
+                ? "ok"
+                : (realtimeConsecutiveFailures > 2 ? "lost" : "weak");
+            /* Где связь показывает лампочка в шапке, нижняя плашка не нужна:
+               она дублирует ту же мысль и закрывает навигацию. */
+            if (document.querySelector("[data-connection-indicator]")) {
+                if (realtimeStatus) {
+                    realtimeStatus.classList.remove("is-visible");
+                    realtimeStatus.hidden = true;
+                }
+                dispatchWindowEvent("operational-state-connection", payload);
+                return;
+            }
             if (realtimeStatus) {
                 if (isConnected) {
                     realtimeStatus.classList.remove("is-visible");
