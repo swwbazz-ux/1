@@ -25,17 +25,25 @@
     /* В обычном браузере показывается только установка. В установленном
        приложении (standalone) — сразу форма входа. Медиазапросом, а не
        скриптом, чтобы не мигало при загрузке. */
-    body.login-page .unified-login-form { display: none; }
-    body.login-page .login-install-gate { display: grid; gap: 14px; justify-items: stretch; }
+    /* Селекторы намеренно длиннее, чем кажется нужным: в app.css есть правило
+       .dispatcher-shell .shared-shift-dialog .app-confirm-content с тремя
+       классами, и более короткий селектор ему проигрывает. */
+    body.login-page .shared-shift-dialog .unified-login-form { display: none; }
+    body.login-page .shared-shift-dialog .login-install-gate {
+        display: grid;
+        gap: 18px;
+        justify-items: center;
+        text-align: center;
+    }
     @media (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) {
-        body.login-page .unified-login-form { display: grid; }
-        body.login-page .login-install-gate { display: none; }
+        body.login-page .shared-shift-dialog .unified-login-form { display: grid; }
+        body.login-page .shared-shift-dialog .login-install-gate { display: none; }
     }
     /* iOS Safari и ручное раскрытие формы. */
-    body.login-page.is-app-installed .unified-login-form,
-    body.login-page.is-login-form-forced .unified-login-form { display: grid; }
-    body.login-page.is-app-installed .login-install-gate,
-    body.login-page.is-login-form-forced .login-install-gate { display: none; }
+    body.login-page.is-app-installed .shared-shift-dialog .unified-login-form,
+    body.login-page.is-login-form-forced .shared-shift-dialog .unified-login-form { display: grid; }
+    body.login-page.is-app-installed .shared-shift-dialog .login-install-gate,
+    body.login-page.is-login-form-forced .shared-shift-dialog .login-install-gate { display: none; }
 
     .login-install-gate__lead {
         margin: 0;
@@ -72,8 +80,7 @@
             <span>Телефон</span>
             <span class="shared-shift-phone-shell">
                 <span class="shared-shift-country-code">+7 <span aria-hidden="true">⌄</span></span>
-                {# Введённый телефон возвращается в поле: раньше при неверном
-                   пинкоде сбрасывалось всё и номер приходилось набирать заново. #}
+                
                 <input id="login-phone" name="phone" type="text" inputmode="numeric" autocomplete="tel" placeholder="999-000-00-00" maxlength="13" pattern="[0-9]{3}-[0-9]{3}-[0-9]{2}-[0-9]{2}" data-phone-input data-hint="10 цифр номера" value="{{ submitted_phone }}"{% if not submitted_phone %} autofocus{% endif %}>
             </span>
             <small class="input-hint" data-input-hint-for="login-phone">10 цифр номера</small>
@@ -83,17 +90,14 @@
             <input id="login-pin" name="access_code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="00-00-00" maxlength="8" pattern="[0-9]{2}-[0-9]{2}-[0-9]{2}" data-pin-input data-hint="6 цифр из сообщения"{% if submitted_phone %} autofocus{% endif %}>
             <small class="input-hint" data-input-hint-for="login-pin">6 цифр из сообщения</small>
         </label>
-        {# Тип устройства определяется по браузеру: на телефоне — личное, на общем
-           компьютере — общее. Отдельный выбор только путал и занимал строку. #}
+        
         <input type="hidden" name="device_kind" value="{{ selected_device_kind }}">
         <div class="unified-login-actions">
             <button class="unified-login-submit" type="submit">Войти</button>
         </div>
     </form>
     {% if role_app and login_role_app %}
-    {# Пока приложение не установлено, в браузере показывается только установка:
-       вход происходит уже внутри приложения, без адресной строки. Ссылка
-       "Войти без установки" оставлена для компьютеров, где установки нет. #}
+    
     <section class="login-install-gate" data-login-install-gate>
         <div class="unified-login-role-identity">
             <img src="{{ login_role_app.icon_180_url }}" width="72" height="72" alt="">
