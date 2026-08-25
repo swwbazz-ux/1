@@ -179,7 +179,7 @@
                 <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                     {{ dispatcher_dashboard.completion_percent|default:0 }}%
                 </div>
-                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v121</span>
+                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
             </div>
         </header>
 
@@ -262,7 +262,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v121</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
                 </div>
             </header>
 
@@ -316,7 +316,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v121</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
                 </div>
             </header>
 
@@ -369,7 +369,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v121</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
                 </div>
             </header>
 
@@ -432,7 +432,7 @@
 
             <div class="mm-mobile-version-strip" aria-label="Версия приложения">
                 <span>Версия приложения</span>
-                <strong data-mm-pwa-current-shell-version>v121</strong>
+                <strong data-mm-pwa-current-shell-version>v122</strong>
                 <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
             </div>
 
@@ -469,7 +469,7 @@
                             <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                                 {{ dispatcher_dashboard.completion_percent|default:0 }}%
                             </div>
-                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v121</span>
+                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
                         </div>
                     </header>
 
@@ -961,7 +961,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v121";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v122";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
