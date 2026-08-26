@@ -3168,6 +3168,45 @@ body.driver-mobile-screen .driver-push-later {
     color: #b9c8cd;
 }
 
+/* Приглашение включить уведомления живёт рядом с экраном первичной настройки
+   и закрывает то, что тот не умеет: настройку отложили на сутки или
+   разрешение отозвали позже, уже после установки. Экран настройки в этих
+   случаях не вернётся, а приглашение смотрит на фактическое разрешение и
+   появляется само. Поэтому его не убираем — но и место занимать оно должно
+   как строка, а не как блок в треть экрана. */
+body.driver-mobile-screen .driver-push-invite {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "title actions" "text actions";
+    align-items: center;
+    gap: 1px 10px;
+    padding: 7px 11px;
+}
+
+body.driver-mobile-screen .driver-push-invite strong {
+    grid-area: title;
+    font-size: clamp(13px, 3.4vw, 15px);
+}
+
+body.driver-mobile-screen .driver-push-invite span {
+    grid-area: text;
+    font-size: clamp(11px, 2.9vw, 13px);
+    line-height: 1.25;
+}
+
+body.driver-mobile-screen .driver-push-invite-actions {
+    grid-area: actions;
+    display: flex;
+    gap: 6px;
+}
+
+body.driver-mobile-screen .driver-push-enable,
+body.driver-mobile-screen .driver-push-later {
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: clamp(12px, 3.1vw, 14px);
+}
+
 body.driver-mobile-screen .driver-shift-workspace,
 body.driver-mobile-screen .driver-shift-opening {
     grid-template-rows: auto minmax(0, 1.15fr) minmax(0, .85fr) auto;
@@ -3961,7 +4000,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                 {% endif %}
                 <div class="driver-push-invite" data-push-invite data-shift-key="{{ open_shift.id }}" data-app-name="Водитель" hidden>
                     <strong data-push-title>Включите уведомления</strong>
-                    <span data-push-text>Экскаваторщик сообщит вам точку разгрузки. Уведомление придёт, даже если приложение закрыто.</span>
+                    <span data-push-text>Точка разгрузки придёт, даже если приложение закрыто.</span>
                     <div class="driver-push-invite-actions" data-push-actions>
                         <button class="driver-push-enable" type="button" data-push-enable>Включить</button>
                         <button class="driver-push-later" type="button" data-push-later>Позже</button>

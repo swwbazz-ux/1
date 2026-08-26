@@ -19,7 +19,7 @@
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
         <meta name="apple-mobile-web-app-title" content="Горный мастер">
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
-        <script src="{% static 'js/role-app-install-v1.js' %}?v=2" defer></script>
+        <script src="{% static 'js/role-app-install-v1.js' %}?v=3" defer></script>
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
         <meta name="theme-color" content="#B33A4C">
@@ -951,7 +951,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v131";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v132";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");

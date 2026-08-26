@@ -11,13 +11,33 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="{{ login_role_app.short_name }}">
     <link rel="apple-touch-icon" href="{{ login_role_app.icon_180_url }}">
+    {# Без этих тегов мессенджер сам скребёт текст со страницы: в превью #}
+    {# оказывались подписи полей вместо описания, а вместо картинки — мелкий значок. #}
+    {% with share_image='img/share/'|add:login_role_app.icon_slug|add:'-share.png' %}
+    <meta name="description" content="Установите приложение на телефон — вход будет уже в нём.">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Коппер Ресорсез">
+    <meta property="og:locale" content="ru_RU">
+    <meta property="og:title" content="{{ login_role_app.name }} · Коппер Ресорсез">
+    <meta property="og:description" content="Установите приложение на телефон — вход будет уже в нём.">
+    <meta property="og:url" content="{{ request.scheme }}://{{ request.get_host }}/">
+    <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static share_image %}">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="{{ login_role_app.name }} · Коппер Ресорсез">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ login_role_app.name }} · Коппер Ресорсез">
+    <meta name="twitter:description" content="Установите приложение на телефон — вход будет уже в нём.">
+    <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static share_image %}">
+    {% endwith %}
     {% if role_app %}
     <link rel="stylesheet" href="{% static 'css/role-app-install-v1.css' %}?v=2">
-    <script src="{% static 'js/role-app-install-v1.js' %}?v=2" defer></script>
+    <script src="{% static 'js/role-app-install-v1.js' %}?v=3" defer></script>
     {% endif %}
     {% endif %}
 {% endblock %}
-{% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% endblock %}
+{% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% if login_role_app %} login-role-{{ login_role_app.role_code }}{% endif %}{% endblock %}
 
 {% block body %}
 {% if role_app and login_role_app %}
@@ -44,6 +64,24 @@
     body.login-page.is-login-form-forced .shared-shift-dialog .unified-login-form { display: grid; }
     body.login-page.is-app-installed .shared-shift-dialog .login-install-gate,
     body.login-page.is-login-form-forced .shared-shift-dialog .login-install-gate { display: none; }
+
+    /* Пока идёт установка, показываем ожидание, а не форму входа: вход будет
+       уже в приложении. */
+    .role-app-install__spinner {
+        justify-self: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        border: 3px solid rgba(255, 255, 255, .18);
+        border-top-color: #2FBF71;
+        animation: role-app-install-spin .9s linear infinite;
+    }
+    .role-app-install__spinner[hidden] { display: none; }
+    @keyframes role-app-install-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+        .role-app-install__spinner { animation-duration: 3s; }
+    }
+    body.login-page.is-app-installing .login-install-gate__skip { opacity: .7; }
 
     .login-install-gate__lead {
         margin: 0;
@@ -96,6 +134,170 @@
         text-decoration: underline;
         cursor: pointer;
     }
+
+    /* Страница входа занимает весь экран телефона: раньше это была карточка
+       посреди пустоты, и приложение выглядело незаконченным. Цвет берём от
+       роли — человек с первого взгляда видит, своё ли он открыл. */
+    body.login-page.unified-login-screen {
+        --login-accent: #2FBF71;
+        --login-glow: rgba(47, 191, 113, .20);
+        --login-ink: #04161A;
+    }
+    body.login-page.login-role-driver {
+        --login-accent: #8CFF2E;
+        --login-glow: rgba(140, 255, 46, .18);
+        --login-ink: #06210A;
+    }
+    body.login-page.login-role-excavator_operator {
+        --login-accent: #FFD200;
+        --login-glow: rgba(255, 210, 0, .16);
+        --login-ink: #241B00;
+    }
+    body.login-page.login-role-mining_master {
+        --login-accent: #4AA3FF;
+        --login-glow: rgba(74, 163, 255, .18);
+        --login-ink: #041a2e;
+    }
+
+    body.login-page.unified-login-screen {
+        min-height: 100dvh;
+        background:
+            radial-gradient(120% 62% at 50% -8%, var(--login-glow), rgba(2, 8, 11, 0) 68%),
+            #02080b;
+    }
+
+    body.login-page.unified-login-screen .shared-shift-dialog.unified-login-dialog {
+        display: grid;
+        align-content: center;
+        justify-items: stretch;
+        gap: 0;
+        width: 100%;
+        max-width: none;
+        min-height: 100dvh;
+        margin: 0;
+        padding:
+            calc(env(safe-area-inset-top, 0px) + clamp(24px, 7vh, 56px))
+            clamp(20px, 6vw, 34px)
+            calc(env(safe-area-inset-bottom, 0px) + clamp(20px, 4vh, 36px));
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+
+    body.login-page.unified-login-screen .shared-shift-accent { display: none; }
+
+    body.login-page.unified-login-screen .unified-login-role-identity {
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+        margin-bottom: clamp(14px, 3vh, 24px);
+    }
+
+    body.login-page.unified-login-screen .unified-login-role-identity img {
+        width: clamp(84px, 22vw, 108px);
+        height: clamp(84px, 22vw, 108px);
+        border-radius: 24px;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, .10), 0 18px 46px rgba(0, 0, 0, .55);
+    }
+
+    body.login-page.unified-login-screen .unified-login-role-identity span {
+        color: #7f929a;
+        font-size: clamp(11px, 3vw, 13px);
+        font-weight: 700;
+        letter-spacing: .18em;
+        text-transform: uppercase;
+    }
+
+    body.login-page.unified-login-screen .shared-shift-dialog h2 {
+        margin: 0 0 clamp(10px, 2.4vh, 18px);
+        color: #F2F8FA;
+        font-size: clamp(24px, 7.2vw, 34px);
+        font-weight: 800;
+        line-height: 1.12;
+        text-align: center;
+    }
+
+    body.login-page.unified-login-screen .login-install-gate__lead {
+        margin: 0 0 clamp(18px, 4vh, 30px);
+        color: #9fb2ba;
+        font-size: clamp(14px, 4vw, 17px);
+        line-height: 1.4;
+    }
+
+    /* Диалог — сетка, и без явной колонки блоки схлопывались в узкий столбик
+       посреди экрана. */
+    body.login-page.unified-login-screen .shared-shift-dialog.unified-login-dialog {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    body.login-page.unified-login-screen .login-install-gate,
+    body.login-page.unified-login-screen .unified-login-form {
+        gap: 0;
+        width: 100%;
+        max-width: 440px;
+        justify-self: center;
+    }
+
+    body.login-page.unified-login-screen .role-app-install {
+        display: grid;
+        justify-items: stretch;
+        gap: 12px;
+        width: 100%;
+        /* Разделительная черта осталась от прежней вёрстки внутри карточки —
+           на полном экране она делит пустоту. */
+        border-top: 0;
+        padding-top: 0;
+        margin-top: 0;
+    }
+
+    body.login-page.unified-login-screen .role-app-install__button {
+        width: 100%;
+        min-height: 60px;
+        border: 0;
+        border-radius: 14px;
+        background: var(--login-accent);
+        color: var(--login-ink);
+        font-size: clamp(16px, 4.6vw, 19px);
+        font-weight: 800;
+        letter-spacing: .01em;
+        box-shadow: 0 14px 34px var(--login-glow);
+    }
+
+    body.login-page.unified-login-screen .role-app-install__button[disabled] {
+        opacity: .55;
+        box-shadow: none;
+    }
+
+    body.login-page.unified-login-screen .role-app-install__status {
+        margin: 0;
+        color: #8296a0;
+        font-size: clamp(12px, 3.4vw, 14px);
+        line-height: 1.4;
+        text-align: center;
+    }
+
+    body.login-page.unified-login-screen .login-install-gate__skip {
+        margin-top: clamp(18px, 5vh, 40px);
+        color: #8296a0;
+        font-size: 15px;
+    }
+
+    body.login-page.unified-login-screen .unified-login-submit {
+        width: 100%;
+        min-height: 58px;
+        border: 0;
+        border-radius: 14px;
+        background: var(--login-accent);
+        color: var(--login-ink);
+        font-size: clamp(16px, 4.6vw, 19px);
+        font-weight: 800;
+        box-shadow: 0 14px 34px var(--login-glow);
+    }
+
+    body.login-page.unified-login-screen .shared-shift-login-field {
+        margin-bottom: clamp(12px, 2.6vh, 18px);
+    }
 </style>
 {% endif %}
 <main class="shared-shift-dialog unified-login-dialog">
@@ -106,7 +308,7 @@
         {% if login_role_app %}
         <div class="unified-login-role-identity">
             <img src="{{ login_role_app.icon_180_url }}" width="72" height="72" alt="">
-            <span>Copper Resources</span>
+            <span>Коппер Ресорсез</span>
         </div>
         {% endif %}
         <h2>{% if login_role_app %}{{ login_role_app.name }}{% else %}Единый вход{% endif %}</h2>
@@ -143,7 +345,7 @@
     <section class="login-install-gate" data-login-install-gate>
         <div class="unified-login-role-identity">
             <img src="{{ login_role_app.icon_180_url }}" width="72" height="72" alt="">
-            <span>Copper Resources</span>
+            <span>Коппер Ресорсез</span>
         </div>
         <h2>{{ login_role_app.name }}</h2>
         <p class="login-install-gate__lead">Установите приложение на телефон — вход будет уже в нём.</p>
@@ -152,6 +354,7 @@
                 <span aria-hidden="true">↓</span>
                 Установить приложение
             </button>
+            <div class="role-app-install__spinner" data-install-spinner hidden aria-hidden="true"></div>
             <p class="role-app-install__status" data-install-status aria-live="polite">
                 Приложение можно добавить на главный экран телефона.
             </p>
@@ -179,9 +382,14 @@
                 if (phone && phone.focus) phone.focus();
             });
         }
-        /* После установки сразу показываем вход, чтобы человек не искал иконку. */
+        /* Форму входа в браузере после установки больше не раскрываем: вход
+           будет уже в приложении. Текст и кружок ожидания рисует общий скрипт
+           установки, здесь только подпись запасного пути. */
         window.addEventListener("appinstalled", function () {
-            body.classList.add("is-app-installed");
+            body.classList.add("is-app-installing");
+            window.setTimeout(function () {
+                if (skip) skip.textContent = "Войти здесь, в браузере";
+            }, 9000);
         });
     })(window, document);
     </script>

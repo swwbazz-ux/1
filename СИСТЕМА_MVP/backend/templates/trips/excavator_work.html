@@ -6,9 +6,9 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v149">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v149">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v149">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v153">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v153">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v153">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -152,7 +152,7 @@
             {% if open_shift %}
             <div class="eo-push-invite" data-push-invite data-shift-key="{{ open_shift.id }}" data-app-name="Экскаватор" hidden>
                 <strong data-push-title>Включите уведомления</strong>
-                <span data-push-text>Сообщим, когда вам назначат или снимут самосвал — даже если приложение закрыто.</span>
+                <span data-push-text>Сообщим о самосвале, даже если приложение закрыто.</span>
                 <div class="eo-push-invite-actions" data-push-actions>
                     <button class="eo-push-enable" type="button" data-push-enable>Включить</button>
                     <button class="eo-push-later" type="button" data-push-later>Позже</button>
@@ -490,7 +490,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v149";
+var excavatorShellVersion = "excavator-mobile-shell-v153";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 document.body.dataset.realtimeVisibilityOnly = "true";

@@ -106,7 +106,27 @@
             status.textContent = "Приложение готово к установке на это устройство.";
         });
 
-        win.addEventListener("appinstalled", markInstalled);
+        /* Только что установили. Раньше здесь раскрывалась форма входа прямо в
+           браузере: человек начинал вводить телефон, и поверх открывалось
+           установленное приложение с такой же формой — он терял, где вводит.
+           Показываем ожидание, вход будет уже внутри приложения. */
+        function markJustInstalled() {
+            deferredPrompt = null;
+            panel.classList.remove("is-ready");
+            panel.classList.add("is-installed", "is-opening");
+            button.hidden = true;
+            status.textContent = "Открываем его. Вход будет уже внутри.";
+            var spinner = panel.querySelector("[data-install-spinner]");
+            if (spinner) spinner.hidden = false;
+            /* Само не открылось — не оставляем человека смотреть на кружок. */
+            win.setTimeout(function () {
+                if (spinner) spinner.hidden = true;
+                panel.classList.remove("is-opening");
+                status.textContent = "Если приложение не открылось само, найдите его значок на главном экране телефона.";
+            }, 9000);
+        }
+
+        win.addEventListener("appinstalled", markJustInstalled);
 
         button.addEventListener("click", function () {
             if (!deferredPrompt) {
