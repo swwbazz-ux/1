@@ -644,7 +644,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v137";
+const CACHE_NAME = "excavator-mobile-shell-v138";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -2861,10 +2861,16 @@ def close_excavator_open_downtimes(excavator):
         return len(events)
 
 
-def excavator_has_loadable_assigned_truck(excavator):
+def excavator_assigned_truck_counts(excavator):
+    """Сколько самосвалов назначено экскаватору и сколько из них можно грузить.
+
+    Возвращает (всего назначено, доступно для погрузки). Самосвал перестаёт
+    быть доступным, когда он уже отгружен и получил точку разгрузки — в
+    интерфейсе экскаваторщика его значок в этот момент гаснет.
+    """
     if not excavator:
-        return False
-    assignments = (
+        return 0, 0
+    assignments = list(
         HaulAssignment.objects
         .filter(
             excavator=excavator,
@@ -2873,10 +2879,16 @@ def excavator_has_loadable_assigned_truck(excavator):
         )
         .select_related('truck', 'truck__equipment_type')
     )
-    return any(
-        not excavator_truck_load_block(assignment, current_excavator=excavator)
+    loadable = sum(
+        1
         for assignment in assignments
+        if not excavator_truck_load_block(assignment, current_excavator=excavator)
     )
+    return len(assignments), loadable
+
+
+def excavator_has_loadable_assigned_truck(excavator):
+    return excavator_assigned_truck_counts(excavator)[1] > 0
 
 
 def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_when_empty=False):
@@ -2884,7 +2896,14 @@ def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_wh
         return None
     with transaction.atomic():
         excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
-        if excavator_has_loadable_assigned_truck(excavator):
+        assigned_total, loadable = excavator_assigned_truck_counts(excavator)
+        if loadable:
+            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+            return None
+        # Ждать самосвалы можно только тогда, когда они назначены и все уже
+        # отгружены. Если экскаватору не назначено ни одного самосвала, ждать
+        # ему нечего — это не простой по ожиданию, и открывать его нельзя.
+        if assigned_total == 0:
             close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
             return None
         if start_when_empty:
