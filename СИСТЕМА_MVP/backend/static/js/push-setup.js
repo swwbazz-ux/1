@@ -14,6 +14,9 @@
     var DONE_KEY = "push-setup-done";
     var POSTPONE_KEY = "push-setup-postponed-until";
     var POSTPONE_MS = 24 * 60 * 60 * 1000;
+    var TEST_SENT_KEY = "push-setup-test-sent";
+    /* Дольше этого ждать проверку бессмысленно: человек уже ушёл работать. */
+    var TEST_SENT_TTL = 10 * 60 * 1000;
     var TEST_KIND = "setup_test";
     var WAIT_MS = 20000;
     var POLL_MS = 1500;
@@ -49,12 +52,18 @@
         root.hidden = true;
     }
 
+    function forget() {
+        try { window.localStorage.removeItem(TEST_SENT_KEY); } catch (error) {}
+    }
+
     function finish() {
+        forget();
         store(DONE_KEY, "1");
         show("done");
     }
 
     function postpone() {
+        forget();
         store(POSTPONE_KEY, String(Date.now() + POSTPONE_MS));
         close();
     }
@@ -89,6 +98,10 @@
 
     function runTest() {
         show("sending");
+        /* Нажав на само уведомление, человек открывает приложение заново —
+           страница перезагружается и ожидание обрывается. Помним, что проверка
+           уже отправлена, чтобы вернуть его к вопросу, а не к началу круга. */
+        store(TEST_SENT_KEY, String(Date.now()));
         return window.fetch("/push/test/", {
             method: "POST",
             credentials: "same-origin",
@@ -137,7 +150,7 @@
     root.querySelectorAll("[data-push-setup-accept]").forEach(function (button) {
         /* Уведомления доходят, баннер человек включать не стал. Настройка
            выполнена: возвращать его сюда каждый запуск незачем. */
-        button.addEventListener("click", function () { store(DONE_KEY, "1"); close(); });
+        button.addEventListener("click", function () { forget(); store(DONE_KEY, "1"); close(); });
     });
     root.querySelectorAll("[data-push-setup-retry]").forEach(function (button) {
         button.addEventListener("click", function () {
@@ -167,7 +180,19 @@
         if (read(DONE_KEY) === "1") return;
         var until = Number(read(POSTPONE_KEY) || 0);
         if (until && Date.now() < until) return;
-        show(window.Notification.permission === "denied" ? "denied" : "permission");
+        if (window.Notification.permission === "denied") {
+            show("denied");
+            return;
+        }
+        var sentAt = Number(read(TEST_SENT_KEY) || 0);
+        if (sentAt && Date.now() - sentAt < TEST_SENT_TTL) {
+            show("sending");
+            waitForDelivery().then(function (delivered) {
+                show(delivered ? "ask" : "none");
+            });
+            return;
+        }
+        show("permission");
     }
 
     /* Ждём фоновый модуль: он подключается с defer и создаёт AppPushNotifications. */

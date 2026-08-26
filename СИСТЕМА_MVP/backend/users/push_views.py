@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from django.http import JsonResponse
+from django.middleware.csrf import get_token
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
@@ -106,6 +107,10 @@ def push_pending_view(request):
     response = JsonResponse({
         'ok': True,
         'badge': unread_total,
+        # Фоновому модулю негде взять CSRF-токен: страницы у него нет. Без него
+        # отметка о показе отбивалась, очередь не пустела, и телефон при каждом
+        # событии заново показывал всё старое.
+        'csrf_token': get_token(request),
         'notifications': [
             {
                 'id': item.id,

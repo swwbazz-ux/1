@@ -8,7 +8,7 @@ from django.http import HttpResponse, JsonResponse
 
 
 APP_CONTRACT_VERSION = 'pwa-contract-v1'
-STATIC_ASSET_RELEASE = 'ready-core-traffic-v19'
+STATIC_ASSET_RELEASE = 'ready-core-traffic-v20'
 READY_TRAFFIC_ROLE_CODES = frozenset({
     'admin',
     'oup',
@@ -78,6 +78,7 @@ async function showPendingNotifications() {
     return;
   }
 
+  const csrfToken = payload.csrf_token || "";
   const shownIds = [];
   for (const item of payload.notifications) {
     shownIds.push(item.id);
@@ -106,7 +107,11 @@ async function showPendingNotifications() {
       method: "POST",
       credentials: "include",
       cache: "no-store",
-      headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrfToken,
+        "X-Requested-With": "XMLHttpRequest"
+      },
       body: JSON.stringify({ ids: shownIds })
     });
   } catch (error) {}
@@ -200,7 +205,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v154',
+        shell_version='driver-mobile-shell-v155',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -216,7 +221,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v142',
+        shell_version='excavator-mobile-shell-v143',
     ),
     RoleApp(
         role_code='mining_master',
@@ -232,7 +237,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v129',
+        shell_version='mining-master-mobile-shell-v130',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
