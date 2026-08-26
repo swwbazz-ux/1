@@ -6,9 +6,9 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v138">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v138">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v138">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v139">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v139">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v139">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -479,7 +479,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v138";
+var excavatorShellVersion = "excavator-mobile-shell-v139";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 document.body.dataset.realtimeVisibilityOnly = "true";
@@ -636,18 +636,40 @@ function storeExcavatorAssignments(root, snapshot) {
 }
 
 function announceExcavatorAssignmentChanges(previousSnapshot, nextSnapshot) {
-    var addedNumbers = Object.keys(nextSnapshot || {}).filter(function (truckId) {
-        return !previousSnapshot || !Object.prototype.hasOwnProperty.call(previousSnapshot, truckId);
+    var previous = previousSnapshot || {};
+    var next = nextSnapshot || {};
+    var addedNumbers = Object.keys(next).filter(function (truckId) {
+        return !previousSnapshot || !Object.prototype.hasOwnProperty.call(previous, truckId);
     }).map(function (truckId) {
-        return nextSnapshot[truckId];
+        return next[truckId];
     });
-    if (!addedNumbers.length) return;
+    /* Снятый самосвал раньше исчезал молча, и машинист мог ждать машину,
+       которую у него уже забрали. Об этом надо сообщать так же, как о
+       назначении. */
+    var removedNumbers = !previousSnapshot ? [] : Object.keys(previous).filter(function (truckId) {
+        return !Object.prototype.hasOwnProperty.call(next, truckId);
+    }).map(function (truckId) {
+        return previous[truckId];
+    });
+    if (!addedNumbers.length && !removedNumbers.length) return;
+
+    var parts = [];
+    if (addedNumbers.length) {
+        parts.push(
+            addedNumbers.length === 1
+                ? "Назначен самосвал " + addedNumbers[0] + "."
+                : "Назначены самосвалы: " + addedNumbers.join(", ") + "."
+        );
+    }
+    if (removedNumbers.length) {
+        parts.push(
+            removedNumbers.length === 1
+                ? "Снят самосвал " + removedNumbers[0] + "."
+                : "Сняты самосвалы: " + removedNumbers.join(", ") + "."
+        );
+    }
     playExcavatorAssignmentAlert();
-    showExcavatorNotice(
-        addedNumbers.length === 1
-            ? "Назначен самосвал " + addedNumbers[0] + "."
-            : "Назначены самосвалы: " + addedNumbers.join(", ") + "."
-    );
+    showExcavatorNotice(parts.join(" "));
 }
 
 function syncExcavatorAssignmentSnapshot(root, previousSnapshot) {
