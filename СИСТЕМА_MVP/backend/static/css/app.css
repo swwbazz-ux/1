@@ -29758,6 +29758,10 @@ body.excavator-operator-screen {
     min-height: 100%;
     margin: 0;
     background: #030708;
+    /* Одного тёмного фона корня не хватило: полоса навигации Android
+       оставалась светлой. color-scheme сообщает системе, что оформление
+       тёмное, чтобы её собственные элементы не рисовались в светлой теме. */
+    color-scheme: dark;
 }
 
 body.excavator-operator-screen {
