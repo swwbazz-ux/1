@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 import hashlib
+import logging
 import os
 from pathlib import Path
 import threading
@@ -10,8 +11,10 @@ import time
 from django.core.exceptions import ValidationError
 from django.core.files import locks
 from django.db import IntegrityError, connection, transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 from core.models import bump_operational_state
 from core.production_time import production_work_date as contract_production_work_date
@@ -949,6 +952,60 @@ def schedule_haul_release(*, truck, assigned_by=None, now=None):
 
 
 @transaction.atomic
+def notify_excavator_assignment_changed(assignment, *, released, previous_excavator_ids=()):
+    """Сообщает машинисту, что ему дали или забрали самосвал.
+
+    Внутри приложения об этом уже говорит звук и сообщение на экране, но при
+    свёрнутом приложении человек ничего не узнает и может ждать машину,
+    которую у него забрали. Ошибки отправки проглатываются: уведомление не
+    должно ломать саму расстановку.
+    """
+    from shifts.models import EmployeeShift
+    from users.webpush import notify_employee
+
+    try:
+        truck_number = (
+            getattr(assignment.truck, 'garage_number', '') or 'без номера'
+        )
+        # При снятии назначение уже закрыто, поэтому берём экскаваторы, которые
+        # были заняты этим самосвалом до применения.
+        excavator_ids = (
+            list(previous_excavator_ids)
+            if released
+            else [assignment.excavator_id]
+        )
+        for excavator_id in {item for item in excavator_ids if item}:
+            shift = (
+                EmployeeShift.objects
+                .select_related('employee')
+                .filter(equipment_id=excavator_id, closed_at__isnull=True)
+                .filter(
+                    Q(workplace_code='excavator_operator')
+                    | Q(workplace_code='', equipment__equipment_type__name='Экскаватор')
+                )
+                .order_by('-opened_at')
+                .first()
+            )
+            if not shift or not shift.employee_id:
+                continue
+            if released:
+                title = 'Самосвал снят'
+                body = f'{truck_number} больше не закреплён за вами.'
+            else:
+                title = 'Назначен самосвал'
+                body = f'{truck_number} закреплён за вашим экскаватором.'
+            notify_employee(
+                shift.employee,
+                title=title,
+                body=body,
+                url='/excavator/work/',
+                tag='excavator-assignment',
+                kind='excavator_assignment_released' if released else 'excavator_assignment_added',
+            )
+    except Exception:
+        logger.exception('Не удалось отправить машинисту уведомление о назначении.')
+
+
 def apply_pending_haul_assignment(assignment_id, *, now=None):
     now = now or timezone.now()
     pending = (
@@ -979,6 +1036,11 @@ def apply_pending_haul_assignment(assignment_id, *, now=None):
     _emit_assignment_changed(
         action=applied_action, truck_id=pending.truck_id,
         excavator_ids=excavator_ids, assignment_id=pending.id,
+    )
+    notify_excavator_assignment_changed(
+        pending,
+        released=pending.action == HaulAssignmentAction.RELEASE,
+        previous_excavator_ids=excavator_ids,
     )
     return pending
 
