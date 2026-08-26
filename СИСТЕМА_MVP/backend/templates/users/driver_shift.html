@@ -1521,7 +1521,13 @@ body.driver-mobile-screen .driver-shift-update-icon::after {
 
 body.driver-mobile-screen .driver-shift-section {
     min-height: 0;
-    overflow: hidden;
+    /* Когда снизу выезжает клавиатура, места остаётся мало и блок показаний
+       не помещается целиком. Раньше лишнее просто обрезалось, и до полей
+       "Одометр" и "Моточасы" было не добраться — теперь их можно прокрутить. */
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     border: 1px solid rgba(74, 222, 128, .34);
     border-radius: 8px;
     display: flex;
@@ -4588,6 +4594,28 @@ window.bindDriverMobileShell = function () {
             });
         });
     }
+    /* Клавиатура закрывает нижнюю половину экрана, поэтому поле, в которое
+       водитель ткнул, надо подвести в видимую часть — иначе он печатает
+       вслепую или вообще не видит, куда попал. */
+    function bindDriverFieldScrollIntoView() {
+        if (shell.dataset.driverFieldFocusBound === "true") return;
+        shell.dataset.driverFieldFocusBound = "true";
+        shell.addEventListener("focusin", function (event) {
+            var field = event.target;
+            if (!field || !field.matches || !field.matches("input, select, textarea")) return;
+            var reveal = function () {
+                if (!field.scrollIntoView) return;
+                try {
+                    field.scrollIntoView({block: "center", behavior: "smooth"});
+                } catch (error) {
+                    field.scrollIntoView();
+                }
+            };
+            /* Ждём, пока клавиатура выедет и пересчитается высота. */
+            window.setTimeout(reveal, 60);
+            window.setTimeout(reveal, 320);
+        });
+    }
     function fitDriverViewport() {
         var height = driverVisualViewportHeight();
         var viewport = window.visualViewport;
@@ -4621,6 +4649,7 @@ window.bindDriverMobileShell = function () {
             fitDriverViewport();
         });
     }
+    bindDriverFieldScrollIntoView();
     window.driverScheduleViewportFit = scheduleDriverViewportFit;
     if (!window.driverViewportFitBound) {
         window.driverViewportFitBound = true;
