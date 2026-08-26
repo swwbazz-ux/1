@@ -1599,6 +1599,24 @@ body.driver-mobile-screen .driver-shift-field {
     background: rgba(2, 12, 17, .76);
 }
 
+/* О том, что поле выбрано, раньше говорил только мигающий курсор — на тёмном
+   фоне в кабине его попросту не видно. Подсвечиваем всю строку и делаем
+   курсор заметным. */
+body.driver-mobile-screen .driver-shift-field:focus-within {
+    border-color: var(--driver-green, #8cff2e);
+    background: rgba(12, 30, 22, .88);
+    box-shadow: 0 0 0 2px rgba(140, 255, 46, .26);
+}
+
+body.driver-mobile-screen .driver-shift-field:focus-within .driver-shift-field-label > span {
+    color: var(--driver-green, #8cff2e);
+}
+
+body.driver-mobile-screen .driver-shift-metric-value input {
+    caret-color: var(--driver-green, #8cff2e);
+}
+
+
 body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-field {
     margin: 0;
 }
@@ -4764,6 +4782,38 @@ window.bindDriverMobileShell = function () {
     shell.querySelectorAll(".driver-shift-metric-value input").forEach(function (input) {
         if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
     });
+
+    /* Enter на клавиатуре телефона уводит на следующее поле, а с последнего
+       просто убирает клавиатуру — иначе её приходится смахивать вручную,
+       чтобы дотянуться до кнопки. Саму кнопку за человека не нажимаем: она
+       открывает и закрывает смену, и удержание в две секунды тут не
+       перестраховка, а осознанное подтверждение. */
+    shell.querySelectorAll("[data-driver-shift-inputs], .driver-shift-opening-form").forEach(function (group) {
+        var fields = Array.prototype.filter.call(
+            group.querySelectorAll("input"),
+            function (input) {
+                return input.type !== "hidden" && !input.disabled && !input.readOnly;
+            }
+        );
+        fields.forEach(function (input, index) {
+            var isLast = index === fields.length - 1;
+            input.setAttribute("enterkeyhint", isLast ? "done" : "next");
+            if (input.dataset.driverEnterBound === "true") return;
+            input.dataset.driverEnterBound = "true";
+            input.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter" && event.keyCode !== 13) return;
+                event.preventDefault();
+                var next = fields[index + 1];
+                if (next) {
+                    next.focus();
+                    if (next.select) next.select();
+                    return;
+                }
+                input.blur();
+            });
+        });
+    });
+
     bindDriverShiftOpeningForm(shell);
     function syncDriverDialProgress() {
         shell.querySelectorAll(".driver-work-dial").forEach(function (dial) {

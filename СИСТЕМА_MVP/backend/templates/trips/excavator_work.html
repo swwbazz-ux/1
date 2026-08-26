@@ -6,9 +6,9 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v143">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v143">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v143">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v145">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v145">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v145">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -490,7 +490,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v143";
+var excavatorShellVersion = "excavator-mobile-shell-v145";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 document.body.dataset.realtimeVisibilityOnly = "true";
@@ -2638,6 +2638,33 @@ window.initExcavatorWorkShell = function () {
             clearShiftErrors();
             if (isShiftCloseAction()) resetShiftVerification();
             updateShiftActionState();
+        });
+    });
+
+    /* Enter на клавиатуре телефона уводит на следующее поле, а с последнего
+       убирает клавиатуру и сам нажимает «Проверить показания». Иначе после
+       каждого показания приходится вручную смахивать клавиатуру, чтобы
+       дотянуться до кнопки. Кнопка только показывает сверку «было → стало»,
+       ничего не отправляет — нажать её за человека безопасно. */
+    var shiftReadingFields = [shiftFuelInput, shiftHoursInput].filter(function (input) {
+        return !!input;
+    });
+    shiftReadingFields.forEach(function (input, index) {
+        var isLast = index === shiftReadingFields.length - 1;
+        input.setAttribute("enterkeyhint", isLast ? "done" : "next");
+        input.addEventListener("keydown", function (event) {
+            if (event.key !== "Enter" && event.keyCode !== 13) return;
+            event.preventDefault();
+            var next = shiftReadingFields[index + 1];
+            if (next && !next.disabled) {
+                next.focus();
+                if (next.select) next.select();
+                return;
+            }
+            input.blur();
+            if (shiftCheckButton && !shiftCheckButton.hidden && !shiftCheckButton.disabled) {
+                shiftCheckButton.click();
+            }
         });
     });
 

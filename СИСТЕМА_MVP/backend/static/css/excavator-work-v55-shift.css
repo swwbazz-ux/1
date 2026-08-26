@@ -4346,3 +4346,19 @@ body.excavator-operator-screen .eo-push-later {
     background: rgba(7, 18, 23, .88);
     color: #b9c8cd;
 }
+
+/* О том, что поле выбрано, раньше говорил только мигающий курсор — на тёмном
+   фоне, да ещё на солнце в кабине, его попросту не видно. Правило стоит в
+   конце последнего листа: тем же селектором выше рамка и подпись задаются
+   заново, и подсветка до экрана не доживала. */
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card:focus-within,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face > div:focus-within {
+    border-color: var(--eo-yellow);
+    background: rgba(32, 40, 44, .96);
+    box-shadow: 0 0 0 2px rgba(255, 210, 0, .28);
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card:focus-within > span:first-child,
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face > div:focus-within > span:first-child {
+    color: var(--eo-yellow);
+}
