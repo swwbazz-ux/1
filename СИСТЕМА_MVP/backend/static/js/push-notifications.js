@@ -160,10 +160,11 @@
        Показываем только пока разрешение не запрошено. Отказ «Позже» прячет
        карточку до следующей смены и НЕ тратит единственную попытку спросить:
        системное окно всплывает лишь по нажатию «Включить». */
-    var DISMISS_KEY = "driver-push-invite-dismissed-shift";
+    /* У каждой роли свой поддомен, поэтому хранилище и так раздельное. */
+    var DISMISS_KEY = "push-invite-dismissed-shift";
 
     function inviteNode() {
-        return document.querySelector("[data-driver-push-invite]");
+        return document.querySelector("[data-push-invite]");
     }
 
     function dismissedShift() {
@@ -190,13 +191,15 @@
         }
         if (permission === "denied") {
             /* Кнопка бесполезна: разрешение можно вернуть только в настройках. */
-            var title = invite.querySelector("[data-driver-push-title]");
-            var text = invite.querySelector("[data-driver-push-text]");
-            var actions = invite.querySelector("[data-driver-push-actions]");
+            var title = invite.querySelector("[data-push-title]");
+            var text = invite.querySelector("[data-push-text]");
+            var actions = invite.querySelector("[data-push-actions]");
             if (title) title.textContent = "Уведомления запрещены";
             if (text) {
-                text.textContent = "Точку разгрузки придётся смотреть в приложении."
-                    + " Включить можно в настройках телефона: приложение «Водитель» → Уведомления.";
+                /* Название приложения берём из карточки: экран у каждой роли свой. */
+                var appName = invite.dataset.appName || "приложение";
+                text.textContent = "События смены придётся смотреть в приложении."
+                    + " Включить можно в настройках телефона: " + appName + " → Уведомления.";
             }
             if (actions) actions.hidden = true;
             invite.hidden = false;
@@ -213,7 +216,7 @@
         var invite = inviteNode();
         if (!invite || invite.dataset.pushInviteBound === "true") return;
         invite.dataset.pushInviteBound = "true";
-        var later = invite.querySelector("[data-driver-push-later]");
+        var later = invite.querySelector("[data-push-later]");
         if (later) {
             later.addEventListener("click", function () {
                 try {

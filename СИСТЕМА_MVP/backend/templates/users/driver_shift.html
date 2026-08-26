@@ -3913,12 +3913,12 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                     <button class="driver-shift-edit" type="button" data-driver-shift-edit>Изменить показания</button>
                 </div>
                 {% endif %}
-                <div class="driver-push-invite" data-driver-push-invite data-shift-key="{{ open_shift.id }}" hidden>
-                    <strong data-driver-push-title>Включите уведомления</strong>
-                    <span data-driver-push-text>Экскаваторщик сообщит вам точку разгрузки. Уведомление придёт, даже если приложение закрыто.</span>
-                    <div class="driver-push-invite-actions" data-driver-push-actions>
+                <div class="driver-push-invite" data-push-invite data-shift-key="{{ open_shift.id }}" data-app-name="Водитель" hidden>
+                    <strong data-push-title>Включите уведомления</strong>
+                    <span data-push-text>Экскаваторщик сообщит вам точку разгрузки. Уведомление придёт, даже если приложение закрыто.</span>
+                    <div class="driver-push-invite-actions" data-push-actions>
                         <button class="driver-push-enable" type="button" data-push-enable>Включить</button>
-                        <button class="driver-push-later" type="button" data-driver-push-later>Позже</button>
+                        <button class="driver-push-later" type="button" data-push-later>Позже</button>
                     </div>
                 </div>
                 <div class="driver-shift-section">

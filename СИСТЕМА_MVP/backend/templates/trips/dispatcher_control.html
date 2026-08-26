@@ -385,6 +385,17 @@
                 </article>
             </div>
 
+            {% if dispatcher_header.shift_is_open %}
+            <div class="mm-push-invite" data-push-invite data-shift-key="{{ dispatcher_header.shift_id|default:'open' }}" data-app-name="Горный мастер" hidden>
+                <strong data-push-title>Включите уведомления</strong>
+                <span data-push-text>Сообщим о событиях смены, даже если приложение закрыто.</span>
+                <div class="mm-push-invite-actions" data-push-actions>
+                    <button class="mm-push-enable" type="button" data-push-enable>Включить</button>
+                    <button class="mm-push-later" type="button" data-push-later>Позже</button>
+                </div>
+            </div>
+            {% endif %}
+
             <form class="mm-mobile-shift-form" method="post" action="{% if dispatcher_header.shift_form_action %}{{ dispatcher_header.shift_form_action }}{% else %}{% url 'dispatcher_toggle_shift' %}{% endif %}">
                 {% csrf_token %}
                 {% if not dispatcher_header.shift_is_open %}
@@ -940,7 +951,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v126";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v127";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");

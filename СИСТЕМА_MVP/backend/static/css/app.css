@@ -28407,6 +28407,64 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
         min-width: 0;
     }
 
+    /* Приглашение включить уведомления: разрешение браузер спрашивает один
+       раз, поэтому кнопку показываем осознанно, а не при загрузке экрана. */
+    .mm-push-invite {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 8px;
+        padding: 11px 13px;
+        border: 1px solid rgba(88, 223, 82, .38);
+        border-radius: 10px;
+        background: rgba(88, 223, 82, .09);
+    }
+
+    .mm-push-invite[hidden] {
+        display: none;
+    }
+
+    .mm-push-invite strong {
+        color: #8ce87f;
+        font-size: 16px;
+        font-weight: 800;
+        line-height: 1.15;
+    }
+
+    .mm-push-invite span {
+        color: #c8d7da;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 1.3;
+    }
+
+    .mm-push-invite-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+        gap: 8px;
+    }
+
+    .mm-push-enable,
+    .mm-push-later {
+        min-height: 44px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 800;
+        text-transform: uppercase;
+        cursor: pointer;
+    }
+
+    .mm-push-enable {
+        border: 1px solid rgba(88, 223, 82, .7);
+        background: rgba(88, 223, 82, .82);
+        color: #05210b;
+    }
+
+    .mm-push-later {
+        border: 1px solid rgba(127, 163, 177, .34);
+        background: rgba(7, 18, 23, .88);
+        color: #b9c8cd;
+    }
+
     .mm-mobile-shift-button {
         width: 100%;
         min-height: 46px;
