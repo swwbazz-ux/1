@@ -1,0 +1,173 @@
+{% load static %}
+<style>
+/* Экран первичной настройки уведомлений.
+
+   Показывается один раз после установки и заканчивается настоящим
+   проверочным уведомлением: человек должен увидеть, что оно доходит, а не
+   узнать об этом в первый рабочий день. Всплывает ли уведомление баннером
+   поверх экрана, из браузера не проверить — поэтому об этом спрашиваем
+   самого человека, он тут единственный, кто это видит. */
+.push-setup {
+    position: fixed;
+    inset: 0;
+    z-index: 10090;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    background: rgba(2, 8, 11, 0.94);
+    overscroll-behavior: contain;
+}
+.push-setup[hidden] { display: none; }
+.push-setup__panel {
+    width: min(420px, 100%);
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    display: grid;
+    gap: 14px;
+    padding: 20px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: #0d1a21;
+    color: #E8F1F4;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+.push-setup__title {
+    margin: 0;
+    font-size: clamp(18px, 5.2vw, 22px);
+    line-height: 1.25;
+    font-weight: 700;
+}
+.push-setup__text {
+    margin: 0;
+    font-size: clamp(14px, 3.9vw, 16px);
+    line-height: 1.45;
+    color: #B6C8D0;
+}
+.push-setup__steps {
+    margin: 0;
+    padding-left: 20px;
+    display: grid;
+    gap: 10px;
+    font-size: clamp(13px, 3.7vw, 15px);
+    line-height: 1.45;
+    color: #D6E4EA;
+}
+.push-setup__steps b { color: #FFFFFF; }
+.push-setup__actions { display: grid; gap: 10px; }
+.push-setup__button {
+    width: 100%;
+    min-height: 52px;
+    padding: 12px 16px;
+    border: 0;
+    border-radius: 12px;
+    font: inherit;
+    font-size: clamp(15px, 4.2vw, 17px);
+    font-weight: 700;
+    color: #04161A;
+    background: #2FBF71;
+    cursor: pointer;
+}
+.push-setup__button:disabled { opacity: 0.6; cursor: progress; }
+.push-setup__button--quiet {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    color: #C7D7DE;
+    font-weight: 600;
+    min-height: 46px;
+}
+.push-setup__button--warn { background: #E0A100; }
+.push-setup__spinner {
+    justify-self: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.18);
+    border-top-color: #2FBF71;
+    animation: push-setup-spin 0.9s linear infinite;
+}
+@keyframes push-setup-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    .push-setup__spinner { animation-duration: 3s; }
+}
+.push-setup__stage { display: grid; gap: 14px; }
+.push-setup__stage[hidden] { display: none; }
+</style>
+<div class="push-setup" data-push-setup hidden role="dialog" aria-modal="true" aria-labelledby="push-setup-title">
+    <div class="push-setup__panel">
+        <div class="push-setup__stage" data-push-setup-stage="permission" hidden>
+            <h2 class="push-setup__title" id="push-setup-title">Настроим уведомления</h2>
+            <p class="push-setup__text">Экскаваторщик назначит точку разгрузки, горный мастер сменит наряд — телефон сообщит об этом сам, даже когда приложение закрыто. Займёт полминуты.</p>
+            <div class="push-setup__actions">
+                <button class="push-setup__button" type="button" data-push-setup-allow>Разрешить уведомления</button>
+                <button class="push-setup__button push-setup__button--quiet" type="button" data-push-setup-later>Позже</button>
+            </div>
+        </div>
+
+        <div class="push-setup__stage" data-push-setup-stage="sending" hidden>
+            <h2 class="push-setup__title">Проверяем</h2>
+            <div class="push-setup__spinner" aria-hidden="true"></div>
+            <p class="push-setup__text">Отправили проверочное уведомление на этот телефон. Посмотрите на экран.</p>
+        </div>
+
+        <div class="push-setup__stage" data-push-setup-stage="ask" hidden>
+            <h2 class="push-setup__title">Уведомление пришло?</h2>
+            <p class="push-setup__text">Выберите то, что произошло на самом деле — от этого зависит, что настраивать дальше.</p>
+            <div class="push-setup__actions">
+                <button class="push-setup__button" type="button" data-push-setup-answer="banner">Да, выскочило поверх экрана</button>
+                <button class="push-setup__button push-setup__button--warn" type="button" data-push-setup-answer="silent">Пришло, но не выскочило</button>
+                <button class="push-setup__button push-setup__button--quiet" type="button" data-push-setup-answer="none">Ничего не пришло</button>
+            </div>
+        </div>
+
+        <div class="push-setup__stage" data-push-setup-stage="tune" hidden>
+            <h2 class="push-setup__title">Чтобы уведомление выскакивало</h2>
+            <p class="push-setup__text">Уведомление доходит, но телефон показывает его молча в шторке. Это настройка телефона, из приложения ею управлять нельзя.</p>
+            <ol class="push-setup__steps">
+                <li>Настройки телефона → <b>Приложения</b> → «{{ role_app.short_name }}» → <b>Уведомления</b>.</li>
+                <li>Включите <b>«Плавающие уведомления»</b>. На части телефонов это называется «Важность: Высокая» или «Показывать поверх других окон».</li>
+                <li>Там же → <b>Батарея</b> → выберите <b>«Без ограничений»</b>, иначе телефон заглушит уведомления, пока лежит в кармане.</li>
+            </ol>
+            <div class="push-setup__actions">
+                <button class="push-setup__button" type="button" data-push-setup-retry>Проверить ещё раз</button>
+                <button class="push-setup__button push-setup__button--quiet" type="button" data-push-setup-accept>Оставить как есть</button>
+            </div>
+        </div>
+
+        <div class="push-setup__stage" data-push-setup-stage="none" hidden>
+            <h2 class="push-setup__title">Уведомление не дошло</h2>
+            <p class="push-setup__text">Чаще всего мешает энергосбережение: телефон усыпляет приложение и не будит его на уведомления.</p>
+            <ol class="push-setup__steps">
+                <li>Проверьте, что есть интернет.</li>
+                <li>Настройки телефона → <b>Приложения</b> → «{{ role_app.short_name }}» → <b>Батарея</b> → <b>«Без ограничений»</b>.</li>
+                <li>Там же → <b>Уведомления</b> → включено всё, в том числе <b>«Плавающие уведомления»</b>.</li>
+            </ol>
+            <div class="push-setup__actions">
+                <button class="push-setup__button" type="button" data-push-setup-retry>Проверить ещё раз</button>
+                <button class="push-setup__button push-setup__button--quiet" type="button" data-push-setup-later>Позже</button>
+            </div>
+        </div>
+
+        <div class="push-setup__stage" data-push-setup-stage="denied" hidden>
+            <h2 class="push-setup__title">Уведомления запрещены</h2>
+            <p class="push-setup__text">Телефон запомнил отказ, и приложение больше не может спросить. Вернуть можно только в настройках.</p>
+            <ol class="push-setup__steps">
+                <li>Настройки телефона → <b>Приложения</b> → «{{ role_app.short_name }}» → <b>Уведомления</b>.</li>
+                <li>Разрешите уведомления и включите <b>«Плавающие уведомления»</b>.</li>
+                <li>Вернитесь в приложение и нажмите «Проверить ещё раз».</li>
+            </ol>
+            <div class="push-setup__actions">
+                <button class="push-setup__button" type="button" data-push-setup-retry>Проверить ещё раз</button>
+                <button class="push-setup__button push-setup__button--quiet" type="button" data-push-setup-later>Закрыть</button>
+            </div>
+        </div>
+
+        <div class="push-setup__stage" data-push-setup-stage="done" hidden>
+            <h2 class="push-setup__title">Всё работает</h2>
+            <p class="push-setup__text">Уведомления о работе будут приходить на этот телефон. Больше этот экран не появится.</p>
+            <div class="push-setup__actions">
+                <button class="push-setup__button" type="button" data-push-setup-close>Готово</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script src="{% static 'js/push-setup.js' %}?v={{ static_asset_release }}" defer></script>

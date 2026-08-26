@@ -10,11 +10,13 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .active_role import role_session_state
 from .models import PushNotification, WebPushSubscription
-from .webpush import public_key_for_browser, push_is_configured
+from .webpush import notify_employee, public_key_for_browser, push_is_configured
 
 
 # Сколько уведомлений отдаём за раз: телефон всё равно покажет последние.
 PENDING_LIMIT = 5
+# По этой пометке экран настройки отличает проверку от рабочих событий.
+TEST_NOTIFICATION_KIND = 'setup_test'
 
 
 def _current_access(request):
@@ -150,3 +152,49 @@ def push_mark_shown_view(request):
         shown_at__isnull=True,
     ).count()
     return JsonResponse({'ok': True, 'badge': unread_total})
+
+
+@require_POST
+def push_test_view(request):
+    """Отправляет сотруднику проверочное уведомление.
+
+    Нужно на экране первичной настройки: человек должен своими глазами увидеть,
+    что уведомление доходит, а не узнать об этом в первый рабочий день. Идёт
+    тем же путём, что и боевые — сервер, push-сервис, телефон, — поэтому
+    проверяет всю цепочку целиком, а не только разрешение в браузере.
+    """
+    access = _current_access(request)
+    if not access:
+        return JsonResponse({'ok': False, 'error': 'Нужно войти в приложение.'}, status=401)
+
+    if not push_is_configured():
+        return JsonResponse({
+            'ok': False,
+            'configured': False,
+            'error': 'Уведомления не настроены на сервере.',
+        }, status=503)
+
+    # Прошлые непоказанные проверки только мешали бы: приложение ждёт,
+    # когда очередь опустеет, и старая запись держала бы её вечно.
+    PushNotification.objects.filter(
+        employee=access.employee,
+        kind=TEST_NOTIFICATION_KIND,
+        shown_at__isnull=True,
+    ).update(shown_at=timezone.now())
+
+    delivered = notify_employee(
+        access.employee,
+        title='Проверка уведомлений',
+        body='Так будет выглядеть сообщение о работе. Настройка завершена.',
+        kind=TEST_NOTIFICATION_KIND,
+        tag=TEST_NOTIFICATION_KIND,
+    )
+    if not delivered:
+        return JsonResponse({
+            'ok': False,
+            'configured': True,
+            'delivered': 0,
+            'error': 'Телефон не подписан на уведомления.',
+        }, status=409)
+
+    return JsonResponse({'ok': True, 'configured': True, 'delivered': delivered})

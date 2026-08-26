@@ -11,7 +11,8 @@
         // Уведомления не меняют рабочие данные и нужны в любом режиме.
         "/push/subscribe/": true,
         "/push/unsubscribe/": true,
-        "/push/shown/": true
+        "/push/shown/": true,
+        "/push/test/": true
     };
     var SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
     var BLOCKED_ATTRIBUTE = "data-role-readonly-blocked";

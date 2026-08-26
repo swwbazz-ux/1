@@ -34,6 +34,7 @@ from .push_views import (
     push_pending_view,
     push_public_key_view,
     push_subscribe_view,
+    push_test_view,
     push_unsubscribe_view,
 )
 from .views import (
@@ -82,6 +83,7 @@ urlpatterns = [
     path('push/unsubscribe/', push_unsubscribe_view, name='push_unsubscribe'),
     path('push/pending/', push_pending_view, name='push_pending'),
     path('push/shown/', push_mark_shown_view, name='push_mark_shown'),
+    path('push/test/', push_test_view, name='push_test'),
     path('', login_view, name='login'),
     path('activate-access/', activate_access_view, name='activate_access'),
     path('reclaim-session/', reclaim_role_session_view, name='reclaim_role_session'),

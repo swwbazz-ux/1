@@ -873,7 +873,7 @@
     })(window, document);
     /* APP_PWA_CONTRACT_GUARD_END */
     </script>
-    <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v5"></script>
+    <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v6"></script>
     {% if observer_mode %}<script src="{% static 'js/observer-mode.js' %}?v=observer-mode-v1" defer></script>{% endif %}
     {% if role_session_authenticated and not observer_mode %}<script src="{% static 'js/application-session-heartbeat.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% if role_session_authenticated and not observer_mode and role_app %}<script src="{% static 'js/push-notifications.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
@@ -893,6 +893,7 @@
     <button type="button" class="app-inactive-role-reclaim" data-inactive-role-reclaim>Продолжить здесь</button>
 </div>
 {% endif %}
+{% if role_session_authenticated and not observer_mode and role_app %}{% include "includes/push_setup.html" %}{% endif %}
 {% block body %}{% endblock %}
 
 <div class="app-sync-overlay" data-app-sync-overlay hidden aria-live="polite" aria-busy="true">

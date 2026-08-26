@@ -93,6 +93,7 @@ class ActiveRoleSessionMiddleware:
         '/push/subscribe/',
         '/push/unsubscribe/',
         '/push/shown/',
+        '/push/test/',
         '/logout/',
         '/clerk/login/',
         '/settlement/login/',
