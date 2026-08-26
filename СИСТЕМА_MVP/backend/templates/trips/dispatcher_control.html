@@ -168,7 +168,7 @@
                 <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                     {{ dispatcher_dashboard.completion_percent|default:0 }}%
                 </div>
-                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
+                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>
             </div>
         </header>
 
@@ -251,7 +251,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>
                 </div>
             </header>
 
@@ -305,7 +305,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>
                 </div>
             </header>
 
@@ -358,7 +358,7 @@
                     <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
+                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>
                 </div>
             </header>
 
@@ -432,7 +432,7 @@
 
             <div class="mm-mobile-version-strip" aria-label="Версия приложения">
                 <span>Версия приложения</span>
-                <strong data-mm-pwa-current-shell-version>v122</strong>
+                <strong data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</strong>
                 <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
             </div>
 
@@ -469,7 +469,7 @@
                             <div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%">
                                 {{ dispatcher_dashboard.completion_percent|default:0 }}%
                             </div>
-                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>v122</span>
+                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>
                         </div>
                     </header>
 
@@ -951,7 +951,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v130";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v131";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
