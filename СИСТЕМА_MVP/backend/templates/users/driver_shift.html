@@ -489,7 +489,7 @@ body.driver-mobile-screen .driver-work-context-heading {
 body.driver-mobile-screen .driver-work-context-body {
     min-width: 0;
     display: grid;
-    grid-template-columns: minmax(98px, 0.36fr) minmax(0, 1fr);
+    grid-template-columns: minmax(116px, 0.44fr) minmax(0, 1fr);
     align-items: center;
     padding: 10px clamp(13px, 3.5vw, 20px) 12px;
 }
@@ -499,6 +499,20 @@ body.driver-mobile-screen .driver-work-context-geology {
     min-width: 0;
     display: grid;
     align-content: center;
+    /* Длинное имя экскаватора раньше вылезало из своей колонки и ложилось
+       поверх места погрузки. Размер подбирается на лету, а это — страховка:
+       если подобрать не вышло, текст обрежется, но на соседа не полезет. */
+    overflow: hidden;
+}
+
+/* Строка с неразрывным текстом по умолчанию раздвигает свою ячейку шире
+   колонки — из-за этого подбор размера считал, что всё помещается, и не
+   срабатывал. Разрешаем ячейке сжиматься до ширины колонки. */
+body.driver-mobile-screen .driver-work-context-machine > *,
+body.driver-mobile-screen .driver-work-context-geology > *,
+body.driver-mobile-screen .driver-work-context-geology-values > * {
+    min-width: 0;
+    max-width: 100%;
 }
 
 body.driver-mobile-screen .driver-work-context-machine {
@@ -3503,7 +3517,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
     }
 
     body.driver-mobile-screen .driver-work-context-body {
-        grid-template-columns: minmax(82px, .28fr) minmax(0, 1fr);
+        grid-template-columns: minmax(104px, .36fr) minmax(0, 1fr);
         padding-block: 3px;
     }
 
@@ -3717,7 +3731,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
     }
 
     body.driver-mobile-screen .driver-work-context-body {
-        grid-template-columns: minmax(90px, 0.36fr) minmax(0, 1fr);
+        grid-template-columns: minmax(110px, 0.44fr) minmax(0, 1fr);
         padding-inline: 11px;
     }
 
@@ -4573,11 +4587,25 @@ window.bindDriverMobileShell = function () {
         });
         return Math.round(total);
     }
+    var driverStableViewportHeight = 0;
+    function driverIsEditingField() {
+        var active = document.activeElement;
+        return !!(active && active.matches && active.matches("input, textarea, select"));
+    }
     function driverVisualViewportHeight() {
         var viewport = window.visualViewport;
         var height = viewport && Number(viewport.height) > 0 ? Number(viewport.height) : Number(window.innerHeight);
-        height = Math.round(height || document.documentElement.clientHeight || 0) - driverLeadingBannerHeight();
-        return Math.max(320, height);
+        height = Math.round(height || document.documentElement.clientHeight || 0);
+        /* Пока открыта клавиатура, видимая часть экрана сжимается почти вдвое.
+           Подгонять под неё всю разметку нельзя — строки налезают друг на
+           друга. Держим высоту, измеренную без клавиатуры: до нужного поля
+           экран и так доводит прокрутка. */
+        if (driverIsEditingField()) {
+            if (driverStableViewportHeight > 0) height = driverStableViewportHeight;
+        } else {
+            driverStableViewportHeight = height;
+        }
+        return Math.max(320, height - driverLeadingBannerHeight());
     }
     function driverPanelOverflows(panel) {
         if (!panel) return false;
@@ -4628,7 +4656,11 @@ window.bindDriverMobileShell = function () {
         {selector: ".driver-header-truck", min: 13, widthOnly: true},
         {selector: ".driver-header-person", min: 11, widthOnly: true},
         {selector: ".driver-shift-open, .driver-shift-logout, .driver-shift-submit, .driver-primary-action", min: 12},
-        {selector: ".driver-shift-result-cell strong", min: 13, widthOnly: true}
+        {selector: ".driver-shift-result-cell strong", min: 13, widthOnly: true},
+        {selector: ".driver-work-context-machine strong", min: 11, widthOnly: true},
+        {selector: ".driver-work-context-machine small", min: 9, widthOnly: true},
+        {selector: ".driver-work-context-location", min: 11, widthOnly: true},
+        {selector: ".driver-work-context-rock", min: 11, widthOnly: true}
     ];
     function fitDriverText() {
         DRIVER_FIT_TARGETS.forEach(function (target) {
@@ -4676,6 +4708,10 @@ window.bindDriverMobileShell = function () {
             : (height < 780 || width < 390 ? "compact" : "normal");
         window.requestAnimationFrame(function () {
             fitDriverText();
+            /* С открытой клавиатурой всё «не влезает» по определению: она
+               закрывает пол-экрана. Уплотнять разметку из-за этого нельзя —
+               строки сойдутся друг на друга. */
+            if (driverIsEditingField()) return;
             var panel = shell.querySelector("[data-driver-tab-panel].is-active");
             if (driverPanelOverflows(panel)) {
                 shell.dataset.driverDensity = shell.dataset.driverDensity === "normal" ? "compact" : "tight";
