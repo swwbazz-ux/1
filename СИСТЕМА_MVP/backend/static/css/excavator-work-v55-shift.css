@@ -4362,3 +4362,32 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-face > div:focus-within > span:first-child {
     color: var(--eo-yellow);
 }
+
+/* Курсор ввода по высоте равен шрифту поля — своей настройки размера у него
+   нет. Растим шрифт, вместе с ним растёт и курсор. Подпись внутри карточки
+   упиралась в 11-12px, хотя место есть. Единицы остались привязаны к высоте
+   карточки: на низком экране всё так же ужимается. */
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics input {
+    font-size: clamp(24px, 4.8cqh, 34px) !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card > span:first-child {
+    font-size: clamp(14px, 2.9cqh, 18px) !important;
+}
+
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card em {
+    font-size: clamp(12px, 2.4cqh, 15px) !important;
+}
+
+/* Карточку показаний сжимало до 29px — цифры и подпись в неё уже не
+   помещались. Даём полю честную минимальную высоту: если экран низкий,
+   пусть панель прокручивается, а не давит поля друг в друга. */
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card {
+    min-height: clamp(54px, 7.4cqh, 74px) !important;
+    height: auto !important;
+}
+
+/* Фокус на экране нужен только чтобы убрать клавиатуру — рамку не рисуем. */
+body.excavator-operator-screen .eo-screen:focus {
+    outline: none;
+}

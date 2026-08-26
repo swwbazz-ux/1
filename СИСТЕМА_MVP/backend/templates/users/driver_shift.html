@@ -1616,6 +1616,11 @@ body.driver-mobile-screen .driver-shift-metric-value input {
     caret-color: var(--driver-green, #8cff2e);
 }
 
+/* Фокус на вкладке нужен только чтобы убрать клавиатуру — рамку не рисуем. */
+body.driver-mobile-screen [data-driver-tab-panel]:focus {
+    outline: none;
+}
+
 
 body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-field {
     margin: 0;
@@ -1671,7 +1676,9 @@ body.driver-mobile-screen .driver-shift-metric-value input {
     color: #f6fbfd;
     background: transparent;
     outline: none;
-    font-size: clamp(23px, 6vw, 26px);
+    /* Курсор ввода по высоте равен шрифту поля — своей настройки размера у него
+       нет, поэтому крупный шрифт заодно делает заметным и курсор. */
+    font-size: clamp(25px, 6.6vw, 30px);
     font-weight: 600;
     text-align: right;
 }
@@ -4809,7 +4816,24 @@ window.bindDriverMobileShell = function () {
                     if (next.select) next.select();
                     return;
                 }
+                /* Одного blur мало: телефон нередко оставляет клавиатуру на
+                   экране. Переводим фокус на кнопку действия — она клавиатуру
+                   не вызывает, та уезжает, и кнопка сразу под рукой. Нажимать
+                   её за человека нельзя: она открывает и закрывает смену, и
+                   удержание в две секунды там осознанное подтверждение. */
                 input.blur();
+                var action = group.querySelector("[data-driver-shift-open-button], [data-driver-shift-close-button]")
+                    || (group.closest("form") || document).querySelector("[data-driver-shift-open-button], [data-driver-shift-close-button]");
+                if (action && !action.disabled) {
+                    action.focus();
+                    return;
+                }
+                /* Кнопка ещё не активна — показания не сошлись. Всё равно уводим
+                   фокус с поля на саму вкладку, иначе клавиатура может остаться
+                   висеть и закрывать пол-экрана. */
+                var host = group.closest("[data-driver-tab-panel]") || group;
+                if (!host.hasAttribute("tabindex")) host.setAttribute("tabindex", "-1");
+                try { host.focus({preventScroll: true}); } catch (error) { host.focus(); }
             });
         });
     });

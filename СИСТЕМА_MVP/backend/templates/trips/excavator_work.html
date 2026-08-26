@@ -6,9 +6,9 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v145">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v145">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v145">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v148">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v148">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v148">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -232,7 +232,7 @@
             </div>
             <input type="hidden" name="dump_point" value="{{ default_dump_point }}" data-eo-dump-input>
             <input type="hidden" name="dump_points" value="{% for id in selected_dump_point_ids %}{% if not forloop.first %},{% endif %}{{ id }}{% endfor %}" data-eo-dump-points-input>
-            <button class="eo-primary-action eo-hold-action{% if has_applied_settings %} is-disabled{% endif %}" type="button" data-eo-apply-settings data-eo-hold-label="Применить настройки" data-eo-settings-applied="{% if has_applied_settings %}true{% else %}false{% endif %}" style="--eo-action-hold: 0%"{% if has_applied_settings %} disabled aria-disabled="true" aria-label="Настройки уже применены"{% else %} aria-disabled="false" aria-label="Удерживайте 2 секунды, чтобы применить настройки"{% endif %}>Применить настройки</button>
+            <button class="eo-primary-action eo-hold-action{% if has_applied_settings %} is-disabled{% endif %}" type="button" data-eo-apply-settings data-eo-instant="true" data-eo-hold-label="Применить настройки" data-eo-settings-applied="{% if has_applied_settings %}true{% else %}false{% endif %}" style="--eo-action-hold: 0%"{% if has_applied_settings %} disabled aria-disabled="true" aria-label="Настройки уже применены"{% else %} aria-disabled="false" aria-label="Удерживайте 2 секунды, чтобы применить настройки"{% endif %}>Применить настройки</button>
         </section>
 
         <section class="eo-screen eo-dashboard-screen" data-eo-screen="trucks">
@@ -490,7 +490,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v145";
+var excavatorShellVersion = "excavator-mobile-shell-v148";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 document.body.dataset.realtimeVisibilityOnly = "true";
@@ -1246,6 +1246,13 @@ window.initExcavatorWorkShell = function () {
                 return;
             }
             if (button.disabled || button.getAttribute("aria-disabled") === "true") return;
+            /* Настройки забоя меняются по ходу смены и легко правятся обратно —
+               лишнее окно подтверждения только держит человека на экране забоя,
+               вместо того чтобы вернуть его к работе. */
+            if (button.dataset.eoInstant === "true") {
+                onComplete({ resetHold: resetHold, defaultLabel: defaultLabel });
+                return;
+            }
             if (typeof window.openAppConfirmDialog === "function") {
                 window.openAppConfirmDialog(
                     "Подтвердите действие: " + defaultLabel + ".",
@@ -2661,9 +2668,25 @@ window.initExcavatorWorkShell = function () {
                 if (next.select) next.select();
                 return;
             }
+            /* Одного blur мало: телефон нередко оставляет клавиатуру на экране.
+               Переводим фокус на кнопку — она клавиатуру не вызывает, та
+               гарантированно уезжает, и до кнопки сразу можно дотянуться. */
             input.blur();
             if (shiftCheckButton && !shiftCheckButton.hidden && !shiftCheckButton.disabled) {
+                shiftCheckButton.focus();
                 shiftCheckButton.click();
+            }
+            if (shiftButton && !shiftButton.hidden && !shiftButton.disabled) {
+                shiftButton.focus();
+                return;
+            }
+            /* Ни одна кнопка не активна — показания не сошлись. Всё равно уводим
+               фокус с поля на сам экран, иначе клавиатура может остаться висеть
+               и закрывать пол-экрана. */
+            var host = input.closest('[data-eo-screen="shift"]') || shell;
+            if (host && !host.hasAttribute("tabindex")) host.setAttribute("tabindex", "-1");
+            if (host) {
+                try { host.focus({preventScroll: true}); } catch (error) { host.focus(); }
             }
         });
     });
