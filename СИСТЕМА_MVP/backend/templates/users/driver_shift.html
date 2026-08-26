@@ -817,6 +817,13 @@ body.driver-mobile-screen .driver-work-hold-bar {
     transition: opacity 80ms linear;
 }
 
+/* Пока идёт удержание, полоса перерисовывается каждый кадр. Выносим её на
+   отдельный слой: иначе браузер заодно перерисовывает весь циферблат — с его
+   градиентами, масками и свечением, и на слабом телефоне это заметно дёргается. */
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-bar {
+    will-change: background;
+}
+
 body.driver-mobile-screen .driver-work-hold-bar.is-core {
     --driver-hold-color: var(--driver-green);
     inset: 13%;
@@ -4450,6 +4457,42 @@ window.applyOperationalStateRefresh = function (context) {
     });
 };
 
+/* Разгрузка уходила обычной отправкой формы: браузер перезагружал страницу
+   целиком, экран моргал и подвисал. Отправляем по тому же адресу, но ответ
+   разбираем сами и меняем только рабочую часть — остальное остаётся на месте.
+
+   Повтор действия безопасен: у формы есть свой номер действия, сервер по нему
+   узнаёт уже выполненный рейс. Поэтому при любой осечке спокойно отдаём форму
+   браузеру — действие не потеряется. */
+window.submitDriverFormInPlace = function (form) {
+    if (!window.fetch || !window.AppOperationalFragment || !window.FormData) {
+        form.submit();
+        return;
+    }
+    var body = new window.FormData(form);
+    window.fetch(form.action, {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "follow",
+        body: body
+    }).then(function (response) {
+        if (!response.ok) throw new Error("driver action rejected");
+        return response.text();
+    }).then(function (html) {
+        var freshShell = window.AppOperationalFragment.parseRoot(html, "[data-driver-shell]");
+        var oldShell = document.querySelector("[data-driver-shell]");
+        if (!freshShell || !oldShell) throw new Error("driver shell missing");
+        freshShell.dataset.activeTab = oldShell.dataset.activeTab || "work";
+        oldShell.replaceWith(freshShell);
+        if (typeof window.bindDriverMobileShell === "function") {
+            window.bindDriverMobileShell();
+        }
+    }).catch(function () {
+        form.submit();
+    });
+};
+
 function bindDriverShiftOpeningForm(shell) {
     var openShiftForm = shell.querySelector(".driver-shift-opening-form");
     var openShiftButton = shell.querySelector("[data-driver-shift-open-button]");
@@ -5608,7 +5651,7 @@ window.bindDriverMobileShell = function () {
                     return;
                 }
                 holdButton.disabled = true;
-                holdForm.submit();
+                window.submitDriverFormInPlace(holdForm);
             }
         });
         window.driverUnloadHoldGuard = unloadHoldGuard;
