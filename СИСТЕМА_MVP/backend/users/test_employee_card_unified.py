@@ -385,7 +385,10 @@ class UnifiedEmployeeCardTests(TestCase):
             encoding='utf-8',
         )
 
-        self.assertIn('--admin-console-header-height: 112px;', app_stylesheet)
+        # 128, а не 112: разделов админки стало девять, они укладываются в два
+        # ряда, и при прежней высоте второй ряд обрезался. Величину сторожим
+        # по-прежнему — от неё считают высоту рабочих панелей на страницах.
+        self.assertIn('--admin-console-header-height: 128px;', app_stylesheet)
         self.assertIn('--admin-header-control-height: 40px;', app_stylesheet)
         self.assertIn('--admin-header-icon-size: 40px;', app_stylesheet)
         self.assertIn('--admin-header-identity-column: minmax(210px, 260px);', app_stylesheet)

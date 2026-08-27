@@ -12464,7 +12464,11 @@ body.employees-admin-screen {
 
 .admin-exports-shell {
     --admin-interface-scale: .90;
-    --admin-console-header-height: 112px;
+    /* Разделов стало девять, и они укладываются в два ряда. При 112 точках
+       второй ряд обрезался, а «Выгрузки» уезжали под содержимое страницы.
+       Высоту правим здесь, а не у самой шапки: от этой величины считают
+       высоту рабочих панелей, и разъехались бы уже они. */
+    --admin-console-header-height: 128px;
     --admin-header-control-height: 40px;
     --admin-header-icon-size: 40px;
     --admin-header-identity-column: minmax(210px, 260px);
@@ -25357,7 +25361,7 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
    телефоне она складывала пульт в столбик и давила ряды до восьмидесяти
    точек. Там мы вместо перекройки уменьшаем пульт целиком, и настольная
    раскладка помещается — поэтому такой экран сюда не пускаем. */
-@media (max-width: 1180px) and (not ((orientation: landscape) and (max-height: 620px))) {
+@media (max-width: 1180px) and (not (orientation: landscape)) {
     .management-dashboard-header {
         grid-template-columns: minmax(0, 1fr) minmax(250px, auto);
     }
@@ -33385,42 +33389,81 @@ body.is-observer-mode .app-contract-banner {
     }
 }
 
-/* Пульт диспетчера на телефоне: уменьшаем целиком, а не перекладываем.
+/* Пульт диспетчера на телефоне: уменьшённая копия настольного экрана.
 
    Пульт задуман горизонтальным: слева экскаваторы, посередине комплексы,
-   справа самосвалы. На телефоне экран широкий, но низкий — раскладка
-   складывала три колонки в столбик и давила каждую до восьмидесяти точек:
-   читать было нечего.
+   справа самосвалы, и ему нужно около 1400 точек ширины. На телефоне их
+   нет, поэтому пульт уменьшается целиком — раскладка остаётся той же.
 
-   Уменьшение решает обе беды разом. Оно не только вмещает пульт по высоте —
-   при масштабе 0.62 страница считает, что у неё около полутора тысяч точек
-   ширины, и трёхколоночная раскладка возвращается сама, без отдельных правил.
+   Считаем от ШИРИНЫ, а не от высоты. Первая попытка опиралась на высоту
+   экрана, и на живом телефоне условие не сработало: высота оказалась больше
+   ожидаемой, уменьшение не включилось, и пульт вылез за правый край.
+   Ширина — то самое, чего пульту не хватает, по ней и считаем.
 
    Ступенями, а не формулой: коэффициент должен быть числом, а поделить
-   высоту экрана на число в CSS нельзя — получается длина, и zoom такое
-   выражение молча игнорирует. Тот же приём уже работает в админке.
+   ширину экрана на число в CSS нельзя — выйдет длина, и zoom такое
+   выражение молча игнорирует.
 
-   Оговорка про landscape и низкий экран нужна, чтобы не задеть настольный
-   пульт в диспетчерской, ради которого всё и рисовалось. */
-@media (orientation: landscape) and (max-height: 620px) {
-    .dispatcher-shell {
-        --gd-fit-scale: .84;
-        zoom: var(--gd-fit-scale);
-        width: calc(100% / var(--gd-fit-scale));
-        min-height: calc(100dvh / var(--gd-fit-scale));
-    }
+   Оговорка про landscape нужна, чтобы не задеть ни настольный пульт в
+   диспетчерской, ни вертикальный планшет: там своя раскладка. */
+@media (orientation: landscape) and (max-width: 1180px) {
+    .dispatcher-shell { --gd-fit-scale: .84; }
 }
 
-@media (orientation: landscape) and (max-height: 540px) {
-    .dispatcher-shell { --gd-fit-scale: .72; }
+@media (orientation: landscape) and (max-width: 1050px) {
+    .dispatcher-shell { --gd-fit-scale: .74; }
 }
 
-@media (orientation: landscape) and (max-height: 460px) {
-    .dispatcher-shell { --gd-fit-scale: .62; }
+@media (orientation: landscape) and (max-width: 950px) {
+    .dispatcher-shell { --gd-fit-scale: .66; }
+}
+
+@media (orientation: landscape) and (max-width: 850px) {
+    .dispatcher-shell { --gd-fit-scale: .58; }
 }
 
 /* Ниже уже не разглядеть — дальше не мельчим. */
-@media (orientation: landscape) and (max-height: 400px) {
-    .dispatcher-shell { --gd-fit-scale: .54; }
+@media (orientation: landscape) and (max-width: 750px) {
+    .dispatcher-shell { --gd-fit-scale: .52; }
 }
 
+/* Само уменьшение — через transform, а не zoom.
+
+   На zoom рассчитывать нельзя: в проверке он отчитывался о применённом
+   масштабе, а размеры не менял, и пульт вылезал за правый край — ровно это
+   и было видно на телефоне. transform уменьшает всегда и предсказуемо.
+
+   Он не меняет место, которое элемент занимает в потоке, поэтому оболочка
+   остаётся широкой и её надо обрезать. У этого экрана overflow: hidden уже
+   стоит, так что лишней полосы прокрутки не появится. */
+@media (orientation: landscape) and (max-width: 1180px) {
+    .dispatcher-shell {
+        width: calc(100% / var(--gd-fit-scale));
+        height: calc(100dvh / var(--gd-fit-scale));
+        min-height: calc(100dvh / var(--gd-fit-scale));
+        transform: scale(var(--gd-fit-scale));
+        transform-origin: top left;
+    }
+}
+
+/* Девять разделов должны помещаться в шапку заданной высоты.
+
+   Раньше разделов было восемь, и два ряда кнопок укладывались впритык.
+   С девятым второй ряд перестал помещаться и обрезался — на широком экране
+   «Выгрузки» уезжали под содержимое страницы.
+
+   Растянуть шапку нельзя: высоту рабочих панелей считают от неё как от
+   постоянной величины, и они поехали бы следом. Поэтому ужимаем сами
+   кнопки разделов — «Назад» и «Выйти» не трогаем, они в другом блоке. */
+@media (min-width: 721px) {
+    .admin-console-nav {
+        gap: 6px;
+        width: 100%;
+    }
+
+    .admin-console-nav a {
+        min-height: 34px;
+        padding-inline: 6px;
+        letter-spacing: 0;
+    }
+}
