@@ -37,7 +37,7 @@
     {% endif %}
     {% endif %}
 {% endblock %}
-{% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% if login_role_app %} login-role-{{ login_role_app.role_code }}{% endif %}{% endblock %}
+{% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% if request.GET.form %} is-login-form-forced{% endif %}{% if login_role_app %} login-role-{{ login_role_app.role_code }}{% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %} login-fullscreen{% endif %}{% endif %}{% endblock %}
 
 {% block body %}
 {% if role_app and login_role_app %}
@@ -138,7 +138,7 @@
     /* Страница входа занимает весь экран телефона: раньше это была карточка
        посреди пустоты, и приложение выглядело незаконченным. Цвет берём от
        роли — человек с первого взгляда видит, своё ли он открыл. */
-    body.login-page.unified-login-screen {
+    body.login-page.login-fullscreen {
         --login-accent: #2FBF71;
         --login-glow: rgba(47, 191, 113, .20);
         --login-ink: #04161A;
@@ -159,14 +159,14 @@
         --login-ink: #041a2e;
     }
 
-    body.login-page.unified-login-screen {
+    body.login-page.login-fullscreen {
         min-height: 100dvh;
         background:
             radial-gradient(120% 62% at 50% -8%, var(--login-glow), rgba(2, 8, 11, 0) 68%),
             #02080b;
     }
 
-    body.login-page.unified-login-screen .shared-shift-dialog.unified-login-dialog {
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog {
         display: grid;
         align-content: center;
         justify-items: stretch;
@@ -185,23 +185,23 @@
         box-shadow: none;
     }
 
-    body.login-page.unified-login-screen .shared-shift-accent { display: none; }
+    body.login-page.login-fullscreen .shared-shift-accent { display: none; }
 
-    body.login-page.unified-login-screen .unified-login-role-identity {
+    body.login-page.login-fullscreen .unified-login-role-identity {
         display: grid;
         justify-items: center;
         gap: 10px;
         margin-bottom: clamp(14px, 3vh, 24px);
     }
 
-    body.login-page.unified-login-screen .unified-login-role-identity img {
+    body.login-page.login-fullscreen .unified-login-role-identity img {
         width: clamp(84px, 22vw, 108px);
         height: clamp(84px, 22vw, 108px);
         border-radius: 24px;
         box-shadow: 0 0 0 1px rgba(255, 255, 255, .10), 0 18px 46px rgba(0, 0, 0, .55);
     }
 
-    body.login-page.unified-login-screen .unified-login-role-identity span {
+    body.login-page.login-fullscreen .unified-login-role-identity span {
         color: #7f929a;
         font-size: clamp(11px, 3vw, 13px);
         font-weight: 700;
@@ -209,7 +209,7 @@
         text-transform: uppercase;
     }
 
-    body.login-page.unified-login-screen .shared-shift-dialog h2 {
+    body.login-page.login-fullscreen .shared-shift-dialog h2 {
         margin: 0 0 clamp(10px, 2.4vh, 18px);
         color: #F2F8FA;
         font-size: clamp(24px, 7.2vw, 34px);
@@ -218,7 +218,7 @@
         text-align: center;
     }
 
-    body.login-page.unified-login-screen .login-install-gate__lead {
+    body.login-page.login-fullscreen .login-install-gate__lead {
         margin: 0 0 clamp(18px, 4vh, 30px);
         color: #9fb2ba;
         font-size: clamp(14px, 4vw, 17px);
@@ -227,19 +227,19 @@
 
     /* Диалог — сетка, и без явной колонки блоки схлопывались в узкий столбик
        посреди экрана. */
-    body.login-page.unified-login-screen .shared-shift-dialog.unified-login-dialog {
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog {
         grid-template-columns: minmax(0, 1fr);
     }
 
-    body.login-page.unified-login-screen .login-install-gate,
-    body.login-page.unified-login-screen .unified-login-form {
+    body.login-page.login-fullscreen .login-install-gate,
+    body.login-page.login-fullscreen .unified-login-form {
         gap: 0;
         width: 100%;
         max-width: 440px;
         justify-self: center;
     }
 
-    body.login-page.unified-login-screen .role-app-install {
+    body.login-page.login-fullscreen .role-app-install {
         display: grid;
         justify-items: stretch;
         gap: 12px;
@@ -251,7 +251,7 @@
         margin-top: 0;
     }
 
-    body.login-page.unified-login-screen .role-app-install__button {
+    body.login-page.login-fullscreen .role-app-install__button {
         width: 100%;
         min-height: 60px;
         border: 0;
@@ -264,12 +264,12 @@
         box-shadow: 0 14px 34px var(--login-glow);
     }
 
-    body.login-page.unified-login-screen .role-app-install__button[disabled] {
+    body.login-page.login-fullscreen .role-app-install__button[disabled] {
         opacity: .55;
         box-shadow: none;
     }
 
-    body.login-page.unified-login-screen .role-app-install__status {
+    body.login-page.login-fullscreen .role-app-install__status {
         margin: 0;
         color: #8296a0;
         font-size: clamp(12px, 3.4vw, 14px);
@@ -277,13 +277,13 @@
         text-align: center;
     }
 
-    body.login-page.unified-login-screen .login-install-gate__skip {
+    body.login-page.login-fullscreen .login-install-gate__skip {
         margin-top: clamp(18px, 5vh, 40px);
         color: #8296a0;
         font-size: 15px;
     }
 
-    body.login-page.unified-login-screen .unified-login-submit {
+    body.login-page.login-fullscreen .unified-login-submit {
         width: 100%;
         min-height: 58px;
         border: 0;
@@ -295,13 +295,13 @@
         box-shadow: 0 14px 34px var(--login-glow);
     }
 
-    body.login-page.unified-login-screen .shared-shift-login-field {
+    body.login-page.login-fullscreen .shared-shift-login-field {
         margin-bottom: clamp(12px, 2.6vh, 18px);
     }
 
     /* Первый вход отдельной кнопкой: человек приходит без пинкода, и заставлять
        его гадать, что вводить в это поле, незачем. */
-    body.login-page.unified-login-screen .unified-login-register {
+    body.login-page.login-fullscreen .unified-login-register {
         justify-self: center;
         width: 100%;
         min-height: 48px;
@@ -318,13 +318,13 @@
        из-за этого всё содержимое было смещено влево на половину этого отступа.
        Обнуляем и центруем явно; заодно учитываем вырез экрана, на телефонах с
        ним боковые отступы тоже различаются. */
-    body.login-page.unified-login-screen .shared-shift-dialog .unified-login-form,
-    body.login-page.unified-login-screen .shared-shift-dialog .login-install-gate {
+    body.login-page.login-fullscreen .shared-shift-dialog .unified-login-form,
+    body.login-page.login-fullscreen .shared-shift-dialog .login-install-gate {
         padding-left: 0;
         padding-right: 0;
     }
 
-    body.login-page.unified-login-screen .shared-shift-dialog.unified-login-dialog {
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog {
         justify-items: center;
         margin-inline: auto;
         padding-left: calc(env(safe-area-inset-left, 0px) + clamp(20px, 6vw, 34px));
@@ -335,23 +335,23 @@
        больше не центрируем по всей высоте — иначе поля и кнопка «Войти»
        оказываются под клавиатурой. Прижимаем к верху и убираем крупную шапку:
        форма из двух полей и кнопки помещается над клавиатурой целиком. */
-    body.login-page.unified-login-screen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog {
+    body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog {
         align-content: start;
         min-height: 0;
         padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
         padding-bottom: 16px;
     }
 
-    body.login-page.unified-login-screen.is-login-keyboard-active .unified-login-role-identity {
+    body.login-page.login-fullscreen.is-login-keyboard-active .unified-login-role-identity {
         display: none;
     }
 
-    body.login-page.unified-login-screen.is-login-keyboard-active .shared-shift-dialog h2 {
+    body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog h2 {
         margin-bottom: clamp(8px, 1.6vh, 14px);
         font-size: clamp(19px, 5.4vw, 24px);
     }
 
-    body.login-page.unified-login-screen.is-login-keyboard-active .shared-shift-login-field {
+    body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-login-field {
         margin-bottom: 10px;
     }
 </style>
@@ -373,14 +373,15 @@
             <span class="shared-shift-phone-shell">
                 <span class="shared-shift-country-code">+7 <span aria-hidden="true">⌄</span></span>
                 
-                <input id="login-phone" name="phone" type="text" inputmode="numeric" autocomplete="tel" placeholder="999-000-00-00" maxlength="13" pattern="[0-9]{3}-[0-9]{3}-[0-9]{2}-[0-9]{2}" data-phone-input data-hint="10 цифр номера" value="{{ submitted_phone }}"{% if not submitted_phone %} autofocus{% endif %}>
+                <input id="login-phone" name="phone" type="text" inputmode="numeric" autocomplete="tel" placeholder="999-000-00-00" maxlength="13" pattern="[0-9]{3}-[0-9]{3}-[0-9]{2}-[0-9]{2}" data-phone-input data-hint="10 цифр номера" value="{{ submitted_phone }}"{% if login_step != 'pin' %} autofocus{% endif %}{% if login_step == 'pin' %} readonly{% endif %}>
             </span>
             <small class="input-hint" data-input-hint-for="login-phone">10 цифр номера</small>
         </label>
+        {% if login_step == 'pin' %}
         <label class="shared-shift-login-field" for="login-pin">
             <span>Пинкод</span>
             <span class="login-pin-shell">
-                <input id="login-pin" name="access_code" type="password" inputmode="numeric" autocomplete="off" placeholder="00-00-00" maxlength="8" pattern="[0-9]{2}-[0-9]{2}-[0-9]{2}" data-pin-input data-hint="6 цифр из сообщения"{% if submitted_phone %} autofocus{% endif %}>
+                <input id="login-pin" name="access_code" type="password" inputmode="numeric" autocomplete="off" placeholder="00-00-00" maxlength="8" pattern="[0-9]{2}-[0-9]{2}-[0-9]{2}" data-pin-input data-hint="6 цифр, которые вы придумали"{% if submitted_phone %} autofocus{% endif %}>
                 <button class="login-pin-reveal" type="button" data-pin-reveal aria-label="Показать пинкод, пока нажато">
                     <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
                         <path d="M1.8 12S5.4 5.4 12 5.4 22.2 12 22.2 12 18.6 18.6 12 18.6 1.8 12 1.8 12Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
@@ -388,15 +389,14 @@
                     </svg>
                 </button>
             </span>
-            <small class="input-hint" data-input-hint-for="login-pin">6 цифр из сообщения</small>
+            <small class="input-hint" data-input-hint-for="login-pin">6 цифр, которые вы придумали при первом входе</small>
         </label>
-        
+        {% endif %}
+
         <input type="hidden" name="device_kind" value="{{ selected_device_kind }}">
         <div class="unified-login-actions">
-            <button class="unified-login-submit" type="submit">Войти</button>
+            <button class="unified-login-submit" type="submit" name="action" value="{% if login_step == 'pin' %}login{% else %}continue{% endif %}">{% if login_step == 'pin' %}Войти{% else %}Далее{% endif %}</button>
         </div>
-        {# Первый вход: пинкод человек придумывает сам, ничего раздавать не нужно. #}
-        <button class="unified-login-register" type="submit" name="action" value="register" formnovalidate>Первый вход — придумать пинкод</button>
     </form>
     {% if role_app and login_role_app %}
     

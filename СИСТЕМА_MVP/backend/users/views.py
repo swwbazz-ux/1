@@ -595,7 +595,7 @@ def login_view(
     submitted_phone = (
         request.POST.get('phone', '').strip() if request.method == 'POST' else ''
     )
-    if request.method == 'POST' and request.POST.get('action') == 'register':
+    if request.method == 'POST' and request.POST.get('action') in {'register', 'continue'}:
         # Первый вход. Раньше сюда пускал только выданный вручную временный код,
         # и раздавать его приходилось каждому — при текучке в двадцать человек за
         # вахту это неподъёмно. Теперь ключ — номер телефона из карточки, а ФИО
@@ -614,12 +614,20 @@ def login_view(
                 allow_pending_access=True,
             )
         ]
+        # У сотрудника может быть несколько записей доступа на один номер —
+        # например, доступ переоформляли. Если хоть одна уже активирована, у
+        # человека есть рабочий пинкод, и вести его на регистрацию нельзя:
+        # заведёт второй и запутается, каким входить.
+        already_registered = any(
+            candidate.status == EmployeeAccess.Status.ACTIVATED
+            for candidate in matches
+        )
         pending = [
             candidate
             for candidate in matches
             if candidate.status == EmployeeAccess.Status.NOT_ACTIVATED
         ]
-        if pending:
+        if pending and not already_registered:
             access = pending[0]
             request.session.cycle_key()
             request.session['pending_activation_access_id'] = access.id
@@ -633,9 +641,17 @@ def login_view(
             set_session_device_kind(request, selected_device_kind)
             return redirect('activate_access')
         if matches:
-            messages.error(
+            # Пинкод у человека уже есть — просим именно его, вторым шагом.
+            return render(
                 request,
-                'Вы уже зарегистрированы. Введите свой пинкод — тот, что придумали при первом входе.',
+                'users/login.html',
+                {
+                    'selected_device_kind': selected_device_kind,
+                    'next_url': next_url,
+                    'login_role_app': login_role_app,
+                    'submitted_phone': phone,
+                    'login_step': 'pin',
+                },
             )
         else:
             # Номер может быть в базе, но за другой должностью: человек открыл
@@ -677,7 +693,7 @@ def login_view(
                 },
             )
 
-    if request.method == 'POST' and request.POST.get('action') != 'register':
+    if request.method == 'POST' and request.POST.get('action') not in {'register', 'continue'}:
         phone = request.POST.get('phone', '').strip()
         access_code = request.POST.get('access_code', '').strip()
         access = find_employee_access_by_credentials(
@@ -743,11 +759,51 @@ def login_view(
                         'next_url': next_url,
                         'login_role_app': login_role_app,
                         'submitted_phone': submitted_phone,
+                        'login_step': 'pin' if submitted_phone else '',
                     },
                 )
             request.session.cycle_key()
             set_session_device_kind(request, selected_device_kind)
             return redirect(next_url or 'role_home')
+        # Пинкода у номера ещё нет — человек первый раз в приложении. Отбивать
+        # его «неверный пинкод» бессмысленно: вводить ему нечего. Ведём на экран,
+        # где он увидит своё ФИО и придумает пинкод.
+        phone_accesses = [
+            candidate
+            for candidate in find_unactivated_accesses_by_phone(
+                phone,
+                role_codes=allowed_role_codes or ([role_app.role_code] if role_app else None),
+            )
+            if employee_has_effective_access_role(
+                candidate.employee,
+                candidate.role.code,
+                allow_pending_access=True,
+            )
+        ]
+        # То же правило, что и на первом шаге: пинкод уже заведён — значит вход
+        # обычный, а не повторная регистрация.
+        first_time = [] if any(
+            candidate.status == EmployeeAccess.Status.ACTIVATED
+            for candidate in phone_accesses
+        ) else [
+            candidate
+            for candidate in phone_accesses
+            if candidate.status == EmployeeAccess.Status.NOT_ACTIVATED
+        ]
+        if first_time:
+            pending_access = first_time[0]
+            request.session.cycle_key()
+            request.session['pending_activation_access_id'] = pending_access.id
+            request.session['pending_activation_role_code'] = pending_access.role.code
+            if target_role_app:
+                request.session['pending_activation_target_app_code'] = target_role_app.role_code
+            else:
+                request.session.pop('pending_activation_target_app_code', None)
+            if next_url:
+                request.session['post_activation_next'] = next_url
+            set_session_device_kind(request, selected_device_kind)
+            return redirect('activate_access')
+
         other_access = None
         if allowed_role_codes:
             other_access = find_employee_access_by_credentials(phone, access_code)
@@ -771,6 +827,7 @@ def login_view(
             'next_url': next_url,
             'login_role_app': login_role_app,
             'submitted_phone': submitted_phone,
+            'login_step': 'pin' if submitted_phone else '',
         },
     )
 
