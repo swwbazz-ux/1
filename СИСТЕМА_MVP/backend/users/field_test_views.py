@@ -47,7 +47,15 @@ def system_admin_field_test_view(request):
     from shifts.models import EmployeeShift
     from trips.models import Trip, TripStatus
 
-    accesses = EmployeeAccess.objects.filter(is_active=True)
+    # Защищённые карточки — это владелец системы, а не полевой сотрудник. У него
+    # доступы во все приложения, и почти во всех он ни разу не был: они попадали
+    # в «Ни разу не вошли» и в таблицу по ролям, добавляя по призраку в каждую
+    # строку. Здесь считают, сколько людей в поле смогли начать работать, — свои
+    # неоткрытые роли этому только мешают.
+    accesses = EmployeeAccess.objects.filter(
+        is_active=True,
+        employee__is_protected=False,
+    )
     activated = accesses.filter(status=EmployeeAccess.Status.ACTIVATED)
 
     shifts_opened = EmployeeShift.objects.filter(opened_at__gte=since)
