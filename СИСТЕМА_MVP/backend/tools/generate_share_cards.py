@@ -65,6 +65,16 @@ CARDS = [
 
 LEAD = 'Установите приложение на телефон — вход будет уже в нём.'
 
+# Общий вход: роль ещё неизвестна, поэтому вместо одного значка показываем три —
+# сразу видно, что ссылка годится любому.
+START_CARD = {
+    'slug': 'start',
+    'icons': ['driver-512.png', 'excavator-512.png', 'mining-master-512.png'],
+    'title': 'Рабочее приложение',
+    'lead': 'Введите номер телефона — система подскажет, какое приложение вам нужно.',
+    'accent': (47, 191, 113),
+}
+
 
 def pick_font(candidates: list[Path], size: int) -> ImageFont.FreeTypeFont:
     for path in candidates:
@@ -159,10 +169,59 @@ def build_card(card: dict) -> Path:
     return out_path
 
 
+def build_start_card(card: dict) -> Path:
+    """Раскладка сверху вниз: марка, заголовок, значки, подпись.
+
+    Значки ставим ниже заголовка фиксированно — при вычислении «по центру»
+    заголовок налезал на них.
+    """
+    accent = card['accent']
+    image = glow_layer(accent)
+    draw = ImageDraw.Draw(image)
+
+    text_x = 92
+    limit = WIDTH - text_x - 92
+    draw.text((text_x, 96), COMPANY, font=pick_font(FONT_CANDIDATES_BOLD, 30), fill=(126, 146, 154))
+    draw.text((text_x, 140), card['title'], font=fit_font(draw, card['title'], limit, 72), fill=(242, 248, 250))
+
+    size = 176
+    gap = 26
+    x, y = text_x, 268
+    for name in card['icons']:
+        icon_path = ICON_DIR / name
+        if not icon_path.exists():
+            raise SystemExit(f'Нет значка {icon_path}')
+        icon = rounded(Image.open(icon_path).convert('RGBA').resize((size, size), Image.LANCZOS))
+        image.paste(icon, (x, y), icon)
+        x += size + gap
+
+    lead_font = pick_font(FONT_CANDIDATES_REGULAR, 32)
+    words = card['lead'].split(' ')
+    line, lines = '', []
+    for word in words:
+        probe = (line + ' ' + word).strip()
+        if draw.textlength(probe, font=lead_font) > limit and line:
+            lines.append(line)
+            line = word
+        else:
+            line = probe
+    if line:
+        lines.append(line)
+    for index, text in enumerate(lines[:2]):
+        draw.text((text_x, 486 + index * 44), text, font=lead_font, fill=(159, 178, 186))
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = OUT_DIR / f"{card['slug']}-share.png"
+    image.save(out_path, 'PNG', optimize=True)
+    return out_path
+
+
 def main() -> int:
     for card in CARDS:
         path = build_card(card)
         print(f'готово: {path.relative_to(BASE_DIR)}  ({path.stat().st_size // 1024} КБ)')
+    path = build_start_card(START_CARD)
+    print(f'готово: {path.relative_to(BASE_DIR)}  ({path.stat().st_size // 1024} КБ)')
     return 0
 
 

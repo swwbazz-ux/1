@@ -3,6 +3,24 @@
 
 {% block title %}Вход в рабочее приложение · Коппер Ресорсез{% endblock %}
 {% block extra_head %}
+    {# Без этих тегов мессенджер скребёт текст со страницы: в превью попадали #}
+    {# подписи полей — «Телефон +7 Далее» — и вместо картинки пустое место. #}
+    <meta name="description" content="Введите номер телефона — система подскажет, какое приложение вам нужно.">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Коппер Ресорсез">
+    <meta property="og:locale" content="ru_RU">
+    <meta property="og:title" content="Рабочее приложение · Коппер Ресорсез">
+    <meta property="og:description" content="Введите номер телефона — система подскажет, какое приложение вам нужно.">
+    <meta property="og:url" content="{{ request.scheme }}://{{ request.get_host }}{% url 'universal_start' %}">
+    <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'img/share/start-share.png' %}">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Рабочее приложение · Коппер Ресорсез">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Рабочее приложение · Коппер Ресорсез">
+    <meta name="twitter:description" content="Введите номер телефона — система подскажет, какое приложение вам нужно.">
+    <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'img/share/start-share.png' %}">
 <style>
     /* Одна ссылка на всех: человек вводит номер, система сама показывает, какое
        приложение ему ставить. Оформление нейтральное — роль здесь ещё неизвестна. */
