@@ -14,6 +14,7 @@ from shifts.services import equipment_is_truck
 from .active_role import latest_active_role_access
 from .live_monitor import (
     ONLINE_WINDOW,
+    OBSERVER_MODE_CONTROL,
     build_observer_url,
     force_close_employee_shift,
     force_end_access_sessions,
@@ -173,9 +174,19 @@ def build_live_monitor_context(request, access):
                     target_access=target_access,
                     path=row['current_path'],
                 )
+                # Тот же пропуск, но с правом действовать: администратору нужно
+                # уметь поправить смену, не отбирая у человека телефон.
+                row['control_url'] = build_observer_url(
+                    request=request,
+                    actor_access=access,
+                    target_access=target_access,
+                    path=row['current_path'],
+                    mode=OBSERVER_MODE_CONTROL,
+                )
                 row['can_eject'] = target_access.pk != access.pk
             else:
                 row['observe_url'] = ''
+                row['control_url'] = ''
                 row['can_eject'] = False
             rows.append(row)
         rows.sort(

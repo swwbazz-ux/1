@@ -314,6 +314,10 @@ class Command(BaseCommand):
             Employee.Status.DELETED,
         }):
             return 'skipped', None, 'совпавшая карточка не является действующей'
+        # Карточка владельца системы переживает любую загрузку из отдела кадров:
+        # пропускаем её молча, а не роняем на ней весь импорт.
+        if employee and employee.is_protected:
+            return 'skipped', None, 'карточка защищена от изменений'
 
         if employee is None:
             profile_error = self._new_profile_error(item)

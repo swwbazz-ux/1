@@ -3,6 +3,8 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
+from .protected_cards import guard_access_write, guard_employee_write
+
 class PersonnelDepartment(models.Model):
     """Official organizational unit imported from 1C."""
 
@@ -87,7 +89,16 @@ class EmployeeWatchProfileQuerySet(models.QuerySet):
 
     def update(self, **kwargs):
         self._raise_if_protected(kwargs)
+        self._raise_if_card_protected()
         return super().update(**kwargs)
+
+    def _raise_if_card_protected(self):
+        from .protected_cards import protected_writes_allowed, raise_protected
+
+        if protected_writes_allowed():
+            return
+        if self.filter(is_protected=True).exists():
+            raise_protected()
 
     def bulk_update(self, objs, fields, batch_size=None):
         self._raise_if_protected(fields)
@@ -200,6 +211,16 @@ class Employee(models.Model):
     hr_data = models.TextField('Паспортные/кадровые данные', blank=True)
     photo = models.FileField('Фото сотрудника', upload_to='employee_photos/', blank=True)
     is_active = models.BooleanField('Активен', default=True)
+    # Карточка владельца системы: её не должен переписать ни массовый импорт
+    # из отдела кадров, ни администратор по ошибке. Иначе войти и всё
+    # починить будет уже неоткуда.
+    # db_default, а не только default: без значения по умолчанию в самой базе
+    # столбец остаётся обязательным и пустым для любой вставки, которая о нём
+    # не знает — старой миграции, отката, внешнего скрипта. На этом уже
+    # спотыкались 25 августа с другими столбцами.
+    is_protected = models.BooleanField(
+        'Защищённая карточка', default=False, db_default=False,
+    )
     created_at = models.DateTimeField('Создан', auto_now_add=True)
     updated_at = models.DateTimeField('Обновлен', auto_now=True)
 
@@ -222,7 +243,12 @@ class Employee(models.Model):
             ),
         ]
 
+    def delete(self, *args, **kwargs):
+        guard_employee_write(self.pk, type(self))
+        return super().delete(*args, **kwargs)
+
     def save(self, *args, **kwargs):
+        guard_employee_write(self.pk, type(self))
         using = kwargs.get('using')
         force_insert = kwargs.get('force_insert', False)
         update_fields = kwargs.get('update_fields')
@@ -279,6 +305,23 @@ class Employee(models.Model):
 
     def __str__(self):
         return self.full_name
+
+    @property
+    def has_photo_file(self):
+        """Фото записано в карточке — это ещё не значит, что файл на месте.
+
+        Имя файла остаётся в базе и после того, как сам файл пропал, и тогда
+        вместо снимка показывался значок битой картинки. Проверяем наличие,
+        а не только заполненность поля.
+        """
+        if not self.photo:
+            return False
+        try:
+            return self.photo.storage.exists(self.photo.name)
+        except Exception:
+            # Из-за недоступного хранилища страница падать не должна:
+            # без фотографии она читается, с ошибкой — нет.
+            return False
 
     @property
     def department_label(self):
@@ -518,6 +561,15 @@ class EmployeeAccess(models.Model):
         verbose_name_plural = 'Доступы сотрудников'
         ordering = ['employee__full_name', 'role__name']
 
+    def save(self, *args, **kwargs):
+        # Доступ — часть защищённой карточки: сняв его, владельца запрут снаружи.
+        guard_access_write(self.employee_id, Employee, kwargs.get('update_fields'))
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        guard_access_write(self.employee_id, Employee)
+        return super().delete(*args, **kwargs)
+
     def __str__(self):
         return f'{self.employee} - {self.role}'
 
@@ -620,6 +672,32 @@ class DriverPrimaryRegistration(models.Model):
 
     def __str__(self):
         return f'{self.employee} / {self.dormitory_section}'
+
+
+class ClientErrorReport(models.Model):
+    """Падение, случившееся на телефоне сотрудника.
+
+    Собирается только для разбора полевого теста: без этого сломанный экран
+    у человека остаётся невидимым, пока он сам не напишет.
+    """
+
+    employee = models.ForeignKey('Employee', verbose_name='Сотрудник', on_delete=models.SET_NULL, null=True, blank=True, related_name='client_errors')
+    role_code = models.CharField('Роль', max_length=64, blank=True, db_index=True)
+    app_version = models.CharField('Версия приложения', max_length=64, blank=True)
+    screen = models.CharField('Экран', max_length=120, blank=True)
+    message = models.CharField('Ошибка', max_length=500)
+    source = models.CharField('Файл', max_length=300, blank=True)
+    stack = models.TextField('Стек', blank=True)
+    user_agent = models.CharField('Телефон и браузер', max_length=300, blank=True)
+    happened_at = models.DateTimeField('Когда', auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = 'Ошибка на телефоне'
+        verbose_name_plural = 'Ошибки на телефонах'
+        ordering = ['-happened_at']
+
+    def __str__(self):
+        return f'{self.happened_at:%d.%m %H:%M} {self.role_code}: {self.message[:60]}'
 
 
 class WebPushSubscription(models.Model):

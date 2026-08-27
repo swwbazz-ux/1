@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Как идёт тест{% endblock %}
+{% block body_class %}system-admin-field-test-screen{% endblock %}
+{% block extra_head %}
+{% include "users/includes/system_admin_workspace_styles.html" %}
+<style>
+.field-test-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+.field-test-card {
+    display: grid;
+    gap: 4px;
+    padding: 12px 14px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+}
+
+.field-test-card span {
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.field-test-card strong {
+    color: var(--admin-ink);
+    font-size: 26px;
+    font-weight: 900;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.field-test-card small {
+    color: var(--admin-muted);
+    font-size: 11px;
+}
+
+.field-test-card.is-warn { border-color: color-mix(in srgb, var(--admin-red) 50%, var(--admin-line)); }
+.field-test-card.is-warn strong { color: var(--admin-red); }
+
+.field-test-periods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.field-test-periods a {
+    padding: 7px 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: 999px;
+    color: var(--admin-ink);
+    font-size: 12px;
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.field-test-periods a.is-active {
+    border-color: var(--admin-green);
+    color: var(--admin-green);
+}
+
+.field-test-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+    font-size: 13px;
+}
+
+.field-test-table th,
+.field-test-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--admin-line);
+    text-align: left;
+    vertical-align: top;
+}
+
+.field-test-table th {
+    color: var(--admin-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.field-test-section-title {
+    margin: 0 0 10px;
+    color: var(--admin-ink);
+    font-size: 15px;
+    font-weight: 900;
+}
+
+.field-test-empty {
+    padding: 14px;
+    border: 1px dashed var(--admin-line);
+    border-radius: 8px;
+    color: var(--admin-muted);
+    font-size: 13px;
+}
+
+@media (max-width: 620px) {
+    .field-test-table thead { display: none; }
+    .field-test-table tr {
+        display: grid;
+        gap: 2px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--admin-line);
+    }
+    .field-test-table td { border: 0; padding: 2px 0; }
+}
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day" data-admin-theme>
+    <header class="admin-console-header" aria-label="Административная шапка">
+        <section class="admin-console-identity">
+            {% include "users/includes/system_admin_avatar.html" %}
+            <span>
+                <strong>{{ access.employee.full_name }}</strong>
+                <em>Системный администратор</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Админка MVP</span>
+                <h1>Как идёт тест</h1>
+                <p>Цифры {{ period_label }}: кто вошёл, что происходит в сменах, доходят ли уведомления и что ломается.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы админки">
+                <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
+                <a href="{% url 'system_admin_employees' %}">Сотрудники</a>
+                <a href="{% url 'system_admin_references' %}">Справочники</a>
+                <a href="{% url 'system_admin_live_monitor' %}">Смена онлайн</a>
+                <a href="{% url 'system_admin_enter_employee' %}">Войти к сотруднику</a>
+                <a class="is-active" href="{% url 'system_admin_field_test' %}">Как идёт тест</a>
+                <a href="{% url 'system_admin_logs' %}">Журнал</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions">
+            <button type="button" class="admin-theme-button" data-admin-theme-toggle data-theme-icon="sun" aria-label="Переключить дневной и ночной режим"></button>
+            <a class="admin-utility-link" href="{% url 'system_admin_dashboard' %}">Назад</a>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page">
+        <div class="field-test-periods">
+            {% for key, label in periods %}
+                <a class="{% if key == period_key %}is-active{% endif %}" href="?period={{ key }}">{{ label }}</a>
+            {% endfor %}
+        </div>
+
+        <h2 class="field-test-section-title">Люди</h2>
+        <div class="field-test-grid">
+            <div class="field-test-card">
+                <span>Доступов всего</span>
+                <strong>{{ totals.accesses_total }}</strong>
+            </div>
+            <div class="field-test-card">
+                <span>Завели пинкод</span>
+                <strong>{{ totals.activated }}</strong>
+                <small>из них {{ totals.registered }} {{ period_label }}</small>
+            </div>
+            <div class="field-test-card{% if totals.never_logged_in %} is-warn{% endif %}">
+                <span>Ни разу не вошли</span>
+                <strong>{{ totals.never_logged_in }}</strong>
+                <small>завели пинкод, но не работали</small>
+            </div>
+        </div>
+
+        <h2 class="field-test-section-title">Работа</h2>
+        <div class="field-test-grid">
+            <div class="field-test-card">
+                <span>Смен открыто</span>
+                <strong>{{ totals.shifts_opened }}</strong>
+            </div>
+            <div class="field-test-card">
+                <span>Смен закрыто</span>
+                <strong>{{ totals.shifts_closed }}</strong>
+            </div>
+            <div class="field-test-card">
+                <span>Открыто сейчас</span>
+                <strong>{{ totals.shifts_open_now }}</strong>
+                <small>если больше числа людей в поле — смены не закрывают</small>
+            </div>
+            <div class="field-test-card">
+                <span>Рейсов завершено</span>
+                <strong>{{ totals.trips }}</strong>
+            </div>
+        </div>
+
+        <h2 class="field-test-section-title">Уведомления</h2>
+        <div class="field-test-grid">
+            <div class="field-test-card">
+                <span>Отправлено</span>
+                <strong>{{ totals.push_total }}</strong>
+            </div>
+            <div class="field-test-card">
+                <span>Показано на телефоне</span>
+                <strong>{{ totals.push_shown }}</strong>
+                <small>если сильно меньше отправленных — не доходят</small>
+            </div>
+            <div class="field-test-card">
+                <span>Телефонов подписано</span>
+                <strong>{{ totals.push_subscriptions }}</strong>
+            </div>
+            <div class="field-test-card{% if totals.push_broken %} is-warn{% endif %}">
+                <span>Подписок отвалилось</span>
+                <strong>{{ totals.push_broken }}</strong>
+            </div>
+        </div>
+
+        <h2 class="field-test-section-title">Поломки на телефонах</h2>
+        <div class="field-test-grid">
+            <div class="field-test-card{% if totals.errors %} is-warn{% endif %}">
+                <span>Ошибок {{ period_label }}</span>
+                <strong>{{ totals.errors }}</strong>
+            </div>
+            <div class="field-test-card">
+                <span>Действий от имени</span>
+                <strong>{{ totals.control_actions }}</strong>
+                <small>сделано администратором за сотрудников</small>
+            </div>
+        </div>
+
+        {% if top_errors %}
+            <table class="field-test-table">
+                <thead>
+                    <tr><th>Ошибка</th><th>Роль</th><th>Версия</th><th>Раз</th></tr>
+                </thead>
+                <tbody>
+                    {% for item in top_errors %}
+                        <tr>
+                            <td>{{ item.message }}</td>
+                            <td>{{ item.role_code|default:"—" }}</td>
+                            <td>{{ item.app_version|default:"—" }}</td>
+                            <td>{{ item.count }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="field-test-empty">Ошибок не приходило. Это либо хорошо, либо люди ещё не начали работать — сверьтесь с числом открытых смен выше.</div>
+        {% endif %}
+
+        <h2 class="field-test-section-title">По ролям</h2>
+        <table class="field-test-table">
+            <thead>
+                <tr><th>Роль</th><th>Завели пинкод</th><th>Из них входили</th></tr>
+            </thead>
+            <tbody>
+                {% for row in by_role %}
+                    <tr>
+                        <td>{{ row.role__name }}</td>
+                        <td>{{ row.total }}</td>
+                        <td>{{ row.entered }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </main>
+</div>
+{% endblock %}

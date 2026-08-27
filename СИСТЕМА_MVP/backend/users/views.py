@@ -1,6 +1,7 @@
 ﻿import secrets
 import json
 from datetime import datetime, timedelta
+from contextlib import nullcontext
 from decimal import Decimal
 from io import BytesIO
 from urllib.parse import urlencode
@@ -79,6 +80,10 @@ from .active_role import (
     ACTIVE_ROLE_SESSION_KEY,
     activate_role_session,
     role_session_state,
+)
+from .protected_cards import (
+    PROTECTED_WRITE_CODE,
+    allow_protected_card_write,
 )
 from .forms import (
     AdminAccessBlockForm,
@@ -218,7 +223,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v165'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v166'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -2124,15 +2129,24 @@ def system_admin_exports_view(request):
     )
 
 
+EMPLOYEES_WITHOUT_POSITION = 'none'
+
+
 def system_admin_employees_view(request):
     access = require_admin_access(request)
     if not access:
         return redirect('role_home')
 
-    employees = Employee.objects.prefetch_related('accesses__role').order_by('full_name')
+    employees = (
+        Employee.objects
+        .select_related('personnel_position')
+        .prefetch_related('accesses__role')
+        .order_by('full_name')
+    )
     status = request.GET.get('status', '').strip()
     access_status = request.GET.get('access_status', '').strip()
     role_id = request.GET.get('role', '').strip()
+    personnel_position = request.GET.get('personnel_position', '').strip()
     query = request.GET.get('q', '').strip()
     if status:
         employees = employees.filter(status=status)
@@ -2140,6 +2154,12 @@ def system_admin_employees_view(request):
         employees = employees.filter(accesses__status=access_status).distinct()
     if role_id.isdigit():
         employees = employees.filter(accesses__role_id=int(role_id)).distinct()
+    # Разметка фильтра по должности была на месте, а данные в неё не приходили:
+    # список открывался пустым, и выбор в нём ничего не менял.
+    if personnel_position == EMPLOYEES_WITHOUT_POSITION:
+        employees = employees.filter(personnel_position__isnull=True)
+    elif personnel_position.isdigit():
+        employees = employees.filter(personnel_position_id=int(personnel_position))
     if query:
         employees = employees.filter(full_name__icontains=query)
 
@@ -2152,9 +2172,18 @@ def system_admin_employees_view(request):
             'statuses': Employee.Status.choices,
             'access_statuses': EmployeeAccess.Status.choices,
             'roles': Role.objects.filter(is_active=True).order_by('name'),
+            'personnel_positions': (
+                PersonnelPosition.objects.filter(is_active=True).order_by('name')
+            ),
+            # Отдельной строкой — те, у кого должность не проставлена: при разборе
+            # выгрузки из отдела кадров их надо находить в первую очередь.
+            'personnel_position_groups': [
+                (EMPLOYEES_WITHOUT_POSITION, 'Без кадровой должности'),
+            ],
             'selected_status': status,
             'selected_access_status': access_status,
             'selected_role': role_id,
+            'selected_personnel_position': personnel_position,
             'query': query,
         },
     )
@@ -2248,6 +2277,17 @@ def system_admin_employee_create_view(request):
     )
 
 
+def editing_own_protected_card(access, employee):
+    """Защищённую карточку правит только её владелец — и только свою.
+
+    Остальным путь закрыт на уровне модели, здесь мы лишь решаем, открывать ли
+    дверь: администратор, вошедший под собой, редактирует сам себя.
+    """
+    if employee.is_protected and access.employee_id == employee.id:
+        return allow_protected_card_write()
+    return nullcontext()
+
+
 def system_admin_employee_detail_view(request, employee_id):
     access = require_admin_access(request)
     if not access:
@@ -2261,14 +2301,15 @@ def system_admin_employee_detail_view(request, employee_id):
             if old_photo_name:
                 employee.photo.storage.delete(old_photo_name)
                 employee.photo = ''
-                employee.save(update_fields=['photo', 'updated_at'])
+                with editing_own_protected_card(access, employee):
+                    employee.save(update_fields=['photo', 'updated_at'])
                 log_admin_action(access.employee, 'Удалено фото сотрудника', employee)
                 messages.success(request, 'Фото сотрудника удалено.')
             return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
         form = AdminEmployeeEditForm(request.POST, request.FILES, instance=employee)
         if form.is_valid():
             try:
-                with transaction.atomic():
+                with transaction.atomic(), editing_own_protected_card(access, employee):
                     locked_employee = Employee.objects.select_for_update().get(pk=employee.pk)
                     if locked_employee.status != initial_status:
                         raise ValidationError(
@@ -2293,7 +2334,7 @@ def system_admin_employee_detail_view(request, employee_id):
                 error_code = getattr(error, 'code', '')
                 form.add_error(
                     None
-                    if error_code in {'stale_employee_status', 'admin_watch_profile_forbidden'}
+                    if error_code in {'stale_employee_status', 'admin_watch_profile_forbidden', PROTECTED_WRITE_CODE}
                     else 'assignment_equipment',
                     error,
                 )
@@ -2715,8 +2756,23 @@ def system_admin_employee_status_action_view(request, employee_id, action):
     if not access:
         return redirect('role_home')
     employee = get_object_or_404(Employee, id=employee_id)
+    # Деактивация и удаление защищённой карточки запрещены моделью. Без этой
+    # проверки администратор получил бы вместо объяснения страницу с ошибкой.
+    if (
+        request.method == 'POST'
+        and employee.is_protected
+        and action != 'restore'
+        and access.employee_id != employee.id
+    ):
+        messages.error(
+            request,
+            'Карточка защищена: изменить или закрыть её может только её владелец.',
+        )
+        return redirect_after_admin_action(
+            request, 'system_admin_employee_detail', employee_id=employee.id,
+        )
     if request.method == 'POST':
-        with transaction.atomic():
+        with transaction.atomic(), editing_own_protected_card(access, employee):
             employee = Employee.objects.select_for_update().get(pk=employee.pk)
             if action == 'restore':
                 if (

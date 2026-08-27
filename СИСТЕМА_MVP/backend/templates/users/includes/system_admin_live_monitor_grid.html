@@ -68,6 +68,9 @@
                             {% if row.observe_url %}
                                 <a class="admin-live-action observe" href="{{ row.observe_url }}" target="_blank" rel="noopener">Наблюдать</a>
                             {% endif %}
+                            {% if row.control_url %}
+                                <a class="admin-live-action control" href="{{ row.control_url }}" target="_blank" rel="noopener">Управлять</a>
+                            {% endif %}
                             {% if row.shift %}
                                 <details class="admin-live-action-menu">
                                     <summary>Завершить смену</summary>

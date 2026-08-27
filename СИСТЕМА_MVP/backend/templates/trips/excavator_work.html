@@ -6,9 +6,9 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v159">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v159">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v159">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v162">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v162">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v162">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -490,7 +490,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v159";
+var excavatorShellVersion = "excavator-mobile-shell-v162";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 document.body.dataset.realtimeVisibilityOnly = "true";
@@ -1428,6 +1428,16 @@ window.initExcavatorWorkShell = function () {
     }
 
     function activateTab(name) {
+        /* Экран с таким именем должен существовать, иначе спрячутся все и
+           человек увидит пустоту. Так уже случалось: после настроек забоя код
+           переключал на «downtime», а вкладка простоя называется «events». */
+        var known = false;
+        screens.forEach(function (screen) {
+            if (screen.dataset.eoScreen === name) known = true;
+        });
+        if (!known) {
+            name = "trucks";
+        }
         screens.forEach(function (screen) {
             screen.hidden = screen.dataset.eoScreen !== name;
         });
@@ -2516,7 +2526,7 @@ window.initExcavatorWorkShell = function () {
                 applySettings.classList.remove("is-pending");
                 updateApplySettingsState();
                 shell.dataset.eoActiveTab = data.work_context_changed && data.active_downtime_reason
-                    ? "downtime"
+                    ? "events"
                     : "trucks";
                 return refreshExcavatorWorkFromServer({ preserveTab: true }).then(function (applied) {
                     if (!applied) {

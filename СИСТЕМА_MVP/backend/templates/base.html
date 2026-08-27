@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1{% block viewport_extra %}{% endblock %}">
-    {% if role_session_authenticated and not observer_mode %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
+    {% if role_session_authenticated and not observer_mode or observer_control %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
     <title>{% block title %}MVP учетной системы{% endblock %}</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}?v={{ static_asset_release }}">
@@ -133,6 +133,12 @@
             display: none;
         }
 
+        .app-observer-banner.is-control {
+            border-color: rgba(255, 90, 80, .75);
+            background: rgba(48, 10, 8, .96);
+            color: #ffd9d6;
+        }
+
         .app-realtime-status.is-visible {
             opacity: 1;
             transform: translate(-50%, 0);
@@ -191,8 +197,7 @@
         /* Status notices float over the screen instead of sitting in the layout:
            they must never squeeze the app's height nor cover the header or the
            bottom navigation, and taps pass straight through them. */
-        .app-inactive-role-banner,
-        .app-contract-banner {
+        .app-inactive-role-banner {
             position: fixed;
             left: 50%;
             z-index: 10070;
@@ -209,10 +214,40 @@
             text-align: center;
             font: 800 14px/1.35 system-ui, sans-serif;
         }
+        /* Обновление длится секунды и ничего от человека не требует, поэтому
+           вместо таблички во весь экран — маленькая метка сверху. */
         .app-contract-banner {
-            top: 50%;
-            transform: translate(-50%, -50%);
-            font-weight: 700;
+            position: fixed;
+            top: calc(max(8px, env(safe-area-inset-top)) + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10070;
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-sizing: border-box;
+            padding: 6px 13px 6px 10px;
+            border: 1px solid rgba(251, 191, 36, .5);
+            border-radius: 999px;
+            background: rgba(28, 22, 8, .92);
+            color: #fde68a;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, .3);
+            font: 700 12.5px/1 system-ui, sans-serif;
+            letter-spacing: .01em;
+        }
+        .app-contract-banner i {
+            display: block;
+            width: 13px;
+            height: 13px;
+            border: 2px solid rgba(253, 230, 138, .28);
+            border-top-color: #fbbf24;
+            border-radius: 50%;
+            animation: app-contract-spin 720ms linear infinite;
+        }
+        @keyframes app-contract-spin { to { transform: rotate(360deg); } }
+        @media (prefers-reduced-motion: reduce) {
+            .app-contract-banner i { animation-duration: 2.4s; }
         }
         .app-inactive-role-banner {
             top: 50%;
@@ -372,7 +407,8 @@
             banner.setAttribute("data-app-contract-banner", "");
             banner.setAttribute("role", "status");
             banner.setAttribute("aria-live", "assertive");
-            banner.textContent = "Обновляется рабочее приложение. Изменяющие действия временно заблокированы.";
+            banner.innerHTML = '<i aria-hidden="true"></i><span>Обновление</span>';
+            banner.setAttribute("aria-label", "Приложение обновляется, изменения временно недоступны");
             document.body.prepend(banner);
         }
 
@@ -909,17 +945,17 @@
     /* APP_PWA_CONTRACT_GUARD_END */
     </script>
     <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v6"></script>
-    {% if observer_mode %}<script src="{% static 'js/observer-mode.js' %}?v=observer-mode-v1" defer></script>{% endif %}
+    {% if observer_mode %}<script src="{% static 'js/observer-mode.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% if role_session_authenticated and not observer_mode %}<script src="{% static 'js/application-session-heartbeat.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
+    <script src="{% static 'js/client-error-report.js' %}?v={{ static_asset_release }}" defer></script>
     {% if role_session_authenticated and not observer_mode and role_app %}<script src="{% static 'js/push-notifications.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% block extra_head %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
+<body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
 {% if observer_mode %}
-<div class="app-observer-banner" data-observer-banner role="status" aria-live="polite">
-    <strong>РЕЖИМ НАБЛЮДЕНИЯ</strong>
-    <span>{{ observer_employee.full_name }} · {{ observer_access.role.name|default:app_role_code }}</span>
-    <em>Действия заблокированы</em>
+<div class="app-observer-chip{% if observer_control %} is-control{% endif %}{% if observer_is_self %} is-self{% endif %}" data-observer-banner role="status" aria-live="polite">
+    <b>{% if observer_is_self %}моя роль{% elif observer_control %}управление{% else %}наблюдение{% endif %}</b>
+    <span>{% if observer_is_self %}{{ observer_access.role.name }}{% else %}{{ observer_employee.full_name }}{% endif %}</span>
 </div>
 {% endif %}
 {% if role_access_is_active == False %}
@@ -953,6 +989,48 @@
 <span class="app-connection-dot" data-connection-indicator role="status" aria-live="polite" title="Связь с сервером" data-state-label="связь есть">
     <i aria-hidden="true"></i>
 </span>
+
+<script>
+(function (window, document) {
+    "use strict";
+    /* В полевых приложениях экран не прокручивается, и точке правильно висеть
+       в углу окна. В админке страница длинная: точка, привязанная к окну,
+       оставалась на месте, пока всё уезжало вверх, и посреди списка выглядела
+       случайным пятном. Переносим её в шапку — тогда она едет вместе со
+       страницей и держится ряда кнопок.
+
+       В сам ряд её вставлять нельзя: там сетка ровно из трёх колонок, и лишний
+       элемент выдавливал «Выйти» в четвёртую. Поэтому она лежит в шапке
+       отдельным слоем, поверх сетки и не участвуя в ней. */
+    function align() {
+        var dot = document.querySelector(".app-connection-dot");
+        if (!dot) return;
+        var actions = document.querySelector(".admin-console-actions");
+        var header = actions && (actions.closest(".admin-console-header") || actions.parentElement);
+        if (!header) {
+            dot.style.removeProperty("position");
+            dot.style.removeProperty("top");
+            return;
+        }
+        if (dot.parentElement !== header) header.appendChild(dot);
+        if (window.getComputedStyle(header).position === "static") {
+            header.style.position = "relative";
+        }
+        dot.style.position = "absolute";
+        var headerBox = header.getBoundingClientRect();
+        var actionsBox = actions.getBoundingClientRect();
+        var centre = actionsBox.top - headerBox.top + actionsBox.height / 2;
+        dot.style.top = Math.max(6, Math.round(centre - dot.offsetHeight / 2)) + "px";
+    }
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", align);
+    } else {
+        align();
+    }
+    window.addEventListener("resize", align, {passive: true});
+    window.addEventListener("load", align);
+})(window, document);
+</script>
 
 <div class="app-realtime-update" data-app-realtime-update hidden role="status" aria-live="polite">
     <span data-app-realtime-update-text>На сервере появились новые данные.</span>

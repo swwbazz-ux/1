@@ -528,3 +528,15 @@
 .admin-live-cancel-button:hover {
     border-color: var(--admin-muted);
 }
+
+/* «Управлять» — действие с последствиями: администратор идёт работать от
+   имени сотрудника. Отличаем его от безобидного «Наблюдать» цветом. */
+.admin-live-action.control {
+    border-color: color-mix(in srgb, var(--admin-red) 55%, var(--admin-line));
+    color: var(--admin-red);
+}
+
+.admin-live-action.control:hover {
+    border-color: var(--admin-red);
+    background: color-mix(in srgb, var(--admin-red) 10%, transparent);
+}

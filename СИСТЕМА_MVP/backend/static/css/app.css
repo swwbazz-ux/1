@@ -8143,6 +8143,13 @@ th {
     background: #ffffff;
 }
 
+/* Названия кадровых должностей длинные — «Водитель автомобиля, занятый на
+   транспортировании горной массы...» заезжало под стрелку списка. */
+.employee-list-filters .select-field select {
+    padding-right: 46px;
+    text-overflow: ellipsis;
+}
+
 .employee-list-filters button,
 .employee-list-filters .filter-reset-link {
     border-radius: 13px;
@@ -12516,6 +12523,14 @@ body.employees-admin-screen {
     }
 }
 
+/* Выпадающие списки рисует сама система, а не страница. В ночной теме текст
+   в них светлый, а список система рисовала светлым — получалось белым по
+   белому, и кадровая должность выглядела пустой. color-scheme объясняет
+   системе, какая тема на странице, и чинит разом все списки, календари и
+   полосы прокрутки. */
+.admin-exports-shell.admin-day { color-scheme: light; }
+.admin-exports-shell.admin-night { color-scheme: dark; }
+
 .admin-exports-shell.admin-night {
     --admin-bg: #050b0f;
     --admin-top: #0b151b;
@@ -16600,6 +16615,9 @@ body.system-admin-reference-detail-screen .admin-page {
     margin: 0;
     background: #071015;
     overflow: hidden;
+    /* Списки техники рисует сама система: без этого она считает страницу
+       светлой и рисует их белыми, а текст в них светлый — не прочитать. */
+    color-scheme: dark;
 }
 
 .dispatcher-shell {
@@ -33291,4 +33309,82 @@ body[data-observer-mode="true"] [data-observer-blocked="true"] {
 .mm-mobile-plan-ring[data-connection-indicator] > * {
     position: relative;
     z-index: 1;
+}
+
+/* Полоса «управление от имени» стояла в потоке и сдвигала весь интерфейс
+   вниз: экраны рассчитаны по высоте, и от этого ломалась вся раскладка.
+   Ничего не двигаем: обводим экран цветной рамкой и вешаем маленькую метку.
+   Рамка нарисована поверх страницы и нажатий не ловит, поэтому работе не
+   мешает, но забыть, что вы не под собой, невозможно. */
+body.is-observer-mode::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 12000;
+    border: 3px solid rgba(255, 193, 7, .85);
+    pointer-events: none;
+}
+
+body.is-observer-control::after {
+    border-color: rgba(255, 90, 80, .9);
+}
+
+.app-observer-chip {
+    /* Внизу метка ложилась поверх кнопок смены и выхода: нажать сквозь неё
+       можно, но не видно, куда целишься. Сверху свободнее — шапка узкая. */
+    position: fixed;
+    top: calc(max(6px, env(safe-area-inset-top)) + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 12001;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: min(280px, calc(100vw - 24px));
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 193, 7, .85);
+    background: rgba(28, 22, 4, .92);
+    color: #ffe9a8;
+    font-size: 11px;
+    line-height: 1.15;
+    pointer-events: none;
+}
+
+.app-observer-chip.is-control {
+    border-color: rgba(255, 90, 80, .9);
+    background: rgba(38, 10, 8, .94);
+    color: #ffd9d6;
+}
+
+.app-observer-chip b {
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.app-observer-chip span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Своя вторая роль — не чужая смена: тревожная красная рамка тут ни к чему,
+   но пометка нужна, иначе легко забыть, в каком приложении находишься. */
+body.is-observer-mode.is-observer-self::after { border-color: rgba(47, 191, 113, .85); }
+
+.app-observer-chip.is-self {
+    border-color: rgba(47, 191, 113, .55);
+    color: #2fbf71;
+}
+
+body.is-observer-mode .app-contract-banner {
+    top: calc(max(6px, env(safe-area-inset-top)) + 38px);
+}
+
+/* Видимый признак: такую карточку не перепишет ни импорт, ни чужая рука. */
+.employee-card-status.is-protected {
+    border: 1px solid rgba(47, 191, 113, .55);
+    background: rgba(47, 191, 113, .12);
+    color: #2fbf71;
 }

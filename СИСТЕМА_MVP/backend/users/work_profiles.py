@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from .protected_cards import protected_writes_allowed
 from .models import Employee, EmployeeAccess, ProductionSpecialization, TemporaryWorkTransfer
 
 
@@ -164,6 +165,12 @@ def sync_employee_production_access(*, employee, as_of=None):
     new access without credentials is left in ``not_activated`` state for the
     normal PIN issuance flow; this avoids silently creating a credential.
     """
+    # Защищённая карточка живёт по своим правилам: её доступы выставлены руками
+    # и не должны подстраиваться под специальность. Молча пропускаем — иначе
+    # запрет уронил бы весь пакетный проход по временным переводам.
+    if employee.is_protected and not protected_writes_allowed():
+        return None
+
     as_of = as_of or timezone.localdate()
     target_role = _effective_production_role(employee, as_of=as_of)
     production_accesses = list(

@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Войти к сотруднику{% endblock %}
+{% block body_class %}system-admin-enter-screen{% endblock %}
+{% block extra_head %}
+{% include "users/includes/system_admin_workspace_styles.html" %}
+<style>
+.enter-lead {
+    margin: 0 0 16px;
+    color: var(--admin-muted);
+    font-size: 13px;
+    line-height: 1.5;
+    max-width: 760px;
+}
+
+.enter-own {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+}
+
+.enter-own a {
+    display: grid;
+    gap: 3px;
+    padding: 12px 14px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    text-decoration: none;
+}
+
+.enter-own a:hover { border-color: var(--admin-green); }
+.enter-own strong { font-size: 14px; font-weight: 800; }
+.enter-own span { color: var(--admin-muted); font-size: 11px; }
+
+.enter-search {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.enter-search input[type="search"] {
+    flex: 1 1 220px;
+    min-width: 0;
+    padding: 9px 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font-size: 14px;
+}
+
+.enter-search select {
+    padding: 9px 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font-size: 14px;
+}
+
+.enter-search button {
+    padding: 9px 16px;
+    border: 1px solid var(--admin-green);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--admin-green);
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.enter-list {
+    display: grid;
+    gap: 8px;
+}
+
+.enter-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 14px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+}
+
+.enter-row-who { display: grid; gap: 2px; min-width: 0; }
+
+.enter-row-who strong {
+    color: var(--admin-ink);
+    font-size: 14px;
+    font-weight: 800;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.enter-row-who span {
+    color: var(--admin-muted);
+    font-size: 11.5px;
+}
+
+.enter-online {
+    color: var(--admin-green);
+    font-weight: 800;
+}
+
+.enter-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.enter-row-actions a {
+    padding: 7px 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: 999px;
+    color: var(--admin-ink);
+    font-size: 12px;
+    font-weight: 800;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.enter-row-actions a.is-control {
+    border-color: var(--admin-red);
+    color: var(--admin-red);
+}
+
+.enter-empty {
+    padding: 16px;
+    border: 1px dashed var(--admin-line);
+    border-radius: 8px;
+    color: var(--admin-muted);
+    font-size: 13px;
+}
+
+.enter-section-title {
+    margin: 0 0 10px;
+    color: var(--admin-ink);
+    font-size: 15px;
+    font-weight: 900;
+}
+
+@media (max-width: 560px) {
+    .enter-row { grid-template-columns: minmax(0, 1fr); }
+    .enter-row-actions a { flex: 1 1 auto; text-align: center; }
+}
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day" data-admin-theme>
+    <header class="admin-console-header" aria-label="Административная шапка">
+        <section class="admin-console-identity">
+            {% include "users/includes/system_admin_avatar.html" %}
+            <span>
+                <strong>{{ access.employee.full_name }}</strong>
+                <em>Системный администратор</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Админка MVP</span>
+                <h1>Войти к сотруднику</h1>
+                <p>Любое приложение и любой человек — работает он сейчас или нет.</p>
+            </div>
+            <nav class="admin-console-nav" aria-label="Разделы админки">
+                <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
+                <a href="{% url 'system_admin_employees' %}">Сотрудники</a>
+                <a href="{% url 'system_admin_references' %}">Справочники</a>
+                <a href="{% url 'system_admin_live_monitor' %}">Смена онлайн</a>
+                <a class="is-active" href="{% url 'system_admin_enter_employee' %}">Войти к сотруднику</a>
+                <a href="{% url 'system_admin_field_test' %}">Как идёт тест</a>
+                <a href="{% url 'system_admin_logs' %}">Журнал</a>
+            </nav>
+        </section>
+
+        <section class="admin-console-actions">
+            <button type="button" class="admin-theme-button" data-admin-theme-toggle data-theme-icon="sun" aria-label="Переключить дневной и ночной режим"></button>
+            <a class="admin-utility-link" href="{% url 'system_admin_dashboard' %}">Назад</a>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page">
+        {% if own_apps %}
+            <h2 class="enter-section-title">Мои приложения</h2>
+            <p class="enter-lead">Работа под своей фамилией: в журнале останетесь вы. Админка при этом не закрывается — можно вернуться в соседней вкладке.</p>
+            <div class="enter-own">
+                {% for item in own_apps %}
+                    <a href="{{ item.url }}">
+                        <strong>{{ item.app.name }}</strong>
+                        {% if item.app.name != item.access.role.name %}<span>{{ item.access.role.name }}</span>{% endif %}
+                    </a>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <h2 class="enter-section-title">Другие сотрудники</h2>
+        <p class="enter-lead">Наблюдение — только смотреть. Управление — действовать за человека: он остаётся в смене со своего телефона, а каждое ваше действие пишется в журнал на ваше имя.</p>
+
+        <form class="enter-search" method="get" action="{% url 'system_admin_enter_employee' %}">
+            <input type="search" name="q" value="{{ query }}" placeholder="Фамилия, телефон или табельный" autocomplete="off">
+            <select name="role" aria-label="Приложение">
+                <option value="">Все приложения</option>
+                {% for app in role_apps %}
+                    <option value="{{ app.role_code }}"{% if app.role_code == role_filter %} selected{% endif %}>{{ app.name }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit">Найти</button>
+        </form>
+
+        {% if rows %}
+            <div class="enter-list">
+                {% for row in rows %}
+                    <div class="enter-row">
+                        <div class="enter-row-who">
+                            <strong>{{ row.employee.full_name }}</strong>
+                            <span>
+                                {{ row.role.name }}
+                                {% if row.is_online %}· <b class="enter-online">в приложении</b>{% endif %}
+                                {% if not row.activated %}· пинкод не заведён{% endif %}
+                            </span>
+                        </div>
+                        <div class="enter-row-actions">
+                            {% if row.activated %}
+                                <a href="{{ row.observe_url }}">Наблюдать</a>
+                                <a class="is-control" href="{{ row.control_url }}">Управлять</a>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+            {% if truncated %}
+                <p class="enter-lead">Показаны первые {{ result_limit }}. Уточните поиск, чтобы увидеть остальных.</p>
+            {% endif %}
+        {% else %}
+            <div class="enter-empty">Никого не нашлось. Проверьте написание фамилии или снимите фильтр по приложению.</div>
+        {% endif %}
+    </main>
+</div>
+{% endblock %}

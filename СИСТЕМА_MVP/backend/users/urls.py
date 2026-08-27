@@ -30,6 +30,9 @@ from .live_monitor_views import (
     system_admin_live_monitor_view,
 )
 from .start_views import universal_start_view
+from .client_errors import client_error_report_view
+from .field_test_views import system_admin_field_test_view
+from .enter_employee_views import system_admin_enter_employee_view
 from .push_views import (
     push_mark_shown_view,
     push_pending_view,
@@ -85,6 +88,7 @@ urlpatterns = [
     path('push/pending/', push_pending_view, name='push_pending'),
     path('push/shown/', push_mark_shown_view, name='push_mark_shown'),
     path('push/test/', push_test_view, name='push_test'),
+    path('client-error/', client_error_report_view, name='client_error_report'),
     path('', login_view, name='login'),
     path('activate-access/', activate_access_view, name='activate_access'),
     path('reclaim-session/', reclaim_role_session_view, name='reclaim_role_session'),
@@ -124,6 +128,8 @@ urlpatterns = [
     path('driver/assignment/<int:assignment_id>/accept/', driver_accept_assignment_view, name='driver_accept_assignment'),
     path('system-admin/', system_admin_dashboard_view, name='system_admin_dashboard'),
     path('system-admin/live/', system_admin_live_monitor_view, name='system_admin_live_monitor'),
+    path('system-admin/enter/', system_admin_enter_employee_view, name='system_admin_enter_employee'),
+    path('system-admin/field-test/', system_admin_field_test_view, name='system_admin_field_test'),
     path(
         'system-admin/live/shifts/<int:shift_id>/force-close/',
         system_admin_force_close_shift_view,

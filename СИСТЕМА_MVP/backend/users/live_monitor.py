@@ -82,9 +82,20 @@ class ObserverSessionProxy(MutableMapping):
         return getattr(self._session, name)
 
 
-def create_observer_token(*, actor_access, target_access):
+OBSERVER_MODE_WATCH = 'observe'
+OBSERVER_MODE_CONTROL = 'control'
+
+
+def create_observer_token(*, actor_access, target_access, mode=OBSERVER_MODE_WATCH):
+    """Пропуск в приложение сотрудника.
+
+    Наблюдение запрещает действия, управление разрешает. Оба режима подменяют
+    сессию заглушкой, не трогая настоящую: сотрудника не выбивает из смены, он
+    продолжает работать со своего телефона.
+    """
     return signing.dumps(
         {
+            'mode': mode if mode == OBSERVER_MODE_CONTROL else OBSERVER_MODE_WATCH,
             'actor_access_id': actor_access.pk,
             'actor_revision': (
                 actor_access.last_login_at.isoformat()
@@ -151,16 +162,20 @@ def resolve_observer_token(token):
         raise ValidationError('Сессия сотрудника изменилась. Откройте наблюдение заново.')
     if payload.get('target_role_code') != target_access.role.code:
         raise ValidationError('Роль сотрудника изменилась. Откройте наблюдение заново.')
-    return actor_access, target_access
+    mode = payload.get('mode') or OBSERVER_MODE_WATCH
+    if mode not in {OBSERVER_MODE_WATCH, OBSERVER_MODE_CONTROL}:
+        mode = OBSERVER_MODE_WATCH
+    return actor_access, target_access, mode
 
 
 def apply_observer_mode(request, token):
-    actor_access, target_access = resolve_observer_token(token)
+    actor_access, target_access, mode = resolve_observer_token(token)
     request_app = get_role_app_for_request(request) or get_role_app_for_path(request.path)
     if not request_app or request_app.role_code != target_access.role.code:
         raise ValidationError('Ссылка наблюдения открыта не в том приложении.')
     target_revision = target_access.last_login_at.isoformat() if target_access.last_login_at else ''
     request.observer_mode = True
+    request.observer_control = mode == OBSERVER_MODE_CONTROL
     request.observer_token = token
     request.observer_actor_access = actor_access
     request.observer_access = target_access
@@ -180,17 +195,26 @@ def observer_context(request):
     if not getattr(request, 'observer_mode', False):
         return {
             'observer_mode': False,
+            'observer_control': False,
             'observer_token': '',
             'observer_employee': None,
             'observer_actor': None,
             'observer_access': None,
+            'observer_is_self': False,
         }
     return {
         'observer_mode': True,
         'observer_token': request.observer_token,
+        'observer_control': getattr(request, 'observer_control', False),
         'observer_employee': request.observer_access.employee,
         'observer_actor': request.observer_actor_access.employee,
         'observer_access': request.observer_access,
+        # Администратор может войти и в собственную вторую роль. Писать там
+        # «управление от имени» — врать: это он сам, своей фамилией.
+        'observer_is_self': (
+            request.observer_access.employee_id
+            == request.observer_actor_access.employee_id
+        ),
     }
 
 
@@ -398,7 +422,7 @@ def force_close_employee_shift(
     return shift
 
 
-def build_observer_url(*, request, actor_access, target_access, path=''):
+def build_observer_url(*, request, actor_access, target_access, path='', mode=OBSERVER_MODE_WATCH):
     app = get_role_app(target_access.role.code)
     if not app:
         return ''
@@ -410,7 +434,7 @@ def build_observer_url(*, request, actor_access, target_access, path=''):
         or path_app.role_code != app.role_code
     ):
         path = app.start_url
-    token = create_observer_token(actor_access=actor_access, target_access=target_access)
+    token = create_observer_token(actor_access=actor_access, target_access=target_access, mode=mode)
     query = urlencode({'observe': token})
     host_with_port = request.get_host().lower()
     host = host_with_port.split(':', 1)[0]

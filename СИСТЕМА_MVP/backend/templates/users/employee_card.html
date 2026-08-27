@@ -36,6 +36,7 @@
                     <a class="is-active" href="{% url 'system_admin_employees' %}" aria-current="page">Сотрудники</a>
                     <a href="{% url 'system_admin_references' %}">Справочники</a>
                     <a href="{% url 'system_admin_live_monitor' %}">Смена онлайн</a>
+                    <a href="{% url 'system_admin_enter_employee' %}">Войти к сотруднику</a>
                     <a href="{% url 'system_admin_conflicts' %}">Конфликты</a>
                     <a href="{% url 'system_admin_logs' %}">Журнал</a>
                     <a href="{% url 'system_admin_exports' %}">Выгрузки</a>
@@ -97,6 +98,7 @@
                     </div>
                     <div class="employee-card-heading-actions">
                         {% if employee %}<span class="employee-card-status status-{{ employee.status }}">{{ employee.get_status_display }}</span>{% endif %}
+                        {% if employee.is_protected %}<span class="employee-card-status is-protected" title="Карточку может изменить только её владелец. Загрузка списка сотрудников её не тронет.">Защищена</span>{% endif %}
                         <button type="button" class="employee-card-icon-button employee-copy-icon" data-copy-card aria-label="Скопировать всю карточку" title="Скопировать всю карточку"></button>
                         <button type="button" class="employee-card-print-button" data-print-card>
                             <span class="employee-print-icon" aria-hidden="true"></span>
@@ -108,7 +110,7 @@
                 <div class="employee-card-profile">
                     <div class="employee-card-photo-column">
                         <div class="employee-card-photo-frame{% if not can_submit_employee_card %} is-readonly{% endif %}">
-                            {% if employee and employee.photo %}
+                            {% if employee and employee.has_photo_file %}
                                 <button class="employee-card-photo" type="button" data-photo-open title="Открыть фото сотрудника">
                                     <img src="{{ employee.photo.url }}" alt="Фото {{ employee.full_name }}" data-employee-photo-preview>
                                 </button>
@@ -544,7 +546,7 @@
     </main>
 </div>
 
-{% if employee and employee.photo %}
+{% if employee and employee.has_photo_file %}
 <div class="employee-card-photo-modal" data-photo-modal hidden>
     <button type="button" class="employee-card-photo-modal-close" data-photo-close aria-label="Закрыть">×</button>
     <img src="{{ employee.photo.url }}" alt="Фото {{ employee.full_name }}">

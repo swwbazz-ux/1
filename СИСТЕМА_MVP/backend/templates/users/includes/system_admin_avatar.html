@@ -1,7 +1,14 @@
+{% comment %}
+Буква под фотографией, а не вместо неё.
+
+В карточке может быть записано имя файла, которого на диске уже нет — тогда
+вместо снимка браузер рисует значок битой картинки. Наличие файла проверяем
+отдельно, а фото лежит слоем поверх буквы и при неудачной загрузке убирает
+себя само. Так буква остаётся и при пропавшем хранилище.
+{% endcomment %}
 <span class="admin-console-avatar" aria-hidden="true">
-    {% if access.employee.photo %}
-        <img src="{{ access.employee.photo.url }}" alt="">
-    {% else %}
-        {{ access.employee.full_name|default:"А"|first }}
+    {{ access.employee.full_name|default:"А"|first }}
+    {% if access.employee.has_photo_file %}
+        <img src="{{ access.employee.photo.url }}" alt="" onerror="this.remove();">
     {% endif %}
 </span>
