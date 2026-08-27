@@ -25353,7 +25353,11 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     outline-offset: -5px;
 }
 
-@media (max-width: 1180px) {
+/* Эта перекройка написана для узкого вертикального окна. На горизонтальном
+   телефоне она складывала пульт в столбик и давила ряды до восьмидесяти
+   точек. Там мы вместо перекройки уменьшаем пульт целиком, и настольная
+   раскладка помещается — поэтому такой экран сюда не пускаем. */
+@media (max-width: 1180px) and (not ((orientation: landscape) and (max-height: 620px))) {
     .management-dashboard-header {
         grid-template-columns: minmax(0, 1fr) minmax(250px, auto);
     }
@@ -33380,3 +33384,43 @@ body.is-observer-mode .app-contract-banner {
         padding-bottom: 8px;
     }
 }
+
+/* Пульт диспетчера на телефоне: уменьшаем целиком, а не перекладываем.
+
+   Пульт задуман горизонтальным: слева экскаваторы, посередине комплексы,
+   справа самосвалы. На телефоне экран широкий, но низкий — раскладка
+   складывала три колонки в столбик и давила каждую до восьмидесяти точек:
+   читать было нечего.
+
+   Уменьшение решает обе беды разом. Оно не только вмещает пульт по высоте —
+   при масштабе 0.62 страница считает, что у неё около полутора тысяч точек
+   ширины, и трёхколоночная раскладка возвращается сама, без отдельных правил.
+
+   Ступенями, а не формулой: коэффициент должен быть числом, а поделить
+   высоту экрана на число в CSS нельзя — получается длина, и zoom такое
+   выражение молча игнорирует. Тот же приём уже работает в админке.
+
+   Оговорка про landscape и низкий экран нужна, чтобы не задеть настольный
+   пульт в диспетчерской, ради которого всё и рисовалось. */
+@media (orientation: landscape) and (max-height: 620px) {
+    .dispatcher-shell {
+        --gd-fit-scale: .84;
+        zoom: var(--gd-fit-scale);
+        width: calc(100% / var(--gd-fit-scale));
+        min-height: calc(100dvh / var(--gd-fit-scale));
+    }
+}
+
+@media (orientation: landscape) and (max-height: 540px) {
+    .dispatcher-shell { --gd-fit-scale: .72; }
+}
+
+@media (orientation: landscape) and (max-height: 460px) {
+    .dispatcher-shell { --gd-fit-scale: .62; }
+}
+
+/* Ниже уже не разглядеть — дальше не мельчим. */
+@media (orientation: landscape) and (max-height: 400px) {
+    .dispatcher-shell { --gd-fit-scale: .54; }
+}
+

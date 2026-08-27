@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
 from core.models import OperationalStateEvent
+from users.role_apps import ROLE_APPS_BY_CODE
 from core.production_time import production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import upsert_default_equipment_states
@@ -209,7 +210,10 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/dispatcher/')
-        self.assertIn('dispatcher-desktop-shell-v41', script)
+        # Версия оболочки поднимается при каждой заметной правке пульта, и
+        # зашитая строка роняла проверку на ровном месте. Сверяем с каталогом
+        # приложений: важно, что скрипт отдаёт объявленную версию.
+        self.assertIn(ROLE_APPS_BY_CODE['dispatcher'].shell_version, script)
         self.assertIn(reverse('dispatcher_control'), script)
         self.assertIn(reverse('dispatcher_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
