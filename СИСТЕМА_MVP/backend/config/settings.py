@@ -160,6 +160,12 @@ WEBPUSH_VAPID_PRIVATE_KEY = os.getenv('DJANGO_WEBPUSH_VAPID_PRIVATE_KEY', '').st
 WEBPUSH_VAPID_PUBLIC_KEY = os.getenv('DJANGO_WEBPUSH_VAPID_PUBLIC_KEY', '').strip()
 WEBPUSH_CONTACT = os.getenv('DJANGO_WEBPUSH_CONTACT', 'mailto:admin@driverform.ru').strip()
 
+# Куда писать человеку, если система не нашла его номер. Ссылка на переписку в
+# мессенджере: номер в карточке правит администратор, и адресовать надо к нему,
+# а не к горному мастеру. Пустая строка — экран просто не покажет кнопку.
+SUPPORT_CHAT_URL = os.getenv('DJANGO_SUPPORT_CHAT_URL', '').strip()
+SUPPORT_CHAT_LABEL = os.getenv('DJANGO_SUPPORT_CHAT_LABEL', 'Написать администратору').strip()
+
 WSGI_APPLICATION = 'config.wsgi.application'
 
 

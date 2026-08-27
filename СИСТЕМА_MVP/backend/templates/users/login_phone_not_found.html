@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{% if wrong_app %}Чужое приложение{% else %}Номер не найден{% endif %}{% if login_role_app %} · {{ login_role_app.short_name }}{% endif %}{% endblock %}
+{% block extra_head %}
+    {% if login_role_app %}
+    <link rel="manifest" href="{{ login_role_app.manifest_url }}">
+    <meta name="theme-color" content="{{ login_role_app.theme_color }}">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="apple-touch-icon" href="{{ login_role_app.icon_180_url }}">
+    {% endif %}
+<style>
+    /* Экран во весь телефон, как и вход: человек попал сюда с ошибкой, и меньше
+       всего ему нужна карточка посреди пустоты. */
+    body.login-page.unified-login-screen {
+        --login-accent: #2FBF71;
+        --login-glow: rgba(47, 191, 113, .20);
+        --login-ink: #04161A;
+        min-height: 100dvh;
+        background:
+            radial-gradient(120% 62% at 50% -8%, var(--login-glow), rgba(2, 8, 11, 0) 68%),
+            #02080b;
+    }
+    body.login-page.login-role-driver { --login-accent: #8CFF2E; --login-glow: rgba(140, 255, 46, .18); --login-ink: #06210A; }
+    body.login-page.login-role-excavator_operator { --login-accent: #FFD200; --login-glow: rgba(255, 210, 0, .16); --login-ink: #241B00; }
+    body.login-page.login-role-mining_master { --login-accent: #4AA3FF; --login-glow: rgba(74, 163, 255, .18); --login-ink: #041a2e; }
+
+    .phone-not-found {
+        display: grid;
+        align-content: center;
+        justify-items: center;
+        gap: 0;
+        width: 100%;
+        min-height: 100dvh;
+        margin: 0 auto;
+        padding:
+            calc(env(safe-area-inset-top, 0px) + clamp(24px, 7vh, 56px))
+            clamp(20px, 6vw, 34px)
+            calc(env(safe-area-inset-bottom, 0px) + clamp(20px, 4vh, 36px));
+        text-align: center;
+    }
+
+    .phone-not-found__inner {
+        width: 100%;
+        max-width: 440px;
+        display: grid;
+        justify-items: center;
+    }
+
+    .phone-not-found img {
+        width: clamp(84px, 22vw, 108px);
+        height: clamp(84px, 22vw, 108px);
+        border-radius: 24px;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, .10), 0 18px 46px rgba(0, 0, 0, .55);
+    }
+
+    .phone-not-found h2 {
+        margin: clamp(14px, 3vh, 24px) 0 clamp(10px, 2vh, 16px);
+        color: #F2F8FA;
+        font-size: clamp(22px, 6.4vw, 30px);
+        font-weight: 800;
+        line-height: 1.15;
+    }
+
+    .phone-not-found p {
+        margin: 0 0 clamp(8px, 1.8vh, 14px);
+        color: #9fb2ba;
+        font-size: clamp(14px, 4vw, 17px);
+        line-height: 1.45;
+    }
+
+    .phone-not-found__phone {
+        margin: 0 0 clamp(18px, 4vh, 30px);
+        padding: 10px 16px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, .12);
+        background: rgba(255, 255, 255, .04);
+        color: #E8F1F4;
+        font-size: clamp(17px, 5vw, 21px);
+        font-weight: 800;
+        letter-spacing: .02em;
+    }
+
+    .phone-not-found__chat,
+    .phone-not-found__back {
+        width: 100%;
+        min-height: 56px;
+        display: grid;
+        place-items: center;
+        border-radius: 14px;
+        font-size: clamp(15px, 4.4vw, 18px);
+        font-weight: 800;
+        text-decoration: none;
+    }
+
+    .phone-not-found__chat {
+        border: 0;
+        margin-bottom: 12px;
+        background: var(--login-accent);
+        color: var(--login-ink);
+        box-shadow: 0 14px 34px var(--login-glow);
+    }
+
+    .phone-not-found__back {
+        border: 1px solid rgba(255, 255, 255, .22);
+        background: transparent;
+        color: #C7D7DE;
+        font-weight: 600;
+    }
+</style>
+{% endblock %}
+{% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% if login_role_app %} login-role-{{ login_role_app.role_code }}{% endif %}{% endblock %}
+
+{% block body %}
+<main class="phone-not-found">
+    <div class="phone-not-found__inner">
+        {% if login_role_app %}<img src="{{ login_role_app.icon_180_url }}" width="72" height="72" alt="">{% endif %}
+        {% if wrong_app %}
+        <h2>Это чужое приложение</h2>
+        <p>Ваш номер в базе есть, но {% if login_role_app %}приложение «{{ login_role_app.short_name }}» не для вашей должности{% else %}это приложение не для вашей должности{% endif %}.</p>
+        <div class="phone-not-found__phone">{{ submitted_phone }}</div>
+        <p>Вы {% for name in own_role_names %}{% if not forloop.first %} и {% endif %}<b>{{ name }}</b>{% endfor %}. Откройте своё приложение — ссылку на него давал администратор. Если считаете, что должность указана неверно, напишите ему.</p>
+        {% else %}
+        <h2>Номер не найден</h2>
+        <p>В базе нет сотрудника с этим номером{% if login_role_app %} для приложения «{{ login_role_app.short_name }}»{% endif %}.</p>
+        <div class="phone-not-found__phone">{{ submitted_phone }}</div>
+        <p>Скорее всего, в вашей карточке записан другой номер. Напишите администратору — он поставит актуальный, и вход заработает.</p>
+        {% endif %}
+        {% if support_chat_url %}
+            <a class="phone-not-found__chat" href="{{ support_chat_url }}" target="_blank" rel="noopener">{{ support_chat_label|default:"Написать администратору" }}</a>
+        {% endif %}
+        <a class="phone-not-found__back" href="{% if login_role_app %}{{ login_role_app.start_url }}{% else %}/{% endif %}">Ввести номер заново</a>
+    </div>
+</main>
+{% endblock %}

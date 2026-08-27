@@ -97,9 +97,9 @@
             <span>Коппер Ресорсез</span>
         </div>
         {% endif %}
-        <div class="activation-stage">Шаг 2 из 2 · вход подтвержден</div>
-        <h2>Создайте постоянный PIN</h2>
-        <p>Телефон и временный PIN повторно вводить не нужно.</p>
+        <div class="activation-stage">Первый вход · сотрудник найден</div>
+        <h2>Это вы?</h2>
+        <p>Проверьте фамилию и должность. Если всё верно — придумайте пинкод, с ним будете заходить дальше.</p>
 
         <div class="activation-confirmed" aria-label="Подтвержденные данные сотрудника">
             <strong title="{{ access.employee.full_name }}">{{ access.employee.full_name }}</strong>
@@ -115,7 +115,7 @@
             <span>{{ form.new_access_code.label }}</span>
             {{ form.new_access_code }}
             <small id="activation-new-pin-hint" class="input-hint{% if form.new_access_code.errors %} is-invalid{% endif %}" data-input-hint-for="{{ form.new_access_code.id_for_label }}"{% if form.new_access_code.errors %} data-server-error="1"{% endif %}>
-                {% if form.new_access_code.errors %}{{ form.new_access_code.errors.0 }}{% else %}Ровно 6 цифр. Не повторяйте временный PIN.{% endif %}
+                {% if form.new_access_code.errors %}{{ form.new_access_code.errors.0 }}{% else %}Ровно 6 цифр. Придумайте свой — его будете вводить при каждом входе.{% endif %}
             </small>
         </label>
         <label class="shared-shift-login-field" for="{{ form.confirm_access_code.id_for_label }}">
@@ -186,7 +186,7 @@ document.addEventListener('DOMContentLoaded', function () {
         var secondValid = second.length === 6 && second === first && firstValid;
 
         if (pinInputs[0]) {
-            var firstMessage = 'Ровно 6 цифр. Не повторяйте временный PIN.';
+            var firstMessage = 'Ровно 6 цифр. Придумайте свой — его будете вводить при каждом входе.';
             if (first && first.length < 6) firstMessage = 'Нужно 6 цифр. Сейчас введено: ' + first.length + '.';
             if (isWeakPin(first)) firstMessage = 'Этот PIN слишком простой. Выберите другую комбинацию.';
             if (firstValid) firstMessage = 'PIN подходит.';

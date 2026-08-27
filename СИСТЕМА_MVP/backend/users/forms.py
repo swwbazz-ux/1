@@ -906,7 +906,7 @@ class AccessActivationForm(forms.Form):
             'maxlength': '6',
             'pattern': '[0-9]{6}',
             'data-pin-input': '1',
-            'data-hint': 'Введите ровно 6 цифр. Не повторяйте временный PIN.',
+            'data-hint': 'Введите ровно 6 цифр. Придумайте свой — его будете вводить при каждом входе.',
             'aria-describedby': 'activation-new-pin-hint',
             'autofocus': 'autofocus',
         }),

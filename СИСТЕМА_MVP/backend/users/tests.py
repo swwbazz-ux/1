@@ -1650,8 +1650,11 @@ class AccessLoginTests(TestCase):
             HTTP_HOST='localhost',
         )
         self.assertRedirects(login_response, '/activate-access/', target_status_code=200)
-        self.assertContains(login_response, 'Создайте постоянный PIN')
-        self.assertContains(login_response, 'Телефон и временный PIN повторно вводить не нужно.')
+        self.assertContains(login_response, 'Это вы?')
+        self.assertContains(
+            login_response,
+            'придумайте пинкод, с ним будете заходить дальше',
+        )
         self.assertContains(login_response, '+7 ••• •••-11-11')
         self.assertNotContains(login_response, 'name="phone"')
         self.assertContains(login_response, 'name="new_access_code"')

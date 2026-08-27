@@ -299,6 +299,21 @@
         margin-bottom: clamp(12px, 2.6vh, 18px);
     }
 
+    /* Первый вход отдельной кнопкой: человек приходит без пинкода, и заставлять
+       его гадать, что вводить в это поле, незачем. */
+    body.login-page.unified-login-screen .unified-login-register {
+        justify-self: center;
+        width: 100%;
+        min-height: 48px;
+        margin-top: 12px;
+        border: 1px solid rgba(255, 255, 255, .22);
+        border-radius: 14px;
+        background: transparent;
+        color: #C7D7DE;
+        font: 600 clamp(14px, 4vw, 16px)/1.2 inherit;
+        cursor: pointer;
+    }
+
     /* У формы в общих стилях отступ 32 точки стоял только справа, слева нулевой —
        из-за этого всё содержимое было смещено влево на половину этого отступа.
        Обнуляем и центруем явно; заодно учитываем вырез экрана, на телефонах с
@@ -380,6 +395,8 @@
         <div class="unified-login-actions">
             <button class="unified-login-submit" type="submit">Войти</button>
         </div>
+        {# Первый вход: пинкод человек придумывает сам, ничего раздавать не нужно. #}
+        <button class="unified-login-register" type="submit" name="action" value="register" formnovalidate>Первый вход — придумать пинкод</button>
     </form>
     {% if role_app and login_role_app %}
     

@@ -5,6 +5,7 @@ from decimal import Decimal
 from io import BytesIO
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import FieldDoesNotExist, ValidationError
 from django.forms import modelform_factory
@@ -61,7 +62,11 @@ from shifts.services import (
 )
 from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 
-from .access_auth import find_employee_access_by_credentials
+from .access_auth import (
+    format_phone_for_display,
+    find_employee_access_by_credentials,
+    find_unactivated_accesses_by_phone,
+)
 from .app_catalog import (
     APP_CATALOG_ROLE_CODES,
     app_catalog_public_url,
@@ -214,7 +219,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v164'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v165'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -590,7 +595,89 @@ def login_view(
     submitted_phone = (
         request.POST.get('phone', '').strip() if request.method == 'POST' else ''
     )
-    if request.method == 'POST':
+    if request.method == 'POST' and request.POST.get('action') == 'register':
+        # Первый вход. Раньше сюда пускал только выданный вручную временный код,
+        # и раздавать его приходилось каждому — при текучке в двадцать человек за
+        # вахту это неподъёмно. Теперь ключ — номер телефона из карточки, а ФИО
+        # человек подтверждает глазами на следующем экране.
+        phone = request.POST.get('phone', '').strip()
+        matches = find_unactivated_accesses_by_phone(
+            phone,
+            role_codes=allowed_role_codes or ([role_app.role_code] if role_app else None),
+        )
+        matches = [
+            candidate
+            for candidate in matches
+            if employee_has_effective_access_role(
+                candidate.employee,
+                candidate.role.code,
+                allow_pending_access=True,
+            )
+        ]
+        pending = [
+            candidate
+            for candidate in matches
+            if candidate.status == EmployeeAccess.Status.NOT_ACTIVATED
+        ]
+        if pending:
+            access = pending[0]
+            request.session.cycle_key()
+            request.session['pending_activation_access_id'] = access.id
+            request.session['pending_activation_role_code'] = access.role.code
+            if target_role_app:
+                request.session['pending_activation_target_app_code'] = target_role_app.role_code
+            else:
+                request.session.pop('pending_activation_target_app_code', None)
+            if next_url:
+                request.session['post_activation_next'] = next_url
+            set_session_device_kind(request, selected_device_kind)
+            return redirect('activate_access')
+        if matches:
+            messages.error(
+                request,
+                'Вы уже зарегистрированы. Введите свой пинкод — тот, что придумали при первом входе.',
+            )
+        else:
+            # Номер может быть в базе, но за другой должностью: человек открыл
+            # чужое приложение. Писать ему «номер не найден» — врать и сбивать с
+            # толку, он пойдёт менять номер, который менять не нужно.
+            elsewhere = find_unactivated_accesses_by_phone(phone)
+            elsewhere = [
+                candidate
+                for candidate in elsewhere
+                if employee_has_effective_access_role(
+                    candidate.employee,
+                    candidate.role.code,
+                    allow_pending_access=True,
+                )
+            ]
+            if elsewhere:
+                return render(
+                    request,
+                    'users/login_phone_not_found.html',
+                    {
+                        'login_role_app': login_role_app,
+                        'submitted_phone': format_phone_for_display(phone),
+                        'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
+                        'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
+                        'wrong_app': True,
+                        'own_role_names': sorted({
+                            candidate.role.name for candidate in elsewhere
+                        }),
+                    },
+                )
+            return render(
+                request,
+                'users/login_phone_not_found.html',
+                {
+                    'login_role_app': login_role_app,
+                    'submitted_phone': format_phone_for_display(phone),
+                    'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
+                    'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
+                },
+            )
+
+    if request.method == 'POST' and request.POST.get('action') != 'register':
         phone = request.POST.get('phone', '').strip()
         access_code = request.POST.get('access_code', '').strip()
         access = find_employee_access_by_credentials(
