@@ -131,7 +131,20 @@
         outline: none;
     }
 
-    .start-screen__submit {
+    .start-screen__hint {
+    display: block;
+    margin: 6px 0 0;
+    color: #8296a0;
+    font-size: 13px;
+    line-height: 1.3;
+}
+
+.start-screen__hint.is-invalid { color: #ff8f8a; }
+
+.start-screen__phone:has(input.is-valid) { border-color: rgba(47, 191, 113, .8); }
+.start-screen__phone:has(input.is-invalid) { border-color: rgba(255, 143, 138, .8); }
+
+.start-screen__submit {
         width: 100%;
         min-height: 58px;
         margin-top: 14px;
@@ -229,10 +242,58 @@
                 <label for="start-phone">Телефон</label>
                 <span class="start-screen__phone">
                     <span class="start-screen__code">+7</span>
-                    <input id="start-phone" name="phone" type="text" inputmode="numeric" autocomplete="tel" placeholder="999-000-00-00" maxlength="13" required autofocus>
+                    <input id="start-phone" name="phone" type="text" inputmode="numeric" autocomplete="tel" placeholder="999-000-00-00" maxlength="13" data-start-phone required autofocus>
                 </span>
+                <small class="start-screen__hint" data-start-hint>10 цифр номера</small>
                 <button class="start-screen__submit" type="submit">Далее</button>
             </form>
+            <script>
+            (function (document) {
+                "use strict";
+                /* Та же маска, что и на входе в приложение: человек набирает
+                   подряд, а номер сам раскладывается на 000-000-00-00. Без неё
+                   в поле оказывалась сплошная строка цифр. */
+                var input = document.querySelector("[data-start-phone]");
+                var hint = document.querySelector("[data-start-hint]");
+                if (!input) return;
+
+                function format(value) {
+                    var digits = String(value || "").replace(/\D/g, "");
+                    if (digits.charAt(0) === "8") digits = "7" + digits.slice(1);
+                    if (digits.charAt(0) === "7") digits = digits.slice(1);
+                    digits = digits.slice(0, 10);
+                    var result = digits.slice(0, 3);
+                    if (digits.length > 3) result += "-" + digits.slice(3, 6);
+                    if (digits.length > 6) result += "-" + digits.slice(6, 8);
+                    if (digits.length > 8) result += "-" + digits.slice(8, 10);
+                    return result;
+                }
+
+                function check() {
+                    input.value = format(input.value);
+                    var digits = input.value.replace(/\D/g, "");
+                    var valid = digits.length === 10 && digits.charAt(0) === "9";
+                    var message = "10 цифр номера";
+                    if (digits && digits.length < 10) {
+                        message = "Нужно 10 цифр после +7. Сейчас введено: " + digits.length + ".";
+                    } else if (digits.length === 10 && !valid) {
+                        message = "Мобильный номер после +7 должен начинаться с 9.";
+                    } else if (valid) {
+                        message = "Введено правильно.";
+                    }
+                    input.classList.toggle("is-invalid", Boolean(digits) && !valid);
+                    input.classList.toggle("is-valid", valid);
+                    if (hint) {
+                        hint.textContent = message;
+                        hint.classList.toggle("is-invalid", Boolean(digits) && !valid);
+                    }
+                }
+
+                input.addEventListener("input", check);
+                input.addEventListener("blur", check);
+                check();
+            })(document);
+            </script>
         {% endif %}
     </div>
 </main>
