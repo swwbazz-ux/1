@@ -19,7 +19,12 @@ from .access_auth import find_unactivated_accesses_by_phone, format_phone_for_di
 from .forms import normalize_phone
 from .app_catalog import APP_CATALOG_ROLE_CODES, role_app_public_url
 from .role_apps import get_role_app
+from .models import EmployeeAccess
 from .work_profiles import employee_has_effective_access_role
+
+
+# Больше трёх кнопок подряд читаются уже как список, а не как выбор.
+VISIBLE_APPS = 3
 
 
 def with_country_code(value):
@@ -63,7 +68,17 @@ def universal_start_view(request):
             'app': app,
             'url': role_app_public_url(request, code),
             'employee': candidate.employee,
+            'last_login_at': candidate.last_login_at,
         })
+
+    # Чем недавно пользовались — то и наверх. У большинства приложение одно и
+    # порядок неважен, но у того, кто совмещает роли, список иначе превращается
+    # в стену одинаковых кнопок, где своё приходится выискивать глазами.
+    apps.sort(key=lambda item: (
+        item['last_login_at'] is None,
+        -(item['last_login_at'].timestamp() if item['last_login_at'] else 0),
+        item['app'].name,
+    ))
 
     if not apps:
         return render(
@@ -78,13 +93,24 @@ def universal_start_view(request):
             },
         )
 
+    # Пинкод уже заведён — значит придумывать его не надо, и обещать обратное
+    # нельзя: человек будет ждать окна, которого не будет.
+    has_working_code = any(
+        candidate.status == EmployeeAccess.Status.ACTIVATED
+        and (candidate.access_code or '').isdigit()
+        and len(candidate.access_code) == 6
+        for candidate in matches
+    )
+
     return render(
         request,
         'users/universal_start.html',
         {
             'found': True,
-            'apps': apps,
+            'apps': apps[:VISIBLE_APPS],
+            'extra_apps': apps[VISIBLE_APPS:],
             'employee': apps[0]['employee'],
             'submitted_phone': format_phone_for_display(phone),
+            'has_working_code': has_working_code,
         },
     )

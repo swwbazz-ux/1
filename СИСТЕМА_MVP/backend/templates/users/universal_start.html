@@ -206,6 +206,24 @@
         opacity: .78;
     }
 
+    .start-screen__more {
+        width: 100%;
+        margin-top: 4px;
+    }
+
+    .start-screen__more summary {
+        padding: 12px 8px;
+        color: #8296a0;
+        font-size: clamp(14px, 3.6vw, 16px);
+        font-weight: 700;
+        text-align: center;
+        cursor: pointer;
+    }
+
+    .start-screen__more[open] summary {
+        margin-bottom: 10px;
+    }
+
     .start-screen__back {
         margin-top: clamp(14px, 3vh, 24px);
         color: #8296a0;
@@ -226,13 +244,28 @@
                 <strong>{{ employee.full_name }}</strong>
                 <span>{{ submitted_phone }}</span>
             </div>
-            <p>Откройте его, установите на телефон и войдите. Пинкод придумаете при первом входе.</p>
+            {% if has_working_code %}
+                <p>Откройте его, установите на телефон и войдите своим пинкодом.</p>
+            {% else %}
+                <p>Откройте его, установите на телефон и войдите. Пинкод придумаете при первом входе.</p>
+            {% endif %}
             {% for item in apps %}
                 <a class="start-screen__app" href="{{ item.url }}">
                     <b>{{ item.app.name }}</b>
                     <i>Открыть и установить</i>
                 </a>
             {% endfor %}
+            {% if extra_apps %}
+                <details class="start-screen__more">
+                    <summary>Другие мои приложения — {{ extra_apps|length }}</summary>
+                    {% for item in extra_apps %}
+                        <a class="start-screen__app" href="{{ item.url }}">
+                            <b>{{ item.app.name }}</b>
+                            <i>Открыть и установить</i>
+                        </a>
+                    {% endfor %}
+                </details>
+            {% endif %}
             <a class="start-screen__back" href="{% url 'universal_start' %}">Это не я — ввести другой номер</a>
         {% else %}
             <h1>Вход в рабочее приложение</h1>
