@@ -175,7 +175,6 @@ INTERFACE_MAP = [
         'section': 'Рабочие интерфейсы',
         'items': [
             {'title': 'Работа водителя самосвала', 'url': '/driver/', 'code': '2000', 'note': 'Главный PWA-экран Работа, смена, простои и путевка'},
-            {'title': 'Первичная регистрация водителя', 'url': '/driver/registration/', 'code': '2000', 'note': 'Первичное заполнение данных проживания; смена и техника выбираются при открытии смены'},
             {'title': 'Машинист экскаватора', 'url': '/excavator/work/', 'code': '3000', 'note': 'Создание рейса и параметры для отчета заказчику'},
             {'title': 'Горный мастер', 'url': '/mining-master/assignments/', 'code': '4000', 'note': 'Назначение самосвалов под экскаваторы'},
             {'title': 'Зам. начальника горного участка', 'url': '/deputy-mining-manager/', 'code': 'роль зам. начальника', 'note': 'Расстановка сотрудников по технике на две смены'},
@@ -992,8 +991,6 @@ def role_home_view(request):
         request.session.flush()
         return redirect('login')
     if access.role.code == 'driver':
-        if not hasattr(access.employee, 'driver_registration'):
-            return redirect('driver_registration')
         return redirect('driver_work')
     if access.role.code == 'mining_master':
         return redirect('mining_master_assignments')
@@ -3184,8 +3181,6 @@ def driver_shift_view(request):
     if not access or access.role.code != 'driver':
         return redirect('role_home')
     registration = getattr(access.employee, 'driver_registration', None)
-    if not registration:
-        return redirect('driver_registration')
 
     posted_client_action_id = request.POST.get('client_action_id', '').strip() if request.method == 'POST' else ''
     if posted_client_action_id and ShiftClientAction.objects.filter(
@@ -3669,9 +3664,6 @@ def driver_close_shift_view(request):
     access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     if not access or access.role.code != 'driver':
         return redirect('role_home')
-    registration = getattr(access.employee, 'driver_registration', None)
-    if not registration:
-        return redirect('driver_registration')
 
     client_action_id = request.POST.get('client_action_id', '').strip()
     completed_action = lambda: ShiftClientAction.objects.filter(
@@ -3753,10 +3745,7 @@ def driver_downtime_action_view(request):
         if wants_json:
             return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану водителя.'}, status=403)
         return redirect('role_home')
-    if not getattr(access.employee, 'driver_registration', None):
-        if wants_json:
-            return JsonResponse({'ok': False, 'error': 'Водитель не зарегистрирован.'}, status=403)
-        return redirect('driver_registration')
+
 
     if request.method != 'POST':
         if wants_json:

@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Вход в рабочее приложение · Коппер Ресорсез{% endblock %}
+{% block extra_head %}
+<style>
+    /* Одна ссылка на всех: человек вводит номер, система сама показывает, какое
+       приложение ему ставить. Оформление нейтральное — роль здесь ещё неизвестна. */
+    body.start-page {
+        --start-accent: #2FBF71;
+        --start-glow: rgba(47, 191, 113, .20);
+        --start-ink: #04161A;
+        min-height: 100dvh;
+        background:
+            radial-gradient(120% 62% at 50% -8%, var(--start-glow), rgba(2, 8, 11, 0) 68%),
+            #02080b;
+    }
+
+    .start-screen {
+        display: grid;
+        align-content: center;
+        justify-items: center;
+        width: 100%;
+        min-height: 100dvh;
+        padding:
+            calc(env(safe-area-inset-top, 0px) + clamp(24px, 7vh, 56px))
+            clamp(20px, 6vw, 34px)
+            calc(env(safe-area-inset-bottom, 0px) + clamp(20px, 4vh, 36px));
+        text-align: center;
+    }
+
+    .start-screen__inner {
+        display: grid;
+        justify-items: center;
+        width: 100%;
+        max-width: 440px;
+    }
+
+    .start-screen__brand {
+        margin-bottom: clamp(10px, 2vh, 18px);
+        color: #7f929a;
+        font-size: clamp(11px, 3vw, 13px);
+        font-weight: 700;
+        letter-spacing: .18em;
+        text-transform: uppercase;
+    }
+
+    .start-screen h1 {
+        margin: 0 0 clamp(10px, 2.4vh, 18px);
+        color: #F2F8FA;
+        font-size: clamp(22px, 6.4vw, 32px);
+        font-weight: 800;
+        line-height: 1.15;
+    }
+
+    .start-screen p {
+        margin: 0 0 clamp(18px, 4vh, 28px);
+        color: #9fb2ba;
+        font-size: clamp(14px, 4vw, 17px);
+        line-height: 1.45;
+    }
+
+    .start-screen form {
+        display: grid;
+        width: 100%;
+        gap: 6px;
+    }
+
+    .start-screen label {
+        color: #8fa3ab;
+        font-size: clamp(11px, 3vw, 13px);
+        font-weight: 700;
+        letter-spacing: .1em;
+        text-align: left;
+        text-transform: uppercase;
+    }
+
+    .start-screen__phone {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        border: 1px solid rgba(255, 255, 255, .16);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, .04);
+        overflow: hidden;
+    }
+
+    .start-screen__phone:focus-within {
+        border-color: var(--start-accent);
+        box-shadow: 0 0 0 2px var(--start-glow);
+    }
+
+    .start-screen__code {
+        padding: 0 14px;
+        border-right: 1px solid rgba(255, 255, 255, .14);
+        color: #E8F1F4;
+        font-size: clamp(17px, 5vw, 21px);
+        font-weight: 800;
+    }
+
+    .start-screen__phone input {
+        min-height: 58px;
+        padding: 0 14px;
+        border: 0;
+        background: transparent;
+        color: #F2F8FA;
+        font: 800 clamp(18px, 5.2vw, 22px)/1 inherit;
+        letter-spacing: .02em;
+        caret-color: var(--start-accent);
+    }
+
+    .start-screen__phone input:focus {
+        outline: none;
+    }
+
+    .start-screen__submit {
+        width: 100%;
+        min-height: 58px;
+        margin-top: 14px;
+        border: 0;
+        border-radius: 14px;
+        background: var(--start-accent);
+        color: var(--start-ink);
+        font-size: clamp(16px, 4.6vw, 19px);
+        font-weight: 800;
+        box-shadow: 0 14px 34px var(--start-glow);
+        cursor: pointer;
+    }
+
+    .start-screen__person {
+        width: 100%;
+        margin-bottom: clamp(16px, 3.4vh, 24px);
+        padding: 14px 16px;
+        border: 1px solid rgba(255, 255, 255, .12);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, .04);
+    }
+
+    .start-screen__person strong {
+        display: block;
+        color: #F2F8FA;
+        font-size: clamp(16px, 4.6vw, 20px);
+        font-weight: 800;
+        line-height: 1.2;
+    }
+
+    .start-screen__person span {
+        color: #8fa3ab;
+        font-size: clamp(12px, 3.4vw, 14px);
+    }
+
+    .start-screen__app {
+        display: grid;
+        gap: 2px;
+        width: 100%;
+        min-height: 66px;
+        margin-bottom: 12px;
+        padding: 12px 16px;
+        border: 0;
+        border-radius: 14px;
+        background: var(--start-accent);
+        color: var(--start-ink);
+        text-decoration: none;
+        box-shadow: 0 14px 34px var(--start-glow);
+    }
+
+    .start-screen__app b {
+        font-size: clamp(16px, 4.6vw, 19px);
+        font-weight: 800;
+    }
+
+    .start-screen__app i {
+        font-size: clamp(12px, 3.4vw, 14px);
+        font-style: normal;
+        opacity: .78;
+    }
+
+    .start-screen__back {
+        margin-top: clamp(14px, 3vh, 24px);
+        color: #8296a0;
+        font-size: 15px;
+        text-decoration: underline;
+    }
+</style>
+{% endblock %}
+{% block body_class %}start-page dispatcher-shell dispatcher-night{% endblock %}
+
+{% block body %}
+<main class="start-screen">
+    <div class="start-screen__inner">
+        <div class="start-screen__brand">Коппер Ресорсез</div>
+        {% if found %}
+            <h1>Ваше приложение</h1>
+            <div class="start-screen__person">
+                <strong>{{ employee.full_name }}</strong>
+                <span>{{ submitted_phone }}</span>
+            </div>
+            <p>Откройте его, установите на телефон и войдите. Пинкод придумаете при первом входе.</p>
+            {% for item in apps %}
+                <a class="start-screen__app" href="{{ item.url }}">
+                    <b>{{ item.app.name }}</b>
+                    <i>Открыть и установить</i>
+                </a>
+            {% endfor %}
+            <a class="start-screen__back" href="{% url 'universal_start' %}">Это не я — ввести другой номер</a>
+        {% else %}
+            <h1>Вход в рабочее приложение</h1>
+            <p>Введите свой номер телефона — система подскажет, какое приложение вам нужно.</p>
+            <form method="post">
+                {% csrf_token %}
+                <label for="start-phone">Телефон</label>
+                <span class="start-screen__phone">
+                    <span class="start-screen__code">+7</span>
+                    <input id="start-phone" name="phone" type="text" inputmode="numeric" autocomplete="tel" placeholder="999-000-00-00" maxlength="13" required autofocus>
+                </span>
+                <button class="start-screen__submit" type="submit">Далее</button>
+            </form>
+        {% endif %}
+    </div>
+</main>
+{% endblock %}

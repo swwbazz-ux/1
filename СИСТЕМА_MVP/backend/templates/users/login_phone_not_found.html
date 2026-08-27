@@ -130,7 +130,7 @@
         {% if support_chat_url %}
             <a class="phone-not-found__chat" href="{{ support_chat_url }}" target="_blank" rel="noopener">{{ support_chat_label|default:"Написать администратору" }}</a>
         {% endif %}
-        <a class="phone-not-found__back" href="/?form=1">Ввести номер заново</a>
+        <a class="phone-not-found__back" href="{{ back_url|default:"/?form=1" }}">Ввести номер заново</a>
     </div>
 </main>
 {% endblock %}

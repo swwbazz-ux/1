@@ -1982,29 +1982,23 @@ class AccessLoginTests(TestCase):
         self.assertEqual(sheet['A1'].value, 'Журнал замечаний пилотного запуска')
         self.assertEqual(sheet['F5'].value, 'Не хватает столбца для сверки')
 
-    def test_driver_primary_registration_flow(self):
+    def test_driver_goes_straight_to_work_without_housing_registration(self):
+        """Экран «Первичная регистрация водителя» больше не заслоняет работу.
+
+        Он спрашивал секцию проживания, а её в системе никто не читал: данные
+        писались один раз и нигде не использовались. Расселение будет вести
+        делопроизводитель отдельно, так что держать полсотни водителей на этом
+        экране незачем.
+        """
         truck_type = EquipmentType.objects.create(name='Самосвал')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
-        dormitory = Dormitory.objects.create(number='5')
-        block = DormitoryBlock.objects.create(dormitory=dormitory, name='Блок 1')
-        section = DormitorySection.objects.create(block=block, name='А')
         self.assign_driver_work(truck)
 
         login_response = self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
-        self.assertRedirects(login_response, '/driver/registration/', target_status_code=200)
 
-        registration_response = self.client.post(
-            '/driver/registration/',
-            {
-                'dormitory_section': section.id,
-            },
-            follow=True,
-            HTTP_HOST='localhost',
-        )
-
-        self.assertEqual(registration_response.status_code, 200)
-        self.assertContains(registration_response, 'Подтвердить показания и начать смену')
-        self.assertTrue(self.employee.driver_registration)
+        self.assertEqual(login_response.status_code, 200)
+        self.assertNotContains(login_response, 'Первичная регистрация водителя')
+        self.assertContains(login_response, 'Подтвердить показания и начать смену')
 
     def test_driver_can_open_shift_after_registration(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')

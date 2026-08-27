@@ -5354,8 +5354,6 @@ def driver_complete_trip_view(request, trip_id):
     access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     if not access or access.role.code != 'driver':
         return redirect('role_home')
-    if not hasattr(access.employee, 'driver_registration'):
-        return redirect('driver_registration')
     if request.method != 'POST':
         return redirect('driver_shift')
     client_action_id = str(request.POST.get('client_action_id') or '').strip()
@@ -5430,8 +5428,6 @@ def driver_change_unload_point_view(request, trip_id):
     access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     if not access or access.role.code != 'driver':
         return redirect('role_home')
-    if not hasattr(access.employee, 'driver_registration'):
-        return redirect('driver_registration')
     if request.method != 'POST':
         return redirect('driver_shift')
 

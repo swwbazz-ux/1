@@ -29,6 +29,7 @@ from .live_monitor_views import (
     system_admin_force_end_sessions_view,
     system_admin_live_monitor_view,
 )
+from .start_views import universal_start_view
 from .push_views import (
     push_mark_shown_view,
     push_pending_view,
@@ -87,6 +88,8 @@ urlpatterns = [
     path('', login_view, name='login'),
     path('activate-access/', activate_access_view, name='activate_access'),
     path('reclaim-session/', reclaim_role_session_view, name='reclaim_role_session'),
+    # Общий вход: одна ссылка на всех, система сама подскажет нужное приложение.
+    path('start/', universal_start_view, name='universal_start'),
     path('apps/', app_catalog_view, name='app_catalog'),
     path('apps/qr/<slug:role_code>/', app_catalog_qr_view, name='app_catalog_qr'),
     path('interfaces/', interface_map_view, name='interface_map'),
