@@ -4442,3 +4442,14 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-scroll:
 body.excavator-operator-screen .eo-push-invite {
     align-self: start;
 }
+
+/* Начало смены теперь тоже удержанием, значит и ему нужна заливка. Раньше
+   полоса была только у красной кнопки закрытия. */
+body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button:not(.is-danger)::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--eo-shift-hold, 0%);
+    background: linear-gradient(90deg, rgba(255, 210, 0, .32), rgba(255, 210, 0, .10));
+    transition: width .08s linear;
+}

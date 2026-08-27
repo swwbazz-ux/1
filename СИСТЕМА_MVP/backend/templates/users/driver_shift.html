@@ -1889,6 +1889,15 @@ body.driver-mobile-screen .driver-shift-submit::before {
     background: rgba(248, 113, 113, .28);
 }
 
+body.driver-mobile-screen .driver-shift-open::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    width: var(--driver-shift-open-hold, 0%);
+    background: rgba(140, 255, 46, .30);
+}
+
 body.driver-mobile-screen .driver-shift-logout::before {
     content: "";
     position: absolute;
@@ -3895,7 +3904,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                             <span class="driver-work-hold-bar is-outer" aria-hidden="true"></span>
                             <span class="driver-work-hold-bar is-core" aria-hidden="true"></span>
                             <span class="driver-work-dial-core">
-                                <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}%</span>
+                                <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}%{% else %}{{ shift_plan_short_label|default:"нет плана" }}{% endif %}</span>
                                 {% if shift_plan_visual.has_completed_loops %}<b class="driver-work-progress-loop" aria-label="Завершено циклов: {{ shift_plan_visual.completed_loops }}">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
                                 <strong class="driver-work-label" data-driver-dial-label>{{ driver_dial_label }}</strong>
                                 <em class="driver-work-note">{{ driver_dial_note }}</em>
@@ -3913,7 +3922,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                         <span class="driver-work-hold-bar is-outer" aria-hidden="true"></span>
                         <span class="driver-work-hold-bar is-core" aria-hidden="true"></span>
                         <span class="driver-work-dial-core">
-                            <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}%</span>
+                            <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}%{% else %}{{ shift_plan_short_label|default:"нет плана" }}{% endif %}</span>
                             {% if shift_plan_visual.has_completed_loops %}<b class="driver-work-progress-loop" aria-label="Завершено циклов: {{ shift_plan_visual.completed_loops }}">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
                             <strong class="driver-work-label" data-driver-dial-label>{{ driver_dial_label }}</strong>
                             <em class="driver-work-note">{{ driver_dial_note }}</em>
@@ -4621,12 +4630,58 @@ function bindDriverShiftOpeningForm(shell) {
             syncOpenShiftFormState({explicitReset: true});
         }, 0);
     });
-    openShiftForm.addEventListener("submit", function () {
+    openShiftForm.addEventListener("submit", function (event) {
+        if (openShiftForm.dataset.driverShiftOpenConfirmed !== "true") {
+            event.preventDefault();
+            if (typeof window.showDriverToast === "function") {
+                window.showDriverToast("Удерживайте кнопку, чтобы начать смену");
+            }
+            return;
+        }
         openShiftForm.dataset.driverShiftOpeningPending = "true";
         openShiftButton.disabled = true;
         openShiftButton.classList.add("is-pending");
         openShiftButton.textContent = "Открываем смену";
     });
+
+    /* Начало смены — тоже удержанием, как и закрытие. Короткий тап слишком легко
+       поймать случайно: телефон в кармане, рукавица, тряска в кабине. Секунды
+       достаточно — действие не опасное, в отличие от закрытия смены. */
+    if (window.createDriverRoleHoldGuard && openShiftButton.dataset.driverOpenHoldBound !== "true") {
+        openShiftButton.dataset.driverOpenHoldBound = "true";
+        if (window.driverShiftOpenHoldGuard && typeof window.driverShiftOpenHoldGuard.destroy === "function") {
+            window.driverShiftOpenHoldGuard.destroy();
+        }
+        var openHoldGuard = window.createDriverRoleHoldGuard({
+            holdMs: 1000,
+            onStart: function () {
+                openShiftButton.classList.add("is-holding");
+            },
+            onProgress: function (percent) {
+                openShiftButton.style.setProperty("--driver-shift-open-hold", percent.toFixed(2) + "%");
+            },
+            onReset: function () {
+                openShiftButton.classList.remove("is-holding");
+                openShiftButton.style.setProperty("--driver-shift-open-hold", "0%");
+            },
+            onComplete: function () {
+                openShiftButton.classList.remove("is-holding");
+                openShiftForm.dataset.driverShiftOpenConfirmed = "true";
+                openShiftForm.requestSubmit(openShiftButton);
+            }
+        });
+        window.driverShiftOpenHoldGuard = openHoldGuard;
+        openShiftButton.addEventListener("pointerdown", function (event) {
+            if (openShiftButton.disabled) return;
+            openShiftButton.setPointerCapture?.(event.pointerId);
+            openHoldGuard.start();
+        });
+        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
+            openShiftButton.addEventListener(eventName, function () {
+                if (openShiftForm.dataset.driverShiftOpenConfirmed !== "true") openHoldGuard.reset();
+            });
+        });
+    }
     syncOpenShiftFormState();
 }
 
@@ -4998,25 +5053,10 @@ window.bindDriverMobileShell = function () {
                         shiftCloseHoldGuard.cancel();
                         return;
                     }
-                    if (typeof window.openAppConfirmDialog === "function") {
-                        window.openAppConfirmDialog(
-                            "Закрыть смену с указанными конечными показаниями?",
-                            function () {
-                                if (driverRoleIsReadonly()) {
-                                    shiftCloseHoldGuard.cancel();
-                                    return;
-                                }
-                                form.dataset.driverShiftConfirmed = "true";
-                                if (driverRoleIsReadonly()) {
-                                    shiftCloseHoldGuard.cancel();
-                                    return;
-                                }
-                                form.requestSubmit(closeButton);
-                            },
-                            0,
-                            "Закрыть смену"
-                        );
-                    }
+                    /* Окно подтверждения убрано: подтверждение — само удержание
+                       кнопки две секунды, случайным касанием смену не закроешь.
+                       Короткий тап только подсказывает, что надо держать. */
+                    showDriverToast("Удерживайте кнопку, чтобы закрыть смену");
                 }
             });
             form.addEventListener("submit", function (event) {
@@ -5327,6 +5367,8 @@ window.bindDriverMobileShell = function () {
             messages.innerHTML = "";
         }
     }
+    /* Форма начала смены привязывается отдельно, за пределами этой области. */
+    window.showDriverToast = function (message) { showDriverToast(message); };
     function showDriverToast(message) {
         var toast = shell.querySelector("[data-driver-toast]");
         if (!toast) {

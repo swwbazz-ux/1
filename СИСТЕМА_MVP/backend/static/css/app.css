@@ -33255,3 +33255,15 @@ body[data-observer-mode="true"] [data-observer-blocked="true"] {
         overflow: auto;
     }
 }
+
+/* Окно подтверждения рисуется на белом, а цвет заголовка ему доставался от
+   тёмной темы оболочки — светло-зелёный текст на белом фоне читать нельзя.
+   Тёмная тема применяется к диалогу только без класса shared-shift-dialog,
+   значит и заголовок должен подчиняться тому же условию. */
+.app-confirm-dialog.shared-shift-dialog .app-confirm-content h2 {
+    color: #0F172A;
+}
+
+.app-confirm-dialog.shared-shift-dialog .app-confirm-content p {
+    color: #334155;
+}

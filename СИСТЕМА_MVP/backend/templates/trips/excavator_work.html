@@ -6,9 +6,9 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v154">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v154">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v154">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v155">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v155">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v155">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -244,7 +244,7 @@
                     </div>
                     <div class="eo-dashboard-plan-widget">
                         <div class="eo-dashboard-plan-ring {{ shift_plan_visual.text_class }}{% if shift_plan_visual.is_overrun %} is-progress-overrun{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--eo-dashboard-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%; --eo-dashboard-loop-progress: {{ shift_plan_visual.loop_progress }}%;" role="img" aria-label="{% if shift_plan_has_plan %}Выполнение нормы: текущий цикл {{ shift_plan_visual.loop_progress }}%, завершено циклов {{ shift_plan_visual.completed_loops }}{% else %}{{ shift_plan_status_label }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}" data-progress-percent="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-progress-loops="{{ shift_plan_visual.completed_loops }}" data-progress-phase="{{ shift_plan_visual.phase }}">
-                            <span>{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}%</span>
+                            <span>{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}%{% else %}—{% endif %}</span>
                             {% if shift_plan_visual.has_completed_loops %}<b class="eo-dashboard-progress-loop">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
                         </div>
                     </div>
@@ -490,7 +490,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v154";
+var excavatorShellVersion = "excavator-mobile-shell-v155";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 document.body.dataset.realtimeVisibilityOnly = "true";
@@ -1144,12 +1144,18 @@ window.initExcavatorWorkShell = function () {
         }
     }
 
+    /* Закрытие смены держим две секунды — оно необратимо. Начало держим одну:
+       случайное нажатие отсечь надо, но пугать длинным удержанием незачем. */
+    function currentShiftHoldMs() {
+        return isShiftCloseAction() ? shiftHoldMs : 1000;
+    }
+
     function drawShiftHold() {
         if (!shiftButton || !shiftHoldStart) {
             return;
         }
         var elapsed = Date.now() - shiftHoldStart;
-        var percent = Math.max(0, Math.min(100, Math.round((elapsed / shiftHoldMs) * 100)));
+        var percent = Math.max(0, Math.min(100, Math.round((elapsed / currentShiftHoldMs()) * 100)));
         shiftButton.style.setProperty("--eo-shift-hold", percent + "%");
         if (percent < 100) {
             shiftHoldFrame = window.requestAnimationFrame(drawShiftHold);
@@ -2802,28 +2808,24 @@ window.initExcavatorWorkShell = function () {
     if (shiftButton) {
         var shiftCompletedByHold = false;
         var shiftTapConfirmationOpened = false;
-        function requestShiftCloseConfirmation() {
-            if (typeof window.openAppConfirmDialog !== "function") return;
-            window.openAppConfirmDialog(
-                "Закрыть смену с указанными конечными показаниями?",
-                submitExcavatorShiftAction,
-                0,
-                "Закрыть смену"
+        /* Окно подтверждения убрано: подтверждение — само удержание кнопки.
+           Короткий тап только подсказывает, что надо держать. */
+        function hintHoldRequired() {
+            showExcavatorNotice(
+                isShiftCloseAction()
+                    ? "Удерживайте кнопку, чтобы закрыть смену"
+                    : "Удерживайте кнопку, чтобы начать смену"
             );
         }
         function completeShiftHold() {
             if (!shiftUrl || shiftButton.disabled) {
                 return;
             }
-            if (!isShiftCloseAction()) {
-                submitExcavatorShiftAction();
-                return;
-            }
             shiftCompletedByHold = true;
             submitExcavatorShiftAction();
         }
         function startShiftHold(event) {
-            if (shiftButton.disabled || !isShiftCloseAction()) {
+            if (shiftButton.disabled) {
                 return;
             }
             if (shiftHoldStart) {
@@ -2836,7 +2838,7 @@ window.initExcavatorWorkShell = function () {
                 shiftLabel.textContent = "Держите";
             }
             drawShiftHold();
-            shiftHoldTimer = window.setTimeout(completeShiftHold, shiftHoldMs);
+            shiftHoldTimer = window.setTimeout(completeShiftHold, currentShiftHoldMs());
         }
         function cancelShiftHold(event) {
             var wasHolding = shiftButton.classList.contains("is-holding");
@@ -2845,33 +2847,29 @@ window.initExcavatorWorkShell = function () {
             }
             if (
                 wasHolding
-                && isShiftCloseAction()
+                && !shiftCompletedByHold
                 && event
                 && (event.type === "pointerup" || event.type === "touchend")
                 && !shiftTapConfirmationOpened
             ) {
                 shiftTapConfirmationOpened = true;
-                requestShiftCloseConfirmation();
+                hintHoldRequired();
                 window.setTimeout(function () {
                     shiftTapConfirmationOpened = false;
                 }, 700);
             }
         }
         shiftButton.addEventListener("click", function (event) {
-            if (isShiftCloseAction()) {
-                event.preventDefault();
-                if (shiftCompletedByHold) {
-                    shiftCompletedByHold = false;
-                    return;
-                }
-                if (shiftTapConfirmationOpened) {
-                    shiftTapConfirmationOpened = false;
-                    return;
-                }
-                requestShiftCloseConfirmation();
+            event.preventDefault();
+            if (shiftCompletedByHold) {
+                shiftCompletedByHold = false;
                 return;
             }
-            submitExcavatorShiftAction();
+            if (shiftTapConfirmationOpened) {
+                shiftTapConfirmationOpened = false;
+                return;
+            }
+            hintHoldRequired();
         });
         shiftButton.addEventListener("pointerdown", startShiftHold);
         ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
@@ -2882,9 +2880,9 @@ window.initExcavatorWorkShell = function () {
             shiftButton.addEventListener(eventName, cancelShiftHold, { passive: false });
         });
         shiftButton.addEventListener("keydown", function (event) {
-            if ((event.key === "Enter" || event.key === " ") && !event.repeat && !shiftButton.disabled && isShiftCloseAction()) {
+            if ((event.key === "Enter" || event.key === " ") && !event.repeat && !shiftButton.disabled) {
                 event.preventDefault();
-                requestShiftCloseConfirmation();
+                startShiftHold(event);
             }
         });
         shiftButton.addEventListener("keyup", function (event) {

@@ -104,6 +104,33 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     window.setInterval(refreshMonitor, 10000);
+
+    /* Из формы служебного завершения не было выхода: передумал — и деться некуда.
+       Закрываем по кнопке «Отмена», по Escape и по щелчку мимо окна. */
+    function closeOpenMenus(except) {
+        document.querySelectorAll("details.admin-live-action-menu[open]").forEach(function (menu) {
+            if (menu !== except) menu.open = false;
+        });
+    }
+
+    document.addEventListener("click", function (event) {
+        var cancel = event.target.closest("[data-admin-live-cancel]");
+        if (cancel) {
+            event.preventDefault();
+            closeOpenMenus();
+            return;
+        }
+        /* Внутри самой формы клик ничего не закрывает — там человек работает.
+           Клик по затемнению позади окна целится в details, поэтому проверяем
+           именно форму и кнопку, а не весь блок меню. */
+        if (event.target.closest(".admin-live-danger-form")) return;
+        var summary = event.target.closest("details.admin-live-action-menu > summary");
+        closeOpenMenus(summary ? summary.parentElement : null);
+    });
+
+    document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") closeOpenMenus();
+    });
 });
 </script>
 {% endblock %}

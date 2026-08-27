@@ -483,3 +483,48 @@
         overflow: auto;
     }
 }
+
+/* Окно служебного завершения смены ставим по центру экрана. Раньше оно
+   выпадало из кнопки вниз: уезжало за нижний край страницы и обрезалось
+   карточкой приложения — человек видел только полоску и не понимал, чего
+   от него хотят. */
+.admin-live-action-menu[open] > .admin-live-danger-form {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    transform: translate(-50%, -50%);
+    z-index: 1000;
+    width: min(420px, calc(100vw - 32px));
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    margin: 0;
+}
+
+/* Затемнение позади окна: видно, что остальное сейчас недоступно. */
+.admin-live-action-menu[open]::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    background: rgba(15, 24, 32, .45);
+}
+
+/* Кнопка отмены: раньше из окна нельзя было выйти, передумав. Вид спокойный,
+   чтобы не путали, где подтверждение, а где отказ. */
+.admin-live-cancel-button {
+    min-height: 34px;
+    padding: 8px 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.admin-live-cancel-button:hover {
+    border-color: var(--admin-muted);
+}
