@@ -298,6 +298,47 @@
     body.login-page.unified-login-screen .shared-shift-login-field {
         margin-bottom: clamp(12px, 2.6vh, 18px);
     }
+
+    /* У формы в общих стилях отступ 32 точки стоял только справа, слева нулевой —
+       из-за этого всё содержимое было смещено влево на половину этого отступа.
+       Обнуляем и центруем явно; заодно учитываем вырез экрана, на телефонах с
+       ним боковые отступы тоже различаются. */
+    body.login-page.unified-login-screen .shared-shift-dialog .unified-login-form,
+    body.login-page.unified-login-screen .shared-shift-dialog .login-install-gate {
+        padding-left: 0;
+        padding-right: 0;
+    }
+
+    body.login-page.unified-login-screen .shared-shift-dialog.unified-login-dialog {
+        justify-items: center;
+        margin-inline: auto;
+        padding-left: calc(env(safe-area-inset-left, 0px) + clamp(20px, 6vw, 34px));
+        padding-right: calc(env(safe-area-inset-right, 0px) + clamp(20px, 6vw, 34px));
+    }
+
+    /* Пока открыта клавиатура, она закрывает нижнюю половину экрана. Содержимое
+       больше не центрируем по всей высоте — иначе поля и кнопка «Войти»
+       оказываются под клавиатурой. Прижимаем к верху и убираем крупную шапку:
+       форма из двух полей и кнопки помещается над клавиатурой целиком. */
+    body.login-page.unified-login-screen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog {
+        align-content: start;
+        min-height: 0;
+        padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+        padding-bottom: 16px;
+    }
+
+    body.login-page.unified-login-screen.is-login-keyboard-active .unified-login-role-identity {
+        display: none;
+    }
+
+    body.login-page.unified-login-screen.is-login-keyboard-active .shared-shift-dialog h2 {
+        margin-bottom: clamp(8px, 1.6vh, 14px);
+        font-size: clamp(19px, 5.4vw, 24px);
+    }
+
+    body.login-page.unified-login-screen.is-login-keyboard-active .shared-shift-login-field {
+        margin-bottom: 10px;
+    }
 </style>
 {% endif %}
 <main class="shared-shift-dialog unified-login-dialog">
