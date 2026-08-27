@@ -170,32 +170,37 @@ def build_card(card: dict) -> Path:
 
 
 def build_start_card(card: dict) -> Path:
-    """Раскладка сверху вниз: марка, заголовок, значки, подпись.
+    """Значки слева, текст справа — и всё по вертикали в середине.
 
-    Значки ставим ниже заголовка фиксированно — при вычислении «по центру»
-    заголовок налезал на них.
+    Мессенджер обрезает картинку сверху и снизу, поэтому раскладка сверху вниз
+    не годилась: срезало и марку, и подпись. В центральной полосе уцелевает всё.
     """
     accent = card['accent']
     image = glow_layer(accent)
     draw = ImageDraw.Draw(image)
 
-    text_x = 92
-    limit = WIDTH - text_x - 92
-    draw.text((text_x, 96), COMPANY, font=pick_font(FONT_CANDIDATES_BOLD, 30), fill=(126, 146, 154))
-    draw.text((text_x, 140), card['title'], font=fit_font(draw, card['title'], limit, 72), fill=(242, 248, 250))
-
-    size = 176
-    gap = 26
-    x, y = text_x, 268
+    size = 150
+    gap = 18
+    icons_x = 92
+    icons_width = len(card['icons']) * size + (len(card['icons']) - 1) * gap
+    icons_y = (HEIGHT - size) // 2
+    x = icons_x
     for name in card['icons']:
         icon_path = ICON_DIR / name
         if not icon_path.exists():
             raise SystemExit(f'Нет значка {icon_path}')
         icon = rounded(Image.open(icon_path).convert('RGBA').resize((size, size), Image.LANCZOS))
-        image.paste(icon, (x, y), icon)
+        image.paste(icon, (x, icons_y), icon)
         x += size + gap
 
-    lead_font = pick_font(FONT_CANDIDATES_REGULAR, 32)
+    text_x = icons_x + icons_width + 56
+    limit = WIDTH - text_x - 80
+    title_font = fit_font(draw, card['title'], limit, 62)
+    lead_font = pick_font(FONT_CANDIDATES_REGULAR, 28)
+
+    draw.text((text_x, 236), COMPANY, font=pick_font(FONT_CANDIDATES_BOLD, 27), fill=(126, 146, 154))
+    draw.text((text_x, 278), card['title'], font=title_font, fill=(242, 248, 250))
+
     words = card['lead'].split(' ')
     line, lines = '', []
     for word in words:
@@ -207,8 +212,8 @@ def build_start_card(card: dict) -> Path:
             line = probe
     if line:
         lines.append(line)
-    for index, text in enumerate(lines[:2]):
-        draw.text((text_x, 486 + index * 44), text, font=lead_font, fill=(159, 178, 186))
+    for index, text in enumerate(lines[:3]):
+        draw.text((text_x, 362 + index * 38), text, font=lead_font, fill=(159, 178, 186))
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUT_DIR / f"{card['slug']}-share.png"
