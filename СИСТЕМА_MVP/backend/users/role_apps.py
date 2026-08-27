@@ -8,7 +8,7 @@ from django.http import HttpResponse, JsonResponse
 
 
 APP_CONTRACT_VERSION = 'pwa-contract-v1'
-STATIC_ASSET_RELEASE = 'ready-core-traffic-v25'
+STATIC_ASSET_RELEASE = 'ready-core-traffic-v28'
 READY_TRAFFIC_ROLE_CODES = frozenset({
     'admin',
     'oup',
@@ -221,7 +221,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v156',
+        shell_version='excavator-mobile-shell-v159',
     ),
     RoleApp(
         role_code='mining_master',
@@ -237,7 +237,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v134',
+        shell_version='mining-master-mobile-shell-v137',
     ),
     RoleApp(
         role_code='deputy_mining_manager',

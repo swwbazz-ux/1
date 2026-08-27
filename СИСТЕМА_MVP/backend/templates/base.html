@@ -98,6 +98,41 @@
             background: #ffd45b;
             box-shadow: 0 0 14px rgba(255, 212, 91, .82);
         }
+        /* Цвет связи держим одной переменной: её же берут кольца планов в шапках
+           приложений, чтобы связь везде читалась одинаково. */
+        body { --app-connection-color: #58df52; }
+        body[data-connection-state="weak"] { --app-connection-color: #ffd45b; }
+        body[data-connection-state="lost"] { --app-connection-color: #ff5a50; }
+
+        .app-connection-dot {
+            position: fixed;
+            /* По центру строки шапки, а не под её верхним краем. */
+            top: calc(env(safe-area-inset-top, 0px) + (var(--app-header-h, 48px) - 20px) / 2);
+            right: max(10px, env(safe-area-inset-right));
+            z-index: 10002;
+            display: inline-flex;
+            align-items: center;
+            padding: 5px;
+            border-radius: 999px;
+            background: rgba(2, 10, 14, .45);
+            pointer-events: none;
+        }
+
+        .app-connection-dot i {
+            display: block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--app-connection-color);
+            box-shadow: 0 0 10px var(--app-connection-color);
+        }
+
+        /* Где индикатор уже встроен в шапку, общий не нужен. */
+        body.driver-mobile-screen .app-connection-dot,
+        body.mining-master-mobile-screen .app-connection-dot {
+            display: none;
+        }
+
         .app-realtime-status.is-visible {
             opacity: 1;
             transform: translate(-50%, 0);
@@ -904,9 +939,20 @@
     </div>
 </div>
 
+<!-- Плашка «Связь потеряна» закрывала собой нижнюю панель вкладок и говорила
+   ровно то же, что цветная точка в углу. Оставляем её в разметке только как
+   запасной путь: realtime-client прячет её, если на экране есть индикатор
+   связи, а индикатор ниже стоит на всех экранах. -->
 <div class="app-realtime-status" data-app-realtime-status hidden role="status" aria-live="polite">
     Связь с сервером потеряна. Экран может отставать.
 </div>
+
+<!-- Один индикатор на все приложения: зелёный — связь есть, жёлтый — связь
+   пропадает, красный — потеряна. У водителя и горного мастера индикатор свой,
+   встроенный в шапку, поэтому там этот скрыт. -->
+<span class="app-connection-dot" data-connection-indicator role="status" aria-live="polite" title="Связь с сервером" data-state-label="связь есть">
+    <i aria-hidden="true"></i>
+</span>
 
 <div class="app-realtime-update" data-app-realtime-update hidden role="status" aria-live="polite">
     <span data-app-realtime-update-text>На сервере появились новые данные.</span>

@@ -4453,3 +4453,39 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-
     background: linear-gradient(90deg, rgba(255, 210, 0, .32), rgba(255, 210, 0, .10));
     transition: width .08s linear;
 }
+
+/* Кольцо в шапке машиниста. Тонкий контур — состояние связи: зелёный,
+   жёлтый, красный. Выполнение плана рисуется поверх него толстой дугой по
+   тому же контуру: полный круг — это 100%. Подкраской фона такая дуга не
+   читалась, поэтому рисуем её отдельным слоем с кольцевой маской. */
+body.excavator-operator-screen .eo-dashboard-plan-ring,
+body.excavator-operator-screen .eo-dashboard-plan-ring.is-plan-missing {
+    position: relative !important;
+    border: 2px solid color-mix(in srgb, var(--app-connection-color, #58df52) 55%, transparent) !important;
+    background: #061014 !important;
+    box-shadow: 0 0 14px color-mix(in srgb, var(--app-connection-color, #58df52) 30%, transparent) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring::before {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border-radius: 50%;
+    background: conic-gradient(var(--app-connection-color, #58df52) 0 var(--eo-dashboard-progress, 0%), transparent var(--eo-dashboard-progress, 0%) 100%);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+    pointer-events: none;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring::after {
+    border-color: transparent !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring.is-plan-missing span {
+    color: #8fa1ab !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-ring span {
+    position: relative;
+    z-index: 1;
+}

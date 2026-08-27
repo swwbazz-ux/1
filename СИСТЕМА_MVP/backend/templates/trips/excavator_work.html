@@ -6,9 +6,9 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v156">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v156">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v156">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v159">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v159">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v159">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -244,7 +244,7 @@
                     </div>
                     <div class="eo-dashboard-plan-widget">
                         <div class="eo-dashboard-plan-ring {{ shift_plan_visual.text_class }}{% if shift_plan_visual.is_overrun %} is-progress-overrun{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--eo-dashboard-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%; --eo-dashboard-loop-progress: {{ shift_plan_visual.loop_progress }}%;" role="img" aria-label="{% if shift_plan_has_plan %}Выполнение нормы: текущий цикл {{ shift_plan_visual.loop_progress }}%, завершено циклов {{ shift_plan_visual.completed_loops }}{% else %}{{ shift_plan_status_label }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}" data-progress-percent="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-progress-loops="{{ shift_plan_visual.completed_loops }}" data-progress-phase="{{ shift_plan_visual.phase }}">
-                            <span>{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}%{% else %}—{% endif %}</span>
+                            <span>{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}%</span>
                             {% if shift_plan_visual.has_completed_loops %}<b class="eo-dashboard-progress-loop">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
                         </div>
                     </div>
@@ -490,7 +490,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v156";
+var excavatorShellVersion = "excavator-mobile-shell-v159";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 document.body.dataset.realtimeVisibilityOnly = "true";
