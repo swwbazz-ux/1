@@ -226,8 +226,16 @@
 }
 
 .admin-live-person-avatar {
+    /* Буква стояла в углу и мелкой: размер шрифта наследовался от карточки —
+       десять точек вместо восемнадцати у соседнего значка приложения. Рядом в
+       одном списке две одинаковые буквы, и разница бросалась в глаза. Этот файл
+       грузится последним, поэтому размер задаём здесь. */
+    display: grid;
+    place-items: center;
     width: 38px;
     height: 38px;
+    font-size: 16px;
+    line-height: 1;
 }
 
 .admin-live-person-avatar img {
@@ -237,7 +245,7 @@
 }
 
 .admin-live-person-main strong,
-.admin-live-person-main span {
+.admin-live-person-main span:not(.admin-live-person-avatar) {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -248,7 +256,7 @@
     font-size: 13px;
 }
 
-.admin-live-person-main span {
+.admin-live-person-main span:not(.admin-live-person-avatar) {
     margin-top: 2px;
     color: var(--admin-muted);
     font-size: 10px;
@@ -302,9 +310,26 @@
 }
 
 .admin-live-person-actions {
-    display: flex;
-    flex-wrap: wrap;
+    /* Четыре кнопки в столбик занимали пол-экрана телефона, и до карточки
+       следующего человека приходилось долго листать. Раскладываем два на два:
+       сверху наблюдение и управление, снизу служебные действия. */
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
+}
+
+.admin-live-person-actions > * {
+    min-width: 0;
+}
+
+.admin-live-person-actions > .admin-live-action {
+    width: 100%;
+    justify-content: center;
+}
+
+/* Раскрытое подтверждение — на всю ширину: внутри форма с полями. */
+.admin-live-person-actions > .admin-live-action-menu[open] {
+    grid-column: 1 / -1;
 }
 
 .admin-live-action,

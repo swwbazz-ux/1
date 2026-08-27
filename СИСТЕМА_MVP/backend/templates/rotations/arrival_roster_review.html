@@ -132,7 +132,7 @@
                             <tbody>
                             {% for employee in employee_results %}
                                 <tr>
-                                    <td>{% if employee.photo %}<img src="{{ employee.photo.url }}" alt="Фото сотрудника" width="48" height="48">{% else %}Нет фото{% endif %}</td>
+                                    <td>{% if employee.has_photo_file %}<img src="{{ employee.photo.url }}" alt="Фото сотрудника" width="48" height="48">{% else %}Нет фото{% endif %}</td>
                                     <td>{{ employee.full_name }}</td>
                                     <td>{% if employee.personnel_position %}{{ employee.personnel_position.name }}{% else %}{{ employee.position|default:"Не указана" }}{% endif %}</td>
                                     <td>{{ employee.watch_composition.name|default:"Не указана" }}</td>

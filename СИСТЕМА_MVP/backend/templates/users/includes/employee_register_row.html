@@ -22,7 +22,7 @@
 {% endif %}
     <span class="oup-person-cell">
         <span class="oup-person-avatar" aria-hidden="true">
-            {% if employee.photo %}
+            {% if employee.has_photo_file %}
                 <img src="{{ employee.photo.url }}" alt="" loading="lazy" decoding="async">
             {% else %}
                 {{ employee.full_name|first }}

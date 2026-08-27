@@ -15,6 +15,7 @@ from .forms import (
     EmployeeCardForm,
     PersonnelPositionReferenceForm,
 )
+from .role_apps import ROLE_APPS_BY_CODE
 from .models import (
     Employee,
     EmployeeAccess,
@@ -358,9 +359,12 @@ class UnifiedEmployeeCardTests(TestCase):
         )
 
     def test_shared_employee_card_shells_use_new_cache_versions(self):
+        # Версии оболочек поднимаются при каждой заметной правке, и зашитая
+        # строка роняла проверку на ровном месте. Сверяем с источником правды:
+        # важно, что скрипт отдаёт ту версию, которая объявлена в каталоге.
         expected_versions = {
-            'system_admin_service_worker': 'system-admin-shell-v19',
-            'oup_service_worker': 'oup-shell-v21',
+            'system_admin_service_worker': ROLE_APPS_BY_CODE['admin'].shell_version,
+            'oup_service_worker': ROLE_APPS_BY_CODE['oup'].shell_version,
         }
 
         for view_name, expected_version in expected_versions.items():
@@ -427,12 +431,29 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertIn('Включить редактирование', editing_template)
         self.assertIn('Завершить редактирование', editing_template)
 
+        # Раньше здесь стояли зашитые версии файлов стилей, и любое их
+        # поднятие роняло проверку. Смысл же в другом: три экрана ОУП должны
+        # подключать одни и те же файлы одной версии, иначе вид разъедется.
         template_root = Path(__file__).resolve().parents[1] / 'templates' / 'users'
+        stylesheets = (
+            'oup-workplace-v1.css',
+            'oup-work-period-v1.css',
+            'oup-responsive-layout-v2.css',
+        )
+        seen = {name: set() for name in stylesheets}
         for template_name in ('oup_employees.html', 'oup_employee_dismiss.html', 'oup_logs.html'):
             template = (template_root / template_name).read_text(encoding='utf-8')
-            self.assertIn('oup-workplace-v1.css\' %}?v=20260718-4', template)
-            self.assertIn('oup-work-period-v1.css\' %}?v=20260718-3', template)
-            self.assertIn('oup-responsive-layout-v2.css\' %}?v=20260718-2', template)
+            for name in stylesheets:
+                match = re.search(re.escape(name) + r"' %\}\?v=([\w.-]+)", template)
+                self.assertIsNotNone(
+                    match, f'{template_name}: не подключён {name} с версией',
+                )
+                seen[name].add(match.group(1))
+        for name, versions in seen.items():
+            self.assertEqual(
+                len(versions), 1,
+                f'{name} подключён с разными версиями: {sorted(versions)}',
+            )
 
     def test_standard_header_theme_buttons_are_icon_only(self):
         backend_root = Path(__file__).resolve().parents[1]

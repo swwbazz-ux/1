@@ -25,16 +25,7 @@
                 <h1>Журнал</h1>
                 <p>История административных действий по сотрудникам, доступам, конфликтам и справочникам.</p>
             </div>
-            <nav class="admin-console-nav" aria-label="Разделы админки">
-                <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
-                <a href="{% url 'system_admin_employees' %}">Сотрудники</a>
-                <a href="{% url 'system_admin_references' %}">Справочники</a>
-                <a href="{% url 'system_admin_live_monitor' %}">Смена онлайн</a>
-                <a href="{% url 'system_admin_enter_employee' %}">Войти к сотруднику</a>
-                <a href="{% url 'system_admin_conflicts' %}">Конфликты</a>
-                <a class="is-active" href="{% url 'system_admin_logs' %}">Журнал</a>
-                <a href="{% url 'system_admin_exports' %}">Выгрузки</a>
-            </nav>
+            {% include "users/includes/system_admin_nav.html" %}
         </section>
 
         <section class="admin-console-actions">

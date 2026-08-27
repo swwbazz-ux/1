@@ -5,9 +5,9 @@
 {% block body_class %}system-admin-employees-screen{% endblock %}
 {% block extra_head %}
 {% include "users/includes/system_admin_workspace_styles.html" %}
-<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260718-4">
+<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260828-4">
 <link rel="stylesheet" href="{% static 'css/oup-responsive-layout-v2.css' %}?v=20260718-2">
-<link rel="stylesheet" href="{% static 'css/admin-employee-filters-v1.css' %}?v=20260824-2">
+<link rel="stylesheet" href="{% static 'css/admin-employee-filters-v1.css' %}?v=20260828-4">
 {% endblock %}
 
 {% block body %}
@@ -27,16 +27,7 @@
                 <h1>Сотрудники</h1>
                 <p>Управление сотрудниками, доступами и административными действиями.</p>
             </div>
-            <nav class="admin-console-nav" aria-label="Разделы админки">
-                <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
-                <a class="is-active" href="{% url 'system_admin_employees' %}">Сотрудники</a>
-                <a href="{% url 'system_admin_references' %}">Справочники</a>
-                <a href="{% url 'system_admin_live_monitor' %}">Смена онлайн</a>
-                <a href="{% url 'system_admin_enter_employee' %}">Войти к сотруднику</a>
-                <a href="{% url 'system_admin_conflicts' %}">Конфликты</a>
-                <a href="{% url 'system_admin_logs' %}">Журнал</a>
-                <a href="{% url 'system_admin_exports' %}">Выгрузки</a>
-            </nav>
+            {% include "users/includes/system_admin_nav.html" %}
         </section>
 
         <section class="admin-console-actions">

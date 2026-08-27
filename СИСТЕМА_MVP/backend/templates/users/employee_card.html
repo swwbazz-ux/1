@@ -4,12 +4,12 @@
 {% block title %}{{ title }}{% if employee_card_context == "oup" %} — ОУП{% endif %}{% endblock %}
 {% block body_class %}employee-card-screen employee-card-context-{{ employee_card_context }}{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/admin-employee-detail.css' %}?v=20260717-1">
+<link rel="stylesheet" href="{% static 'css/admin-employee-detail.css' %}?v=20260828-4">
 {% if employee_card_context == "oup" %}
-<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260718-4">
+<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260828-4">
 <link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260718-3">
 {% endif %}
-<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260824-6">
+<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260828-4">
 {% endblock %}
 
 {% block body %}
@@ -31,16 +31,7 @@
                     <h1>{{ title }}</h1>
                     <p>Единая карточка сотрудника, доступы и рабочее назначение.</p>
                 </div>
-                <nav class="admin-console-nav" aria-label="Разделы админки">
-                    <a href="{% url 'system_admin_dashboard' %}">Сводка</a>
-                    <a class="is-active" href="{% url 'system_admin_employees' %}" aria-current="page">Сотрудники</a>
-                    <a href="{% url 'system_admin_references' %}">Справочники</a>
-                    <a href="{% url 'system_admin_live_monitor' %}">Смена онлайн</a>
-                    <a href="{% url 'system_admin_enter_employee' %}">Войти к сотруднику</a>
-                    <a href="{% url 'system_admin_conflicts' %}">Конфликты</a>
-                    <a href="{% url 'system_admin_logs' %}">Журнал</a>
-                    <a href="{% url 'system_admin_exports' %}">Выгрузки</a>
-                </nav>
+                {% include "users/includes/system_admin_nav.html" %}
             </section>
             <section class="admin-console-actions">
                 <button type="button"

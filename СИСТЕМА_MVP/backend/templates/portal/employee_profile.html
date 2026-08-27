@@ -4,7 +4,7 @@
 <a class="back-link" href="{% url 'portal:people' %}">← Ко всем коллегам</a>
 <section class="employee-profile">
     <header class="employee-profile__header">
-        {% if employee.photo %}<img src="{% url 'portal:employee_photo' employee.pk %}" alt="">{% else %}<span class="avatar-fallback avatar-fallback--profile">{{ employee.full_name|first }}</span>{% endif %}
+        {% if employee.has_photo_file %}<img src="{% url 'portal:employee_photo' employee.pk %}" alt="">{% else %}<span class="avatar-fallback avatar-fallback--profile">{{ employee.full_name|first }}</span>{% endif %}
         <div><span class="screen-kicker">Сотрудник участка № 2</span><h1>{{ employee.full_name }}</h1><p>{{ position|default:'Сотрудник' }}</p></div>
     </header>
     <div class="employee-profile__facts">

@@ -11,7 +11,7 @@
 <div class="employee-grid">
     {% for employee in employees %}
     <a class="employee-card" href="{% url 'portal:employee_profile' employee.pk %}">
-        {% if employee.photo %}<img src="{% url 'portal:employee_photo' employee.pk %}" alt="">{% else %}<span class="avatar-fallback avatar-fallback--large">{{ employee.full_name|first }}</span>{% endif %}
+        {% if employee.has_photo_file %}<img src="{% url 'portal:employee_photo' employee.pk %}" alt="">{% else %}<span class="avatar-fallback avatar-fallback--large">{{ employee.full_name|first }}</span>{% endif %}
         <span><strong>{{ employee.full_name }}</strong><small>{{ employee.personnel_position.name|default:employee.position|default:'Сотрудник' }}</small></span>
         <b aria-hidden="true">→</b>
     </a>

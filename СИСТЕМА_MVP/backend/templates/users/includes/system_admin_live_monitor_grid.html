@@ -36,7 +36,7 @@
                     <section class="admin-live-person-row">
                         <div class="admin-live-person-main">
                             <span class="admin-live-person-avatar" aria-hidden="true">
-                                {% if row.employee.photo %}<img src="{{ row.employee.photo.url }}" alt="">{% else %}{{ row.employee.full_name|first }}{% endif %}
+                                {% if row.employee.has_photo_file %}<img src="{{ row.employee.photo.url }}" alt="">{% else %}{{ row.employee.full_name|first }}{% endif %}
                             </span>
                             <div>
                                 <strong>{{ row.employee.full_name }}</strong>

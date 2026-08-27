@@ -83,6 +83,9 @@ def system_admin_field_test_view(request):
     ).count() if hasattr(AdminActionLog, 'created_at') else 0
 
     context = {
+        # Без этого шапка рисовала пустое место рядом с аватаром: шаблон общий
+        # и ждёт сотрудника, а страница его не передавала.
+        'access': access,
         'period_key': period_key,
         'period_label': period_label,
         'periods': [(key, label) for key, (label, _) in PERIODS.items()],

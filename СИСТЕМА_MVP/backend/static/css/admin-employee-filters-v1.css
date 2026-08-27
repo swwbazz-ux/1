@@ -83,12 +83,12 @@
 }
 
 @media (max-width: 1023px) {
+    /* Общий масштаб админки не отключаем. Все остальные страницы ужаты до 0.90,
+       а эта шла в натуральную величину: кнопки выходили 44 точки вместо 40,
+       аватар 52 вместо 47, шапка выше остальных — и при переходе на вкладку
+       страница подпрыгивала. */
     .admin-employees-shell {
-        --admin-interface-scale: 1;
-        width: 100%;
-        min-height: 100dvh;
         overflow-x: hidden;
-        zoom: 1;
     }
 
     @supports not (zoom: 1) {
@@ -131,80 +131,14 @@
         overflow-x: hidden;
     }
 
-    .admin-employees-shell .admin-console-header {
-        width: 100%;
-    }
+    /* Своей шапки у этой страницы больше нет.
 
-    .admin-employees-shell .admin-console-identity,
-    .admin-employees-shell .admin-console-main,
-    .admin-employees-shell .admin-console-actions {
-        padding: clamp(10px, 3vw, 14px);
-    }
-
-    .admin-employees-shell .admin-console-identity {
-        grid-template-columns: clamp(44px, 13vw, 52px) minmax(0, 1fr);
-        gap: clamp(10px, 3vw, 14px);
-    }
-
-    .admin-employees-shell .admin-console-avatar {
-        width: 100%;
-        height: auto;
-        aspect-ratio: 1;
-    }
-
-    .admin-employees-shell .admin-console-identity strong,
-    .admin-employees-shell .admin-console-identity em {
-        white-space: normal;
-    }
-
-    .admin-employees-shell .admin-console-identity strong {
-        font-size: clamp(16px, 5vw, 20px);
-        line-height: 1.1;
-    }
-
-    .admin-employees-shell .admin-console-main {
-        gap: clamp(10px, 3vw, 14px);
-    }
-
-    .admin-employees-shell .admin-console-title h1 {
-        font-size: clamp(30px, 10vw, 42px);
-        line-height: 1;
-        overflow-wrap: normal;
-        word-break: normal;
-    }
-
-    .admin-employees-shell .admin-console-title p {
-        max-width: none;
-        font-size: clamp(12px, 3.5vw, 14px);
-    }
-
-    .admin-employees-shell .admin-console-nav {
-        display: flex;
-        flex-wrap: nowrap;
-        gap: clamp(6px, 2vw, 10px);
-        max-width: 100%;
-        padding-bottom: 4px;
-        overflow-x: auto;
-        overscroll-behavior-inline: contain;
-        scrollbar-width: thin;
-    }
-
-    .admin-employees-shell .admin-console-nav a {
-        flex: 0 0 auto;
-        width: auto;
-        min-width: max-content;
-        padding-inline: clamp(12px, 4vw, 18px);
-    }
-
-    .admin-employees-shell .admin-console-actions {
-        grid-template-columns: minmax(44px, .22fr) repeat(2, minmax(0, 1fr));
-        gap: clamp(8px, 2.5vw, 12px);
-    }
-
-    .admin-employees-shell .admin-console-actions .admin-theme-button {
-        width: 100%;
-        min-width: 44px;
-    }
+       Здесь была написана отдельная: свои отступы, свой аватар, заголовок
+       clamp(30px, 10vw, 42px) вместо общего и кнопки на 44 точки вместо 40.
+       Шапка выходила на 41 точку выше, чем на остальных страницах, и при
+       переходе с вкладки на вкладку страница подпрыгивала. Навигация вдобавок
+       была лентой с горизонтальной прокруткой — на телефоне её не поймать
+       пальцем. Общая шапка описана один раз в app.css, пусть она и работает. */
 
     .admin-employees-shell .employees-page {
         width: calc(100% - clamp(12px, 4vw, 20px));

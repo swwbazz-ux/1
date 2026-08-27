@@ -12729,6 +12729,27 @@ body.employees-admin-screen {
     justify-content: end;
 }
 
+/* Индикатор связи стоит в самом ряду кнопок, а не рядом с ним: иначе кнопки
+   идут по своей линии, а он по своей, и на телефоне это читается как случайное
+   пятно сбоку.
+
+   Колонку под него в раскладку не дописываем: раскладок этого ряда в файле
+   несколько, страницы переопределяют их под себя, и про очередную легко забыть
+   — точка тогда сваливается на вторую строку. Вместо этого разрешаем ряду
+   добавлять колонки самому: заданные колонки достаются кнопкам, а точка
+   получает свою, узкую, в конце. Кнопки ужимаются ровно на её ширину. */
+.admin-console-header .admin-console-actions {
+    grid-auto-flow: column;
+    grid-auto-columns: 14px;
+}
+
+.admin-console-header .admin-console-actions > .app-connection-dot {
+    position: static;
+    justify-self: center;
+    padding: 0;
+    background: none;
+}
+
 .admin-console-actions .admin-utility-link {
     width: 100%;
     min-width: 0;
@@ -29012,60 +29033,15 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
         height: calc(100dvh / var(--admin-interface-scale));
     }
 
-    .admin-employee-detail-shell .admin-console-header {
-        grid-template-columns: minmax(210px, 260px) minmax(0, 1fr) minmax(230px, 300px);
-    }
 
-    .admin-employee-detail-shell .admin-console-identity,
-    .admin-employee-detail-shell .admin-console-main,
-    .admin-employee-detail-shell .admin-console-actions {
-        padding: 10px 16px;
-    }
 
-    .admin-employee-detail-shell .admin-console-identity {
-        grid-template-columns: 52px minmax(0, 1fr);
-        gap: 12px;
-    }
 
-    .admin-employee-detail-shell .admin-console-avatar {
-        width: 52px;
-        height: 52px;
-        font-size: 22px;
-    }
 
-    .admin-employee-detail-shell .admin-console-main {
-        grid-template-columns: minmax(200px, 310px) minmax(0, 1fr);
-        gap: 12px;
-    }
 
-    .admin-employee-detail-shell .admin-console-title h1 {
-        max-width: 100%;
-        overflow: hidden;
-        font-size: 32px;
-        line-height: .96;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
 
-    .admin-employee-detail-shell .admin-console-title p {
-        display: block;
-    }
 
-    .admin-employee-detail-shell .admin-console-nav {
-        gap: 8px;
-    }
 
-    .admin-employee-detail-shell .admin-console-nav a,
-    .admin-employee-detail-shell .admin-utility-link,
-    .admin-employee-detail-shell .admin-theme-button {
-        min-height: 40px;
-        font-size: 13px;
-    }
 
-    .admin-employee-detail-shell .admin-console-nav a {
-        min-width: 0;
-        padding: 0 10px;
-    }
 
     .admin-employee-detail-shell .admin-theme-button {
         width: 40px;
@@ -29073,10 +29049,6 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
         font-size: 0;
     }
 
-    .admin-employee-detail-shell .admin-console-actions {
-        grid-template-columns: 40px repeat(2, minmax(0, 1fr));
-        gap: 10px;
-    }
 
     body.employee-detail-screen .admin-employee-detail-shell .admin-page,
     .admin-employee-detail-shell .employee-detail-page {
@@ -29298,55 +29270,14 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
         overflow: visible;
     }
 
-    .admin-employee-detail-shell .admin-console-header {
-        grid-template-columns: 1fr;
-        min-height: 108px;
-    }
 
-    .admin-employee-detail-shell .admin-console-identity,
-    .admin-employee-detail-shell .admin-console-main,
-    .admin-employee-detail-shell .admin-console-actions {
-        padding: 14px 12px;
-    }
 
-    .admin-employee-detail-shell .admin-console-identity {
-        grid-template-columns: 56px minmax(0, 1fr);
-        gap: 12px;
-    }
 
-    .admin-employee-detail-shell .admin-console-avatar {
-        width: 56px;
-        height: 56px;
-        font-size: 24px;
-    }
 
-    .admin-employee-detail-shell .admin-console-main {
-        gap: 10px;
-    }
 
-    .admin-employee-detail-shell .admin-console-title h1 {
-        max-width: 100%;
-        overflow: visible;
-        font-size: 30px;
-        line-height: .96;
-        text-overflow: clip;
-        white-space: normal;
-    }
 
-    .admin-employee-detail-shell .admin-console-title p {
-        display: block;
-    }
 
-    .admin-employee-detail-shell .admin-console-nav {
-        gap: 8px;
-    }
 
-    .admin-employee-detail-shell .admin-console-nav a,
-    .admin-employee-detail-shell .admin-utility-link,
-    .admin-employee-detail-shell .admin-theme-button {
-        min-height: 40px;
-        font-size: 13px;
-    }
 
     .admin-employee-detail-shell .admin-theme-button {
         width: 44px;
@@ -29354,10 +29285,6 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
         font-size: 0;
     }
 
-    .admin-employee-detail-shell .admin-console-actions {
-        grid-template-columns: 44px repeat(2, minmax(0, 1fr));
-        gap: 10px;
-    }
 
     body.employee-detail-screen .admin-employee-detail-shell .admin-page,
     .admin-employee-detail-shell .employee-detail-page {
@@ -29404,10 +29331,6 @@ body.employee-detail-screen .admin-employee-detail-shell .admin-page {
 }
 
 @media (max-width: 720px) {
-    .admin-employee-detail-shell .admin-console-nav a {
-        min-width: 0;
-        padding: 0 10px;
-    }
 }
 
 .admin-employee-create-shell > .app-header {
@@ -33016,8 +32939,16 @@ body[data-observer-mode="true"] [data-observer-blocked="true"] {
 }
 
 .admin-live-person-avatar {
+    /* Буква оказывалась в углу и мелкой: раскладку сбивало на display: block,
+       а размер шрифта наследовался от карточки — десять точек вместо
+       восемнадцати. Рядом в том же списке стоит значок приложения с такой же
+       буквой, и разница бросалась в глаза. Задаём здесь явно, чтобы совпадали. */
+    display: grid;
+    place-items: center;
     width: 38px;
     height: 38px;
+    font-size: 16px;
+    line-height: 1;
 }
 
 .admin-live-person-avatar img {
@@ -33027,7 +32958,7 @@ body[data-observer-mode="true"] [data-observer-blocked="true"] {
 }
 
 .admin-live-person-main strong,
-.admin-live-person-main span {
+.admin-live-person-main span:not(.admin-live-person-avatar) {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -33038,7 +32969,7 @@ body[data-observer-mode="true"] [data-observer-blocked="true"] {
     font-size: 13px;
 }
 
-.admin-live-person-main span {
+.admin-live-person-main span:not(.admin-live-person-avatar) {
     margin-top: 2px;
     color: var(--admin-muted);
     font-size: 10px;
@@ -33092,9 +33023,26 @@ body[data-observer-mode="true"] [data-observer-blocked="true"] {
 }
 
 .admin-live-person-actions {
-    display: flex;
-    flex-wrap: wrap;
+    /* Четыре кнопки в столбик занимали пол-экрана телефона, и до карточки
+       следующего человека приходилось долго листать. Раскладываем два на два:
+       сверху наблюдение и управление, снизу служебные действия. */
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
+}
+
+.admin-live-person-actions > * {
+    min-width: 0;
+}
+
+.admin-live-person-actions > .admin-live-action {
+    width: 100%;
+    justify-content: center;
+}
+
+/* Раскрытое подтверждение — на всю ширину: внутри форма с полями. */
+.admin-live-person-actions > .admin-live-action-menu[open] {
+    grid-column: 1 / -1;
 }
 
 .admin-live-action,
@@ -33387,4 +33335,48 @@ body.is-observer-mode .app-contract-banner {
     border: 1px solid rgba(47, 191, 113, .55);
     background: rgba(47, 191, 113, .12);
     color: #2fbf71;
+}
+
+/* Компактная шапка на телефоне.
+
+   Раньше она занимала больше половины экрана: до содержимого страницы
+   приходилось листать. Убираем то, что не помогает работать: подпись под
+   заголовком пересказывает сам заголовок, а надстрочник «Админка MVP»
+   сообщает то, что и так видно. Заодно это чинит прыжки при переходе между
+   вкладками: подпись была то в одну строку, то в две.
+
+   Кнопки не мельчим ниже 38 точек — пальцем надо попадать. Экономим на
+   промежутках и на воздухе вокруг, а не на самих кнопках. */
+@media (max-width: 720px) {
+    .admin-console-title p,
+    .admin-console-title > span {
+        display: none;
+    }
+
+    .admin-console-title h1 {
+        font-size: 26px;
+        line-height: 1.05;
+    }
+
+    .admin-console-main {
+        gap: 8px;
+    }
+
+    .admin-console-nav {
+        gap: 6px;
+    }
+
+    /* Вся админка ужата до 0.90, поэтому 42 точки на экране дают 38 —
+       чуть крупнее, чем было до перекройки шапки. Экономим на промежутках,
+       а не на том, куда надо попадать пальцем. */
+    .admin-console-nav a {
+        min-height: 42px;
+    }
+
+    .admin-console-identity,
+    .admin-console-main,
+    .admin-console-actions {
+        padding-top: 8px;
+        padding-bottom: 8px;
+    }
 }

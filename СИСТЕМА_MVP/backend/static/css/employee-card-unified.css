@@ -44,10 +44,6 @@
     --employee-info: #3bbbd0;
 }
 
-.employee-card-shell > .admin-console-header {
-    height: var(--employee-header-height);
-    min-height: var(--employee-header-height);
-}
 
 .employee-card-page {
     display: flex;
@@ -1233,10 +1229,6 @@ summary.employee-card-section-heading {
         --employee-header-height: auto;
     }
 
-    .employee-card-shell > .admin-console-header {
-        height: auto;
-        min-height: 0;
-    }
 
     .employee-card-page {
         height: auto;
@@ -1267,18 +1259,7 @@ summary.employee-card-section-heading {
 }
 
 @media (max-width: 760px) {
-    .employee-card-shell .admin-console-main > *,
-    .employee-card-shell .admin-console-title,
-    .employee-card-shell .admin-console-nav {
-        width: 100%;
-        min-width: 0;
-    }
 
-    .employee-card-shell .admin-console-title h1,
-    .employee-card-shell .admin-console-identity strong {
-        overflow-wrap: anywhere;
-        white-space: normal;
-    }
 
     .employee-card-page {
         padding: 8px;
@@ -1402,18 +1383,6 @@ summary.employee-card-section-heading {
         color: #111 !important;
     }
 
-    .employee-card-shell > .admin-console-header,
-    .employee-card-side,
-    .employee-card-heading-actions,
-    .employee-copy-icon,
-    .employee-card-photo-actions,
-    .employee-card-submit-row,
-    .employee-card-notice-stack,
-    .employee-card-error-summary,
-    .employee-card-readonly-note,
-    .app-confirm-modal {
-        display: none !important;
-    }
 
     .employee-card-page,
     .employee-card-workspace,

@@ -12,18 +12,8 @@
     overflow-y: visible;
 }
 
-.oup-console-header .admin-console-identity {
-    grid-template-columns: var(--oup-header-avatar-size) minmax(0, 1fr);
-}
 
-.oup-console-header .admin-console-avatar {
-    width: var(--oup-header-avatar-size);
-    height: var(--oup-header-avatar-size);
-}
 
-.oup-console-header .admin-console-title h1 {
-    font-size: var(--oup-header-title-size);
-}
 
 .oup-console-actions {
     grid-template-columns: var(--oup-header-theme-size) var(--admin-header-utility-width);
@@ -1226,9 +1216,6 @@
         min-height: 44px;
     }
 
-    .oup-console-header .admin-console-title h1 {
-        font-size: 30px;
-    }
 }
 
 @media (max-width: 640px) {
@@ -1245,14 +1232,9 @@
 
     .oup-console-title p { display: none; }
 
-    .admin-console-nav {
-        flex-wrap: nowrap;
-        padding-bottom: 4px;
-        overflow-x: auto;
-    }
-
+    /* Та же история, что на «Сотрудниках»: лента с прокруткой не годится для
+       пальца, общее правило раскладывает кнопки в два столбца. */
     .admin-console-nav a {
-        min-width: max-content;
         min-height: 44px;
     }
 

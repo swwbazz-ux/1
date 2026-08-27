@@ -1,0 +1,22 @@
+{% comment %}
+Разделы админки — одним списком на все страницы.
+
+Раньше навигацию переписывали в каждом шаблоне отдельно, и списки разошлись:
+где семь кнопок, где восемь, где девять. Из-за этого шапка на разных вкладках
+получалась разной высоты, и при переходе страница подпрыгивала. Новый раздел
+приходилось дописывать в десять файлов, о части из них забывали.
+
+Активную вкладку определяем по адресу, а не по переменной из вьюхи: иначе каждую
+вьюху пришлось бы помнить и править.
+{% endcomment %}
+<nav class="admin-console-nav" aria-label="Разделы админки">
+    <a {% if request.path == '/system-admin/' %}class="is-active" {% endif %}href="{% url 'system_admin_dashboard' %}">Сводка</a>
+    <a {% if '/system-admin/employees/' in request.path %}class="is-active" {% endif %}href="{% url 'system_admin_employees' %}">Сотрудники</a>
+    <a {% if '/system-admin/references/' in request.path %}class="is-active" {% endif %}href="{% url 'system_admin_references' %}">Справочники</a>
+    <a {% if '/system-admin/live/' in request.path %}class="is-active" {% endif %}href="{% url 'system_admin_live_monitor' %}">Смена онлайн</a>
+    <a {% if '/system-admin/enter/' in request.path %}class="is-active" {% endif %}href="{% url 'system_admin_enter_employee' %}">Войти к сотруднику</a>
+    <a {% if '/system-admin/field-test/' in request.path %}class="is-active" {% endif %}href="{% url 'system_admin_field_test' %}">Как идёт тест</a>
+    <a {% if '/system-admin/conflicts/' in request.path %}class="is-active" {% endif %}href="{% url 'system_admin_conflicts' %}">Конфликты</a>
+    <a {% if '/system-admin/logs/' in request.path %}class="is-active" {% endif %}href="{% url 'system_admin_logs' %}">Журнал</a>
+    <a {% if '/system-admin/exports/' in request.path %}class="is-active" {% endif %}href="{% url 'system_admin_exports' %}">Выгрузки</a>
+</nav>
