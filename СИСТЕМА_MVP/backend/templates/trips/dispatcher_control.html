@@ -859,9 +859,19 @@
        пересчитанная от старого dvh раскладка переставала совпадать с
        реальным экраном, оставляя пустое поле снизу. innerWidth/innerHeight
        читаются один раз по факту в момент вызова — рассинхронизация
-       невозможна в принципе, а не просто маловероятна. */
-    var DESIGN_WIDTH = 1400;
+       невозможна в принципе, а не просто маловероятна.
+
+       Высота опорного размера постоянна (800), а ширина считается от
+       пропорции самого экрана. С жёсткими 1400×800 телефон 784×336
+       оказывался по пропорции шире опорного размера, масштаб упирался в
+       высоту, и справа оставалась пустая полоса примерно в четверть
+       экрана. Растянуть отдельно по ширине нельзя — исказятся буквы и
+       значки, поэтому расширяется сам опорный размер: пульт получает
+       столько условных точек ширины, сколько нужно под пропорцию экрана,
+       и раскладка внутри распределяет их сама, как на широком мониторе.
+       Ниже 1400 не опускаемся: у́же раскладка пульта уже не собирается. */
     var DESIGN_HEIGHT = 800;
+    var DESIGN_WIDTH_MIN = 1400;
 
     function fitDispatcherShellToScreen() {
         var shell = document.querySelector(".dispatcher-shell");
@@ -871,12 +881,18 @@
         ).matches;
         if (!isPhoneLandscape) {
             shell.style.transform = "";
+            shell.style.width = "";
             return;
         }
+        var designWidth = Math.max(
+            DESIGN_WIDTH_MIN,
+            Math.round(DESIGN_HEIGHT * window.innerWidth / window.innerHeight)
+        );
         var scale = Math.min(
-            window.innerWidth / DESIGN_WIDTH,
+            window.innerWidth / designWidth,
             window.innerHeight / DESIGN_HEIGHT
         );
+        shell.style.width = designWidth + "px";
         shell.style.transform = "scale(" + scale + ")";
     }
 
