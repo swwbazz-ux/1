@@ -9,7 +9,6 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .models import Employee, EmployeeAccess, Role
-from .start_views import VISIBLE_APPS
 
 
 def make_role(code, name):
@@ -63,26 +62,26 @@ class UniversalStartTests(TestCase):
         self.assertFalse(response.context['has_working_code'])
         self.assertContains(response, 'Пинкод придумаете при первом входе')
 
-    def test_short_list_is_not_collapsed(self):
+    def test_apps_are_shown_as_icon_tiles(self):
         self.add_access('driver', 'Водитель самосвала')
         response = self.post()
         self.assertEqual(len(response.context['apps']), 1)
-        self.assertFalse(response.context['extra_apps'])
+        self.assertContains(response, 'start-screen__apps')
+        self.assertContains(response, response.context['apps'][0]['app'].icon_192_url)
 
-    def test_long_list_hides_the_tail(self):
-        """Иначе двенадцать одинаковых кнопок читаются как стена."""
+    def test_all_apps_are_shown(self):
+        """Раньше список обрезался: кнопки в столбик занимали несколько
+        экранов. Плитки в два столбца помещаются, прятать нечего."""
         for code, name in (
             ('driver', 'Водитель самосвала'),
             ('excavator_operator', 'Машинист экскаватора'),
             ('mining_master', 'Горный мастер'),
             ('dispatcher', 'Диспетчер'),
-            ('mechanic', 'Механик'),
+            ('oup', 'Специалист ОУП'),
         ):
             self.add_access(code, name)
         response = self.post()
-        self.assertEqual(len(response.context['apps']), VISIBLE_APPS)
-        self.assertTrue(response.context['extra_apps'])
-        self.assertContains(response, 'Другие мои приложения')
+        self.assertEqual(len(response.context['apps']), 5)
 
     def test_recently_used_app_comes_first(self):
         now = timezone.now()

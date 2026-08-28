@@ -23,8 +23,9 @@ from .models import EmployeeAccess
 from .work_profiles import employee_has_effective_access_role
 
 
-# Больше трёх кнопок подряд читаются уже как список, а не как выбор.
-VISIBLE_APPS = 3
+# Раньше здесь стоял предел на число показанных кнопок: восемь штук подряд
+# читались как список, а не как выбор. Со значками в два столбца место
+# перестало быть узким местом, и прятать что-то больше не нужно.
 
 
 def with_country_code(value):
@@ -107,8 +108,7 @@ def universal_start_view(request):
         'users/universal_start.html',
         {
             'found': True,
-            'apps': apps[:VISIBLE_APPS],
-            'extra_apps': apps[VISIBLE_APPS:],
+            'apps': apps,
             'employee': apps[0]['employee'],
             'submitted_phone': format_phone_for_display(phone),
             'has_working_code': has_working_code,

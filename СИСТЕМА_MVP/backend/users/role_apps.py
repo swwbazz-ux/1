@@ -8,7 +8,7 @@ from django.http import HttpResponse, JsonResponse
 
 
 APP_CONTRACT_VERSION = 'pwa-contract-v1'
-STATIC_ASSET_RELEASE = 'ready-core-traffic-v80'
+STATIC_ASSET_RELEASE = 'ready-core-traffic-v90'
 READY_TRAFFIC_ROLE_CODES = frozenset({
     'admin',
     'oup',
@@ -295,7 +295,7 @@ ROLE_APPS = (
     RoleApp(
         role_code='oup',
         subdomain='oup',
-        name='Отдел управления персоналом',
+        name='О.У.П.',
         short_name='ОУП',
         description='Рабочее место ОУП для ведения сотрудников, доступов и кадровых событий.',
         start_url='/oup/employees/',
@@ -375,7 +375,7 @@ ROLE_APPS = (
     RoleApp(
         role_code='admin',
         subdomain='admin',
-        name='Системный администратор',
+        name='Сис. админ',
         short_name='Админка',
         description='Административный контур сотрудников, доступов, справочников и журналов.',
         start_url='/system-admin/',
