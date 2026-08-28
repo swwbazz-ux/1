@@ -843,17 +843,80 @@
 {% endspaceless %}
 <script>
 (function () {
-    /* Временная подсказка на время подбора точки перелома масштаба пульта.
-       .dispatcher-shell уменьшается через transform — фиксированный элемент
-       внутри него уменьшился бы вместе с ним, поэтому строка добавляется
-       в document.body напрямую, минуя пульт, и остаётся читаемого размера. */
+    /* Пульт диспетчера на телефоне: масштаб считает JS, а не CSS.
+
+       Опорный размер пульта "как на компьютере" — 1400×800 (задан и в
+       app.css, на случай если этот скрипт не выполнится). Сравниваем с
+       innerWidth/innerHeight — реальными пикселями экрана, без vh/vw/dvh.
+
+       Единицы вьюпорта здесь нарочно не участвуют вообще. Дважды подряд с
+       ними не получалось: (1) vh внутри уже уменьшенной transform-ом
+       оболочки продолжает мерить настоящий экран устройства, а не
+       увеличенную "виртуальную" область — сжатие срабатывало дважды, и
+       часть пульта обрезалась; (2) dvh на живом телефоне при появлении и
+       скрытии системных панелей меняется не сразу — на одном и том же
+       устройстве без перезагрузки страницы то 280px высоты, то 336px, и
+       пересчитанная от старого dvh раскладка переставала совпадать с
+       реальным экраном, оставляя пустое поле снизу. innerWidth/innerHeight
+       читаются один раз по факту в момент вызова — рассинхронизация
+       невозможна в принципе, а не просто маловероятна. */
+    var DESIGN_WIDTH = 1400;
+    var DESIGN_HEIGHT = 800;
+
+    function fitDispatcherShellToScreen() {
+        var shell = document.querySelector(".dispatcher-shell");
+        if (!shell) return;
+        var isPhoneLandscape = window.matchMedia(
+            "(orientation: landscape) and (max-width: 1700px)"
+        ).matches;
+        if (!isPhoneLandscape) {
+            shell.style.transform = "";
+            return;
+        }
+        var scale = Math.min(
+            window.innerWidth / DESIGN_WIDTH,
+            window.innerHeight / DESIGN_HEIGHT
+        );
+        shell.style.transform = "scale(" + scale + ")";
+    }
+
+    fitDispatcherShellToScreen();
+    window.addEventListener("resize", fitDispatcherShellToScreen);
+    window.addEventListener("orientationchange", function () {
+        /* Сразу после поворота браузер иногда ещё отчитывается старыми
+           размерами — небольшая пауза перед пересчётом. */
+        setTimeout(fitDispatcherShellToScreen, 60);
+    });
+    if (window.visualViewport) {
+        /* Показ и скрытие адресной строки/системных панелей не считается
+           поворотом экрана и resize документа не всегда вызывает — а
+           именно из-за этого на одном телефоне высота "плавала" между
+           280 и 336 точками без перезагрузки страницы. */
+        window.visualViewport.addEventListener("resize", fitDispatcherShellToScreen);
+    }
+
+    /* Временная подсказка на время проверки: показывает фактические
+       размеры экрана и посчитанный масштаб. .dispatcher-shell уменьшается
+       через transform — элемент внутри него уменьшился бы вместе с ним,
+       поэтому строка добавляется в document.body напрямую, минуя пульт. */
     if (window.matchMedia("(orientation: landscape)").matches) {
         var badge = document.createElement("div");
-        badge.textContent = window.innerWidth + "×" + window.innerHeight;
         badge.style.cssText = "position:fixed;left:6px;bottom:6px;z-index:99999;" +
             "background:rgba(0,0,0,.75);color:#8cff2e;font:700 11px monospace;" +
             "padding:3px 6px;border-radius:4px;pointer-events:none;";
         document.body.appendChild(badge);
+        function updateBadge() {
+            var shell = document.querySelector(".dispatcher-shell");
+            var scaleText = shell && shell.style.transform
+                ? shell.style.transform.replace(/[^0-9.]/g, "")
+                : "—";
+            badge.textContent = window.innerWidth + "×" + window.innerHeight + " × " + scaleText;
+        }
+        updateBadge();
+        window.addEventListener("resize", updateBadge);
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener("resize", updateBadge);
+        }
     }
 })();
 </script>
