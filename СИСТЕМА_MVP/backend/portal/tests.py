@@ -791,3 +791,79 @@ class PortalPageRenderTests(PortalTestCase):
                 reverse('portal:manage_feedback_detail', args=[self.message.pk]),
             ]
         )
+
+
+@override_settings(ALLOWED_HOSTS=['testserver', '.testserver', '.localhost'])
+class ObserverModePhotoAccessTests(TestCase):
+    """Регрессия на боевой инцидент 2026-08-28.
+
+    Фото сотрудника отдаётся защищённым маршрутом, а не файлом статики —
+    он честно отказывает анонимному запросу. Тег <img> не нёс пропуск
+    (?observe=…) в адресе, и в режиме «Управлять» браузер запрашивал фото
+    без него: запрос выглядел анонимным, и вместо фото показывалась битая
+    картинка. Пропуск в адрес теперь дописывает клиентский скрипт
+    (static/js/observer-mode.js); здесь проверяется серверная половина —
+    что маршрут действительно принимает такой пропуск.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # ignore_cleanup_errors: на Windows файл ответа с фото ещё может быть
+        # открыт сборщиком мусора в момент удаления временной папки — сама
+        # проверка к этому моменту уже прошла, дело только в уборке за собой.
+        cls._media_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        cls._media_override = override_settings(MEDIA_ROOT=cls._media_dir.name)
+        cls._media_override.enable()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._media_override.disable()
+        cls._media_dir.cleanup()
+        super().tearDownClass()
+
+    def setUp(self):
+        self.role = Role.objects.get_or_create(code='dispatcher', defaults={'name': 'Диспетчер'})[0]
+        self.admin_role = Role.objects.get_or_create(code='admin', defaults={'name': 'Администратор'})[0]
+
+        self.dispatcher_employee = Employee.objects.create(
+            full_name='Диспетчерова Диспетчера Диспетчеровна',
+            phone='+79990009001',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            photo=SimpleUploadedFile('dispatcher.jpg', b'fake-jpeg-bytes', content_type='image/jpeg'),
+        )
+        self.dispatcher_access = EmployeeAccess.objects.create(
+            employee=self.dispatcher_employee, role=self.role, access_code='900001',
+            is_active=True, status=EmployeeAccess.Status.ACTIVATED, last_login_at=timezone.now(),
+        )
+        self.admin_employee = Employee.objects.create(
+            full_name='Админов Админ Админович',
+            phone='+79990009002',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.admin_access = EmployeeAccess.objects.create(
+            employee=self.admin_employee, role=self.admin_role, access_code='900002',
+            is_active=True, status=EmployeeAccess.Status.ACTIVATED, last_login_at=timezone.now(),
+        )
+
+    def photo_url(self):
+        return reverse('portal:legacy_employee_photo', args=[self.dispatcher_employee.photo.name.split('/', 1)[1]])
+
+    def test_anonymous_request_is_refused(self):
+        response = self.client.get(self.photo_url())
+        self.assertEqual(response.status_code, 404)
+
+    def test_control_mode_token_grants_access(self):
+        from users.live_monitor import OBSERVER_MODE_CONTROL, create_observer_token
+
+        token = create_observer_token(
+            actor_access=self.admin_access,
+            target_access=self.dispatcher_access,
+            mode=OBSERVER_MODE_CONTROL,
+        )
+        response = self.client.get(
+            self.photo_url(), {'observe': token}, HTTP_HOST='dispatcher.localhost',
+        )
+        self.assertEqual(response.status_code, 200)

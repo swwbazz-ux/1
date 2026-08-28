@@ -1393,3 +1393,71 @@ class HaulAssignmentTransactionTests(TransactionTestCase):
         )
         self.assertTrue(states, 'select_for_update ни разу не выполнился')
         self.assertTrue(all(states), 'select_for_update выполнился без активной транзакции')
+
+
+class ComplexBoardTestEquipmentExclusionTests(TestCase):
+    """Регрессия на боевой инцидент 2026-08-28.
+
+    Номер карточки «К-N» вычисляется по первой цифре в гаражном номере
+    экскаватора. У настоящего экскаватора «Э-1» и у оставшейся тестовой
+    техники «ТЕСТ-Э1» первая цифра совпадает — обе получали ярлык «K-1»,
+    и на пульте одновременно показывались два разных комплекса с одним
+    номером. Дистпетчер работала с настоящим, администратор через
+    «Управлять» — с тестовым, оба не подозревая о подмене.
+    """
+
+    def setUp(self):
+        self.master_role = Role.objects.create(code='mining_master', name='Горный мастер')
+        self.master = Employee.objects.create(
+            full_name='Горный мастер ТА',
+            phone='79000000900',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.access = EmployeeAccess.objects.create(
+            employee=self.master,
+            role=self.master_role,
+            access_code='900000',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        self.real_excavator = Equipment.objects.create(
+            equipment_type=excavator_type, garage_number='Э-1', is_active=True,
+        )
+        self.test_excavator = Equipment.objects.create(
+            equipment_type=excavator_type, garage_number='ТЕСТ-Э1', is_active=True,
+        )
+        self.truck_a = Equipment.objects.create(
+            equipment_type=truck_type, garage_number='101', is_active=True,
+        )
+        self.truck_b = Equipment.objects.create(
+            equipment_type=truck_type, garage_number='102', is_active=True,
+        )
+        EmployeeShift.objects.create(
+            employee=self.master, shift_type='day',
+            opened_at=timezone.now(), opened_by=self.master,
+        )
+        session = self.client.session
+        session['employee_access_id'] = self.access.id
+        session.save()
+
+    def test_test_excavator_does_not_collide_with_real_complex_number(self):
+        schedule_haul_assignment(truck=self.truck_a, excavator=self.real_excavator)
+        schedule_haul_assignment(truck=self.truck_b, excavator=self.test_excavator)
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        zones = response.context['dispatcher_dashboard']['complex_zones']
+
+        k1_cards = [card for card in zones if card['id'] == 'K-1']
+        self.assertEqual(len(k1_cards), 1, 'на пульте не должно быть двух карточек K-1 одновременно')
+
+    def test_test_excavator_is_absent_from_the_board_entirely(self):
+        schedule_haul_assignment(truck=self.truck_b, excavator=self.test_excavator)
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        zones = response.context['dispatcher_dashboard']['complex_zones']
+        real_zones = [zone for zone in zones if not zone.get('is_empty')]
+
+        self.assertEqual(len(real_zones), 0, 'тестовая техника не должна попадать на боевой пульт')

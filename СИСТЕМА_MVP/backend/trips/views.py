@@ -1611,6 +1611,15 @@ def build_dispatcher_dashboard_context(
 
     complex_cards = []
     for excavator in shown_excavators:
+        # Техника с гаражным номером «ТЕСТ...» — заглушка, а не настоящий
+        # экскаватор, даже если она активна в справочнике. Номер комплекса
+        # раньше брали через поиск первой цифры в названии — и «ТЕСТ-Э1»
+        # получал тот же номер, что настоящий экскаватор №1: оба содержат
+        # цифру «1». 28.08.2026 из-за этого на пульте одновременно показались
+        # два разных «К-1». Формат «Э-1» (буква + число) — обычная запись для
+        # настоящей техники, его не трогаем; фильтруем только префикс «ТЕСТ».
+        if str(excavator.garage_number or '').strip().upper().startswith('ТЕСТ'):
+            continue
         index = garage_number_int(excavator)
         row = by_excavator[excavator.id]
         need = max(len(row['trucks']), row['accepted'] + row['pending'], 0)

@@ -19207,6 +19207,110 @@ body.system-admin-reference-detail-screen .admin-page {
     height: 38px;
 }
 
+/* Форма служебного закрытия блокирующей смены — перенесена из
+   dispatcher-control-v1.css. Тот файл подключался через
+   {% block app_stylesheets %}, а такого блока нет в base.html — Django тихо
+   отбрасывает содержимое несуществующего блока у потомка, и весь файл никогда
+   не загружался ни у диспетчера, ни у горного мастера. Без этих правил форма
+   рендерилась без раскладки прямо в шапке, а «visually-hidden»-подписи полей
+   ничем не прятались — 28.08.2026 это было видно поверх кнопок Выйти/Назад. */
+.dispatcher-command-actions .dispatcher-blocking-shift-recovery {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 116px;
+    grid-template-rows: 14px 22px;
+    gap: 2px 6px;
+    width: 100%;
+    max-width: 300px;
+    min-width: 0;
+    height: 38px;
+    margin: 0;
+}
+
+.dispatcher-blocking-shift-recovery .dispatcher-blocking-shift-summary {
+    grid-column: 1 / -1;
+    min-width: 0;
+    overflow: hidden;
+    color: #d8e3e7;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dispatcher-blocking-shift-recovery label {
+    position: relative;
+    min-width: 0;
+    margin: 0;
+}
+
+.dispatcher-blocking-shift-recovery .visually-hidden {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+.dispatcher-blocking-shift-recovery input,
+.dispatcher-blocking-shift-recovery button {
+    box-sizing: border-box;
+    width: 100%;
+    height: 22px;
+    min-height: 22px;
+    margin: 0;
+    padding: 0 7px;
+    border-radius: 5px;
+    font: inherit;
+    font-size: 10px;
+    line-height: 20px;
+}
+
+.dispatcher-blocking-shift-recovery input {
+    border: 1px solid rgba(123, 148, 158, .68);
+    background: rgba(5, 17, 23, .76);
+    color: var(--gd-ink);
+}
+
+.dispatcher-blocking-shift-recovery input::placeholder {
+    color: #93a4ab;
+    opacity: 1;
+}
+
+.dispatcher-blocking-shift-recovery button {
+    overflow: hidden;
+    border: 1px solid rgba(255, 82, 75, .82);
+    background: rgba(255, 82, 75, .12);
+    color: var(--gd-red);
+    font-weight: 900;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.dispatcher-blocking-shift-recovery button:hover {
+    background: rgba(255, 82, 75, .2);
+}
+
+.dispatcher-day .dispatcher-blocking-shift-recovery .dispatcher-blocking-shift-summary {
+    color: #43545b;
+}
+
+.dispatcher-day .dispatcher-blocking-shift-recovery input {
+    border-color: rgba(101, 119, 128, .46);
+    background: #ffffff;
+    color: #142229;
+}
+
+.dispatcher-day .dispatcher-blocking-shift-recovery button {
+    background: #fff2f0;
+}
+
 .dispatcher-command-actions .dispatcher-shift-button {
     position: relative;
     min-height: 38px;

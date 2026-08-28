@@ -99,6 +99,25 @@
         });
     }
 
+    function tagImages(scope) {
+        /* Фото сотрудника отдаётся защищённым маршрутом (/media/employee_photos/…),
+           не обычным файлом статики — без пропуска в адресе он видит анонимный
+           запрос и честно отказывает. Обычный /media/ carriesToken() нарочно
+           пропускает как публичный, здесь — отдельная, более узкая проверка. */
+        eachIn(scope, "img[src]").forEach(function (img) {
+            var url;
+            try {
+                url = new URL(img.src, window.location.href);
+            } catch (error) {
+                return;
+            }
+            if (!sameOrigin(url) || !url.pathname.startsWith("/media/employee_photos/")) return;
+            if (url.searchParams.has("observe")) return;
+            url.searchParams.set("observe", token);
+            img.src = url.toString();
+        });
+    }
+
     function blockControls(scope) {
         eachIn(scope, "form").forEach(function (form) {
             form.dataset.observerBlocked = "true";
@@ -112,6 +131,7 @@
 
     function apply(scope) {
         tagLinks(scope);
+        tagImages(scope);
         if (readOnly) {
             blockControls(scope);
         } else {
