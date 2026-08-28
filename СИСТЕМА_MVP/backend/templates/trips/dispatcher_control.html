@@ -910,30 +910,6 @@
            280 и 336 точками без перезагрузки страницы. */
         window.visualViewport.addEventListener("resize", fitDispatcherShellToScreen);
     }
-
-    /* Временная подсказка на время проверки: показывает фактические
-       размеры экрана и посчитанный масштаб. .dispatcher-shell уменьшается
-       через transform — элемент внутри него уменьшился бы вместе с ним,
-       поэтому строка добавляется в document.body напрямую, минуя пульт. */
-    if (window.matchMedia("(orientation: landscape)").matches) {
-        var badge = document.createElement("div");
-        badge.style.cssText = "position:fixed;left:6px;bottom:6px;z-index:99999;" +
-            "background:rgba(0,0,0,.75);color:#8cff2e;font:700 11px monospace;" +
-            "padding:3px 6px;border-radius:4px;pointer-events:none;";
-        document.body.appendChild(badge);
-        function updateBadge() {
-            var shell = document.querySelector(".dispatcher-shell");
-            var scaleText = shell && shell.style.transform
-                ? shell.style.transform.replace(/[^0-9.]/g, "")
-                : "—";
-            badge.textContent = window.innerWidth + "×" + window.innerHeight + " × " + scaleText;
-        }
-        updateBadge();
-        window.addEventListener("resize", updateBadge);
-        if (window.visualViewport) {
-            window.visualViewport.addEventListener("resize", updateBadge);
-        }
-    }
 })();
 </script>
 
