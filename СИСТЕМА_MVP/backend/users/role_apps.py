@@ -8,7 +8,7 @@ from django.http import HttpResponse, JsonResponse
 
 
 APP_CONTRACT_VERSION = 'pwa-contract-v1'
-STATIC_ASSET_RELEASE = 'ready-core-traffic-v54'
+STATIC_ASSET_RELEASE = 'ready-core-traffic-v71'
 READY_TRAFFIC_ROLE_CODES = frozenset({
     'admin',
     'oup',
@@ -242,7 +242,10 @@ ROLE_APPS = (
     RoleApp(
         role_code='deputy_mining_manager',
         subdomain='deputy',
-        name='Заместитель начальника горного участка',
+        # Полное название не помещается в плитку и растягивает ряд на три
+        # строки. В справочнике должность остаётся полной — здесь это
+        # подпись под значком приложения.
+        name='Зам. нач. горного участка',
         short_name='Расстановка',
         description='Расстановка сотрудников по технике и контроль опубликованных назначений.',
         start_url='/deputy-mining-manager/',
