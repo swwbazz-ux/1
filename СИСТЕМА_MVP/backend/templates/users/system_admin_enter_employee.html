@@ -54,12 +54,13 @@
 .enter-search {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
     margin-bottom: 14px;
 }
 
 .enter-search input[type="search"] {
-    flex: 1 1 220px;
+    flex: 2 1 200px;
     min-width: 0;
     padding: 9px 12px;
     border: 1px solid var(--admin-line);
@@ -70,6 +71,12 @@
 }
 
 .enter-search select {
+    /* Без предела ширины браузер растягивает <select> под самый длинный
+       вариант — «Заместитель начальника горного участка» — и вся строка
+       переносится: полю, списку и кнопке вместе уже не хватает места. */
+    flex: 1 1 180px;
+    min-width: 0;
+    max-width: 220px;
     padding: 9px 12px;
     border: 1px solid var(--admin-line);
     border-radius: 8px;
@@ -79,7 +86,13 @@
 }
 
 .enter-search button {
-    padding: 9px 16px;
+    /* У app.css есть общий сброс "input, select, textarea, button { width: 100% }".
+       flex-basis: auto без своего width его не перебивает — flex-basis: auto
+       берёт ширину из width, а он так и остаётся 100%. Кнопка тянулась на всю
+       строку, хотя flex-grow был явно нулевым. */
+    width: auto;
+    flex: 0 0 auto;
+    padding: 9px 20px;
     border: 1px solid var(--admin-green);
     border-radius: 8px;
     background: transparent;
@@ -87,6 +100,7 @@
     font-size: 13px;
     font-weight: 800;
     cursor: pointer;
+    white-space: nowrap;
 }
 
 .enter-list {
