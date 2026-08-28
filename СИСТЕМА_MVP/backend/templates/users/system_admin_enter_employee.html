@@ -6,6 +6,21 @@
 {% block extra_head %}
 {% include "users/includes/system_admin_workspace_styles.html" %}
 <style>
+/* .admin-console-page — сетка ровно на три строки: auto, auto и гибкая
+   minmax(0, 1fr). Раньше сюда шло семь самостоятельных элементов подряд —
+   лишние набивались в третью, гибкую строку вместе с настоящим содержимым
+   и сжимали её в ноль, а «Мои приложения» и «Другие сотрудники» наезжали
+   друг на друга. Три секции ниже — ровно три строки сетки; третья
+   прокручивается сама, а не тянет высоту всей страницы. */
+.enter-page {
+    overflow: hidden;
+}
+
+.enter-results-section {
+    min-height: 0;
+    overflow-y: auto;
+}
+
 .enter-lead {
     margin: 0 0 16px;
     color: var(--admin-muted);
@@ -178,61 +193,67 @@
         </section>
     </header>
 
-    <main class="admin-console-page">
+    <main class="admin-console-page enter-page">
         {% if own_apps %}
-            <h2 class="enter-section-title">Мои приложения</h2>
-            <p class="enter-lead">Работа под своей фамилией: в журнале останетесь вы. Админка при этом не закрывается — можно вернуться в соседней вкладке.</p>
-            <div class="enter-own">
-                {% for item in own_apps %}
-                    <a href="{{ item.url }}">
-                        <strong>{{ item.app.name }}</strong>
-                        {% if item.app.name != item.access.role.name %}<span>{{ item.access.role.name }}</span>{% endif %}
-                    </a>
-                {% endfor %}
-            </div>
+            <section class="enter-own-section">
+                <h2 class="enter-section-title">Мои приложения</h2>
+                <p class="enter-lead">Работа под своей фамилией: в журнале останетесь вы. Админка при этом не закрывается — можно вернуться в соседней вкладке.</p>
+                <div class="enter-own">
+                    {% for item in own_apps %}
+                        <a href="{{ item.url }}">
+                            <strong>{{ item.app.name }}</strong>
+                            {% if item.app.name != item.access.role.name %}<span>{{ item.access.role.name }}</span>{% endif %}
+                        </a>
+                    {% endfor %}
+                </div>
+            </section>
         {% endif %}
 
-        <h2 class="enter-section-title">Другие сотрудники</h2>
-        <p class="enter-lead">Наблюдение — только смотреть. Управление — действовать за человека: он остаётся в смене со своего телефона, а каждое ваше действие пишется в журнал на ваше имя.</p>
+        <section class="enter-search-section">
+            <h2 class="enter-section-title">Другие сотрудники</h2>
+            <p class="enter-lead">Наблюдение — только смотреть. Управление — действовать за человека: он остаётся в смене со своего телефона, а каждое ваше действие пишется в журнал на ваше имя.</p>
 
-        <form class="enter-search" method="get" action="{% url 'system_admin_enter_employee' %}">
-            <input type="search" name="q" value="{{ query }}" placeholder="Фамилия, телефон или табельный" autocomplete="off">
-            <select name="role" aria-label="Приложение">
-                <option value="">Все приложения</option>
-                {% for app in role_apps %}
-                    <option value="{{ app.role_code }}"{% if app.role_code == role_filter %} selected{% endif %}>{{ app.name }}</option>
-                {% endfor %}
-            </select>
-            <button type="submit">Найти</button>
-        </form>
+            <form class="enter-search" method="get" action="{% url 'system_admin_enter_employee' %}">
+                <input type="search" name="q" value="{{ query }}" placeholder="Фамилия, телефон или табельный" autocomplete="off">
+                <select name="role" aria-label="Приложение">
+                    <option value="">Все приложения</option>
+                    {% for app in role_apps %}
+                        <option value="{{ app.role_code }}"{% if app.role_code == role_filter %} selected{% endif %}>{{ app.name }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit">Найти</button>
+            </form>
+        </section>
 
-        {% if rows %}
-            <div class="enter-list">
-                {% for row in rows %}
-                    <div class="enter-row">
-                        <div class="enter-row-who">
-                            <strong>{{ row.employee.full_name }}</strong>
-                            <span>
-                                {{ row.role.name }}
-                                {% if row.is_online %}· <b class="enter-online">в приложении</b>{% endif %}
-                                {% if not row.activated %}· пинкод не заведён{% endif %}
-                            </span>
+        <section class="enter-results-section">
+            {% if rows %}
+                <div class="enter-list">
+                    {% for row in rows %}
+                        <div class="enter-row">
+                            <div class="enter-row-who">
+                                <strong>{{ row.employee.full_name }}</strong>
+                                <span>
+                                    {{ row.role.name }}
+                                    {% if row.is_online %}· <b class="enter-online">в приложении</b>{% endif %}
+                                    {% if not row.activated %}· пинкод не заведён{% endif %}
+                                </span>
+                            </div>
+                            <div class="enter-row-actions">
+                                {% if row.activated %}
+                                    <a href="{{ row.observe_url }}">Наблюдать</a>
+                                    <a class="is-control" href="{{ row.control_url }}">Управлять</a>
+                                {% endif %}
+                            </div>
                         </div>
-                        <div class="enter-row-actions">
-                            {% if row.activated %}
-                                <a href="{{ row.observe_url }}">Наблюдать</a>
-                                <a class="is-control" href="{{ row.control_url }}">Управлять</a>
-                            {% endif %}
-                        </div>
-                    </div>
-                {% endfor %}
-            </div>
-            {% if truncated %}
-                <p class="enter-lead">Показаны первые {{ result_limit }}. Уточните поиск, чтобы увидеть остальных.</p>
+                    {% endfor %}
+                </div>
+                {% if truncated %}
+                    <p class="enter-lead">Показаны первые {{ result_limit }}. Уточните поиск, чтобы увидеть остальных.</p>
+                {% endif %}
+            {% else %}
+                <div class="enter-empty">Никого не нашлось. Проверьте написание фамилии или снимите фильтр по приложению.</div>
             {% endif %}
-        {% else %}
-            <div class="enter-empty">Никого не нашлось. Проверьте написание фамилии или снимите фильтр по приложению.</div>
-        {% endif %}
+        </section>
     </main>
 </div>
 {% endblock %}
