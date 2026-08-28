@@ -1,7 +1,7 @@
 import json
 from datetime import timedelta
 
-from django.test import Client, TestCase
+from django.test import Client, TestCase, TransactionTestCase
 
 from django.urls import reverse
 from django.utils import timezone
@@ -1298,3 +1298,98 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertFalse(EmployeeShift.objects.filter(employee=dispatcher, closed_at__isnull=True).exists())
         self.assertRedirects(response, reverse('role_home'), fetch_redirect_response=False)
+
+
+def _atomic_states_during_select_for_update(callable_):
+    """Отмечает, была ли активна транзакция ORM в момент каждого запроса
+    ``select_for_update``.
+
+    SQLite (локальная тестовая база) не поддерживает построчную блокировку —
+    Django просто отбрасывает FOR UPDATE, и на этой базе тест никогда не
+    столкнётся с ошибкой Postgres. Проверка идёт на уровне самого Django:
+    ``in_atomic_block`` — это состояние логической транзакции ORM, оно не
+    зависит от того, умеет ли база в реальную блокировку строк.
+    """
+    from django.db import connection
+    from django.db.models.sql.compiler import SQLCompiler
+
+    seen = []
+    original = SQLCompiler.as_sql
+
+    def spy(self, *args, **kwargs):
+        if getattr(self.query, 'select_for_update', False):
+            seen.append(connection.in_atomic_block)
+        return original(self, *args, **kwargs)
+
+    SQLCompiler.as_sql = spy
+    try:
+        callable_()
+    finally:
+        SQLCompiler.as_sql = original
+    return seen
+
+
+class HaulAssignmentTransactionTests(TransactionTestCase):
+    # TransactionTestCase, а не TestCase: обычный TestCase сам оборачивает
+    # каждый тест в транзакцию, и тогда select_for_update() всегда находит
+    # активную транзакцию просто по счастливой случайности теста — баг
+    # остался бы незамеченным даже без фикса. Проверено руками: с TestCase
+    # тест проходил и с откаченным исправлением тоже.
+    """Регрессия на боевой сбой 2026-08-28.
+
+    ``select_for_update()`` требует активную транзакцию — без неё Django не
+    берёт блокировку, а отказывает запросом целиком. Обе функции когда-то
+    вызывались без ``transaction.atomic``, и это молчало, пока не появилось
+    первое просроченное назначение: тогда опрос состояния (дёргает
+    reconcile каждые 5 секунд) и кнопка «Назначить самосвал» стали падать
+    500-й ошибкой у всех, кто в приложениях, — не только у того, чьё
+    назначение.
+    """
+
+    def setUp(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал ТА')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор ТА')
+        self.truck = Equipment.objects.create(
+            equipment_type=truck_type, garage_number='ТА-1', is_active=True,
+        )
+        self.excavator = Equipment.objects.create(
+            equipment_type=excavator_type, garage_number='ТА-Э1', is_active=True,
+        )
+
+    def test_reconcile_applies_a_due_assignment_without_crashing(self):
+        now = timezone.now()
+        pending = HaulAssignment.objects.create(
+            truck=self.truck,
+            excavator=self.excavator,
+            action=HaulAssignmentAction.ASSIGN,
+            status=AssignmentStatus.PENDING,
+            effective_at=now,
+        )
+        applied = reconcile_due_haul_assignments(now=now)
+        self.assertEqual(applied, 1)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+
+    def test_apply_pending_haul_assignment_opens_its_own_transaction(self):
+        """Вызов напрямую, без обёртки вызывающей стороны — функция должна сама
+        открыть транзакцию, а не полагаться на чужую."""
+        now = timezone.now()
+        pending = HaulAssignment.objects.create(
+            truck=self.truck,
+            excavator=self.excavator,
+            action=HaulAssignmentAction.ASSIGN,
+            status=AssignmentStatus.PENDING,
+            effective_at=now,
+        )
+        states = _atomic_states_during_select_for_update(
+            lambda: apply_pending_haul_assignment(pending.id, now=now)
+        )
+        self.assertTrue(states, 'select_for_update ни разу не выполнился')
+        self.assertTrue(all(states), 'select_for_update выполнился без активной транзакции')
+
+    def test_schedule_haul_assignment_opens_its_own_transaction(self):
+        states = _atomic_states_during_select_for_update(
+            lambda: schedule_haul_assignment(truck=self.truck, excavator=self.excavator)
+        )
+        self.assertTrue(states, 'select_for_update ни разу не выполнился')
+        self.assertTrue(all(states), 'select_for_update выполнился без активной транзакции')

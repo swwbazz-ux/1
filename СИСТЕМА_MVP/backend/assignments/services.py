@@ -870,6 +870,10 @@ def _cancel_assignments(assignments, now):
 
 
 @transaction.atomic
+# select_for_update требует активную транзакцию. У соседней schedule_haul_release
+# декоратор уже стоял, а здесь его не было — молчало, пока действие «Назначить
+# самосвал» не сработало на редком стечении данных, и тогда падало 500-й ошибкой
+# ровно на той кнопке, которой горный мастер и диспетчер пользуются каждый день.
 def schedule_haul_assignment(*, truck, excavator, assigned_by=None, now=None):
     now = now or timezone.now()
     truck = Equipment.objects.select_for_update().get(pk=truck.pk)
@@ -1007,32 +1011,40 @@ def notify_excavator_assignment_changed(assignment, *, released, previous_excava
 
 
 def apply_pending_haul_assignment(assignment_id, *, now=None):
+    # select_for_update требует активную транзакцию — без неё Django отказывает
+    # запросом, а не блокировкой. Раньше функция вызывалась без transaction.atomic,
+    # и это молчало, пока не появилось первое просроченное назначение: тогда
+    # опрос состояния (дергает эту функцию каждые 5 секунд) стал падать 500-й
+    # ошибкой у всех, кто в приложениях, — не только у того, чьё назначение.
     now = now or timezone.now()
-    pending = (
-        HaulAssignment.objects.select_for_update()
-        .filter(id=assignment_id, status=AssignmentStatus.PENDING, ended_at__isnull=True)
-        .first()
-    )
-    if not pending:
-        return None
+    with transaction.atomic():
+        pending = (
+            HaulAssignment.objects.select_for_update()
+            .filter(id=assignment_id, status=AssignmentStatus.PENDING, ended_at__isnull=True)
+            .first()
+        )
+        if not pending:
+            return None
 
-    open_assignments = list(
-        HaulAssignment.objects.select_for_update()
-        .filter(truck_id=pending.truck_id, ended_at__isnull=True)
-        .exclude(status=AssignmentStatus.CANCELLED)
-        .order_by('-assigned_at', '-id')
-    )
-    excavator_ids = [item.excavator_id for item in open_assignments]
-    if pending.action == HaulAssignmentAction.RELEASE:
-        _cancel_assignments(open_assignments, now)
-        applied_action = 'release_applied'
-    else:
-        _cancel_assignments([item for item in open_assignments if item.id != pending.id], now)
-        pending.status = AssignmentStatus.ACCEPTED
-        pending.accepted_at = now
-        pending.save(update_fields=['status', 'accepted_at'])
-        applied_action = 'assignment_applied'
+        open_assignments = list(
+            HaulAssignment.objects.select_for_update()
+            .filter(truck_id=pending.truck_id, ended_at__isnull=True)
+            .exclude(status=AssignmentStatus.CANCELLED)
+            .order_by('-assigned_at', '-id')
+        )
+        excavator_ids = [item.excavator_id for item in open_assignments]
+        if pending.action == HaulAssignmentAction.RELEASE:
+            _cancel_assignments(open_assignments, now)
+            applied_action = 'release_applied'
+        else:
+            _cancel_assignments([item for item in open_assignments if item.id != pending.id], now)
+            pending.status = AssignmentStatus.ACCEPTED
+            pending.accepted_at = now
+            pending.save(update_fields=['status', 'accepted_at'])
+            applied_action = 'assignment_applied'
 
+    # Уведомления — за пределами блокировки: сетевой вызов внутри select_for_update
+    # держал бы строки взаперти, пока не ответит сервер уведомлений.
     _emit_assignment_changed(
         action=applied_action, truck_id=pending.truck_id,
         excavator_ids=excavator_ids, assignment_id=pending.id,
