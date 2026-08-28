@@ -33533,25 +33533,42 @@ body.is-observer-mode .app-contract-banner {
 
    Оговорка про landscape нужна, чтобы не задеть ни настольный пульт в
    диспетчерской, ни вертикальный планшет: там своя раскладка. */
-@media (orientation: landscape) and (max-width: 1180px) {
+/* Верхняя ступень поднята с 1180 до 1700: телефон пользователя явно шире, чем
+   предполагали первые пять ступеней — на 780 и 915 масштаб на проверке
+   срабатывал верно, а на его реальном устройстве нет. Раз число неизвестно,
+   закрываем весь правдоподобный диапазон landscape-телефонов, а не гадаем
+   дальше по одной ступени. */
+@media (orientation: landscape) and (max-width: 1700px) {
+    .dispatcher-shell { --gd-fit-scale: .92; }
+}
+
+@media (orientation: landscape) and (max-width: 1500px) {
     .dispatcher-shell { --gd-fit-scale: .84; }
 }
 
+@media (orientation: landscape) and (max-width: 1300px) {
+    .dispatcher-shell { --gd-fit-scale: .76; }
+}
+
+@media (orientation: landscape) and (max-width: 1180px) {
+    .dispatcher-shell { --gd-fit-scale: .68; }
+}
+
 @media (orientation: landscape) and (max-width: 1050px) {
-    .dispatcher-shell { --gd-fit-scale: .74; }
+    .dispatcher-shell { --gd-fit-scale: .60; }
 }
 
 @media (orientation: landscape) and (max-width: 950px) {
-    .dispatcher-shell { --gd-fit-scale: .66; }
+    .dispatcher-shell { --gd-fit-scale: .54; }
 }
 
 @media (orientation: landscape) and (max-width: 850px) {
-    .dispatcher-shell { --gd-fit-scale: .58; }
+    .dispatcher-shell { --gd-fit-scale: .48; }
 }
 
 /* Ниже уже не разглядеть — дальше не мельчим. */
 @media (orientation: landscape) and (max-width: 750px) {
-    .dispatcher-shell { --gd-fit-scale: .52; }
+    .dispatcher-shell { --gd-fit-scale: .44; }
 }
 
 /* Само уменьшение — через transform, а не zoom.
@@ -33563,7 +33580,7 @@ body.is-observer-mode .app-contract-banner {
    Он не меняет место, которое элемент занимает в потоке, поэтому оболочка
    остаётся широкой и её надо обрезать. У этого экрана overflow: hidden уже
    стоит, так что лишней полосы прокрутки не появится. */
-@media (orientation: landscape) and (max-width: 1180px) {
+@media (orientation: landscape) and (max-width: 1700px) {
     .dispatcher-shell {
         width: calc(100% / var(--gd-fit-scale));
         height: calc(100dvh / var(--gd-fit-scale));

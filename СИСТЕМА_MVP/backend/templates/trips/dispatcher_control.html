@@ -841,6 +841,22 @@
     </div>
 </main>
 {% endspaceless %}
+<script>
+(function () {
+    /* Временная подсказка на время подбора точки перелома масштаба пульта.
+       .dispatcher-shell уменьшается через transform — фиксированный элемент
+       внутри него уменьшился бы вместе с ним, поэтому строка добавляется
+       в document.body напрямую, минуя пульт, и остаётся читаемого размера. */
+    if (window.matchMedia("(orientation: landscape)").matches) {
+        var badge = document.createElement("div");
+        badge.textContent = window.innerWidth + "×" + window.innerHeight;
+        badge.style.cssText = "position:fixed;left:6px;bottom:6px;z-index:99999;" +
+            "background:rgba(0,0,0,.75);color:#8cff2e;font:700 11px monospace;" +
+            "padding:3px 6px;border-radius:4px;pointer-events:none;";
+        document.body.appendChild(badge);
+    }
+})();
+</script>
 
 {{ dispatcher_dashboard.equipment_cards|json_script:"gd-equipment-cards-data" }}
 {{ dispatcher_dashboard.equipment_state_ui|json_script:"gd-equipment-states-data" }}
