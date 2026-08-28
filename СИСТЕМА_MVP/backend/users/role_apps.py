@@ -8,7 +8,7 @@ from django.http import HttpResponse, JsonResponse
 
 
 APP_CONTRACT_VERSION = 'pwa-contract-v1'
-STATIC_ASSET_RELEASE = 'ready-core-traffic-v90'
+STATIC_ASSET_RELEASE = 'ready-core-traffic-v91'
 READY_TRAFFIC_ROLE_CODES = frozenset({
     'admin',
     'oup',
