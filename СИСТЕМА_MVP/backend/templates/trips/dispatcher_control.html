@@ -1534,16 +1534,25 @@ document.addEventListener("DOMContentLoaded", function () {
             if (panel) panel.scrollTop = state.detailScrollTop || 0;
         }
     }
+    var dispatcherDesktopRefreshGeneration = 0;
     function refreshDispatcherDesktopBoardFromServer(options) {
         options = options || {};
         if (!isDispatcherDesktopPage()) return Promise.resolve(false);
         var currentBoard = document.querySelector(".dispatcher-board");
         var desktopState = captureDispatcherDesktopState(currentBoard);
         if (!window.AppOperationalFragment) return Promise.resolve(false);
+        /* Всплеск событий (несколько назначений подряд с чужого устройства или
+           из админки) мог запустить несколько таких обновлений одновременно.
+           Сетевые ответы приходят не обязательно в том порядке, в котором ушли
+           запросы — устаревший ответ, применённый ПОСЛЕ более свежего, отменял
+           уже показанное новое состояние. Пропускаем результат, если за время
+           запроса уже стартовало более новое обновление. */
+        var requestGeneration = ++dispatcherDesktopRefreshGeneration;
         return window.AppOperationalFragment.request(
             "dispatcher",
             Number(options.version || 0)
         ).then(function (payload) {
+            if (requestGeneration !== dispatcherDesktopRefreshGeneration) return false;
             if (isDispatcherOperationalRefreshUnsafe()) return false;
             var freshBoard = window.AppOperationalFragment.parseRoot(
                 payload.html,
