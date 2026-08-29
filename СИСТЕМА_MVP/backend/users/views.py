@@ -600,6 +600,12 @@ def login_view(
     submitted_phone = (
         request.POST.get('phone', '').strip() if request.method == 'POST' else ''
     )
+    # Со /start/ номер уже известен — ссылка на приложение несёт его в query.
+    # Незачем набирать его снова: не путать с submitted_phone, который отвечает
+    # ещё и за то, показывать ли поле пинкода (первый неудачный вход).
+    prefilled_phone = (
+        request.GET.get('phone', '').strip() if request.method == 'GET' else ''
+    )
     if request.method == 'POST' and request.POST.get('action') in {'register', 'continue'}:
         # Первый вход. Раньше сюда пускал только выданный вручную временный код,
         # и раздавать его приходилось каждому — при текучке в двадцать человек за
@@ -831,8 +837,14 @@ def login_view(
             'selected_device_kind': selected_device_kind,
             'next_url': next_url,
             'login_role_app': login_role_app,
-            'submitted_phone': submitted_phone,
+            'submitted_phone': submitted_phone or prefilled_phone,
             'login_step': 'pin' if submitted_phone else '',
+            # Отличаем «номер пришёл в ссылке со /start/» от «человек уже
+            # пробовал войти»: в первом случае экран установки должен
+            # показаться как обычно, во втором — форма уже открыта на JS,
+            # и это единственный случай, кроме постоянного GET, что доходит
+            # досюда без реальной попытки входа.
+            'phone_is_prefill_only': bool(prefilled_phone) and not submitted_phone,
         },
     )
 

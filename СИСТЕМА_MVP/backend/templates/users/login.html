@@ -358,7 +358,7 @@
 {% endif %}
 <main class="shared-shift-dialog unified-login-dialog">
     <div class="shared-shift-accent" aria-hidden="true"></div>
-    <form method="post" data-validated-login class="app-confirm-content unified-login-form">
+    <form method="post" data-validated-login{% if phone_is_prefill_only %} data-phone-prefill-only{% endif %} class="app-confirm-content unified-login-form">
         {% csrf_token %}
         {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
         {% if login_role_app %}
@@ -427,8 +427,15 @@
         if (window.navigator && window.navigator.standalone === true) {
             body.classList.add("is-app-installed");
         }
-        /* Если вход уже пробовали и он не удался, форму прячем зря. */
-        if (document.querySelector("[data-validated-login] [data-phone-input]") &&
+        /* Если вход уже пробовали (успешно дошли до пинкода или неудачно),
+           форму прячем зря. Флаг data-phone-prefill-only — единственное
+           исключение: номер пришёл в ссылке со /start/, а не от самого
+           человека, это его первый визит на этот экран — установку показываем
+           как обычно, а не перескакиваем сразу в форму. */
+        var loginForm = document.querySelector("[data-validated-login]");
+        var isPhonePrefillOnly = loginForm && loginForm.hasAttribute("data-phone-prefill-only");
+        if (!isPhonePrefillOnly &&
+            document.querySelector("[data-validated-login] [data-phone-input]") &&
             document.querySelector("[data-validated-login] [data-phone-input]").value) {
             body.classList.add("is-login-form-forced");
         }

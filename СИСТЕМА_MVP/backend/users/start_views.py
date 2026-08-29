@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
 from django.conf import settings
 from django.shortcuts import render
 from django.urls import reverse
@@ -65,9 +67,16 @@ def universal_start_view(request):
         if app is None:
             continue
         seen.add(code)
+        # Номер уже введён здесь — набирать его заново на входе в приложение
+        # незачем, поэтому несём его дальше в ссылке. Экран установки от
+        # этого не пропадает: он размонтируется на login_view только при
+        # ошибке входа, а не при простом наличии номера в поле.
+        app_url = role_app_public_url(request, code)
+        if phone:
+            app_url = f'{app_url}?{urlencode({"phone": normalize_phone(phone)})}'
         apps.append({
             'app': app,
-            'url': role_app_public_url(request, code),
+            'url': app_url,
             'employee': candidate.employee,
             'last_login_at': candidate.last_login_at,
         })
