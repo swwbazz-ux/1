@@ -194,6 +194,68 @@
             outline: 2px solid #bfdbfe;
             outline-offset: 2px;
         }
+        /* Яндекс Браузер на Android не ставит настоящий PWA-ярлык: либо кнопка
+           установки ничего не делает, либо получается обычная закладка — тот
+           же сайт, но со своей адресной строкой и панелью Яндекса снизу,
+           поверх интерфейса приложения. Со стороны сотрудника это выглядит
+           как «то же самое приложение, только что-то лишнее внизу», и без
+           объяснения никто сам не догадывается, что дело в браузере, а не в
+           программе. Полоса сверху, а не всплывающее окно: она не мешает
+           работать, если Chrome прямо сейчас недоступен, но напоминает при
+           каждом открытии, пока установка не исправлена — один раз скрыть
+           её насовсем нельзя нарочно, это единственный шанс, что человек
+           всё-таки переустановит правильно, а не будет жить с чужой панелью
+           месяцами, как уже случилось. */
+        .app-yandex-warning-banner {
+            /* fixed, а не sticky: рабочие экраны считают высоту под 100dvh
+               без запаса на лишний элемент сверху (та же причина, по которой
+               остальные плашки этого блока — тоже fixed, а не часть потока). */
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 10090;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 8px 14px;
+            padding: calc(env(safe-area-inset-top, 0px) + 8px) 14px 8px;
+            background: #fbbf24;
+            color: #422006;
+            text-align: center;
+            font: 700 13px/1.35 system-ui, sans-serif;
+        }
+        .app-yandex-warning-banner strong {
+            font-weight: 800;
+        }
+        .app-yandex-warning-banner__actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .app-yandex-warning-banner__open {
+            min-height: 34px;
+            padding: 0 16px;
+            border: 0;
+            border-radius: 8px;
+            background: #422006;
+            color: #fef3c7;
+            font: 800 13px/1 system-ui, sans-serif;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            cursor: pointer;
+        }
+        .app-yandex-warning-banner__dismiss {
+            border: 0;
+            background: none;
+            padding: 4px;
+            color: #422006;
+            font: 700 13px/1 system-ui, sans-serif;
+            text-decoration: underline;
+            cursor: pointer;
+        }
         /* Status notices float over the screen instead of sitting in the layout:
            they must never squeeze the app's height nor cover the header or the
            bottom navigation, and taps pass straight through them. */
@@ -952,6 +1014,15 @@
     {% block extra_head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
+{% if is_yandex_android and not observer_mode %}
+<div class="app-yandex-warning-banner" data-yandex-warning role="status" aria-live="polite">
+    <span><strong>Это Яндекс Браузер.</strong> Приложение может установиться неправильно — со своей строкой снизу.</span>
+    <span class="app-yandex-warning-banner__actions">
+        <a class="app-yandex-warning-banner__open" href="{{ chrome_open_url }}">Открыть в Chrome</a>
+        <button type="button" class="app-yandex-warning-banner__dismiss" data-yandex-warning-dismiss>Позже</button>
+    </span>
+</div>
+{% endif %}
 {% if observer_mode %}
 <div class="app-observer-chip{% if observer_control %} is-control{% endif %}{% if observer_is_self %} is-self{% endif %}" data-observer-banner role="status" aria-live="polite">
     <b>{% if observer_is_self %}моя роль{% elif observer_control %}управление{% else %}наблюдение{% endif %}</b>
@@ -1056,6 +1127,16 @@
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
+    /* «Позже» просто убирает полосу с этого просмотра страницы, без
+       localStorage — полоса намеренно возвращается при следующем открытии,
+       пока установка не исправлена на настоящий Chrome-PWA. */
+    var yandexWarning = document.querySelector("[data-yandex-warning]");
+    var yandexWarningDismiss = yandexWarning ? yandexWarning.querySelector("[data-yandex-warning-dismiss]") : null;
+    if (yandexWarningDismiss) {
+        yandexWarningDismiss.addEventListener("click", function () {
+            yandexWarning.remove();
+        });
+    }
     var logoutPath = "{% url 'logout' %}";
     var roleHomePath = "{% url 'role_home' %}";
     var confirmModal = document.getElementById("app-confirm-modal");

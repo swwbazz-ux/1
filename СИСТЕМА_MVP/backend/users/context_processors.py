@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 from .active_role import role_session_state
 from .app_catalog import app_catalog_public_url
 from .live_monitor import observer_context
@@ -9,6 +11,41 @@ from .role_apps import (
     get_role_app_for_request,
     role_app_scope,
 )
+
+
+def _is_yandex_android(request):
+    """Яндекс Браузер на Android не умеет ставить настоящий PWA-ярлык.
+
+    «Установить приложение» там либо не срабатывает вовсе, либо создаёт
+    обычную закладку — тот же сайт, но в оболочке Яндекса со своей адресной
+    строкой снизу. Внешне это неотличимо от настоящего приложения, поэтому
+    сотрудник ставит именно так и потом пользуется этим месяцами, не
+    понимая, что что-то не так — пока не наткнётся на путаницу вроде лишней
+    строки браузера поверх интерфейса. Проверка по User-Agent ловит оба
+    случая: и человека, который только открыл страницу для установки, и
+    того, кто уже застрял в неправильно поставленном ярлыке (там User-Agent
+    остаётся тем же — это по-прежнему движок Яндекса, а не Chrome).
+    """
+    user_agent = (request.META.get('HTTP_USER_AGENT') or '').lower()
+    return 'android' in user_agent and ('yabrowser' in user_agent or 'yandexbrowser' in user_agent)
+
+
+def _chrome_open_url(request):
+    """Ссылка, которая на Android открывает именно Chrome, а не браузер по умолчанию.
+
+    Обычная ссылка на тот же адрес откроется опять в Яндексе — это же его
+    страница. intent:// — единственный способ без установленных приложений
+    и системных диалогов сказать Android «открой это в Chrome конкретно».
+    Если Chrome на телефоне нет, S.browser_fallback_url возвращает туда же,
+    откуда начали, — человек не проваливается в пустоту.
+    """
+    absolute_url = request.build_absolute_uri()
+    host_and_path = absolute_url.split('://', 1)[-1]
+    fallback = quote(absolute_url, safe='')
+    return (
+        f'intent://{host_and_path}#Intent;scheme=https;'
+        f'package=com.android.chrome;S.browser_fallback_url={fallback};end'
+    )
 
 
 def role_app(request):
@@ -34,6 +71,7 @@ def role_app(request):
         else ''
     )
     state = getattr(request, 'role_session_state', None) or role_session_state(request)
+    is_yandex_android = _is_yandex_android(request)
     return {
         'role_app': app,
         'role_app_isolated': app is not None,
@@ -52,4 +90,6 @@ def role_app(request):
         'app_service_worker_scope': metadata_scope,
         **observer_context(request),
         'app_catalog_url': app_catalog_public_url(request),
+        'is_yandex_android': is_yandex_android,
+        'chrome_open_url': _chrome_open_url(request) if is_yandex_android else '',
     }
