@@ -11,6 +11,28 @@ from .role_apps import (
 )
 
 
+NATIVE_APP_USER_AGENT_MARKER = 'copperresourcesnative'
+
+
+def _is_native_app(request):
+    """Страница открыта внутри нашего же Android-приложения, а не в браузере.
+
+    Нативная оболочка (Capacitor) дописывает в User-Agent метку
+    «CopperResourcesNative/<профиль>» — см. MainActivity.setAppendedUserAgent
+    в проекте mobile/capacitor-shell.
+
+    Зачем это нужно: сайт по умолчанию считает, что его открыли в браузере,
+    и предлагает «Установить приложение». Внутри уже установленного
+    приложения это выглядит абсурдно — человек ставит приложение, открывает
+    его и видит предложение установить приложение. Раньше экран установки
+    прятался по display-mode: standalone, но WebView внутри Capacitor
+    отдаёт display-mode: browser, поэтому CSS-проверка там не срабатывает,
+    и нужна серверная.
+    """
+    user_agent = (request.META.get('HTTP_USER_AGENT') or '').lower()
+    return NATIVE_APP_USER_AGENT_MARKER in user_agent
+
+
 def _is_yandex_android(request):
     """Яндекс Браузер на Android не умеет ставить настоящий PWA-ярлык.
 
@@ -51,7 +73,10 @@ def role_app(request):
         else ''
     )
     state = getattr(request, 'role_session_state', None) or role_session_state(request)
-    is_yandex_android = _is_yandex_android(request)
+    is_native_app = _is_native_app(request)
+    # Внутри нашего приложения баннер про Яндекс бессмысленен: человек уже
+    # не в браузере, ставить через Chrome ему нечего.
+    is_yandex_android = _is_yandex_android(request) and not is_native_app
     return {
         'role_app': app,
         'role_app_isolated': app is not None,
@@ -78,4 +103,5 @@ def role_app(request):
         # Копирование адреса вручную — единственный путь, который работает
         # независимо от того, что именно блокирует переход.
         'current_absolute_url': request.build_absolute_uri() if is_yandex_android else '',
+        'is_native_app': is_native_app,
     }
