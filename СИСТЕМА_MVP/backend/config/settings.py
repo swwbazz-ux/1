@@ -347,3 +347,31 @@ RATING_TV_QA_FORMULA_REPLAY_NIGHT_SHA256 = os.getenv(
 # Перед подключением второго участка здесь должен быть указан серверный провайдер
 # членства, возвращающий строго ограниченный Employee QuerySet.
 PORTAL_EMPLOYEE_SCOPE_PROVIDER = ''
+
+# Отказы CSRF должны быть видны в journalctl.
+#
+# Django знает точную причину каждого отказа («Origin checking failed»,
+# «CSRF cookie not set» и т.п.) и пишет её в логгер django.security.csrf на
+# уровне WARNING — но без этой настройки логгер никуда не подключён, и в
+# журнале пусто. Для человека такой отказ выглядит как «Ошибка доступа 403»
+# без единой подсказки, а воспроизвести его часто не удаётся: 29.08.2026
+# отказ случился при первом входе в новом Android-приложении и больше не
+# повторился ни разу, в том числе при попытке пройти ровно тот же путь
+# запросами с сервера. Без журнала такие разовые случаи неотличимы от
+# поломки входа как таковой.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'django.security.csrf': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+    },
+}
