@@ -927,6 +927,31 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'runManualUpdateCheck')
         self.assertContains(response, 'Проверка...')
 
+    def test_browser_excavator_keeps_pwa_update_ui(self):
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<span class="eo-current-app-version" aria-label="Текущая версия приложения">')
+        self.assertContains(response, '<button class="eo-shift-update-button" type="button" data-eo-pwa-update-check')
+        self.assertContains(response, '<div class="eo-mobile-update-modal" data-eo-pwa-update-modal hidden>')
+        self.assertContains(response, '<span class="mm-mobile-update-badge" data-eo-pwa-update-badge')
+        self.assertContains(response, 'data-eo-tab="shift" data-eo-pwa-update-nav-target')
+        self.assertContains(response, 'data-eo-refresh-work')
+
+    def test_native_excavator_hides_pwa_update_ui_but_keeps_work_refresh(self):
+        response = self.client.get(
+            reverse('excavator_work'),
+            HTTP_USER_AGENT='Mozilla/5.0 CopperResourcesNative/excavator',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, '<span class="eo-current-app-version"')
+        self.assertNotContains(response, '<button class="eo-shift-update-button"')
+        self.assertNotContains(response, '<div class="eo-mobile-update-modal" data-eo-pwa-update-modal')
+        self.assertNotContains(response, '<span class="mm-mobile-update-badge" data-eo-pwa-update-badge')
+        self.assertNotContains(response, 'data-eo-tab="shift" data-eo-pwa-update-nav-target')
+        self.assertContains(response, 'data-eo-refresh-work')
+
     def test_excavator_work_disables_apply_button_for_saved_settings(self):
         ExcavatorPlacement.objects.create(
             excavator=self.excavator,

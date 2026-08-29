@@ -168,7 +168,7 @@
                 <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
                     {{ dispatcher_dashboard.completion_percent|default:0 }}%
                 </div>
-                <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>
+                {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
             </div>
         </header>
 
@@ -233,9 +233,9 @@
                 <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                 <span>Самосвалы</span>
             </a>
-            <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
+            <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports"{% if not is_native_app %} data-mm-pwa-update-nav-target{% endif %}>
                 <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
-                <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
+                {% if not is_native_app %}<span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>{% endif %}
                 <span>Отчеты</span>
             </a>
         </nav>
@@ -251,7 +251,7 @@
                     <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>
+                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
 
@@ -287,9 +287,9 @@
                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                     <span>Самосвалы</span>
                 </a>
-                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
+                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports"{% if not is_native_app %} data-mm-pwa-update-nav-target{% endif %}>
                     <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
-                    <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
+                    {% if not is_native_app %}<span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>{% endif %}
                     <span>Отчеты</span>
                 </a>
             </nav>
@@ -305,7 +305,7 @@
                     <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>
+                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
 
@@ -340,9 +340,9 @@
                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                     <span>Самосвалы</span>
                 </a>
-                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
+                <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="reports"{% if not is_native_app %} data-mm-pwa-update-nav-target{% endif %}>
                     <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
-                    <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
+                    {% if not is_native_app %}<span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>{% endif %}
                     <span>Отчеты</span>
                 </a>
             </nav>
@@ -358,7 +358,7 @@
                     <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </div>
-                    <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>
+                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
 
@@ -430,11 +430,13 @@
                 {% endif %}
             </form>
 
+            {% if not is_native_app %}
             <div class="mm-mobile-version-strip" aria-label="Версия приложения">
                 <span>Версия приложения</span>
                 <strong data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</strong>
                 <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
             </div>
+            {% endif %}
 
             <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="home">
@@ -449,9 +451,9 @@
                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                     <span>Самосвалы</span>
                 </a>
-                <a class="mm-mobile-nav-item is-active" href="#" data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target>
+                <a class="mm-mobile-nav-item is-active" href="#" data-mm-mobile-nav="reports"{% if not is_native_app %} data-mm-pwa-update-nav-target{% endif %}>
                     <span class="mm-mobile-nav-icon mm-mobile-nav-icon-reports" aria-hidden="true"></span>
-                    <span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>
+                    {% if not is_native_app %}<span class="mm-mobile-update-badge" data-mm-pwa-update-badge hidden aria-hidden="true"></span>{% endif %}
                     <span>Отчеты</span>
                 </a>
             </nav>
@@ -469,7 +471,7 @@
                             <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
                                 {{ dispatcher_dashboard.completion_percent|default:0 }}%
                             </div>
-                            <span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>
+                            {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                         </div>
                     </header>
 
@@ -523,6 +525,7 @@
     </div>
 
     {% if mining_master_mobile_enabled %}
+    {% if not is_native_app %}
     <div class="mm-mobile-update-modal" data-pwa-browser-mode-warning hidden>
         <section class="mm-mobile-update-dialog" role="alertdialog" aria-modal="true" aria-labelledby="mm-yandex-pwa-title" aria-describedby="mm-yandex-pwa-text">
             <div class="mm-mobile-update-pulse" aria-hidden="true"></div>
@@ -558,6 +561,7 @@
             </div>
         </section>
     </div>
+    {% endif %}
     {% endif %}
 
     <section class="dispatcher-tools" aria-label="Фильтры и служебные списки" hidden>
@@ -2702,7 +2706,11 @@ document.addEventListener("DOMContentLoaded", function () {
                     '<header class="mm-mobile-detail-header">',
                         '<button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>',
                         '<div class="mm-mobile-detail-title mm-mobile-fill-title"><h1>Набор самосвалов</h1></div>',
+                        {% if is_native_app %}
+                        '<div class="mm-mobile-header-actions"><div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: 0%;" role="img" aria-label="Выполнение плана смены 0%">0%</div></div>',
+                        {% else %}
                         '<div class="mm-mobile-header-actions"><div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: 0%;" role="img" aria-label="Выполнение плана смены 0%">0%</div><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
+                        {% endif %}
                     '</header>',
                     '<div class="mm-mobile-fill-save-overlay" aria-hidden="true">Сохранить</div>',
                     '<div class="mm-mobile-fill-shake-overlay" aria-hidden="true">Стряхнуть</div>',

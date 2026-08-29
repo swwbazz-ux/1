@@ -366,6 +366,32 @@ class MiningMasterAssignmentsViewTests(TestCase):
             'querySelectorAll("[data-mm-mobile-panel=\'trucks\'] .mm-mobile-truck-card[data-equipment-card-id]").forEach(bindEquipmentCardTrigger)'
         )
 
+    def test_browser_mining_master_keeps_pwa_update_ui(self):
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>')
+        self.assertContains(response, '<div class="mm-mobile-version-strip" aria-label="Версия приложения">')
+        self.assertContains(response, '<div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>')
+        self.assertContains(response, '<span class="mm-mobile-update-badge" data-mm-pwa-update-badge')
+        self.assertContains(response, 'data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target')
+        self.assertContains(response, '>Обновить пульт</button>')
+
+    def test_native_mining_master_hides_pwa_update_ui_but_keeps_pult_refresh(self):
+        response = self.client.get(
+            reverse('mining_master_assignments'),
+            HTTP_USER_AGENT='Mozilla/5.0 CopperResourcesNative/mining-master',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, '<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>')
+        self.assertNotContains(response, '<div class="mm-mobile-version-strip" aria-label="Версия приложения">')
+        self.assertNotContains(response, '<div class="mm-mobile-update-modal" data-mm-pwa-update-modal')
+        self.assertNotContains(response, '<span class="mm-mobile-update-badge" data-mm-pwa-update-badge')
+        self.assertNotContains(response, 'data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target')
+        self.assertNotContains(response, '<div class="mm-mobile-update-modal" data-pwa-browser-mode-warning')
+        self.assertContains(response, '>Обновить пульт</button>')
+
     def test_shared_login_has_no_role_manifest_and_mining_master_host_has_its_pwa(self):
         response = Client().get('/')
 

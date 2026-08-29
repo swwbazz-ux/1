@@ -315,6 +315,34 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'body.driver-mobile-screen .driver-nav-truck')
         self.assertNotContains(response, 'driver-work-' + 'bottom-nav')
 
+    def test_browser_driver_keeps_pwa_update_ui(self):
+        self.create_registered_driver_shift()
+
+        response = self.client.get(reverse('driver_work'), HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<small class="driver-shell-version" aria-label="Версия приложения">')
+        self.assertContains(response, '<div class="driver-mobile-update-modal" data-driver-pwa-update-modal')
+        self.assertContains(response, '<span class="driver-mobile-update-badge" data-driver-pwa-update-badge')
+        self.assertContains(response, 'data-driver-tab-open="manifest" data-driver-pwa-update-nav-target')
+        self.assertContains(response, 'data-driver-shift-update')
+
+    def test_native_driver_hides_pwa_update_ui_but_keeps_operational_refresh(self):
+        self.create_registered_driver_shift()
+
+        response = self.client.get(
+            reverse('driver_work'),
+            HTTP_HOST='localhost',
+            HTTP_USER_AGENT='Mozilla/5.0 CopperResourcesNative/driver',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, '<small class="driver-shell-version"')
+        self.assertNotContains(response, '<div class="driver-mobile-update-modal" data-driver-pwa-update-modal')
+        self.assertNotContains(response, '<span class="driver-mobile-update-badge" data-driver-pwa-update-badge')
+        self.assertNotContains(response, 'data-driver-tab-open="manifest" data-driver-pwa-update-nav-target')
+        self.assertContains(response, 'data-driver-shift-update')
+
     def test_driver_manifest_is_installable_pwa_manifest(self):
         response = self.client.get(reverse('driver_manifest'), HTTP_HOST='localhost')
         payload = response.json()

@@ -72,6 +72,7 @@
         >
             <div class="eo-shift-titlebar">
                 <h1>Смена</h1>
+                {% if not is_native_app %}
                 <div class="eo-shift-update-group">
                     <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия {{ app_shell_version|default:'excavator-mobile-shell-v0'|cut:'excavator-mobile-shell-v' }}</span>
                     <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
@@ -80,6 +81,7 @@
                         <em data-eo-pwa-update-check-version hidden></em>
                     </button>
                 </div>
+                {% endif %}
             </div>
             <div class="eo-shift-scroll" data-eo-shift-scroll>
             {% if not open_shift %}
@@ -419,14 +421,14 @@
             </span>
             <span class="mm-mobile-nav-label">Работа</span>
         </button>
-        <button class="mm-mobile-nav-item" type="button" data-eo-tab="shift" data-eo-pwa-update-nav-target aria-label="Смена">
+        <button class="mm-mobile-nav-item" type="button" data-eo-tab="shift"{% if not is_native_app %} data-eo-pwa-update-nav-target{% endif %} aria-label="Смена">
             <span class="mm-mobile-nav-icon mm-mobile-nav-icon-shift" aria-hidden="true">
                 <svg class="lucide lucide-clipboard-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect width="8" height="4" x="8" y="2" rx="1"></rect>
                     <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
                     <path d="m9 14 2 2 4-4"></path>
                 </svg>
-                <span class="mm-mobile-update-badge" data-eo-pwa-update-badge hidden></span>
+                {% if not is_native_app %}<span class="mm-mobile-update-badge" data-eo-pwa-update-badge hidden></span>{% endif %}
             </span>
             <span class="mm-mobile-nav-label">Смена</span>
         </button>
@@ -452,6 +454,7 @@
     </nav>
 </main>
 
+{% if not is_native_app %}
 <div class="eo-mobile-update-modal" data-eo-pwa-update-modal hidden>
     <section class="eo-mobile-update-dialog" role="alertdialog" aria-modal="true" aria-labelledby="eo-pwa-update-title" aria-describedby="eo-pwa-update-text">
         <div class="eo-mobile-update-pulse" aria-hidden="true"></div>
@@ -471,6 +474,7 @@
         </div>
     </section>
 </div>
+{% endif %}
 
 <div class="eo-notice-modal" data-eo-notice-modal hidden aria-hidden="true">
     <section class="eo-notice-dialog" role="alertdialog" aria-modal="true" aria-labelledby="eo-notice-title" aria-describedby="eo-notice-message">

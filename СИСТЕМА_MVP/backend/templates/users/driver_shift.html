@@ -3860,7 +3860,9 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
             <span class="driver-header-person">{{ driver_header_person_label }}</span>
         </div>
         <div class="driver-online" role="status" aria-label="Онлайн">
+            {% if not is_native_app %}
             <small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|cut:'driver-mobile-shell-' }}</small>
+            {% endif %}
             <span>Онлайн</span>
             <i class="driver-online-dot" data-connection-indicator aria-hidden="true"></i>
             <strong></strong>
@@ -4192,13 +4194,16 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         <span class="driver-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M10 15V9"></path><path d="M14 15V9"></path></svg></span>
         <span class="driver-nav-label">Простои</span>
     </button>
-    <button class="mm-mobile-nav-item {% if active_tab == 'manifest' %}is-active{% endif %}" type="button" data-driver-tab-open="manifest" data-driver-pwa-update-nav-target>
+    <button class="mm-mobile-nav-item {% if active_tab == 'manifest' %}is-active{% endif %}" type="button" data-driver-tab-open="manifest"{% if not is_native_app %} data-driver-pwa-update-nav-target{% endif %}>
         <span class="driver-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></span>
         <span class="driver-nav-label">Путевка</span>
+        {% if not is_native_app %}
         <span class="driver-mobile-update-badge" data-driver-pwa-update-badge hidden aria-hidden="true"></span>
+        {% endif %}
     </button>
 </nav>
 
+{% if not is_native_app %}
 <div class="driver-mobile-update-modal" data-driver-pwa-update-modal hidden aria-live="polite" aria-modal="true" role="dialog">
     <div class="driver-mobile-update-dialog">
         <strong>Доступно обновление</strong>
@@ -4213,6 +4218,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         </div>
     </div>
 </div>
+{% endif %}
 
 {% include "includes/achievement_prize.html" %}
 
