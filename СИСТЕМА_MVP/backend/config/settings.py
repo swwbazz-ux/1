@@ -112,6 +112,10 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    # Только ставит cookie-признак «это наше Android-приложение». Ничего не
+    # блокирует и ни на что не влияет, кроме предложения установить
+    # приложение, поэтому место в цепочке некритично.
+    'users.middleware.NativeAppMarkerMiddleware',
     'users.middleware.ObserverModeMiddleware',
     'users.middleware.PersonalSessionRenewalMiddleware',
     'django.middleware.common.CommonMiddleware',

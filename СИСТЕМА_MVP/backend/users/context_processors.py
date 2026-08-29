@@ -12,14 +12,21 @@ from .role_apps import (
 
 
 NATIVE_APP_USER_AGENT_MARKER = 'copperresourcesnative'
+NATIVE_APP_COOKIE = 'native_app'
+
+
+def native_app_marker_in_user_agent(request):
+    """Метка нативной оболочки в User-Agent.
+
+    Нативная оболочка (Capacitor) дописывает «CopperResourcesNative/<профиль>»
+    — см. MainActivity.setAppendedUserAgentString в mobile/capacitor-shell.
+    """
+    user_agent = (request.META.get('HTTP_USER_AGENT') or '').lower()
+    return NATIVE_APP_USER_AGENT_MARKER in user_agent
 
 
 def _is_native_app(request):
     """Страница открыта внутри нашего же Android-приложения, а не в браузере.
-
-    Нативная оболочка (Capacitor) дописывает в User-Agent метку
-    «CopperResourcesNative/<профиль>» — см. MainActivity.setAppendedUserAgent
-    в проекте mobile/capacitor-shell.
 
     Зачем это нужно: сайт по умолчанию считает, что его открыли в браузере,
     и предлагает «Установить приложение». Внутри уже установленного
@@ -28,9 +35,19 @@ def _is_native_app(request):
     прятался по display-mode: standalone, но WebView внутри Capacitor
     отдаёт display-mode: browser, поэтому CSS-проверка там не срабатывает,
     и нужна серверная.
+
+    Признаков два, и второй обязателен. По одному User-Agent опознание
+    ненадёжно: service worker перехватывает переходы между страницами и
+    переотправляет их своим `fetch()` из собственного контекста, где
+    надстройка Capacitor к User-Agent уже не действует, — часть запросов от
+    одного и того же приложения приходит без метки. Cookie такую
+    переотправку переживает, её ставит NativeAppMarkerMiddleware при первом
+    же запросе с меткой.
     """
-    user_agent = (request.META.get('HTTP_USER_AGENT') or '').lower()
-    return NATIVE_APP_USER_AGENT_MARKER in user_agent
+    return (
+        native_app_marker_in_user_agent(request)
+        or request.COOKIES.get(NATIVE_APP_COOKIE) == '1'
+    )
 
 
 def _is_yandex_android(request):

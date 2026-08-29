@@ -5,11 +5,59 @@ from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
 from django.utils import timezone
 
 from .active_role import SAFE_ROLE_SWITCH_METHODS, role_session_state
+from .context_processors import NATIVE_APP_COOKIE, native_app_marker_in_user_agent
 from .session_device import (
     personal_session_expiry,
     personal_session_renew_interval_seconds,
 )
 from .live_monitor import apply_observer_mode
+
+
+class NativeAppMarkerMiddleware:
+    """Запоминает в cookie, что человек сидит в нашем Android-приложении.
+
+    Опознание по одному User-Agent оказалось ненадёжным. Нативная оболочка
+    дописывает в него метку «CopperResourcesNative/<профиль>», но service
+    worker перехватывает переходы между страницами и переотправляет их своим
+    `fetch()` — уже из собственного контекста, где надстройка Capacitor к
+    User-Agent не действует. В итоге часть запросов приходит с меткой, а
+    часть — без, от одного и того же приложения. Поймано 29.08.2026: выход
+    из приложения (`GET /logout/` с referer страницы экскаваторщика) пришёл
+    без метки, сервер счёл его браузерным и показал экран «Установите
+    приложение» внутри уже установленного приложения.
+
+    Cookie переживает переотправку через service worker, потому что тот
+    сохраняет учётные данные для запросов на свой же домен. Достаточно
+    одного запроса с меткой — дальше признак держится сам.
+
+    Браузер на том же телефоне эту cookie не подхватит: у приложения и у
+    браузера отдельные хранилища, а куки ролевых приложений намеренно
+    host-only (см. SESSION_COOKIE_DOMAIN в настройках).
+    """
+
+    # Год: приложение стоит на телефоне долго, а признак не секретный и не
+    # даёт никаких прав — он влияет только на то, показывать ли предложение
+    # установить приложение.
+    COOKIE_MAX_AGE = 60 * 60 * 24 * 365
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        if (
+            native_app_marker_in_user_agent(request)
+            and request.COOKIES.get(NATIVE_APP_COOKIE) != '1'
+        ):
+            response.set_cookie(
+                NATIVE_APP_COOKIE,
+                '1',
+                max_age=self.COOKIE_MAX_AGE,
+                samesite='Lax',
+                secure=request.is_secure(),
+                httponly=False,
+            )
+        return response
 
 
 class ObserverModeMiddleware:
