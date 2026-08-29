@@ -945,12 +945,33 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        # Метка без версии — старая сборка. Версию оболочки показывать нельзя:
+        # её примут за версию приложения. Лучше не показывать ничего.
         self.assertNotContains(response, '<span class="eo-current-app-version"')
         self.assertNotContains(response, '<button class="eo-shift-update-button"')
         self.assertNotContains(response, '<div class="eo-mobile-update-modal" data-eo-pwa-update-modal')
         self.assertNotContains(response, '<span class="mm-mobile-update-badge" data-eo-pwa-update-badge')
         self.assertNotContains(response, 'data-eo-tab="shift" data-eo-pwa-update-nav-target')
         self.assertContains(response, 'data-eo-refresh-work')
+
+    def test_native_excavator_shows_real_app_version_when_reported(self):
+        """Приложение сообщает свою версию — показываем именно её, а не
+        версию веб-оболочки, которую в приложении понять невозможно."""
+        response = self.client.get(
+            reverse('excavator_work'),
+            HTTP_USER_AGENT='Mozilla/5.0 (Linux; Android 13; wv) CopperResourcesNative/excavator/0.1.4 Mobile Safari/537.36',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<span class="eo-current-app-version"')
+        self.assertContains(response, 'Версия 0.1.4')
+        # Проверяем именно сам элемент версии: строка «excavator-mobile-shell-»
+        # встречается на странице и в других местах (регистрация service
+        # worker, метаданные), поэтому голый поиск подстроки ложно падает.
+        self.assertNotContains(
+            response,
+            'aria-label="Текущая версия приложения">Версия excavator-mobile-shell-',
+        )
 
     def test_excavator_work_disables_apply_button_for_saved_settings(self):
         ExcavatorPlacement.objects.create(

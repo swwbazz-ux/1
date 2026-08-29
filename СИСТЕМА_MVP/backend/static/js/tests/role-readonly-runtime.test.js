@@ -662,7 +662,11 @@ function extractDriverShiftCloseBindingSource() {
     );
     const source = fs.readFileSync(templatePath, "utf8");
     const startMarker = '        if (form && closeButton && closeButton.dataset.driverShiftBound !== "true") {';
-    const endMarker = '        if (updateButton && updateButton.dataset.driverShiftUpdateBound !== "true") {';
+    // Раньше границей служила привязка кнопки «Обновить» рядом со сменой. Её
+    // убрали совсем: она проверяла обновление веб-оболочки, а стояла во
+    // вкладке «Смена» и читалась как обновление данных смены. Берём следующую
+    // привязку в том же блоке — выход из смены.
+    const endMarker = '        if (logoutButton && logoutButton.dataset.driverLogoutBound !== "true") {';
     const start = source.indexOf(startMarker);
     const end = source.indexOf(endMarker, start);
     assert.notEqual(start, -1, "Production driver shift-close binding was not found.");

@@ -337,11 +337,38 @@ class AccessLoginTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        # Метка без версии — старая сборка. Версию оболочки показывать нельзя:
+        # её примут за версию приложения. Лучше не показывать ничего.
         self.assertNotContains(response, '<small class="driver-shell-version"')
         self.assertNotContains(response, '<div class="driver-mobile-update-modal" data-driver-pwa-update-modal')
         self.assertNotContains(response, '<span class="driver-mobile-update-badge" data-driver-pwa-update-badge')
         self.assertNotContains(response, 'data-driver-tab-open="manifest" data-driver-pwa-update-nav-target')
-        self.assertContains(response, 'data-driver-shift-update')
+
+    def test_native_driver_shows_real_app_version_when_reported(self):
+        """Приложение сообщает свою версию — показываем именно её.
+
+        Раньше версии в приложении не было вообще: версию веб-оболочки
+        спрятали как вводящую в заблуждение, а своей ещё не было. Теперь
+        сборка дописывает её в User-Agent.
+        """
+        self.create_registered_driver_shift()
+
+        response = self.client.get(
+            reverse('driver_work'),
+            HTTP_HOST='localhost',
+            HTTP_USER_AGENT='Mozilla/5.0 (Linux; Android 13; wv) CopperResourcesNative/driver/0.1.3 Mobile Safari/537.36',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<small class="driver-shell-version"')
+        self.assertContains(response, '>0.1.3</small>')
+        # Проверяем именно сам элемент версии: строка «driver-mobile-shell-»
+        # есть на странице и в других местах (service worker, метаданные),
+        # поэтому голый поиск подстроки ложно падает.
+        self.assertNotContains(
+            response,
+            'aria-label="Версия приложения">driver-mobile-shell-',
+        )
 
     def test_driver_manifest_is_installable_pwa_manifest(self):
         response = self.client.get(reverse('driver_manifest'), HTTP_HOST='localhost')

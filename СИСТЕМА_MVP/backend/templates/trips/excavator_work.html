@@ -72,16 +72,22 @@
         >
             <div class="eo-shift-titlebar">
                 <h1>Смена</h1>
-                {% if not is_native_app %}
                 <div class="eo-shift-update-group">
-                    <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия {{ app_shell_version|default:'excavator-mobile-shell-v0'|cut:'excavator-mobile-shell-v' }}</span>
+                    {# В приложении — версия самого приложения, в браузере — версия
+                       веб-оболочки. Старая сборка версию не сообщает: тогда лучше
+                       не показывать ничего, чем показать версию оболочки — её
+                       примут за версию приложения. #}
+                    {% if is_native_app %}{% if native_app_version %}<span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия {{ native_app_version }}</span>{% endif %}{% else %}<span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия {{ app_shell_version|default:'excavator-mobile-shell-v0'|cut:'excavator-mobile-shell-v' }}</span>{% endif %}
+                    {# Проверка обновления веб-оболочки. В приложении бессмысленна:
+                       обновления приходят из RuStore, а не по этой кнопке. #}
+                    {% if not is_native_app %}
                     <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
                         <span aria-hidden="true"></span>
                         <b data-eo-pwa-update-check-label>Обновить</b>
                         <em data-eo-pwa-update-check-version hidden></em>
                     </button>
+                    {% endif %}
                 </div>
-                {% endif %}
             </div>
             <div class="eo-shift-scroll" data-eo-shift-scroll>
             {% if not open_shift %}
@@ -454,6 +460,8 @@
     </nav>
 </main>
 
+{# Окно обновления веб-оболочки. В приложении не нужно: обновления
+   приходят из RuStore, а не отсюда. #}
 {% if not is_native_app %}
 <div class="eo-mobile-update-modal" data-eo-pwa-update-modal hidden>
     <section class="eo-mobile-update-dialog" role="alertdialog" aria-modal="true" aria-labelledby="eo-pwa-update-title" aria-describedby="eo-pwa-update-text">

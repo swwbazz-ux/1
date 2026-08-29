@@ -3860,9 +3860,11 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
             <span class="driver-header-person">{{ driver_header_person_label }}</span>
         </div>
         <div class="driver-online" role="status" aria-label="Онлайн">
-            {% if not is_native_app %}
-            <small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|cut:'driver-mobile-shell-' }}</small>
-            {% endif %}
+            {# В приложении показываем версию самого приложения, в браузере — версию
+               веб-оболочки. Если приложение версию не сообщило (старая сборка,
+               метка без версии) — не показываем ничего: версия оболочки там
+               вводит в заблуждение, человек решит, что это версия приложения. #}
+            {% if is_native_app %}{% if native_app_version %}<small class="driver-shell-version" aria-label="Версия приложения">{{ native_app_version }}</small>{% endif %}{% else %}<small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|cut:'driver-mobile-shell-' }}</small>{% endif %}
             <span>Онлайн</span>
             <i class="driver-online-dot" data-connection-indicator aria-hidden="true"></i>
             <strong></strong>
@@ -3980,7 +3982,6 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                 <input type="hidden" name="shift_action" value="{% if close_review %}close{% else %}review{% endif %}" data-driver-shift-action>
                 <div class="driver-shift-titlebar">
                     <h2>Смена</h2>
-                    <button class="driver-shift-update" type="button" data-driver-shift-update><span class="driver-shift-update-icon" aria-hidden="true"></span><span>Обновить</span></button>
                 </div>
                 <div class="driver-shift-scroll" data-driver-shift-scroll>
                 <div class="driver-shift-section driver-shift-inputs" data-driver-shift-inputs{% if close_review %} hidden{% endif %}>
@@ -4036,7 +4037,6 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
             <div class="driver-shift-workspace driver-shift-opening">
                 <div class="driver-shift-titlebar">
                     <h2>Смена</h2>
-                    <button class="driver-shift-update" type="button" data-driver-shift-update><span class="driver-shift-update-icon" aria-hidden="true"></span><span>Обновить</span></button>
                 </div>
                 {% if form %}
                 <form method="post" class="driver-shift-opening-form">
@@ -4197,12 +4197,12 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
     <button class="mm-mobile-nav-item {% if active_tab == 'manifest' %}is-active{% endif %}" type="button" data-driver-tab-open="manifest"{% if not is_native_app %} data-driver-pwa-update-nav-target{% endif %}>
         <span class="driver-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></span>
         <span class="driver-nav-label">Путевка</span>
-        {% if not is_native_app %}
-        <span class="driver-mobile-update-badge" data-driver-pwa-update-badge hidden aria-hidden="true"></span>
-        {% endif %}
+        {% if not is_native_app %}<span class="driver-mobile-update-badge" data-driver-pwa-update-badge hidden aria-hidden="true"></span>{% endif %}
     </button>
 </nav>
 
+{# Окно обновления веб-оболочки. В приложении не нужно: обновления
+   приходят из RuStore, а не отсюда. #}
 {% if not is_native_app %}
 <div class="driver-mobile-update-modal" data-driver-pwa-update-modal hidden aria-live="polite" aria-modal="true" role="dialog">
     <div class="driver-mobile-update-dialog">
@@ -5001,7 +5001,6 @@ window.bindDriverMobileShell = function () {
     function bindDriverShiftControls() {
         var form = shell.querySelector("[data-driver-shift-close-form]");
         var closeButton = shell.querySelector("[data-driver-shift-close-button]");
-        var updateButton = shell.querySelector("[data-driver-shift-update]");
         var logoutButton = shell.querySelector("[data-driver-shift-logout]");
         var shiftAction = form ? form.querySelector("[data-driver-shift-action]") : null;
         var inputsSection = form ? form.querySelector("[data-driver-shift-inputs]") : null;
@@ -5119,30 +5118,6 @@ window.bindDriverMobileShell = function () {
                     }
                 });
             }
-        }
-
-        if (updateButton && updateButton.dataset.driverShiftUpdateBound !== "true") {
-            updateButton.dataset.driverShiftUpdateBound = "true";
-            updateButton.addEventListener("click", function () {
-                if (updateButton.disabled) return;
-                updateButton.disabled = true;
-                updateButton.textContent = "Проверка";
-                var guard = window.AppPwaContractGuard;
-                var updateRequest = guard && typeof guard.requestManualUpdate === "function"
-                    ? guard.requestManualUpdate()
-                    : Promise.resolve({status: "unavailable"});
-                Promise.resolve(updateRequest).then(function (result) {
-                    updateButton.textContent = result && result.status === "current"
-                        ? "Актуально"
-                        : result && result.status === "update-ready"
-                            ? "Доступно обновление"
-                            : "Повторить";
-                }).catch(function () {
-                    updateButton.textContent = "Повторить";
-                }).finally(function () {
-                    updateButton.disabled = false;
-                });
-            });
         }
 
         if (logoutButton && logoutButton.dataset.driverLogoutBound !== "true") {

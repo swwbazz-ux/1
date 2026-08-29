@@ -1,3 +1,5 @@
+import re
+
 from .active_role import role_session_state
 from .app_catalog import app_catalog_public_url
 from .live_monitor import observer_context
@@ -10,43 +12,44 @@ from .role_apps import (
     role_app_scope,
 )
 
+_NATIVE_APP_MARKER = re.compile(
+    # \s — любой пробельный символ. Двойной слэш здесь был бы ошибкой: в
+    # raw-строке он означает literal-обратный слэш плюс букву «s», то есть
+    # выражение переставало обрывать совпадение на пробеле и вместо версии
+    # захватывало хвост User-Agent («0.1.3 Mobile » вместо «0.1.3»).
+    r"copperresourcesnative/([^\s/;,)]+)(?:/([^\s/;,)]+))?",
+    re.IGNORECASE,
+)
 
-NATIVE_APP_USER_AGENT_MARKER = 'copperresourcesnative'
+
 NATIVE_APP_COOKIE = 'native_app'
 
 
-def _is_ios(request):
-    """iPhone или iPad.
+def parse_native_app_marker(request):
+    """Разобрать метку CopperResourcesNative из User-Agent.
 
-    Safari не даёт сайту предложить установку — там это делается только
-    руками через «Поделиться» → «На экран Домой». Поэтому кнопка
-    «Установить приложение» на iOS не срабатывает вообще: человек жмёт, и
-    ничего не происходит. Вместо неё нужно сразу показывать инструкцию.
+    Возвращает пару: нашлась ли метка и версия приложения (может быть
+    пустой — старые сборки писали метку без версии).
     """
-    user_agent = (request.META.get('HTTP_USER_AGENT') or '').lower()
-    return any(marker in user_agent for marker in ('iphone', 'ipad', 'ipod'))
+    user_agent = request.META.get('HTTP_USER_AGENT', '')
+    match = _NATIVE_APP_MARKER.search(user_agent or '')
+    if not match:
+        return False, ''
+    return True, (match.group(2) or '').strip()
 
 
 def native_app_marker_in_user_agent(request):
-    """Метка нативной оболочки в User-Agent.
+    """Есть ли метка нативной оболочки в User-Agent.
 
-    Нативная оболочка (Capacitor) дописывает «CopperResourcesNative/<профиль>»
-    — см. MainActivity.setAppendedUserAgentString в mobile/capacitor-shell.
+    Отдельно от parse_native_app_marker, потому что этим пользуется
+    NativeAppMarkerMiddleware, которому нужен только факт, без версии.
     """
-    user_agent = (request.META.get('HTTP_USER_AGENT') or '').lower()
-    return NATIVE_APP_USER_AGENT_MARKER in user_agent
+    marker_found, _ = parse_native_app_marker(request)
+    return marker_found
 
 
 def _is_native_app(request):
-    """Страница открыта внутри нашего же Android-приложения, а не в браузере.
-
-    Зачем это нужно: сайт по умолчанию считает, что его открыли в браузере,
-    и предлагает «Установить приложение». Внутри уже установленного
-    приложения это выглядит абсурдно — человек ставит приложение, открывает
-    его и видит предложение установить приложение. Раньше экран установки
-    прятался по display-mode: standalone, но WebView внутри Capacitor
-    отдаёт display-mode: browser, поэтому CSS-проверка там не срабатывает,
-    и нужна серверная.
+    """Страница открыта внутри нашего Android-приложения, а не в браузере.
 
     Признаков два, и второй обязателен. По одному User-Agent опознание
     ненадёжно: service worker перехватывает переходы между страницами и
@@ -60,6 +63,28 @@ def _is_native_app(request):
         native_app_marker_in_user_agent(request)
         or request.COOKIES.get(NATIVE_APP_COOKIE) == '1'
     )
+
+
+def _native_app_version(request):
+    """Версия установленного приложения — только из метки.
+
+    Из cookie её взять нельзя: cookie живёт год и переживает обновления,
+    поэтому показала бы версию, которая уже не стоит на телефоне.
+    """
+    _, marker_version = parse_native_app_marker(request)
+    return marker_version
+
+
+def _is_ios(request):
+    """iPhone или iPad.
+
+    Safari не даёт сайту предложить установку — там это делается только
+    руками через «Поделиться» → «На экран Домой». Поэтому кнопка
+    «Установить приложение» на iOS не срабатывает вообще: человек жмёт, и
+    ничего не происходит. Вместо неё нужно сразу показывать инструкцию.
+    """
+    user_agent = (request.META.get('HTTP_USER_AGENT') or '').lower()
+    return any(marker in user_agent for marker in ('iphone', 'ipad', 'ipod'))
 
 
 def _is_yandex_android(request):
@@ -102,10 +127,7 @@ def role_app(request):
         else ''
     )
     state = getattr(request, 'role_session_state', None) or role_session_state(request)
-    is_native_app = _is_native_app(request)
-    # Внутри нашего приложения баннер про Яндекс бессмысленен: человек уже
-    # не в браузере, ставить через Chrome ему нечего.
-    is_yandex_android = _is_yandex_android(request) and not is_native_app
+    is_yandex_android = _is_yandex_android(request)
     return {
         'role_app': app,
         'role_app_isolated': app is not None,
@@ -125,6 +147,9 @@ def role_app(request):
         **observer_context(request),
         'app_catalog_url': app_catalog_public_url(request),
         'is_yandex_android': is_yandex_android,
+        'is_native_app': _is_native_app(request),
+        'native_app_version': _native_app_version(request),
+        'is_ios': _is_ios(request),
         # Программное открытие в Chrome (intent://, потом googlechromes://)
         # проверено пользователем на реальном телефоне и не срабатывает: сам
         # Chrome запускается нормально при прямом открытии, но и Яндекс, и
@@ -132,6 +157,4 @@ def role_app(request):
         # Копирование адреса вручную — единственный путь, который работает
         # независимо от того, что именно блокирует переход.
         'current_absolute_url': request.build_absolute_uri() if is_yandex_android else '',
-        'is_native_app': is_native_app,
-        'is_ios': _is_ios(request),
     }
