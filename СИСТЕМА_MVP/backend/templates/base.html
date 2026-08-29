@@ -256,6 +256,26 @@
             text-decoration: underline;
             cursor: pointer;
         }
+        /* Открытие через googlechromes:// не гарантировано на 100% — на части
+           телефонов Яндекс, назначенный браузером по умолчанию, всё равно
+           перехватывает ссылку на себя. «Скопировать ссылку» — путь, который
+           срабатывает всегда, независимо от того, как поведёт себя браузер. */
+        .app-yandex-warning-banner__copy {
+            min-height: 34px;
+            padding: 0 14px;
+            border: 1px solid #422006;
+            border-radius: 8px;
+            background: transparent;
+            color: #422006;
+            font: 800 13px/1 system-ui, sans-serif;
+            cursor: pointer;
+        }
+        .app-yandex-warning-banner__hint {
+            display: block;
+            width: 100%;
+            margin-top: 4px;
+            font: 700 12px/1.3 system-ui, sans-serif;
+        }
         /* Status notices float over the screen instead of sitting in the layout:
            they must never squeeze the app's height nor cover the header or the
            bottom navigation, and taps pass straight through them. */
@@ -1019,8 +1039,10 @@
     <span><strong>Это Яндекс Браузер.</strong> Приложение может установиться неправильно — со своей строкой снизу.</span>
     <span class="app-yandex-warning-banner__actions">
         <a class="app-yandex-warning-banner__open" href="{{ chrome_open_url }}">Открыть в Chrome</a>
+        <button type="button" class="app-yandex-warning-banner__copy" data-yandex-warning-copy data-yandex-warning-copy-url="{{ current_absolute_url }}">Скопировать ссылку</button>
         <button type="button" class="app-yandex-warning-banner__dismiss" data-yandex-warning-dismiss>Позже</button>
     </span>
+    <span class="app-yandex-warning-banner__hint" data-yandex-warning-copy-status hidden></span>
 </div>
 {% endif %}
 {% if observer_mode %}
@@ -1135,6 +1157,33 @@ document.addEventListener("DOMContentLoaded", function () {
     if (yandexWarningDismiss) {
         yandexWarningDismiss.addEventListener("click", function () {
             yandexWarning.remove();
+        });
+    }
+    /* Ссылка «Открыть в Chrome» срабатывает не на всех телефонах — на части
+       из них Яндекс, назначенный браузером по умолчанию, всё равно
+       перехватывает переход на себя. «Скопировать ссылку» — гарантированный
+       путь: дальше человек сам открывает Chrome и вставляет адрес. */
+    var yandexWarningCopy = yandexWarning ? yandexWarning.querySelector("[data-yandex-warning-copy]") : null;
+    var yandexWarningCopyStatus = yandexWarning ? yandexWarning.querySelector("[data-yandex-warning-copy-status]") : null;
+    if (yandexWarningCopy) {
+        yandexWarningCopy.addEventListener("click", function () {
+            var plainUrl = yandexWarningCopy.getAttribute("data-yandex-warning-copy-url") || "";
+            var clipboard = window.navigator && window.navigator.clipboard;
+            function showStatus(text) {
+                if (!yandexWarningCopyStatus) return;
+                yandexWarningCopyStatus.textContent = text;
+                yandexWarningCopyStatus.hidden = false;
+            }
+            if (!clipboard || typeof clipboard.writeText !== "function") {
+                showStatus("Скопируйте адрес из строки браузера вручную и откройте его в Chrome.");
+                return;
+            }
+            Promise.resolve(clipboard.writeText(plainUrl)).then(function () {
+                yandexWarningCopy.textContent = "Ссылка скопирована";
+                showStatus("Откройте Chrome и вставьте адрес в его адресную строку.");
+            }).catch(function () {
+                showStatus("Не удалось скопировать. Адрес: " + plainUrl);
+            });
         });
     }
     var logoutPath = "{% url 'logout' %}";

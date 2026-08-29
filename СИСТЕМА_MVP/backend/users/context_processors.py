@@ -1,5 +1,3 @@
-from urllib.parse import quote
-
 from .active_role import role_session_state
 from .app_catalog import app_catalog_public_url
 from .live_monitor import observer_context
@@ -33,19 +31,27 @@ def _is_yandex_android(request):
 def _chrome_open_url(request):
     """Ссылка, которая на Android открывает именно Chrome, а не браузер по умолчанию.
 
-    Обычная ссылка на тот же адрес откроется опять в Яндексе — это же его
-    страница. intent:// — единственный способ без установленных приложений
-    и системных диалогов сказать Android «открой это в Chrome конкретно».
-    Если Chrome на телефоне нет, S.browser_fallback_url возвращает туда же,
-    откуда начали, — человек не проваливается в пустоту.
+    Первая версия использовала intent://…package=com.android.chrome — по
+    спецификации это тоже должно было сработать, но на практике зависит от
+    того, насколько правильно САМ Яндекс переводит такую ссылку в системный
+    вызов. Когда Яндекс назначен браузером по умолчанию (частый случай — и
+    у сотрудников, и в тесте пользователя, у которого Chrome на телефоне
+    точно есть), он, судя по всему, просто открывает ссылку опять в себе,
+    а не передаёт её системе. Внешне это выглядит как «нажал — экран
+    перезагрузился, ничего не изменилось».
+
+    googlechromes:// надёжнее ровно потому, что это не intent, который
+    браузер сам разбирает и может разобрать криво, — эту схему регистрирует
+    сам Chrome при установке. Android ищет, какое приложение заявило её
+    обработку, находит только Chrome и передаёт ссылку напрямую ему, в
+    обход того, что назначено браузером по умолчанию. Если Chrome всё же
+    нет — ссылка просто не откроется, поэтому рядом всегда должен быть
+    гарантированно рабочий запасной путь («Скопировать ссылку»), а не
+    только эта кнопка.
     """
     absolute_url = request.build_absolute_uri()
-    host_and_path = absolute_url.split('://', 1)[-1]
-    fallback = quote(absolute_url, safe='')
-    return (
-        f'intent://{host_and_path}#Intent;scheme=https;'
-        f'package=com.android.chrome;S.browser_fallback_url={fallback};end'
-    )
+    without_scheme = absolute_url.split('://', 1)[-1]
+    return f'googlechromes://{without_scheme}'
 
 
 def role_app(request):
@@ -92,4 +98,7 @@ def role_app(request):
         'app_catalog_url': app_catalog_public_url(request),
         'is_yandex_android': is_yandex_android,
         'chrome_open_url': _chrome_open_url(request) if is_yandex_android else '',
+        # Запасной путь на случай, если сама ссылка не сработает: адрес
+        # текущей страницы как есть, чтобы скопировать и вставить вручную.
+        'current_absolute_url': request.build_absolute_uri() if is_yandex_android else '',
     }
