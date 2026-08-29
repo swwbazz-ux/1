@@ -2,18 +2,21 @@
 сотрудник получает значок на экране, но внутри открывается сайт со своей
 адресной строкой снизу, а не отдельное приложение. Баннер должен появляться
 у всех, кто заходит через Яндекс на Android (и до установки, и уже застряв
-в неправильном ярлыке — там User-Agent тот же), и предлагать одно нажатие,
-которое открывает ту же страницу в Chrome.
+в неправильном ярлыке — там User-Agent тот же) и предлагать скопировать
+ссылку для ручного открытия в Google Chrome.
 
-Ссылка использует googlechromes:// — схему, которую регистрирует сам Chrome,
-а не intent://. Первая версия основывалась на intent://…package=com.android.
-chrome, но у пользователя, назначившего Яндекс браузером по умолчанию (Chrome
-на телефоне при этом стоял), она просто перезагружала ту же страницу в
-Яндексе — судя по всему, сам Яндекс не передаёт такую ссылку системе, а
-обрабатывает её собственной логикой. googlechromes:// не оставляет браузеру
-выбора: это не намёк браузеру, а прямое имя схемы, которое ищет Android.
-Рядом с ней всегда должна быть кнопка «Скопировать ссылку» — гарантированный
-путь на случай, если и это не сработает на каком-то ещё телефоне.
+Программные способы открыть Chrome напрямую перебраны и отброшены по очереди,
+оба проверены пользователем на реальном телефоне:
+1. intent://…package=com.android.chrome — Яндекс, назначенный браузером по
+   умолчанию, просто перезагружал ту же страницу в себе, не передавая её
+   системе.
+2. googlechromes:// (схема самого Chrome) — тоже не сработала: даже штатный
+   пункт меню Яндекса «Открыть в Google Chrome» через долгое нажатие ничего
+   не делал. Сам Chrome при этом запускается нормально при прямом открытии —
+   значит блокируется именно передача управления между приложениями, а не
+   что-то в самой ссылке.
+Единственный путь, который не зависит от того, что именно это блокирует, —
+скопировать адрес и открыть его в Chrome вручную.
 """
 from django.test import TestCase
 from django.urls import reverse
@@ -34,13 +37,17 @@ YANDEX_IOS_UA = (
 
 
 class YandexAndroidWarningBannerTests(TestCase):
-    def test_yandex_android_sees_the_warning_with_a_chrome_link(self):
+    def test_yandex_android_sees_the_warning_with_a_copy_link_button(self):
         response = self.client.get(reverse('universal_start'), HTTP_USER_AGENT=YANDEX_ANDROID_UA)
 
         self.assertContains(response, 'class="app-yandex-warning-banner"')
-        self.assertContains(response, 'Открыть в Chrome')
-        self.assertContains(response, 'href="googlechromes://')
         self.assertContains(response, 'Скопировать ссылку')
+        self.assertContains(response, 'Google Chrome')
+        # Программные попытки открыть Chrome отброшены — не должно остаться
+        # ни intent://, ни googlechromes:// ссылок (а не просто упоминаний
+        # в поясняющем комментарии — он в коде остался нарочно).
+        self.assertNotContains(response, 'href="intent://')
+        self.assertNotContains(response, 'href="googlechromes://')
 
     def test_chrome_android_sees_no_warning(self):
         response = self.client.get(reverse('universal_start'), HTTP_USER_AGENT=CHROME_ANDROID_UA)
@@ -60,15 +67,13 @@ class YandexAndroidWarningBannerTests(TestCase):
 
         self.assertNotContains(response, 'class="app-yandex-warning-banner"')
 
-    def test_chrome_link_points_back_to_the_same_page_with_its_query_string(self):
+    def test_copy_url_keeps_its_query_string(self):
         """Если номер уже известен (ссылка со /start/ несёт ?phone=), тот же
-        номер должен уехать с человеком и в Chrome, а не потеряться — и в
-        основной ссылке, и в запасном адресе для копирования."""
+        номер должен уехать с человеком и в Chrome, а не потеряться."""
         response = self.client.get(
             '/?phone=79991234567',
             HTTP_USER_AGENT=YANDEX_ANDROID_UA,
             HTTP_HOST='localhost',
         )
 
-        self.assertContains(response, 'href="googlechromes://localhost/?phone=79991234567"')
         self.assertContains(response, 'data-yandex-warning-copy-url="http://localhost/?phone=79991234567"')

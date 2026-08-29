@@ -28,32 +28,6 @@ def _is_yandex_android(request):
     return 'android' in user_agent and ('yabrowser' in user_agent or 'yandexbrowser' in user_agent)
 
 
-def _chrome_open_url(request):
-    """Ссылка, которая на Android открывает именно Chrome, а не браузер по умолчанию.
-
-    Первая версия использовала intent://…package=com.android.chrome — по
-    спецификации это тоже должно было сработать, но на практике зависит от
-    того, насколько правильно САМ Яндекс переводит такую ссылку в системный
-    вызов. Когда Яндекс назначен браузером по умолчанию (частый случай — и
-    у сотрудников, и в тесте пользователя, у которого Chrome на телефоне
-    точно есть), он, судя по всему, просто открывает ссылку опять в себе,
-    а не передаёт её системе. Внешне это выглядит как «нажал — экран
-    перезагрузился, ничего не изменилось».
-
-    googlechromes:// надёжнее ровно потому, что это не intent, который
-    браузер сам разбирает и может разобрать криво, — эту схему регистрирует
-    сам Chrome при установке. Android ищет, какое приложение заявило её
-    обработку, находит только Chrome и передаёт ссылку напрямую ему, в
-    обход того, что назначено браузером по умолчанию. Если Chrome всё же
-    нет — ссылка просто не откроется, поэтому рядом всегда должен быть
-    гарантированно рабочий запасной путь («Скопировать ссылку»), а не
-    только эта кнопка.
-    """
-    absolute_url = request.build_absolute_uri()
-    without_scheme = absolute_url.split('://', 1)[-1]
-    return f'googlechromes://{without_scheme}'
-
-
 def role_app(request):
     host_app = get_role_app_for_request(request)
     pending_activation_app = None
@@ -97,8 +71,11 @@ def role_app(request):
         **observer_context(request),
         'app_catalog_url': app_catalog_public_url(request),
         'is_yandex_android': is_yandex_android,
-        'chrome_open_url': _chrome_open_url(request) if is_yandex_android else '',
-        # Запасной путь на случай, если сама ссылка не сработает: адрес
-        # текущей страницы как есть, чтобы скопировать и вставить вручную.
+        # Программное открытие в Chrome (intent://, потом googlechromes://)
+        # проверено пользователем на реальном телефоне и не срабатывает: сам
+        # Chrome запускается нормально при прямом открытии, но и Яндекс, и
+        # системная передача управления между приложениями его перехватывают.
+        # Копирование адреса вручную — единственный путь, который работает
+        # независимо от того, что именно блокирует переход.
         'current_absolute_url': request.build_absolute_uri() if is_yandex_android else '',
     }

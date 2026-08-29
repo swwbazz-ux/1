@@ -234,19 +234,6 @@
             align-items: center;
             gap: 10px;
         }
-        .app-yandex-warning-banner__open {
-            min-height: 34px;
-            padding: 0 16px;
-            border: 0;
-            border-radius: 8px;
-            background: #422006;
-            color: #fef3c7;
-            font: 800 13px/1 system-ui, sans-serif;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            cursor: pointer;
-        }
         .app-yandex-warning-banner__dismiss {
             border: 0;
             background: none;
@@ -262,11 +249,11 @@
            срабатывает всегда, независимо от того, как поведёт себя браузер. */
         .app-yandex-warning-banner__copy {
             min-height: 34px;
-            padding: 0 14px;
-            border: 1px solid #422006;
+            padding: 0 16px;
+            border: 0;
             border-radius: 8px;
-            background: transparent;
-            color: #422006;
+            background: #422006;
+            color: #fef3c7;
             font: 800 13px/1 system-ui, sans-serif;
             cursor: pointer;
         }
@@ -1036,9 +1023,8 @@
 <body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
 {% if is_yandex_android and not observer_mode %}
 <div class="app-yandex-warning-banner" data-yandex-warning role="status" aria-live="polite">
-    <span><strong>Это Яндекс Браузер.</strong> Приложение может установиться неправильно — со своей строкой снизу.</span>
+    <span><strong>Это Яндекс Браузер.</strong> Приложение может установиться неправильно — со своей строкой снизу. Нажмите «Скопировать ссылку», откройте Google Chrome и вставьте её в адресную строку.</span>
     <span class="app-yandex-warning-banner__actions">
-        <a class="app-yandex-warning-banner__open" href="{{ chrome_open_url }}">Открыть в Chrome</a>
         <button type="button" class="app-yandex-warning-banner__copy" data-yandex-warning-copy data-yandex-warning-copy-url="{{ current_absolute_url }}">Скопировать ссылку</button>
         <button type="button" class="app-yandex-warning-banner__dismiss" data-yandex-warning-dismiss>Позже</button>
     </span>
@@ -1159,10 +1145,13 @@ document.addEventListener("DOMContentLoaded", function () {
             yandexWarning.remove();
         });
     }
-    /* Ссылка «Открыть в Chrome» срабатывает не на всех телефонах — на части
-       из них Яндекс, назначенный браузером по умолчанию, всё равно
-       перехватывает переход на себя. «Скопировать ссылку» — гарантированный
-       путь: дальше человек сам открывает Chrome и вставляет адрес. */
+    /* Программные способы открыть Chrome напрямую (intent://, потом
+       googlechromes://) проверены на реальном телефоне и не сработали:
+       Chrome при прямом запуске открывается нормально, но переход в него
+       откуда-то ещё — из Яндекса или из системного меню «Поделиться» —
+       блокируется. Копирование адреса и открытие его в Chrome вручную —
+       единственный путь, который не зависит от того, что именно мешает
+       автоматическому переходу. */
     var yandexWarningCopy = yandexWarning ? yandexWarning.querySelector("[data-yandex-warning-copy]") : null;
     var yandexWarningCopyStatus = yandexWarning ? yandexWarning.querySelector("[data-yandex-warning-copy-status]") : null;
     if (yandexWarningCopy) {
@@ -1175,12 +1164,12 @@ document.addEventListener("DOMContentLoaded", function () {
                 yandexWarningCopyStatus.hidden = false;
             }
             if (!clipboard || typeof clipboard.writeText !== "function") {
-                showStatus("Скопируйте адрес из строки браузера вручную и откройте его в Chrome.");
+                showStatus("1. Перепишите этот адрес: " + plainUrl + " 2. Откройте Google Chrome. 3. Вставьте адрес и перейдите.");
                 return;
             }
             Promise.resolve(clipboard.writeText(plainUrl)).then(function () {
                 yandexWarningCopy.textContent = "Ссылка скопирована";
-                showStatus("Откройте Chrome и вставьте адрес в его адресную строку.");
+                showStatus("Готово. Теперь: 1. Откройте Google Chrome. 2. Вставьте ссылку в адресную строку. 3. Перейдите по ней.");
             }).catch(function () {
                 showStatus("Не удалось скопировать. Адрес: " + plainUrl);
             });
