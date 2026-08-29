@@ -158,6 +158,38 @@ def _effective_production_role(employee, *, as_of=None):
     return None
 
 
+def production_access_is_out_of_sync(employee, *, as_of=None):
+    """Расходятся ли выданные доступы с тем, что положено по специализации.
+
+    Карточку правят гораздо чаще, чем меняют специализацию, и раньше доступ
+    подтягивался только в момент её смены. Если запись доступа по какой-то
+    причине не появилась — карточку завели раньше, чем справочник должностей,
+    или специализацию проставили в обход формы — человек оставался без входа
+    навсегда: сколько ни сохраняй карточку, специализация не менялась, и
+    синхронизация не запускалась. Со стороны это выглядело как «внёс телефон,
+    сохранил, а система всё равно не узнаёт номер», хотя телефон был ни при чём.
+
+    Проверка дешёвая и точечная: у кого доступы уже в порядке, ничего не
+    трогаем — иначе пересборка задевала бы и тех, у кого всё настроено руками.
+    """
+    if employee.is_protected and not protected_writes_allowed():
+        return False
+
+    as_of = as_of or timezone.localdate()
+    target_role = _effective_production_role(employee, as_of=as_of)
+    active_accesses = [
+        access
+        for access in EmployeeAccess.objects
+        .select_related('role')
+        .filter(employee=employee, role__code__in=PRODUCTION_APP_ROLE_CODES)
+        if access.is_active
+    ]
+
+    if not target_role:
+        return bool(active_accesses)
+    return not any(access.role_id == target_role.id for access in active_accesses)
+
+
 def sync_employee_production_access(*, employee, as_of=None):
     """Keep exactly one production app access aligned with effective specialization.
 

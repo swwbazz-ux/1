@@ -717,3 +717,55 @@ class UnifiedEmployeeCardTests(TestCase):
         employee = Employee.objects.get(phone='+79005554433')
         self.assertEqual(employee.status, Employee.Status.ACTIVE)
         self.assertTrue(employee.is_active)
+
+    def test_adding_phone_to_a_card_without_any_access_creates_one(self):
+        """Воспроизводит жалобу 2026-08-29: внёс телефон — вход всё равно не узнаёт.
+
+        Карточка и должность у сотрудника были в порядке с самого начала (так
+        и завели в 1С, до знакомства с системой), а записи доступа не было —
+        например, потому что базовую специализацию проставили в обход формы,
+        которая обычно это отслеживает. `sync_employee_production_access`
+        запускался только при смене специализации, а её тут никто не менял:
+        просто дописали номер в уже существующую карточку. Итог — сколько ни
+        сохраняй карточку, доступ не появлялся, и вход был обречён навсегда.
+        """
+        employee = Employee.objects.create(
+            full_name='Мочалов Дмитрий Иванович',
+            phone='',
+            personnel_position=self.truck_position,
+            base_specialization=self.truck_specialization,
+            status=Employee.Status.ACTIVE,
+        )
+        self.assertFalse(EmployeeAccess.objects.filter(employee=employee).exists())
+        self.login_as(self.admin_access)
+
+        response = self.client.post(
+            reverse('system_admin_employee_detail', args=[employee.id]),
+            {
+                'full_name': employee.full_name,
+                'birth_date': '',
+                'sex': employee.sex,
+                'personnel_number': employee.personnel_number,
+                'phone': '+79617155709',
+                'personnel_position': self.truck_position.id,
+                'base_specialization': self.truck_specialization.id,
+                'position': self.truck_position.name,
+                'personnel_department': '',
+                'work_category': employee.work_category,
+                'status': Employee.Status.ACTIVE,
+                'hired_at': employee.hired_at.isoformat() if employee.hired_at else '',
+                'residence_text': '',
+                'comment': '',
+                'hr_data': '',
+                'assignment_role': '',
+                'assignment_shift_type': '',
+                'assignment_equipment': '',
+            },
+        )
+
+        self.assertEqual(response.status_code, 302, getattr(response, 'context', None) and response.context['form'].errors)
+        employee.refresh_from_db()
+        self.assertEqual(employee.phone, '+79617155709')
+        access = EmployeeAccess.objects.filter(employee=employee, role=self.driver_role).first()
+        self.assertIsNotNone(access, 'доступ к приложению водителя должен появиться сам')
+        self.assertTrue(access.is_active)

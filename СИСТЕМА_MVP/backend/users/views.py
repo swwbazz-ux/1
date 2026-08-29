@@ -133,6 +133,7 @@ from .work_profiles import (
     effective_specialization,
     employee_has_effective_access_role,
     expire_due_temporary_work_transfers,
+    production_access_is_out_of_sync,
     sync_employee_production_access,
 )
 
@@ -2327,7 +2328,10 @@ def system_admin_employee_detail_view(request, employee_id):
                     )
                     previous_specialization_id = locked_employee.base_specialization_id
                     saved_employee = form.save()
-                    if previous_specialization_id != saved_employee.base_specialization_id:
+                    if (
+                        previous_specialization_id != saved_employee.base_specialization_id
+                        or production_access_is_out_of_sync(saved_employee)
+                    ):
                         sync_employee_production_access(employee=saved_employee)
                     work_assignment = form.save_work_assignment(assigned_by=access.employee)
             except ValidationError as error:

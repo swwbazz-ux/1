@@ -62,6 +62,7 @@ from .views import get_current_access
 from .work_profiles import (
     effective_specialization,
     resolve_temporary_work_transfer,
+    production_access_is_out_of_sync,
     sync_employee_production_access,
 )
 
@@ -407,7 +408,7 @@ def oup_employee_detail_view(request, employee_id):
                         tuple(excluded_fields),
                     )
                     saved_employee = form.save()
-                    if specialization_changed:
+                    if specialization_changed or production_access_is_out_of_sync(saved_employee):
                         sync_employee_production_access(employee=saved_employee)
                     after = employee_audit_snapshot(saved_employee)
                     after_state = employee_card_undo_state(saved_employee)
