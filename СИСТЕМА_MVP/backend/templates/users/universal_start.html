@@ -206,14 +206,36 @@
        узнаётся быстрее, чем читается название. */
     .start-screen__app {
         display: grid;
-        justify-items: center;
         align-content: start;
-        gap: 6px;
-        padding: 10px 8px 9px;
         border-radius: 14px;
         border: 1px solid rgba(140, 255, 46, .28);
         background: rgba(140, 255, 46, .07);
+        overflow: hidden;
+    }
+
+    .start-screen__app-main {
+        display: grid;
+        justify-items: center;
+        gap: 6px;
+        width: 100%;
+        padding: 10px 8px 9px;
         color: #eaf6ee;
+        text-decoration: none;
+    }
+
+    .start-screen__apk {
+        display: grid;
+        place-items: center;
+        min-height: 42px;
+        margin: 0 8px 8px;
+        padding: 7px 10px;
+        border: 1px solid rgba(47, 191, 113, .72);
+        border-radius: 10px;
+        background: #2FBF71;
+        color: #04161A;
+        font-size: clamp(12px, 3.2vw, 13px);
+        font-weight: 900;
+        line-height: 1.2;
         text-decoration: none;
     }
 
@@ -276,7 +298,7 @@
             font-size: clamp(18px, 6vw, 24px);
         }
 
-        .start-screen__app {
+        .start-screen__app-main {
             padding: 8px 6px 7px;
             gap: 5px;
         }
@@ -316,13 +338,20 @@
             {% endif %}
             <div class="start-screen__apps">
                 {% for item in apps %}
-                    <a class="start-screen__app" href="{{ item.url }}">
-                        <span class="start-screen__icon" aria-hidden="true">
-                            {{ item.app.short_name|first }}
-                            <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
-                        </span>
-                        <b>{{ item.app.name }}</b>
-                    </a>
+                    <div class="start-screen__app">
+                        <a class="start-screen__app-main" href="{{ item.url }}">
+                            <span class="start-screen__icon" aria-hidden="true">
+                                {{ item.app.short_name|first }}
+                                <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
+                            </span>
+                            <b>{{ item.app.name }}</b>
+                        </a>
+                        {% if item.apk %}
+                            <a class="start-screen__apk" href="{{ item.apk.url }}" download aria-label="Скачать {{ item.app.name }} для Android, версия {{ item.apk.version }}">
+                                Скачать APK · версия {{ item.apk.version }}
+                            </a>
+                        {% endif %}
+                    </div>
                 {% endfor %}
             </div>
             <a class="start-screen__back" href="{% url 'universal_start' %}">Это не я — ввести другой номер</a>

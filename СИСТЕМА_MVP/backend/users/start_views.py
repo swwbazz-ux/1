@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -23,6 +24,21 @@ from .app_catalog import APP_CATALOG_ROLE_CODES, role_app_public_url
 from .role_apps import get_role_app
 from .models import EmployeeAccess
 from .work_profiles import employee_has_effective_access_role
+
+
+# Единственный реестр Android-сборок для универсального входа. При выпуске
+# новой версии меняются только URL и подпись версии здесь; шаблон о конкретных
+# ролях и именах APK ничего не знает.
+ANDROID_APK_BY_ROLE = {
+    'excavator_operator': {
+        'path': 'apk/excavator-7.apk',
+        'version': '0.1.4',
+    },
+    'driver': {
+        'path': 'apk/driver-5.apk',
+        'version': '0.1.3',
+    },
+}
 
 
 # Раньше здесь стоял предел на число показанных кнопок: восемь штук подряд
@@ -42,6 +58,24 @@ def with_country_code(value):
     return digits
 
 
+def is_android_request(request):
+    return 'android' in request.META.get('HTTP_USER_AGENT', '').lower()
+
+
+def android_apk_for_role(role_code):
+    release = ANDROID_APK_BY_ROLE.get(role_code)
+    if release is None:
+        return None
+    relative_path = Path(release['path'])
+    if not (Path(settings.MEDIA_ROOT) / relative_path).is_file():
+        return None
+    media_url = f"/{settings.MEDIA_URL.strip('/')}"
+    return {
+        'url': f"{media_url}/{relative_path.as_posix()}",
+        'version': release['version'],
+    }
+
+
 def universal_start_view(request):
     if request.method != 'POST':
         return render(request, 'users/universal_start.html', {})
@@ -58,6 +92,7 @@ def universal_start_view(request):
     ]
 
     apps = []
+    show_android_apk = is_android_request(request)
     seen = set()
     for candidate in matches:
         code = candidate.role.code
@@ -77,6 +112,7 @@ def universal_start_view(request):
         apps.append({
             'app': app,
             'url': app_url,
+            'apk': android_apk_for_role(code) if show_android_apk else None,
             'employee': candidate.employee,
             'last_login_at': candidate.last_login_at,
         })
