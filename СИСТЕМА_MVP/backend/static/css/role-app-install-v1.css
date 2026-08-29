@@ -75,3 +75,21 @@
         transition: none;
     }
 }
+
+/* На iPhone Safari не даёт сайту предложить установку — там только ручной
+   путь «Поделиться» → «На экран Домой». Вместо кнопки, которая ничего не
+   сделает, показываем сами шаги. */
+.role-app-install__ios-steps {
+    margin: 0 0 12px;
+    padding-left: 22px;
+    text-align: left;
+    line-height: 1.5;
+}
+
+.role-app-install__ios-steps li {
+    margin-bottom: 8px;
+}
+
+.role-app-install__ios-steps b {
+    font-weight: 700;
+}

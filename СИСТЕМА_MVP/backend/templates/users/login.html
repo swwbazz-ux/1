@@ -32,7 +32,7 @@
     <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static share_image %}?v=2">
     {% endwith %}
     {% if role_app %}
-    <link rel="stylesheet" href="{% static 'css/role-app-install-v1.css' %}?v=2">
+    <link rel="stylesheet" href="{% static 'css/role-app-install-v1.css' %}?v=3">
     <script src="{% static 'js/role-app-install-v1.js' %}?v=3" defer></script>
     {% endif %}
     {% endif %}
@@ -415,6 +415,20 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         </div>
         <h2>{{ login_role_app.name }}</h2>
         <p class="login-install-gate__lead">Установите приложение на телефон — вход будет уже в нём.</p>
+        {% if is_ios %}
+        {# На iPhone Safari не разрешает сайту предлагать установку — кнопка
+           там просто не срабатывает, человек жмёт и остаётся ни с чем.
+           Единственный способ — «Поделиться» → «На экран Домой», поэтому
+           показываем сразу инструкцию, а не кнопку. #}
+        <section class="role-app-install role-app-install--ios" aria-label="Установка приложения на iPhone">
+            <ol class="role-app-install__ios-steps">
+                <li>Нажмите <b>«Поделиться»</b> — квадрат со стрелкой вверх, внизу экрана.</li>
+                <li>Пролистайте список вниз и выберите <b>«На экран Домой»</b>.</li>
+                <li>Нажмите <b>«Добавить»</b> — значок появится на экране телефона.</li>
+            </ol>
+            <p class="role-app-install__status">Дальше открывайте приложение этим значком, а не через браузер.</p>
+        </section>
+        {% else %}
         <section class="role-app-install" data-role-app-install data-app-name="{{ login_role_app.name }}" aria-label="Установка приложения">
             <button class="role-app-install__button" type="button" data-install-button>
                 <span aria-hidden="true">↓</span>
@@ -425,6 +439,7 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
                 Приложение можно добавить на главный экран телефона.
             </p>
         </section>
+        {% endif %}
         <button class="login-install-gate__skip" type="button" data-login-show-form>Войти без установки</button>
     </section>
     <script>

@@ -15,6 +15,18 @@ NATIVE_APP_USER_AGENT_MARKER = 'copperresourcesnative'
 NATIVE_APP_COOKIE = 'native_app'
 
 
+def _is_ios(request):
+    """iPhone или iPad.
+
+    Safari не даёт сайту предложить установку — там это делается только
+    руками через «Поделиться» → «На экран Домой». Поэтому кнопка
+    «Установить приложение» на iOS не срабатывает вообще: человек жмёт, и
+    ничего не происходит. Вместо неё нужно сразу показывать инструкцию.
+    """
+    user_agent = (request.META.get('HTTP_USER_AGENT') or '').lower()
+    return any(marker in user_agent for marker in ('iphone', 'ipad', 'ipod'))
+
+
 def native_app_marker_in_user_agent(request):
     """Метка нативной оболочки в User-Agent.
 
@@ -121,4 +133,5 @@ def role_app(request):
         # независимо от того, что именно блокирует переход.
         'current_absolute_url': request.build_absolute_uri() if is_yandex_android else '',
         'is_native_app': is_native_app,
+        'is_ios': _is_ios(request),
     }
