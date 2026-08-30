@@ -1,5 +1,7 @@
 import re
 
+from django.conf import settings
+
 from .active_role import role_session_state
 from .app_catalog import app_catalog_public_url
 from .live_monitor import observer_context
@@ -150,6 +152,8 @@ def role_app(request):
         'is_native_app': _is_native_app(request),
         'native_app_version': _native_app_version(request),
         'is_ios': _is_ios(request),
+        'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
+        'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
         # Программное открытие в Chrome (intent://, потом googlechromes://)
         # проверено пользователем на реальном телефоне и не срабатывает: сам
         # Chrome запускается нормально при прямом открытии, но и Яндекс, и

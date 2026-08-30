@@ -201,7 +201,7 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         display: grid;
         justify-items: center;
         gap: 10px;
-        margin-bottom: clamp(14px, 3vh, 24px);
+        margin-bottom: 0;
     }
 
     body.login-page.login-fullscreen .unified-login-role-identity img {
@@ -220,16 +220,21 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     }
 
     body.login-page.login-fullscreen .shared-shift-dialog h2 {
-        margin: 0 0 clamp(10px, 2.4vh, 18px);
+        margin: 0;
         color: #F2F8FA;
-        font-size: clamp(24px, 7.2vw, 34px);
+        font-size: clamp(22px, 6.4vw, 32px);
         font-weight: 800;
         line-height: 1.12;
         text-align: center;
+        /* Капс приходит из правил модального окна в app.css: тот же класс
+           app-confirm-content носит и форма входа. Из-за него название роли
+           на форме кричало заглавными, а на экране установки рядом стояло
+           обычным — два состояния одного экрана выглядели чужими. */
+        text-transform: none;
     }
 
     body.login-page.login-fullscreen .login-install-gate__lead {
-        margin: 0 0 clamp(18px, 4vh, 30px);
+        margin: 0;
         color: #9fb2ba;
         font-size: clamp(14px, 4vw, 17px);
         line-height: 1.4;
@@ -243,7 +248,13 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
 
     body.login-page.login-fullscreen .login-install-gate,
     body.login-page.login-fullscreen .unified-login-form {
-        gap: 0;
+        /* Форма несёт класс app-confirm-content, а тот в app.css посажен во
+           вторую колонку — под полоску-акцент слева. На полном экране полоска
+           скрыта, но её колонка остаётся, и форма съезжала вправо на её
+           ширину. Экран установки этого класса не носит и стоял ровно —
+           отсюда и разница между двумя состояниями одного экрана. */
+        grid-column: 1;
+        gap: clamp(10px, 3.4vh, 32px);
         width: 100%;
         max-width: 440px;
         justify-self: center;
@@ -263,7 +274,7 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
 
     body.login-page.login-fullscreen .role-app-install__button {
         width: 100%;
-        min-height: 60px;
+        min-height: 58px;
         border: 0;
         border-radius: 14px;
         background: var(--login-accent);
@@ -287,8 +298,29 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         text-align: center;
     }
 
+    body.login-page.login-fullscreen .start-screen__support {
+        display: inline-grid;
+        grid-template-columns: auto auto;
+        align-items: center;
+        justify-content: center;
+        justify-self: center;
+        gap: 7px;
+        padding: 8px 14px;
+        border: 1px solid rgba(255, 255, 255, .14);
+        border-radius: 999px;
+        color: #9fb2ba;
+        font-size: 13px;
+        font-weight: 700;
+        text-decoration: none;
+    }
+
+    body.login-page.login-fullscreen .start-screen__support svg {
+        width: 15px;
+        height: 15px;
+    }
+
     body.login-page.login-fullscreen .login-install-gate__skip {
-        margin-top: clamp(18px, 5vh, 40px);
+        margin-top: 0;
         color: #8296a0;
         font-size: 15px;
     }
@@ -306,7 +338,52 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     }
 
     body.login-page.login-fullscreen .shared-shift-login-field {
-        margin-bottom: clamp(12px, 2.6vh, 18px);
+        margin-bottom: 0;
+    }
+
+    /* Поле телефона в точности как на /start/: там человек уже вводил номер
+       пять минут назад. Значения из app.css рассчитаны на диспетчерский пульт
+       за компьютером — рамка почти белая, скругление 6, высота 42 — и рядом с
+       кнопкой в 58 точек выглядели чужой деталью. */
+    body.login-page.login-fullscreen .shared-shift-phone-shell {
+        grid-template-columns: auto minmax(0, 1fr);
+        min-height: 58px;
+        border: 1px solid rgba(255, 255, 255, .16);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, .04);
+    }
+
+    body.login-page.login-fullscreen .shared-shift-phone-shell:focus-within {
+        border-color: var(--login-accent);
+        box-shadow: 0 0 0 2px var(--login-glow);
+    }
+
+    body.login-page.login-fullscreen .shared-shift-phone-shell:has(input.is-valid) {
+        border-color: var(--login-accent);
+    }
+
+    body.login-page.login-fullscreen .shared-shift-country-code {
+        padding: 0 14px;
+        border-right: 1px solid rgba(255, 255, 255, .14);
+        color: #E8F1F4;
+        font-size: clamp(17px, 5vw, 21px);
+        font-weight: 800;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-login-field input {
+        min-height: 58px;
+        padding: 0 14px;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: #F2F8FA;
+        font: 800 clamp(18px, 5.2vw, 22px)/1 inherit;
+        letter-spacing: .02em;
+        caret-color: var(--login-accent);
+    }
+
+    body.login-page.login-fullscreen .shared-shift-login-field input:focus {
+        outline: none;
     }
 
     /* Первый вход отдельной кнопкой: человек приходит без пинкода, и заставлять
@@ -363,6 +440,13 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
 
     body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-login-field {
         margin-bottom: 10px;
+    }
+
+    /* Клавиатура занимает половину экрана: общий просторный ритм здесь
+       разгоняет форму так, что кнопка «Далее» уезжает под клавиатуру. */
+    body.login-page.login-fullscreen.is-login-keyboard-active .login-install-gate,
+    body.login-page.login-fullscreen.is-login-keyboard-active .unified-login-form {
+        gap: 10px;
     }
 </style>
 {% endif %}
@@ -443,6 +527,11 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         </section>
         {% endif %}
         <button class="login-install-gate__skip" type="button" data-login-show-form>Войти без установки</button>
+        {% comment %}
+        Тот же выход, что и на /start/. Здесь он нужнее: сюда попадает как раз
+        тот, у кого установка не пошла, — а написать было некому.
+        {% endcomment %}
+        {% include "users/_start_support_link.html" %}
     </section>
     <script>
     (function (window, document) {
