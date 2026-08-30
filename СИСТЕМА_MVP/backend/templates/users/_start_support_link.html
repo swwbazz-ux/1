@@ -1,0 +1,17 @@
+{% comment %}
+Связь с администратором на обоих состояниях экрана /start/. Человек застревает
+не только когда номер не нашёлся: бывает, что нашёлся, но не ставится
+приложение или забыт пинкод — и тогда ему тоже некуда обратиться.
+
+Ссылка появляется, только если адрес задан в DJANGO_SUPPORT_CHAT_URL. Без
+настройки кнопка не рисуется: пустая ссылка «напишите админу» хуже, чем её
+отсутствие — человек нажмёт и попадёт в никуда.
+{% endcomment %}
+{% if support_chat_url %}
+    <a class="start-screen__support" href="{{ support_chat_url }}" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.6-.7L3 21l1.9-5a8 8 0 0 1-.9-3.6 8.4 8.4 0 0 1 8.4-8.4h.6a8.4 8.4 0 0 1 8 8z"></path>
+        </svg>
+        <span>{{ support_chat_label|default:"Связаться с администратором" }}</span>
+    </a>
+{% endif %}

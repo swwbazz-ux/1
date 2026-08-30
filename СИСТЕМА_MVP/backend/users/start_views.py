@@ -82,8 +82,13 @@ def android_apk_for_role(role_code):
 
 
 def universal_start_view(request):
+    support = {
+        'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
+        'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
+    }
+
     if request.method != 'POST':
-        return render(request, 'users/universal_start.html', {})
+        return render(request, 'users/universal_start.html', support)
 
     phone = with_country_code(request.POST.get('phone', ''))
     matches = [
@@ -138,9 +143,8 @@ def universal_start_view(request):
             {
                 'login_role_app': None,
                 'submitted_phone': format_phone_for_display(phone),
-                'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
-                'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
                 'back_url': reverse('universal_start'),
+                **support,
             },
         )
 
@@ -163,5 +167,6 @@ def universal_start_view(request):
             'submitted_phone': format_phone_for_display(phone),
             'has_working_code': has_working_code,
             'is_ios': is_ios_request(request),
+            **support,
         },
     )

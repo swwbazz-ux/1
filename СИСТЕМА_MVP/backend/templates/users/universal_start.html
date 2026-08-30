@@ -64,12 +64,13 @@
     .start-screen__inner {
         display: grid;
         justify-items: center;
+        gap: clamp(10px, 3.4vh, 32px);
         width: 100%;
         max-width: 440px;
     }
 
     .start-screen__brand {
-        margin-bottom: clamp(10px, 2vh, 18px);
+        margin-bottom: 0;
         color: #7f929a;
         font-size: clamp(11px, 3vw, 13px);
         font-weight: 700;
@@ -78,7 +79,7 @@
     }
 
     .start-screen h1 {
-        margin: 0 0 clamp(10px, 2.4vh, 18px);
+        margin: 0;
         color: #F2F8FA;
         font-size: clamp(22px, 6.4vw, 32px);
         font-weight: 800;
@@ -86,7 +87,7 @@
     }
 
     .start-screen p {
-        margin: 0 0 clamp(18px, 4vh, 28px);
+        margin: 0;
         color: #9fb2ba;
         font-size: clamp(14px, 4vw, 17px);
         line-height: 1.45;
@@ -176,8 +177,7 @@
        Но она не главная на экране — главное ниже, приложения. */
     .start-screen__person {
         width: 100%;
-        margin-bottom: clamp(10px, 2vh, 16px);
-        padding: 9px 14px;
+        padding: clamp(9px, 1.6vh, 14px) 14px;
         border: 1px solid rgba(255, 255, 255, .12);
         border-radius: 14px;
         background: rgba(255, 255, 255, .04);
@@ -224,7 +224,7 @@
         align-items: center;
         gap: 10px;
         width: 100%;
-        padding: 8px 10px;
+        padding: clamp(8px, 1.4vh, 13px) 12px;
         color: #eaf6ee;
         text-decoration: none;
         border-bottom: 1px solid rgba(140, 255, 46, .18);
@@ -235,16 +235,16 @@
        прокручивается и всё обязано поместиться в один экран. */
     .start-screen__install-options {
         display: grid;
-        gap: 6px;
-        margin: 8px 8px 0;
+        gap: clamp(6px, 1.2vh, 12px);
+        margin: clamp(8px, 1.4vh, 12px) 10px 0;
     }
 
     .start-screen__opt {
         display: grid;
-        grid-template-columns: 44px minmax(0, 1fr);
+        grid-template-columns: 52px minmax(0, 1fr);
         align-items: center;
-        gap: 10px;
-        padding: 8px 10px;
+        gap: 12px;
+        padding: clamp(9px, 1.5vh, 14px) 12px;
         border: 1px solid rgba(255, 255, 255, .14);
         border-radius: 12px;
         background: rgba(255, 255, 255, .04);
@@ -258,30 +258,66 @@
         background: rgba(47, 191, 113, .12);
     }
 
+    /* На обеих строках стоит значок самого приложения — человек ставит одно
+       и то же, разными способами. Способ показывает кружок в углу: APK или
+       Chrome. Прежде у браузерного варианта была серая картинка окна, и она
+       читалась как не подгрузившийся значок. */
     .start-screen__opt-icon {
+        position: relative;
         display: grid;
         place-items: center;
-        width: 44px;
-        height: 44px;
-        border-radius: 11px;
-        overflow: hidden;
+        width: 52px;
+        height: 52px;
     }
 
     .start-screen__opt-icon img {
         width: 100%;
         height: 100%;
+        border-radius: 11px;
         object-fit: cover;
     }
 
-    .start-screen__opt-icon--browser {
-        border: 1px solid rgba(255, 255, 255, .18);
-        background: rgba(255, 255, 255, .06);
-        color: #b9cbd3;
-    }
-
-    .start-screen__opt-icon--browser svg {
+    .start-screen__opt-badge {
+        position: absolute;
+        right: -5px;
+        bottom: -5px;
+        display: grid;
+        place-items: center;
+        box-sizing: border-box;
         width: 24px;
         height: 24px;
+        border-radius: 50%;
+        /* Обводка цветом строки, а не белым: кружок должен отделяться от
+           значка, но не выглядеть наклейкой поверх него. */
+        box-shadow: 0 0 0 2px #0b1a12;
+    }
+
+    .start-screen__opt-badge--apk {
+        background: #2FBF71;
+        color: #04161A;
+        font-size: 8px;
+        font-weight: 900;
+        letter-spacing: -.01em;
+    }
+
+    /* Кружок Chrome собран из секторов, а не нарисован файлом: на 22 точках
+       мелкие детали всё равно не читаются, а лишней картинки не нужно. */
+    .start-screen__opt-badge--chrome {
+        background: conic-gradient(
+            from -60deg,
+            #EA4335 0deg 120deg,
+            #FBBC05 120deg 240deg,
+            #34A853 240deg 360deg);
+    }
+
+    .start-screen__opt-badge--chrome::after {
+        content: "";
+        box-sizing: content-box;
+        width: 8px;
+        height: 8px;
+        border: 2px solid #fff;
+        border-radius: 50%;
+        background: #4285F4;
     }
 
     .start-screen__opt-text {
@@ -294,7 +330,7 @@
        text-align: center, а у .start-screen__app b — своё центрирование для
        подписи под значком роли, и оно достаёт до этих строк тоже. */
     .start-screen__opt-text b {
-        font-size: 14px;
+        font-size: 15px;
         font-weight: 800;
         line-height: 1.15;
     }
@@ -316,41 +352,16 @@
     .start-screen__opt-text em {
         color: #93a7ae;
         font-style: normal;
-        font-size: 11px;
+        font-size: 12px;
         line-height: 1.25;
     }
 
     .start-screen .start-screen__opt-note {
-        margin: 7px 10px 10px;
+        margin: clamp(7px, 1.3vh, 12px) 12px clamp(9px, 1.5vh, 14px);
         color: #7d919a;
         text-align: left;
-        font-size: 10.5px;
+        font-size: 11px;
         line-height: 1.3;
-    }
-
-    /* Буква под значком, а не вместо него: если картинка пропадёт, останется
-       квадрат с буквой, а не значок битого изображения. */
-    .start-screen__icon {
-        position: relative;
-        display: grid;
-        place-items: center;
-        width: 44px;
-        aspect-ratio: 1;
-        border-radius: 11px;
-        background: rgba(140, 255, 46, .12);
-        color: #8cff2e;
-        font-size: 24px;
-        font-weight: 900;
-        line-height: 1;
-    }
-
-    .start-screen__icon img {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        border-radius: 11px;
-        object-fit: cover;
     }
 
     /* Только название роли в шапке карточки. Раньше селектор был шире —
@@ -360,6 +371,28 @@
         font-weight: 800;
         line-height: 1.2;
         text-align: left;
+    }
+
+    /* Тише, чем основные действия: это выход для застрявшего, а не то,
+       куда нужно вести всех. Поэтому строкой, а не кнопкой. */
+    .start-screen__support {
+        display: inline-grid;
+        grid-template-columns: auto auto;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        padding: 8px 14px;
+        border: 1px solid rgba(255, 255, 255, .14);
+        border-radius: 999px;
+        color: #9fb2ba;
+        font-size: 13px;
+        font-weight: 700;
+        text-decoration: none;
+    }
+
+    .start-screen__support svg {
+        width: 15px;
+        height: 15px;
     }
 
     .start-screen__back {
@@ -381,11 +414,6 @@
 
         .start-screen__inner h1 {
             font-size: clamp(19px, 5.4vw, 24px);
-        }
-
-        .start-screen__icon {
-            width: 38px;
-            font-size: 20px;
         }
 
         .start-screen__app-main {
@@ -428,11 +456,13 @@
             <div class="start-screen__apps">
                 {% for item in apps %}
                     <div class="start-screen__app">
+                        {% comment %}
+                        Шапка без значка: тот же значок стоит на обеих строках
+                        установки ниже, и третья его копия читалась как ошибка
+                        вёрстки — «зачем оно тут три раза». Название роли нужно,
+                        когда приложений несколько.
+                        {% endcomment %}
                         <div class="start-screen__app-main">
-                            <span class="start-screen__icon" aria-hidden="true">
-                                {{ item.app.short_name|first }}
-                                <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
-                            </span>
                             <b>{{ item.app.name }}</b>
                         </div>
                         {% comment %}
@@ -451,6 +481,7 @@
                                    aria-label="Скачать приложение {{ item.app.name }} для Android, версия {{ item.apk.version }}">
                                     <span class="start-screen__opt-icon" aria-hidden="true">
                                         <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
+                                        <span class="start-screen__opt-badge start-screen__opt-badge--apk">APK</span>
                                     </span>
                                     <span class="start-screen__opt-text">
                                         <b>Приложение <i>стабильное</i></b>
@@ -468,13 +499,9 @@
                                data-start-install-option="browser"
                                href="{{ item.url }}{% if '?' in item.url %}&amp;{% else %}?{% endif %}install=1"
                                aria-label="Установить {{ item.app.name }} как браузерное приложение">
-                                <span class="start-screen__opt-icon start-screen__opt-icon--browser" aria-hidden="true">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                        <rect x="3" y="4" width="18" height="16" rx="2"></rect>
-                                        <path d="M3 8h18"></path>
-                                        <path d="M7 6h.01M10 6h.01"></path>
-                                        <path d="M8 13h8M8 16h5"></path>
-                                    </svg>
+                                <span class="start-screen__opt-icon" aria-hidden="true">
+                                    <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
+                                    <span class="start-screen__opt-badge start-screen__opt-badge--chrome"></span>
                                 </span>
                                 <span class="start-screen__opt-text">
                                     <b>Браузер <i>нестабильно</i></b>
@@ -489,6 +516,7 @@
                 {% endfor %}
             </div>
             <a class="start-screen__back" href="{% url 'universal_start' %}">Это не я — ввести другой номер</a>
+            {% include "users/_start_support_link.html" %}
         {% else %}
             <h1>Вход в рабочее приложение</h1>
             <p>Введите свой номер телефона — система подскажет, какое приложение вам нужно.</p>
@@ -502,6 +530,7 @@
                 <small class="start-screen__hint" data-start-hint>10 цифр номера</small>
                 <button class="start-screen__submit" type="submit">Далее</button>
             </form>
+            {% include "users/_start_support_link.html" %}
             <script>
             (function (document) {
                 "use strict";

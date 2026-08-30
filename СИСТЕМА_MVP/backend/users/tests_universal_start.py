@@ -191,6 +191,31 @@ class UniversalStartTests(TestCase):
         self.assertNotContains(response, 'href="/media/apk/driver-5.apk"')
         self.assertNotContains(response, 'class="start-screen__app-main" href=')
 
+    @override_settings(
+        SUPPORT_CHAT_URL='https://max.ru/u/test',
+        SUPPORT_CHAT_LABEL='Написать администратору в MAX',
+    )
+    def test_administrator_contact_is_offered_before_and_after_the_lookup(self):
+        """Застревают не только те, чей номер не нашёлся: человек может
+        найтись, но не суметь поставить приложение — ему тоже нужен выход."""
+        self.add_access('driver', 'Водитель самосвала')
+
+        form = self.client.get(reverse('universal_start'))
+        found = self.post()
+
+        for response in (form, found):
+            self.assertContains(response, 'https://max.ru/u/test')
+            self.assertContains(response, 'Написать администратору в MAX')
+
+    @override_settings(SUPPORT_CHAT_URL='')
+    def test_administrator_contact_is_hidden_when_no_address_is_configured(self):
+        """Ссылка в никуда хуже её отсутствия: человек нажмёт и не поймёт."""
+        self.add_access('driver', 'Водитель самосвала')
+
+        response = self.post()
+
+        self.assertNotContains(response, 'class="start-screen__support"')
+
     def test_desktop_does_not_see_apk_button(self):
         self.add_apk('apk/excavator-7.apk')
         self.add_access('excavator_operator', 'Машинист экскаватора')
