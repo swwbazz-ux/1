@@ -34,6 +34,11 @@
         return "Если окно установки не появилось, откройте меню браузера и выберите «Установить приложение».";
     }
 
+    function isInstallIntent(win) {
+        var search = String((win.location && win.location.search) || "");
+        return /(?:^|[?&])install=1(?:&|$)/.test(search);
+    }
+
     function initBrowserModeWarning(win, doc) {
         var warning = doc.querySelector("[data-pwa-browser-mode-warning]");
         if (!warning || !isAndroidYandex(win) || isStandalone(win)) return false;
@@ -76,6 +81,12 @@
         if (!button || !status) return;
 
         var deferredPrompt = null;
+        var installIntent = isInstallIntent(win);
+        var automaticPromptAttempted = false;
+
+        if (installIntent) {
+            panel.classList.add("is-install-intent");
+        }
 
         if (isAndroidYandex(win)) {
             panel.classList.add("is-browser-limited");
@@ -85,7 +96,7 @@
 
         function markInstalled() {
             deferredPrompt = null;
-            panel.classList.remove("is-ready");
+            panel.classList.remove("is-ready", "is-manual", "is-gesture-required");
             panel.classList.add("is-installed");
             button.disabled = true;
             button.textContent = "Приложение уже установлено";
@@ -97,6 +108,56 @@
             return;
         }
 
+        function showManualInstruction() {
+            panel.classList.add("is-manual");
+            status.textContent = manualInstruction(win);
+        }
+
+        function showGestureFallback(promptEvent) {
+            deferredPrompt = promptEvent;
+            panel.classList.add("is-gesture-required");
+            button.hidden = false;
+            button.disabled = false;
+            button.textContent = "Установить приложение";
+            status.textContent = "Нажмите кнопку, чтобы подтвердить установку.";
+        }
+
+        function requestInstall(promptEvent, automatic) {
+            deferredPrompt = null;
+            panel.classList.remove("is-manual", "is-gesture-required");
+            var promptResult;
+            try {
+                promptResult = promptEvent.prompt();
+            } catch (error) {
+                if (automatic) {
+                    showGestureFallback(promptEvent);
+                } else {
+                    showManualInstruction();
+                }
+                return;
+            }
+
+            Promise.resolve(promptResult)
+                .then(function () {
+                    return Promise.resolve(promptEvent.userChoice);
+                })
+                .then(function (choice) {
+                    if (choice && choice.outcome === "accepted") {
+                        status.textContent = "Установка началась. Дождитесь появления иконки на экране.";
+                    } else {
+                        panel.classList.add("is-manual");
+                        status.textContent = "Установку можно запустить позже из меню браузера.";
+                    }
+                })
+                .catch(function () {
+                    if (automatic) {
+                        showGestureFallback(promptEvent);
+                    } else {
+                        showManualInstruction();
+                    }
+                });
+        }
+
         win.addEventListener("beforeinstallprompt", function (event) {
             event.preventDefault();
             deferredPrompt = event;
@@ -104,6 +165,10 @@
             panel.classList.add("is-ready");
             button.textContent = "Установить приложение";
             status.textContent = "Приложение готово к установке на это устройство.";
+            if (installIntent && !automaticPromptAttempted) {
+                automaticPromptAttempted = true;
+                requestInstall(event, true);
+            }
         });
 
         /* Только что установили. Раньше здесь раскрывалась форма входа прямо в
@@ -130,21 +195,10 @@
 
         button.addEventListener("click", function () {
             if (!deferredPrompt) {
-                status.textContent = manualInstruction(win);
+                showManualInstruction();
                 return;
             }
-            var promptEvent = deferredPrompt;
-            deferredPrompt = null;
-            promptEvent.prompt();
-            Promise.resolve(promptEvent.userChoice).then(function (choice) {
-                if (choice && choice.outcome === "accepted") {
-                    status.textContent = "Установка началась. Дождитесь появления иконки на экране.";
-                } else {
-                    status.textContent = "Установку можно запустить позже из меню браузера.";
-                }
-            }).catch(function () {
-                status.textContent = manualInstruction(win);
-            });
+            requestInstall(deferredPrompt, false);
         });
     }
 
@@ -153,6 +207,7 @@
         isStandalone: isStandalone,
         isAndroidYandex: isAndroidYandex,
         initBrowserModeWarning: initBrowserModeWarning,
-        manualInstruction: manualInstruction
+        manualInstruction: manualInstruction,
+        isInstallIntent: isInstallIntent
     };
 }));

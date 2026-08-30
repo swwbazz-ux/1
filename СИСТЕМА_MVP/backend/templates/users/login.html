@@ -32,8 +32,8 @@
     <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static share_image %}?v=2">
     {% endwith %}
     {% if role_app %}
-    <link rel="stylesheet" href="{% static 'css/role-app-install-v1.css' %}?v=3">
-    <script src="{% static 'js/role-app-install-v1.js' %}?v=3" defer></script>
+    <link rel="stylesheet" href="{% static 'css/role-app-install-v1.css' %}?v=4">
+    <script src="{% static 'js/role-app-install-v1.js' %}?v=4" defer></script>
     {% endif %}
     {% endif %}
 {% endblock %}
@@ -45,7 +45,7 @@ is-app-installed внутри нативного приложения: экра�
 display-mode: browser, поэтому нужна серверная проверка (см.
 _is_native_app в users/context_processors.py — метка в User-Agent).
 {% endcomment %}
-{% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% if request.GET.form %} is-login-form-forced{% endif %}{% if is_native_app %} is-app-installed{% endif %}{% if login_role_app %} login-role-{{ login_role_app.role_code }}{% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %} login-fullscreen{% endif %}{% endif %}{% endblock %}
+{% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% if request.GET.form %} is-login-form-forced{% endif %}{% if is_native_app %} is-app-installed{% endif %}{% if request.GET.install and not is_ios %} is-pwa-install-intent{% endif %}{% if login_role_app %} login-role-{{ login_role_app.role_code }}{% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %} login-fullscreen{% endif %}{% endif %}{% endblock %}
 
 {% block body %}
 {% if role_app and login_role_app %}
@@ -90,6 +90,12 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         .role-app-install__spinner { animation-duration: 3s; }
     }
     body.login-page.is-app-installing .login-install-gate__skip { opacity: .7; }
+
+    /* Со /start/ человек уже прочитал, что даёт установка, и выбрал
+       браузерный вариант — повторять то же самое предложение незачем. */
+    body.login-page.is-pwa-install-intent .login-install-gate__lead {
+        display: none;
+    }
 
     .login-install-gate__lead {
         margin: 0;

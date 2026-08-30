@@ -40,15 +40,25 @@
 
     .start-screen {
         display: grid;
-        align-content: center;
+        /* safe center, а не просто center: при переполнении обычное
+           центрирование срезает верх содержимого и до него не доскроллить. */
+        align-content: safe center;
         justify-items: center;
         width: 100%;
         min-height: 100dvh;
+        max-height: 100dvh;
         padding:
             calc(env(safe-area-inset-top, 0px) + clamp(24px, 7vh, 56px))
             clamp(20px, 6vw, 34px)
             calc(env(safe-area-inset-bottom, 0px) + clamp(20px, 4vh, 36px));
         text-align: center;
+        /* Класс dispatcher-shell на body запрещает прокрутку всей страницы.
+           Экран рассчитан так, чтобы помещаться целиком, но у совмещающего
+           роли карточек несколько, и на низком окне они перестают влезать —
+           без своей прокрутки нижняя оказывалась недосягаемой. Прокрутка
+           работает только вместе с max-height выше: без него экран просто
+           вырастал за пределы окна, а обрезал его уже body. */
+        overflow-y: auto;
     }
 
     .start-screen__inner {
@@ -186,24 +196,16 @@
         font-size: clamp(12px, 3.4vw, 14px);
     }
 
-        .start-screen__apps {
+    /* Один столбец, а не два. Внутри карточки теперь не только значок роли,
+       но и две строки установки с подписями — в половине ширины телефона
+       «скачать и установить» разъезжается на четыре строки. */
+    .start-screen__apps {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: minmax(0, 1fr);
         gap: 8px;
         width: 100%;
     }
 
-    /* У большинства сотрудников приложение одно. Теперь внутри карточки не
-       только значок, но и установка со справкой, поэтому она занимает ту же
-       доступную ширину, что карточка найденного сотрудника. */
-    .start-screen__apps:has(> .start-screen__app:only-child) {
-        grid-template-columns: minmax(0, 1fr);
-        justify-content: stretch;
-    }
-
-    /* Плитки со значками вместо кнопок в столбик: у совмещающего роли их
-       набиралось до восьми, и список занимал несколько экранов. Значок
-       узнаётся быстрее, чем читается название. */
     .start-screen__app {
         display: grid;
         align-content: start;
@@ -213,205 +215,117 @@
         overflow: hidden;
     }
 
+    /* Шапка карточки той же горизонтальной строкой, что и варианты ниже:
+       значок слева, название справа. Вертикальный вариант забирал вдвое
+       больше высоты, а её на этом экране не хватает. */
     .start-screen__app-main {
         display: grid;
-        justify-items: center;
-        gap: 6px;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: 10px;
         width: 100%;
-        padding: 10px 8px 9px;
+        padding: 8px 10px;
         color: #eaf6ee;
         text-decoration: none;
         border-bottom: 1px solid rgba(140, 255, 46, .18);
-        padding-bottom: 12px;
     }
 
+    /* Горизонтальные строки: значок слева, подпись справа. Вдвое ниже
+       вертикальных плиток — это принципиально, потому что страница не
+       прокручивается и всё обязано поместиться в один экран. */
     .start-screen__install-options {
         display: grid;
-        gap: 7px;
-        padding: 7px;
+        gap: 6px;
+        margin: 8px 8px 0;
     }
 
-    .start-screen__install-option {
+    .start-screen__opt {
         display: grid;
-        align-content: start;
-        gap: 7px;
-        min-width: 0;
-        padding: 8px;
-        border: 1px solid rgba(255, 255, 255, .12);
-        border-radius: 11px;
-        background: rgba(2, 8, 11, .45);
-    }
-
-    .start-screen__install-option--native {
-        border-color: rgba(140, 255, 46, .45);
-        background: rgba(140, 255, 46, .08);
-    }
-
-    .start-screen__option-heading {
-        display: flex;
+        grid-template-columns: 44px minmax(0, 1fr);
         align-items: center;
-        gap: 8px;
-        min-width: 0;
+        gap: 10px;
+        padding: 8px 10px;
+        border: 1px solid rgba(255, 255, 255, .14);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, .04);
         color: #eaf6ee;
         text-align: left;
+        text-decoration: none;
     }
 
-    .start-screen__option-heading strong {
-        min-width: 0;
-        font-size: 12px;
-        font-weight: 850;
-        line-height: 1.2;
+    .start-screen__opt--native {
+        border-color: rgba(47, 191, 113, .6);
+        background: rgba(47, 191, 113, .12);
     }
 
-    .start-screen__option-icon {
-        position: relative;
-        flex: 0 0 auto;
+    .start-screen__opt-icon {
         display: grid;
         place-items: center;
-        width: 30px;
-        height: 30px;
-        border: 1px solid rgba(140, 255, 46, .28);
-        border-radius: 9px;
-        background: rgba(140, 255, 46, .10);
-        color: #8cff2e;
+        width: 44px;
+        height: 44px;
+        border-radius: 11px;
         overflow: hidden;
     }
 
-    .start-screen__option-icon img {
+    .start-screen__opt-icon img {
         width: 100%;
         height: 100%;
         object-fit: cover;
     }
 
-    .start-screen__option-icon--browser {
-        border-color: rgba(130, 157, 171, .42);
-        background: rgba(130, 157, 171, .12);
-        color: #a9c5d2;
+    .start-screen__opt-icon--browser {
+        border: 1px solid rgba(255, 255, 255, .18);
+        background: rgba(255, 255, 255, .06);
+        color: #b9cbd3;
     }
 
-    .start-screen__option-icon--browser svg {
-        width: 19px;
-        height: 19px;
+    .start-screen__opt-icon--browser svg {
+        width: 24px;
+        height: 24px;
     }
 
-    .start-screen__action-button {
+    .start-screen__opt-text {
         display: grid;
-        place-items: center;
-        min-height: 44px;
-        margin: 0;
-        padding: 7px 10px;
-        border: 1px solid rgba(47, 191, 113, .72);
-        border-radius: 10px;
-        background: #2FBF71;
-        color: #04161A;
-        font-size: 13px;
-        font-weight: 900;
-        line-height: 1.2;
-        text-decoration: none;
-        text-align: center;
+        gap: 2px;
+        min-width: 0;
     }
 
-    .start-screen__action-button--apk {
-        border-color: rgba(47, 191, 113, .82);
+    /* Выравнивание по левому краю приходится задавать явно: у экрана общее
+       text-align: center, а у .start-screen__app b — своё центрирование для
+       подписи под значком роли, и оно достаёт до этих строк тоже. */
+    .start-screen__opt-text b {
+        font-size: 14px;
+        font-weight: 800;
+        line-height: 1.15;
     }
 
-    .start-screen__action-button--pwa {
-        border-color: rgba(130, 157, 171, .55);
-        background: rgba(130, 157, 171, .14);
-        color: #dcebf1;
-        font-size: 13px;
+    /* Пометка стабильности рядом с названием, а не отдельной строкой —
+       экономит высоту и сразу отвечает на вопрос «а какая разница». */
+    .start-screen__opt-text b i {
+        font-style: normal;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: .02em;
+        text-transform: uppercase;
+        opacity: .75;
     }
 
-    .start-screen__install-benefits {
-        margin: 0;
-        list-style: none;
-        padding: 0;
-    }
+    .start-screen__opt--native .start-screen__opt-text b i { color: #7ee2a8; }
+    .start-screen__opt--browser .start-screen__opt-text b i { color: #e0b877; }
 
-    .start-screen__install-benefits li {
-        position: relative;
-        margin: 0 0 4px;
-        padding-left: 13px;
-        color: #849aa3;
-        text-align: left;
-        font-size: 11px;
-        line-height: 1.3;
-    }
-
-    /* Предупреждение Chrome про файлы не из магазина убрать нельзя — проверено
-       и на этой странице, и на прежней статической. Поэтому не прячем его, а
-       предупреждаем заранее, чтобы человек не пугался и не бросал установку. */
-    .start-screen__install-warning-note {
-        margin: 8px 0 0;
+    .start-screen__opt-text em {
         color: #93a7ae;
+        font-style: normal;
+        font-size: 11px;
+        line-height: 1.25;
+    }
+
+    .start-screen .start-screen__opt-note {
+        margin: 7px 10px 10px;
+        color: #7d919a;
         text-align: left;
         font-size: 10.5px;
-        line-height: 1.35;
-    }
-
-    .start-screen__install-benefits li::before {
-        content: "•";
-        position: absolute;
-        left: 0;
-        color: #8cff2e;
-        font-size: 11px;
-        line-height: 1;
-    }
-
-    /* У общего .start-screen p выше крупный размер вводного текста. Этот
-       селектор удерживает пояснение варианта в роли короткой подписи. */
-    .start-screen .start-screen__option-note {
-        margin: 0;
-        color: #71868f;
-        font-size: 10px;
-        line-height: 1.35;
-        text-align: left;
-    }
-
-    /* В одиночной карточке оба варианта получают удобные мобильные размеры.
-       У совмещающих роли внешняя сетка остаётся компактной двухколоночной. */
-    .start-screen__app:only-child .start-screen__install-options {
-        gap: 10px;
-        padding: 12px;
-    }
-
-    .start-screen__app:only-child .start-screen__install-option {
-        gap: 9px;
-        padding: 11px;
-    }
-
-    .start-screen__app:only-child .start-screen__option-heading {
-        gap: 10px;
-    }
-
-    .start-screen__app:only-child .start-screen__option-heading strong {
-        font-size: 15px;
-    }
-
-    .start-screen__app:only-child .start-screen__option-icon {
-        width: 38px;
-        height: 38px;
-        border-radius: 11px;
-    }
-
-    .start-screen__app:only-child .start-screen__option-icon--browser svg {
-        width: 23px;
-        height: 23px;
-    }
-
-    .start-screen__app:only-child .start-screen__action-button {
-        min-height: 50px;
-        font-size: 16px;
-    }
-
-    .start-screen__app:only-child .start-screen__install-benefits li {
-        padding-left: 15px;
-        font-size: 12px;
-        line-height: 1.35;
-    }
-
-    .start-screen .start-screen__app:only-child .start-screen__option-note {
-        font-size: 11.5px;
+        line-height: 1.3;
     }
 
     /* Буква под значком, а не вместо него: если картинка пропадёт, останется
@@ -420,12 +334,12 @@
         position: relative;
         display: grid;
         place-items: center;
-        width: clamp(40px, 12vw, 52px);
+        width: 44px;
         aspect-ratio: 1;
-        border-radius: 14px;
+        border-radius: 11px;
         background: rgba(140, 255, 46, .12);
         color: #8cff2e;
-        font-size: clamp(22px, 7vw, 30px);
+        font-size: 24px;
         font-weight: 900;
         line-height: 1;
     }
@@ -435,16 +349,17 @@
         inset: 0;
         width: 100%;
         height: 100%;
-        border-radius: 14px;
+        border-radius: 11px;
         object-fit: cover;
     }
 
-    .start-screen__app b {
-        font-size: clamp(12px, 3.2vw, 13.5px);
+    /* Только название роли в шапке карточки. Раньше селектор был шире —
+       .start-screen__app b — и цеплял заодно названия вариантов установки. */
+    .start-screen__app-main b {
+        font-size: 14px;
         font-weight: 800;
         line-height: 1.2;
-        text-align: center;
-        text-wrap: balance;
+        text-align: left;
     }
 
     .start-screen__back {
@@ -469,13 +384,12 @@
         }
 
         .start-screen__icon {
-            width: clamp(34px, 10vw, 44px);
-            font-size: clamp(18px, 6vw, 24px);
+            width: 38px;
+            font-size: 20px;
         }
 
         .start-screen__app-main {
-            padding: 8px 6px 7px;
-            gap: 5px;
+            padding: 6px 10px;
         }
     }
 
@@ -521,58 +435,56 @@
                             </span>
                             <b>{{ item.app.name }}</b>
                         </div>
+                        {% comment %}
+                        Горизонтальные строки, а не вертикальные плитки: экран этой
+                        страницы не прокручивается (класс dispatcher-shell на body
+                        задаёт overflow: hidden), и развёрнутые карточки в него не
+                        помещались — до второго варианта было не добраться. Строка
+                        со значком слева занимает вдвое меньше высоты.
+                        {% endcomment %}
                         <div class="start-screen__install-options">
                             {% if item.apk %}
-                                <section class="start-screen__install-option start-screen__install-option--native" data-start-install-option="native">
-                                    <div class="start-screen__option-heading">
-                                        <span class="start-screen__option-icon" aria-hidden="true">
-                                            <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
-                                        </span>
-                                        <strong>Приложение</strong>
-                                    </div>
-                                    {# Без download: с ним Chrome включает проверку и пугает «файл может быть опасным». #}
-                                    <a
-                                        class="start-screen__action-button start-screen__action-button--apk"
-                                        href="{{ item.apk.url }}"
-                                        aria-label="Скачать {{ item.app.name }} для Android, версия {{ item.apk.version }}"
-                                    >
-                                        Установить
-                                    </a>
-                                    <ul class="start-screen__install-benefits">
-                                        <li>Работает при свёрнутом окне</li>
-                                        <li>Уведомления со звуком</li>
-                                        <li>Обновляется само</li>
-                                    </ul>
-                                    {# Chrome предупреждает о любом приложении не из магазина — со стороны сайта не убирается, проверено. #}
-                                    <p class="start-screen__install-warning-note">Телефон спросит «Файл может быть опасным» — так он предупреждает про все приложения не из магазина. Нажмите «Всё равно скачать».</p>
-                                </section>
-                            {% endif %}
-                            <section class="start-screen__install-option start-screen__install-option--browser" data-start-install-option="browser">
-                                <div class="start-screen__option-heading">
-                                    <span class="start-screen__option-icon start-screen__option-icon--browser" aria-hidden="true">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                            <rect x="3" y="4" width="18" height="16" rx="2"></rect>
-                                            <path d="M3 8h18"></path>
-                                            <path d="M7 6h.01M10 6h.01"></path>
-                                            <path d="M8 13h8M8 16h5"></path>
-                                        </svg>
+                                {# Без download: с ним Chrome включает проверку и пугает «файл может быть опасным». #}
+                                <a class="start-screen__opt start-screen__opt--native"
+                                   data-start-install-option="native"
+                                   href="{{ item.apk.url }}"
+                                   aria-label="Скачать приложение {{ item.app.name }} для Android, версия {{ item.apk.version }}">
+                                    <span class="start-screen__opt-icon" aria-hidden="true">
+                                        <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
                                     </span>
-                                    <strong>Версия для браузера</strong>
-                                </div>
-                                <a class="start-screen__action-button start-screen__action-button--pwa" href="{{ item.url }}">
-                                    Открыть
+                                    <span class="start-screen__opt-text">
+                                        <b>Приложение <i>стабильное</i></b>
+                                        <em>APK · версия {{ item.apk.version }} · скачать и установить →</em>
+                                    </span>
                                 </a>
-                                {% if item.apk %}
-                                    <p class="start-screen__option-note">
-                                        Ставится как ярлык на экран. Связь оборвётся, когда свернёте окно — придётся открывать заново.
-                                    </p>
-                                {% elif is_ios %}
-                                    <p class="start-screen__option-note">
-                                        После перехода добавьте значок на экран — как это сделать, покажем на следующем шаге.
-                                    </p>
-                                {% endif %}
-                            </section>
+                            {% endif %}
+                            {% comment %}
+                            install=1 в адресе: установить PWA можно только с
+                            собственного адреса приложения, поэтому переход туда
+                            неизбежен. Метка говорит скрипту сразу вызвать окно
+                            установки, чтобы не заставлять жать кнопку второй раз.
+                            {% endcomment %}
+                            <a class="start-screen__opt start-screen__opt--browser"
+                               data-start-install-option="browser"
+                               href="{{ item.url }}{% if '?' in item.url %}&amp;{% else %}?{% endif %}install=1"
+                               aria-label="Установить {{ item.app.name }} как браузерное приложение">
+                                <span class="start-screen__opt-icon start-screen__opt-icon--browser" aria-hidden="true">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+                                        <path d="M3 8h18"></path>
+                                        <path d="M7 6h.01M10 6h.01"></path>
+                                        <path d="M8 13h8M8 16h5"></path>
+                                    </svg>
+                                </span>
+                                <span class="start-screen__opt-text">
+                                    <b>Браузер <i>нестабильно</i></b>
+                                    <em>PWA · ярлык на экран · открыть →</em>
+                                </span>
+                            </a>
                         </div>
+                        <p class="start-screen__opt-note">
+                            {% if item.apk %}Приложение держит связь при свёрнутом окне. Телефон предупредит «файл может быть опасным» — нажмите «Всё равно скачать».{% elif is_ios %}После перехода добавьте значок на экран — покажем, как.{% endif %}
+                        </p>
                     </div>
                 {% endfor %}
             </div>

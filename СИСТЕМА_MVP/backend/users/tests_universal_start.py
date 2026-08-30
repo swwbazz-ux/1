@@ -133,16 +133,15 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, '/media/apk/excavator-7.apk')
         self.assertContains(response, 'data-start-install-option="native"', count=2)
         self.assertContains(response, 'data-start-install-option="browser"', count=2)
-        self.assertContains(response, '>Приложение</strong>', count=2)
-        self.assertContains(response, '>Версия для браузера</strong>', count=2)
-        self.assertContains(response, 'Установить', count=2)
-        self.assertContains(response, 'Работает при свёрнутом окне', count=2)
-        self.assertContains(response, 'Уведомления со звуком', count=2)
-        self.assertContains(response, 'Обновляется само', count=2)
-        self.assertContains(response, 'Открыть', count=2)
-        self.assertContains(response, 'Ставится как ярлык на экран.', count=2)
-        self.assertContains(response, 'Связь оборвётся, когда свернёте окно', count=2)
+        self.assertContains(response, '<b>Приложение <i>стабильное</i></b>', count=2)
+        self.assertContains(response, '<b>Браузер <i>нестабильно</i></b>', count=2)
+        self.assertContains(response, 'APK · версия 0.1.3 · скачать и установить', count=1)
+        self.assertContains(response, 'APK · версия 0.1.4 · скачать и установить', count=1)
+        self.assertContains(response, 'PWA · ярлык на экран · открыть', count=2)
+        self.assertContains(response, 'install=1', count=2)
         self.assertNotContains(response, 'class="start-screen__app-main" href=')
+        # Атрибут download заставлял Chrome ругаться «файл может быть опасным».
+        self.assertNotContains(response, ' download')
 
     def test_android_does_not_see_button_when_configured_apk_file_is_missing(self):
         self.add_access('driver', 'Водитель самосвала')
@@ -174,8 +173,8 @@ class UniversalStartTests(TestCase):
         self.assertNotContains(response, 'href="/media/apk/driver-5.apk"')
         self.assertNotContains(response, 'data-start-install-option="native"')
         self.assertContains(response, 'data-start-install-option="browser"', count=1)
-        self.assertContains(response, 'Версия для браузера')
-        self.assertContains(response, 'Открыть')
+        self.assertContains(response, '<b>Браузер <i>нестабильно</i></b>')
+        self.assertContains(response, 'install=1', count=1)
         self.assertContains(response, 'После перехода добавьте значок на экран')
 
     def test_iphone_shows_only_pwa_action_without_android_block(self):
@@ -188,7 +187,7 @@ class UniversalStartTests(TestCase):
         # На iPhone только полноценный браузерный вариант, без блока Android.
         self.assertContains(response, 'data-start-install-option="browser"', count=1)
         self.assertNotContains(response, 'data-start-install-option="native"')
-        self.assertContains(response, 'Открыть')
+        self.assertContains(response, 'install=1', count=1)
         self.assertNotContains(response, 'href="/media/apk/driver-5.apk"')
         self.assertNotContains(response, 'class="start-screen__app-main" href=')
 
@@ -201,5 +200,5 @@ class UniversalStartTests(TestCase):
         self.assertIsNone(response.context['apps'][0]['apk'])
         self.assertNotContains(response, 'href="/media/apk/excavator-7.apk"')
         self.assertContains(response, 'data-start-install-option="browser"')
-        self.assertContains(response, 'Открыть')
+        self.assertContains(response, 'install=1', count=1)
         self.assertNotContains(response, 'После перехода добавьте значок на экран')
