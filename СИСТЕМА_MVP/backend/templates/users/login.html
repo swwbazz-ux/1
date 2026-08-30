@@ -416,10 +416,10 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         <h2>{{ login_role_app.name }}</h2>
         <p class="login-install-gate__lead">Установите приложение на телефон — вход будет уже в нём.</p>
         {% if is_ios %}
-        {# На iPhone Safari не разрешает сайту предлагать установку — кнопка
+        {% comment %} На iPhone Safari не разрешает сайту предлагать установку — кнопка
            там просто не срабатывает, человек жмёт и остаётся ни с чем.
            Единственный способ — «Поделиться» → «На экран Домой», поэтому
-           показываем сразу инструкцию, а не кнопку. #}
+           показываем сразу инструкцию, а не кнопку. {% endcomment %}
         <section class="role-app-install role-app-install--ios" aria-label="Установка приложения на iPhone">
             <ol class="role-app-install__ios-steps">
                 <li>Нажмите <b>«Поделиться»</b> — квадрат со стрелкой вверх, внизу экрана.</li>

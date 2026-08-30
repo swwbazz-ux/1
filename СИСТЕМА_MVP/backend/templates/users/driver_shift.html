@@ -3860,10 +3860,10 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
             <span class="driver-header-person">{{ driver_header_person_label }}</span>
         </div>
         <div class="driver-online" role="status" aria-label="Онлайн">
-            {# В приложении показываем версию самого приложения, в браузере — версию
+            {% comment %} В приложении показываем версию самого приложения, в браузере — версию
                веб-оболочки. Если приложение версию не сообщило (старая сборка,
                метка без версии) — не показываем ничего: версия оболочки там
-               вводит в заблуждение, человек решит, что это версия приложения. #}
+               вводит в заблуждение, человек решит, что это версия приложения. {% endcomment %}
             {% if is_native_app %}{% if native_app_version %}<small class="driver-shell-version" aria-label="Версия приложения">{{ native_app_version }}</small>{% endif %}{% else %}<small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|cut:'driver-mobile-shell-' }}</small>{% endif %}
             <span>Онлайн</span>
             <i class="driver-online-dot" data-connection-indicator aria-hidden="true"></i>
@@ -4201,8 +4201,8 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
     </button>
 </nav>
 
-{# Окно обновления веб-оболочки. В приложении не нужно: обновления
-   приходят из RuStore, а не отсюда. #}
+{% comment %} Окно обновления веб-оболочки. В приложении не нужно: обновления
+   приходят из RuStore, а не отсюда. {% endcomment %}
 {% if not is_native_app %}
 <div class="driver-mobile-update-modal" data-driver-pwa-update-modal hidden aria-live="polite" aria-modal="true" role="dialog">
     <div class="driver-mobile-update-dialog">
