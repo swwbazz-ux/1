@@ -1755,15 +1755,36 @@ window.AppOperationalFragment = (function () {
     "use strict";
 
     var contract = "operational-fragment-v1";
+    var defaultRequestTimeoutMs = 15000;
 
-    function request(screen, version) {
+    function request(screen, version, options) {
+        options = options || {};
         var url = new URL(window.location.href);
         ["_driver_refresh", "_eo_refresh", "_mm_refresh"].forEach(function (name) {
             url.searchParams.delete(name);
         });
         url.searchParams.set("_operational_fragment", String(screen || ""));
         url.searchParams.set("_operational_version", String(Number(version || 0)));
-        return window.fetch(url.toString(), {
+        var controller = window.AbortController ? new window.AbortController() : null;
+        var timeoutMs = Number(options.timeoutMs) > 0
+            ? Number(options.timeoutMs)
+            : defaultRequestTimeoutMs;
+        var timeoutId = null;
+        var timedOut = false;
+        var timeoutPromise = new Promise(function (resolve, reject) {
+            timeoutId = window.setTimeout(function () {
+                timedOut = true;
+                if (controller) {
+                    try {
+                        controller.abort();
+                    } catch (error) {}
+                }
+                var timeoutError = new Error("operational fragment timeout");
+                timeoutError.code = "OPERATIONAL_FRAGMENT_TIMEOUT";
+                reject(timeoutError);
+            }, timeoutMs);
+        });
+        var fetchOptions = {
             method: "GET",
             credentials: "same-origin",
             cache: "no-store",
@@ -1771,7 +1792,11 @@ window.AppOperationalFragment = (function () {
                 "Accept": "application/json",
                 "X-Requested-With": "XMLHttpRequest"
             }
-        }).then(function (response) {
+        };
+        if (controller) {
+            fetchOptions.signal = controller.signal;
+        }
+        var requestPromise = window.fetch(url.toString(), fetchOptions).then(function (response) {
             if (!response.ok) {
                 var error = new Error("operational fragment " + response.status);
                 error.status = response.status;
@@ -1789,6 +1814,18 @@ window.AppOperationalFragment = (function () {
                 throw new Error("operational fragment contract mismatch");
             }
             return payload;
+        });
+        return Promise.race([requestPromise, timeoutPromise]).catch(function (error) {
+            if (timedOut && (!error || error.code !== "OPERATIONAL_FRAGMENT_TIMEOUT")) {
+                var timeoutError = new Error("operational fragment timeout");
+                timeoutError.code = "OPERATIONAL_FRAGMENT_TIMEOUT";
+                throw timeoutError;
+            }
+            throw error;
+        }).finally(function () {
+            if (timeoutId !== null) {
+                window.clearTimeout(timeoutId);
+            }
         });
     }
 

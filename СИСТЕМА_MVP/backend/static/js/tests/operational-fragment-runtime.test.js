@@ -139,6 +139,9 @@ function createFragmentRuntime(fetchImplementation) {
             origin: "http://driver.localhost",
         },
         fetch: fetchImplementation,
+        setTimeout,
+        clearTimeout,
+        AbortController,
     };
     runtimeWindow.window = runtimeWindow;
     const context = {
@@ -149,6 +152,9 @@ function createFragmentRuntime(fetchImplementation) {
         Promise,
         Error,
         TypeError,
+        setTimeout,
+        clearTimeout,
+        AbortController,
     };
     const helperSource = extractMarkedSource(
         BASE_TEMPLATE_SOURCE,
@@ -280,6 +286,52 @@ test("production fragment helper rejects contract and screen mismatches", async 
         runtimeWindow.AppOperationalFragment.request("driver", 75),
         /contract|screen|mismatch/i
     );
+});
+
+
+test("production fragment helper times out a hung request and remains reusable", async () => {
+    let requestCount = 0;
+    let firstRequestAborted = false;
+    const recoveredPayload = {
+        contract: FRAGMENT_CONTRACT,
+        screen: "excavator",
+        version: 77,
+        html: '<main data-eo-shell="1"></main>',
+    };
+    const {runtimeWindow} = createFragmentRuntime((url, options) => {
+        requestCount += 1;
+        if (requestCount === 1) {
+            options.signal.addEventListener("abort", () => {
+                firstRequestAborted = true;
+            });
+            return new Promise(() => {});
+        }
+        return Promise.resolve({
+            ok: true,
+            status: 200,
+            json() {
+                return Promise.resolve(recoveredPayload);
+            },
+        });
+    });
+
+    await assert.rejects(
+        runtimeWindow.AppOperationalFragment.request(
+            "excavator",
+            76,
+            {timeoutMs: 10}
+        ),
+        (error) => error && error.code === "OPERATIONAL_FRAGMENT_TIMEOUT"
+    );
+    assert.equal(firstRequestAborted, true);
+
+    const recovered = await runtimeWindow.AppOperationalFragment.request(
+        "excavator",
+        77,
+        {timeoutMs: 100}
+    );
+    assert.equal(recovered, recoveredPayload);
+    assert.equal(requestCount, 2);
 });
 
 
