@@ -3,9 +3,9 @@
 
 {% block title %}{% if wrong_app %}Чужое приложение{% else %}Номер не найден{% endif %}{% if login_role_app %} · {{ login_role_app.short_name }}{% endif %}{% endblock %}
 {% block extra_head %}
+    <meta name="theme-color" content="{{ entry_screen_browser_bar }}">
     {% if login_role_app %}
     <link rel="manifest" href="{{ login_role_app.manifest_url }}">
-    <meta name="theme-color" content="{{ entry_screen_browser_bar }}">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <link rel="apple-touch-icon" href="{{ login_role_app.icon_180_url }}">

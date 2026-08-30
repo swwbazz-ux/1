@@ -87,6 +87,21 @@ class UniversalStartTests(TestCase):
             count=1,
         )
 
+    def test_unknown_phone_keeps_the_shared_dark_browser_bar(self):
+        response = self.client.post(
+            reverse('universal_start'),
+            {'phone': '+79990000999'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="phone-not-found"')
+        self.assertContains(response, 'Номер не найден')
+        self.assertContains(
+            response,
+            f'<meta name="theme-color" content="{ENTRY_SCREEN_BROWSER_BAR}">',
+            count=1,
+        )
+
     def test_person_with_a_working_code_is_not_promised_a_new_one(self):
         self.add_access('driver', 'Водитель самосвала')
         response = self.post()
