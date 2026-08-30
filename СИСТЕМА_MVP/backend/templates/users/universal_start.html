@@ -193,12 +193,12 @@
         width: 100%;
     }
 
-    /* У большинства сотрудников приложение одно. В сетке на две колонки
-       единственная плитка попадает в левую ячейку, а правая остаётся
-       пустой — плитка визуально уезжает влево вместо центра экрана. */
+    /* У большинства сотрудников приложение одно. Теперь внутри карточки не
+       только значок, но и установка со справкой, поэтому она занимает ту же
+       доступную ширину, что карточка найденного сотрудника. */
     .start-screen__apps:has(> .start-screen__app:only-child) {
-        grid-template-columns: minmax(0, 200px);
-        justify-content: center;
+        grid-template-columns: minmax(0, 1fr);
+        justify-content: stretch;
     }
 
     /* Плитки со значками вместо кнопок в столбик: у совмещающего роли их
@@ -229,13 +229,13 @@
         display: grid;
         place-items: center;
         min-height: 48px;
-        margin: 0;
+        margin: 10px 10px 0;
         padding: 7px 10px;
         border: 1px solid rgba(47, 191, 113, .72);
         border-radius: 10px;
         background: #2FBF71;
         color: #04161A;
-        font-size: clamp(14px, 3.6vw, 15px);
+        font-size: 13px;
         font-weight: 900;
         line-height: 1.2;
         text-decoration: none;
@@ -251,30 +251,23 @@
         border-color: rgba(140, 255, 46, .88);
         background: rgba(140, 255, 46, .16);
         color: #dfffd4;
-        font-size: clamp(13px, 3.4vw, 15px);
-    }
-
-    .start-screen__install-benefits,
-    .start-screen__pwa-hint,
-    .start-screen__fallback-note {
-        margin: 10px 0 0;
-        color: #9cb2ba;
         font-size: 13px;
-        line-height: 1.34;
     }
 
     .start-screen__install-benefits {
+        margin: 8px 10px 0;
         list-style: none;
         padding: 0;
     }
 
     .start-screen__install-benefits li {
         position: relative;
-        margin: 0 0 5px;
-        padding-left: 15px;
+        margin: 0 0 4px;
+        padding-left: 13px;
         color: #8fa7af;
         text-align: left;
-        font-size: 12px;
+        font-size: 11px;
+        line-height: 1.3;
     }
 
     .start-screen__install-benefits li::before {
@@ -282,18 +275,70 @@
         position: absolute;
         left: 0;
         color: #8cff2e;
-        font-size: 12px;
+        font-size: 11px;
         line-height: 1;
     }
 
     .start-screen__fallback-link {
-        margin-top: 10px;
+        margin: 8px 10px 0;
         display: inline-block;
-        color: #8cb3d9;
-        font-size: 12px;
+        color: #829dab;
+        font-size: 10.5px;
         font-weight: 700;
+        line-height: 1.3;
+        text-align: left;
         text-decoration: underline;
-        text-wrap: balance;
+    }
+
+    /* У общего .start-screen p выше есть крупный размер вводного текста.
+       Уточняем селектор, чтобы сноска не наследовала его визуальный вес. */
+    .start-screen .start-screen__fallback-note {
+        margin: 3px 10px 10px;
+        color: #687d86;
+        font-size: 10px;
+        line-height: 1.35;
+        text-align: left;
+    }
+
+    .start-screen .start-screen__pwa-hint {
+        margin: 7px 10px 10px;
+        color: #7f949d;
+        font-size: 11px;
+        line-height: 1.35;
+        text-align: left;
+    }
+
+    /* В одиночной карточке главный путь получает нормальный мобильный размер;
+       двухколоночный вариант для совмещающих роли остаётся компактным. */
+    .start-screen__app:only-child .start-screen__action-button {
+        min-height: 52px;
+        margin-inline: 14px;
+        font-size: 16px;
+    }
+
+    .start-screen__app:only-child .start-screen__install-benefits {
+        margin: 10px 14px 0;
+    }
+
+    .start-screen__app:only-child .start-screen__install-benefits li {
+        padding-left: 15px;
+        font-size: 12px;
+        line-height: 1.35;
+    }
+
+    .start-screen__app:only-child .start-screen__fallback-link {
+        margin: 9px 14px 0;
+        font-size: 11px;
+    }
+
+    .start-screen .start-screen__app:only-child .start-screen__fallback-note {
+        margin: 3px 14px 12px;
+        font-size: 10.5px;
+    }
+
+    .start-screen .start-screen__app:only-child .start-screen__pwa-hint {
+        margin: 8px 14px 12px;
+        font-size: 12px;
     }
 
     /* Буква под значком, а не вместо него: если картинка пропадёт, останется
