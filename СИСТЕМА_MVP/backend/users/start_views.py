@@ -62,6 +62,11 @@ def is_android_request(request):
     return 'android' in request.META.get('HTTP_USER_AGENT', '').lower()
 
 
+def is_ios_request(request):
+    user_agent = request.META.get('HTTP_USER_AGENT', '').lower()
+    return 'iphone' in user_agent or 'ipad' in user_agent or 'ipod' in user_agent
+
+
 def android_apk_for_role(role_code):
     release = ANDROID_APK_BY_ROLE.get(role_code)
     if release is None:
@@ -157,5 +162,6 @@ def universal_start_view(request):
             'employee': apps[0]['employee'],
             'submitted_phone': format_phone_for_display(phone),
             'has_working_code': has_working_code,
+            'is_ios': is_ios_request(request),
         },
     )
