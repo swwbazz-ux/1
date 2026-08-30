@@ -131,12 +131,17 @@ class UniversalStartTests(TestCase):
 
         self.assertContains(response, '/media/apk/driver-5.apk')
         self.assertContains(response, '/media/apk/excavator-7.apk')
-        self.assertContains(response, 'Установить приложение')
-        self.assertContains(response, 'Работает, когда приложение свёрнуто — связь со сменой не рвётся')
-        self.assertContains(response, 'Уведомления приходят со звуком')
-        self.assertContains(response, 'Обновляется само, ничего переустанавливать не нужно')
-        self.assertContains(response, 'Не получается установить? Открыть в браузере')
-        self.assertContains(response, 'Так тоже можно работать, но связь оборвётся, когда свернёте окно')
+        self.assertContains(response, 'data-start-install-option="native"', count=2)
+        self.assertContains(response, 'data-start-install-option="browser"', count=2)
+        self.assertContains(response, '>Приложение</strong>', count=2)
+        self.assertContains(response, '>Версия для браузера</strong>', count=2)
+        self.assertContains(response, 'Установить', count=2)
+        self.assertContains(response, 'Работает при свёрнутом окне', count=2)
+        self.assertContains(response, 'Уведомления со звуком', count=2)
+        self.assertContains(response, 'Обновляется само', count=2)
+        self.assertContains(response, 'Открыть', count=2)
+        self.assertContains(response, 'Ставится как ярлык на экран.', count=2)
+        self.assertContains(response, 'Связь оборвётся, когда свернёте окно', count=2)
         self.assertNotContains(response, 'class="start-screen__app-main" href=')
 
     def test_android_does_not_see_button_when_configured_apk_file_is_missing(self):
@@ -146,6 +151,8 @@ class UniversalStartTests(TestCase):
 
         self.assertIsNone(response.context['apps'][0]['apk'])
         self.assertNotContains(response, 'href="/media/apk/driver-5.apk"')
+        self.assertNotContains(response, 'data-start-install-option="native"')
+        self.assertContains(response, 'data-start-install-option="browser"')
 
     def test_android_does_not_see_apk_button_for_unsupported_role(self):
         self.add_access('mining_master', 'Горный мастер')
@@ -153,6 +160,8 @@ class UniversalStartTests(TestCase):
         response = self.post(user_agent=ANDROID_USER_AGENT)
 
         self.assertTrue(all(item['apk'] is None for item in response.context['apps']))
+        self.assertNotContains(response, 'data-start-install-option="native"')
+        self.assertContains(response, 'data-start-install-option="browser"')
         self.assertNotContains(response, 'href="/media/apk/')
 
     def test_iphone_does_not_see_apk_button(self):
@@ -163,9 +172,11 @@ class UniversalStartTests(TestCase):
 
         self.assertIsNone(response.context['apps'][0]['apk'])
         self.assertNotContains(response, 'href="/media/apk/driver-5.apk"')
-        self.assertContains(response, 'Открыть в браузере')
-        self.assertContains(response, 'После перехода нужно будет добавить значок на экран')
-        self.assertNotContains(response, 'Не получается установить? Открыть в браузере')
+        self.assertNotContains(response, 'data-start-install-option="native"')
+        self.assertContains(response, 'data-start-install-option="browser"', count=1)
+        self.assertContains(response, 'Версия для браузера')
+        self.assertContains(response, 'Открыть')
+        self.assertContains(response, 'После перехода добавьте значок на экран')
 
     def test_iphone_shows_only_pwa_action_without_android_block(self):
         self.add_apk('apk/driver-5.apk')
@@ -174,10 +185,11 @@ class UniversalStartTests(TestCase):
         response = self.post(user_agent=IPHONE_USER_AGENT)
 
         self.assertEqual(response.context['apps'][0]['app'].name, 'Водитель самосвала')
-        # На iPhone только действие «Открыть в браузере», без действий Android.
-        self.assertContains(response, 'Открыть в браузере')
+        # На iPhone только полноценный браузерный вариант, без блока Android.
+        self.assertContains(response, 'data-start-install-option="browser"', count=1)
+        self.assertNotContains(response, 'data-start-install-option="native"')
+        self.assertContains(response, 'Открыть')
         self.assertNotContains(response, 'href="/media/apk/driver-5.apk"')
-        self.assertNotContains(response, 'Не получается установить?')
         self.assertNotContains(response, 'class="start-screen__app-main" href=')
 
     def test_desktop_does_not_see_apk_button(self):
@@ -188,5 +200,6 @@ class UniversalStartTests(TestCase):
 
         self.assertIsNone(response.context['apps'][0]['apk'])
         self.assertNotContains(response, 'href="/media/apk/excavator-7.apk"')
-        self.assertContains(response, 'Открыть в браузере')
-        self.assertNotContains(response, 'После перехода нужно будет добавить значок на экран')
+        self.assertContains(response, 'data-start-install-option="browser"')
+        self.assertContains(response, 'Открыть')
+        self.assertNotContains(response, 'После перехода добавьте значок на экран')
