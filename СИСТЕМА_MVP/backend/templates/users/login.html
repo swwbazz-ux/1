@@ -153,24 +153,20 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
        посреди пустоты, и приложение выглядело незаконченным. Цвет берём от
        роли — человек с первого взгляда видит, своё ли он открыл. */
     body.login-page.login-fullscreen {
-        --login-accent: #2FBF71;
-        --login-glow: rgba(47, 191, 113, .20);
+        /* Цвет роли приходит из каталога приложений (accent_color в
+           users/role_apps.py) — оттуда же его берёт карточка на /start/.
+           Раньше набор был записан здесь отдельно, и цвета двух экранов
+           разъезжались, стоило поправить один из них.
+
+           Свечение и цвет текста на кнопке выводятся из акцента, а не
+           перечисляются для каждой роли: иначе новая роль приносит три
+           значения, и забыть одно из них ничего не стоит. Строки без
+           color-mix оставлены запасными для старых браузеров. */
+        --login-accent: {{ login_role_app.accent_color|default:"#2FBF71" }};
+        --login-glow: rgba(255, 255, 255, .12);
+        --login-glow: color-mix(in srgb, var(--login-accent) 18%, transparent);
         --login-ink: #04161A;
-    }
-    body.login-page.login-role-driver {
-        --login-accent: #8CFF2E;
-        --login-glow: rgba(140, 255, 46, .18);
-        --login-ink: #06210A;
-    }
-    body.login-page.login-role-excavator_operator {
-        --login-accent: #FFD200;
-        --login-glow: rgba(255, 210, 0, .16);
-        --login-ink: #241B00;
-    }
-    body.login-page.login-role-mining_master {
-        --login-accent: #4AA3FF;
-        --login-glow: rgba(74, 163, 255, .18);
-        --login-ink: #041a2e;
+        --login-ink: color-mix(in srgb, var(--login-accent) 22%, #02080b);
     }
 
     body.login-page.login-fullscreen {

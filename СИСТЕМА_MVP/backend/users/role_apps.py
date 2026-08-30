@@ -166,6 +166,10 @@ class RoleApp:
     orientation: str
     theme_color: str
     background_color: str
+    # Цвет, которым роль обозначается в интерфейсе: рамка карточки на /start/,
+    # кнопка входа, подписи. Не то же самое, что theme_color — тот красит
+    # системную полосу браузера и потому намеренно тёмный.
+    accent_color: str
     icon_slug: str
     manifest_url: str
     service_worker_url: str
@@ -202,6 +206,7 @@ ROLE_APPS = (
         orientation='portrait',
         theme_color='#031015',
         background_color='#101820',
+        accent_color='#8CFF2E',
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
@@ -218,6 +223,7 @@ ROLE_APPS = (
         orientation='portrait',
         theme_color='#D58B14',
         background_color='#101820',
+        accent_color='#FFD200',
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
@@ -234,6 +240,7 @@ ROLE_APPS = (
         orientation='portrait',
         theme_color='#2366A8',
         background_color='#101820',
+        accent_color='#4AA3FF',
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
@@ -253,6 +260,7 @@ ROLE_APPS = (
         orientation='landscape',
         theme_color='#2E7D52',
         background_color='#101820',
+        accent_color='#2FBF71',
         icon_slug='deputy-mining-manager',
         manifest_url='/deputy-mining-manager.webmanifest',
         service_worker_url='/deputy-mining-manager-sw.js',
@@ -269,6 +277,7 @@ ROLE_APPS = (
         orientation='landscape',
         theme_color='#B33A4C',
         background_color='#101820',
+        accent_color='#2FBF71',
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
@@ -285,6 +294,7 @@ ROLE_APPS = (
         orientation='any',
         theme_color='#2E7D52',
         background_color='#101820',
+        accent_color='#2FBF71',
         icon_slug='clerk',
         manifest_url='/clerk/manifest.webmanifest',
         service_worker_url='/clerk/sw.js',
@@ -303,6 +313,7 @@ ROLE_APPS = (
         orientation='any',
         theme_color='#A64778',
         background_color='#101820',
+        accent_color='#2FBF71',
         icon_slug='oup',
         manifest_url='/oup.webmanifest',
         service_worker_url='/oup-sw.js',
@@ -319,6 +330,7 @@ ROLE_APPS = (
         orientation='any',
         theme_color='#176B73',
         background_color='#101820',
+        accent_color='#2FBF71',
         icon_slug='timekeeper',
         manifest_url='/timekeeper.webmanifest',
         service_worker_url='/timekeeper-sw.js',
@@ -335,6 +347,7 @@ ROLE_APPS = (
         orientation='any',
         theme_color='#8A5A23',
         background_color='#101820',
+        accent_color='#2FBF71',
         icon_slug='site-manager',
         manifest_url='/site-manager.webmanifest',
         service_worker_url='/site-manager-sw.js',
@@ -351,6 +364,7 @@ ROLE_APPS = (
         orientation='any',
         theme_color='#C65C2E',
         background_color='#101820',
+        accent_color='#2FBF71',
         icon_slug='mechanic',
         manifest_url='/mechanic.webmanifest',
         service_worker_url='/mechanic-sw.js',
@@ -367,6 +381,7 @@ ROLE_APPS = (
         orientation='landscape',
         theme_color='#5058A4',
         background_color='#101820',
+        accent_color='#2FBF71',
         icon_slug='management',
         manifest_url='/management.webmanifest',
         service_worker_url='/management-sw.js',
@@ -383,6 +398,7 @@ ROLE_APPS = (
         orientation='any',
         theme_color='#53616F',
         background_color='#101820',
+        accent_color='#2FBF71',
         icon_slug='admin',
         manifest_url='/system-admin.webmanifest',
         service_worker_url='/system-admin-sw.js',

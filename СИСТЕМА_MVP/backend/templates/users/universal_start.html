@@ -206,12 +206,17 @@
         width: 100%;
     }
 
+    /* Цвет роли задаётся на самой карточке инлайном из каталога приложений
+       (accent_color в users/role_apps.py) — оттуда же его берёт экран входа.
+       Запасные строки без color-mix нужны старым браузерам. */
     .start-screen__app {
         display: grid;
         align-content: start;
         border-radius: 14px;
-        border: 1px solid rgba(140, 255, 46, .28);
-        background: rgba(140, 255, 46, .07);
+        border: 1px solid rgba(255, 255, 255, .16);
+        border-color: color-mix(in srgb, var(--app-accent) 30%, transparent);
+        background: rgba(255, 255, 255, .05);
+        background: color-mix(in srgb, var(--app-accent) 8%, transparent);
         overflow: hidden;
     }
 
@@ -227,7 +232,8 @@
         padding: clamp(8px, 1.4vh, 13px) 12px;
         color: #eaf6ee;
         text-decoration: none;
-        border-bottom: 1px solid rgba(140, 255, 46, .18);
+        border-bottom: 1px solid rgba(255, 255, 255, .12);
+        border-bottom-color: color-mix(in srgb, var(--app-accent) 20%, transparent);
     }
 
     /* Горизонтальные строки: значок слева, подпись справа. Вдвое ниже
@@ -254,8 +260,10 @@
     }
 
     .start-screen__opt--native {
-        border-color: rgba(47, 191, 113, .6);
-        background: rgba(47, 191, 113, .12);
+        border-color: rgba(255, 255, 255, .3);
+        border-color: color-mix(in srgb, var(--app-accent) 60%, transparent);
+        background: rgba(255, 255, 255, .07);
+        background: color-mix(in srgb, var(--app-accent) 13%, transparent);
     }
 
     /* На обеих строках стоит значок самого приложения — человек ставит одно
@@ -293,7 +301,7 @@
     }
 
     .start-screen__opt-badge--apk {
-        background: #2FBF71;
+        background: var(--app-accent, #2FBF71);
         color: #04161A;
         font-size: 8px;
         font-weight: 900;
@@ -346,7 +354,10 @@
         opacity: .75;
     }
 
-    .start-screen__opt--native .start-screen__opt-text b i { color: #7ee2a8; }
+    .start-screen__opt--native .start-screen__opt-text b i {
+        color: #7ee2a8;
+        color: color-mix(in srgb, var(--app-accent) 75%, #ffffff);
+    }
     .start-screen__opt--browser .start-screen__opt-text b i { color: #e0b877; }
 
     .start-screen__opt-text em {
@@ -455,7 +466,7 @@
             {% endif %}
             <div class="start-screen__apps">
                 {% for item in apps %}
-                    <div class="start-screen__app">
+                    <div class="start-screen__app" style="--app-accent: {{ item.app.accent_color }}">
                         {% comment %}
                         Шапка без значка: тот же значок стоит на обеих строках
                         установки ниже, и третья его копия читалась как ошибка
