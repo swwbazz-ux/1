@@ -519,10 +519,10 @@
                                         </span>
                                         <strong>Приложение</strong>
                                     </div>
+                                    {# Без download: с ним Chrome включает проверку и пугает «файл может быть опасным». #}
                                     <a
                                         class="start-screen__action-button start-screen__action-button--apk"
                                         href="{{ item.apk.url }}"
-                                        download
                                         aria-label="Скачать {{ item.app.name }} для Android, версия {{ item.apk.version }}"
                                     >
                                         Установить
