@@ -3,7 +3,7 @@ from pathlib import Path
 from django.conf import settings
 from django.test import Client, SimpleTestCase, override_settings
 
-from .role_apps import ROLE_APPS
+from .role_apps import ENTRY_SCREEN_BROWSER_BAR, ROLE_APPS
 
 
 @override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
@@ -27,6 +27,11 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
                 self.assertContains(response, 'class="app-confirm-content unified-login-form"')
                 self.assertContains(response, 'data-phone-input')
                 self.assertContains(response, 'autofocus')
+                self.assertContains(
+                    response,
+                    f'<meta name="theme-color" content="{ENTRY_SCREEN_BROWSER_BAR}">',
+                    count=1,
+                )
 
     def test_login_assets_keep_focus_scrolling_vertical_only(self):
         backend_root = Path(settings.BASE_DIR)

@@ -7,6 +7,7 @@ from .app_catalog import app_catalog_public_url
 from .live_monitor import observer_context
 from .role_apps import (
     APP_CONTRACT_VERSION,
+    ENTRY_SCREEN_BROWSER_BAR,
     STATIC_ASSET_RELEASE,
     get_role_app,
     get_role_app_for_path,
@@ -139,6 +140,7 @@ def role_app(request):
         'active_role_code': state.get('active_role_code', ''),
         'active_role_changed_at': state.get('active_role_changed_at'),
         'app_contract_version': APP_CONTRACT_VERSION,
+        'entry_screen_browser_bar': ENTRY_SCREEN_BROWSER_BAR,
         'static_asset_release': STATIC_ASSET_RELEASE,
         'app_shell_version': metadata_app.shell_version if metadata_app else '',
         'app_role_code': metadata_app.role_code if metadata_app else '',

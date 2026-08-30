@@ -12,6 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .models import Employee, EmployeeAccess, Role
+from .role_apps import ENTRY_SCREEN_BROWSER_BAR
 
 
 ANDROID_USER_AGENT = (
@@ -75,6 +76,15 @@ class UniversalStartTests(TestCase):
             reverse('universal_start'),
             {'phone': self.phone},
             HTTP_USER_AGENT=user_agent,
+        )
+
+    def test_browser_bar_matches_the_shared_dark_background(self):
+        response = self.client.get(reverse('universal_start'))
+
+        self.assertContains(
+            response,
+            f'<meta name="theme-color" content="{ENTRY_SCREEN_BROWSER_BAR}">',
+            count=1,
         )
 
     def test_person_with_a_working_code_is_not_promised_a_new_one(self):
