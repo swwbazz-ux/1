@@ -4,13 +4,16 @@
 {% block title %}{% if wrong_app %}Чужое приложение{% else %}Номер не найден{% endif %}{% if login_role_app %} · {{ login_role_app.short_name }}{% endif %}{% endblock %}
 {% block extra_head %}
     <meta name="theme-color" content="{{ entry_screen_browser_bar }}">
+    <link rel="stylesheet" href="{% static 'css/max-support-link-v1.css' %}?v=6">
+    <link rel="stylesheet" href="{% static 'vendor/bulma/button-1.0.4.min.css' %}">
+    <link rel="stylesheet" href="{% static 'css/entry-action-button-v2.css' %}">
     {% if login_role_app %}
     <link rel="manifest" href="{{ login_role_app.manifest_url }}">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <link rel="apple-touch-icon" href="{{ login_role_app.icon_180_url }}">
     {% endif %}
-<style>
+<style data-login-phone-not-found-styles>
     /* Экран во весь телефон, как и вход: человек попал сюда с ошибкой, и меньше
        всего ему нужна карточка посреди пустоты. */
     body.login-page.unified-login-screen {
@@ -39,6 +42,12 @@
             clamp(20px, 6vw, 34px)
             calc(env(safe-area-inset-bottom, 0px) + clamp(20px, 4vh, 36px));
         text-align: center;
+    }
+
+    @media (max-width: 700px) {
+        .phone-not-found {
+            padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
+        }
     }
 
     .phone-not-found__inner {
@@ -82,32 +91,6 @@
         letter-spacing: .02em;
     }
 
-    .phone-not-found__chat,
-    .phone-not-found__back {
-        width: 100%;
-        min-height: 56px;
-        display: grid;
-        place-items: center;
-        border-radius: 14px;
-        font-size: clamp(15px, 4.4vw, 18px);
-        font-weight: 800;
-        text-decoration: none;
-    }
-
-    .phone-not-found__chat {
-        border: 0;
-        margin-bottom: 12px;
-        background: var(--login-accent);
-        color: var(--login-ink);
-        box-shadow: 0 14px 34px var(--login-glow);
-    }
-
-    .phone-not-found__back {
-        border: 1px solid rgba(255, 255, 255, .22);
-        background: transparent;
-        color: #C7D7DE;
-        font-weight: 600;
-    }
 </style>
 {% endblock %}
 {% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% if login_role_app %} login-role-{{ login_role_app.role_code }}{% endif %}{% endblock %}
@@ -127,10 +110,8 @@
         <div class="phone-not-found__phone">{{ submitted_phone }}</div>
         <p>Скорее всего, в вашей карточке записан другой номер. Напишите администратору — он поставит актуальный, и вход заработает.</p>
         {% endif %}
-        {% if support_chat_url %}
-            <a class="phone-not-found__chat" href="{{ support_chat_url }}" target="_blank" rel="noopener">{{ support_chat_label|default:"Написать администратору" }}</a>
-        {% endif %}
-        <a class="phone-not-found__back" href="{{ back_url|default:"/?form=1" }}">Ввести номер заново</a>
+        {% include "users/_start_support_link.html" with support_link_class="phone-not-found__chat" %}
+        <a class="cr-button cr-is-medium cr-is-rounded cr-is-fullwidth entry-action phone-not-found__back" href="{{ back_url|default:"/?form=1" }}" data-login-retry>Ввести номер заново</a>
     </div>
 </main>
 {% endblock %}

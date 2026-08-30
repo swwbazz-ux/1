@@ -8,10 +8,14 @@
 отсутствие — человек нажмёт и попадёт в никуда.
 {% endcomment %}
 {% if support_chat_url %}
-    <a class="start-screen__support" href="{{ support_chat_url }}" target="_blank" rel="noopener">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.6-.7L3 21l1.9-5a8 8 0 0 1-.9-3.6 8.4 8.4 0 0 1 8.4-8.4h.6a8.4 8.4 0 0 1 8 8z"></path>
-        </svg>
-        <span>{{ support_chat_label|default:"Связаться с администратором" }}</span>
+    <a class="{% if support_link_class %}{{ support_link_class }} {% else %}start-screen__support {% endif %}max-support-link"
+       href="{{ support_chat_url }}" target="_blank" rel="noopener" data-support-channel="max">
+        <span class="max-support-link__icon" aria-hidden="true">
+            {# Официальная форма знака MAX из брендбука, в белой версии для фирменного градиента. #}
+            <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M50.7571.2617C78.2929.2617 99.8857 22.5974 99.8857 50.1474S77.6071 99.4903 51.0214 99.4903c-9.4357 0-14.0071-1.3286-21.3714-6.5429-.5071-.3571-1.2-.2643-1.6286.1929C22.3571 99.1831 7.85 103.426 7.1857 95.176c0-14.3857-7.1857-23.7286-7.1857-45.3C0 21.5546 23.2214.2617 50.7571.2617Zm.7715 24.55c-13.0643-.6857-23.2643 8.3857-25.5143 22.5714-1.8643 11.75 1.4357 26.0715 4.2643 26.7929 1.2.3072 4.0785-1.9 6.1785-3.8786.3929-.3714.9929-.4357 1.45-.15 3.2715 2 6.9715 3.5 11.05 3.7143 13.4143.7 25.3-9.8 26.0072-23.2143.7-13.4143-10.0214-25.1428-23.4357-25.8357Z"/>
+            </svg>
+        </span>
+        <span class="max-support-link__label">{{ support_chat_label|default:"Написать администратору в MAX" }}</span>
     </a>
 {% endif %}

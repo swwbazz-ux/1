@@ -3937,7 +3937,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         </div>
 
         {% if driver_new_assignment_label %}
-            <form id="driver-assignment-action" method="post" action="{% url 'driver_accept_assignment' pending_assignment_action.id %}" hidden>
+            <form id="driver-assignment-action" method="post" action="{% url 'driver_accept_assignment' pending_assignment_action.id %}" data-driver-in-place="assignment" hidden>
                 {% csrf_token %}
             </form>
             <button class="driver-work-assignment" type="submit" form="driver-assignment-action" data-driver-assignment-deadline="{{ driver_assignment_effective_at }}">
@@ -3959,7 +3959,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
             </div>
             <div class="driver-unload-grid">
                 {% for point in unload_points %}
-                    <form method="post" action="{% url 'driver_change_unload_point' active_trip.id %}" class="driver-unload-tile-form">
+                    <form method="post" action="{% url 'driver_change_unload_point' active_trip.id %}" class="driver-unload-tile-form" data-driver-in-place="change-unload-point">
                         {% csrf_token %}
                         <input type="hidden" name="client_action_id" value="" data-driver-client-action>
                         <input type="hidden" name="dump_point" value="{{ point.id }}">
@@ -3976,7 +3976,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 
     <section class="driver-panel driver-tab {% if active_tab == 'shift' %}is-active{% endif %}" data-driver-tab-panel="shift">
         {% if open_shift %}
-            <form method="post" action="{% url 'driver_close_shift' %}" class="driver-shift-workspace{% if close_review %} is-reviewed{% endif %}" data-driver-shift-close-form>
+            <form method="post" action="{% url 'driver_close_shift' %}" class="driver-shift-workspace{% if close_review %} is-reviewed{% endif %}" data-driver-shift-close-form data-driver-in-place="shift-close">
                 {% csrf_token %}
                 {{ close_form.client_action_id }}
                 <input type="hidden" name="shift_action" value="{% if close_review %}close{% else %}review{% endif %}" data-driver-shift-action>
@@ -4039,7 +4039,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                     <h2>Смена</h2>
                 </div>
                 {% if form %}
-                <form method="post" class="driver-shift-opening-form">
+                <form method="post" class="driver-shift-opening-form" data-driver-in-place="shift-open">
                     {% csrf_token %}
                     {{ form.client_action_id }}
                     {{ form.non_field_errors }}
@@ -4557,13 +4557,14 @@ window.applyOperationalStateRefresh = function (context) {
    Повтор действия безопасен: у формы есть свой номер действия, сервер по нему
    узнаёт уже выполненный рейс. Поэтому при любой осечке спокойно отдаём форму
    браузеру — действие не потеряется. */
-window.submitDriverFormInPlace = function (form) {
+window.submitDriverFormInPlace = function (form, options) {
+    options = options || {};
     if (!window.fetch || !window.AppOperationalFragment || !window.FormData) {
         form.submit();
-        return;
+        return Promise.resolve(false);
     }
     var body = new window.FormData(form);
-    window.fetch(form.action, {
+    return window.fetch(form.getAttribute("action") || window.location.href, {
         method: "POST",
         credentials: "same-origin",
         cache: "no-store",
@@ -4581,8 +4582,19 @@ window.submitDriverFormInPlace = function (form) {
         if (typeof window.bindDriverMobileShell === "function") {
             window.bindDriverMobileShell();
         }
+        return true;
     }).catch(function () {
-        form.submit();
+        if (options.fallbackToNavigation !== false) {
+            form.submit();
+            return false;
+        }
+        if (typeof window.showDriverToast === "function") {
+            window.showDriverToast("Не удалось обновить экран. Проверяем состояние сервера.");
+        }
+        if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+            window.AppRealtime.wake("driver_in_place_failed");
+        }
+        return false;
     });
 };
 
@@ -5887,6 +5899,47 @@ window.bindDriverMobileShell = function () {
             });
         });
     }
+
+    /* Открытие/закрытие смены, принятие назначения и смена
+       точки разгрузки раньше перезагружали весь WebView. Серверные
+       POST-обработчики не меняем: забираем их готовый HTML и заменяем
+       только рабочий shell. Обычная отправка остаётся аварийным fallback. */
+    shell.querySelectorAll("form[data-driver-in-place]").forEach(function (form) {
+        if (form.dataset.driverInPlaceBound === "true") return;
+        form.dataset.driverInPlaceBound = "true";
+        form.addEventListener("submit", function (event) {
+            if (event.defaultPrevented || form.dataset.driverInPlacePending === "true") {
+                return;
+            }
+            event.preventDefault();
+            form.dataset.driverInPlacePending = "true";
+            var actionInput = form.querySelector("[data-driver-client-action], [name='client_action_id']");
+            if (actionInput && !actionInput.value) {
+                actionInput.value = generateClientActionId(form.dataset.driverInPlace || "driver-action");
+            }
+            window.submitDriverFormInPlace(form, {fallbackToNavigation: false}).then(function (applied) {
+                if (!applied && form.isConnected) {
+                    form.dataset.driverInPlacePending = "false";
+                    form.dataset.driverShiftOpeningPending = "false";
+                    var openButton = form.querySelector("[data-driver-shift-open-button]");
+                    if (openButton) {
+                        openButton.disabled = false;
+                        openButton.classList.remove("is-pending");
+                        openButton.textContent = "Подтвердить показания и начать смену";
+                    }
+                    var closeButton = form.querySelector("[data-driver-shift-close-button]");
+                    if (closeButton) {
+                        closeButton.disabled = false;
+                        closeButton.classList.remove("is-pending");
+                        var shiftAction = form.querySelector("[data-driver-shift-action]");
+                        closeButton.textContent = shiftAction && shiftAction.value === "close"
+                            ? "Закрыть смену"
+                            : "Проверить показания";
+                    }
+                }
+            });
+        });
+    });
 
     (function initDriverPwaUpdates() {
         if (!("serviceWorker" in navigator)) {

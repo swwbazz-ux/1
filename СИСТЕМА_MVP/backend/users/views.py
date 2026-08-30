@@ -457,6 +457,19 @@ def _validated_next_url(request, value):
     return ''
 
 
+def _role_landing_url(access):
+    """Return the role's real workplace instead of the redirect-only /home/."""
+    app = get_role_app(access.role.code) if access else None
+    return app.start_url if app else reverse('role_home')
+
+
+def _login_redirect_response(request, target_url):
+    """Let the fetch-driven login perform exactly one final navigation."""
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({'ok': True, 'redirect_url': target_url})
+    return redirect(target_url)
+
+
 def _active_role_session_matches_access(request, access):
     state = role_session_state(request, access)
     active_access = state.get('active_access')
@@ -585,7 +598,7 @@ def login_view(
         and not rating_tv_reauthentication_required
         and not targeted_role_reauthentication_required
     ):
-        return redirect(next_url or 'role_home')
+        return redirect(next_url or _role_landing_url(current_access))
     if (
         request.method == 'GET'
         and role_app
@@ -650,7 +663,7 @@ def login_view(
             if next_url:
                 request.session['post_activation_next'] = next_url
             set_session_device_kind(request, selected_device_kind)
-            return redirect('activate_access')
+            return _login_redirect_response(request, reverse('activate_access'))
         if matches:
             # Пинкод у человека уже есть — просим именно его, вторым шагом.
             return render(
@@ -741,7 +754,7 @@ def login_view(
                     if next_url:
                         request.session['post_activation_next'] = next_url
                     set_session_device_kind(request, selected_device_kind)
-                    return redirect('activate_access')
+                    return _login_redirect_response(request, reverse('activate_access'))
             try:
                 with transaction.atomic():
                     locked_employee = Employee.objects.select_for_update().get(pk=access.employee_id)
@@ -775,7 +788,10 @@ def login_view(
                 )
             request.session.cycle_key()
             set_session_device_kind(request, selected_device_kind)
-            return redirect(next_url or 'role_home')
+            return _login_redirect_response(
+                request,
+                next_url or _role_landing_url(access),
+            )
         # Пинкода у номера ещё нет — человек первый раз в приложении. Отбивать
         # его «неверный пинкод» бессмысленно: вводить ему нечего. Ведём на экран,
         # где он увидит своё ФИО и придумает пинкод.
@@ -813,7 +829,7 @@ def login_view(
             if next_url:
                 request.session['post_activation_next'] = next_url
             set_session_device_kind(request, selected_device_kind)
-            return redirect('activate_access')
+            return _login_redirect_response(request, reverse('activate_access'))
 
         other_access = None
         if allowed_role_codes:
@@ -982,7 +998,7 @@ def activate_access_view(request):
                     'Постоянный пинкод создан. Первичный пинкод больше не действует.',
                 )
             next_url = _validated_next_url(request, request.session.pop('post_activation_next', ''))
-            return redirect(next_url or 'role_home')
+            return redirect(next_url or _role_landing_url(access))
     else:
         form = AccessActivationForm(access=access)
 

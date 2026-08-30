@@ -287,7 +287,7 @@ class RoleAppLoginTests(TestCase):
             self._credentials(self.driver_access),
             HTTP_HOST='driver.localhost',
         )
-        self.assertRedirects(accepted, '/home/', fetch_redirect_response=False)
+        self.assertRedirects(accepted, '/driver/', fetch_redirect_response=False)
         self.assertEqual(self.client.session['employee_access_id'], self.driver_access.id)
 
     def test_shared_login_keeps_the_existing_multi_role_entry_point(self):
@@ -296,8 +296,90 @@ class RoleAppLoginTests(TestCase):
             self._credentials(self.excavator_access),
             HTTP_HOST='localhost',
         )
-        self.assertRedirects(response, '/home/', fetch_redirect_response=False)
+        self.assertRedirects(response, '/excavator/work/', fetch_redirect_response=False)
         self.assertEqual(self.client.session['employee_access_id'], self.excavator_access.id)
+
+    def test_phone_step_is_returned_in_place_and_pin_uses_one_final_navigation(self):
+        phone_step = self.client.post(
+            '/',
+            {
+                'phone': self.driver_access.employee.phone,
+                'action': 'continue',
+                'device_kind': 'personal',
+            },
+            HTTP_HOST='driver.localhost',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(phone_step.status_code, 200)
+        self.assertContains(phone_step, 'data-pin-input')
+        self.assertNotIn('employee_access_id', self.client.session)
+
+        pin_step = self.client.post(
+            '/',
+            self._credentials(self.driver_access),
+            HTTP_HOST='driver.localhost',
+        )
+
+        self.assertRedirects(pin_step, '/driver/', fetch_redirect_response=False)
+
+    def test_fetch_login_contract_returns_the_real_workplace_not_redirect_hub(self):
+        response = self.client.post(
+            '/',
+            self._credentials(self.excavator_access),
+            HTTP_HOST='excavator.localhost',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {'ok': True, 'redirect_url': '/excavator/work/'},
+        )
+
+    def test_authenticated_app_root_skips_the_redirect_only_home_route(self):
+        self.client.post(
+            '/',
+            self._credentials(self.driver_access),
+            HTTP_HOST='driver.localhost',
+        )
+
+        response = self.client.get('/', HTTP_HOST='driver.localhost')
+
+        self.assertRedirects(response, '/driver/', fetch_redirect_response=False)
+
+    def test_login_script_updates_only_phone_step_and_keeps_pin_cookie_navigation(self):
+        response = self.client.get('/', HTTP_HOST='driver.localhost')
+
+        self.assertContains(response, 'window.CopperUnifiedLogin')
+        self.assertContains(response, 'X-Requested-With')
+        self.assertContains(response, 'normalized.action !== "continue"', html=False)
+        self.assertContains(response, 'form.getAttribute("action")', html=False)
+        self.assertNotContains(response, 'window.fetch(form.action', html=False)
+        self.assertContains(response, 'target.closest("[data-login-retry]")', html=False)
+        self.assertContains(response, 'history.replaceState', html=False)
+        self.assertContains(
+            response,
+            'state.locked = hasContract && !state.ready && !isEntryScreen();',
+            html=False,
+        )
+        self.assertNotContains(response, ' autofocus')
+
+    def test_unknown_phone_partial_has_in_place_retry_hook(self):
+        response = self.client.post(
+            '/',
+            {
+                'phone': '+79990000999',
+                'action': 'continue',
+                'device_kind': 'personal',
+            },
+            HTTP_HOST='driver.localhost',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="phone-not-found"')
+        self.assertContains(response, 'data-login-retry')
 
     def test_mismatched_stale_session_is_flushed_on_role_host(self):
         session = self.client.session

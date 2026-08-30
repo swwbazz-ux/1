@@ -109,6 +109,10 @@ class LiveRoleReadOnlyClientContractTests(TestCase):
             driver_template.count('driverRoleIsReadonly()'),
             8,
         )
+        self.assertEqual(driver_template.count('data-driver-in-place='), 4)
+        self.assertIn('window.submitDriverFormInPlace = function (form, options)', driver_template)
+        self.assertIn('form.getAttribute("action") || window.location.href', driver_template)
+        self.assertIn('{fallbackToNavigation: false}', driver_template)
 
     def test_role_readonly_runtime_contract(self):
         node = shutil.which('node')

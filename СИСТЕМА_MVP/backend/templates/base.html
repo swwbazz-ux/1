@@ -458,6 +458,10 @@
             );
         }
 
+        function isEntryScreen() {
+            return !!document.body && document.body.classList.contains("login-page");
+        }
+
         function ensureBanner(locked) {
             if (!document.body || !document.createElement) return;
             if (hasOwnUpdateDialog()) {
@@ -657,7 +661,11 @@
                 || sameContract(state.serviceWorker, expected);
             var serverMatches = state.serverUnavailable || sameContract(state.server, expected);
             state.ready = hasContract && javascriptMatches && workerMatches && serverMatches;
-            state.locked = hasContract && !state.ready;
+            /* На экране входа service worker нужен для установки PWA,
+               но его короткая проверка не должна блокировать PIN, показывать
+               плашку «Обновление» или перезагружать ввод. Рабочие экраны
+               сохраняют строгую проверку контракта. */
+            state.locked = hasContract && !state.ready && !isEntryScreen();
             document.body.dataset.appContractReady = state.ready ? "true" : "false";
             document.body.dataset.appContractLocked = state.locked ? "true" : "false";
             document.body.classList.toggle("is-app-contract-locked", state.locked);

@@ -82,10 +82,12 @@
 
         var deferredPrompt = null;
         var installIntent = isInstallIntent(win);
+        var installIntentStatus = "Нажмите кнопку, чтобы продолжить установку.";
         var automaticPromptAttempted = false;
 
         if (installIntent) {
             panel.classList.add("is-install-intent");
+            status.textContent = installIntentStatus;
         }
 
         if (isAndroidYandex(win)) {
@@ -119,7 +121,9 @@
             button.hidden = false;
             button.disabled = false;
             button.textContent = "Установить приложение";
-            status.textContent = "Нажмите кнопку, чтобы подтвердить установку.";
+            status.textContent = installIntent
+                ? installIntentStatus
+                : "Нажмите кнопку, чтобы подтвердить установку.";
         }
 
         function requestInstall(promptEvent, automatic) {
@@ -164,7 +168,9 @@
             panel.classList.remove("is-browser-limited");
             panel.classList.add("is-ready");
             button.textContent = "Установить приложение";
-            status.textContent = "Приложение готово к установке на это устройство.";
+            status.textContent = installIntent
+                ? installIntentStatus
+                : "Приложение готово к установке на это устройство.";
             if (installIntent && !automaticPromptAttempted) {
                 automaticPromptAttempted = true;
                 requestInstall(event, true);

@@ -22,6 +22,9 @@
     <meta name="twitter:title" content="Рабочее приложение · Коппер Рисорсез">
     <meta name="twitter:description" content="Введите номер телефона — система подскажет, какое приложение вам нужно.">
     <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'img/share/start-share.png' %}?v=2">
+    <link rel="stylesheet" href="{% static 'css/max-support-link-v1.css' %}?v=6">
+    <link rel="stylesheet" href="{% static 'vendor/bulma/button-1.0.4.min.css' %}">
+    <link rel="stylesheet" href="{% static 'css/entry-action-button-v2.css' %}">
 <style>
     /* Одна ссылка на всех: человек вводит номер, система сама показывает, какое
        приложение ему ставить. Оформление нейтральное — роль здесь ещё неизвестна. */
@@ -160,20 +163,6 @@
 .start-screen__phone:has(input.is-valid) { border-color: rgba(47, 191, 113, .8); }
 .start-screen__phone:has(input.is-invalid) { border-color: rgba(255, 143, 138, .8); }
 
-.start-screen__submit {
-        width: 100%;
-        min-height: 58px;
-        margin-top: 14px;
-        border: 0;
-        border-radius: 14px;
-        background: var(--start-accent);
-        color: var(--start-ink);
-        font-size: clamp(16px, 4.6vw, 19px);
-        font-weight: 800;
-        box-shadow: 0 14px 34px var(--start-glow);
-        cursor: pointer;
-    }
-
     /* Карточка с фамилией нужна, чтобы человек убедился, что нашли его.
        Но она не главная на экране — главное ниже, приложения. */
     .start-screen__person {
@@ -261,10 +250,24 @@
     }
 
     .start-screen__opt--native {
+        position: relative;
+        padding-right: 42px;
         border-color: rgba(255, 255, 255, .3);
         border-color: color-mix(in srgb, var(--app-accent) 60%, transparent);
         background: rgba(255, 255, 255, .07);
         background: color-mix(in srgb, var(--app-accent) 13%, transparent);
+        box-shadow: 0 10px 28px color-mix(in srgb, var(--app-accent) 16%, transparent);
+    }
+
+    .start-screen__opt--native::after {
+        content: "→";
+        position: absolute;
+        right: 14px;
+        top: 50%;
+        color: var(--app-accent);
+        font-size: 22px;
+        font-weight: 900;
+        transform: translateY(-50%);
     }
 
     /* На обеих строках стоит значок самого приложения — человек ставит одно
@@ -385,33 +388,19 @@
         text-align: left;
     }
 
-    /* Тише, чем основные действия: это выход для застрявшего, а не то,
-       куда нужно вести всех. Поэтому строкой, а не кнопкой. */
-    .start-screen__support {
-        display: inline-grid;
-        grid-template-columns: auto auto;
-        align-items: center;
-        justify-content: center;
-        gap: 7px;
-        padding: 8px 14px;
-        border: 1px solid rgba(255, 255, 255, .14);
-        border-radius: 999px;
-        color: #9fb2ba;
-        font-size: 13px;
-        font-weight: 700;
-        text-decoration: none;
-    }
-
-    .start-screen__support svg {
-        width: 15px;
-        height: 15px;
-    }
-
     .start-screen__back {
         margin-top: clamp(8px, 1.6vh, 14px);
         color: #8296a0;
         font-size: 15px;
         text-decoration: underline;
+    }
+
+    @media (max-width: 700px) {
+        .start-screen {
+            /* Резерв под фиксированный док MAX: прокручиваемое содержимое не
+               уходит под кнопку даже в результате с несколькими ролями. */
+            padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
+        }
     }
 
     /* Низкий экран: всё должно помещаться без прокрутки.
@@ -540,7 +529,7 @@
                     <input id="start-phone" name="phone" type="text" inputmode="numeric" autocomplete="tel" placeholder="999-000-00-00" maxlength="13" data-start-phone required autofocus>
                 </span>
                 <small class="start-screen__hint" data-start-hint>10 цифр номера</small>
-                <button class="start-screen__submit" type="submit">Далее</button>
+                <button class="cr-button cr-is-medium cr-is-rounded cr-is-fullwidth entry-action start-screen__submit" type="submit">Далее</button>
             </form>
             {% include "users/_start_support_link.html" %}
             <script>
@@ -552,6 +541,14 @@
                 var input = document.querySelector("[data-start-phone]");
                 var hint = document.querySelector("[data-start-hint]");
                 if (!input) return;
+
+                function syncKeyboardMode() {
+                    var viewport = window.visualViewport;
+                    var keyboardOpen = viewport
+                        && viewport.height < window.innerHeight - 120
+                        && document.activeElement === input;
+                    document.body.classList.toggle("is-start-keyboard-active", Boolean(keyboardOpen));
+                }
 
                 function format(value) {
                     var digits = String(value || "").replace(/\D/g, "");
@@ -586,8 +583,16 @@
                 }
 
                 input.addEventListener("input", check);
-                input.addEventListener("blur", check);
+                input.addEventListener("focus", syncKeyboardMode);
+                input.addEventListener("blur", function () {
+                    check();
+                    document.body.classList.remove("is-start-keyboard-active");
+                });
+                if (window.visualViewport) {
+                    window.visualViewport.addEventListener("resize", syncKeyboardMode);
+                }
                 check();
+                syncKeyboardMode();
             })(document);
             </script>
         {% endif %}
