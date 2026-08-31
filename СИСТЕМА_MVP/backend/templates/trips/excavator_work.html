@@ -6,9 +6,9 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v166">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v166">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v166">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v167">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v167">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v167">
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -503,9 +503,11 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v166";
+var excavatorShellVersion = "excavator-mobile-shell-v167";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
+var excavatorStableViewportHeight = 0;
+var excavatorStableViewportWidth = 0;
 document.body.dataset.realtimeVisibilityOnly = "true";
 var excavatorNoticeModal = document.querySelector("[data-eo-notice-modal]");
 var excavatorNoticeMessage = excavatorNoticeModal ? excavatorNoticeModal.querySelector("[data-eo-notice-message]") : null;
@@ -725,10 +727,76 @@ if (typeof window.bindAchievementPrizeUnlock === "function") {
     window.bindAchievementPrizeUnlock();
 }
 
+function readExcavatorViewportMetrics() {
+    var viewport = window.visualViewport;
+    var height = viewport && Number(viewport.height) > 0 ? Number(viewport.height) : Number(window.innerHeight);
+    var width = viewport && Number(viewport.width) > 0 ? Number(viewport.width) : Number(window.innerWidth);
+    return {
+        height: Math.round(height || document.documentElement.clientHeight || 0),
+        width: Math.round(width || document.documentElement.clientWidth || 0)
+    };
+}
+
+function excavatorShiftFieldIsFocused() {
+    var active = document.activeElement;
+    return !!(
+        active
+        && active.matches
+        && active.matches("[data-eo-shift-fuel], [data-eo-shift-engine-hours]")
+    );
+}
+
+function syncExcavatorKeyboardState(metrics) {
+    var shell = document.querySelector("[data-eo-shell]");
+    if (!shell || !metrics.height || !metrics.width) return;
+
+    var wasOpen = shell.dataset.eoImeOpen === "true";
+    var fieldFocused = excavatorShiftFieldIsFocused();
+    var widthChanged = excavatorStableViewportWidth > 0
+        && Math.abs(metrics.width - excavatorStableViewportWidth) > 80;
+
+    if (widthChanged || !(excavatorStableViewportHeight > 0)) {
+        excavatorStableViewportHeight = metrics.height;
+        excavatorStableViewportWidth = metrics.width;
+        wasOpen = false;
+    }
+
+    var sameWidth = Math.abs(metrics.width - excavatorStableViewportWidth) <= 24;
+    var keyboardGap = Math.max(120, Math.round(excavatorStableViewportHeight * .22));
+    var viewportReduced = sameWidth
+        && metrics.height < excavatorStableViewportHeight - keyboardGap;
+
+    /* Изменение высоты без фокуса — split-screen или системные панели, а не
+       клавиатура. Принимаем его как новую стабильную высоту, чтобы следующий
+       фокус поля не дал ложное состояние IME. */
+    if (viewportReduced && !fieldFocused && !wasOpen) {
+        excavatorStableViewportHeight = metrics.height;
+        excavatorStableViewportWidth = metrics.width;
+        viewportReduced = false;
+    }
+
+    /* После открытия держим состояние до восстановления visualViewport. Так
+       blur между полями не возвращает строку действий поверх клавиатуры. */
+    var isOpen = viewportReduced && (fieldFocused || wasOpen);
+    if (isOpen) {
+        shell.dataset.eoImeOpen = "true";
+    } else {
+        delete shell.dataset.eoImeOpen;
+        if (!fieldFocused) {
+            excavatorStableViewportHeight = metrics.height;
+            excavatorStableViewportWidth = metrics.width;
+        } else if (metrics.height > excavatorStableViewportHeight) {
+            excavatorStableViewportHeight = metrics.height;
+            excavatorStableViewportWidth = metrics.width;
+        }
+    }
+}
+
 function syncExcavatorViewportHeight() {
-    var height = window.visualViewport && window.visualViewport.height ? window.visualViewport.height : window.innerHeight;
-    if (!height || height < 320) return;
-    var value = height + "px";
+    var metrics = readExcavatorViewportMetrics();
+    syncExcavatorKeyboardState(metrics);
+    if (!metrics.height || metrics.height < 320) return;
+    var value = metrics.height + "px";
     document.documentElement.style.setProperty("--app-height", value);
     document.documentElement.style.setProperty("--eo-app-height", value);
 }
@@ -748,12 +816,23 @@ function scheduleExcavatorViewportHeightSync() {
 syncExcavatorViewportHeight();
 window.syncExcavatorViewportHeight = syncExcavatorViewportHeight;
 window.addEventListener("resize", scheduleExcavatorViewportHeightSync, { passive: true });
+window.addEventListener("orientationchange", scheduleExcavatorViewportHeightSync, { passive: true });
 window.addEventListener("pageshow", scheduleExcavatorViewportHeightSync);
 window.addEventListener("load", scheduleExcavatorViewportHeightSync);
 if (window.visualViewport) {
     window.visualViewport.addEventListener("resize", scheduleExcavatorViewportHeightSync, { passive: true });
     window.visualViewport.addEventListener("scroll", scheduleExcavatorViewportHeightSync, { passive: true });
 }
+document.addEventListener("focusin", function (event) {
+    if (event.target && event.target.matches && event.target.matches("[data-eo-shift-fuel], [data-eo-shift-engine-hours]")) {
+        scheduleExcavatorViewportHeightSync();
+    }
+});
+document.addEventListener("focusout", function (event) {
+    if (event.target && event.target.matches && event.target.matches("[data-eo-shift-fuel], [data-eo-shift-engine-hours]")) {
+        scheduleExcavatorViewportHeightSync();
+    }
+});
 document.addEventListener("visibilitychange", function () {
     if (!document.hidden) {
         scheduleExcavatorViewportHeightSync();

@@ -858,11 +858,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v166')
+        self.assertContains(response, 'excavator-mobile-shell-v167')
         self.assertContains(response, 'function requestShiftCloseConfirmation()')
         self.assertContains(response, 'event.type === "pointerup" || event.type === "touchend"')
         self.assertContains(response, 'shiftTapConfirmationOpened = true')
-        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 166</span>')
+        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 167</span>')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -2116,7 +2116,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v166', script)
+        self.assertIn('excavator-mobile-shell-v167', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2133,6 +2133,36 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('SKIP_WAITING', script)
         self.assertIn('GET_VERSION', script)
         self.assertIn('event.ports && event.ports[0]', script)
+
+    def test_excavator_shift_ime_hides_actions_and_preserves_large_fields(self):
+        response = self.client.get(reverse('excavator_work'))
+        html = response.content.decode('utf-8')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('function syncExcavatorKeyboardState(metrics)', html)
+        self.assertIn('shell.dataset.eoImeOpen = "true"', html)
+        self.assertIn('delete shell.dataset.eoImeOpen', html)
+        self.assertLess(
+            html.index('syncExcavatorKeyboardState(metrics);'),
+            html.index('metrics.height < 320'),
+        )
+
+        css_path = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'css'
+            / 'excavator-work-v55-shift.css'
+        )
+        css = css_path.read_text(encoding='utf-8')
+        self.assertIn(
+            '.eo-shell[data-eo-ime-open="true"][data-eo-active-tab="shift"]',
+            css,
+        )
+        self.assertIn('display: none !important;', css)
+        self.assertIn(
+            'repeat(2, minmax(clamp(82px, 21cqh, 94px), auto))',
+            css,
+        )
 
     def test_excavator_work_hides_pending_assignment_until_driver_accepts(self):
         pending_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='77')
