@@ -187,7 +187,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v119')
+        self.assertContains(response, 'driver-mobile-shell-v168')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(
@@ -342,6 +342,8 @@ class AccessLoginTests(TestCase):
         # Метка без версии — старая сборка. Версию оболочки показывать нельзя:
         # её примут за версию приложения. Лучше не показывать ничего.
         self.assertNotContains(response, '<small class="driver-shell-version"')
+        self.assertContains(response, 'class="driver-native-app-version native-app-version"', count=1)
+        self.assertContains(response, 'data-native-app-version=""', count=1)
         self.assertNotContains(response, '<div class="driver-mobile-update-modal" data-driver-pwa-update-modal')
         self.assertNotContains(response, '<span class="driver-mobile-update-badge" data-driver-pwa-update-badge')
         self.assertNotContains(response, 'data-driver-tab-open="manifest" data-driver-pwa-update-nav-target')
@@ -362,14 +364,16 @@ class AccessLoginTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, '<small class="driver-shell-version"')
-        self.assertContains(response, '>0.1.3</small>')
+        self.assertNotContains(response, '<small class="driver-shell-version"')
+        self.assertContains(response, 'class="driver-native-app-version native-app-version"', count=1)
+        self.assertContains(response, 'data-native-app-version="0.1.3"', count=1)
+        self.assertContains(response, '>Версия 0.1.3</span>', count=1)
         # Проверяем именно сам элемент версии: строка «driver-mobile-shell-»
         # есть на странице и в других местах (service worker, метаданные),
         # поэтому голый поиск подстроки ложно падает.
         self.assertNotContains(
             response,
-            'aria-label="Версия приложения">driver-mobile-shell-',
+            'aria-label="Текущая версия приложения">Версия driver-mobile-shell-',
         )
 
     def test_driver_manifest_is_installable_pwa_manifest(self):
@@ -391,11 +395,12 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v119', script)
+        self.assertIn('driver-mobile-shell-v168', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
         self.assertIn('/static/css/app.css', script)
+        self.assertIn('/static/css/native-app-update-v1.css', script)
         self.assertIn('/static/js/role-readonly.js', script)
         self.assertNotIn('ignoreSearch: true', script)
         self.assertIn('networkFirstStatic(request)', script)
@@ -2729,7 +2734,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v119')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v168')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

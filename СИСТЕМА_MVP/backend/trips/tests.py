@@ -858,11 +858,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v129')
+        self.assertContains(response, 'excavator-mobile-shell-v163')
         self.assertContains(response, 'function requestShiftCloseConfirmation()')
         self.assertContains(response, 'event.type === "pointerup" || event.type === "touchend"')
         self.assertContains(response, 'shiftTapConfirmationOpened = true')
-        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 129</span>')
+        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 163</span>')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -947,7 +947,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         # Метка без версии — старая сборка. Версию оболочки показывать нельзя:
         # её примут за версию приложения. Лучше не показывать ничего.
-        self.assertNotContains(response, '<span class="eo-current-app-version"')
+        self.assertContains(response, 'class="eo-current-app-version native-app-version"')
+        self.assertContains(response, 'data-native-app-version=""')
+        self.assertContains(response, 'aria-label="Текущая версия приложения" hidden')
         self.assertNotContains(response, '<button class="eo-shift-update-button"')
         self.assertNotContains(response, '<div class="eo-mobile-update-modal" data-eo-pwa-update-modal')
         self.assertNotContains(response, '<span class="mm-mobile-update-badge" data-eo-pwa-update-badge')
@@ -963,7 +965,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, '<span class="eo-current-app-version"')
+        self.assertContains(response, '<span class="eo-current-app-version native-app-version"')
+        self.assertContains(response, 'data-native-app-version="0.1.4"')
         self.assertContains(response, 'Версия 0.1.4')
         # Проверяем именно сам элемент версии: строка «excavator-mobile-shell-»
         # встречается на странице и в других местах (регистрация service
@@ -2113,7 +2116,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v129', script)
+        self.assertIn('excavator-mobile-shell-v163', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2122,6 +2125,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('/static/css/excavator-work-v55.css', script)
         self.assertIn('/static/css/excavator-work-v55-final.css', script)
         self.assertIn('/static/css/excavator-work-v55-shift.css', script)
+        self.assertIn('/static/css/native-app-update-v1.css', script)
         self.assertNotIn('ignoreSearch: true', script)
         self.assertIn('networkFirstStatic(request)', script)
         self.assertIn('request.headers.get("X-Requested-With") === "XMLHttpRequest"', script)

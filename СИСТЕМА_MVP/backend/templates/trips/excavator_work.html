@@ -6,9 +6,10 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v162">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v162">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v162">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v163">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v163">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v163">
+<link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -77,7 +78,7 @@
                        веб-оболочки. Старая сборка версию не сообщает: тогда лучше
                        не показывать ничего, чем показать версию оболочки — её
                        примут за версию приложения. {% endcomment %}
-                    {% if is_native_app %}{% if native_app_version %}<span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия {{ native_app_version }}</span>{% endif %}{% else %}<span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия {{ app_shell_version|default:'excavator-mobile-shell-v0'|cut:'excavator-mobile-shell-v' }}</span>{% endif %}
+                    {% if is_native_app %}<span class="eo-current-app-version native-app-version" data-native-app-version="{{ native_app_version }}" aria-label="Текущая версия приложения"{% if not native_app_version %} hidden{% endif %}>Версия {{ native_app_version }}</span>{% else %}<span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия {{ app_shell_version|default:'excavator-mobile-shell-v0'|cut:'excavator-mobile-shell-v' }}</span>{% endif %}
                     {% comment %} Проверка обновления веб-оболочки. В приложении бессмысленна:
                        обновления приходят из RuStore, а не по этой кнопке. {% endcomment %}
                     {% if not is_native_app %}
@@ -502,7 +503,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v162";
+var excavatorShellVersion = "excavator-mobile-shell-v163";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 document.body.dataset.realtimeVisibilityOnly = "true";

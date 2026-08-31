@@ -224,7 +224,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v167'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v168'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -277,6 +277,7 @@ const CORE_ASSETS = [
     LEGACY_SHELL_URL,
     MANIFEST_URL,
     "/static/css/app.css",
+    "/static/css/native-app-update-v1.css",
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
     "/static/favicon.ico",

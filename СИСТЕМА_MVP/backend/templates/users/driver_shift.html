@@ -13,6 +13,7 @@
 <meta name="apple-mobile-web-app-title" content="Самосвал">
 <link rel="manifest" href="{% url 'driver_manifest' %}">
 <link rel="apple-touch-icon" href="{% static 'img/pwa/driver-180.png' %}">
+<link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <style>
 html {
     width: 100%;
@@ -3884,7 +3885,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                веб-оболочки. Если приложение версию не сообщило (старая сборка,
                метка без версии) — не показываем ничего: версия оболочки там
                вводит в заблуждение, человек решит, что это версия приложения. {% endcomment %}
-            {% if is_native_app %}{% if native_app_version %}<small class="driver-shell-version" aria-label="Версия приложения">{{ native_app_version }}</small>{% endif %}{% else %}<small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|cut:'driver-mobile-shell-' }}</small>{% endif %}
+            {% if not is_native_app %}<small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|cut:'driver-mobile-shell-' }}</small>{% endif %}
             <span>Онлайн</span>
             <i class="driver-online-dot" data-connection-indicator aria-hidden="true"></i>
             <strong></strong>
@@ -4001,6 +4002,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                 {{ close_form.client_action_id }}
                 <div class="driver-shift-titlebar">
                     <h2>Смена</h2>
+                    {% if is_native_app %}<span class="driver-native-app-version native-app-version" data-native-app-version="{{ native_app_version }}" aria-label="Текущая версия приложения"{% if not native_app_version %} hidden{% endif %}>Версия {{ native_app_version }}</span>{% endif %}
                 </div>
                 <div class="driver-shift-scroll" data-driver-shift-scroll>
                 <div class="driver-shift-section driver-shift-inputs" data-driver-shift-inputs>
@@ -4048,6 +4050,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
             <div class="driver-shift-workspace driver-shift-opening">
                 <div class="driver-shift-titlebar">
                     <h2>Смена</h2>
+                    {% if is_native_app %}<span class="driver-native-app-version native-app-version" data-native-app-version="{{ native_app_version }}" aria-label="Текущая версия приложения"{% if not native_app_version %} hidden{% endif %}>Версия {{ native_app_version }}</span>{% endif %}
                 </div>
                 {% if form %}
                 <form method="post" class="driver-shift-opening-form" data-driver-in-place="shift-open">

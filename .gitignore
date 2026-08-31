@@ -9,6 +9,13 @@ db.sqlite3
 venv/
 .env
 
+# Android release signing secrets (keys must stay outside the repository)
+*.jks
+*.keystore
+keystore.properties
+key.properties
+keystore-credentials.txt
+
 # MVP local data
 СИСТЕМА_MVP/.venv/
 СИСТЕМА_MVP/backend/db.sqlite3
