@@ -24,8 +24,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "13",
-    versionName: "0.1.10",
+    versionCode: "14",
+    versionName: "0.1.11",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -35,8 +35,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "8",
-    versionName: "0.1.6",
+    versionCode: "9",
+    versionName: "0.1.7",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -173,6 +173,11 @@ test("startup splash is profile-driven and waits for stable rendered layout", ()
   assert.match(overlay, /armStartupWatchdog\(int generation, long delayMs\)[\s\S]*?!hostResumed[\s\S]*?!windowFocused[\s\S]*?!activity\.hasWindowFocus\(\)/);
   assert.match(overlay, /onHostResumed\(\)[\s\S]*?cancelWatchdogs\(\);[\s\S]*?restartProbeOrArmWatchdog\(\)/);
   assert.match(overlay, /if \(!hostResumed \|\| !windowFocused \|\| !activity\.hasWindowFocus\(\)\) \{\s*return;\s*\}/);
+  assert.match(activity, /setPageRevealedListener\([\s\S]*?notifyWebViewPageRevealed\(webView\)/);
+  assert.match(activity, /notifyWebViewPageRevealed\(WebView revealedWebView\)[\s\S]*?new Event\('focus'\)[\s\S]*?native-connectivity-resume[\s\S]*?native_startup_revealed/);
+  assert.match(overlay, /private Runnable pageRevealedListener;/);
+  assert.match(overlay, /setPageRevealedListener\(Runnable listener\)[\s\S]*?pageRevealedListener = listener/);
+  assert.match(overlay, /parent\.removeView\(overlay\);[\s\S]*?notifyPageRevealed\(generation\)/);
   assert.match(overlay, /private Runnable startupWatchdog;[\s\S]*?private Runnable recoveryWatchdog;/);
   assert.match(overlay, /armRecoveryWatchdog\(generation, DiagnosticReason\.WATCHDOG\)/);
   assert.match(overlay, /armRecoveryWatchdog\(generation, DiagnosticReason\.ERROR\)[\s\S]*?evaluateJavascript\(READINESS_PROBE/);

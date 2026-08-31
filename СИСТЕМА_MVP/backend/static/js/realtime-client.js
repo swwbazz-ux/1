@@ -849,6 +849,15 @@
             pageFocused = true;
             wakeRealtimeConnection("window_resume");
         });
+        /* The Android startup cover deliberately takes native focus away from
+           the WebView until its first stable frame is committed. WebView may
+           not emit a DOM focus event when that cover disappears, so consume
+           the native signal as a foreground catch-up as well. Browser pages
+           never dispatch this event and keep their ordinary focus contract. */
+        window.addEventListener("native-connectivity-resume", function () {
+            pageFocused = true;
+            wakeRealtimeConnection("native_connectivity_resume");
+        });
         window.addEventListener("online", function () {
             if (authEnded) {
                 return;

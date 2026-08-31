@@ -31,12 +31,12 @@ from .work_profiles import employee_has_effective_access_role
 # ролях и именах APK ничего не знает.
 ANDROID_APK_BY_ROLE = {
     'excavator_operator': {
-        'path': 'apk/excavator-13.apk',
-        'version': '0.1.10',
+        'path': 'apk/excavator-14.apk',
+        'version': '0.1.11',
     },
     'driver': {
-        'path': 'apk/driver-8.apk',
-        'version': '0.1.6',
+        'path': 'apk/driver-9.apk',
+        'version': '0.1.7',
     },
 }
 

@@ -171,6 +171,7 @@ final class StartupLoadingOverlay {
     private int savedWebViewDescendantFocusability;
     private boolean savedWebViewFocusable;
     private boolean savedWebViewFocusableInTouchMode;
+    private Runnable pageRevealedListener;
 
     private StartupLoadingOverlay(Activity activity) {
         this.activity = activity;
@@ -397,6 +398,10 @@ final class StartupLoadingOverlay {
         } else {
             cancelPendingProbe();
         }
+    }
+
+    void setPageRevealedListener(Runnable listener) {
+        pageRevealedListener = listener;
     }
 
     void destroy() {
@@ -940,8 +945,19 @@ final class StartupLoadingOverlay {
                 if (overlay.getParent() instanceof ViewGroup parent) {
                     parent.removeView(overlay);
                 }
+                notifyPageRevealed(generation);
             })
             .start();
+    }
+
+    private void notifyPageRevealed(int generation) {
+        if (destroyed || visible || generation != pageGeneration) {
+            return;
+        }
+        Runnable listener = pageRevealedListener;
+        if (listener != null) {
+            listener.run();
+        }
     }
 
     private void suppressWebViewInteraction() {

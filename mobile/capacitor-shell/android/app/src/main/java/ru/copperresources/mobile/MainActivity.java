@@ -117,6 +117,9 @@ public class MainActivity extends BridgeActivity {
                 android.graphics.Color.parseColor(BuildConfig.SPLASH_BACKGROUND_COLOR)
             );
             startupLoadingOverlay = StartupLoadingOverlay.attach(this, webView);
+            startupLoadingOverlay.setPageRevealedListener(
+                () -> notifyWebViewPageRevealed(webView)
+            );
             appUpdateManager = new AppUpdateManager(this);
             appUpdateManager.attach(webView);
             /* BridgeWebViewClient may finish a cached document inside
@@ -151,6 +154,33 @@ public class MainActivity extends BridgeActivity {
         CookieManager cookieManager = CookieManager.getInstance();
         cookieManager.setAcceptCookie(true);
         cookieManager.setAcceptThirdPartyCookies(webView, true);
+    }
+
+    private void notifyWebViewPageRevealed(WebView revealedWebView) {
+        if (revealedWebView == null) {
+            return;
+        }
+        /* StartupLoadingOverlay temporarily suppresses WebView focus. A WebView
+           can reveal its first frame without sending DOM focus, so tell the
+           shared realtime client explicitly to make its first safe catch-up. */
+        revealedWebView.post(() -> {
+            if (isFinishing()
+                    || getBridge() == null
+                    || getBridge().getWebView() != revealedWebView) {
+                return;
+            }
+            revealedWebView.evaluateJavascript(
+                "(function(){" +
+                    "window.dispatchEvent(new Event('focus'));" +
+                    "window.dispatchEvent(new CustomEvent('native-connectivity-resume'," +
+                        "{detail:{source:'startup_overlay'}}));" +
+                    "if(window.AppRealtime&&typeof window.AppRealtime.wake==='function'){" +
+                        "window.AppRealtime.wake('native_startup_revealed');" +
+                    "}" +
+                "})();",
+                null
+            );
+        });
     }
 
     @Override

@@ -930,6 +930,38 @@ test("blur pauses polling and focus performs one immediate catch-up request", as
     assert.equal(runtime.fetchCalls.length, 2);
 });
 
+test("native startup reveal wakes a rendered WebView before DOM focus is reported", async () => {
+    const runtime = createRuntime({
+        focused: false,
+        fetch() {
+            return Promise.resolve(response(200, {
+                version: 7,
+                role_active: true,
+                relevant: false,
+            }));
+        },
+    });
+    await settlePromises();
+
+    assert.equal(
+        runtime.fetchCalls.length,
+        0,
+        "a WebView covered by the native startup layer must not poll before it is revealed"
+    );
+    assert.equal(runtime.window.AppRealtime.getDebugState().pageActive, false);
+
+    runtime.window.dispatchEvent({type: "native-connectivity-resume"});
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    assert.equal(
+        runtime.fetchCalls.length,
+        1,
+        "the native reveal signal must trigger exactly one immediate catch-up"
+    );
+    assert.equal(runtime.window.AppRealtime.getDebugState().pageActive, true);
+});
+
 test("forced catch-up ignores the aborted older response without clearing the new poll", async () => {
     const resolvers = [];
     const runtime = createRuntime({

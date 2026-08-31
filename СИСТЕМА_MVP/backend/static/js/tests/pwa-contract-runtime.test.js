@@ -393,6 +393,7 @@ function createRuntime(options = {}) {
         appContractVersion: htmlContractVersion,
         appShellVersion: htmlShellVersion,
         appRoleCode: roleCode,
+        nativeApp: options.nativeApp ? "true" : "false",
         appContractReady: "false",
         appServiceWorkerUrl: serviceWorkerUrl,
         appServiceWorkerScope: serviceWorkerScope,
@@ -417,6 +418,7 @@ function createRuntime(options = {}) {
     let reloadCalls = 0;
     let updateCalls = 0;
     let registerCalls = 0;
+    let unregisterCalls = 0;
     const registerRequests = [];
     let registerFailuresRemaining = Number(options.registerFailures || 0);
     let updateFailuresRemaining = Number(options.updateFailures || 0);
@@ -540,6 +542,10 @@ function createRuntime(options = {}) {
             }
             return Promise.resolve(registration);
         },
+        unregister() {
+            unregisterCalls += 1;
+            return Promise.resolve(true);
+        },
     });
     const serviceWorker = Object.assign(serviceWorkerTarget, {
         controller: activeWorker,
@@ -653,6 +659,9 @@ function createRuntime(options = {}) {
         },
         get registerCalls() {
             return registerCalls;
+        },
+        get unregisterCalls() {
+            return unregisterCalls;
         },
         registerRequests,
         resolveRegistration() {
@@ -1297,6 +1306,66 @@ test(
             runtime.document.querySelector("[data-app-contract-banner]"),
             null,
             "a verification completed inside the debounce window must never flash a banner"
+        );
+    }
+);
+
+test(
+    "native APK bypasses the browser PWA lock, update and reload lifecycle",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            nativeApp: true,
+            workerContractVersion: "contract-v1",
+            workerShellVersion: "driver-shell-v1",
+            hasWaitingWorker: false,
+        });
+        runtime.guard.registerJavaScript("contract-v2");
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v1",
+            shellVersion: "driver-shell-v1",
+            roleCode: "driver",
+        });
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v1",
+            role_shell_version: "driver-shell-v1",
+            role_app_code: "driver",
+        });
+        await flushRuntime(runtime);
+
+        assert.equal(
+            runtime.document.body.dataset.nativeApp,
+            "true",
+            "the server-rendered native marker must reach the guard"
+        );
+        assert.equal(
+            runtime.guard.getState().locked,
+            false,
+            "an APK must never wait for the browser PWA contract"
+        );
+        assert.equal(runtime.document.querySelector("[data-app-contract-banner]"), null);
+        assert.equal(runtime.registerCalls, 0, "native must not register a browser worker");
+        assert.equal(runtime.unregisterCalls, 1, "a prior WebView worker is released once");
+
+        const mutation = new ElementStub("button", {type: "button"});
+        runtime.document.body.appendChild(mutation);
+        const click = new CustomEventStub("click");
+        click.target = mutation;
+        runtime.document.dispatchEvent(click);
+        assert.equal(click.defaultPrevented, false, "the native work screen remains actionable");
+
+        runtime.navigator.serviceWorker.dispatchEvent(
+            new CustomEventStub("controllerchange")
+        );
+        await flushPromises();
+        assert.equal(runtime.reloadCalls, 0, "an old PWA worker must not reload the APK");
+
+        const manualResult = await runtime.guard.requestManualUpdate();
+        assert.equal(manualResult.status, "native-app");
+        assert.match(
+            baseTemplate,
+            /data-native-app="\{\{ is_native_app\|yesno:'true,false' \}\}"/,
+            "the body must expose the context processor's native verdict"
         );
     }
 );

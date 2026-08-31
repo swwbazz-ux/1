@@ -490,6 +490,13 @@
         var controllerVersionPending = false;
         var unsafeWorkChecks = [];
 
+        /* APK has its own startup gate and signed-update path. An old browser
+           worker must not outlive an APK update and lock a usable work screen. */
+        function isNativeApp() {
+            return !!document.body
+                && document.body.dataset.nativeApp === "true";
+        }
+
         function expectedContract() {
             var body = document.body;
             return {
@@ -778,6 +785,7 @@
         }
 
         function configuredRegistration() {
+            if (isNativeApp()) return Promise.resolve(null);
             if (registration) return Promise.resolve(registration);
             if (registrationPromise) return registrationPromise;
             var serviceWorker = window.navigator && window.navigator.serviceWorker;
@@ -821,6 +829,24 @@
                 return null;
             });
             return registrationPromise;
+        }
+
+        function unregisterNativeAppServiceWorkers() {
+            if (!isNativeApp()) return;
+            var serviceWorker = window.navigator && window.navigator.serviceWorker;
+            if (!serviceWorker || !serviceWorker.getRegistrations) return;
+            Promise.resolve(serviceWorker.getRegistrations()).then(function (registrations) {
+                return Promise.all((registrations || []).map(function (currentRegistration) {
+                    if (!currentRegistration || !currentRegistration.unregister) {
+                        return null;
+                    }
+                    return Promise.resolve(currentRegistration.unregister()).catch(function () {
+                        return false;
+                    });
+                }));
+            }).catch(function () {
+                /* Native traffic stays usable even if WebView storage refuses cleanup. */
+            });
         }
 
         function updateError(code) {
@@ -1050,6 +1076,9 @@
         }
 
         function requestManualUpdate() {
+            if (isNativeApp()) {
+                return Promise.resolve({status: "native-app", registration: null});
+            }
             if (manualUpdatePromise) return manualUpdatePromise;
             if (registrationNeedsRecovery) {
                 registrationPromise = null;
@@ -1115,7 +1144,10 @@
                но его короткая проверка не должна блокировать PIN, показывать
                плашку «Обновление» или перезагружать ввод. Рабочие экраны
                сохраняют строгую проверку контракта. */
-            state.locked = hasContract && !state.ready && !isEntryScreen();
+            state.locked = hasContract
+                && !state.ready
+                && !isEntryScreen()
+                && !isNativeApp();
             state.expected = expected;
             state.javascriptMatches = javascriptMatches;
             state.serviceWorkerMatches = workerMatches;
@@ -1468,6 +1500,10 @@
 
         function initialize() {
             evaluate();
+            if (isNativeApp()) {
+                unregisterNativeAppServiceWorkers();
+                return;
+            }
             observeRoleUpdateDialogs();
             startServerGrace();
             if (!(window.navigator && window.navigator.serviceWorker)) {
@@ -1485,6 +1521,7 @@
         }
         if (window.navigator && window.navigator.serviceWorker) {
             window.navigator.serviceWorker.addEventListener("controllerchange", function () {
+                if (isNativeApp()) return;
                 workerVersionGeneration += 1;
                 controllerReloadPending = true;
                 controllerVersionPending = true;
@@ -1498,6 +1535,7 @@
             });
         }
         window.addEventListener("online", function () {
+            if (isNativeApp()) return;
             state.serverUnavailable = false;
             if (!registration && registrationPromise) {
                 return;
@@ -1527,7 +1565,7 @@
     {% if role_session_authenticated and not observer_mode and role_app %}<script src="{% static 'js/push-notifications.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% block extra_head %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
+<body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-native-app="{{ is_native_app|yesno:'true,false' }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
 {% if is_yandex_android and not observer_mode %}
 <div class="app-yandex-warning-banner" data-yandex-warning role="status" aria-live="polite">
     <span><strong>Это Яндекс Браузер.</strong> Приложение может установиться неправильно — со своей строкой снизу. Нажмите «Скопировать ссылку», откройте Google Chrome и вставьте её в адресную строку.</span>
