@@ -537,6 +537,29 @@ class DeputyPlanningViewTests(TestCase):
         )
         self.assertContains(response, 'data-export-excel', count=1)
 
+    def test_board_refresh_includes_eligible_employee_added_after_draft(self):
+        self.client.get(
+            reverse('deputy_mining_manager_placement'),
+            HTTP_HOST='localhost',
+        )
+        new_driver, _new_access = self.create_employee_with_access(
+            'Петров Новый Водитель',
+            self.driver_role,
+            phone='+79000000020',
+            access_code='210020',
+        )
+
+        response = self.client.get(
+            reverse('deputy_mining_manager_placement'),
+            HTTP_HOST='localhost',
+        )
+
+        employee_ids = {
+            employee['id']
+            for employee in response.context['planning_payload']['employees']
+        }
+        self.assertIn(new_driver.id, employee_ids)
+
     def test_board_and_excel_use_natural_equipment_number_order(self):
         self.truck_1.garage_number = '10'
         self.truck_1.save(update_fields=['garage_number'])

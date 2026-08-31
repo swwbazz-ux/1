@@ -534,10 +534,41 @@ class AdminEmployeeForm(EmployeeCardForm):
             equipment_busy.setdefault(assignment.shift_type, assignment.employee.full_name)
         self.fields['assignment_equipment'].widget.busy_assignments = busy_assignments
 
+    def clean_base_specialization(self):
+        specialization = self.cleaned_data.get('base_specialization')
+        if specialization:
+            return specialization
+
+        role_id = self.data.get(self.add_prefix('role'))
+        position_id = self.data.get(self.add_prefix('personnel_position'))
+        role = (
+            Role.objects
+            .filter(pk=role_id, code__in=WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES)
+            .first()
+            if role_id else None
+        )
+        position = (
+            PersonnelPosition.objects.filter(pk=position_id).first()
+            if position_id else None
+        )
+        if not role or not position:
+            return None
+
+        matching_specializations = list(
+            position.allowed_specializations.filter(
+                is_active=True,
+                access_role=role,
+            )[:2]
+        )
+        if len(matching_specializations) == 1:
+            return matching_specializations[0]
+        return None
+
     def clean(self):
         cleaned_data = super().clean()
         role = cleaned_data.get('role')
         specialization = cleaned_data.get('base_specialization')
+        personnel_position = cleaned_data.get('personnel_position')
         expected_role = (
             specialization.access_role
             if specialization and specialization.access_role_id
@@ -552,7 +583,17 @@ class AdminEmployeeForm(EmployeeCardForm):
             role = expected_role
             cleaned_data['role'] = role
         elif (
-            not cleaned_data.get('personnel_position')
+            role
+            and role.code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES
+            and personnel_position
+            and 'base_specialization' not in self.errors
+        ):
+            self.add_error(
+                'base_specialization',
+                f'Для доступа «{role}» выберите подходящую производственную специализацию.',
+            )
+        elif (
+            not personnel_position
             and role
             and role.code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES
         ):

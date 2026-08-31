@@ -105,6 +105,76 @@ class CrewPlanningServiceTests(TestCase):
         self.assertFalse(second_created)
         self.assertEqual(same_plan.id, plan.id)
 
+    def test_existing_driver_draft_adds_active_truck_created_later(self):
+        plan, _created = get_or_create_crew_draft(role=self.driver_role, actor=self.actor)
+        original_version = plan.version
+        new_truck = Equipment.objects.create(
+            equipment_type=self.truck_type,
+            garage_number='Т-03',
+        )
+        new_driver = self.create_employee_with_access(
+            'Водитель 4',
+            self.driver_role,
+            '210004',
+        )
+        assignment = self.assign(
+            new_driver,
+            self.driver_role,
+            new_truck,
+            WorkShiftType.SHIFT_1,
+        )
+
+        same_plan, created = get_or_create_crew_draft(
+            role=self.driver_role,
+            actor=self.actor,
+        )
+
+        self.assertFalse(created)
+        self.assertEqual(same_plan.id, plan.id)
+        self.assertEqual(same_plan.version, original_version + 1)
+        self.assertEqual(same_plan.slots.filter(equipment=new_truck).count(), 2)
+        day_slot = same_plan.slots.get(
+            equipment=new_truck,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        night_slot = same_plan.slots.get(
+            equipment=new_truck,
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        self.assertEqual(day_slot.employee, new_driver)
+        self.assertEqual(day_slot.baseline_employee, new_driver)
+        self.assertIsNone(night_slot.employee)
+        self.assertEqual(assignment.employee, new_driver)
+
+    def test_existing_excavator_draft_adds_active_excavator_created_later(self):
+        plan, _created = get_or_create_crew_draft(
+            role=self.excavator_role,
+            actor=self.actor,
+        )
+        original_version = plan.version
+        new_excavator = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            garage_number='Э-02',
+        )
+
+        same_plan, created = get_or_create_crew_draft(
+            role=self.excavator_role,
+            actor=self.actor,
+        )
+
+        self.assertFalse(created)
+        self.assertEqual(same_plan.id, plan.id)
+        self.assertEqual(same_plan.version, original_version + 1)
+        self.assertEqual(same_plan.slots.filter(equipment=new_excavator).count(), 2)
+
+        repeated_plan, repeated_created = get_or_create_crew_draft(
+            role=self.excavator_role,
+            actor=self.actor,
+        )
+        self.assertFalse(repeated_created)
+        self.assertEqual(repeated_plan.version, same_plan.version)
+        self.assertEqual(repeated_plan.slots.filter(equipment=new_excavator).count(), 2)
+
     def test_draft_update_moves_and_swaps_without_changing_baseline(self):
         plan, _created = get_or_create_crew_draft(role=self.driver_role, actor=self.actor)
         target = plan.slots.get(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1)

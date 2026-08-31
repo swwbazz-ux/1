@@ -200,6 +200,83 @@ def _validate_crew_equipment(equipment, role):
         )
 
 
+def _sync_crew_draft_equipment_slots(plan, *, actor=None, bump_version=True):
+    """Add newly registered equipment to an existing editable crew draft.
+
+    A crew plan keeps its existing rows as an operational snapshot, but active
+    equipment may legitimately arrive during a watch.  Synchronization is
+    additive only: it never removes old rows or rewrites assignments already
+    edited by the deputy.
+    """
+    equipment = list(equipment_queryset_for_work_role(plan.role.code))
+    existing_slots = set(
+        plan.slots.values_list('equipment_id', 'shift_type')
+    )
+    missing_equipment_ids = {
+        item.id
+        for item in equipment
+        if any(
+            (item.id, shift_type) not in existing_slots
+            for shift_type in WorkShiftType.values
+        )
+    }
+    if not missing_equipment_ids:
+        return 0
+
+    active_assignments = (
+        EquipmentAssignment.objects
+        .filter(
+            role=plan.role,
+            equipment_id__in=missing_equipment_ids,
+            shift_type__in=WorkShiftType.values,
+            status=AssignmentStatus.ACCEPTED,
+            ended_at__isnull=True,
+            shift__isnull=True,
+        )
+        .order_by('-assigned_at', '-id')
+    )
+    baseline_by_slot = {}
+    for assignment in active_assignments:
+        baseline_by_slot.setdefault(
+            (assignment.equipment_id, assignment.shift_type),
+            assignment.employee_id,
+        )
+
+    used_employee_ids = set(
+        plan.slots.exclude(employee_id__isnull=True).values_list('employee_id', flat=True)
+    )
+    slots = []
+    for item in equipment:
+        if item.id not in missing_equipment_ids:
+            continue
+        for shift_type in WorkShiftType.values:
+            slot_key = (item.id, shift_type)
+            if slot_key in existing_slots:
+                continue
+            employee_id = baseline_by_slot.get(slot_key)
+            if employee_id in used_employee_ids:
+                employee_id = None
+            if employee_id:
+                used_employee_ids.add(employee_id)
+            slots.append(CrewPlanSlot(
+                plan=plan,
+                equipment=item,
+                shift_type=shift_type,
+                employee_id=employee_id,
+                baseline_employee_id=employee_id,
+            ))
+
+    CrewPlanSlot.objects.bulk_create(slots)
+    if slots and bump_version:
+        plan.version += 1
+        update_fields = ['version', 'updated_at']
+        if actor is not None:
+            plan.updated_by = actor
+            update_fields.append('updated_by')
+        plan.save(update_fields=update_fields)
+    return len(slots)
+
+
 @transaction.atomic
 def get_or_create_crew_draft(*, role, work_date=None, actor=None):
     role = _crew_plan_role(role)
@@ -211,6 +288,7 @@ def get_or_create_crew_draft(*, role, work_date=None, actor=None):
         .first()
     )
     if existing:
+        _sync_crew_draft_equipment_slots(existing, actor=actor)
         return existing, False
 
     latest_revision = (
@@ -229,46 +307,16 @@ def get_or_create_crew_draft(*, role, work_date=None, actor=None):
             )
     except IntegrityError:
         concurrent_draft = (
-            CrewPlan.objects
+            CrewPlan.objects.select_for_update()
             .filter(work_date=work_date, role=role, status=CrewPlanStatus.DRAFT)
             .order_by('-revision')
             .first()
         )
         if concurrent_draft:
+            _sync_crew_draft_equipment_slots(concurrent_draft, actor=actor)
             return concurrent_draft, False
         raise
-    equipment = list(equipment_queryset_for_work_role(role.code))
-    equipment_ids = [item.id for item in equipment]
-    active_assignments = (
-        EquipmentAssignment.objects
-        .filter(
-            role=role,
-            equipment_id__in=equipment_ids,
-            shift_type__in=WorkShiftType.values,
-            status=AssignmentStatus.ACCEPTED,
-            ended_at__isnull=True,
-            shift__isnull=True,
-        )
-        .order_by('-assigned_at', '-id')
-    )
-    baseline_by_slot = {}
-    for assignment in active_assignments:
-        baseline_by_slot.setdefault(
-            (assignment.equipment_id, assignment.shift_type),
-            assignment.employee_id,
-        )
-    slots = []
-    for item in equipment:
-        for shift_type in WorkShiftType.values:
-            employee_id = baseline_by_slot.get((item.id, shift_type))
-            slots.append(CrewPlanSlot(
-                plan=plan,
-                equipment=item,
-                shift_type=shift_type,
-                employee_id=employee_id,
-                baseline_employee_id=employee_id,
-            ))
-    CrewPlanSlot.objects.bulk_create(slots)
+    _sync_crew_draft_equipment_slots(plan, actor=actor, bump_version=False)
     return plan, True
 
 
