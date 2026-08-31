@@ -48,7 +48,7 @@ Backend является основным рабочим приложением.
 - Маршрут: `/excavator/work/`.
 - Manifest: `/excavator.webmanifest`.
 - Service worker: `/excavator-sw.js`.
-- Shell: `excavator-mobile-shell-v165` (опубликован в production 31.08.2026).
+- Shell: `excavator-mobile-shell-v166` (опубликован в production 01.09.2026).
 
 ### Нативные Android-приложения
 
