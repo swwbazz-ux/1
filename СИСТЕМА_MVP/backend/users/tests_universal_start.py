@@ -148,19 +148,19 @@ class UniversalStartTests(TestCase):
 
     def test_android_sees_configured_apk_buttons_for_its_roles(self):
         self.add_apk('apk/driver-6.apk')
-        self.add_apk('apk/excavator-9.apk')
+        self.add_apk('apk/excavator-10.apk')
         self.add_access('driver', 'Водитель самосвала')
         self.add_access('excavator_operator', 'Машинист экскаватора')
 
         response = self.post(user_agent=ANDROID_USER_AGENT)
 
         self.assertContains(response, '/media/apk/driver-6.apk')
-        self.assertContains(response, '/media/apk/excavator-9.apk')
+        self.assertContains(response, '/media/apk/excavator-10.apk')
         self.assertContains(response, 'data-start-install-option="native"', count=2)
         self.assertContains(response, 'data-start-install-option="browser"', count=2)
         self.assertContains(response, '<b>Приложение <i>стабильное</i></b>', count=2)
         self.assertContains(response, '<b>Браузер <i>нестабильно</i></b>', count=2)
-        self.assertContains(response, 'APK · версия 0.1.6 · скачать и установить', count=1)
+        self.assertContains(response, 'APK · версия 0.1.7 · скачать и установить', count=1)
         self.assertContains(response, 'APK · версия 0.1.4 · скачать и установить', count=1)
         self.assertContains(response, 'PWA · ярлык на экран · открыть', count=2)
         self.assertContains(response, 'install=1', count=2)
@@ -257,13 +257,13 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'is-start-keyboard-active')
 
     def test_desktop_does_not_see_apk_button(self):
-        self.add_apk('apk/excavator-9.apk')
+        self.add_apk('apk/excavator-10.apk')
         self.add_access('excavator_operator', 'Машинист экскаватора')
 
         response = self.post(user_agent=DESKTOP_USER_AGENT)
 
         self.assertIsNone(response.context['apps'][0]['apk'])
-        self.assertNotContains(response, 'href="/media/apk/excavator-9.apk"')
+        self.assertNotContains(response, 'href="/media/apk/excavator-10.apk"')
         self.assertContains(response, 'data-start-install-option="browser"')
         self.assertContains(response, 'install=1', count=1)
         self.assertNotContains(response, 'После перехода добавьте значок на экран')
