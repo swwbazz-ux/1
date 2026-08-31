@@ -1,0 +1,170 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+function profile(name) {
+  return Object.fromEntries(
+    readFileSync(resolve(root, "profiles", name, "app.properties"), "utf8")
+      .split(/\r?\n/)
+      .filter((line) => line && !line.startsWith("#"))
+      .map((line) => {
+        const separator = line.indexOf("=");
+        return [line.slice(0, separator), line.slice(separator + 1)];
+      })
+  );
+}
+
+const expectedProfiles = {
+  excavator: {
+    serverUrl: "https://excavator.driverform.ru/",
+    startUrl: "https://excavator.driverform.ru/excavator/work/",
+    applicationId: "ru.copperresources.excavator",
+    appName: "Экскаваторщик",
+    versionCode: "9",
+    versionName: "0.1.6",
+    splashBackgroundColor: "#02080b",
+    splashAccentColor: "#FFD200",
+    splashIconResource: "app_icon",
+  },
+  driver: {
+    serverUrl: "https://driver.driverform.ru/",
+    startUrl: "https://driver.driverform.ru/driver/",
+    applicationId: "ru.copperresources.driver",
+    appName: "Водитель",
+    versionCode: "6",
+    versionName: "0.1.4",
+    splashBackgroundColor: "#02080b",
+    splashAccentColor: "#8CFF2E",
+    splashIconResource: "app_icon",
+  },
+};
+
+for (const [profileName, expected] of Object.entries(expectedProfiles)) {
+  test(`${profileName} build profile contains every role-specific parameter`, () => {
+    const config = profile(profileName);
+    assert.equal(config.serverUrl, expected.serverUrl);
+    assert.equal(config.startUrl, expected.startUrl);
+    assert.ok(config.startUrl.startsWith(config.serverUrl));
+    assert.equal(config.applicationId, expected.applicationId);
+    assert.equal(config.appName, expected.appName);
+    assert.match(config.applicationId, /^[a-z][a-z0-9_.]+$/);
+    assert.ok(config.heartbeatUrl.startsWith(config.serverUrl));
+    assert.ok(Number(config.heartbeatIntervalSeconds) >= 15);
+    assert.ok(config.alertSoundResource);
+    assert.ok(config.syncTokenEnv);
+    assert.equal(config.versionCode, expected.versionCode);
+    assert.equal(config.versionName, expected.versionName);
+    assert.equal(config.splashBackgroundColor, expected.splashBackgroundColor);
+    assert.equal(config.splashAccentColor, expected.splashAccentColor);
+    assert.equal(config.splashIconResource, expected.splashIconResource);
+  });
+}
+
+test("profiles remain isolated by URL and application id", () => {
+  const excavator = profile("excavator");
+  const driver = profile("driver");
+  assert.notEqual(excavator.serverUrl, driver.serverUrl);
+  assert.notEqual(excavator.applicationId, driver.applicationId);
+  assert.notEqual(excavator.foregroundChannelId, driver.foregroundChannelId);
+  assert.notEqual(excavator.alertChannelId, driver.alertChannelId);
+});
+
+test("WebView cookies are accepted and flushed at every persistence boundary", () => {
+  const activity = readFileSync(
+    resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile", "MainActivity.java"),
+    "utf8"
+  );
+  assert.match(activity, /setAcceptCookie\(true\)/);
+  assert.match(activity, /setAcceptThirdPartyCookies\(webView, true\)/);
+  assert.match(activity, /bridgeBuilder\.addWebViewListener\(new WebViewListener/);
+  assert.match(activity, /onPageLoaded\(WebView loadedWebView\)[\s\S]*?CookieManager\.getInstance\(\)\.flush\(\)/);
+  assert.match(activity, /onPause\(\)[\s\S]*?CookieManager\.getInstance\(\)\.flush\(\)/);
+  assert.match(activity, /onStop\(\)[\s\S]*?CookieManager\.getInstance\(\)\.flush\(\)/);
+  assert.doesNotMatch(activity, /remove(All|Session)Cookies|clearCookies/);
+});
+
+test("native implementation reads role data only from BuildConfig", () => {
+  const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
+  const sources = ["MainActivity.java", "ConnectivityForegroundService.java", "AppNotifications.java"]
+    .map((file) => readFileSync(resolve(javaRoot, file), "utf8"))
+    .join("\n");
+  assert.doesNotMatch(sources, /https:\/\/(excavator|driver)\.driverform\.ru/);
+  assert.match(sources, /BuildConfig\.APP_SERVER_URL/);
+  assert.match(sources, /BuildConfig\.APP_START_URL/);
+  assert.match(sources, /BuildConfig\.HEARTBEAT_URL/);
+  assert.match(sources, /BuildConfig\.SYNC_AUTH_TOKEN/);
+});
+
+test("startup splash is profile-driven and waits for stable rendered layout", () => {
+  const gradle = readFileSync(resolve(root, "android", "app", "build.gradle"), "utf8");
+  const styles = readFileSync(resolve(root, "android", "app", "src", "main", "res", "values", "styles.xml"), "utf8");
+  const activity = readFileSync(
+    resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile", "MainActivity.java"),
+    "utf8"
+  );
+  const overlay = readFileSync(
+    resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile", "StartupLoadingOverlay.java"),
+    "utf8"
+  );
+
+  assert.match(gradle, /profile\.getProperty\('splashBackgroundColor'/);
+  assert.match(gradle, /profile\.getProperty\('splashAccentColor'/);
+  assert.match(gradle, /profile\.getProperty\('splashIconResource'/);
+  assert.match(gradle, /resValue "drawable", "startup_splash_icon"/);
+  assert.match(styles, /windowSplashScreenBackground/);
+  assert.match(styles, /windowSplashScreenAnimatedIcon/);
+  assert.match(styles, /postSplashScreenTheme/);
+  assert.match(activity, /SplashScreen\.installSplashScreen\(this\)[\s\S]*?super\.onCreate/);
+  assert.match(activity, /setKeepOnScreenCondition\(\(\) -> !nativeCoverReady\)/);
+  assert.match(activity, /onPageStarted\(WebView loadingWebView\)[\s\S]*?startupLoadingOverlay\.onPageStarted/);
+  assert.match(activity, /onPageLoaded\(WebView loadedWebView\)[\s\S]*?startupLoadingOverlay\.onPageLoaded/);
+  assert.match(activity, /lastObservedPageState = PageState\.STARTED[\s\S]*?startupLoadingOverlay\.onPageStarted\(loadingWebView\)/);
+  assert.match(activity, /lastObservedPageState = PageState\.LOADED[\s\S]*?startupLoadingOverlay\.onPageLoaded\(loadedWebView\)/);
+  assert.match(activity, /StartupLoadingOverlay\.attach\(this, webView\)[\s\S]*?lastObservedPageState == PageState\.LOADED[\s\S]*?startupLoadingOverlay\.onPageLoaded\(webView\)[\s\S]*?else[\s\S]*?startupLoadingOverlay\.onPageStarted\(webView\)/);
+  assert.doesNotMatch(activity, /getProgress\(\)/);
+  assert.match(overlay, /BuildConfig\.SPLASH_BACKGROUND_COLOR/);
+  assert.match(overlay, /BuildConfig\.SPLASH_ACCENT_COLOR/);
+  assert.match(overlay, /BuildConfig\.SPLASH_ICON_RESOURCE/);
+  assert.match(overlay, /document\.readyState/);
+  assert.match(overlay, /window\.visualViewport/);
+  assert.match(overlay, /document\.fonts/);
+  assert.match(overlay, /ResizeObserver/);
+  assert.match(overlay, /MutationObserver/);
+  assert.match(overlay, /data-driver-shell-bound/);
+  assert.match(overlay, /data-eo-initialized/);
+  assert.match(overlay, /REQUIRED_STABLE_FRAMES/);
+  assert.match(overlay, /REQUIRED_QUIET_WINDOW_MS/);
+  assert.match(overlay, /WindowInsetsCompat\.Type\.ime\(\)/);
+  assert.match(overlay, /webView\.setAlpha\(0f\)/);
+  assert.doesNotMatch(overlay, /View\.INVISIBLE/);
+  assert.match(overlay, /postVisualStateCallback/);
+  assert.match(overlay, /postVisualStateCallback[\s\S]*?evaluateJavascript\(READINESS_PROBE/);
+  assert.match(overlay, /webView\.setAlpha\(1f\)[\s\S]*?postOnAnimation\(\(\) -> dismiss\(generation\)\)/);
+  assert.match(overlay, /waitForImeClose/);
+  assert.match(overlay, /waitForImeClose = rootInsets != null && rootInsets\.isVisible\(WindowInsetsCompat\.Type\.ime\(\)\)/);
+  assert.match(overlay, /if \(waitForImeClose && !imeVisible\)[\s\S]*?waitForImeClose = false/);
+  assert.match(overlay, /now - nativeLastChangeMs >= REQUIRED_NATIVE_QUIET_WINDOW_MS[\s\S]*?&& !waitForImeClose/);
+  assert.match(overlay, /generation != pageGeneration/);
+  assert.match(overlay, /STARTUP_WATCHDOG_MS = 15_000L/);
+  assert.match(overlay, /evaluateJavascript\("document\.readyState"/);
+  assert.match(overlay, /if \(!"\\"complete\\""\.equals\(encodedReadyState\)\)/);
+  assert.match(overlay, /pageLoaded = true;[\s\S]*?webView\.setAlpha\(1f\)[\s\S]*?dismiss\(generation\)/);
+  assert.match(overlay, /private boolean destroyed;/);
+  assert.match(overlay, /private boolean visible;/);
+  assert.doesNotMatch(overlay, /private boolean dismissed;/);
+  assert.match(overlay, /ValueAnimator\.ofFloat\(0f, 360f\)/);
+  assert.match(overlay, /animator\.setDuration\(900L\)/);
+});
+
+test("release signing uses only an external credentials file", () => {
+  const gradle = readFileSync(resolve(root, "android", "app", "build.gradle"), "utf8");
+  assert.match(gradle, /COPPER_RELEASE_KEYSTORE_PROPERTIES/);
+  assert.match(gradle, /CopperResourcesKeys\/keystore-credentials\.txt/);
+  assert.match(gradle, /Release keystore was not found/);
+  assert.doesNotMatch(gradle, /storePassword\s+["'][^"']+["']/);
+  assert.doesNotMatch(gradle, /keyPassword\s+["'][^"']+["']/);
+});

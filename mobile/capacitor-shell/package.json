@@ -1,0 +1,28 @@
+{
+  "name": "copper-resources-capacitor-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Universal Capacitor Android shell for Copper Resources role applications",
+  "scripts": {
+    "cap:sync": "cap sync android",
+    "android:build:excavator": "node scripts/build-android.mjs excavator debug",
+    "android:assemble:excavator": "node scripts/build-android.mjs excavator debug --assemble-only",
+    "android:install:excavator": "node scripts/install-android.mjs excavator debug",
+    "android:release:excavator": "node scripts/build-android.mjs excavator release",
+    "android:build:driver": "node scripts/build-android.mjs driver debug",
+    "android:assemble:driver": "node scripts/build-android.mjs driver debug --assemble-only",
+    "android:install:driver": "node scripts/install-android.mjs driver debug",
+    "android:release:driver": "node scripts/build-android.mjs driver release",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.0",
+    "@capacitor/core": "8.5.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
