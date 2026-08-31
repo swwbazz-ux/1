@@ -1,3 +1,6 @@
+import java.net.URI
+import java.net.URISyntaxException
+
 apply plugin: 'com.android.application'
 
 def profileDirectory = file("${rootProject.projectDir}/../profiles")
@@ -11,6 +14,44 @@ if (profileFiles.isEmpty()) {
 
 def javaStringLiteral = { String value ->
     '"' + (value ?: '').replace('\\', '\\\\').replace('"', '\\"') + '"'
+}
+
+def parseProfileHttpsUri = { String propertyName, String rawValue, File profileDir ->
+    URI uri
+    try {
+        uri = new URI(rawValue)
+    } catch (URISyntaxException exception) {
+        throw new GradleException("Invalid ${propertyName} in ${profileDir}/app.properties", exception)
+    }
+    String rawPath = uri.rawPath ?: '/'
+    if (!uri.absolute
+            || !'https'.equalsIgnoreCase(uri.scheme)
+            || !uri.host
+            || uri.rawUserInfo != null
+            || uri.rawQuery != null
+            || uri.rawFragment != null
+            || !(uri.port in [-1, 443])
+            || uri.normalize().rawPath != rawPath) {
+        throw new GradleException(
+                "${propertyName} must be a normalized HTTPS URL without credentials, query, or fragment " +
+                        "in ${profileDir}/app.properties"
+        )
+    }
+    uri
+}
+
+def effectiveHttpsPort = { URI uri -> uri.port == -1 ? 443 : uri.port }
+
+def validateAppLinkPath = { String rawPath, File profileDir ->
+    if (!(rawPath ==~ /\/[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*\//)
+            || rawPath.contains('/./')
+            || rawPath.contains('/../')
+            || rawPath.contains('//')) {
+        throw new GradleException(
+                "appLinkPath must be a normalized absolute directory path in ${profileDir}/app.properties"
+        )
+    }
+    rawPath
 }
 
 def releaseCredentialsPath = System.getenv('COPPER_RELEASE_KEYSTORE_PROPERTIES')?.trim()
@@ -106,6 +147,14 @@ android {
             String syncToken = tokenEnvironmentVariable ? (System.getenv(tokenEnvironmentVariable) ?: '') : ''
             String serverUrl = profile.getProperty('serverUrl', '').trim()
             String startUrl = profile.getProperty('startUrl', serverUrl).trim()
+            URI serverUri = parseProfileHttpsUri('serverUrl', serverUrl, profileDir)
+            URI startUri = parseProfileHttpsUri('startUrl', startUrl, profileDir)
+            String serverPath = serverUri.rawPath ?: '/'
+            String startPath = startUri.rawPath ?: '/'
+            String appLinkPath = validateAppLinkPath(
+                    profile.getProperty('appLinkPath', '').trim(),
+                    profileDir
+            )
             long heartbeatIntervalMs = Long.parseLong(profile.getProperty('heartbeatIntervalSeconds', '20')) * 1000L
             long updateCheckIntervalMs = Long.parseLong(profile.getProperty('updateCheckIntervalMinutes', '15')) * 60_000L
             String updateManifestUrl = profile.getProperty('updateManifestUrl', '').trim()
@@ -122,8 +171,13 @@ android {
             if (!(splashIconResource ==~ /[a-z][a-z0-9_]*/)) {
                 throw new GradleException("Invalid splashIconResource in ${profileDir}/app.properties")
             }
-            if (!serverUrl || !startUrl.startsWith(serverUrl)) {
-                throw new GradleException("startUrl must stay inside serverUrl in ${profileDir}/app.properties")
+            if (serverPath != '/') {
+                throw new GradleException("serverUrl must point to the HTTPS origin root in ${profileDir}/app.properties")
+            }
+            if (!serverUri.host.equalsIgnoreCase(startUri.host)
+                    || effectiveHttpsPort(serverUri) != effectiveHttpsPort(startUri)
+                    || !(startPath == serverPath || startPath.startsWith(serverPath))) {
+                throw new GradleException("startUrl must stay inside the exact serverUrl origin in ${profileDir}/app.properties")
             }
             if (!updateManifestUrl.startsWith('https://')) {
                 throw new GradleException("updateManifestUrl must use HTTPS in ${profileDir}/app.properties")
@@ -147,6 +201,8 @@ android {
                 buildConfigField "String", "APP_DISPLAY_NAME", javaStringLiteral(profile.getProperty('appName'))
                 buildConfigField "String", "APP_SERVER_URL", javaStringLiteral(serverUrl)
                 buildConfigField "String", "APP_START_URL", javaStringLiteral(startUrl)
+                buildConfigField "String", "APP_LINK_HOST", javaStringLiteral(serverUri.host.toLowerCase(Locale.ROOT))
+                buildConfigField "String", "APP_LINK_PATH", javaStringLiteral(appLinkPath)
                 buildConfigField "String", "HEARTBEAT_URL", javaStringLiteral(profile.getProperty('heartbeatUrl', profile.getProperty('serverUrl')))
                 buildConfigField "long", "HEARTBEAT_INTERVAL_MS", "${heartbeatIntervalMs}L"
                 buildConfigField "String", "UPDATE_MANIFEST_URL", javaStringLiteral(updateManifestUrl)
@@ -164,6 +220,8 @@ android {
                         'specialUseDescription',
                         'Continuous operational server connectivity during an active work shift'
                 )
+                manifestPlaceholders.appLinkHost = serverUri.host.toLowerCase(Locale.ROOT)
+                manifestPlaceholders.appLinkPath = appLinkPath
             }
         }
     }

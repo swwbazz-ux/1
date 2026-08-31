@@ -9,6 +9,8 @@
 - `serverUrl` — начальный URL Capacitor;
 - `heartbeatUrl` — адрес нативной фоновой проверки с cookie WebView;
 - `updateManifestUrl`, `updateApkBaseUrl`, `updateCheckIntervalMinutes` — источник и период проверки обновлений;
+- `appLinkPath` — единственный HTTPS-путь, который профиль принимает для
+  одноразовой передачи уже известного номера после установки APK;
 - `syncTokenEnv` — необязательная переменная окружения с токеном, если для будущего разрешённого endpoint он понадобится;
 - `alertSoundResource` и папка `res` — иконка и звук конкретного приложения.
 - `splashBackgroundColor`, `splashAccentColor`, `splashIconResource` — оформление общего стартового экрана конкретного профиля.
@@ -36,6 +38,13 @@ APK системному установщику проверяются SHA-256, 
 и совпадение сертификата с уже установленным приложением. Тихая установка без
 системного подтверждения Android намеренно не используется.
 
+После прямой установки APK системный установщик не может сам передать
+приложению номер, введённый на `/start/`. Поэтому пользователь возвращается на
+страницу и нажимает `Открыть приложение`. Verified HTTPS App Link содержит
+только короткоживущий одноразовый token во fragment; `MainActivity` принимает
+его при холодном и тёплом запуске только для точного host/path своего профиля.
+Номер остаётся в серверном cache, PIN и авторизация не переносятся.
+
 Сервис объявлен как Android `specialUse`: `dataSync` при target SDK 36 ограничен шестью часами фоновой работы в сутки, что короче производственной смены. Канал поставки — прямое распространение APK с корпоративного сайта и, при необходимости, RuStore.
 
 ## Сборка
@@ -49,6 +58,20 @@ npm run android:build:excavator
 ```
 
 APK появляется в `dist/excavator-debug.apk`.
+
+На Windows Gradle/AGP не всегда загружает JVM unit tests из рабочего пути с
+кириллицей, хотя production-код компилируется. Тесты и release-сборки нужно
+запускать через короткий ASCII-путь к тому же worktree, например:
+
+```powershell
+subst R: "<абсолютный путь к worktree>"
+Set-Location R:\mobile\capacitor-shell
+npm test
+Set-Location android
+.\gradlew.bat testDriverDebugUnitTest testExcavatorDebugUnitTest
+```
+
+Это только алиас пути; копия проекта и отдельное рабочее дерево не создаются.
 
 ## Релизная подпись
 

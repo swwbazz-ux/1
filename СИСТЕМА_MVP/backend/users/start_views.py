@@ -17,10 +17,12 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.shortcuts import render
 from django.urls import reverse
+from django.views.decorators.cache import never_cache
 
 from .access_auth import find_unactivated_accesses_by_phone, format_phone_for_display
 from .forms import normalize_phone
 from .app_catalog import APP_CATALOG_ROLE_CODES, role_app_public_url
+from .native_handoff import build_native_handoff_url
 from .role_apps import get_role_app
 from .models import EmployeeAccess
 from .work_profiles import employee_has_effective_access_role
@@ -31,12 +33,12 @@ from .work_profiles import employee_has_effective_access_role
 # ролях и именах APK ничего не знает.
 ANDROID_APK_BY_ROLE = {
     'excavator_operator': {
-        'path': 'apk/excavator-14.apk',
-        'version': '0.1.11',
+        'path': 'apk/excavator-15.apk',
+        'version': '0.1.12',
     },
     'driver': {
-        'path': 'apk/driver-9.apk',
-        'version': '0.1.7',
+        'path': 'apk/driver-10.apk',
+        'version': '0.1.8',
     },
 }
 
@@ -81,9 +83,19 @@ def android_apk_for_role(role_code):
     }
 
 
+def _render_universal_start(request, template_name, context):
+    """Не кешировать результат, содержащий телефон и одноразовый App Link."""
+
+    response = render(request, template_name, context)
+    response['Referrer-Policy'] = 'no-referrer'
+    response['X-Robots-Tag'] = 'noindex, nofollow'
+    return response
+
+
+@never_cache
 def universal_start_view(request):
     if request.method != 'POST':
-        return render(request, 'users/universal_start.html', {})
+        return _render_universal_start(request, 'users/universal_start.html', {})
 
     phone = with_country_code(request.POST.get('phone', ''))
     matches = [
@@ -114,10 +126,19 @@ def universal_start_view(request):
         app_url = role_app_public_url(request, code)
         if phone:
             app_url = f'{app_url}?{urlencode({"phone": normalize_phone(phone)})}'
+        apk = android_apk_for_role(code) if show_android_apk else None
+        native_handoff_url = ''
+        if apk and phone:
+            native_handoff_url = build_native_handoff_url(
+                request,
+                phone=phone,
+                role_code=code,
+            )
         apps.append({
             'app': app,
             'url': app_url,
-            'apk': android_apk_for_role(code) if show_android_apk else None,
+            'apk': apk,
+            'native_handoff_url': native_handoff_url,
             'employee': candidate.employee,
             'last_login_at': candidate.last_login_at,
         })
@@ -132,7 +153,7 @@ def universal_start_view(request):
     ))
 
     if not apps:
-        return render(
+        return _render_universal_start(
             request,
             'users/login_phone_not_found.html',
             {
@@ -151,7 +172,7 @@ def universal_start_view(request):
         for candidate in matches
     )
 
-    return render(
+    return _render_universal_start(
         request,
         'users/universal_start.html',
         {

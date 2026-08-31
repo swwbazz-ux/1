@@ -4,6 +4,7 @@
 тому, у кого он уже есть, и вываливала все приложения одним списком.
 """
 
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -147,26 +148,38 @@ class UniversalStartTests(TestCase):
         self.assertEqual(response.context['apps'][0]['app'].role_code, 'mining_master')
 
     def test_android_sees_configured_apk_buttons_for_its_roles(self):
-        self.add_apk('apk/driver-9.apk')
-        self.add_apk('apk/excavator-14.apk')
+        self.add_apk('apk/driver-10.apk')
+        self.add_apk('apk/excavator-15.apk')
         self.add_access('driver', 'Водитель самосвала')
         self.add_access('excavator_operator', 'Машинист экскаватора')
 
         response = self.post(user_agent=ANDROID_USER_AGENT)
 
-        self.assertContains(response, '/media/apk/driver-9.apk')
-        self.assertContains(response, '/media/apk/excavator-14.apk')
+        self.assertContains(response, '/media/apk/driver-10.apk')
+        self.assertContains(response, '/media/apk/excavator-15.apk')
         self.assertContains(response, 'data-start-install-option="native"', count=2)
+        self.assertContains(response, 'data-start-native-open', count=2)
         self.assertContains(response, 'data-start-install-option="browser"', count=2)
         self.assertContains(response, '<b>Приложение <i>стабильное</i></b>', count=2)
         self.assertContains(response, '<b>Браузер <i>нестабильно</i></b>', count=2)
-        self.assertContains(response, 'APK · версия 0.1.11 · скачать и установить', count=1)
-        self.assertContains(response, 'APK · версия 0.1.7 · скачать и установить', count=1)
+        self.assertContains(response, '1. Скачать APK · версия 0.1.12', count=1)
+        self.assertContains(response, '1. Скачать APK · версия 0.1.8', count=1)
+        self.assertContains(response, '2. Открыть приложение', count=2)
         self.assertContains(response, 'PWA · ярлык на экран · открыть', count=2)
         self.assertContains(response, 'install=1', count=2)
         self.assertNotContains(response, 'class="start-screen__app-main" href=')
         # Атрибут download заставлял Chrome ругаться «файл может быть опасным».
         self.assertNotContains(response, ' download')
+        html = response.content.decode('utf-8')
+        handoff_links = re.findall(
+            r'href="(https://(?:driver|excavator)\.driverform\.ru/native-handoff/open/#token=[A-Za-z0-9_-]{43})"',
+            html,
+        )
+        self.assertEqual(len(handoff_links), 2)
+        self.assertTrue(all('phone=' not in link for link in handoff_links))
+        self.assertIn('no-store', response.headers['Cache-Control'])
+        self.assertEqual(response.headers['Referrer-Policy'], 'no-referrer')
+        self.assertContains(response, 'phone=79990000071', count=2)
 
     def test_android_does_not_see_button_when_configured_apk_file_is_missing(self):
         self.add_access('driver', 'Водитель самосвала')
@@ -174,8 +187,9 @@ class UniversalStartTests(TestCase):
         response = self.post(user_agent=ANDROID_USER_AGENT)
 
         self.assertIsNone(response.context['apps'][0]['apk'])
-        self.assertNotContains(response, 'href="/media/apk/driver-9.apk"')
+        self.assertNotContains(response, 'href="/media/apk/driver-10.apk"')
         self.assertNotContains(response, 'data-start-install-option="native"')
+        self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"')
 
     def test_android_does_not_see_apk_button_for_unsupported_role(self):
@@ -189,21 +203,22 @@ class UniversalStartTests(TestCase):
         self.assertNotContains(response, 'href="/media/apk/')
 
     def test_iphone_does_not_see_apk_button(self):
-        self.add_apk('apk/driver-9.apk')
+        self.add_apk('apk/driver-10.apk')
         self.add_access('driver', 'Водитель самосвала')
 
         response = self.post(user_agent=IPHONE_USER_AGENT)
 
         self.assertIsNone(response.context['apps'][0]['apk'])
-        self.assertNotContains(response, 'href="/media/apk/driver-9.apk"')
+        self.assertNotContains(response, 'href="/media/apk/driver-10.apk"')
         self.assertNotContains(response, 'data-start-install-option="native"')
+        self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=1)
         self.assertContains(response, '<b>Браузер <i>нестабильно</i></b>')
         self.assertContains(response, 'install=1', count=1)
         self.assertContains(response, 'После перехода добавьте значок на экран')
 
     def test_iphone_shows_only_pwa_action_without_android_block(self):
-        self.add_apk('apk/driver-9.apk')
+        self.add_apk('apk/driver-10.apk')
         self.add_access('driver', 'Водитель самосвала')
 
         response = self.post(user_agent=IPHONE_USER_AGENT)
@@ -213,7 +228,8 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'data-start-install-option="browser"', count=1)
         self.assertNotContains(response, 'data-start-install-option="native"')
         self.assertContains(response, 'install=1', count=1)
-        self.assertNotContains(response, 'href="/media/apk/driver-9.apk"')
+        self.assertNotContains(response, 'href="/media/apk/driver-10.apk"')
+        self.assertNotContains(response, 'data-start-native-open')
         self.assertNotContains(response, 'class="start-screen__app-main" href=')
 
     @override_settings(
@@ -257,13 +273,14 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'is-start-keyboard-active')
 
     def test_desktop_does_not_see_apk_button(self):
-        self.add_apk('apk/excavator-14.apk')
+        self.add_apk('apk/excavator-15.apk')
         self.add_access('excavator_operator', 'Машинист экскаватора')
 
         response = self.post(user_agent=DESKTOP_USER_AGENT)
 
         self.assertIsNone(response.context['apps'][0]['apk'])
-        self.assertNotContains(response, 'href="/media/apk/excavator-14.apk"')
+        self.assertNotContains(response, 'href="/media/apk/excavator-15.apk"')
+        self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"')
         self.assertContains(response, 'install=1', count=1)
         self.assertNotContains(response, 'После перехода добавьте значок на экран')
