@@ -7,6 +7,8 @@
 import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -72,11 +74,12 @@ class UniversalStartTests(TestCase):
         apk_path.parent.mkdir(parents=True, exist_ok=True)
         apk_path.write_bytes(b'test apk placeholder')
 
-    def post(self, *, user_agent=''):
+    def post(self, *, user_agent='', follow=True):
         return self.client.post(
             reverse('universal_start'),
             {'phone': self.phone},
             HTTP_USER_AGENT=user_agent,
+            follow=follow,
         )
 
     def test_browser_bar_matches_the_shared_dark_background(self):
@@ -113,13 +116,101 @@ class UniversalStartTests(TestCase):
             HTTP_ORIGIN='null',
         )
 
-        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.status_code, 303)
+        self.assertNotIn('phone=', accepted.headers['Location'])
         self.assertEqual(rejected.status_code, 403)
+
+    def test_lookup_uses_opaque_post_redirect_get_result(self):
+        self.add_access('driver', 'Водитель самосвала')
+
+        submitted = self.post(user_agent=ANDROID_USER_AGENT, follow=False)
+
+        self.assertEqual(submitted.status_code, 303)
+        location = submitted.headers['Location']
+        parsed = urlparse(location)
+        result_tokens = parse_qs(parsed.query).get('result', [])
+        self.assertEqual(parsed.path, reverse('universal_start'))
+        self.assertEqual(len(result_tokens), 1)
+        self.assertRegex(result_tokens[0], r'^[A-Za-z0-9_-]{43}$')
+        self.assertNotIn('phone', location)
+        self.assertNotIn('79990000071', location)
+
+        first = self.client.get(location, HTTP_USER_AGENT=ANDROID_USER_AGENT)
+        reloaded = self.client.get(location, HTTP_USER_AGENT=ANDROID_USER_AGENT)
+
+        for response in (first, reloaded):
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.context['found'])
+            self.assertEqual(response.headers['Referrer-Policy'], 'no-referrer')
+            self.assertContains(response, 'Водитель самосвала')
+
+    def test_parallel_lookup_results_do_not_overwrite_each_other(self):
+        self.add_access('driver', 'Водитель самосвала')
+        other = Employee.objects.create(
+            full_name='Другой Водитель Водителевич',
+            phone='+79990000072',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=other,
+            role=make_role('driver', 'Водитель самосвала'),
+            access_code='170002',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+            activated_at=timezone.now(),
+        )
+
+        first = self.post(follow=False)
+        second = self.client.post(
+            reverse('universal_start'),
+            {'phone': '+79990000072'},
+        )
+
+        self.assertNotEqual(first.headers['Location'], second.headers['Location'])
+        for location, employee_name in (
+            (first.headers['Location'], self.employee.full_name),
+            (second.headers['Location'], other.full_name),
+        ):
+            response = self.client.get(location)
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.context['found'])
+            self.assertContains(response, employee_name)
+
+    @patch('users.start_views.cache.add', side_effect=RuntimeError('cache down'))
+    def test_cache_failure_redirects_to_clean_form_without_post_result(self, _add):
+        self.add_access('driver', 'Водитель самосвала')
+
+        response = self.post(follow=False)
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers['Location'], reverse('universal_start'))
+        self.assertNotIn('phone', response.headers['Location'])
+
+    def test_start_rejects_methods_other_than_get_and_post(self):
+        response = self.client.put(reverse('universal_start'))
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_missing_result_redirects_to_clean_same_origin_form(self):
+        missing = self.client.get(
+            f'{reverse("universal_start")}?result={"x" * 43}',
+        )
+
+        self.assertEqual(missing.status_code, 303)
+        self.assertEqual(missing.headers['Location'], reverse('universal_start'))
+        self.assertNotIn('phone', missing.headers['Location'])
+
+        form = self.client.get(missing.headers['Location'])
+        self.assertEqual(form.status_code, 200)
+        self.assertEqual(form.headers['Referrer-Policy'], 'same-origin')
+        self.assertContains(form, 'name="csrfmiddlewaretoken"')
 
     def test_unknown_phone_keeps_the_shared_dark_browser_bar(self):
         response = self.client.post(
             reverse('universal_start'),
             {'phone': '+79990000999'},
+            follow=True,
         )
 
         self.assertEqual(response.status_code, 200)
@@ -206,7 +297,7 @@ class UniversalStartTests(TestCase):
         self.assertEqual(len(handoff_links), 2)
         self.assertTrue(all('phone=' not in link for link in handoff_links))
         self.assertIn('no-store', response.headers['Cache-Control'])
-        self.assertEqual(response.headers['Referrer-Policy'], 'same-origin')
+        self.assertEqual(response.headers['Referrer-Policy'], 'no-referrer')
         self.assertContains(response, 'phone=79990000071', count=2)
 
     def test_android_does_not_see_button_when_configured_apk_file_is_missing(self):
@@ -281,6 +372,7 @@ class UniversalStartTests(TestCase):
         unknown = self.client.post(
             reverse('universal_start'),
             {'phone': '+79990000999'},
+            follow=True,
         )
         self.assertContains(unknown, 'phone-not-found__chat max-support-link')
         self.assertContains(unknown, 'data-support-channel="max"', count=1)

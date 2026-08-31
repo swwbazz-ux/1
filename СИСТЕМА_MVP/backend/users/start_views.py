@@ -11,13 +11,21 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
+import re
+import secrets
+import time
 from pathlib import Path
 from urllib.parse import urlencode
 
 from django.conf import settings
+from django.core.cache import cache
+from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_http_methods
 
 from .access_auth import find_unactivated_accesses_by_phone, format_phone_for_display
 from .forms import normalize_phone
@@ -43,6 +51,12 @@ ANDROID_APK_BY_ROLE = {
 }
 
 
+START_RESULT_TTL_SECONDS = 30 * 60
+_START_RESULT_TOKEN_RE = re.compile(r'^[A-Za-z0-9_-]{43}$')
+_START_RESULT_CACHE_PREFIX = 'universal-start-result:v1:'
+logger = logging.getLogger(__name__)
+
+
 # Раньше здесь стоял предел на число показанных кнопок: восемь штук подряд
 # читались как список, а не как выбор. Со значками в два столбца место
 # перестало быть узким местом, и прятать что-то больше не нужно.
@@ -58,6 +72,67 @@ def with_country_code(value):
     if len(digits) == 10 and digits.startswith('9'):
         return f'7{digits}'
     return digits
+
+
+def _start_result_cache_key(token):
+    digest = hashlib.sha256(token.encode('ascii')).hexdigest()
+    return f'{_START_RESULT_CACHE_PREFIX}{digest}'
+
+
+def _issue_start_result(phone):
+    """Сохранить номер для безопасного POST/Redirect/GET без PII в URL."""
+
+    payload = {
+        'phone': str(phone),
+        'issued_at': time.time(),
+    }
+    try:
+        for _attempt in range(4):
+            token = secrets.token_urlsafe(32)
+            if cache.add(
+                _start_result_cache_key(token),
+                payload,
+                START_RESULT_TTL_SECONDS,
+            ):
+                return token
+    except Exception:
+        logger.exception('Universal start result cache write failed')
+        return ''
+    logger.warning('Universal start result token allocation failed')
+    return ''
+
+
+def _read_start_result(token):
+    if not isinstance(token, str) or not _START_RESULT_TOKEN_RE.fullmatch(token):
+        return None
+    key = _start_result_cache_key(token)
+    try:
+        payload = cache.get(key)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    phone = payload.get('phone')
+    issued_at = payload.get('issued_at')
+    if (
+        not isinstance(phone, str)
+        or len(phone) > 32
+        or (phone and not phone.isdigit())
+        or not isinstance(issued_at, (int, float))
+    ):
+        try:
+            cache.delete(key)
+        except Exception:
+            pass
+        return None
+    age = time.time() - float(issued_at)
+    if age < -60 or age > START_RESULT_TTL_SECONDS:
+        try:
+            cache.delete(key)
+        except Exception:
+            pass
+        return None
+    return phone
 
 
 def is_android_request(request):
@@ -83,25 +158,32 @@ def android_apk_for_role(role_code):
     }
 
 
-def _render_universal_start(request, template_name, context):
+def _render_universal_start(
+    request,
+    template_name,
+    context,
+    *,
+    referrer_policy='same-origin',
+):
     """Не кешировать результат, содержащий телефон и одноразовый App Link."""
 
     response = render(request, template_name, context)
-    # Android Chrome can submit a regular HTTPS form with ``Origin: null``
-    # when the document forbids every referrer. Django then correctly rejects
-    # the POST before this view sees it. Keep same-origin CSRF evidence while
-    # still hiding the source page from role subdomains and other origins.
-    response['Referrer-Policy'] = 'same-origin'
+    response['Referrer-Policy'] = referrer_policy
     response['X-Robots-Tag'] = 'noindex, nofollow'
     return response
 
 
-@never_cache
-def universal_start_view(request):
-    if request.method != 'POST':
-        return _render_universal_start(request, 'users/universal_start.html', {})
+def _see_other(location):
+    response = HttpResponseRedirect(location)
+    response.status_code = 303
+    response['Cache-Control'] = 'private, no-store, max-age=0'
+    response['Pragma'] = 'no-cache'
+    response['Referrer-Policy'] = 'no-referrer'
+    response['X-Robots-Tag'] = 'noindex, nofollow'
+    return response
 
-    phone = with_country_code(request.POST.get('phone', ''))
+
+def _render_start_result(request, phone):
     matches = [
         candidate
         for candidate in find_unactivated_accesses_by_phone(phone)
@@ -165,6 +247,7 @@ def universal_start_view(request):
                 'submitted_phone': format_phone_for_display(phone),
                 'back_url': reverse('universal_start'),
             },
+            referrer_policy='no-referrer',
         )
 
     # Пинкод уже заведён — значит придумывать его не надо, и обещать обратное
@@ -187,4 +270,35 @@ def universal_start_view(request):
             'has_working_code': has_working_code,
             'is_ios': is_ios_request(request),
         },
+        referrer_policy='no-referrer',
+    )
+
+
+@never_cache
+@require_http_methods(['GET', 'POST'])
+def universal_start_view(request):
+    if request.method == 'POST':
+        phone = with_country_code(request.POST.get('phone', ''))
+        result_token = _issue_start_result(phone)
+        if not result_token:
+            # Даже при сбое Redis POST не должен становиться history entry:
+            # возврат из установщика иначе снова отправит форму.
+            return _see_other(reverse('universal_start'))
+        result_url = f'{reverse("universal_start")}?{urlencode({"result": result_token})}'
+        return _see_other(result_url)
+
+    result_token = request.GET.get('result', '')
+    if result_token:
+        phone = _read_start_result(result_token)
+        if phone is None:
+            return _see_other(reverse('universal_start'))
+        return _render_start_result(request, phone)
+
+    # На единственной странице с POST-формой нужен same-origin referrer:
+    # Android Chrome иначе отправляет Origin:null, и Django отклоняет CSRF.
+    return _render_universal_start(
+        request,
+        'users/universal_start.html',
+        {},
+        referrer_policy='same-origin',
     )
