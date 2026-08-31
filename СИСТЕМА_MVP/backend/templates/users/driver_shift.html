@@ -4950,6 +4950,11 @@ window.bindDriverMobileShell = function () {
     function scheduleDriverTabSettle(expectedTab) {
         invalidateDriverViewportFit();
         var generation = invalidateDriverTabSettle();
+        /* Все вызовы планировщика начинают с той же стабильной базы. Основной
+           click-path выставляет её ещё раньше — до смены active-классов. */
+        shell.dataset.driverDensity = shell.dataset.driverViewportDensity
+            || shell.dataset.driverDensity
+            || "normal";
         window.driverTabSettleFirstFrame = window.requestAnimationFrame(function () {
             window.driverTabSettleFirstFrame = null;
             if (
@@ -4963,9 +4968,6 @@ window.bindDriverMobileShell = function () {
                 window.driverTabSettleSecondFrame = null;
                 var panel = shell.querySelector("[data-driver-tab-panel].is-active");
                 if (!driverTabSettleIsCurrent(generation, expectedTab, panel)) return;
-                shell.dataset.driverDensity = shell.dataset.driverViewportDensity
-                    || shell.dataset.driverDensity
-                    || "normal";
                 fitDriverText(panel);
                 settleDriverTabDensity(generation, expectedTab, panel);
             });
@@ -5287,17 +5289,30 @@ window.bindDriverMobileShell = function () {
         }
         return lines;
     }
-    function fitDriverDialLabel(label) {
+    function driverDialCoreHasVisibleGeometry(core) {
+        if (!core || !core.isConnected || core.hidden) return false;
+        if (core.closest && core.closest("[hidden]")) return false;
+        if (!core.getClientRects || core.getClientRects().length === 0) return false;
+        return core.clientWidth >= 1 && core.clientHeight >= 1;
+    }
+    function fitDriverDialLabel(label, force) {
         var core = label.closest(".driver-work-dial-core");
         var rawText = label.dataset.driverDialRaw || label.textContent.trim().replace(/\s+/g, " ");
-        if (!core || !rawText) {
+        if (!rawText) return;
+        if (!driverDialCoreHasVisibleGeometry(core)) {
+            if (force) delete label.dataset.driverDialFitKey;
             return;
         }
+        var coreWidth = Math.round(core.clientWidth);
+        var coreHeight = Math.round(core.clientHeight);
+        var fitKey = JSON.stringify([rawText, coreWidth, coreHeight]);
+        if (!force && label.dataset.driverDialFitKey === fitKey) return;
+        delete label.dataset.driverDialFitKey;
         label.style.removeProperty("font-size");
         var lines = renderDriverDialLabel(label, rawText);
         var textLength = rawText.replace(/\s+/g, "").length;
         core.classList.toggle("has-multiline-label", lines.length > 1);
-        var maxSize = preferredDriverDialFontSize(core.clientWidth, lines.length, textLength);
+        var maxSize = preferredDriverDialFontSize(coreWidth, lines.length, textLength);
         var minSize = Math.min(maxSize, minimumDriverDialFontSize(lines.length, textLength));
         var low = minSize;
         var high = maxSize;
@@ -5332,31 +5347,48 @@ window.bindDriverMobileShell = function () {
             }
         }
         label.style.fontSize = best.toFixed(2) + "px";
+        label.dataset.driverDialFitKey = fitKey;
     }
-    function fitDriverDialLabels() {
-        shell.querySelectorAll("[data-driver-dial-label]").forEach(fitDriverDialLabel);
+    function fitDriverDialLabels(force) {
+        shell.querySelectorAll("[data-driver-dial-label]").forEach(function (label) {
+            fitDriverDialLabel(label, force);
+        });
     }
-    function scheduleDriverDialLabelFit() {
-        if (window.driverDialLabelFitFrame) {
+    function scheduleDriverDialLabelFit(force) {
+        if (force) window.driverDialLabelFitForce = true;
+        if (
+            window.driverDialLabelFitFrame !== null
+            && typeof window.driverDialLabelFitFrame !== "undefined"
+        ) {
             window.cancelAnimationFrame(window.driverDialLabelFitFrame);
+            window.driverDialLabelFitFrame = null;
         }
         window.driverDialLabelFitFrame = window.requestAnimationFrame(function () {
             window.driverDialLabelFitFrame = null;
-            fitDriverDialLabels();
+            var shouldForce = window.driverDialLabelFitForce === true;
+            window.driverDialLabelFitForce = false;
+            fitDriverDialLabels(shouldForce);
         });
     }
     if (window.driverDialLabelResizeObserver) {
         window.driverDialLabelResizeObserver.disconnect();
     }
     if ("ResizeObserver" in window) {
-        window.driverDialLabelResizeObserver = new ResizeObserver(scheduleDriverDialLabelFit);
+        window.driverDialLabelResizeObserver = new ResizeObserver(function (entries) {
+            var hasVisibleCore = Array.prototype.some.call(entries, function (entry) {
+                return driverDialCoreHasVisibleGeometry(entry.target);
+            });
+            if (hasVisibleCore) scheduleDriverDialLabelFit();
+        });
         shell.querySelectorAll(".driver-work-dial-core").forEach(function (core) {
             window.driverDialLabelResizeObserver.observe(core);
         });
     }
     scheduleDriverDialLabelFit();
     if (document.fonts && document.fonts.ready) {
-        document.fonts.ready.then(scheduleDriverDialLabelFit);
+        document.fonts.ready.then(function () {
+            scheduleDriverDialLabelFit(true);
+        });
     }
     function generateClientActionId(prefix) {
         if (window.crypto && window.crypto.randomUUID) {
@@ -5394,6 +5426,11 @@ window.bindDriverMobileShell = function () {
     }
     function openDriverTab(tab) {
         shell.dataset.activeTab = tab;
+        /* Новая панель должна получить базовую плотность до первого paint:
+           иначе она на кадр наследует tight/compact от предыдущей вкладки. */
+        shell.dataset.driverDensity = shell.dataset.driverViewportDensity
+            || shell.dataset.driverDensity
+            || "normal";
         shell.querySelectorAll("[data-driver-tab-panel]").forEach(function (panel) {
             panel.classList.toggle("is-active", panel.dataset.driverTabPanel === tab);
         });
@@ -5406,6 +5443,7 @@ window.bindDriverMobileShell = function () {
             window.history.replaceState({}, "", url.toString());
         }
         clearDriverMessages();
+        if (tab === "work") scheduleDriverDialLabelFit();
         scheduleDriverTabSettle(tab);
     }
     document.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {

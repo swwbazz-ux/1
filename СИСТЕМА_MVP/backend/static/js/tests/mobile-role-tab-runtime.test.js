@@ -225,6 +225,9 @@ function loadScheduler(options) {
             return overflowCalls;
         },
         schedule(tab) {
+            shell.dataset.driverDensity = shell.dataset.driverViewportDensity
+                || shell.dataset.driverDensity
+                || "normal";
             shell.dataset.activeTab = tab;
             shell.dataset.eoActiveTab = tab;
             activePanel.dataset.driverTabPanel = tab;
@@ -236,6 +239,299 @@ function loadScheduler(options) {
         },
     };
 }
+
+
+function loadDriverDialFitter() {
+    const source = [
+        extractBraceBlock(
+            DRIVER_SOURCE,
+            "function splitDriverDialLabel(text)",
+            "Driver dial label splitter"
+        ),
+        extractBraceBlock(
+            DRIVER_SOURCE,
+            "function preferredDriverDialFontSize(coreWidth, lineCount, textLength)",
+            "Driver preferred dial font size"
+        ),
+        extractBraceBlock(
+            DRIVER_SOURCE,
+            "function minimumDriverDialFontSize(lineCount, textLength)",
+            "Driver minimum dial font size"
+        ),
+        extractBraceBlock(
+            DRIVER_SOURCE,
+            "function renderDriverDialLabel(label, text)",
+            "Driver dial label renderer"
+        ),
+        extractBraceBlock(
+            DRIVER_SOURCE,
+            "function driverDialCoreHasVisibleGeometry(core)",
+            "Driver dial visible-geometry guard"
+        ),
+        extractBraceBlock(
+            DRIVER_SOURCE,
+            "function fitDriverDialLabel(label, force)",
+            "Driver dial label fitter"
+        ),
+    ].join("\n");
+
+    let coreWidth = 260;
+    let coreHeight = 260;
+    let fontSize = "35.5px";
+    let fontSizeWrites = 0;
+    let fontSizeRemovals = 0;
+    let replaceCalls = 0;
+    const attributes = new Map();
+    const labelClasses = new Set(["is-two-line"]);
+    const coreClasses = new Set(["has-multiline-label"]);
+    const children = [{className: "driver-work-label-line", textContent: "ОЖИДАНИЕ"}];
+
+    const label = {
+        dataset: {
+            driverDialRaw: "ОЖИДАНИЕ РАЗГРУЗКИ",
+            driverDialFitText: "ОЖИДАНИЕ РАЗГРУЗКИ",
+            driverDialFitWidth: "260",
+            driverDialFitHeight: "260",
+        },
+        style: {
+            removeProperty(name) {
+                if (name !== "font-size") return;
+                fontSize = "";
+                fontSizeRemovals += 1;
+            },
+            get fontSize() {
+                return fontSize;
+            },
+            set fontSize(value) {
+                fontSize = value;
+                fontSizeWrites += 1;
+            },
+        },
+        classList: {
+            add(name) {
+                labelClasses.add(name);
+            },
+            remove(...names) {
+                names.forEach((name) => labelClasses.delete(name));
+            },
+        },
+        get children() {
+            return children;
+        },
+        get clientWidth() {
+            return Math.max(0, Math.round(coreWidth * 0.92));
+        },
+        get scrollHeight() {
+            if (!(coreHeight > 0)) return 0;
+            const size = parseFloat(fontSize) || 56;
+            return Math.ceil(children.length * size * 1.04 + 13);
+        },
+        get textContent() {
+            return this.dataset.driverDialRaw || children.map((child) => child.textContent).join(" ");
+        },
+        closest(selector) {
+            return selector === ".driver-work-dial-core" ? core : null;
+        },
+        replaceChildren() {
+            replaceCalls += 1;
+            children.splice(0, children.length);
+        },
+        appendChild(child) {
+            children.push(child);
+            return child;
+        },
+        setAttribute(name, value) {
+            attributes.set(name, value);
+        },
+    };
+    const core = {
+        isConnected: true,
+        hidden: false,
+        get clientWidth() {
+            return coreWidth;
+        },
+        get clientHeight() {
+            return coreHeight;
+        },
+        classList: {
+            toggle(name, force) {
+                if (force) coreClasses.add(name);
+                else coreClasses.delete(name);
+            },
+        },
+        querySelector(selector) {
+            if (selector === ".driver-work-percent") return {offsetHeight: coreHeight > 0 ? 22 : 0};
+            if (selector === ".driver-work-note") return {offsetHeight: coreHeight > 0 ? 15 : 0};
+            return null;
+        },
+        closest() {
+            return null;
+        },
+        getClientRects() {
+            return coreWidth > 0 && coreHeight > 0 ? [{}] : [];
+        },
+    };
+    const document = {
+        createElement() {
+            const node = {className: "", textContent: ""};
+            Object.defineProperty(node, "scrollWidth", {
+                get() {
+                    if (!(coreWidth > 0)) return 0;
+                    const size = parseFloat(fontSize) || 56;
+                    return Math.ceil(String(node.textContent || "").length * size * 0.58);
+                },
+            });
+            return node;
+        },
+    };
+    const context = {fit: null};
+    vm.runInNewContext(
+        `${source}\ncontext.fit = fitDriverDialLabel;`,
+        {
+            context,
+            document,
+            window: {
+                getComputedStyle() {
+                    return {rowGap: "12px", gap: "12px"};
+                },
+            },
+        },
+        {filename: "driver_shift.html#driver-dial-fit"}
+    );
+    assert.equal(typeof context.fit, "function");
+
+    return {
+        label,
+        fit(force) {
+            context.fit(label, force);
+        },
+        setGeometry(width, height) {
+            coreWidth = width;
+            coreHeight = height;
+        },
+        setText(text) {
+            label.dataset.driverDialRaw = text;
+        },
+        snapshot() {
+            return {
+                fontSize,
+                fontSizeWrites,
+                fontSizeRemovals,
+                replaceCalls,
+                children: children.map((child) => ({
+                    className: child.className,
+                    textContent: child.textContent,
+                })),
+                dataset: {...label.dataset},
+                attributes: Object.fromEntries(attributes),
+            };
+        },
+    };
+}
+
+
+test("Driver dial fitting preserves the last visible result while its panel is hidden", () => {
+    const runtime = loadDriverDialFitter();
+    runtime.fit();
+    const before = runtime.snapshot();
+
+    runtime.setGeometry(0, 0);
+    runtime.fit();
+
+    assert.deepEqual(
+        runtime.snapshot(),
+        before,
+        "A zero-size hidden core must not clear the font, rebuild children, or overwrite the fit cache."
+    );
+});
+
+
+test("Driver dial fitting is cached until visible geometry or text changes", () => {
+    const runtime = loadDriverDialFitter();
+
+    runtime.fit();
+    const stable = runtime.snapshot();
+    runtime.fit();
+    assert.deepEqual(
+        runtime.snapshot(),
+        stable,
+        "The same text and visible core geometry must not rebuild or refit the label."
+    );
+
+    runtime.setGeometry(300, 300);
+    const beforeResize = runtime.snapshot();
+    runtime.fit();
+    const resized = runtime.snapshot();
+    assert.ok(
+        resized.fontSizeWrites > beforeResize.fontSizeWrites,
+        "A genuine visible core resize must refit the label."
+    );
+
+    runtime.setText("РАЗГРУЗИТЬ");
+    const beforeTextChange = runtime.snapshot();
+    runtime.fit();
+    const changedText = runtime.snapshot();
+    assert.ok(
+        changedText.replaceCalls > beforeTextChange.replaceCalls,
+        "A genuine text change must rebuild and refit the label."
+    );
+    assert.equal(changedText.attributes["aria-label"], "РАЗГРУЗИТЬ");
+});
+
+
+test("Driver dial fitting can be forced after web fonts finish loading", () => {
+    const runtime = loadDriverDialFitter();
+
+    runtime.fit();
+    const stable = runtime.snapshot();
+    runtime.fit();
+    assert.deepEqual(runtime.snapshot(), stable, "An ordinary identical fit must use the cache.");
+
+    runtime.fit(true);
+    const forced = runtime.snapshot();
+    assert.ok(
+        forced.fontSizeWrites > stable.fontSizeWrites,
+        "A forced fit must recalculate font size even when text and core geometry are unchanged."
+    );
+    assert.ok(
+        forced.replaceCalls > stable.replaceCalls,
+        "A forced fit must rebuild the label using the resolved web font metrics."
+    );
+    assert.equal(forced.fontSize, stable.fontSize);
+    assert.equal(forced.dataset.driverDialFitKey, stable.dataset.driverDialFitKey);
+    assert.match(
+        DRIVER_SOURCE,
+        /document\.fonts\.ready\.then\s*\(\s*function\s*\(\s*\)\s*\{[\s\S]*scheduleDriverDialLabelFit\s*\(\s*true\s*\)/,
+        "The web-font completion hook must request a forced dial-label fit."
+    );
+});
+
+
+test("Driver preserves a forced web-font refit requested while Work is hidden", () => {
+    const runtime = loadDriverDialFitter();
+
+    runtime.fit();
+    const visible = runtime.snapshot();
+    runtime.setGeometry(0, 0);
+    runtime.fit(true);
+    const hiddenForced = runtime.snapshot();
+    assert.equal(hiddenForced.fontSize, visible.fontSize);
+    assert.equal(hiddenForced.replaceCalls, visible.replaceCalls);
+    assert.equal(hiddenForced.dataset.driverDialFitKey, undefined);
+
+    runtime.setGeometry(260, 260);
+    runtime.fit();
+    const returned = runtime.snapshot();
+    assert.ok(
+        returned.fontSizeWrites > hiddenForced.fontSizeWrites,
+        "Returning to Work must complete the web-font refit that was requested while hidden."
+    );
+    assert.ok(
+        returned.replaceCalls > hiddenForced.replaceCalls,
+        "The first visible fit after font resolution must rebuild the label with current metrics."
+    );
+    assert.ok(returned.dataset.driverDialFitKey);
+});
 
 
 test("Driver tab settling runs after two frames and replaces stale work", () => {
@@ -333,29 +629,62 @@ test("Driver tab switch cancels an older density frame", () => {
 });
 
 
-test("Driver resets inherited tight density to the viewport baseline", () => {
-    const source = extractMarkedSource(
+test("Driver applies viewport density and schedules Work dial fit before its first paint", () => {
+    const openDriverTab = extractBraceBlock(
+        DRIVER_SOURCE,
+        "function openDriverTab(tab)",
+        "Driver openDriverTab"
+    );
+    const baselineIndex = openDriverTab.search(
+        /shell\.dataset\.driverDensity\s*=\s*shell\.dataset\.driverViewportDensity/
+    );
+    const panelToggleIndex = openDriverTab.search(
+        /panel\.classList\.toggle\s*\(\s*["']is-active["']/
+    );
+    const dialFitIndex = openDriverTab.indexOf("scheduleDriverDialLabelFit", panelToggleIndex);
+    const tabSettleIndex = openDriverTab.indexOf("scheduleDriverTabSettle", panelToggleIndex);
+
+    assert.notEqual(baselineIndex, -1, "Every tab click must restore the viewport density baseline.");
+    assert.notEqual(panelToggleIndex, -1, "The active panel toggle was not found.");
+    assert.ok(
+        baselineIndex < panelToggleIndex,
+        "Density must be stable before the newly selected panel becomes visible."
+    );
+    assert.match(
+        openDriverTab,
+        /tab\s*===\s*["']work["'][\s\S]*scheduleDriverDialLabelFit\s*\(/,
+        "Opening Work must schedule its dial-label fit in the click stack."
+    );
+    assert.ok(
+        dialFitIndex > panelToggleIndex && dialFitIndex < tabSettleIndex,
+        "Work label fitting must be queued after activation and before the generic tab settle."
+    );
+
+    const settleSource = extractMarkedSource(
         DRIVER_SOURCE,
         "/* DRIVER_TAB_SETTLE_START */",
         "/* DRIVER_TAB_SETTLE_END */",
         "Driver tab settle scheduler"
     );
-    const runtime = loadScheduler({
-        source,
-        functionName: "scheduleDriverTabSettle",
-        filename: "driver_shift.html#driver-tab-density-baseline",
-    });
-    runtime.shell.dataset.driverDensity = "tight";
-    runtime.shell.dataset.driverViewportDensity = "normal";
-    runtime.setOverflowResults([false]);
-
-    runtime.schedule("manifest");
-    runtime.queue.runFrame();
-    runtime.queue.runFrame();
-
-    assert.deepEqual(runtime.callbackTabs, ["manifest"]);
-    assert.equal(runtime.shell.dataset.driverDensity, "normal");
-    assert.equal(runtime.queue.pendingCount(), 0);
+    const settleSchedule = extractBraceBlock(
+        settleSource,
+        "function scheduleDriverTabSettle(expectedTab)",
+        "Driver tab settle schedule"
+    );
+    const settleBaselineIndex = settleSchedule.search(
+        /shell\.dataset\.driverDensity\s*=\s*shell\.dataset\.driverViewportDensity/
+    );
+    const firstFrameIndex = settleSchedule.indexOf("window.requestAnimationFrame");
+    const secondFrameIndex = settleSchedule.indexOf("driverTabSettleSecondFrame");
+    assert.ok(
+        settleBaselineIndex !== -1 && settleBaselineIndex < firstFrameIndex,
+        "Any scheduler fallback baseline must also run synchronously before its first frame."
+    );
+    assert.doesNotMatch(
+        settleSchedule.slice(secondFrameIndex),
+        /shell\.dataset\.driverDensity\s*=\s*shell\.dataset\.driverViewportDensity/,
+        "The second frame must not visibly reset the density baseline after the tab was painted."
+    );
 });
 
 
