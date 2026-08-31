@@ -4,6 +4,7 @@ import math
 import re
 import secrets
 from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.contrib import messages
@@ -78,6 +79,74 @@ from .trip_creation import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+TRUCK_WAITING_LOADING_REASON = 'Ожидание погрузки'
+TRUCK_WAITING_UNLOADING_REASON = 'Ожидание разгрузки'
+TRUCK_POST_UNLOAD_COOLDOWN = timedelta(minutes=10)
+
+
+def downtime_event_has_reason(event, reason_name):
+    reason = getattr(event, 'reason', None)
+    actual_name = getattr(reason, 'name', '') if reason else ''
+    return str(actual_name or '').strip().casefold() == str(reason_name or '').strip().casefold()
+
+
+def truck_waiting_loading_downtime(event):
+    return downtime_event_has_reason(event, TRUCK_WAITING_LOADING_REASON)
+
+
+def close_truck_downtime_for_reason(truck, reason_name):
+    if not truck:
+        return 0
+    events = list(
+        DowntimeEvent.objects
+        .select_for_update()
+        .filter(
+            equipment=truck,
+            reason__name__iexact=reason_name,
+            ended_at__isnull=True,
+        )
+        .order_by('id')
+    )
+    if not events:
+        return 0
+    ended_at = timezone.now()
+    for event in events:
+        event.ended_at = ended_at
+        event.save(update_fields=['ended_at'])
+    return len(events)
+
+
+def truck_post_unload_cooldown(truck, *, completed_at=None, now=None):
+    if not truck:
+        return None
+    if completed_at is None:
+        completed_at = (
+            Trip.objects
+            .filter(
+                truck=truck,
+                status=TripStatus.COMPLETED,
+                completed_at__isnull=False,
+            )
+            .order_by('-completed_at')
+            .values_list('completed_at', flat=True)
+            .first()
+        )
+    if not completed_at:
+        return None
+    now = now or timezone.now()
+    remaining_seconds = int(
+        (completed_at + TRUCK_POST_UNLOAD_COOLDOWN - now).total_seconds()
+    )
+    if remaining_seconds <= 0:
+        return None
+    remaining_minutes = max(1, math.ceil(remaining_seconds / 60))
+    return {
+        'code': 'post_unload_cooldown',
+        'label': f'Возвращается к экскаватору · {remaining_minutes} мин.',
+        'remaining_seconds': remaining_seconds,
+    }
 
 
 DISPATCHER_FILTER_KEYS = (
@@ -1483,7 +1552,8 @@ def build_dispatcher_dashboard_context(
             return equipment_state_for('inactive')
         downtime_state_code = downtime_state_code_for(truck.id)
         if downtime_state_code:
-            return equipment_state_for(downtime_state_code)
+            status, label, state_code = equipment_state_for(downtime_state_code)
+            return status, downtime_reason_label_for(truck.id) or label, state_code
         active_trip = active_trip_by_truck_id.get(truck.id)
         if active_trip:
             if active_trip.status in OPEN_TRIP_STATUSES:
@@ -2701,6 +2771,7 @@ def excavator_truck_load_block(
     current_excavator=None,
     active_trip=None,
     active_downtime=None,
+    post_unload_cooldown=None,
     has_open_truck_shift=None,
     has_driver_assignment=None,
 ):
@@ -2727,8 +2798,12 @@ def excavator_truck_load_block(
             .order_by('-started_at', '-id')
             .first()
         )
-    if active_downtime:
+    if active_downtime and not truck_waiting_loading_downtime(active_downtime):
         return excavator_truck_load_block_payload('active_downtime')
+    if post_unload_cooldown is None:
+        post_unload_cooldown = truck_post_unload_cooldown(truck)
+    if post_unload_cooldown:
+        return post_unload_cooldown
     if has_open_truck_shift is None:
         has_open_truck_shift = EmployeeShift.objects.filter(
             equipment=truck,
@@ -2749,6 +2824,7 @@ def excavator_truck_load_block_reason(
     current_excavator=None,
     active_trip=None,
     active_downtime=None,
+    post_unload_cooldown=None,
     has_open_truck_shift=None,
     has_driver_assignment=None,
 ):
@@ -2757,6 +2833,7 @@ def excavator_truck_load_block_reason(
         current_excavator=current_excavator,
         active_trip=active_trip,
         active_downtime=active_downtime,
+        post_unload_cooldown=post_unload_cooldown,
         has_open_truck_shift=has_open_truck_shift,
         has_driver_assignment=has_driver_assignment,
     )
@@ -3111,6 +3188,10 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift):
         'actual_dump_point',
         'is_carryover',
     ])
+    close_truck_downtime_for_reason(
+        trip.truck,
+        TRUCK_WAITING_UNLOADING_REASON,
+    )
     reconcile_excavator_waiting_for_trucks(trip.excavator)
     return True
 
@@ -3341,6 +3422,10 @@ def excavator_truck_loaded_view(request):
             client_action_id=client_action_id,
             trip=trip,
             actor=access.employee,
+        )
+        close_truck_downtime_for_reason(
+            assignment.truck,
+            TRUCK_WAITING_LOADING_REASON,
         )
         close_excavator_open_downtimes(current_excavator)
         reconcile_excavator_waiting_for_trucks(
@@ -3902,6 +3987,10 @@ def excavator_work_view(request):
                             trip=trip,
                             actor=access.employee,
                         )
+                        close_truck_downtime_for_reason(
+                            locked_assignment.truck,
+                            TRUCK_WAITING_LOADING_REASON,
+                        )
                         close_excavator_open_downtimes(locked_excavator)
                         reconcile_excavator_waiting_for_trucks(
                             locked_excavator,
@@ -3971,6 +4060,26 @@ def excavator_work_view(request):
         )
     active_truck_ids = {trip.truck_id for trip in blocking_trips}
     active_trip_by_truck_id = {trip.truck_id: trip for trip in blocking_trips}
+    post_unload_cooldown_by_truck_id = {}
+    if assignment_truck_ids:
+        cooldown_cutoff = timezone.now() - TRUCK_POST_UNLOAD_COOLDOWN
+        for completed_trip in (
+            Trip.objects
+            .filter(
+                truck_id__in=assignment_truck_ids,
+                status=TripStatus.COMPLETED,
+                completed_at__gt=cooldown_cutoff,
+            )
+            .only('truck_id', 'completed_at')
+            .order_by('truck_id', '-completed_at')
+        ):
+            post_unload_cooldown_by_truck_id.setdefault(
+                completed_trip.truck_id,
+                truck_post_unload_cooldown(
+                    completed_trip.truck_id,
+                    completed_at=completed_trip.completed_at,
+                ),
+            )
 
     def equipment_number(equipment):
         return str(getattr(equipment, 'garage_number', '') or equipment or '-')
@@ -4040,6 +4149,7 @@ def excavator_work_view(request):
             current_excavator=current_excavator,
             active_trip=known_active_trip,
             active_downtime=truck_downtime_by_equipment_id.get(assignment.truck_id),
+            post_unload_cooldown=post_unload_cooldown_by_truck_id.get(assignment.truck_id) or False,
             has_open_truck_shift=assignment.truck_id in open_truck_shift_equipment_ids,
             has_driver_assignment=assignment.truck_id in driver_assignment_truck_ids,
         )
@@ -4096,6 +4206,8 @@ def excavator_work_view(request):
             return downtime_equipment_state_code(downtime)
         if active_trip:
             return 'loaded_waiting_unload'
+        if post_unload_cooldown_by_truck_id.get(assignment.truck_id):
+            return 'waiting'
         if assignment.truck_id not in open_truck_shift_equipment_ids:
             if assignment.truck_id in driver_assignment_truck_ids:
                 return 'waiting_for_shift'
@@ -4114,7 +4226,12 @@ def excavator_work_view(request):
         block_reason = load_block['label'] if load_block else ''
         load_block_reason_code = load_block['code'] if load_block else ''
         soft_driver_block = load_block_reason_code in {'no_driver', 'driver_shift_not_started'}
-        state_allows_load = bool(state_ui['allows_drag'] and not state_ui['blocks_operation'])
+        active_truck_downtime = truck_downtime_by_equipment_id.get(assignment.truck_id)
+        is_waiting_for_loading = truck_waiting_loading_downtime(active_truck_downtime)
+        state_allows_load = bool(
+            is_waiting_for_loading
+            or (state_ui['allows_drag'] and not state_ui['blocks_operation'])
+        )
         can_load = bool(not load_block and state_allows_load)
         is_locked = not can_load
         is_inactive = bool((load_block and not soft_driver_block) or (not load_block and not state_allows_load))
@@ -4124,7 +4241,15 @@ def excavator_work_view(request):
             'number': equipment_number(assignment.truck),
             'equipment_state_code': equipment_state_code,
             'status_key': status_key,
-            'status_label': state_ui['label'],
+            'status_label': (
+                active_truck_downtime.reason.button_label
+                if active_truck_downtime
+                else (
+                    block_reason
+                    if load_block_reason_code == 'post_unload_cooldown'
+                    else state_ui['label']
+                )
+            ),
             'target_label': target_label,
             'is_selected': assignment.id == first_ready_assignment_id,
             'is_locked': is_locked,
@@ -4132,6 +4257,7 @@ def excavator_work_view(request):
             'is_load_blocked': bool(load_block and soft_driver_block),
             'can_drag': can_load,
             'can_load': can_load,
+            'is_waiting_for_loading': is_waiting_for_loading,
             'driver_shift_started': assignment.truck_id in open_truck_shift_equipment_ids,
             'block_reason': block_reason,
             'load_block_reason_code': load_block_reason_code,

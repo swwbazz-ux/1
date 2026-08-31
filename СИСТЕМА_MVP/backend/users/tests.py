@@ -127,7 +127,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Работа водителя')
-        self.assertContains(response, 'Подтвердить показания и начать смену')
+        self.assertContains(response, '>Начать смену<')
         self.assertContains(response, 'driver-shift-workspace driver-shift-opening')
         self.assertContains(response, 'Показатели техники')
         self.assertContains(response, 'Итог смены')
@@ -150,13 +150,15 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'data-driver-shift-inputs')
         self.assertContains(response, 'data-driver-shift-scroll')
         self.assertNotContains(response, 'data-driver-shift-inputs hidden')
-        self.assertContains(response, 'Проверить показания')
+        self.assertContains(response, '>Закрыть смену<')
         self.assertContains(response, 'Начало')
         self.assertContains(response, '12560')
         self.assertContains(response, '1354')
         self.assertContains(response, '>Выйти<')
         self.assertNotContains(response, '>Закрытие смены<')
-        self.assertNotContains(response, '>Закрыть смену<')
+        self.assertNotContains(response, 'Проверить показания')
+        self.assertNotContains(response, 'data-driver-shift-review')
+        self.assertNotContains(response, 'driverShiftCloseHoldGuard')
         self.assertContains(response, 'data-driver-manifest-view-open="report"')
         self.assertContains(response, 'data-driver-manifest-view-open="timeline"')
         self.assertContains(response, 'data-driver-report-copy')
@@ -2053,7 +2055,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(login_response.status_code, 200)
         self.assertNotContains(login_response, 'Первичная регистрация водителя')
-        self.assertContains(login_response, 'Подтвердить показания и начать смену')
+        self.assertContains(login_response, '>Начать смену<')
 
     def test_driver_can_open_shift_after_registration(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -2130,19 +2132,9 @@ class AccessLoginTests(TestCase):
             HTTP_HOST='localhost',
         )
 
-        review_response = self.client.post(
-            '/driver/shift/close/',
-            {'end_fuel': '90', 'end_mileage': '2600', 'end_engine_hours': '712', 'shift_action': 'review', 'client_action_id': 'close-handoff'},
-            follow=True,
-            HTTP_HOST='localhost',
-        )
-        self.assertContains(review_response, 'Закрыть смену')
-        self.assertContains(review_response, 'data-driver-shift-review')
-        self.assertContains(review_response, 'data-driver-shift-inputs hidden')
-        self.assertContains(review_response, '→ 90')
         close_response = self.client.post(
             '/driver/shift/close/',
-            {'end_fuel': '90', 'end_mileage': '2600', 'end_engine_hours': '712', 'shift_action': 'close', 'client_action_id': 'close-handoff'},
+            {'end_fuel': '90', 'end_mileage': '2600', 'end_engine_hours': '712', 'client_action_id': 'close-handoff'},
             follow=True,
             HTTP_HOST='localhost',
         )
@@ -2150,6 +2142,10 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(close_response.status_code, 200)
         self.assertContains(close_response, 'Смена закрыта')
+        self.assertTrue(close_response.redirect_chain)
+        self.assertEqual(close_response.redirect_chain[-1][0], '/driver/?tab=manifest')
+        self.assertContains(close_response, 'data-driver-tab-panel="manifest"')
+        self.assertContains(close_response, 'driver-panel driver-tab is-active')
         self.assertIsNotNone(shift.closed_at)
         self.assertEqual(shift.end_fuel, 90)
         self.assertEqual(shift.end_mileage, 2600)
@@ -2159,6 +2155,67 @@ class AccessLoginTests(TestCase):
         self.assertContains(next_open_response, 'value="90')
         self.assertContains(next_open_response, 'value="2600')
         self.assertContains(next_open_response, 'value="712')
+
+    def test_driver_manifest_keeps_last_closed_shift_report(self):
+        truck = self.create_registered_driver_shift()
+        shift = EmployeeShift.objects.get(employee=self.employee, closed_at__isnull=True)
+        now = timezone.now()
+        shift.opened_at = now - timedelta(hours=2)
+        shift.closed_at = now
+        shift.end_fuel = Decimal('90.00')
+        shift.end_mileage = Decimal('2600.00')
+        shift.end_engine_hours = Decimal('712.00')
+        shift.closed_by = self.employee
+        shift.save(update_fields=[
+            'opened_at',
+            'closed_at',
+            'end_fuel',
+            'end_mileage',
+            'end_engine_hours',
+            'closed_by',
+        ])
+
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='7')
+        rock = RockType.objects.create(name='Скальная масса')
+        dump_point = DumpPoint.objects.create(name='Отвал 3')
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            driver=self.employee,
+            loading_shift=shift,
+            unloading_shift=shift,
+            rock_type=rock,
+            dump_point=dump_point,
+            status=TripStatus.COMPLETED,
+            completed_at=now - timedelta(minutes=30),
+        )
+        Trip.objects.filter(pk=trip.pk).update(created_at=now - timedelta(hours=1))
+        reason = DowntimeReason.objects.create(
+            name='Тест заправка после закрытия',
+            short_label='Заправка',
+            show_for_truck_driver=True,
+        )
+        DowntimeEvent.objects.create(
+            equipment=truck,
+            employee=self.employee,
+            reason=reason,
+            started_at=now - timedelta(minutes=25),
+            ended_at=now - timedelta(minutes=15),
+        )
+
+        response = self.client.get('/driver/?tab=manifest', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-driver-tab-panel="manifest"')
+        self.assertContains(response, 'data-driver-report-truck="10"')
+        self.assertContains(response, 'data-driver-report-trip-total="1"')
+        self.assertContains(response, 'data-driver-report-downtime-total="10 мин."')
+        self.assertContains(response, 'data-driver-report-end-fuel="90')
+        self.assertContains(response, 'data-driver-report-end-mileage="2600')
+        self.assertContains(response, 'data-driver-report-end-engine-hours="712')
+        self.assertContains(response, 'data-excavator="7" data-dump-point="Отвал 3"')
+        self.assertContains(response, 'Заправка')
 
     def test_driver_sees_assigned_excavator_without_accept_action(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -2712,8 +2769,11 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'driver-downtime-state-icon-play')
         self.assertContains(response, 'driver-downtime-state-icon-pause')
         self.assertContains(response, 'class="driver-downtime-list"')
-        self.assertContains(response, 'Удерживайте 2 секунды, чтобы начать простой')
-        self.assertContains(response, 'registerDriverDowntimeHold')
+        self.assertContains(response, 'aria-label="Начать простой: Фронт"')
+        self.assertContains(response, 'registerDriverDowntimeAction')
+        self.assertNotContains(response, 'registerDriverDowntimeHold')
+        self.assertNotContains(response, 'Удерживайте полсекунды')
+        self.assertNotContains(response, 'driverShiftOpenConfirmed')
         self.assertContains(response, f'data-driver-downtime-reason-id="{waiting_reason.id}"')
         self.assertContains(response, f'name="reason_id" value="{waiting_reason.id}"')
         self.assertContains(response, 'Фронт')

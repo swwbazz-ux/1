@@ -99,9 +99,11 @@ class LiveRoleReadOnlyClientContractTests(TestCase):
         self.assertIn('window.createDriverRoleHoldGuard', driver_template)
         self.assertGreaterEqual(
             driver_template.count('createDriverRoleHoldGuard({'),
-            2,
+            1,
         )
-        self.assertIn('form.dataset.driverShiftConfirmed = "false";', driver_template)
+        self.assertIn('closeButton.textContent = "Закрываем смену";', driver_template)
+        self.assertNotIn('driverShiftCloseHoldGuard', driver_template)
+        self.assertIn('function driverOpeningRoleIsReadonly()', driver_template)
         self.assertIn('delete holdForm.dataset.holdComplete;', driver_template)
         self.assertIn('holdButton.classList.remove("is-holding", "is-pending");', driver_template)
         self.assertNotIn('resetHold();', driver_template)
@@ -112,6 +114,8 @@ class LiveRoleReadOnlyClientContractTests(TestCase):
         self.assertEqual(driver_template.count('data-driver-in-place='), 4)
         self.assertIn('window.submitDriverFormInPlace = function (form, options)', driver_template)
         self.assertIn('form.getAttribute("action") || window.location.href', driver_template)
+        self.assertIn('window.history.replaceState(', driver_template)
+        self.assertNotIn('freshShell.dataset.activeTab = oldShell.dataset.activeTab', driver_template)
         self.assertIn('{fallbackToNavigation: false}', driver_template)
 
     def test_role_readonly_runtime_contract(self):

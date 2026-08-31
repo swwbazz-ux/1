@@ -648,7 +648,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(mobile_tiles['102']['label'], 'Свободен')
         self.assertEqual(mobile_tiles['103']['status'], 'red')
         self.assertEqual(mobile_tiles['103']['equipment_state_code'], 'breakdown')
-        self.assertEqual(mobile_tiles['103']['label'], 'Поломка')
+        self.assertEqual(mobile_tiles['103']['label'], 'Авария самосвала')
         self.assertEqual(mobile_tiles['104']['status'], 'green')
         self.assertEqual(mobile_tiles['104']['equipment_state_code'], 'loaded_waiting_unload')
         self.assertEqual(mobile_tiles['104']['label'], 'На разгрузку')

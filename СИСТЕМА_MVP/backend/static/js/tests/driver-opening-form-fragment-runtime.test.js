@@ -124,7 +124,7 @@ function createRuntime(options = {}) {
     const formListeners = new Map();
     const button = {
         disabled: false,
-        textContent: "Подтвердить показания и начать смену",
+        textContent: "Начать смену",
         classList: new FakeClassList(),
     };
     const form = {

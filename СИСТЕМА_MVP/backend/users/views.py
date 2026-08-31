@@ -224,7 +224,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v166'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v167'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -3280,6 +3280,19 @@ def driver_shift_view(request):
         return redirect('driver_work')
 
     open_shift = driver_open_shift_queryset(access.employee).order_by('-opened_at').first()
+    last_closed_shift = (
+        EmployeeShift.objects
+        .select_related('equipment', 'equipment__equipment_type')
+        .filter(employee=access.employee, closed_at__isnull=False)
+        .filter(
+            Q(workplace_code='driver')
+            | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
+        )
+        .order_by('-closed_at')
+        .first()
+    )
+    report_shift = open_shift or last_closed_shift
+    report_truck = report_shift.equipment if report_shift else None
     work_assignment = get_active_equipment_assignment(access.employee, 'driver')
     assignment_state = work_assignment_state(access.employee, work_assignment)
     shift_start_conflict_message = ''
@@ -3353,10 +3366,22 @@ def driver_shift_view(request):
             .order_by('-started_at')
             .first()
         )
+
+    if report_shift and report_truck:
+        legacy_driver_trip_filter = Q(
+            driver=access.employee,
+            completed_at__gte=report_shift.opened_at,
+        )
+        if report_shift.closed_at:
+            legacy_driver_trip_filter &= Q(completed_at__lte=report_shift.closed_at)
         shift_trips = list(
             Trip.objects
             .select_related('excavator', 'rock_type', 'dump_point', 'assigned_dump_point', 'actual_dump_point')
-            .filter(Q(unloading_shift=open_shift) | Q(loading_shift=open_shift) | Q(driver=access.employee, completed_at__gte=open_shift.opened_at))
+            .filter(
+                Q(unloading_shift=report_shift)
+                | Q(loading_shift=report_shift)
+                | legacy_driver_trip_filter
+            )
             .distinct()
             .order_by('created_at')[:30]
         )
@@ -3364,7 +3389,8 @@ def driver_shift_view(request):
     for trip in shift_trips:
         started_at = timezone.localtime(trip.created_at) if trip.created_at else None
         completed_at = timezone.localtime(trip.completed_at) if trip.completed_at else None
-        finish_for_duration = completed_at or timezone.localtime(timezone.now())
+        duration_end = report_shift.closed_at if report_shift and report_shift.closed_at else timezone.now()
+        finish_for_duration = completed_at or timezone.localtime(duration_end)
         duration_seconds = 0
         if started_at:
             duration_seconds = max(0, int((finish_for_duration - started_at).total_seconds()))
@@ -3392,22 +3418,22 @@ def driver_shift_view(request):
     driver_shift_downtime_events = []
     driver_shift_downtime_rows = []
     driver_shift_timeline = []
-    if current_truck and open_shift:
-        shift_period_end = timezone.now()
+    if report_truck and report_shift:
+        shift_period_end = report_shift.closed_at or timezone.now()
         driver_shift_downtime_events = list(
             DowntimeEvent.objects
             .select_related('reason')
             .filter(
-                equipment=current_truck,
+                equipment=report_truck,
                 employee=access.employee,
                 started_at__lt=shift_period_end,
             )
-            .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=open_shift.opened_at))
+            .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=report_shift.opened_at))
             .order_by('started_at')
         )
         downtime_totals = {}
         for event in driver_shift_downtime_events:
-            overlap_start = max(event.started_at, open_shift.opened_at)
+            overlap_start = max(event.started_at, report_shift.opened_at)
             overlap_end = min(event.ended_at or shift_period_end, shift_period_end)
             duration_seconds = max(0, int((overlap_end - overlap_start).total_seconds()))
             reason_label = event.reason.button_label
@@ -3461,8 +3487,15 @@ def driver_shift_view(request):
         driver_status_class = 'is-loaded'
         driver_target_label = active_trip.actual_dump_point or active_trip.dump_point
     elif active_downtime:
-        driver_status = 'ПРОСТОЙ'
+        driver_status = active_downtime.reason.button_label
         driver_status_class = 'is-downtime'
+
+    driver_waiting_unload = bool(
+        active_trip
+        and active_downtime
+        and str(active_downtime.reason.name or '').strip().casefold()
+        == 'Ожидание разгрузки'.casefold()
+    )
 
     driver_work_excavator = active_trip.excavator if active_trip else (current_assignment.excavator if current_assignment else None)
     driver_work_context_placement = None
@@ -3511,8 +3544,15 @@ def driver_shift_view(request):
     ]
     driver_context_parts = [driver_complex_label, *driver_geology_parts]
     driver_context_label = ' · '.join(driver_context_parts)
-    driver_dial_label = str(driver_target_label) if active_trip else driver_excavator_short_label(driver_work_excavator)
-    driver_dial_note = 'ТОЧКА РАЗГРУЗКИ' if active_trip else 'НА ЗАГРУЗКУ'
+    if active_trip:
+        driver_dial_label = str(driver_target_label)
+        driver_dial_note = 'ОЖИДАНИЕ РАЗГРУЗКИ' if driver_waiting_unload else 'ТОЧКА РАЗГРУЗКИ'
+    elif active_downtime:
+        driver_dial_label = active_downtime.reason.button_label
+        driver_dial_note = 'ПРИЧИНА ПРОСТОЯ'
+    else:
+        driver_dial_label = driver_excavator_short_label(driver_work_excavator)
+        driver_dial_note = 'НА ЗАГРУЗКУ'
     driver_new_assignment_label = ''
     driver_assignment_action_label = ''
     driver_assignment_effective_at = ''
@@ -3545,7 +3585,13 @@ def driver_shift_view(request):
         open_shift,
     )
     shift_downtime_total_label = driver_format_duration_label(shift_downtime_total_seconds)
-    shift_downtime_report_total_label = driver_report_duration_label(shift_downtime_total_seconds, total=True)
+    shift_downtime_report_total_seconds = sum(
+        row['seconds'] for row in driver_shift_downtime_rows
+    )
+    shift_downtime_report_total_label = driver_report_duration_label(
+        shift_downtime_report_total_seconds,
+        total=True,
+    )
     active_downtime_started_at = ''
     active_downtime_status_key = 'yellow'
     if active_downtime and active_downtime.started_at:
@@ -3553,13 +3599,6 @@ def driver_shift_view(request):
         active_downtime_elapsed_label = driver_format_duration_label(active_downtime_elapsed_seconds)
         active_downtime_started_at = active_downtime.started_at.isoformat()
         active_downtime_status_key = driver_downtime_reason_status_key(active_downtime.reason)
-
-    last_closed_shift = None
-    if assigned_truck:
-        last_closed_shift = EmployeeShift.objects.filter(
-            equipment=assigned_truck,
-            closed_at__isnull=False,
-        ).order_by('-closed_at').first()
 
     if request.method == 'POST' and not open_shift:
         form = DriverOpenShiftForm(request.POST, employee=access.employee, work_assignment=work_assignment) if assignment_state == 'assigned' else None
@@ -3652,10 +3691,13 @@ def driver_shift_view(request):
             'driver_shift_report_trip_rows': driver_shift_report_trip_rows,
             'driver_shift_downtime_rows': driver_shift_downtime_rows,
             'driver_shift_timeline': driver_shift_timeline,
-            'driver_shift_report_date': timezone.localtime(open_shift.opened_at).strftime('%d.%m.%Y') if open_shift else '—',
-            'driver_shift_report_shift': open_shift.get_shift_type_display() if open_shift else 'Смена не открыта',
+            'driver_shift_report_date': timezone.localtime(report_shift.opened_at).strftime('%d.%m.%Y') if report_shift else '—',
+            'driver_shift_report_shift': report_shift.get_shift_type_display() if report_shift else 'Смена не открыта',
             'driver_shift_report_driver': driver_employee_short_name(access.employee),
-            'driver_shift_report_truck': driver_equipment_number(current_truck) if current_truck else '—',
+            'driver_shift_report_truck': driver_equipment_number(report_truck) if report_truck else '—',
+            'driver_shift_report_end_fuel': report_shift.end_fuel if report_shift and report_shift.closed_at else None,
+            'driver_shift_report_end_mileage': report_shift.end_mileage if report_shift and report_shift.closed_at else None,
+            'driver_shift_report_end_engine_hours': report_shift.end_engine_hours if report_shift and report_shift.closed_at else None,
             'shift_plan_percent': shift_plan_percent,
             'shift_plan_status': shift_plan['status'],
             'shift_plan_status_label': shift_plan['status_label'],
@@ -3667,6 +3709,7 @@ def driver_shift_view(request):
             'shift_plan_visual': shift_plan['visual'],
             'driver_status': driver_status,
             'driver_status_class': driver_status_class,
+            'driver_waiting_unload': driver_waiting_unload,
             'driver_target_label': driver_target_label,
             'driver_header_label': driver_header_label,
             'driver_header_truck_label': driver_header_truck_label,
@@ -3761,60 +3804,40 @@ def driver_close_shift_view(request):
     ).exists()
     if client_action_id and completed_action():
         messages.success(request, 'Смена закрыта.')
-        return redirect('driver_work')
+        return redirect(f"{reverse('driver_work')}?tab=manifest")
 
     open_shift = driver_open_shift_queryset(access.employee).order_by('-opened_at').first()
     if not open_shift:
         if client_action_id and completed_action():
             messages.success(request, 'Смена закрыта.')
-            return redirect('driver_work')
+            return redirect(f"{reverse('driver_work')}?tab=manifest")
         messages.error(request, 'Открытая смена не найдена.')
         return redirect('driver_work')
 
     form = DriverCloseShiftForm(request.POST, instance=open_shift)
     request._driver_close_form = form
-    request._driver_close_review = None
-    action = request.POST.get('shift_action', 'review')
     if form.is_valid():
         readings = {
             'end_fuel': form.cleaned_data['end_fuel'],
             'end_mileage': form.cleaned_data['end_mileage'],
             'end_engine_hours': form.cleaned_data['end_engine_hours'],
         }
-        review_key = f'driver_shift_close_review_{open_shift.pk}'
-        normalized = {field: str(value) for field, value in readings.items()}
-        if action == 'review':
-            request.session[review_key] = normalized
-            request._driver_close_review = {
-                'start_fuel': open_shift.start_fuel,
-                'end_fuel': readings['end_fuel'],
-                'start_mileage': open_shift.start_mileage,
-                'end_mileage': readings['end_mileage'],
-                'mileage_delta': readings['end_mileage'] - open_shift.start_mileage,
-                'start_engine_hours': open_shift.start_engine_hours,
-                'end_engine_hours': readings['end_engine_hours'],
-                'engine_hours_delta': readings['end_engine_hours'] - open_shift.start_engine_hours,
-            }
-        elif request.session.get(review_key) != normalized:
-            form.add_error(None, 'Показания изменились после проверки. Проверьте их повторно.')
+        try:
+            with transaction.atomic():
+                Employee.objects.select_for_update().get(pk=access.employee_id)
+                if not role_session_state(request, access)['is_active']:
+                    raise ValidationError('Роль неактивна — доступен только просмотр.')
+                close_driver_shift(
+                    shift=open_shift,
+                    employee=access.employee,
+                    readings=readings,
+                    client_action_id=form.cleaned_data.get('client_action_id') or secrets.token_urlsafe(24),
+                )
+        except ValidationError as error:
+            form.add_error(None, error)
         else:
-            try:
-                with transaction.atomic():
-                    Employee.objects.select_for_update().get(pk=access.employee_id)
-                    if not role_session_state(request, access)['is_active']:
-                        raise ValidationError('Роль неактивна — доступен только просмотр.')
-                    close_driver_shift(
-                        shift=open_shift,
-                        employee=access.employee,
-                        readings=readings,
-                        client_action_id=form.cleaned_data.get('client_action_id') or secrets.token_urlsafe(24),
-                    )
-            except ValidationError as error:
-                form.add_error(None, error)
-            else:
-                request.session.pop(review_key, None)
-                messages.success(request, 'Смена закрыта.')
-                return redirect('driver_work')
+            messages.success(request, 'Смена закрыта.')
+            return redirect(f"{reverse('driver_work')}?tab=manifest")
     request.GET = request.GET.copy()
     request.GET['tab'] = 'shift'
     return driver_shift_view(request)

@@ -878,38 +878,17 @@ test("driver hold final callback rechecks readonly before local state changes", 
     assert.ok(state.resets >= 1);
 });
 
-test("production driver reading input handler cancels the real shift-close guard", () => {
+test("production driver shift-close submits in one tap and blocks readonly role", () => {
     const runtime = createHoldRuntime();
-    vm.runInNewContext(extractDriverHoldGuardSource(), {
-        window: runtime.window,
-        Date: runtime.FakeDate,
-    });
-
     const form = new FakeFormElement({method: "post", action: "/driver/shift/close/"});
     const closeButton = new FakeElement("button");
-    const readingInput = new FakeElement("input", {type: "number"});
-    const shiftAction = new FakeElement("input", {type: "hidden"});
-    const reviewPanel = new FakeElement("section");
-    const inputsSection = new FakeElement("section");
-    shiftAction.value = "close";
-    form.dataset.driverShiftConfirmed = "true";
-    form.classList.add("is-reviewed");
-    reviewPanel.hidden = false;
-    inputsSection.hidden = true;
-    form.appendChild(readingInput);
-    form.appendChild(shiftAction);
-
     const binding = extractDriverShiftCloseBindingSource();
     vm.runInNewContext(
         `
         (function () {
             var form = context.form;
             var closeButton = context.closeButton;
-            var shiftAction = context.shiftAction;
-            var inputsSection = context.inputsSection;
             var shiftScroll = null;
-            var reviewPanel = context.reviewPanel;
-            var editButton = null;
             function driverRoleIsReadonly() {
                 return window.isAppRoleReadonly();
             }
@@ -921,39 +900,38 @@ test("production driver reading input handler cancels the real shift-close guard
             context: {
                 form,
                 closeButton,
-                shiftAction,
-                inputsSection,
-                reviewPanel,
             },
         }
     );
 
-    assert.ok(runtime.window.driverShiftCloseHoldGuard);
-    assert.equal(runtime.window.driverShiftCloseHoldGuard.start(), true);
-    runtime.advance(800);
-    runtime.runFrames();
-    assert.ok(
-        Number.parseFloat(
-            closeButton.style.getPropertyValue("--driver-shift-hold")
-        ) > 0
-    );
-    closeButton.classList.add("is-pending");
+    assert.equal(form.dispatchEvent(createEvent("submit", form)), true);
+    assert.equal(closeButton.disabled, true);
+    assert.equal(closeButton.classList.contains("is-pending"), true);
+    assert.equal(closeButton.textContent, "Закрываем смену");
 
-    readingInput.dispatchEvent({type: "input", target: readingInput});
-
-    assert.equal(shiftAction.value, "review");
-    assert.equal(form.dataset.driverShiftDirty, "true");
-    assert.equal(form.dataset.driverShiftConfirmed, "false");
-    assert.equal(reviewPanel.hidden, true);
-    assert.equal(inputsSection.hidden, false);
-    assert.equal(form.classList.contains("is-reviewed"), false);
-    assert.equal(closeButton.classList.contains("is-holding"), false);
-    assert.equal(closeButton.classList.contains("is-pending"), false);
-    assert.equal(
-        closeButton.style.getPropertyValue("--driver-shift-hold"),
-        "0%"
+    const readonlyRuntime = createHoldRuntime();
+    readonlyRuntime.setReadonly(true);
+    const readonlyForm = new FakeFormElement({method: "post", action: "/driver/shift/close/"});
+    const readonlyButton = new FakeElement("button");
+    vm.runInNewContext(
+        `
+        (function () {
+            var form = context.form;
+            var closeButton = context.closeButton;
+            var shiftScroll = null;
+            function driverRoleIsReadonly() {
+                return window.isAppRoleReadonly();
+            }
+            ${binding.source}
+        })();
+        `,
+        {
+            window: readonlyRuntime.window,
+            context: {form: readonlyForm, closeButton: readonlyButton},
+        }
     );
-    assert.equal(runtime.pendingTimers(), 0);
-    assert.equal(runtime.pendingFrames(), 0);
-    assert.equal(/\bresetHold\s*\(/.test(binding.template), false);
+    assert.equal(readonlyForm.dispatchEvent(createEvent("submit", readonlyForm)), false);
+    assert.equal(readonlyButton.disabled, false);
+    assert.equal(binding.source.includes("holdMs"), false);
+    assert.equal(binding.template.includes("driverShiftCloseHoldGuard"), false);
 });

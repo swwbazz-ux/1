@@ -474,7 +474,7 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(trucks_by_name['11']['label'], 'На разгрузку')
         self.assertEqual(trucks_by_name['12']['status'], 'red')
         self.assertEqual(trucks_by_name['12']['equipment_state_code'], 'breakdown')
-        self.assertEqual(trucks_by_name['12']['label'], 'Поломка')
+        self.assertEqual(trucks_by_name['12']['label'], 'Аварийный простой')
         assigned_tile = next(tile for tile in complex_by_id['K-1']['active_truck_tiles'] if tile['name'] == '13')
         self.assertEqual(assigned_tile['status'], 'blue')
         self.assertEqual(assigned_tile['equipment_state_code'], 'assigned')
@@ -2502,7 +2502,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(waiting.employee, self.operator)
         self.assertEqual(waiting.comment, 'Автоматически по производственному событию')
 
-    def test_trip_unloaded_closes_automatic_waiting_for_trucks(self):
+    def test_trip_unloaded_keeps_excavator_waiting_during_return_cooldown(self):
         load_response = self.post_truck_loaded(client_action_id='waiting-unload')
         trip = Trip.objects.get(id=json.loads(load_response.content.decode('utf-8'))['trip_id'])
         waiting = DowntimeEvent.objects.get(
@@ -2513,6 +2513,13 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         finalize_trip_unloaded(trip, driver=self.driver, unloading_shift=self.truck_shift)
 
+        waiting.refresh_from_db()
+        self.assertIsNone(waiting.ended_at)
+
+        trip.refresh_from_db()
+        trip.completed_at = timezone.now() - timedelta(minutes=11)
+        trip.save(update_fields=['completed_at'])
+        self.client.get(reverse('excavator_work'))
         waiting.refresh_from_db()
         self.assertIsNotNone(waiting.ended_at)
 
@@ -2609,6 +2616,57 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('простое', payload['error'])
         self.assertEqual(Trip.objects.count(), 0)
 
+    def test_waiting_for_loading_truck_stays_available_and_closes_on_load(self):
+        waiting_reason, _ = DowntimeReason.objects.get_or_create(
+            name='Ожидание погрузки',
+            defaults={
+                'short_label': 'Ожидание погрузки',
+                'show_for_truck_driver': True,
+            },
+        )
+        waiting = DowntimeEvent.objects.create(
+            equipment=self.truck,
+            employee=self.driver,
+            reason=waiting_reason,
+            started_at=timezone.now() - timedelta(minutes=5),
+        )
+
+        work_response = self.client.get(reverse('excavator_work'))
+
+        card = work_response.context['truck_cards'][0]
+        self.assertEqual(card['status_label'], 'Ожидание погрузки')
+        self.assertTrue(card['is_waiting_for_loading'])
+        self.assertTrue(card['can_load'])
+        self.assertTrue(card['can_drag'])
+
+        load_response = self.post_truck_loaded(client_action_id='waiting-loading-finished')
+
+        self.assertEqual(load_response.status_code, 200)
+        waiting.refresh_from_db()
+        self.assertIsNotNone(waiting.ended_at)
+
+    def test_excavator_card_shows_actual_truck_downtime_reason(self):
+        refuel_reason, _ = DowntimeReason.objects.get_or_create(
+            name='Заправка',
+            defaults={
+                'short_label': 'Заправка',
+                'show_for_truck_driver': True,
+            },
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.truck,
+            employee=self.driver,
+            reason=refuel_reason,
+            started_at=timezone.now() - timedelta(minutes=3),
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        card = response.context['truck_cards'][0]
+        self.assertEqual(card['status_label'], 'Заправка')
+        self.assertFalse(card['can_load'])
+        self.assertContains(response, '>Заправка</span>')
+
     def test_truck_loaded_publishes_operational_state_event(self):
         response = self.post_truck_loaded(client_action_id='event-load')
 
@@ -2624,7 +2682,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         ).first()
         self.assertIsNotNone(event)
 
-    def test_dispatcher_assigned_truck_load_unload_cycle_returns_available_to_excavator(self):
+    def test_dispatcher_assigned_truck_load_unload_cycle_waits_ten_minutes_before_reuse(self):
         kkd = DumpPoint.objects.create(name='ККД')
         assignment = HaulAssignment.objects.get(truck=self.truck, excavator=self.excavator)
         start_response = self.client.get(reverse('excavator_work'))
@@ -2669,8 +2727,63 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         finish_response = self.client.get(reverse('excavator_work'))
         finish_cards_by_number = {card['number']: card for card in finish_response.context['truck_cards']}
-        self.assertEqual(finish_cards_by_number['21']['equipment_state_code'], 'assigned')
-        self.assertTrue(finish_cards_by_number['21']['can_drag'])
+        cooldown_card = finish_cards_by_number['21']
+        self.assertEqual(cooldown_card['equipment_state_code'], 'waiting')
+        self.assertEqual(cooldown_card['load_block_reason_code'], 'post_unload_cooldown')
+        self.assertIn('Возвращается к экскаватору', cooldown_card['status_label'])
+        self.assertFalse(cooldown_card['can_drag'])
+        self.assertFalse(cooldown_card['can_load'])
+
+        blocked_reload = self.post_truck_loaded(client_action_id='cycle-too-early')
+        self.assertEqual(blocked_reload.status_code, 409)
+        self.assertEqual(blocked_reload.json()['load_block_reason_code'], 'post_unload_cooldown')
+
+        trip.completed_at = timezone.now() - timedelta(minutes=11)
+        trip.save(update_fields=['completed_at'])
+        returned_response = self.client.get(reverse('excavator_work'))
+        returned_cards = {card['number']: card for card in returned_response.context['truck_cards']}
+        self.assertEqual(returned_cards['21']['equipment_state_code'], 'assigned')
+        self.assertTrue(returned_cards['21']['can_drag'])
+        self.assertTrue(returned_cards['21']['can_load'])
+
+    def test_waiting_for_unloading_uses_one_tap_and_closes_with_trip(self):
+        load_response = self.post_truck_loaded(client_action_id='waiting-unload-one-tap')
+        trip = Trip.objects.get(id=load_response.json()['trip_id'])
+        waiting_reason, _ = DowntimeReason.objects.get_or_create(
+            name='Ожидание разгрузки',
+            defaults={
+                'short_label': 'Ожидание разгрузки',
+                'show_for_truck_driver': True,
+            },
+        )
+        waiting = DowntimeEvent.objects.create(
+            equipment=self.truck,
+            employee=self.driver,
+            reason=waiting_reason,
+            started_at=timezone.now() - timedelta(minutes=2),
+        )
+        driver_client = self.client_class()
+        session = driver_client.session
+        session['employee_access_id'] = self.driver_access.id
+        session.save()
+
+        work_response = driver_client.get(reverse('driver_work'))
+
+        self.assertTrue(work_response.context['driver_waiting_unload'])
+        self.assertEqual(work_response.context['driver_dial_note'], 'ОЖИДАНИЕ РАЗГРУЗКИ')
+        self.assertContains(work_response, 'data-driver-unload-one-tap="true"')
+        self.assertContains(work_response, 'is-waiting-unload')
+
+        complete_response = driver_client.post(
+            reverse('driver_complete_trip', args=[trip.id]),
+            data={'client_action_id': 'waiting-unload-complete'},
+        )
+
+        self.assertEqual(complete_response.status_code, 302)
+        waiting.refresh_from_db()
+        trip.refresh_from_db()
+        self.assertIsNotNone(waiting.ended_at)
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
 
     def test_truck_loaded_cancel_returns_truck_to_assigned_state(self):
         no_access_response = Client().post(
