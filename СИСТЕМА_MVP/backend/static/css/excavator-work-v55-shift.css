@@ -4527,3 +4527,73 @@ body.excavator-operator-screen .eo-dashboard-plan-ring span {
     position: relative;
     z-index: 1;
 }
+
+/* Клавиатура уменьшает visualViewport и, следом, контейнер вкладки «Смена».
+   В коротком контейнере нельзя продолжать делить остаток высоты на доли:
+   минимальная высота полей тогда выходит за границы grid-track, и соседние
+   карточки визуально наезжают друг на друга. Оставляем шапку и действия на
+   месте, а среднюю часть переводим на естественную высоту и прокрутку. */
+@container eo-shift (max-height: 430px) {
+    body.excavator-operator-screen .eo-shift-scroll {
+        align-content: start !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        overscroll-behavior-x: none !important;
+        overscroll-behavior-y: contain !important;
+        -webkit-overflow-scrolling: touch;
+        scroll-padding-block: 4px 10px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-scroll > .eo-shift-section {
+        align-self: start !important;
+        height: auto !important;
+        min-height: max-content !important;
+        overflow: hidden !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid {
+        flex: none !important;
+        height: auto !important;
+        min-height: 0 !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid > div {
+        height: auto !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics .eo-field-card:focus-within {
+        scroll-margin-block: 6px;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid {
+        grid-template-rows: minmax(52px, auto) !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-grid .eo-shift-result-fact {
+        grid-template-rows: auto auto auto !important;
+    }
+}
+
+@container eo-shift (max-height: 430px) and (max-width: 719px) {
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form[data-eo-shift-state="closed"] .eo-shift-scroll,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form[data-eo-shift-state="open"] .eo-shift-scroll {
+        grid-template-columns: minmax(0, 1fr) !important;
+        grid-template-rows: none !important;
+        grid-auto-rows: max-content !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-metrics {
+        grid-template-rows: repeat(2, minmax(54px, auto)) !important;
+    }
+
+}
+
+@container eo-shift (max-height: 430px) and (min-width: 720px) {
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form[data-eo-shift-state="closed"] .eo-shift-scroll,
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form[data-eo-shift-state="open"] .eo-shift-scroll {
+        grid-template-rows: max-content !important;
+        grid-auto-rows: max-content !important;
+    }
+}
