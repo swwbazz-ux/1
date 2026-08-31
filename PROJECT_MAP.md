@@ -39,7 +39,7 @@ Backend является основным рабочим приложением.
 - Маршруты: `/driver/`, `/driver/shift/`.
 - Manifest: `/driver.webmanifest`.
 - Service worker: `/driver-sw.js`.
-- Shell: `driver-mobile-shell-v120`.
+- Shell: `driver-mobile-shell-v170` (локально подготовлен; production остаётся на `v169` до отдельной публикации).
 
 ### Машинист экскаватора
 
@@ -48,7 +48,7 @@ Backend является основным рабочим приложением.
 - Маршрут: `/excavator/work/`.
 - Manifest: `/excavator.webmanifest`.
 - Service worker: `/excavator-sw.js`.
-- Shell: `excavator-mobile-shell-v112`.
+- Shell: `excavator-mobile-shell-v165` (локально подготовлен; production остаётся на `v164` до отдельной публикации).
 
 ### Горный мастер
 

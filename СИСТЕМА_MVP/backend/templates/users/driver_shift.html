@@ -4714,22 +4714,38 @@ window.bindDriverMobileShell = function () {
         return Math.round(total);
     }
     var driverStableViewportHeight = 0;
+    var driverStableViewportWidth = 0;
     function driverIsEditingField() {
         var active = document.activeElement;
         return !!(active && active.matches && active.matches("input, textarea, select"));
     }
-    function driverVisualViewportHeight() {
+    function driverCurrentViewportMetrics() {
         var viewport = window.visualViewport;
         var height = viewport && Number(viewport.height) > 0 ? Number(viewport.height) : Number(window.innerHeight);
         height = Math.round(height || document.documentElement.clientHeight || 0);
+        var width = viewport && Number(viewport.width) > 0 ? Number(viewport.width) : Number(window.innerWidth);
+        width = Math.round(width || document.documentElement.clientWidth || 0);
+        return {height: height, width: width};
+    }
+    function driverViewportIsTemporarilyReduced() {
+        if (!(driverStableViewportHeight > 0) || !(driverStableViewportWidth > 0)) return false;
+        var metrics = driverCurrentViewportMetrics();
+        var sameWidth = Math.abs(metrics.width - driverStableViewportWidth) <= 24;
+        var keyboardGap = Math.max(96, Math.round(driverStableViewportHeight * 0.18));
+        return sameWidth && metrics.height < driverStableViewportHeight - keyboardGap;
+    }
+    function driverVisualViewportHeight() {
+        var metrics = driverCurrentViewportMetrics();
+        var height = metrics.height;
         /* Пока открыта клавиатура, видимая часть экрана сжимается почти вдвое.
            Подгонять под неё всю разметку нельзя — строки налезают друг на
            друга. Держим высоту, измеренную без клавиатуры: до нужного поля
            экран и так доводит прокрутка. */
-        if (driverIsEditingField()) {
+        if (driverIsEditingField() || driverViewportIsTemporarilyReduced()) {
             if (driverStableViewportHeight > 0) height = driverStableViewportHeight;
         } else {
             driverStableViewportHeight = height;
+            driverStableViewportWidth = metrics.width;
         }
         return Math.max(320, height - driverLeadingBannerHeight());
     }
@@ -4788,9 +4804,10 @@ window.bindDriverMobileShell = function () {
         {selector: ".driver-work-context-location", min: 11, widthOnly: true},
         {selector: ".driver-work-context-rock", min: 11, widthOnly: true}
     ];
-    function fitDriverText() {
+    function fitDriverText(root) {
+        var fitRoot = root && typeof root.querySelectorAll === "function" ? root : shell;
         DRIVER_FIT_TARGETS.forEach(function (target) {
-            shell.querySelectorAll(target.selector).forEach(function (node) {
+            fitRoot.querySelectorAll(target.selector).forEach(function (node) {
                 shrinkDriverTextToFit(node, target.min, target.widthOnly);
             });
         });
@@ -4817,7 +4834,28 @@ window.bindDriverMobileShell = function () {
             window.setTimeout(reveal, 320);
         });
     }
-    function fitDriverViewport() {
+    function cancelDriverViewportFitFrames() {
+        [
+            "driverViewportFitFrame",
+            "driverViewportFitTextFrame",
+            "driverViewportFitDensityFrame"
+        ].forEach(function (key) {
+            if (window[key] !== null && typeof window[key] !== "undefined") {
+                window.cancelAnimationFrame(window[key]);
+                window[key] = null;
+            }
+        });
+    }
+    function invalidateDriverViewportFit() {
+        window.driverViewportFitGeneration = Number(window.driverViewportFitGeneration || 0) + 1;
+        cancelDriverViewportFitFrames();
+        return window.driverViewportFitGeneration;
+    }
+    function driverViewportFitIsCurrent(generation) {
+        return generation === window.driverViewportFitGeneration && shell.isConnected;
+    }
+    function fitDriverViewport(generation) {
+        if (!driverViewportFitIsCurrent(generation)) return;
         var height = driverVisualViewportHeight();
         var viewport = window.visualViewport;
         var width = Math.max(240, Math.round(
@@ -4829,31 +4867,111 @@ window.bindDriverMobileShell = function () {
         document.body.style.setProperty("--driver-viewport-h", height + "px");
         shell.style.setProperty("--driver-viewport-h", height + "px");
         shell.style.setProperty("--driver-viewport-w", width + "px");
-        shell.dataset.driverDensity = height < 620 || width < 340
+        var baseDensity = height < 620 || width < 340
             ? "tight"
             : (height < 780 || width < 390 ? "compact" : "normal");
-        window.requestAnimationFrame(function () {
+        shell.dataset.driverViewportDensity = baseDensity;
+        shell.dataset.driverDensity = baseDensity;
+        window.driverViewportFitTextFrame = window.requestAnimationFrame(function () {
+            window.driverViewportFitTextFrame = null;
+            if (!driverViewportFitIsCurrent(generation)) return;
             fitDriverText();
             /* С открытой клавиатурой всё «не влезает» по определению: она
                закрывает пол-экрана. Уплотнять разметку из-за этого нельзя —
                строки сойдутся друг на друга. */
-            if (driverIsEditingField()) return;
+            if (driverIsEditingField() || driverViewportIsTemporarilyReduced()) return;
             var panel = shell.querySelector("[data-driver-tab-panel].is-active");
-            if (driverPanelOverflows(panel)) {
+            if (panel && panel.isConnected && driverPanelOverflows(panel)) {
                 shell.dataset.driverDensity = shell.dataset.driverDensity === "normal" ? "compact" : "tight";
-                window.requestAnimationFrame(function () {
+                window.driverViewportFitDensityFrame = window.requestAnimationFrame(function () {
+                    window.driverViewportFitDensityFrame = null;
+                    if (!driverViewportFitIsCurrent(generation)) return;
+                    if (!panel.isConnected || driverViewportIsTemporarilyReduced()) return;
                     if (driverPanelOverflows(panel)) shell.dataset.driverDensity = "tight";
                 });
             }
         });
     }
     function scheduleDriverViewportFit() {
-        if (window.driverViewportFitFrame) window.cancelAnimationFrame(window.driverViewportFitFrame);
+        invalidateDriverTabSettle();
+        var generation = invalidateDriverViewportFit();
         window.driverViewportFitFrame = window.requestAnimationFrame(function () {
             window.driverViewportFitFrame = null;
-            fitDriverViewport();
+            if (!driverViewportFitIsCurrent(generation)) return;
+            fitDriverViewport(generation);
         });
     }
+    /* DRIVER_TAB_SETTLE_START */
+    function cancelDriverTabSettleFrames() {
+        [
+            "driverTabSettleFirstFrame",
+            "driverTabSettleSecondFrame",
+            "driverTabSettleDensityFrame"
+        ].forEach(function (key) {
+            if (window[key] !== null && typeof window[key] !== "undefined") {
+                window.cancelAnimationFrame(window[key]);
+                window[key] = null;
+            }
+        });
+    }
+    function invalidateDriverTabSettle() {
+        window.driverTabSettleGeneration = Number(window.driverTabSettleGeneration || 0) + 1;
+        cancelDriverTabSettleFrames();
+        return window.driverTabSettleGeneration;
+    }
+    function driverTabSettleIsCurrent(generation, expectedTab, panel) {
+        return (
+            generation === window.driverTabSettleGeneration
+            && shell.isConnected
+            && shell.dataset.activeTab === expectedTab
+            && panel
+            && panel.isConnected
+            && panel.classList.contains("is-active")
+            && panel.dataset.driverTabPanel === expectedTab
+        );
+    }
+    function settleDriverTabDensity(generation, expectedTab, panel) {
+        if (!driverTabSettleIsCurrent(generation, expectedTab, panel)) return;
+        if (driverIsEditingField() || driverViewportIsTemporarilyReduced()) return;
+        if (!driverPanelOverflows(panel)) return;
+        var currentDensity = shell.dataset.driverDensity || "normal";
+        var nextDensity = currentDensity === "normal"
+            ? "compact"
+            : (currentDensity === "compact" ? "tight" : currentDensity);
+        if (nextDensity === currentDensity) return;
+        shell.dataset.driverDensity = nextDensity;
+        if (nextDensity !== "tight") {
+            window.driverTabSettleDensityFrame = window.requestAnimationFrame(function () {
+                window.driverTabSettleDensityFrame = null;
+                settleDriverTabDensity(generation, expectedTab, panel);
+            });
+        }
+    }
+    function scheduleDriverTabSettle(expectedTab) {
+        invalidateDriverViewportFit();
+        var generation = invalidateDriverTabSettle();
+        window.driverTabSettleFirstFrame = window.requestAnimationFrame(function () {
+            window.driverTabSettleFirstFrame = null;
+            if (
+                generation !== window.driverTabSettleGeneration
+                || !shell.isConnected
+                || shell.dataset.activeTab !== expectedTab
+            ) {
+                return;
+            }
+            window.driverTabSettleSecondFrame = window.requestAnimationFrame(function () {
+                window.driverTabSettleSecondFrame = null;
+                var panel = shell.querySelector("[data-driver-tab-panel].is-active");
+                if (!driverTabSettleIsCurrent(generation, expectedTab, panel)) return;
+                shell.dataset.driverDensity = shell.dataset.driverViewportDensity
+                    || shell.dataset.driverDensity
+                    || "normal";
+                fitDriverText(panel);
+                settleDriverTabDensity(generation, expectedTab, panel);
+            });
+        });
+    }
+    /* DRIVER_TAB_SETTLE_END */
     bindDriverFieldScrollIntoView();
     window.driverScheduleViewportFit = scheduleDriverViewportFit;
     if (!window.driverViewportFitBound) {
@@ -5288,7 +5406,7 @@ window.bindDriverMobileShell = function () {
             window.history.replaceState({}, "", url.toString());
         }
         clearDriverMessages();
-        scheduleDriverViewportFit();
+        scheduleDriverTabSettle(tab);
     }
     document.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
         button.addEventListener("click", function () {

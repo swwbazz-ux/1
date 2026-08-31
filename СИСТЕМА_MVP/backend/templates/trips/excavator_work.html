@@ -6,9 +6,9 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v164">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v164">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v164">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v165">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v165">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v165">
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -503,7 +503,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v164";
+var excavatorShellVersion = "excavator-mobile-shell-v165";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 document.body.dataset.realtimeVisibilityOnly = "true";
@@ -818,7 +818,10 @@ function refreshExcavatorWorkFromServer(options) {
         if (payload.equipment_cards && currentTruckDetailCards) {
             currentTruckDetailCards.textContent = JSON.stringify(payload.equipment_cards);
         }
-        newShell.dataset.eoActiveTab = options.preserveTab === false ? (newShell.dataset.eoActiveTab || "trucks") : activeTab;
+        var latestActiveTab = currentShell.dataset.eoActiveTab || activeTab;
+        newShell.dataset.eoActiveTab = options.preserveTab === false
+            ? (newShell.dataset.eoActiveTab || "trucks")
+            : latestActiveTab;
         currentShell.replaceWith(newShell);
         if (typeof window.initExcavatorWorkShell === "function") {
             window.initExcavatorWorkShell();
@@ -1465,6 +1468,41 @@ window.initExcavatorWorkShell = function () {
         });
         shell.dataset.eoActiveTab = name;
     }
+
+    /* EXCAVATOR_TAB_SETTLE_START */
+    var excavatorTabSettleGeneration = 0;
+    var excavatorTabSettleFirstFrame = null;
+    var excavatorTabSettleSecondFrame = null;
+
+    function clearExcavatorTabSettleFrames() {
+        if (excavatorTabSettleFirstFrame !== null) {
+            window.cancelAnimationFrame(excavatorTabSettleFirstFrame);
+            excavatorTabSettleFirstFrame = null;
+        }
+        if (excavatorTabSettleSecondFrame !== null) {
+            window.cancelAnimationFrame(excavatorTabSettleSecondFrame);
+            excavatorTabSettleSecondFrame = null;
+        }
+    }
+
+    function scheduleExcavatorTabSettle(name) {
+        excavatorTabSettleGeneration += 1;
+        var generation = excavatorTabSettleGeneration;
+        clearExcavatorTabSettleFrames();
+        if (name !== "events") return;
+
+        excavatorTabSettleFirstFrame = window.requestAnimationFrame(function () {
+            excavatorTabSettleFirstFrame = null;
+            if (generation !== excavatorTabSettleGeneration || !shell.isConnected) return;
+            excavatorTabSettleSecondFrame = window.requestAnimationFrame(function () {
+                excavatorTabSettleSecondFrame = null;
+                if (generation !== excavatorTabSettleGeneration || !shell.isConnected) return;
+                if (shell.dataset.eoActiveTab !== "events") return;
+                syncDowntimeStatus();
+            });
+        });
+    }
+    /* EXCAVATOR_TAB_SETTLE_END */
 
     function selectTruck(card) {
         if (!card) return;
@@ -2216,9 +2254,7 @@ window.initExcavatorWorkShell = function () {
         tab.addEventListener("click", function () {
             var tabName = tab.dataset.eoTab;
             activateTab(tabName);
-            if (tabName === "events") {
-                syncDowntimeStatus();
-            }
+            scheduleExcavatorTabSettle(tabName);
         });
     });
 
@@ -2423,7 +2459,10 @@ window.initExcavatorWorkShell = function () {
         });
     }
 
+    var downtimeStatusSyncGeneration = 0;
     function syncDowntimeStatus() {
+        downtimeStatusSyncGeneration += 1;
+        var generation = downtimeStatusSyncGeneration;
         return fetch("{% url 'excavator_downtime_action' %}?_eo_status=" + Date.now(), {
             method: "GET",
             credentials: "same-origin",
@@ -2436,6 +2475,13 @@ window.initExcavatorWorkShell = function () {
             if (!response.ok) throw new Error("Не удалось обновить простой");
             return response.json();
         }).then(function (payload) {
+            if (
+                generation !== downtimeStatusSyncGeneration
+                || !shell.isConnected
+                || document.querySelector("[data-eo-shell]") !== shell
+            ) {
+                return null;
+            }
             if (payload.active) {
                 applyActiveDowntime(payload);
             } else {
