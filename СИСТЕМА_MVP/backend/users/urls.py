@@ -30,11 +30,6 @@ from .live_monitor_views import (
     system_admin_live_monitor_view,
 )
 from .start_views import universal_start_view
-from .native_handoff import (
-    native_handoff_assetlinks_view,
-    native_handoff_open_view,
-    native_handoff_redeem_view,
-)
 from .client_errors import client_error_report_view
 from .field_test_views import system_admin_field_test_view
 from .enter_employee_views import system_admin_enter_employee_view
@@ -86,9 +81,6 @@ from .views import (
 )
 
 urlpatterns = [
-    path('.well-known/assetlinks.json', native_handoff_assetlinks_view, name='native_handoff_assetlinks'),
-    path('native-handoff/open/', native_handoff_open_view, name='native_handoff_open'),
-    path('native-handoff/redeem/', native_handoff_redeem_view, name='native_handoff_redeem'),
     path('session-heartbeat/', application_session_heartbeat_view, name='application_session_heartbeat'),
     path('push/key/', push_public_key_view, name='push_public_key'),
     path('push/subscribe/', push_subscribe_view, name='push_subscribe'),

@@ -42,18 +42,6 @@ def parseProfileHttpsUri = { String propertyName, String rawValue, File profileD
 
 def effectiveHttpsPort = { URI uri -> uri.port == -1 ? 443 : uri.port }
 
-def validateAppLinkPath = { String rawPath, File profileDir ->
-    if (!(rawPath ==~ /\/[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*\//)
-            || rawPath.contains('/./')
-            || rawPath.contains('/../')
-            || rawPath.contains('//')) {
-        throw new GradleException(
-                "appLinkPath must be a normalized absolute directory path in ${profileDir}/app.properties"
-        )
-    }
-    rawPath
-}
-
 def releaseCredentialsPath = System.getenv('COPPER_RELEASE_KEYSTORE_PROPERTIES')?.trim()
 if (!releaseCredentialsPath) {
     releaseCredentialsPath = new File(
@@ -151,10 +139,6 @@ android {
             URI startUri = parseProfileHttpsUri('startUrl', startUrl, profileDir)
             String serverPath = serverUri.rawPath ?: '/'
             String startPath = startUri.rawPath ?: '/'
-            String appLinkPath = validateAppLinkPath(
-                    profile.getProperty('appLinkPath', '').trim(),
-                    profileDir
-            )
             long heartbeatIntervalMs = Long.parseLong(profile.getProperty('heartbeatIntervalSeconds', '20')) * 1000L
             long updateCheckIntervalMs = Long.parseLong(profile.getProperty('updateCheckIntervalMinutes', '15')) * 60_000L
             String updateManifestUrl = profile.getProperty('updateManifestUrl', '').trim()
@@ -201,8 +185,6 @@ android {
                 buildConfigField "String", "APP_DISPLAY_NAME", javaStringLiteral(profile.getProperty('appName'))
                 buildConfigField "String", "APP_SERVER_URL", javaStringLiteral(serverUrl)
                 buildConfigField "String", "APP_START_URL", javaStringLiteral(startUrl)
-                buildConfigField "String", "APP_LINK_HOST", javaStringLiteral(serverUri.host.toLowerCase(Locale.ROOT))
-                buildConfigField "String", "APP_LINK_PATH", javaStringLiteral(appLinkPath)
                 buildConfigField "String", "HEARTBEAT_URL", javaStringLiteral(profile.getProperty('heartbeatUrl', profile.getProperty('serverUrl')))
                 buildConfigField "long", "HEARTBEAT_INTERVAL_MS", "${heartbeatIntervalMs}L"
                 buildConfigField "String", "UPDATE_MANIFEST_URL", javaStringLiteral(updateManifestUrl)
@@ -220,8 +202,6 @@ android {
                         'specialUseDescription',
                         'Continuous operational server connectivity during an active work shift'
                 )
-                manifestPlaceholders.appLinkHost = serverUri.host.toLowerCase(Locale.ROOT)
-                manifestPlaceholders.appLinkPath = appLinkPath
             }
         }
     }

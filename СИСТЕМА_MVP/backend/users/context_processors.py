@@ -1,5 +1,4 @@
 import re
-from typing import NamedTuple
 
 from django.conf import settings
 
@@ -29,42 +28,17 @@ _NATIVE_APP_MARKER = re.compile(
 NATIVE_APP_COOKIE = 'native_app'
 
 
-class NativeAppIdentity(NamedTuple):
-    """Публично разобранная метка нативной оболочки.
-
-    Старый API ``parse_native_app_marker()`` намеренно оставлен ниже: им уже
-    пользуются middleware и тесты, которым нужны только факт метки и версия.
-    Для маршрутов, где важно отличать профиль Водителя от Экскаваторщика,
-    используется эта полная форма.
-    """
-
-    found: bool
-    profile_id: str
-    version: str
-
-
-def parse_native_app_identity(request):
-    """Вернуть факт метки, профиль сборки и её версию из User-Agent."""
-
-    user_agent = request.META.get('HTTP_USER_AGENT', '')
-    match = _NATIVE_APP_MARKER.search(user_agent or '')
-    if not match:
-        return NativeAppIdentity(False, '', '')
-    return NativeAppIdentity(
-        True,
-        (match.group(1) or '').strip(),
-        (match.group(2) or '').strip(),
-    )
-
-
 def parse_native_app_marker(request):
     """Разобрать метку CopperResourcesNative из User-Agent.
 
     Возвращает пару: нашлась ли метка и версия приложения (может быть
     пустой — старые сборки писали метку без версии).
     """
-    identity = parse_native_app_identity(request)
-    return identity.found, identity.version
+    user_agent = request.META.get('HTTP_USER_AGENT', '')
+    match = _NATIVE_APP_MARKER.search(user_agent or '')
+    if not match:
+        return False, ''
+    return True, (match.group(2) or '').strip()
 
 
 def native_app_marker_in_user_agent(request):

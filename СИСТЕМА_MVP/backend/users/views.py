@@ -112,7 +112,6 @@ from .models import (
     WatchComposition,
     WorkSchedule,
 )
-from .native_handoff import consume_native_handoff_session_prefill
 from .oup_undo import (
     get_oup_action_undo_state,
     undo_oup_action,
@@ -571,14 +570,6 @@ def login_view(
 ):
     role_app = get_role_app_for_request(request)
     login_role_app = target_role_app or role_app
-    session_prefilled_phone = ''
-    if request.method == 'GET' and role_app:
-        # Забираем билет ровно один раз даже при уже активной сессии, когда
-        # следующий early redirect не будет показывать форму входа.
-        session_prefilled_phone = consume_native_handoff_session_prefill(
-            request,
-            role_code=role_app.role_code,
-        )
     allowed_role_codes = tuple(allowed_role_codes or ())
     next_url = forced_next_url or _validated_next_url(
         request,
@@ -623,14 +614,11 @@ def login_view(
     submitted_phone = (
         request.POST.get('phone', '').strip() if request.method == 'POST' else ''
     )
-    # Со /start/ номер уже известен: браузерная ссылка несёт его в query,
-    # а нативный handoff один раз переносит его через host-only session.
+    # Со /start/ номер уже известен — ссылка на приложение несёт его в query.
     # Незачем набирать его снова: не путать с submitted_phone, который отвечает
     # ещё и за то, показывать ли поле пинкода (первый неудачный вход).
     prefilled_phone = (
-        request.GET.get('phone', '').strip() or session_prefilled_phone
-        if request.method == 'GET'
-        else ''
+        request.GET.get('phone', '').strip() if request.method == 'GET' else ''
     )
     if request.method == 'POST' and request.POST.get('action') in {'register', 'continue'}:
         # Первый вход. Раньше сюда пускал только выданный вручную временный код,

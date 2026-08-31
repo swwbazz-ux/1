@@ -22,7 +22,6 @@ const expectedProfiles = {
   excavator: {
     serverUrl: "https://excavator.driverform.ru/",
     startUrl: "https://excavator.driverform.ru/excavator/work/",
-    appLinkPath: "/native-handoff/open/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
     versionCode: "15",
@@ -34,7 +33,6 @@ const expectedProfiles = {
   driver: {
     serverUrl: "https://driver.driverform.ru/",
     startUrl: "https://driver.driverform.ru/driver/",
-    appLinkPath: "/native-handoff/open/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
     versionCode: "10",
@@ -51,7 +49,6 @@ for (const [profileName, expected] of Object.entries(expectedProfiles)) {
     assert.equal(config.serverUrl, expected.serverUrl);
     assert.equal(config.startUrl, expected.startUrl);
     assert.ok(config.startUrl.startsWith(config.serverUrl));
-    assert.equal(config.appLinkPath, expected.appLinkPath);
     assert.equal(config.applicationId, expected.applicationId);
     assert.equal(config.appName, expected.appName);
     assert.match(config.applicationId, /^[a-z][a-z0-9_.]+$/);
@@ -79,41 +76,17 @@ test("profiles remain isolated by URL and application id", () => {
   assert.notEqual(excavator.alertChannelId, driver.alertChannelId);
 });
 
-test("verified native handoff is profile-driven and strictly sanitized", () => {
+test("rejected native phone handoff remains disabled", () => {
   const gradle = readFileSync(resolve(root, "android", "app", "build.gradle"), "utf8");
   const manifest = readFileSync(resolve(root, "android", "app", "src", "main", "AndroidManifest.xml"), "utf8");
   const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
   const activity = readFileSync(resolve(javaRoot, "MainActivity.java"), "utf8");
-  const appLink = readFileSync(resolve(javaRoot, "NativeAppLink.java"), "utf8");
 
   assert.match(gradle, /new URI\(rawValue\)/);
   assert.match(gradle, /startUrl must stay inside the exact serverUrl origin/);
-  assert.match(gradle, /buildConfigField "String", "APP_LINK_HOST"/);
-  assert.match(gradle, /buildConfigField "String", "APP_LINK_PATH"/);
-  assert.match(gradle, /manifestPlaceholders\.appLinkHost/);
-  assert.match(gradle, /manifestPlaceholders\.appLinkPath/);
-
-  assert.match(manifest, /intent-filter android:autoVerify="true"/);
-  assert.match(manifest, /android\.intent\.action\.VIEW/);
-  assert.match(manifest, /android\.intent\.category\.DEFAULT/);
-  assert.match(manifest, /android\.intent\.category\.BROWSABLE/);
-  assert.match(manifest, /android:scheme="https"/);
-  assert.match(manifest, /android:host="\$\{appLinkHost\}"/);
-  assert.match(manifest, /android:pathPrefix="\$\{appLinkPath\}"/);
-
-  assert.match(activity, /bridgeCreating = true[\s\S]*?resolveNativeAppLink\(getIntent\(\)\)[\s\S]*?setServerUrl\(initialUrl\)/);
-  assert.match(activity, /super\.onCreate\(savedInstanceState\);[\s\S]*?bridgeCreating = false/);
-  assert.match(activity, /onNewIntent\(Intent intent\)[\s\S]*?setIntent\(intent\)[\s\S]*?bridgeCreating/);
-  assert.match(activity, /NativeAppLink\.resolve\([\s\S]*?BuildConfig\.APP_SERVER_URL[\s\S]*?BuildConfig\.APP_LINK_HOST[\s\S]*?BuildConfig\.APP_LINK_PATH/);
-  assert.doesNotMatch(activity, /loadUrl\(intent\.getData/);
-
-  assert.match(appLink, /android\.intent\.action\.VIEW/);
-  assert.match(appLink, /\[A-Za-z0-9_-\]\{43\}/);
-  assert.match(appLink, /incoming\.getRawQuery\(\) != null/);
-  assert.match(appLink, /expectedPath\.equals\(incoming\.getRawPath\(\)\)/);
-  assert.match(appLink, /incoming\.getRawFragment\(\)/);
-  assert.match(appLink, /"token=" \+ token/);
-  assert.doesNotMatch(appLink, /getQueryParameter|appendQueryParameter/);
+  assert.doesNotMatch(gradle, /APP_LINK_|appLinkPath|manifestPlaceholders\.appLink/);
+  assert.doesNotMatch(manifest, /android:autoVerify|android\.intent\.action\.VIEW|appLinkPath/);
+  assert.doesNotMatch(activity, /NativeAppLink|resolveNativeAppLink|onNewIntent\(Intent intent\)/);
 });
 
 test("WebView cookies are accepted and flushed at every persistence boundary", () => {
@@ -132,14 +105,12 @@ test("WebView cookies are accepted and flushed at every persistence boundary", (
 
 test("native implementation reads role data only from BuildConfig", () => {
   const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
-  const sources = ["MainActivity.java", "NativeAppLink.java", "ConnectivityForegroundService.java", "AppNotifications.java", "AppUpdateManager.java"]
+  const sources = ["MainActivity.java", "ConnectivityForegroundService.java", "AppNotifications.java", "AppUpdateManager.java"]
     .map((file) => readFileSync(resolve(javaRoot, file), "utf8"))
     .join("\n");
   assert.doesNotMatch(sources, /https:\/\/(excavator|driver)\.driverform\.ru/);
   assert.match(sources, /BuildConfig\.APP_SERVER_URL/);
   assert.match(sources, /BuildConfig\.APP_START_URL/);
-  assert.match(sources, /BuildConfig\.APP_LINK_HOST/);
-  assert.match(sources, /BuildConfig\.APP_LINK_PATH/);
   assert.match(sources, /BuildConfig\.HEARTBEAT_URL/);
   assert.match(sources, /BuildConfig\.SYNC_AUTH_TOKEN/);
   assert.match(sources, /BuildConfig\.UPDATE_MANIFEST_URL/);

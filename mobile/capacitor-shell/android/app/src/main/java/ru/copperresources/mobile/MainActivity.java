@@ -33,13 +33,9 @@ public class MainActivity extends BridgeActivity {
     private WebView lastObservedWebView;
     private PageState lastObservedPageState = PageState.UNKNOWN;
     private boolean lastObservedPageError;
-    private boolean bridgeCreating;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        bridgeCreating = true;
-        String appLinkUrl = resolveNativeAppLink(getIntent());
-        String initialUrl = appLinkUrl == null ? BuildConfig.APP_START_URL : appLinkUrl;
         SplashScreen splashScreen = SplashScreen.installSplashScreen(this);
         splashScreen.setKeepOnScreenCondition(() -> !nativeCoverReady);
         CookieManager.getInstance().setAcceptCookie(true);
@@ -99,10 +95,12 @@ public class MainActivity extends BridgeActivity {
             }
         });
 
-        String[] allowNavigation = new String[] { BuildConfig.APP_LINK_HOST };
+        Uri serverUri = Uri.parse(BuildConfig.APP_START_URL);
+        String serverHost = serverUri.getHost();
+        String[] allowNavigation = serverHost == null ? new String[0] : new String[] { serverHost };
 
         config = new CapConfig.Builder(this)
-            .setServerUrl(initialUrl)
+            .setServerUrl(BuildConfig.APP_START_URL)
             .setAllowNavigation(allowNavigation)
             .setAppendedUserAgentString(
                 " CopperResourcesNative/" + BuildConfig.APP_PROFILE_ID
@@ -112,7 +110,6 @@ public class MainActivity extends BridgeActivity {
             .create();
 
         super.onCreate(savedInstanceState);
-        bridgeCreating = false;
         configurePersistentWebViewCookies();
         if (getBridge() != null && getBridge().getWebView() != null) {
             WebView webView = getBridge().getWebView();
@@ -147,39 +144,6 @@ public class MainActivity extends BridgeActivity {
         AppNotifications.createChannels(this);
         ConnectivityForegroundService.start(this);
         requestNotificationPermissionThenBatteryExemption();
-    }
-
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-
-        String appLinkUrl = resolveNativeAppLink(intent);
-        if (bridgeCreating || appLinkUrl == null || isFinishing()) {
-            return;
-        }
-        if (isDestroyed()) {
-            return;
-        }
-        if (getBridge() == null || getBridge().getWebView() == null) {
-            return;
-        }
-
-        WebView webView = getBridge().getWebView();
-        if (appLinkUrl.equals(webView.getUrl())) {
-            return;
-        }
-        webView.loadUrl(appLinkUrl);
-    }
-
-    private String resolveNativeAppLink(Intent intent) {
-        return NativeAppLink.resolve(
-            intent == null ? null : intent.getAction(),
-            intent == null ? null : intent.getDataString(),
-            BuildConfig.APP_SERVER_URL,
-            BuildConfig.APP_LINK_HOST,
-            BuildConfig.APP_LINK_PATH
-        );
     }
 
     private void configurePersistentWebViewCookies() {

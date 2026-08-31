@@ -22,13 +22,6 @@ class NativeAppShellContextTests(TestCase):
         self.assertTrue(context["is_native_app"])
         self.assertEqual(context["native_app_version"], "0.1.4")
 
-        from users.context_processors import parse_native_app_identity
-
-        identity = parse_native_app_identity(request)
-        self.assertTrue(identity.found)
-        self.assertEqual(identity.profile_id, "excavator")
-        self.assertEqual(identity.version, "0.1.4")
-
     def test_native_app_without_version_still_detected_without_version(self):
         request = self.make_request(
             "Mozilla/5.0 (Linux; Android 14) CopperResourcesNative/excavator"

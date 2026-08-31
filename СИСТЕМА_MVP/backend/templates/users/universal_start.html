@@ -270,51 +270,6 @@
         transform: translateY(-50%);
     }
 
-    /* Прямой APK не может сам вернуть человека из системного
-       установщика. Второй шаг виден сразу, но оформлен компактнее
-       основной строки скачивания. */
-    .start-screen__native-handoff {
-        display: grid;
-        gap: 7px;
-        margin-top: -2px;
-        padding: 8px 10px 10px;
-        border: 1px solid rgba(255, 255, 255, .12);
-        border-color: color-mix(in srgb, var(--app-accent) 28%, transparent);
-        border-radius: 11px;
-        background: rgba(255, 255, 255, .025);
-    }
-
-    .start-screen .start-screen__native-instruction {
-        color: #93a7ae;
-        text-align: left;
-        font-size: 11px;
-        line-height: 1.3;
-    }
-
-    .start-screen__native-open {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 48px;
-        padding: 9px 12px;
-        border: 1px solid rgba(255, 255, 255, .28);
-        border-color: color-mix(in srgb, var(--app-accent) 52%, transparent);
-        border-radius: 10px;
-        background: rgba(255, 255, 255, .07);
-        background: color-mix(in srgb, var(--app-accent) 12%, transparent);
-        color: #f2f8fa;
-        font-size: 14px;
-        font-weight: 800;
-        line-height: 1.15;
-        text-align: center;
-        text-decoration: none;
-    }
-
-    .start-screen__native-open:focus-visible {
-        outline: 2px solid var(--app-accent);
-        outline-offset: 2px;
-    }
-
     /* На обеих строках стоит значок самого приложения — человек ставит одно
        и то же, разными способами. Способ показывает кружок в углу: APK или
        Chrome. Прежде у браузерного варианта была серая картинка окна, и она
@@ -531,24 +486,9 @@
                                     </span>
                                     <span class="start-screen__opt-text">
                                         <b>Приложение <i>стабильное</i></b>
-                                        {% if item.native_handoff_url %}
-                                            <em>1. Скачать APK · версия {{ item.apk.version }} →</em>
-                                        {% else %}
-                                            <em>APK · версия {{ item.apk.version }} · скачать и установить →</em>
-                                        {% endif %}
+                                        <em>APK · версия {{ item.apk.version }} · скачать и установить →</em>
                                     </span>
                                 </a>
-                                {% if item.native_handoff_url %}
-                                    <div class="start-screen__native-handoff">
-                                        <p class="start-screen__native-instruction">В установщике нажмите «Готово», вернитесь сюда и откройте приложение — номер заполнится сам.</p>
-                                        <a class="start-screen__native-open"
-                                           data-start-native-open
-                                           href="{{ item.native_handoff_url }}"
-                                           aria-label="Открыть установленное приложение {{ item.app.name }}">
-                                            2. Открыть приложение
-                                        </a>
-                                    </div>
-                                {% endif %}
                             {% endif %}
                             {% comment %}
                             install=1 в адресе: установить PWA можно только с

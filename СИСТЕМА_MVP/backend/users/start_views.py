@@ -30,7 +30,6 @@ from django.views.decorators.http import require_http_methods
 from .access_auth import find_unactivated_accesses_by_phone, format_phone_for_display
 from .forms import normalize_phone
 from .app_catalog import APP_CATALOG_ROLE_CODES, role_app_public_url
-from .native_handoff import build_native_handoff_url
 from .role_apps import get_role_app
 from .models import EmployeeAccess
 from .work_profiles import employee_has_effective_access_role
@@ -165,7 +164,7 @@ def _render_universal_start(
     *,
     referrer_policy='same-origin',
 ):
-    """Не кешировать результат, содержащий телефон и одноразовый App Link."""
+    """Не кешировать персональный результат поиска приложения."""
 
     response = render(request, template_name, context)
     response['Referrer-Policy'] = referrer_policy
@@ -212,19 +211,10 @@ def _render_start_result(request, phone):
         app_url = role_app_public_url(request, code)
         if phone:
             app_url = f'{app_url}?{urlencode({"phone": normalize_phone(phone)})}'
-        apk = android_apk_for_role(code) if show_android_apk else None
-        native_handoff_url = ''
-        if apk and phone:
-            native_handoff_url = build_native_handoff_url(
-                request,
-                phone=phone,
-                role_code=code,
-            )
         apps.append({
             'app': app,
             'url': app_url,
-            'apk': apk,
-            'native_handoff_url': native_handoff_url,
+            'apk': android_apk_for_role(code) if show_android_apk else None,
             'employee': candidate.employee,
             'last_login_at': candidate.last_login_at,
         })
