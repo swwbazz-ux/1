@@ -6,9 +6,9 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v163">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v163">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v163">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v164">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v164">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v164">
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -503,7 +503,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v163";
+var excavatorShellVersion = "excavator-mobile-shell-v164";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 document.body.dataset.realtimeVisibilityOnly = "true";
@@ -3255,15 +3255,20 @@ function initExcavatorPwaUpdates() {
             if (registration) registrationRef = registration;
             var guard = window.AppPwaContractGuard;
             var updatePromise = guard && typeof guard.requestManualUpdate === "function"
-                ? guard.requestManualUpdate().then(function (result) {
-                    return result && result.registration
-                        ? result.registration
-                        : registration;
-                })
+                ? guard.requestManualUpdate()
                 : registration && registration.update
-                    ? registration.update().then(function () { return registration; })
-                    : Promise.resolve(null);
-            return updatePromise.then(function () {
+                    ? registration.update().then(function () {
+                        return {status: "current", registration: registration};
+                    })
+                    : Promise.resolve({status: "unavailable", registration: null});
+            return Promise.resolve(updatePromise).then(function (result) {
+                var updateStatus = result && result.status;
+                if (updateStatus === "error" || updateStatus === "unavailable") {
+                    var updateError = new Error("PWA manual update " + updateStatus);
+                    updateError.pwaUpdateStatus = updateStatus;
+                    throw updateError;
+                }
+                if (result && result.registration) registrationRef = result.registration;
                 registration = registrationRef || registration;
                 if (registration && registration.waiting) {
                     return inspectWaitingWorker(registration, registration.waiting).then(function (shown) {
@@ -3280,8 +3285,12 @@ function initExcavatorPwaUpdates() {
                 checkButton.classList.remove("is-current");
                 if (checkLabel) checkLabel.textContent = "Обновить";
             }, 1800);
-        }).catch(function () {
-            if (checkLabel) checkLabel.textContent = "Ошибка";
+        }).catch(function (error) {
+            if (checkLabel) {
+                checkLabel.textContent = error && error.pwaUpdateStatus === "unavailable"
+                    ? "Недоступно"
+                    : "Ошибка";
+            }
             window.setTimeout(function () {
                 if (checkLabel) checkLabel.textContent = "Обновить";
             }, 1800);

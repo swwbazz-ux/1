@@ -218,7 +218,7 @@ function extractMiningMasterPwaSource() {
     ].join("\n");
 }
 
-function createRoleRuntime(options) {
+function createRoleRuntime(options = {}) {
     const document = new DocumentStub();
     const serviceWorkerTarget = new EventTargetStub();
     const registrationTarget = new EventTargetStub();
@@ -226,6 +226,8 @@ function createRoleRuntime(options) {
     const deferredVersionReplies = [];
     const timers = new Map();
     let nextTimerId = 1;
+    let registrationUpdateCalls = 0;
+    let manualUpdateCalls = 0;
 
     function createWorker(version, options = {}) {
         const worker = {
@@ -263,9 +265,10 @@ function createRoleRuntime(options) {
     });
     const registration = Object.assign(registrationTarget, {
         active: activeWorker,
-        waiting: waitingWorker,
+        waiting: options.hasWaitingWorker === false ? null : waitingWorker,
         installing: null,
         update() {
+            registrationUpdateCalls += 1;
             return Promise.resolve(registration);
         },
     });
@@ -306,7 +309,11 @@ function createRoleRuntime(options) {
             };
         },
         requestManualUpdate() {
-            return Promise.resolve({status: "current", registration});
+            manualUpdateCalls += 1;
+            var result = typeof options.manualUpdateResult === "function"
+                ? options.manualUpdateResult(registration)
+                : options.manualUpdateResult;
+            return Promise.resolve(result || {status: "current", registration});
         },
     };
     const window = Object.assign(windowTarget, {
@@ -370,6 +377,12 @@ function createRoleRuntime(options) {
         registration,
         waitingWorker,
         waitingWorkerMessages,
+        get registrationUpdateCalls() {
+            return registrationUpdateCalls;
+        },
+        get manualUpdateCalls() {
+            return manualUpdateCalls;
+        },
         deferActiveVersion() {
             activeWorker.deferVersion = true;
         },
@@ -410,7 +423,10 @@ function addExcavatorNodes(runtime) {
     runtime.document.addNode("[data-eo-pwa-update-text]");
     runtime.document.addNode("[data-eo-pwa-update-later]");
     const applyButton = runtime.document.addNode("[data-eo-pwa-update-apply]");
-    return {badge, modal, applyButton};
+    const checkButton = runtime.document.addNode("[data-eo-pwa-update-check]");
+    const checkLabel = runtime.document.addNode("[data-eo-pwa-update-check-label]");
+    runtime.document.addNode("[data-eo-pwa-update-check-version]");
+    return {badge, modal, applyButton, checkButton, checkLabel};
 }
 
 function addMiningMasterNodes(runtime) {
@@ -425,7 +441,9 @@ function addMiningMasterNodes(runtime) {
     runtime.document.addNode("[data-mm-pwa-new-version]");
     runtime.document.addNode("[data-mm-pwa-update-later]");
     const applyButton = runtime.document.addNode("[data-mm-pwa-update-apply]");
-    return {badge, modal, applyButton};
+    const checkButton = runtime.document.addNode("[data-mm-pwa-check-update]");
+    const status = runtime.document.querySelector("[data-mm-pwa-update-status]");
+    return {badge, modal, applyButton, checkButton, status};
 }
 
 async function flushPromises(iterations = 20) {
@@ -433,6 +451,60 @@ async function flushPromises(iterations = 20) {
         await Promise.resolve();
     }
 }
+
+test(
+    "Excavator manual check stops on an unavailable shared-guard result",
+    async () => {
+        const runtime = createRoleRuntime({
+            roleCode: "excavator_operator",
+            activeVersion: "excavator-mobile-shell-v127",
+            waitingVersion: "excavator-mobile-shell-v127",
+            hasWaitingWorker: false,
+            manualUpdateResult: {status: "unavailable", registration: null},
+        });
+        const nodes = addExcavatorNodes(runtime);
+        runtime.context.excavatorShellVersion = "excavator-mobile-shell-v127";
+        vm.runInContext(extractExcavatorPwaSource(), runtime.context, {
+            filename: "templates/trips/excavator_work.html::PwaUpdates",
+        });
+        runtime.context.initExcavatorPwaUpdates();
+        await flushPromises();
+
+        nodes.checkButton.dispatchEvent(new CustomEventStub("click"));
+        await flushPromises();
+
+        assert.equal(runtime.manualUpdateCalls, 1);
+        assert.equal(runtime.registrationUpdateCalls, 0);
+        assert.equal(nodes.checkLabel.textContent, "Недоступно");
+        assert.equal(nodes.checkButton.classList.contains("is-current"), false);
+    }
+);
+
+test(
+    "Mining Master manual check stops on a shared-guard error before fallback registration",
+    async () => {
+        const runtime = createRoleRuntime({
+            roleCode: "mining_master",
+            activeVersion: "mining-master-mobile-shell-v120",
+            waitingVersion: "mining-master-mobile-shell-v120",
+            hasWaitingWorker: false,
+            manualUpdateResult: {status: "error", registration: null},
+        });
+        const nodes = addMiningMasterNodes(runtime);
+        vm.runInContext(extractMiningMasterPwaSource(), runtime.context, {
+            filename: "templates/trips/dispatcher_control.html::MiningMasterPwaUpdates",
+        });
+        await flushPromises();
+
+        await runtime.context.checkMiningMasterPwaUpdateManually();
+        await flushPromises();
+
+        assert.equal(runtime.manualUpdateCalls, 1);
+        assert.equal(runtime.registrationUpdateCalls, 0);
+        assert.match(nodes.status.textContent, /Не удалось проверить обновление/);
+        assert.equal(nodes.modal.hidden, true, "an error must not be displayed as current");
+    }
+);
 
 test(
     "Excavator ignores delayed waiting-worker version after promotion",

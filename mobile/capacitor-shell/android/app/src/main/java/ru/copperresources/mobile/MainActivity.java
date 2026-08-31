@@ -32,6 +32,7 @@ public class MainActivity extends BridgeActivity {
     private boolean nativeCoverReady;
     private WebView lastObservedWebView;
     private PageState lastObservedPageState = PageState.UNKNOWN;
+    private boolean lastObservedPageError;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -44,6 +45,7 @@ public class MainActivity extends BridgeActivity {
                 runOnUiThread(() -> {
                     lastObservedWebView = loadingWebView;
                     lastObservedPageState = PageState.STARTED;
+                    lastObservedPageError = false;
                     if (startupLoadingOverlay != null) {
                         startupLoadingOverlay.onPageStarted(loadingWebView);
                     }
@@ -68,6 +70,26 @@ public class MainActivity extends BridgeActivity {
                     }
                     if (appUpdateManager != null) {
                         appUpdateManager.onPageLoaded(loadedWebView);
+                    }
+                });
+            }
+
+            @Override
+            public void onReceivedError(WebView erroredWebView) {
+                runOnUiThread(() -> {
+                    if (lastObservedPageState != PageState.STARTED) {
+                        return;
+                    }
+                    if (lastObservedWebView != null && lastObservedWebView != erroredWebView) {
+                        return;
+                    }
+                    lastObservedWebView = erroredWebView;
+                    lastObservedPageError = true;
+                    if (startupLoadingOverlay != null) {
+                        /* Capacitor does not expose the failing request here, so this is
+                           diagnostic input only. A successful readiness probe may still
+                           reveal the page; the watchdog reports error if it never settles. */
+                        startupLoadingOverlay.onPageError(erroredWebView);
                     }
                 });
             }
@@ -105,6 +127,9 @@ public class MainActivity extends BridgeActivity {
                 startupLoadingOverlay.onPageLoaded(webView);
             } else {
                 startupLoadingOverlay.onPageStarted(webView);
+            }
+            if (lastObservedWebView == webView && lastObservedPageError) {
+                startupLoadingOverlay.onPageError(webView);
             }
             if (lastObservedWebView == webView && lastObservedPageState == PageState.LOADED) {
                 appUpdateManager.onPageLoaded(webView);

@@ -357,7 +357,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v120')
+        self.assertContains(response, 'mining-master-mobile-shell-v139')
         self.assertNotContains(response, '>v116<')
         self.assertContains(response, 'function hasMiningMasterRelevantEvents')
         self.assertContains(response, 'return Array.isArray(events) && events.length > 0;')
@@ -427,7 +427,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v120', script)
+        self.assertIn('mining-master-mobile-shell-v139', script)
         self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)

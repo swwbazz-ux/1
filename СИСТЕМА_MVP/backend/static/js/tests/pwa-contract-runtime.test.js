@@ -34,6 +34,13 @@ const miningMasterTemplate = fs.readFileSync(
     miningMasterTemplatePath,
     "utf8"
 );
+const excavatorCssPath = path.join(
+    backendRoot,
+    "static",
+    "css",
+    "excavator-work-v55-shift.css"
+);
+const excavatorCss = fs.readFileSync(excavatorCssPath, "utf8");
 const guardStartMarker = "/* APP_PWA_CONTRACT_GUARD_START */";
 const guardEndMarker = "/* APP_PWA_CONTRACT_GUARD_END */";
 
@@ -405,6 +412,8 @@ function createRuntime(options = {}) {
     const activeWorkerMessages = [];
     const fetchRequests = [];
     const timers = [];
+    const scheduledTimerDelays = [];
+    const mutationObservers = [];
     let reloadCalls = 0;
     let updateCalls = 0;
     let registerCalls = 0;
@@ -578,6 +587,21 @@ function createRuntime(options = {}) {
             online = Boolean(value);
         },
     };
+    class MutationObserverStub {
+        constructor(callback) {
+            this.callback = callback;
+            this.connected = false;
+        }
+
+        observe() {
+            this.connected = true;
+            mutationObservers.push(this);
+        }
+
+        disconnect() {
+            this.connected = false;
+        }
+    }
     const location = {
         origin: locationOrigin,
         href: locationHref,
@@ -603,6 +627,7 @@ function createRuntime(options = {}) {
         Promise,
         URL,
         console,
+        MutationObserver: MutationObserverStub,
         AppRealtimeConfig: {
             stateUrl: "/api/operational-state/version/",
         },
@@ -619,6 +644,7 @@ function createRuntime(options = {}) {
         activeWorkerMessages,
         replacementWorkerMessages,
         fetchRequests,
+        scheduledTimerDelays,
         get reloadCalls() {
             return reloadCalls;
         },
@@ -693,6 +719,11 @@ function createRuntime(options = {}) {
                 }
             });
         },
+        notifyMutation(mutation) {
+            mutationObservers
+                .filter((observer) => observer.connected)
+                .forEach((observer) => observer.callback([mutation]));
+        },
         runTimers(limit = 100) {
             let runs = 0;
             while (timers.length && runs < limit) {
@@ -708,14 +739,16 @@ function createRuntime(options = {}) {
         },
     };
     let nextTimerId = 1;
-    function setTimeoutStub(callback) {
+    function setTimeoutStub(callback, delay) {
         const timer = {
             id: nextTimerId,
             callback,
+            delay: Number(delay || 0),
             cancelled: false,
         };
         nextTimerId += 1;
         timers.push(timer);
+        scheduledTimerDelays.push(timer.delay);
         return timer.id;
     }
     function clearTimeoutStub(timerId) {
@@ -754,6 +787,7 @@ function createRuntime(options = {}) {
         Promise,
         URL,
         console,
+        MutationObserver: MutationObserverStub,
         fetch: fetchStub,
         setTimeout: setTimeoutStub,
         clearTimeout: clearTimeoutStub,
@@ -1148,20 +1182,348 @@ test("role controller listeners only reconcile stale UI while base owns contract
 
 test("Driver shift manual update delegates to the shared guarded single-flight path", () => {
     const start = driverTemplate.indexOf(
-        'if (updateButton && updateButton.dataset.driverShiftUpdateBound !== "true")'
+        "runtime.requestManualUpdate = function ()"
     );
     const end = driverTemplate.indexOf(
-        'if (logoutButton && logoutButton.dataset.driverLogoutBound !== "true")',
+        'window.addEventListener("app-pwa-contract-state"',
         start
     );
     assert.ok(start >= 0 && end > start, "Driver update handler was not found");
     const handler = driverTemplate.slice(start, end);
     assert.match(handler, /AppPwaContractGuard/);
-    assert.match(handler, /requestManualUpdate\(\)/);
-    assert.match(handler, /if \(updateButton\.disabled\) return/);
-    assert.doesNotMatch(handler, /getRegistration\(|registration\.update\(/);
-    assert.match(handler, /Актуально|Доступно обновление|Повторить/);
+    assert.match(
+        handler,
+        /guard\s*&&\s*typeof guard\.requestManualUpdate === "function"[\s\S]*?guard\.requestManualUpdate\(\)/
+    );
+    assert.match(handler, /if \(runtime\.applyPromise\) return runtime\.applyPromise/);
+    assert.match(handler, /актуальная версия|Не удалось проверить обновление/i);
 });
+
+test("Excavator recovery banner is viewport-bound, safe-area aware and one-row", () => {
+    assert.doesNotMatch(
+        excavatorCss,
+        /--eo-contract-banner-reserve/,
+        "a floating recovery notice must not add an 80px workstation reflow reserve"
+    );
+    assert.doesNotMatch(
+        excavatorCss,
+        /\.app-contract-banner::before/,
+        "the message must be real accessible DOM, not a generated grid row"
+    );
+    const start = excavatorCss.indexOf(
+        "body.excavator-operator-screen .app-contract-banner {"
+    );
+    const end = excavatorCss.indexOf("}", start);
+    assert.ok(start >= 0 && end > start, "the Excavator banner rule is missing");
+    const rule = excavatorCss.slice(start, end);
+    assert.match(rule, /left:\s*max\(8px,\s*env\(safe-area-inset-left,\s*0px\)\)\s*!important/);
+    assert.match(rule, /right:\s*max\(8px,\s*env\(safe-area-inset-right,\s*0px\)\)\s*!important/);
+    assert.match(rule, /transform:\s*none\s*!important/);
+    assert.match(rule, /width:\s*auto\s*!important/);
+    assert.match(rule, /max-width:\s*calc\(100vw - 16px\)\s*!important/);
+    assert.match(rule, /grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto\s*!important/);
+    assert.match(rule, /grid-template-rows:\s*auto\s*!important/);
+    assert.match(rule, /max-height:\s*none\s*!important/);
+    assert.match(rule, /overflow:\s*visible\s*!important/);
+    assert.match(rule, /-webkit-text-size-adjust:\s*100%\s*!important/);
+    assert.match(rule, /text-size-adjust:\s*100%\s*!important/);
+    assert.match(excavatorCss, /white-space:\s*nowrap/);
+    const compactStart = excavatorCss.indexOf("@media (max-width: 480px)", end);
+    const compactEnd = excavatorCss.indexOf("@media (orientation: landscape)", compactStart);
+    assert.ok(compactStart >= 0 && compactEnd > compactStart, "the 360px compact banner fallback is missing");
+    const compactRule = excavatorCss.slice(compactStart, compactEnd);
+    assert.match(compactRule, /grid-template-columns:\s*auto minmax\(0,\s*1fr\)\s*!important/);
+    assert.match(compactRule, /grid-template-rows:\s*auto auto\s*!important/);
+    assert.match(compactRule, /white-space:\s*normal\s*!important/);
+    assert.match(compactRule, /overflow-wrap:\s*anywhere/);
+    assert.match(compactRule, /\[data-app-contract-retry\][\s\S]*?grid-row:\s*2\s*!important/);
+});
+
+test("shared contract banner contains long recovery text on narrow role screens", () => {
+    const baseStyleStart = baseTemplate.indexOf(".app-contract-banner {");
+    const compactStart = baseTemplate.indexOf(
+        "@media (max-width: 520px), (max-height: 520px)",
+        baseStyleStart
+    );
+    const compactEnd = baseTemplate.indexOf("@keyframes app-contract-spin", compactStart);
+    assert.ok(baseStyleStart >= 0, "the shared contract banner rule is missing");
+    assert.ok(compactStart > baseStyleStart && compactEnd > compactStart,
+        "the shared compact banner fallback is missing");
+
+    const baseRule = baseTemplate.slice(baseStyleStart, compactStart);
+    const compactRule = baseTemplate.slice(compactStart, compactEnd);
+    assert.match(baseRule, /display:\s*flex/);
+    assert.match(baseRule, /max-width:\s*min\(420px,\s*calc\(100vw - 32px\)\)/);
+    assert.match(baseRule, /white-space:\s*normal/);
+    assert.match(baseRule, /overflow-wrap:\s*anywhere/);
+    assert.match(compactRule, /left:\s*max\(8px,\s*env\(safe-area-inset-left,\s*0px\)\)/);
+    assert.match(compactRule, /right:\s*max\(8px,\s*env\(safe-area-inset-right,\s*0px\)\)/);
+    assert.match(compactRule, /transform:\s*none/);
+    assert.match(compactRule, /grid-template-columns:\s*auto minmax\(0,\s*1fr\)/);
+    assert.match(compactRule, /white-space:\s*normal/);
+    assert.match(compactRule, /overflow-wrap:\s*anywhere/);
+    assert.match(compactRule, /\[data-app-contract-retry\][\s\S]*?grid-row:\s*2/);
+});
+
+test(
+    "quick initial verification keeps the generic banner hidden but locks mutations immediately",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({hasWaitingWorker: false});
+        assertContractState(runtime, {ready: false, locked: true});
+        assert.equal(runtime.document.querySelector("[data-app-contract-banner]"), null);
+
+        const mutation = new ElementStub("button", {type: "button"});
+        runtime.document.body.appendChild(mutation);
+        const blockedClick = new CustomEventStub("click");
+        blockedClick.target = mutation;
+        runtime.document.dispatchEvent(blockedClick);
+        assert.equal(blockedClick.defaultPrevented, true);
+
+        runtime.guard.registerJavaScript("contract-v2");
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v2",
+            roleCode: "driver",
+        });
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v2",
+            role_app_code: "driver",
+        });
+        assertContractState(runtime, {ready: true, locked: false});
+        await flushRuntime(runtime);
+        assert.equal(
+            runtime.document.querySelector("[data-app-contract-banner]"),
+            null,
+            "a verification completed inside the debounce window must never flash a banner"
+        );
+    }
+);
+
+test(
+    "prolonged contract lock exposes a banner and non-secret diagnostics",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            hasWaitingWorker: false,
+        });
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v2",
+            roleCode: "driver",
+        });
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v2",
+            role_app_code: "driver",
+        });
+        assert.equal(runtime.document.querySelector("[data-app-contract-banner]"), null);
+        await flushRuntime(runtime);
+
+        const banner = runtime.document.querySelector("[data-app-contract-banner]");
+        assert.ok(banner, "a lock that outlives the debounce must remain visibly explained");
+        assert.equal(
+            banner.querySelector("[data-app-contract-message]").textContent,
+            "Проверяем рабочий экран…"
+        );
+        assert.equal(runtime.document.body.dataset.appContractExpected, "contract-v2:driver:driver-shell-v2");
+        assert.equal(runtime.document.body.dataset.appContractJavascript, "pending");
+        assert.equal(runtime.document.body.dataset.appContractServiceWorker, "contract-v2:driver:driver-shell-v2");
+        assert.equal(runtime.document.body.dataset.appContractServer, "contract-v2:driver:driver-shell-v2");
+        assert.match(runtime.document.body.dataset.appContractLockReason, /javascript-pending/);
+        assert.equal(runtime.guard.getState().locked, true);
+    }
+);
+
+test(
+    "generic banner follows a role update modal opening and closing without duplicates",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({hasWaitingWorker: false});
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v2",
+            roleCode: "driver",
+        });
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v2",
+            role_app_code: "driver",
+        });
+        await flushRuntime(runtime);
+        assert.ok(runtime.document.querySelector("[data-app-contract-banner]"));
+
+        const roleModal = new ElementStub("div", {
+            "data-eo-pwa-update-modal": "",
+        });
+        roleModal.hidden = false;
+        runtime.document.body.appendChild(roleModal);
+        runtime.notifyMutation({
+            type: "childList",
+            target: runtime.document.body,
+            addedNodes: [roleModal],
+            removedNodes: [],
+        });
+        assert.equal(
+            runtime.document.querySelector("[data-app-contract-banner]"),
+            null,
+            "a visible role modal must replace the generic notice"
+        );
+
+        roleModal.hidden = true;
+        runtime.notifyMutation({
+            type: "attributes",
+            attributeName: "hidden",
+            target: roleModal,
+        });
+        assert.equal(
+            runtime.document.querySelector("[data-app-contract-banner]"),
+            null,
+            "the generic notice must still honour its debounce after closing a modal"
+        );
+        runtime.runTimers();
+        assert.equal(
+            runtime.document.body.children.filter(
+                (node) => node.hasAttribute("data-app-contract-banner")
+            ).length,
+            1,
+            "closing a role modal must restore exactly one generic notice"
+        );
+
+        roleModal.hidden = false;
+        runtime.notifyMutation({
+            type: "attributes",
+            attributeName: "hidden",
+            target: roleModal,
+        });
+        roleModal.hidden = true;
+        runtime.notifyMutation({
+            type: "attributes",
+            attributeName: "hidden",
+            target: roleModal,
+        });
+        runtime.runTimers();
+        assert.equal(
+            runtime.document.body.children.filter(
+                (node) => node.hasAttribute("data-app-contract-banner")
+            ).length,
+            1,
+            "repeated modal visibility changes must not duplicate the banner"
+        );
+    }
+);
+
+test(
+    "a ready contract clears its completed flight so the same contract can relock and update again",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            workerShellVersion: "driver-shell-v1",
+            hasWaitingWorker: false,
+        });
+        runtime.guard.registerJavaScript("contract-v2");
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v1",
+            roleCode: "driver",
+        });
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v2",
+            role_app_code: "driver",
+        });
+        await flushPromises(24);
+        assert.equal(runtime.updateCalls, 1, "the initial same-contract mismatch must update once");
+
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v2",
+            roleCode: "driver",
+        });
+        assertContractState(runtime, {ready: true, locked: false});
+        assert.equal(runtime.guard.getState().update.attempt, 0);
+
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v1",
+            roleCode: "driver",
+        });
+        await flushPromises(24);
+        assertContractState(runtime, {ready: false, locked: true});
+        assert.equal(
+            runtime.updateCalls,
+            2,
+            "a later mismatch for the same contract must start a fresh update flight"
+        );
+    }
+);
+
+test(
+    "hanging registration.update is timed out, retried with bounded backoff, then exposes Retry",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            workerShellVersion: "driver-shell-v1",
+            hasWaitingWorker: false,
+            deferUpdates: true,
+            online: false,
+        });
+        runtime.guard.registerJavaScript("contract-v2");
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v1",
+            roleCode: "driver",
+        });
+        runtime.guard.acceptServerContract({
+            app_contract_version: "contract-v2",
+            role_shell_version: "driver-shell-v2",
+            role_app_code: "driver",
+        });
+
+        for (let pass = 0; pass < 10; pass += 1) {
+            await flushRuntime(runtime);
+        }
+        const exhausted = runtime.guard.getState();
+        assert.equal(runtime.updateCalls, 3, "the automatic sequence must be bounded at three attempts");
+        assert.equal(exhausted.update.exhausted, true);
+        assert.equal(exhausted.update.state, "recovery-required");
+        assert.equal(exhausted.update.failure, "update-timeout");
+        assert.ok(runtime.scheduledTimerDelays.includes(700), "the first retry backoff is missing");
+        assert.ok(runtime.scheduledTimerDelays.includes(1800), "the second retry backoff is missing");
+        assert.equal(
+            runtime.scheduledTimerDelays.filter((delay) => delay === 8000).length,
+            3,
+            "every hanging update attempt must have its own timeout"
+        );
+
+        const banner = runtime.document.querySelector("[data-app-contract-banner]");
+        const retry = banner && banner.querySelector("[data-app-contract-retry]");
+        const spinner = banner && banner.querySelector("[data-app-contract-spinner]");
+        assert.ok(retry, "the exhausted state must expose an accessible retry control");
+        assert.equal(retry.hidden, false);
+        assert.equal(retry.disabled, false);
+        assert.equal(spinner.hidden, true);
+
+        const allowedClick = new CustomEventStub("click");
+        allowedClick.target = retry;
+        runtime.document.dispatchEvent(allowedClick);
+        assert.equal(allowedClick.defaultPrevented, false, "the lock must not swallow Retry");
+
+        retry.dispatchEvent(new CustomEventStub("click"));
+        await flushPromises();
+        assert.equal(runtime.updateCalls, 4, "Retry must start a fresh bounded sequence");
+        runtime.resolveUpdates();
+        await flushPromises();
+        runtime.guard.acceptServiceWorkerVersion({
+            appContractVersion: "contract-v2",
+            shellVersion: "driver-shell-v2",
+            roleCode: "driver",
+        });
+        assertContractState(runtime, {ready: true, locked: false});
+        assert.equal(runtime.document.querySelector("[data-app-contract-banner]"), null);
+    }
+);
 
 test(
     "stable role shells perform no full version_check GET and no automatic update",
@@ -2161,7 +2523,7 @@ test(
 );
 
 test(
-    "transient registration failure retries once on online and does not storm",
+    "transient registration failure recovers automatically without an online event",
     {skip: guardUnavailable},
     async () => {
         const runtime = createRuntime({
@@ -2172,6 +2534,7 @@ test(
             hasWaitingWorker: false,
             registrationAvailable: false,
             registerFailures: 1,
+            online: false,
         });
         runtime.guard.registerJavaScript("contract-v2");
         runtime.guard.acceptServiceWorkerVersion({
@@ -2185,9 +2548,11 @@ test(
             role_app_code: "driver",
         };
         runtime.guard.acceptServerContract(newerServerContract);
-        await flushRuntime(runtime);
-        assert.equal(runtime.updateCalls, 0);
-        assert.equal(runtime.registerCalls, 1);
+        for (let pass = 0; pass < 3; pass += 1) {
+            await flushRuntime(runtime);
+        }
+        assert.equal(runtime.registerCalls, 2, "the bounded retry must re-register offline");
+        assert.equal(runtime.updateCalls, 1, "the recovered registration must be updated");
 
         for (let repeat = 0; repeat < 10; repeat += 1) {
             runtime.guard.acceptServerContract(newerServerContract);
@@ -2195,26 +2560,21 @@ test(
         }
         assert.equal(
             runtime.registerCalls,
-            1,
-            "realtime observations must not retry a failed registration before recovery"
+            2,
+            "realtime observations must not create a registration storm"
         );
-        assert.equal(runtime.updateCalls, 0);
-
-        runtime.window.dispatchEvent(new CustomEventStub("online"));
-        await flushRuntime(runtime);
-        assert.equal(runtime.registerCalls, 2, "online must retry the failed registration once");
-        assert.equal(runtime.updateCalls, 1, "the recovered registration receives one update");
+        assert.equal(runtime.updateCalls, 1);
 
         runtime.window.dispatchEvent(new CustomEventStub("online"));
         runtime.window.dispatchEvent(new CustomEventStub("online"));
         await flushRuntime(runtime);
         assert.equal(runtime.registerCalls, 2);
-        assert.equal(runtime.updateCalls, 1, "repeated online signals must not start an update storm");
+        assert.equal(runtime.updateCalls, 1, "online signals must not restart a completed sequence");
     }
 );
 
 test(
-    "failed controlled update waits for explicit online recovery without realtime retries",
+    "failed controlled update retries with backoff even while offline and does not storm",
     {skip: guardUnavailable},
     async () => {
         const runtime = createRuntime({
@@ -2224,6 +2584,7 @@ test(
             workerShellVersion: "driver-shell-v2",
             hasWaitingWorker: false,
             updateFailures: 1,
+            online: false,
         });
         runtime.guard.registerJavaScript("contract-v2");
         runtime.guard.acceptServiceWorkerVersion({
@@ -2238,7 +2599,7 @@ test(
         };
         runtime.guard.acceptServerContract(newerServerContract);
         await flushRuntime(runtime);
-        assert.equal(runtime.updateCalls, 1);
+        assert.equal(runtime.updateCalls, 2, "one transient failure must retry automatically");
 
         for (let repeat = 0; repeat < 10; repeat += 1) {
             runtime.guard.acceptServerContract(newerServerContract);
@@ -2246,8 +2607,8 @@ test(
         }
         assert.equal(
             runtime.updateCalls,
-            1,
-            "same-version realtime observations must not retry a failed full SW update"
+            2,
+            "same-version observations must not restart the bounded update sequence"
         );
 
         runtime.window.dispatchEvent(new CustomEventStub("online"));
@@ -2255,7 +2616,7 @@ test(
         assert.equal(
             runtime.updateCalls,
             2,
-            "one explicit online recovery may retry the failed controlled update once"
+            "online recovery must not duplicate an automatic retry"
         );
     }
 );

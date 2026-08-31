@@ -3582,55 +3582,93 @@ body.excavator-operator-screen .eo-dashboard-truck-grid {
     }
 }
 
-/* v129: contract recovery is visible without covering controls or bottom navigation. */
-body.excavator-operator-screen[data-app-contract-locked="true"] {
-    --eo-contract-banner-reserve: 80px;
-    --eo-fixed-nav-reserve: calc(
-        var(--eo-fixed-nav-h)
-        + var(--eo-fixed-nav-safe)
-        + var(--eo-contract-banner-reserve)
-    );
-}
-
-body.excavator-operator-screen[data-app-contract-locked="true"] .mm-mobile-bottom-nav {
-    height: calc(var(--eo-fixed-nav-h) + var(--eo-fixed-nav-safe)) !important;
-    min-height: calc(var(--eo-fixed-nav-h) + var(--eo-fixed-nav-safe)) !important;
-}
-
+/* Contract recovery floats above the fixed navigation and never changes the
+   workstation grid height while the shell is being verified. */
 body.excavator-operator-screen .app-contract-banner {
-    inset: auto 8px calc(var(--eo-fixed-nav-h) + var(--eo-fixed-nav-safe) + 4px) !important;
+    top: auto !important;
+    right: max(8px, env(safe-area-inset-right, 0px)) !important;
+    bottom: calc(var(--eo-fixed-nav-h) + var(--eo-fixed-nav-safe) + 4px) !important;
+    left: max(8px, env(safe-area-inset-left, 0px)) !important;
+    transform: none !important;
     z-index: 10070 !important;
     width: auto !important;
-    max-width: none !important;
+    min-width: 0 !important;
+    max-width: calc(100vw - 16px) !important;
     min-height: 42px !important;
-    max-height: 48px !important;
+    height: auto !important;
+    max-height: none !important;
     margin: 0 !important;
     padding: 7px 10px !important;
-    overflow: hidden !important;
+    overflow: visible !important;
     border-radius: 6px !important;
     display: grid !important;
-    place-items: center !important;
-    font-size: 0 !important;
+    grid-template-columns: auto minmax(0, 1fr) auto !important;
+    grid-template-rows: auto !important;
+    align-items: center !important;
+    justify-items: stretch !important;
+    column-gap: 8px !important;
+    row-gap: 0 !important;
+    font-size: inherit !important;
     line-height: 1 !important;
+    -webkit-text-size-adjust: 100% !important;
+    text-size-adjust: 100% !important;
     pointer-events: none !important;
 }
 
-body.excavator-operator-screen .app-contract-banner::before {
-    content: "Обновление приложения. Подождите несколько секунд.";
+body.excavator-operator-screen .app-contract-banner [data-app-contract-spinner] {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+}
+
+body.excavator-operator-screen .app-contract-banner [data-app-contract-message] {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
     display: block;
+    min-width: 0;
+    max-width: 100%;
     color: inherit;
     text-align: center;
     font: 800 clamp(11px, 2.8vw, 13px)/1.18 system-ui, sans-serif;
+    white-space: nowrap;
+}
+
+body.excavator-operator-screen .app-contract-banner [data-app-contract-retry] {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+    justify-self: end;
+    max-width: 100%;
+    white-space: nowrap;
+    pointer-events: auto !important;
+}
+
+/* A large Android text scale must keep both the recovery action and the
+   explanation inside a narrow phone viewport. The compact layout deliberately
+   wraps the message before it can push Retry past the safe area. */
+@media (max-width: 480px) {
+    body.excavator-operator-screen .app-contract-banner {
+        grid-template-columns: auto minmax(0, 1fr) !important;
+        grid-template-rows: auto auto !important;
+        row-gap: 6px !important;
+    }
+
+    body.excavator-operator-screen .app-contract-banner [data-app-contract-message] {
+        grid-column: 2 !important;
+        grid-row: 1 !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere;
+        text-align: left;
+    }
+
+    body.excavator-operator-screen .app-contract-banner [data-app-contract-retry] {
+        grid-column: 2 !important;
+        grid-row: 2 !important;
+        justify-self: end;
+    }
 }
 
 @media (orientation: landscape) and (max-height: 500px) {
-    body.excavator-operator-screen[data-app-contract-locked="true"] {
-        --eo-contract-banner-reserve: 56px;
-    }
-
     body.excavator-operator-screen .app-contract-banner {
         min-height: 30px !important;
-        max-height: 34px !important;
         padding-block: 4px !important;
     }
 }

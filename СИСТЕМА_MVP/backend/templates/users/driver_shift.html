@@ -6118,9 +6118,15 @@ window.bindDriverMobileShell = function () {
                         worker.postMessage({type: "SKIP_WAITING"});
                         return result;
                     }
-                    setStatus(result && result.status === "error"
-                        ? "Не удалось проверить обновление. Попробуйте еще раз."
-                        : "Установлена актуальная версия.");
+                    if (result && result.status === "unavailable") {
+                        setStatus(
+                            "Служба обновления недоступна. Закройте и снова откройте приложение."
+                        );
+                    } else if (result && result.status === "error") {
+                        setStatus("Не удалось проверить обновление. Попробуйте еще раз.");
+                    } else {
+                        setStatus("Установлена актуальная версия.");
+                    }
                     return result;
                 }).finally(function () {
                     runtime.applyPromise = null;

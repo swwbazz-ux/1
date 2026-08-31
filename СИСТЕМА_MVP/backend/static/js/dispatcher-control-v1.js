@@ -114,7 +114,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v120";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v139";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");

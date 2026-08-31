@@ -24,8 +24,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "11",
-    versionName: "0.1.8",
+    versionCode: "12",
+    versionName: "0.1.9",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -35,8 +35,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "7",
-    versionName: "0.1.5",
+    versionCode: "8",
+    versionName: "0.1.6",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -114,6 +114,10 @@ test("startup splash is profile-driven and waits for stable rendered layout", ()
     resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile", "StartupLoadingOverlay.java"),
     "utf8"
   );
+  const watchdogBody = overlay.slice(
+    overlay.indexOf("private void runStartupWatchdog("),
+    overlay.indexOf("private void restartProbeIfReady()")
+  );
 
   assert.match(gradle, /profile\.getProperty\('splashBackgroundColor'/);
   assert.match(gradle, /profile\.getProperty\('splashAccentColor'/);
@@ -140,6 +144,13 @@ test("startup splash is profile-driven and waits for stable rendered layout", ()
   assert.match(overlay, /MutationObserver/);
   assert.match(overlay, /data-driver-shell-bound/);
   assert.match(overlay, /data-eo-initialized/);
+  assert.match(overlay, /querySelectorAll\('\[data-driver-tab-panel\]\.is-active'\)/);
+  assert.match(overlay, /excavatorShell\.dataset\.eoActiveTab/);
+  assert.match(overlay, /panel\.dataset\.eoScreen===excavatorActiveName/);
+  assert.match(overlay, /node\.getClientRects\(\)\.length>0/);
+  assert.match(overlay, /Number\.isFinite\(value\.width\)[\s\S]*?value\.width>0&&value\.height>0/);
+  assert.match(overlay, /visibleBox\(driverActivePanel\)/);
+  assert.match(overlay, /visibleBox\(excavatorActivePanel\)&&!excavatorActivePanel\.hidden/);
   assert.match(overlay, /REQUIRED_STABLE_FRAMES/);
   assert.match(overlay, /REQUIRED_QUIET_WINDOW_MS/);
   assert.match(overlay, /WindowInsetsCompat\.Type\.ime\(\)/);
@@ -154,9 +165,35 @@ test("startup splash is profile-driven and waits for stable rendered layout", ()
   assert.match(overlay, /now - nativeLastChangeMs >= REQUIRED_NATIVE_QUIET_WINDOW_MS[\s\S]*?&& !waitForImeClose/);
   assert.match(overlay, /generation != pageGeneration/);
   assert.match(overlay, /STARTUP_WATCHDOG_MS = 15_000L/);
-  assert.match(overlay, /evaluateJavascript\("document\.readyState"/);
-  assert.match(overlay, /if \(!"\\"complete\\""\.equals\(encodedReadyState\)\)/);
-  assert.match(overlay, /pageLoaded = true;[\s\S]*?webView\.setAlpha\(1f\)[\s\S]*?dismiss\(generation\)/);
+  assert.match(overlay, /runStartupWatchdog\(int generation, WebView watchedWebView\)[\s\S]*?evaluateJavascript\(READINESS_PROBE/);
+  assert.match(overlay, /enterRecovery\([\s\S]*?DiagnosticReason\.WATCHDOG/);
+  assert.doesNotMatch(watchdogBody, /webView\.setAlpha\(1f\)|dismiss\(generation\)/);
+  assert.match(overlay, /restartProbeIfReady\(\)[\s\S]*?int generation = \+\+pageGeneration;[\s\S]*?armStartupWatchdog\(generation, STARTUP_WATCHDOG_MS\)/);
+  assert.match(overlay, /runStartupWatchdog\(int generation[\s\S]*?generation != pageGeneration[\s\S]*?ensureStartupWatchdogArmed/);
+  assert.match(overlay, /armStartupWatchdog\(int generation, long delayMs\)[\s\S]*?!hostResumed[\s\S]*?!windowFocused[\s\S]*?!activity\.hasWindowFocus\(\)/);
+  assert.match(overlay, /onHostResumed\(\)[\s\S]*?cancelWatchdogs\(\);[\s\S]*?restartProbeOrArmWatchdog\(\)/);
+  assert.match(overlay, /if \(!hostResumed \|\| !windowFocused \|\| !activity\.hasWindowFocus\(\)\) \{\s*return;\s*\}/);
+  assert.match(overlay, /private Runnable startupWatchdog;[\s\S]*?private Runnable recoveryWatchdog;/);
+  assert.match(overlay, /armRecoveryWatchdog\(generation, DiagnosticReason\.WATCHDOG\)/);
+  assert.match(overlay, /armRecoveryWatchdog\(generation, DiagnosticReason\.ERROR\)[\s\S]*?evaluateJavascript\(READINESS_PROBE/);
+  assert.match(overlay, /cancelPendingProbe\(\)[\s\S]*?cancelWatchdogs\(\)/);
+  assert.match(overlay, /cancelRecoveryWatchdog\(\)[\s\S]*?removeCallbacks\(recoveryWatchdog\)/);
+  assert.match(overlay, /retryButton\.setText\("Повторить"\)/);
+  assert.match(overlay, /retryButton\.setOnClickListener\([\s\S]*?retryCurrentPage\(\)/);
+  assert.match(overlay, /retryCurrentPage\(\)[\s\S]*?webView\.reload\(\)/);
+  assert.match(overlay, /IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS/);
+  assert.match(overlay, /restoreWebViewInteraction\(\)[\s\S]*?setImportantForAccessibility\(savedWebViewImportantForAccessibility\)/);
+  assert.match(overlay, /retryButton\.requestFocus\(\)[\s\S]*?announceForAccessibility/);
+  assert.match(overlay, /new ScrollView\(activity\)/);
+  assert.match(overlay, /contentScroll\.setFillViewport\(true\)/);
+  assert.match(overlay, /WindowInsetsCompat\.Type\.displayCutout\(\)[\s\S]*?WindowInsetsCompat\.Type\.ime\(\)/);
+  assert.match(overlay, /fontScale >= 1\.5f[\s\S]*?availableWidth > availableHeight/);
+  assert.match(overlay, /retryButton\.setMinHeight\(dp\(48\)\)/);
+  assert.match(overlay, /content\.addView\(retryButton, linearParams\([\s\S]*?ViewGroup\.LayoutParams\.WRAP_CONTENT,[\s\S]*?ViewGroup\.LayoutParams\.WRAP_CONTENT/);
+  assert.match(overlay, /NORMAL\("normal"\)[\s\S]*?WATCHDOG\("watchdog"\)[\s\S]*?ERROR\("error"\)/);
+  assert.match(overlay, /startup_overlay state=/);
+  assert.doesNotMatch(overlay, /Log\.[idwe]\([^\n]*(getUrl|APP_START_URL|APP_SERVER_URL|encodedResult)/);
+  assert.match(activity, /onReceivedError\(WebView erroredWebView\)[\s\S]*?lastObservedPageState != PageState\.STARTED[\s\S]*?startupLoadingOverlay\.onPageError\(erroredWebView\)/);
   assert.match(overlay, /private boolean destroyed;/);
   assert.match(overlay, /private boolean visible;/);
   assert.doesNotMatch(overlay, /private boolean dismissed;/);

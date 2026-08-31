@@ -8,15 +8,19 @@ import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.os.SystemClock;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.LinearInterpolator;
 import android.webkit.WebView;
+import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.core.graphics.Insets;
@@ -26,6 +30,7 @@ import androidx.core.view.WindowInsetsCompat;
 import org.json.JSONTokener;
 
 final class StartupLoadingOverlay {
+    private static final String LOG_TAG = "CopperStartup";
     private static final int REQUIRED_STABLE_FRAMES = 8;
     private static final long REQUIRED_QUIET_WINDOW_MS = 240L;
     private static final int REQUIRED_NATIVE_STABLE_FRAMES = 8;
@@ -56,10 +61,25 @@ final class StartupLoadingOverlay {
             "var driverShell=document.querySelector('[data-driver-shell]');" +
             "var excavatorShell=document.querySelector('[data-eo-shell]');" +
             "var roleShell=driverShell||excavatorShell||document.querySelector('main')||body;" +
-            "var activePanel=roleShell&&roleShell.querySelector('[data-driver-tab-panel].is-active,[data-eo-screen]:not([hidden])');" +
+            "var driverPanels=driverShell?driverShell.querySelectorAll('[data-driver-tab-panel].is-active'):null;" +
+            "var driverActivePanel=driverPanels&&driverPanels.length===1?driverPanels[0]:null;" +
+            "var excavatorActiveName=excavatorShell?String(excavatorShell.dataset.eoActiveTab||''):'';" +
+            "var excavatorActivePanel=null;" +
+            "if(excavatorShell&&excavatorActiveName){" +
+                "Array.prototype.some.call(excavatorShell.querySelectorAll('[data-eo-screen]'),function(panel){" +
+                    "if(panel.dataset.eoScreen===excavatorActiveName){excavatorActivePanel=panel;return true;}return false;" +
+                "});" +
+            "}" +
+            "var activePanel=driverShell?driverActivePanel:(excavatorShell?excavatorActivePanel:null);" +
             "var metric=function(value){value=Number(value)||0;return Math.round(value*10)/10;};" +
             "var rect=function(node){var value=node&&node.getBoundingClientRect?node.getBoundingClientRect():null;" +
                 "return value?[metric(value.left),metric(value.top),metric(value.width),metric(value.height)].join(','):'0,0,0,0';};" +
+            "var visibleBox=function(node){" +
+                "if(!node||node.hidden||node.getAttribute('aria-hidden')==='true'||!node.getBoundingClientRect){return false;}" +
+                "var style=getComputedStyle(node);var value=node.getBoundingClientRect();" +
+                "return style.display!=='none'&&style.visibility!=='hidden'&&node.getClientRects().length>0" +
+                    "&&Number.isFinite(value.width)&&Number.isFinite(value.height)&&value.width>0&&value.height>0;" +
+            "};" +
             "var width=metric(viewport?viewport.width:window.innerWidth);" +
             "var height=metric(viewport?viewport.height:window.innerHeight);" +
             "var scale=Math.round((Number(viewport?viewport.scale:1)||0)*1000)/1000;" +
@@ -67,12 +87,14 @@ final class StartupLoadingOverlay {
             "var shellStyle=roleShell?getComputedStyle(roleShell):null;" +
             "var driverHeight=rootStyle?rootStyle.getPropertyValue('--driver-viewport-h').trim():'';" +
             "var excavatorHeight=rootStyle?rootStyle.getPropertyValue('--eo-app-height').trim():'';" +
-            "var roleReady=true;" +
+            "var roleReady=visibleBox(roleShell);" +
             "if(driverShell){roleReady=driverShell.dataset.driverShellBound==='true'&&!!driverHeight" +
                 "&&Math.abs((parseFloat(driverHeight)||0)-driverShell.getBoundingClientRect().height)<=2" +
-                "&&!window.driverViewportFitFrame&&!window.driverDialLabelFitFrame;}" +
+                "&&!window.driverViewportFitFrame&&!window.driverDialLabelFitFrame" +
+                "&&visibleBox(driverShell)&&visibleBox(driverActivePanel);}" +
             "if(excavatorShell){roleReady=excavatorShell.dataset.eoInitialized==='1'&&!!excavatorHeight" +
-                "&&Math.abs((parseFloat(excavatorHeight)||0)-excavatorShell.getBoundingClientRect().height)<=2;}" +
+                "&&Math.abs((parseFloat(excavatorHeight)||0)-excavatorShell.getBoundingClientRect().height)<=2" +
+                "&&visibleBox(excavatorShell)&&visibleBox(excavatorActivePanel)&&!excavatorActivePanel.hidden;}" +
             "var snapshot=[" +
                 "width,height,scale,metric(window.innerWidth),metric(window.innerHeight)," +
                 "root?root.clientWidth:0,root?root.clientHeight:0,root?root.scrollWidth:0,root?root.scrollHeight:0," +
@@ -119,12 +141,21 @@ final class StartupLoadingOverlay {
 
     private final Activity activity;
     private final FrameLayout overlay;
+    private final ScrollView contentScroll;
+    private final LinearLayout content;
+    private final ImageView icon;
+    private final TextView title;
     private final SyncSpinnerView spinner;
+    private final TextView recoveryMessage;
+    private final Button retryButton;
     private final View.OnLayoutChangeListener webViewLayoutChangeListener;
     private WebView webView;
     private boolean destroyed;
     private boolean visible;
     private boolean pageLoaded;
+    private boolean recoveryVisible;
+    private boolean pageErrorObserved;
+    private boolean watchdogGraceUsed;
     private boolean hostResumed;
     private boolean windowFocused;
     private boolean waitForImeClose;
@@ -132,7 +163,14 @@ final class StartupLoadingOverlay {
     private String nativeLayoutSnapshot = "";
     private int nativeStableFrames;
     private long nativeLastChangeMs;
-    private final Runnable startupWatchdog = this::runStartupWatchdog;
+    private Runnable startupWatchdog;
+    private Runnable recoveryWatchdog;
+    private int recoveryWatchdogGeneration = -1;
+    private boolean webViewInteractionSuppressed;
+    private int savedWebViewImportantForAccessibility;
+    private int savedWebViewDescendantFocusability;
+    private boolean savedWebViewFocusable;
+    private boolean savedWebViewFocusableInTouchMode;
 
     private StartupLoadingOverlay(Activity activity) {
         this.activity = activity;
@@ -147,16 +185,16 @@ final class StartupLoadingOverlay {
         overlay.setContentDescription("Загрузка приложения " + BuildConfig.APP_DISPLAY_NAME);
         overlay.setElevation(dp(32));
 
-        LinearLayout content = new LinearLayout(activity);
+        content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setGravity(Gravity.CENTER_HORIZONTAL);
+        content.setGravity(Gravity.CENTER);
 
-        ImageView icon = new ImageView(activity);
+        icon = new ImageView(activity);
         icon.setImageDrawable(resolveProfileIcon(activity));
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        content.addView(icon, linearParams(128, 128, 0, 0, 0, 24));
+        content.addView(icon, linearParams(112, 112, 0, 0, 0, 18));
 
-        TextView title = new TextView(activity);
+        title = new TextView(activity);
         title.setText(BuildConfig.APP_DISPLAY_NAME);
         title.setTextColor(Color.rgb(247, 250, 252));
         title.setTextSize(22f);
@@ -168,18 +206,108 @@ final class StartupLoadingOverlay {
             0,
             0,
             0,
-            24
+            18
         ));
 
         spinner = new SyncSpinnerView(activity, accentColor);
         content.addView(spinner, linearParams(42, 42, 0, 0, 0, 0));
 
-        FrameLayout.LayoutParams contentParams = new FrameLayout.LayoutParams(
+        recoveryMessage = new TextView(activity);
+        recoveryMessage.setTextColor(Color.rgb(226, 232, 240));
+        recoveryMessage.setTextSize(16f);
+        recoveryMessage.setGravity(Gravity.CENTER);
+        recoveryMessage.setMaxWidth(dp(300));
+        recoveryMessage.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE);
+        recoveryMessage.setVisibility(View.GONE);
+        content.addView(recoveryMessage, linearParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.CENTER
+            0,
+            0,
+            0,
+            20
+        ));
+
+        retryButton = new Button(activity);
+        retryButton.setText("Повторить");
+        retryButton.setTextColor(backgroundColor);
+        retryButton.setTextSize(16f);
+        retryButton.setAllCaps(false);
+        retryButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        GradientDrawable retryBackground = new GradientDrawable();
+        retryBackground.setColor(accentColor);
+        retryBackground.setCornerRadius(dp(12));
+        retryButton.setBackground(retryBackground);
+        retryButton.setMinHeight(dp(48));
+        retryButton.setMinWidth(dp(172));
+        retryButton.setFocusable(true);
+        retryButton.setVisibility(View.GONE);
+        retryButton.setOnClickListener(ignored -> retryCurrentPage());
+        content.addView(retryButton, linearParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            0,
+            0,
+            0,
+            0
+        ));
+
+        contentScroll = new ScrollView(activity);
+        contentScroll.setFillViewport(true);
+        contentScroll.setClipToPadding(false);
+        contentScroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        contentScroll.addView(content, new ScrollView.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        overlay.addView(contentScroll, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+
+        ViewCompat.setOnApplyWindowInsetsListener(overlay, (view, windowInsets) -> {
+            Insets safeInsets = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars()
+                    | WindowInsetsCompat.Type.displayCutout()
+                    | WindowInsetsCompat.Type.ime()
+            );
+            int horizontalPadding = dp(16);
+            int verticalPadding = dp(12);
+            int paddingLeft = safeInsets.left + horizontalPadding;
+            int paddingTop = safeInsets.top + verticalPadding;
+            int paddingRight = safeInsets.right + horizontalPadding;
+            int paddingBottom = safeInsets.bottom + verticalPadding;
+            if (contentScroll.getPaddingLeft() != paddingLeft
+                    || contentScroll.getPaddingTop() != paddingTop
+                    || contentScroll.getPaddingRight() != paddingRight
+                    || contentScroll.getPaddingBottom() != paddingBottom) {
+                contentScroll.setPadding(paddingLeft, paddingTop, paddingRight, paddingBottom);
+            }
+            updateContentDensity(
+                Math.max(0, view.getWidth() - contentScroll.getPaddingLeft() - contentScroll.getPaddingRight()),
+                Math.max(0, view.getHeight() - contentScroll.getPaddingTop() - contentScroll.getPaddingBottom())
+            );
+            return windowInsets;
+        });
+        overlay.addOnLayoutChangeListener((
+                view,
+                left,
+                top,
+                right,
+                bottom,
+                oldLeft,
+                oldTop,
+                oldRight,
+                oldBottom) -> {
+            if (left == oldLeft && top == oldTop && right == oldRight && bottom == oldBottom) {
+                return;
+            }
+            updateContentDensity(
+                Math.max(0, right - left - contentScroll.getPaddingLeft() - contentScroll.getPaddingRight()),
+                Math.max(0, bottom - top - contentScroll.getPaddingTop() - contentScroll.getPaddingBottom())
+            );
+        }
         );
-        overlay.addView(content, contentParams);
 
         webViewLayoutChangeListener = (
                 view,
@@ -212,6 +340,9 @@ final class StartupLoadingOverlay {
         }
         pageGeneration += 1;
         pageLoaded = false;
+        pageErrorObserved = false;
+        watchdogGraceUsed = false;
+        recoveryVisible = false;
         bindWebView(loadingWebView);
         WindowInsetsCompat rootInsets = ViewCompat.getRootWindowInsets(loadingWebView);
         waitForImeClose = rootInsets != null && rootInsets.isVisible(WindowInsetsCompat.Type.ime());
@@ -224,11 +355,18 @@ final class StartupLoadingOverlay {
             return;
         }
         bindWebView(loadedWebView);
-        if (!visible) {
+        if (!visible || recoveryVisible) {
             return;
         }
         pageLoaded = true;
         restartProbeIfReady();
+    }
+
+    void onPageError(WebView erroredWebView) {
+        if (destroyed || !visible || recoveryVisible || erroredWebView == null || erroredWebView != webView) {
+            return;
+        }
+        pageErrorObserved = true;
     }
 
     void onHostResumed() {
@@ -236,7 +374,8 @@ final class StartupLoadingOverlay {
             return;
         }
         hostResumed = true;
-        restartProbeIfReady();
+        cancelWatchdogs();
+        restartProbeOrArmWatchdog();
     }
 
     void onHostPaused() {
@@ -253,7 +392,8 @@ final class StartupLoadingOverlay {
         }
         windowFocused = hasFocus;
         if (hasFocus) {
-            restartProbeIfReady();
+            cancelWatchdogs();
+            restartProbeOrArmWatchdog();
         } else {
             cancelPendingProbe();
         }
@@ -262,11 +402,12 @@ final class StartupLoadingOverlay {
     void destroy() {
         destroyed = true;
         pageGeneration += 1;
+        cancelWatchdogs();
         spinner.stop();
         overlay.animate().cancel();
         if (webView != null) {
-            webView.removeCallbacks(startupWatchdog);
             webView.removeOnLayoutChangeListener(webViewLayoutChangeListener);
+            restoreWebViewInteraction();
             webView.setAlpha(1f);
             webView.setVisibility(View.VISIBLE);
         }
@@ -280,9 +421,12 @@ final class StartupLoadingOverlay {
             return;
         }
         if (webView != null) {
+            cancelWatchdogs();
             webView.removeOnLayoutChangeListener(webViewLayoutChangeListener);
+            restoreWebViewInteraction();
         }
         webView = nextWebView;
+        webViewInteractionSuppressed = false;
         if (webView != null) {
             webView.addOnLayoutChangeListener(webViewLayoutChangeListener);
         }
@@ -303,64 +447,209 @@ final class StartupLoadingOverlay {
         }
         overlay.bringToFront();
         visible = true;
-        spinner.start();
+        showLoadingState();
         webView.setVisibility(View.VISIBLE);
+        suppressWebViewInteraction();
         webView.setAlpha(0f);
-        webView.removeCallbacks(startupWatchdog);
-        webView.postDelayed(startupWatchdog, STARTUP_WATCHDOG_MS);
+        cancelWatchdogs();
+        armStartupWatchdog(pageGeneration, STARTUP_WATCHDOG_MS);
+        ViewCompat.requestApplyInsets(overlay);
     }
 
-    private void runStartupWatchdog() {
-        if (destroyed || !visible || webView == null) {
+    private void runStartupWatchdog(int generation, WebView watchedWebView) {
+        if (destroyed || !visible || recoveryVisible || webView == null || watchedWebView != webView) {
+            return;
+        }
+        if (generation != pageGeneration) {
+            ensureStartupWatchdogArmed(STARTUP_WATCHDOG_RETRY_MS);
             return;
         }
         if (!hostResumed || !windowFocused || !activity.hasWindowFocus()) {
-            webView.postDelayed(startupWatchdog, STARTUP_WATCHDOG_RETRY_MS);
             return;
         }
-        int generation = pageGeneration;
-        webView.evaluateJavascript("document.readyState", encodedReadyState -> {
-            if (destroyed || !visible || generation != pageGeneration || webView == null) {
-                return;
-            }
-            if (!"\"complete\"".equals(encodedReadyState)) {
-                webView.postDelayed(startupWatchdog, STARTUP_WATCHDOG_RETRY_MS);
-                return;
-            }
-            /* Аварийный выход срабатывает только для уже готового документа.
-               Основной путь по-прежнему ждёт role shell, insets и visual state. */
-            pageLoaded = true;
-            webView.setAlpha(1f);
-            dismiss(generation);
-        });
+        /* Keep a separate recovery task armed while evaluateJavascript is
+           outstanding; some WebView builds can omit its callback on navigation. */
+        armRecoveryWatchdog(generation, DiagnosticReason.ERROR);
+        try {
+            webView.evaluateJavascript(READINESS_PROBE, encodedResult -> {
+                cancelRecoveryWatchdog(generation);
+                if (!isCurrentVisibleGeneration(generation)) {
+                    ensureStartupWatchdogArmed(STARTUP_WATCHDOG_RETRY_MS);
+                    return;
+                }
+                Readiness readiness = parseReadiness(encodedResult);
+                if (!readiness.valid()) {
+                    enterRecovery(generation, DiagnosticReason.ERROR);
+                    return;
+                }
+                if (!pageLoaded && readiness.documentComplete() && !watchdogGraceUsed) {
+                    /* Capacitor can lose onPageLoaded for a cached document. Give the
+                       ordinary probe one short, bounded chance instead of revealing it. */
+                    pageLoaded = true;
+                    watchdogGraceUsed = true;
+                    restartProbeIfReady();
+                    return;
+                }
+                if (pageLoaded && sampleNativeLayoutReadiness() && readiness.isReady()) {
+                    awaitCommittedVisualState(generation);
+                    armRecoveryWatchdog(generation, DiagnosticReason.WATCHDOG);
+                    return;
+                }
+                enterRecovery(
+                    generation,
+                    pageErrorObserved ? DiagnosticReason.ERROR : DiagnosticReason.WATCHDOG
+                );
+            });
+        } catch (RuntimeException error) {
+            enterRecovery(generation, DiagnosticReason.ERROR);
+        }
     }
 
     private void restartProbeIfReady() {
         if (!canProbe()) {
+            ensureStartupWatchdogArmed(STARTUP_WATCHDOG_MS);
             return;
         }
         int generation = ++pageGeneration;
+        cancelRecoveryWatchdog();
+        armStartupWatchdog(generation, STARTUP_WATCHDOG_MS);
         resetNativeLayoutStability();
         View parent = webView.getParent() instanceof View ? (View) webView.getParent() : webView;
         ViewCompat.requestApplyInsets(parent);
         webView.requestLayout();
         webView.invalidate();
-        webView.postOnAnimation(() -> webView.evaluateJavascript(PREPARE_LAYOUT, ignored -> {
+        webView.postOnAnimation(() -> {
             if (!isCurrentProbe(generation)) {
                 return;
             }
-            probeOnNextFrame(generation);
-        }));
+            try {
+                webView.evaluateJavascript(PREPARE_LAYOUT, ignored -> {
+                    if (!isCurrentProbe(generation)) {
+                        return;
+                    }
+                    probeOnNextFrame(generation);
+                });
+            } catch (RuntimeException error) {
+                enterRecovery(generation, DiagnosticReason.ERROR);
+            }
+        });
+    }
+
+    private void restartProbeOrArmWatchdog() {
+        if (canProbe()) {
+            restartProbeIfReady();
+            return;
+        }
+        ensureStartupWatchdogArmed(STARTUP_WATCHDOG_MS);
     }
 
     private void cancelPendingProbe() {
         pageGeneration += 1;
         resetNativeLayoutStability();
+        cancelWatchdogs();
+    }
+
+    private void armStartupWatchdog(int generation, long delayMs) {
+        cancelStartupWatchdog();
+        if (destroyed
+                || !visible
+                || recoveryVisible
+                || !hostResumed
+                || !windowFocused
+                || !activity.hasWindowFocus()
+                || webView == null) {
+            return;
+        }
+        WebView watchedWebView = webView;
+        Runnable task = new Runnable() {
+            @Override
+            public void run() {
+                if (startupWatchdog != this) {
+                    return;
+                }
+                startupWatchdog = null;
+                runStartupWatchdog(generation, watchedWebView);
+            }
+        };
+        startupWatchdog = task;
+        watchedWebView.postDelayed(task, Math.max(1L, delayMs));
+    }
+
+    private void ensureStartupWatchdogArmed(long delayMs) {
+        if (startupWatchdog == null
+                && recoveryWatchdog == null
+                && !destroyed
+                && visible
+                && !recoveryVisible
+                && hostResumed
+                && windowFocused
+                && activity.hasWindowFocus()
+                && webView != null) {
+            armStartupWatchdog(pageGeneration, delayMs);
+        }
+    }
+
+    private void cancelStartupWatchdog() {
+        if (startupWatchdog == null) {
+            return;
+        }
+        if (webView != null) {
+            webView.removeCallbacks(startupWatchdog);
+        }
+        startupWatchdog = null;
+    }
+
+    private void armRecoveryWatchdog(int generation, DiagnosticReason reason) {
+        cancelStartupWatchdog();
+        cancelRecoveryWatchdog();
+        if (!isCurrentVisibleGeneration(generation) || webView == null) {
+            return;
+        }
+        WebView watchedWebView = webView;
+        Runnable task = new Runnable() {
+            @Override
+            public void run() {
+                if (recoveryWatchdog != this) {
+                    return;
+                }
+                recoveryWatchdog = null;
+                recoveryWatchdogGeneration = -1;
+                if (watchedWebView == webView) {
+                    enterRecovery(generation, reason);
+                }
+            }
+        };
+        recoveryWatchdog = task;
+        recoveryWatchdogGeneration = generation;
+        watchedWebView.postDelayed(task, STARTUP_WATCHDOG_RETRY_MS);
+    }
+
+    private void cancelRecoveryWatchdog(int generation) {
+        if (recoveryWatchdogGeneration == generation) {
+            cancelRecoveryWatchdog();
+        }
+    }
+
+    private void cancelRecoveryWatchdog() {
+        if (recoveryWatchdog == null) {
+            return;
+        }
+        if (webView != null) {
+            webView.removeCallbacks(recoveryWatchdog);
+        }
+        recoveryWatchdog = null;
+        recoveryWatchdogGeneration = -1;
+    }
+
+    private void cancelWatchdogs() {
+        cancelStartupWatchdog();
+        cancelRecoveryWatchdog();
     }
 
     private boolean canProbe() {
         return !destroyed
             && visible
+            && !recoveryVisible
             && pageLoaded
             && hostResumed
             && windowFocused
@@ -373,6 +662,15 @@ final class StartupLoadingOverlay {
         return generation == pageGeneration && canProbe();
     }
 
+    private boolean isCurrentVisibleGeneration(int generation) {
+        return !destroyed
+            && visible
+            && !recoveryVisible
+            && generation == pageGeneration
+            && webView != null
+            && !activity.isFinishing();
+    }
+
     private void probeOnNextFrame(int generation) {
         if (!isCurrentProbe(generation)) {
             return;
@@ -382,17 +680,21 @@ final class StartupLoadingOverlay {
                 return;
             }
             boolean nativeLayoutReady = sampleNativeLayoutReadiness();
-            webView.evaluateJavascript(READINESS_PROBE, encodedResult -> {
-                if (!isCurrentProbe(generation)) {
-                    return;
-                }
-                Readiness readiness = parseReadiness(encodedResult);
-                if (nativeLayoutReady && readiness.isReady()) {
-                    awaitCommittedVisualState(generation);
-                    return;
-                }
-                probeOnNextFrame(generation);
-            });
+            try {
+                webView.evaluateJavascript(READINESS_PROBE, encodedResult -> {
+                    if (!isCurrentProbe(generation)) {
+                        return;
+                    }
+                    Readiness readiness = parseReadiness(encodedResult);
+                    if (nativeLayoutReady && readiness.isReady()) {
+                        awaitCommittedVisualState(generation);
+                        return;
+                    }
+                    probeOnNextFrame(generation);
+                });
+            } catch (RuntimeException error) {
+                enterRecovery(generation, DiagnosticReason.ERROR);
+            }
         });
     }
 
@@ -400,26 +702,48 @@ final class StartupLoadingOverlay {
         if (!isCurrentProbe(generation)) {
             return;
         }
-        webView.postVisualStateCallback(generation, new WebView.VisualStateCallback() {
-            @Override
-            public void onComplete(long requestId) {
-                if (requestId != generation || !isCurrentProbe(generation)) {
-                    return;
+        try {
+            webView.postVisualStateCallback(generation, new WebView.VisualStateCallback() {
+                @Override
+                public void onComplete(long requestId) {
+                    if (requestId != generation || !isCurrentProbe(generation)) {
+                        return;
+                    }
+                    webView.postOnAnimation(() -> {
+                        if (!isCurrentProbe(generation)) {
+                            return;
+                        }
+                        try {
+                            webView.evaluateJavascript(READINESS_PROBE, encodedResult -> {
+                                cancelRecoveryWatchdog(generation);
+                                if (!isCurrentProbe(generation)) {
+                                    return;
+                                }
+                                Readiness readiness = parseReadiness(encodedResult);
+                                if (!readiness.valid()) {
+                                    enterRecovery(generation, DiagnosticReason.ERROR);
+                                    return;
+                                }
+                                if (!sampleNativeLayoutReadiness() || !readiness.isReady()) {
+                                    ensureStartupWatchdogArmed(STARTUP_WATCHDOG_RETRY_MS);
+                                    probeOnNextFrame(generation);
+                                    return;
+                                }
+                                cancelWatchdogs();
+                                recordDiagnostic(DiagnosticReason.NORMAL, "reveal", generation);
+                                restoreWebViewInteraction();
+                                webView.setAlpha(1f);
+                                webView.postOnAnimation(() -> dismiss(generation));
+                            });
+                        } catch (RuntimeException error) {
+                            enterRecovery(generation, DiagnosticReason.ERROR);
+                        }
+                    });
                 }
-                webView.postOnAnimation(() -> webView.evaluateJavascript(READINESS_PROBE, encodedResult -> {
-                    if (!isCurrentProbe(generation)) {
-                        return;
-                    }
-                    Readiness readiness = parseReadiness(encodedResult);
-                    if (!sampleNativeLayoutReadiness() || !readiness.isReady()) {
-                        probeOnNextFrame(generation);
-                        return;
-                    }
-                    webView.setAlpha(1f);
-                    webView.postOnAnimation(() -> dismiss(generation));
-                }));
-            }
-        });
+            });
+        } catch (RuntimeException error) {
+            enterRecovery(generation, DiagnosticReason.ERROR);
+        }
     }
 
     private boolean sampleNativeLayoutReadiness() {
@@ -488,15 +812,15 @@ final class StartupLoadingOverlay {
         try {
             Object decoded = new JSONTokener(encodedResult).nextValue();
             if (!(decoded instanceof String value)) {
-                return Readiness.notReady();
+                return Readiness.invalid();
             }
             String[] parts = value.split("\\|", -1);
             if (parts.length != 8) {
-                return Readiness.notReady();
+                return Readiness.invalid();
             }
             String[] dimensions = parts[1].split("x", -1);
             if (dimensions.length < 5) {
-                return Readiness.notReady();
+                return Readiness.invalid();
             }
             double viewportScale = Double.parseDouble(dimensions[2]);
             boolean hasViewport = Double.parseDouble(dimensions[0]) > 0
@@ -504,6 +828,7 @@ final class StartupLoadingOverlay {
                 && viewportScale >= 0.98
                 && viewportScale <= 1.02;
             return new Readiness(
+                true,
                 "complete".equals(parts[0]),
                 hasViewport,
                 Integer.parseInt(parts[2]),
@@ -514,7 +839,85 @@ final class StartupLoadingOverlay {
                 "1".equals(parts[7])
             );
         } catch (Exception ignored) {
-            return Readiness.notReady();
+            return Readiness.invalid();
+        }
+    }
+
+    private void showLoadingState() {
+        recoveryVisible = false;
+        recoveryMessage.setVisibility(View.GONE);
+        retryButton.setEnabled(true);
+        retryButton.setVisibility(View.GONE);
+        spinner.setVisibility(View.VISIBLE);
+        spinner.start();
+        overlay.setContentDescription("Загрузка приложения " + BuildConfig.APP_DISPLAY_NAME);
+        overlay.requestFocus();
+    }
+
+    private void enterRecovery(int generation, DiagnosticReason reason) {
+        if (!isCurrentVisibleGeneration(generation)) {
+            return;
+        }
+        pageGeneration += 1;
+        recoveryVisible = true;
+        cancelWatchdogs();
+        spinner.stop();
+        spinner.setVisibility(View.GONE);
+        webView.setVisibility(View.VISIBLE);
+        suppressWebViewInteraction();
+        webView.setAlpha(0f);
+        recoveryMessage.setText(
+            reason == DiagnosticReason.ERROR
+                ? "Не удалось загрузить экран приложения. Проверьте соединение и повторите попытку."
+                : "Экран не успел подготовиться. Проверьте соединение и повторите загрузку."
+        );
+        recoveryMessage.setVisibility(View.VISIBLE);
+        retryButton.setEnabled(true);
+        retryButton.setVisibility(View.VISIBLE);
+        overlay.setContentDescription(recoveryMessage.getText());
+        overlay.bringToFront();
+        recordDiagnostic(reason, "recovery", pageGeneration);
+        int recoveryGeneration = pageGeneration;
+        retryButton.post(() -> {
+            if (destroyed || !recoveryVisible || recoveryGeneration != pageGeneration) {
+                return;
+            }
+            retryButton.requestFocus();
+            overlay.announceForAccessibility(recoveryMessage.getText());
+        });
+    }
+
+    private void retryCurrentPage() {
+        if (destroyed || webView == null || !recoveryVisible) {
+            return;
+        }
+        int generation = ++pageGeneration;
+        pageLoaded = false;
+        pageErrorObserved = false;
+        watchdogGraceUsed = false;
+        waitForImeClose = false;
+        resetNativeLayoutStability();
+        showLoadingState();
+        webView.setVisibility(View.VISIBLE);
+        suppressWebViewInteraction();
+        webView.setAlpha(0f);
+        cancelWatchdogs();
+        armStartupWatchdog(generation, STARTUP_WATCHDOG_MS);
+        try {
+            webView.reload();
+        } catch (RuntimeException error) {
+            enterRecovery(generation, DiagnosticReason.ERROR);
+        }
+    }
+
+    private void recordDiagnostic(DiagnosticReason reason, String state, int generation) {
+        String message = "startup_overlay state=" + state
+            + " reason=" + reason.value
+            + " generation=" + generation;
+        if (reason == DiagnosticReason.NORMAL) {
+            Log.i(LOG_TAG, message);
+        } else {
+            Log.w(LOG_TAG, message);
         }
     }
 
@@ -523,8 +926,9 @@ final class StartupLoadingOverlay {
             return;
         }
         visible = false;
+        cancelWatchdogs();
         spinner.stop();
-        webView.removeCallbacks(startupWatchdog);
+        restoreWebViewInteraction();
         overlay.animate().cancel();
         overlay.animate()
             .alpha(0f)
@@ -538,6 +942,88 @@ final class StartupLoadingOverlay {
                 }
             })
             .start();
+    }
+
+    private void suppressWebViewInteraction() {
+        if (webView == null || webViewInteractionSuppressed) {
+            return;
+        }
+        savedWebViewImportantForAccessibility = webView.getImportantForAccessibility();
+        savedWebViewDescendantFocusability = webView.getDescendantFocusability();
+        savedWebViewFocusable = webView.isFocusable();
+        savedWebViewFocusableInTouchMode = webView.isFocusableInTouchMode();
+        webView.clearFocus();
+        webView.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        webView.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        webView.setFocusable(false);
+        webView.setFocusableInTouchMode(false);
+        webViewInteractionSuppressed = true;
+    }
+
+    private void restoreWebViewInteraction() {
+        if (webView == null || !webViewInteractionSuppressed) {
+            return;
+        }
+        webView.setImportantForAccessibility(savedWebViewImportantForAccessibility);
+        webView.setDescendantFocusability(savedWebViewDescendantFocusability);
+        webView.setFocusable(savedWebViewFocusable);
+        webView.setFocusableInTouchMode(savedWebViewFocusableInTouchMode);
+        webViewInteractionSuppressed = false;
+    }
+
+    private void updateContentDensity(int availableWidth, int availableHeight) {
+        float fontScale = activity.getResources().getConfiguration().fontScale;
+        boolean compact = fontScale >= 1.5f
+            || (availableWidth > 0 && availableHeight > 0 && availableWidth > availableHeight)
+            || (availableHeight > 0 && availableHeight < dp(520));
+        int iconSize = compact ? 64 : 112;
+        int iconSpacing = compact ? 10 : 18;
+        int titleSpacing = compact ? 12 : 18;
+        int messageSpacing = compact ? 12 : 20;
+        updateLinearParams(icon, iconSize, iconSize, iconSpacing);
+        updateLinearParams(
+            title,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            titleSpacing
+        );
+        updateLinearParams(
+            recoveryMessage,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            messageSpacing
+        );
+        int messageMaxWidth = availableWidth > 0
+            ? Math.max(dp(160), Math.min(availableWidth, dp(360)))
+            : dp(300);
+        if (recoveryMessage.getMaxWidth() != messageMaxWidth) {
+            recoveryMessage.setMaxWidth(messageMaxWidth);
+        }
+        int contentPadding = dp(compact ? 8 : 20);
+        if (content.getPaddingLeft() != contentPadding
+                || content.getPaddingTop() != contentPadding
+                || content.getPaddingRight() != contentPadding
+                || content.getPaddingBottom() != contentPadding) {
+            content.setPadding(contentPadding, contentPadding, contentPadding, contentPadding);
+        }
+    }
+
+    private void updateLinearParams(View view, int widthDp, int heightDp, int bottomDp) {
+        LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) view.getLayoutParams();
+        int width = widthDp == ViewGroup.LayoutParams.WRAP_CONTENT ? widthDp : dp(widthDp);
+        int height = heightDp == ViewGroup.LayoutParams.WRAP_CONTENT ? heightDp : dp(heightDp);
+        int bottom = dp(bottomDp);
+        if (params.width != width
+                || params.height != height
+                || params.leftMargin != 0
+                || params.topMargin != 0
+                || params.rightMargin != 0
+                || params.bottomMargin != bottom) {
+            params.width = width;
+            params.height = height;
+            params.setMargins(0, 0, 0, bottom);
+            view.setLayoutParams(params);
+        }
     }
 
     private Drawable resolveProfileIcon(Activity activity) {
@@ -572,6 +1058,7 @@ final class StartupLoadingOverlay {
     }
 
     private record Readiness(
+            boolean valid,
             boolean documentComplete,
             boolean hasViewport,
             int stableFrames,
@@ -580,8 +1067,8 @@ final class StartupLoadingOverlay {
             boolean imagesReady,
             boolean roleReady,
             boolean pageVisible) {
-        static Readiness notReady() {
-            return new Readiness(false, false, 0, 0L, false, false, false, false);
+        static Readiness invalid() {
+            return new Readiness(false, false, false, 0, 0L, false, false, false, false);
         }
 
         boolean isReady() {
@@ -593,6 +1080,18 @@ final class StartupLoadingOverlay {
                 && pageVisible
                 && stableFrames >= REQUIRED_STABLE_FRAMES
                 && quietWindowMs >= REQUIRED_QUIET_WINDOW_MS;
+        }
+    }
+
+    private enum DiagnosticReason {
+        NORMAL("normal"),
+        WATCHDOG("watchdog"),
+        ERROR("error");
+
+        final String value;
+
+        DiagnosticReason(String value) {
+            this.value = value;
         }
     }
 
