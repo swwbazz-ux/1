@@ -87,7 +87,11 @@ def _render_universal_start(request, template_name, context):
     """Не кешировать результат, содержащий телефон и одноразовый App Link."""
 
     response = render(request, template_name, context)
-    response['Referrer-Policy'] = 'no-referrer'
+    # Android Chrome can submit a regular HTTPS form with ``Origin: null``
+    # when the document forbids every referrer. Django then correctly rejects
+    # the POST before this view sees it. Keep same-origin CSRF evidence while
+    # still hiding the source page from role subdomains and other origins.
+    response['Referrer-Policy'] = 'same-origin'
     response['X-Robots-Tag'] = 'noindex, nofollow'
     return response
 

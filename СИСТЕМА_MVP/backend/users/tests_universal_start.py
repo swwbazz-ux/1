@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -87,6 +87,34 @@ class UniversalStartTests(TestCase):
             f'<meta name="theme-color" content="{ENTRY_SCREEN_BROWSER_BAR}">',
             count=1,
         )
+
+    def test_start_form_keeps_same_origin_csrf_evidence(self):
+        client = Client(enforce_csrf_checks=True)
+        form = client.get(reverse('universal_start'), secure=True)
+        html = form.content.decode('utf-8')
+        csrf_token = re.search(
+            r'name="csrfmiddlewaretoken" value="([^"]+)"',
+            html,
+        ).group(1)
+
+        self.assertEqual(form.headers['Referrer-Policy'], 'same-origin')
+        self.assertIn('csrftoken', client.cookies)
+
+        accepted = client.post(
+            reverse('universal_start'),
+            {'phone': '+79990000999', 'csrfmiddlewaretoken': csrf_token},
+            secure=True,
+            HTTP_ORIGIN='https://testserver',
+        )
+        rejected = client.post(
+            reverse('universal_start'),
+            {'phone': '+79990000999', 'csrfmiddlewaretoken': csrf_token},
+            secure=True,
+            HTTP_ORIGIN='null',
+        )
+
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(rejected.status_code, 403)
 
     def test_unknown_phone_keeps_the_shared_dark_browser_bar(self):
         response = self.client.post(
@@ -178,7 +206,7 @@ class UniversalStartTests(TestCase):
         self.assertEqual(len(handoff_links), 2)
         self.assertTrue(all('phone=' not in link for link in handoff_links))
         self.assertIn('no-store', response.headers['Cache-Control'])
-        self.assertEqual(response.headers['Referrer-Policy'], 'no-referrer')
+        self.assertEqual(response.headers['Referrer-Policy'], 'same-origin')
         self.assertContains(response, 'phone=79990000071', count=2)
 
     def test_android_does_not_see_button_when_configured_apk_file_is_missing(self):
