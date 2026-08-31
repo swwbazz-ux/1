@@ -858,11 +858,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v167')
+        self.assertContains(response, 'excavator-mobile-shell-v168')
         self.assertContains(response, 'function requestShiftCloseConfirmation()')
         self.assertContains(response, 'event.type === "pointerup" || event.type === "touchend"')
         self.assertContains(response, 'shiftTapConfirmationOpened = true')
-        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 167</span>')
+        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 168</span>')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -2116,7 +2116,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v167', script)
+        self.assertIn('excavator-mobile-shell-v168', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2161,6 +2161,28 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('display: none !important;', css)
         self.assertIn(
             'repeat(2, minmax(clamp(82px, 21cqh, 94px), auto))',
+            css,
+        )
+
+    def test_excavator_shift_uses_shared_driver_visual_rhythm_without_layout_overlap(self):
+        css_path = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'css'
+            / 'excavator-work-v55-shift.css'
+        )
+        css = css_path.read_text(encoding='utf-8')
+
+        self.assertIn('@media (orientation: portrait) and (min-width: 380px)', css)
+        self.assertIn('@container eo-shift (min-height: 670px)', css)
+        self.assertIn('justify-content: stretch !important;', css)
+        self.assertIn('font-size: clamp(25px, 6.6vw, 30px) !important;', css)
+        self.assertIn(
+            '.eo-shift-check-panel:has(> .eo-shift-config-error:not([hidden]))',
+            css,
+        )
+        self.assertIn(
+            '@container eo-shift (min-height: 670px) and (max-height: 729px) and (min-width: 356px)',
             css,
         )
 
