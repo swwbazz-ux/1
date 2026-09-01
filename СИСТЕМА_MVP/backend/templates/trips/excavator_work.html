@@ -6,10 +6,11 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v173">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v173">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v173">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v173">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v174">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v174">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v174">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v174">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v174" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -66,124 +67,7 @@
             </div>
         </header>
 
-        <section
-            class="eo-screen mm-mobile-shift-form mobile-shift"
-            data-eo-screen="shift"
-            data-eo-shift-state="{% if open_shift %}open{% else %}closed{% endif %}"
-            data-eo-assignment-state="{{ work_assignment_state|default:'none' }}"
-        >
-            <div class="eo-shift-titlebar mobile-shift__titlebar">
-                <h1 class="mobile-shift__title">Смена</h1>
-                <div class="eo-shift-update-group">
-                    {% comment %} В приложении — версия самого приложения, в браузере — версия
-                       веб-оболочки. Старая сборка версию не сообщает: тогда лучше
-                       не показывать ничего, чем показать версию оболочки — её
-                       примут за версию приложения. {% endcomment %}
-                    {% if is_native_app %}<span class="eo-current-app-version native-app-version" data-native-app-version="{{ native_app_version }}" aria-label="Текущая версия приложения"{% if not native_app_version %} hidden{% endif %}>Версия {{ native_app_version }}</span>{% else %}<span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия {{ app_shell_version|default:'excavator-mobile-shell-v0'|cut:'excavator-mobile-shell-v' }}</span>{% endif %}
-                    {% comment %} Проверка обновления веб-оболочки. В приложении бессмысленна:
-                       обновления приходят из RuStore, а не по этой кнопке. {% endcomment %}
-                    {% if not is_native_app %}
-                    <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения">
-                        <span aria-hidden="true"></span>
-                        <b data-eo-pwa-update-check-label>Обновить</b>
-                        <em data-eo-pwa-update-check-version hidden></em>
-                    </button>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="eo-shift-scroll mobile-shift__scroll" data-eo-shift-scroll>
-            <div class="eo-shift-section eo-shift-check-panel mobile-shift__section mobile-shift__readings" data-eo-shift-inputs>
-                <div class="eo-shift-section-head mobile-shift__section-head">
-                    <span>Показания · {% if open_shift %}конец{% else %}начало{% endif %}</span>
-                </div>
-                {% if open_shift %}
-                <div class="eo-shift-start-readings">
-                    <span>Начало смены</span>
-                    <strong>Топливо {{ shift_start_fuel_display }} л</strong>
-                    <strong>Моточасы {{ shift_start_engine_hours_display }}</strong>
-                </div>
-                {% elif shift_previous_readings %}
-                <p class="eo-shift-handover-note">Показания переданы предыдущей сменой. Сверьте их с экскаватором и при необходимости исправьте.</p>
-                {% endif %}
-                <div class="eo-shift-form-error" data-eo-shift-form-error hidden></div>
-                <div class="eo-shift-metrics mobile-shift__metrics">
-                    <label class="eo-field-card mobile-shift__field" data-eo-shift-field="fuel">
-                        <span>Топливо</span>
-                        <span class="eo-shift-metric-value mobile-shift__metric-value">
-                            <input type="text" inputmode="decimal" name="shift_fuel" value="{{ shift_fuel_display }}" placeholder="0" data-eo-shift-fuel data-eo-fuel-limit="{{ shift_fuel_limit|default:'' }}" {% if equipment_open_shift %}disabled{% endif %}>
-                            <em>л</em>
-                        </span>
-                        <small data-eo-shift-field-error="fuel"></small>
-                    </label>
-                    <label class="eo-field-card mobile-shift__field" data-eo-shift-field="engine_hours">
-                        <span>Моточасы</span>
-                        <span class="eo-shift-metric-value mobile-shift__metric-value">
-                            <input type="text" inputmode="decimal" name="shift_engine_hours" value="{{ shift_engine_hours_display }}" placeholder="0" data-eo-shift-engine-hours data-eo-start-engine-hours="{{ shift_start_engine_hours_display }}" {% if equipment_open_shift %}disabled{% endif %}>
-                            <em>м/ч</em>
-                        </span>
-                        <small data-eo-shift-field-error="engine_hours"></small>
-                    </label>
-                </div>
-                {% if not shift_fuel_limit and shift_start_excavator %}
-                <div class="eo-shift-config-error">Для модели этого экскаватора не настроен допустимый объем топлива. Обратитесь к администратору.</div>
-                {% endif %}
-            </div>
-
-            {% if open_shift %}
-            <div class="eo-shift-section eo-shift-review" data-eo-shift-review hidden>
-                <div class="eo-shift-section-head"><span>Проверка перед закрытием</span></div>
-                <div class="eo-shift-review-grid">
-                    <div><span>Топливо</span><strong data-eo-review-fuel></strong></div>
-                    <div><span>Моточасы</span><strong data-eo-review-hours></strong></div>
-                    <div><span>Прирост</span><strong data-eo-review-hours-delta></strong></div>
-                </div>
-                <button type="button" class="eo-shift-edit-button" data-eo-shift-edit>Вернуться к редактированию</button>
-            </div>
-            {% endif %}
-
-            {% if open_shift %}
-            <div class="eo-push-invite" data-push-invite data-shift-key="{{ open_shift.id }}" data-app-name="Экскаватор" hidden>
-                <strong data-push-title>Включите уведомления</strong>
-                <span data-push-text>Сообщим о самосвале, даже если приложение закрыто.</span>
-                <div class="eo-push-invite-actions" data-push-actions>
-                    <button class="eo-push-enable" type="button" data-push-enable>Включить</button>
-                    <button class="eo-push-later" type="button" data-push-later>Позже</button>
-                </div>
-            </div>
-            {% endif %}
-
-            <div class="eo-shift-section eo-shift-result-panel mobile-shift__section mobile-shift__summary">
-                <div class="eo-shift-section-head mobile-shift__section-head">
-                    <span>Итог смены</span>
-                    <b>Сейчас</b>
-                </div>
-                <div class="eo-shift-result-grid mobile-shift__grid">
-                    <div class="eo-shift-result-cell eo-shift-result-plan mobile-shift__cell" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}"><span>План</span><strong>{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}Нет плана{% endif %}</strong></div>
-                    <div class="eo-shift-result-cell eo-shift-result-fact mobile-shift__cell">
-                        <span>{{ shift_fact_label }}</span>
-                        <strong>{{ shift_fact_value }}</strong>
-                        {% if shift_fact_meta %}<em>{{ shift_fact_meta }}</em>{% endif %}
-                    </div>
-                    <div class="eo-shift-result-cell mobile-shift__cell"><span>Назначено</span><strong>{{ truck_cards|length }} шт.</strong></div>
-                    <div class="eo-shift-result-cell mobile-shift__cell"><span>В пути</span><strong>{{ active_trips_count }} шт.</strong></div>
-                </div>
-            </div>
-            </div>
-
-            <div class="eo-shift-actions mobile-shift__actions">
-                {% if open_shift %}
-                <button class="mm-mobile-shift-button mobile-shift__action mobile-shift__action--primary" type="button" data-eo-shift-check disabled aria-disabled="true">
-                    <span data-mobile-shift-label>Проверить показания</span>
-                </button>
-                {% endif %}
-                <button class="mm-mobile-shift-button mobile-shift__action {% if open_shift %}is-danger mobile-shift__action--danger{% else %}mobile-shift__action--primary{% endif %}" type="button" data-eo-shift-button data-eo-shift-action="{% if open_shift %}close{% else %}open{% endif %}" style="--eo-shift-hold: 0%; --mobile-shift-hold: 0%;" {% if open_shift %}hidden aria-label="Удерживайте 2 секунды, чтобы закрыть смену"{% elif work_assignment_state != 'assigned' or equipment_open_shift or not shift_fuel_limit %}disabled aria-disabled="true"{% endif %}>
-                    <span data-eo-shift-label data-mobile-shift-label>{% if open_shift %}Закрыть смену{% else %}Начать смену{% endif %}</span>
-                </button>
-                <button class="eo-logout-button mobile-shift__action mobile-shift__action--secondary" type="button" data-eo-logout-button data-eo-logout-url="{% url 'logout' %}" style="--eo-logout-hold: 0%; --mobile-shift-hold: 0%;" aria-label="Удерживайте 2 секунды, чтобы выйти">
-                    <span data-eo-logout-label data-mobile-shift-label>Выйти</span>
-                </button>
-            </div>
-        </section>
+        {% include "includes/mobile_shift_screen.html" with mobile_shift_role="excavator" mobile_shift_state=open_shift|yesno:"open,closed" mobile_shift_previous=shift_previous_readings %}
 
         <section class="eo-screen" data-eo-screen="face">
             <h1>Забой</h1>
@@ -486,7 +370,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v173";
+var excavatorShellVersion = "excavator-mobile-shell-v174";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -833,13 +717,12 @@ function isExcavatorRefreshUnsafe() {
     var shiftScreen = shell.querySelector('[data-eo-screen="shift"]');
     if (shiftScreen && (
         shiftScreen.dataset.eoShiftDirty === "true" ||
-        shiftScreen.classList.contains("is-reviewed") ||
         shiftScreen.querySelector("[data-eo-shift-form-error]:not([hidden])") ||
         shiftScreen.querySelector("[data-eo-shift-field].has-error")
     )) {
         return true;
     }
-    return !!document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .mm-mobile-shift-button.is-holding, .eo-hold-action.is-holding, .eo-logout-button.is-holding, .eo-shift-update-button.is-checking, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .eo-notice-modal:not([hidden]), .app-confirm-modal:not([hidden])");
+    return !!document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .mobile-shift__action.is-holding, .eo-hold-action.is-holding, .eo-shift-update-button.is-checking, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .eo-notice-modal:not([hidden]), .app-confirm-modal:not([hidden])");
 }
 
 function storeExcavatorRealtimeVersion(version) {
@@ -885,6 +768,9 @@ function refreshExcavatorWorkFromServer(options) {
             ? (newShell.dataset.eoActiveTab || "trucks")
             : latestActiveTab;
         currentShell.replaceWith(newShell);
+        if (typeof window.bindMobileShiftScreens === "function") {
+            window.bindMobileShiftScreens();
+        }
         if (typeof window.initExcavatorWorkShell === "function") {
             window.initExcavatorWorkShell();
         }
@@ -959,9 +845,6 @@ window.initExcavatorWorkShell = function () {
     var activeQueueDrag = null;
     var shiftButton = shell.querySelector("[data-eo-shift-button]");
     var shiftLabel = shell.querySelector("[data-eo-shift-label]");
-    var shiftCheckButton = shell.querySelector("[data-eo-shift-check]");
-    var shiftEditButton = shell.querySelector("[data-eo-shift-edit]");
-    var shiftReview = shell.querySelector("[data-eo-shift-review]");
     var shiftScreen = shell.querySelector('[data-eo-screen="shift"]');
     var shiftScroll = shell.querySelector("[data-eo-shift-scroll]");
     var shiftInputs = shell.querySelector("[data-eo-shift-inputs]");
@@ -969,16 +852,10 @@ window.initExcavatorWorkShell = function () {
     var shiftHoursInput = shell.querySelector("[data-eo-shift-engine-hours]");
     var shiftFormError = shell.querySelector("[data-eo-shift-form-error]");
     var shiftServerBlocked = !!(shiftButton && shiftButton.disabled);
-    var shiftReadingsVerified = false;
-    var shiftHoldTimer = null;
-    var shiftHoldFrame = null;
-    var shiftHoldStart = 0;
     var shiftHoldMs = 2000;
+    var shiftHoldController = null;
     var logoutButton = shell.querySelector("[data-eo-logout-button]");
     var logoutLabel = shell.querySelector("[data-eo-logout-label]");
-    var logoutHoldTimer = null;
-    var logoutHoldFrame = null;
-    var logoutHoldStart = 0;
     var logoutHoldMs = 2000;
     var truckDetailLayer = document.querySelector("[data-eo-truck-detail]");
     var truckDetailIconSlot = document.querySelector("[data-eo-truck-detail-icon-slot]");
@@ -1206,40 +1083,13 @@ window.initExcavatorWorkShell = function () {
     }
 
     function resetShiftHold() {
-        window.clearTimeout(shiftHoldTimer);
-        if (shiftHoldFrame) {
-            window.cancelAnimationFrame(shiftHoldFrame);
-        }
-        shiftHoldTimer = null;
-        shiftHoldFrame = null;
-        shiftHoldStart = 0;
-        if (shiftButton) {
-            shiftButton.classList.remove("is-holding");
-            shiftButton.style.setProperty("--eo-shift-hold", "0%");
-            shiftButton.style.setProperty("--mobile-shift-hold", "0%");
-        }
-        if (shiftLabel) {
-            shiftLabel.textContent = isShiftCloseAction() ? "Закрыть смену" : "Начать смену";
-        }
+        if (shiftHoldController) shiftHoldController.reset();
     }
 
     /* Закрытие смены держим две секунды — оно необратимо. Начало держим одну:
        случайное нажатие отсечь надо, но пугать длинным удержанием незачем. */
     function currentShiftHoldMs() {
         return isShiftCloseAction() ? shiftHoldMs : 1000;
-    }
-
-    function drawShiftHold() {
-        if (!shiftButton || !shiftHoldStart) {
-            return;
-        }
-        var elapsed = Date.now() - shiftHoldStart;
-        var percent = Math.max(0, Math.min(100, Math.round((elapsed / currentShiftHoldMs()) * 100)));
-        shiftButton.style.setProperty("--eo-shift-hold", percent + "%");
-        shiftButton.style.setProperty("--mobile-shift-hold", percent + "%");
-        if (percent < 100) {
-            shiftHoldFrame = window.requestAnimationFrame(drawShiftHold);
-        }
     }
 
     function registerHoldAction(button, onComplete, options) {
@@ -1366,50 +1216,6 @@ window.initExcavatorWorkShell = function () {
                 cancelHold(event);
             }
         });
-    }
-
-    function resetLogoutHold() {
-        window.clearTimeout(logoutHoldTimer);
-        if (logoutHoldFrame) {
-            window.cancelAnimationFrame(logoutHoldFrame);
-        }
-        logoutHoldTimer = null;
-        logoutHoldFrame = null;
-        logoutHoldStart = 0;
-        if (logoutButton) {
-            logoutButton.classList.remove("is-holding");
-            logoutButton.style.setProperty("--eo-logout-hold", "0%");
-            logoutButton.style.setProperty("--mobile-shift-hold", "0%");
-        }
-        if (logoutLabel) {
-            logoutLabel.textContent = "Выйти";
-        }
-    }
-
-    function drawLogoutHold() {
-        if (!logoutButton || !logoutHoldStart) {
-            return;
-        }
-        var elapsed = Date.now() - logoutHoldStart;
-        var percent = Math.max(0, Math.min(100, Math.round((elapsed / logoutHoldMs) * 100)));
-        logoutButton.style.setProperty("--eo-logout-hold", percent + "%");
-        logoutButton.style.setProperty("--mobile-shift-hold", percent + "%");
-        if (percent < 100) {
-            logoutHoldFrame = window.requestAnimationFrame(drawLogoutHold);
-        }
-    }
-
-    function completeLogoutHold() {
-        if (!logoutButton) {
-            return;
-        }
-        logoutButton.classList.remove("is-holding");
-        logoutButton.classList.add("is-pending");
-        logoutButton.disabled = true;
-        if (logoutLabel) {
-            logoutLabel.textContent = "Выход";
-        }
-        window.location.href = logoutButton.dataset.eoLogoutUrl || "/logout/";
     }
 
     function formatDowntimeDuration(totalSeconds) {
@@ -2716,11 +2522,6 @@ window.initExcavatorWorkShell = function () {
         var firstErrorField = shell.querySelector("[data-eo-shift-field].has-error");
         var firstErrorInput = firstErrorField ? firstErrorField.querySelector("input") : null;
         window.requestAnimationFrame(function () {
-            if (firstErrorField) {
-                firstErrorField.scrollIntoView({block: "center", behavior: "smooth"});
-            } else if (shiftScroll) {
-                shiftScroll.scrollTop = 0;
-            }
             if (firstErrorInput) {
                 try {
                     firstErrorInput.focus({preventScroll: true});
@@ -2753,27 +2554,9 @@ window.initExcavatorWorkShell = function () {
         return { valid: Object.keys(errors).length === 0, fuel: fuel, hours: hours, startHours: startHours, errors: errors };
     }
 
-    function resetShiftVerification(focusFirstField) {
-        shiftReadingsVerified = false;
-        if (shiftReview) shiftReview.hidden = true;
-        if (shiftInputs) shiftInputs.hidden = false;
-        if (shiftScreen) shiftScreen.classList.remove("is-reviewed");
-        if (shiftButton && isShiftCloseAction()) shiftButton.hidden = true;
-        if (shiftCheckButton) shiftCheckButton.hidden = false;
-        if (focusFirstField && shiftFuelInput) {
-            window.requestAnimationFrame(function () {
-                shiftFuelInput.focus();
-            });
-        }
-    }
-
     function updateShiftActionState() {
         var validation = validateShiftReadings(false);
-        if (shiftCheckButton) {
-            var hasReadings = validation.fuel !== null && !Number.isNaN(validation.fuel) && validation.hours !== null && !Number.isNaN(validation.hours);
-            shiftCheckButton.disabled = !hasReadings;
-            shiftCheckButton.setAttribute("aria-disabled", hasReadings ? "false" : "true");
-        } else if (shiftButton && !isShiftCloseAction() && !shiftServerBlocked) {
+        if (shiftButton && !shiftServerBlocked) {
             shiftButton.disabled = !validation.valid;
             shiftButton.setAttribute("aria-disabled", validation.valid ? "false" : "true");
         }
@@ -2784,20 +2567,17 @@ window.initExcavatorWorkShell = function () {
         input.addEventListener("input", function () {
             if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "true";
             clearShiftErrors();
-            if (isShiftCloseAction()) resetShiftVerification();
             updateShiftActionState();
         });
     });
 
     /* Enter на клавиатуре телефона уводит на следующее поле, а с последнего
-       убирает клавиатуру и сам нажимает «Проверить показания». Иначе после
-       каждого показания приходится вручную смахивать клавиатуру, чтобы
-       дотянуться до кнопки. Кнопка только показывает сверку «было → стало»,
-       ничего не отправляет — нажать её за человека безопасно. */
+       убирает клавиатуру и переводит фокус на общее действие смены. */
     var shiftReadingFields = [shiftFuelInput, shiftHoursInput].filter(function (input) {
         return !!input;
     });
     shiftReadingFields.forEach(function (input, index) {
+        if (input.closest(".mobile-shift")) return;
         var isLast = index === shiftReadingFields.length - 1;
         input.setAttribute("enterkeyhint", isLast ? "done" : "next");
         input.addEventListener("keydown", function (event) {
@@ -2813,10 +2593,6 @@ window.initExcavatorWorkShell = function () {
                Переводим фокус на кнопку — она клавиатуру не вызывает, та
                гарантированно уезжает, и до кнопки сразу можно дотянуться. */
             input.blur();
-            if (shiftCheckButton && !shiftCheckButton.hidden && !shiftCheckButton.disabled) {
-                shiftCheckButton.focus();
-                shiftCheckButton.click();
-            }
             if (shiftButton && !shiftButton.hidden && !shiftButton.disabled) {
                 shiftButton.focus();
                 return;
@@ -2832,33 +2608,6 @@ window.initExcavatorWorkShell = function () {
         });
     });
 
-    if (shiftCheckButton) {
-        shiftCheckButton.addEventListener("click", function () {
-            var values = validateShiftReadings(true);
-            if (!values.valid) return;
-            shiftReadingsVerified = true;
-            var reviewFuel = shell.querySelector("[data-eo-review-fuel]");
-            var reviewHours = shell.querySelector("[data-eo-review-hours]");
-            var reviewDelta = shell.querySelector("[data-eo-review-hours-delta]");
-            if (reviewFuel) reviewFuel.textContent = "{{ shift_start_fuel_display }} → " + values.fuel + " л";
-            if (reviewHours) reviewHours.textContent = "{{ shift_start_engine_hours_display }} → " + values.hours;
-            if (reviewDelta) reviewDelta.textContent = (values.hours - values.startHours).toFixed(2) + " м/ч";
-            if (shiftInputs) shiftInputs.hidden = true;
-            if (shiftReview) shiftReview.hidden = false;
-            if (shiftScreen) shiftScreen.classList.add("is-reviewed");
-            shiftCheckButton.hidden = true;
-            if (shiftButton) shiftButton.hidden = false;
-            if (shiftScroll) shiftScroll.scrollTop = 0;
-        });
-    }
-
-    if (shiftEditButton) {
-        shiftEditButton.addEventListener("click", function () {
-            if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "true";
-            resetShiftVerification(true);
-        });
-    }
-
     updateShiftActionState();
 
     var shiftPendingActionKey = "";
@@ -2873,7 +2622,7 @@ window.initExcavatorWorkShell = function () {
         }
         var action = shiftButton.dataset.eoShiftAction || "toggle";
         var validation = validateShiftReadings(true);
-        if (!validation.valid || (action === "close" && !shiftReadingsVerified)) {
+        if (!validation.valid) {
             return;
         }
         var shiftActionKey = [
@@ -2897,7 +2646,7 @@ window.initExcavatorWorkShell = function () {
         shiftButton.disabled = true;
         shiftButton.classList.add("is-pending");
         if (shiftLabel) {
-            shiftLabel.textContent = action === "close" ? "Закрываю" : "Открываю";
+            shiftLabel.textContent = action === "close" ? "Закрываем смену" : "Открываем смену";
         }
         fetch(shiftUrl, {
             method: "POST",
@@ -2928,9 +2677,6 @@ window.initExcavatorWorkShell = function () {
                 }
             });
         }).catch(function (error) {
-            if (action === "close") {
-                resetShiftVerification();
-            }
             showShiftErrors(error.error || error.message || "Смена не сохранена", error.field_errors || {});
             shiftButton.disabled = false;
             shiftButton.classList.remove("is-pending");
@@ -2941,89 +2687,13 @@ window.initExcavatorWorkShell = function () {
     }
 
     if (shiftButton) {
-        var shiftCompletedByHold = false;
-        var shiftTapConfirmationOpened = false;
-        /* Окно подтверждения убрано: подтверждение — само удержание кнопки.
-           Короткий тап только подсказывает, что надо держать. */
-        function hintHoldRequired() {
-            showExcavatorNotice(
-                isShiftCloseAction()
-                    ? "Удерживайте кнопку, чтобы закрыть смену"
-                    : "Удерживайте кнопку, чтобы начать смену"
-            );
-        }
-        function completeShiftHold() {
-            if (!shiftUrl || shiftButton.disabled) {
-                return;
-            }
-            shiftCompletedByHold = true;
-            submitExcavatorShiftAction();
-        }
-        function startShiftHold(event) {
-            if (shiftButton.disabled) {
-                return;
-            }
-            if (shiftHoldStart) {
-                return;
-            }
-            resetShiftHold();
-            shiftHoldStart = Date.now();
-            shiftButton.classList.add("is-holding");
-            if (shiftLabel) {
-                shiftLabel.textContent = "Держите";
-            }
-            drawShiftHold();
-            shiftHoldTimer = window.setTimeout(completeShiftHold, currentShiftHoldMs());
-        }
-        function cancelShiftHold(event) {
-            var wasHolding = shiftButton.classList.contains("is-holding");
-            if (!shiftButton.classList.contains("is-pending")) {
-                resetShiftHold();
-            }
-            if (
-                wasHolding
-                && !shiftCompletedByHold
-                && event
-                && (event.type === "pointerup" || event.type === "touchend")
-                && !shiftTapConfirmationOpened
-            ) {
-                shiftTapConfirmationOpened = true;
-                hintHoldRequired();
-                window.setTimeout(function () {
-                    shiftTapConfirmationOpened = false;
-                }, 700);
-            }
-        }
-        shiftButton.addEventListener("click", function (event) {
-            event.preventDefault();
-            if (shiftCompletedByHold) {
-                shiftCompletedByHold = false;
-                return;
-            }
-            if (shiftTapConfirmationOpened) {
-                shiftTapConfirmationOpened = false;
-                return;
-            }
-            hintHoldRequired();
-        });
-        shiftButton.addEventListener("pointerdown", startShiftHold);
-        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
-            shiftButton.addEventListener(eventName, cancelShiftHold);
-        });
-        shiftButton.addEventListener("touchstart", startShiftHold, { passive: false });
-        ["touchend", "touchcancel"].forEach(function (eventName) {
-            shiftButton.addEventListener(eventName, cancelShiftHold, { passive: false });
-        });
-        shiftButton.addEventListener("keydown", function (event) {
-            if ((event.key === "Enter" || event.key === " ") && !event.repeat && !shiftButton.disabled) {
-                event.preventDefault();
-                startShiftHold(event);
-            }
-        });
-        shiftButton.addEventListener("keyup", function (event) {
-            if ((event.key === "Enter" || event.key === " ") && isShiftCloseAction()) {
-                event.preventDefault();
-            }
+        shiftHoldController = window.MobileShiftHold.bind(shiftButton, {
+            holdMs: currentShiftHoldMs,
+            readyLabel: isShiftCloseAction() ? "Закрыть смену" : "Начать смену",
+            onShortPress: function () {
+                showExcavatorNotice("Удерживайте кнопку");
+            },
+            onComplete: submitExcavatorShiftAction
         });
     }
 
@@ -3066,47 +2736,17 @@ window.initExcavatorWorkShell = function () {
         clearDowntimeTimer();
     }
     if (logoutButton) {
-        function startLogoutHold(event) {
-            if (logoutButton.disabled) {
-                return;
-            }
-            event.preventDefault();
-            if (logoutHoldStart) {
-                return;
-            }
-            resetLogoutHold();
-            logoutHoldStart = Date.now();
-            logoutButton.classList.add("is-holding");
-            if (logoutLabel) {
-                logoutLabel.textContent = "Держите";
-            }
-            drawLogoutHold();
-            logoutHoldTimer = window.setTimeout(completeLogoutHold, logoutHoldMs);
-        }
-        function cancelLogoutHold(event) {
-            if (event) {
-                event.preventDefault();
-            }
-            if (!logoutButton.classList.contains("is-pending")) {
-                resetLogoutHold();
-            }
-        }
-        logoutButton.addEventListener("pointerdown", startLogoutHold);
-        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
-            logoutButton.addEventListener(eventName, cancelLogoutHold);
-        });
-        logoutButton.addEventListener("touchstart", startLogoutHold, { passive: false });
-        ["touchend", "touchcancel"].forEach(function (eventName) {
-            logoutButton.addEventListener(eventName, cancelLogoutHold, { passive: false });
-        });
-        logoutButton.addEventListener("keydown", function (event) {
-            if ((event.key === "Enter" || event.key === " ") && !event.repeat && !logoutButton.disabled) {
-                startLogoutHold(event);
-            }
-        });
-        logoutButton.addEventListener("keyup", function (event) {
-            if (event.key === "Enter" || event.key === " ") {
-                cancelLogoutHold(event);
+        window.MobileShiftHold.bind(logoutButton, {
+            holdMs: logoutHoldMs,
+            readyLabel: "Выйти",
+            onShortPress: function () {
+                showExcavatorNotice("Удерживайте кнопку");
+            },
+            onComplete: function () {
+                logoutButton.classList.add("is-pending");
+                logoutButton.disabled = true;
+                if (logoutLabel) logoutLabel.textContent = "Выходим";
+                window.location.href = logoutButton.dataset.eoLogoutUrl || "/logout/";
             }
         });
     }

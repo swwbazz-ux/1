@@ -3852,238 +3852,6 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
     }
 }
 
-/* Второй шаг унификации снизу вверх: только блок «Итог смены».
-   На обычном портретном экране обе роли получают одну фактическую высоту,
-   сетку и типографику; состав карточек и поведение формы не меняются. */
-@media (orientation: portrait) and (min-height: 720px) {
-    body.driver-mobile-screen {
-        --mobile-shift-summary-size: clamp(220px, 29dvh, 280px);
-    }
-
-    body.driver-mobile-screen .driver-shift-opening {
-        grid-template-rows:
-            auto
-            minmax(0, 1fr)
-            var(--mobile-shift-summary-size)
-            auto;
-    }
-
-    body.driver-mobile-screen .driver-shift-scroll,
-    body.driver-mobile-screen [data-driver-shift-close-form].is-reviewed .driver-shift-scroll {
-        grid-template-rows:
-            minmax(0, 1fr)
-            var(--mobile-shift-summary-size);
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) {
-        box-sizing: border-box;
-        width: 100%;
-        height: 100%;
-        min-height: 0;
-        gap: 0;
-        padding: clamp(8px, 1.25dvh, 12px) clamp(10px, 3vw, 16px) !important;
-        overflow: hidden;
-        border: 1px solid rgba(74, 222, 128, .34);
-        border-radius: 8px;
-        background: linear-gradient(180deg, rgba(9, 27, 16, .52), rgba(8, 14, 18, .86));
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) > .driver-shift-section-head {
-        height: clamp(17px, 2.1dvh, 20px);
-        min-height: clamp(17px, 2.1dvh, 20px);
-        margin-bottom: clamp(6px, .85dvh, 9px) !important;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) > .driver-shift-section-head span {
-        font-size: clamp(14px, 3.5vw, 15px);
-        font-weight: 600;
-        line-height: 1;
-        letter-spacing: .14em;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) > .driver-shift-section-head b {
-        font-size: clamp(12px, 2.95vw, 13px);
-        font-weight: 500;
-        line-height: 1;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) > .driver-shift-result-grid {
-        min-height: 0;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        grid-template-rows: repeat(2, minmax(0, 1fr));
-        gap: clamp(8px, 1.15dvh, 12px);
-        overflow: hidden;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) .driver-shift-result-cell {
-        box-sizing: border-box;
-        min-width: 0;
-        min-height: 0;
-        height: 100%;
-        display: grid;
-        align-content: center;
-        justify-content: stretch;
-        justify-items: start;
-        gap: 4px;
-        padding: clamp(10px, 1.45dvh, 14px) clamp(13px, 3.5vw, 17px) !important;
-        overflow: hidden;
-        border: 1px solid rgba(127, 163, 177, .18);
-        border-radius: 7px;
-        background: rgba(4, 15, 19, .72);
-        text-align: left;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) .driver-shift-result-cell span {
-        width: 100%;
-        color: #84989e;
-        font-size: clamp(14px, 3.55vw, 15px);
-        font-weight: 500;
-        line-height: 1;
-        letter-spacing: .02em;
-        text-align: left;
-        text-transform: uppercase;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) .driver-shift-result-cell strong {
-        width: 100%;
-        min-width: 0;
-        margin: 0;
-        overflow: hidden;
-        color: #f6fbfd;
-        font-size: clamp(23px, 6vw, 26px);
-        font-weight: 600;
-        line-height: 1;
-        letter-spacing: 0;
-        text-align: left;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-}
-
-/* Третий шаг унификации снизу вверх: одна карточка показаний имеет одинаковую
-   геометрию у Водителя и Экскаваторщика. Число строк остаётся ролевым: три
-   у Водителя и две у Экскаваторщика. Клавиатурный landscape-контракт ниже
-   не затрагивается, потому что этот слой действует только в portrait. */
-@media (orientation: portrait) and (min-height: 720px) {
-    body.driver-mobile-screen {
-        --mobile-shift-reading-size: clamp(88px, 10.2svh, 106px);
-        --mobile-shift-reading-gap: clamp(8px, 1.15dvh, 12px);
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) {
-        width: 100%;
-        padding: clamp(8px, 1.25dvh, 12px) clamp(10px, 3vw, 16px) !important;
-        overflow-y: auto !important;
-        overflow-x: hidden !important;
-        scroll-padding-block: 6px;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics):has(.errorlist) {
-        align-self: stretch;
-        height: 100%;
-        max-height: 100%;
-        overflow-y: auto !important;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) > .driver-shift-section-head {
-        height: clamp(17px, 2.1dvh, 20px);
-        min-height: clamp(17px, 2.1dvh, 20px);
-        margin-bottom: clamp(6px, .85dvh, 9px) !important;
-        line-height: 1;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) > .driver-shift-section-head span {
-        font-size: clamp(14px, 3.5vw, 15px);
-        font-weight: 600;
-        line-height: 1;
-        letter-spacing: .14em;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) > .driver-shift-metrics {
-        flex: 0 0 auto;
-        width: 100%;
-        grid-template-rows: repeat(3, var(--mobile-shift-reading-size));
-        align-content: center;
-        gap: var(--mobile-shift-reading-gap);
-        overflow: visible !important;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) > .driver-shift-metrics:has(.errorlist) {
-        grid-template-rows: repeat(3, minmax(var(--mobile-shift-reading-size), max-content));
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field,
-    body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field {
-        box-sizing: border-box;
-        width: 100%;
-        height: var(--mobile-shift-reading-size);
-        min-height: var(--mobile-shift-reading-size);
-        max-height: var(--mobile-shift-reading-size);
-        margin: 0;
-        gap: 12px;
-        padding: clamp(5px, .8dvh, 9px) clamp(9px, 2.6vw, 13px) !important;
-        border: 1px solid rgba(127, 163, 177, .24);
-        border-radius: 7px;
-        background: rgba(2, 12, 17, .76);
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field:has(.errorlist) {
-        height: auto;
-        min-height: var(--mobile-shift-reading-size);
-        max-height: none;
-        border-color: #ff5b49;
-        box-shadow: inset 0 0 0 1px rgba(255, 91, 73, .35);
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field:focus-within {
-        border-color: #8cff2e;
-        background: rgba(12, 30, 22, .88);
-        box-shadow: 0 0 0 2px rgba(140, 255, 46, .26);
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field:focus-within .driver-shift-field-label > span,
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field:focus-within > span:first-child {
-        color: #8cff2e;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field:has(.errorlist):focus-within {
-        border-color: #ff5b49;
-        box-shadow: 0 0 0 2px rgba(255, 91, 73, .28), inset 0 0 0 1px rgba(255, 91, 73, .35);
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field > span:first-child,
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field-label > span {
-        color: #91a4aa;
-        font-size: clamp(14px, 3.55vw, 15px);
-        font-weight: 600;
-        line-height: 1;
-        letter-spacing: 0;
-        text-transform: uppercase;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-metric-value {
-        align-items: center;
-        justify-content: flex-end;
-        gap: 6px;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-metric-value input,
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-metric-value strong {
-        color: #f6fbfd;
-        font-size: clamp(25px, 6.6vw, 30px);
-        font-weight: 600;
-        line-height: 1;
-        text-align: right;
-    }
-
-    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-metric-value em {
-        color: #82969d;
-        font-size: clamp(12px, 3vw, 13px);
-        font-weight: 400;
-        line-height: 1;
-    }
-}
-
 @media (min-width: 900px) {
     body.driver-mobile-screen .driver-work-screen.is-active {
         --driver-dial-size: clamp(320px, min(42vw, 58dvh), 520px);
@@ -4095,6 +3863,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 }
 </style>
 <link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v={{ driver_shell_version }}">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 {% endblock %}
 
 {% block body %}
@@ -4230,124 +3999,20 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 
     <section class="driver-panel driver-tab {% if active_tab == 'shift' %}is-active{% endif %}" data-driver-tab-panel="shift">
         {% if open_shift %}
-            <form method="post" action="{% url 'driver_close_shift' %}" class="driver-shift-workspace mobile-shift" data-driver-shift-close-form data-driver-in-place="shift-close">
+            <form method="post" action="{% url 'driver_close_shift' %}" class="mobile-shift-host" data-driver-shift-close-form data-driver-in-place="shift-close">
                 {% csrf_token %}
                 {{ close_form.client_action_id }}
-                <div class="driver-shift-titlebar mobile-shift__titlebar">
-                    <h2 class="mobile-shift__title">Смена</h2>
-                    {% if is_native_app %}<span class="driver-native-app-version native-app-version" data-native-app-version="{{ native_app_version }}" aria-label="Текущая версия приложения"{% if not native_app_version %} hidden{% endif %}>Версия {{ native_app_version }}</span>{% endif %}
-                </div>
-                <div class="driver-shift-scroll mobile-shift__scroll" data-driver-shift-scroll>
-                <div class="driver-shift-section driver-shift-inputs mobile-shift__section mobile-shift__readings" data-driver-shift-inputs>
-                    <div class="driver-shift-section-head mobile-shift__section-head"><span>Показатели техники</span></div>
-                    {{ close_form.non_field_errors }}
-                    <div class="driver-shift-metrics mobile-shift__metrics">
-                        <label class="driver-shift-field mobile-shift__field">
-                            <span class="driver-shift-field-label"><span>Топливо</span><small>Начало <strong>{{ open_shift.start_fuel|default_if_none:"—" }}</strong> л</small></span>
-                            <span class="driver-shift-metric-value mobile-shift__metric-value">{{ close_form.end_fuel }}<em>л</em></span>{{ close_form.end_fuel.errors }}
-                        </label>
-                        <label class="driver-shift-field mobile-shift__field">
-                            <span class="driver-shift-field-label"><span>Одометр</span><small>Начало <strong>{{ open_shift.start_mileage|default_if_none:"—" }}</strong> км</small></span>
-                            <span class="driver-shift-metric-value mobile-shift__metric-value">{{ close_form.end_mileage }}<em>км</em></span>{{ close_form.end_mileage.errors }}
-                        </label>
-                        <label class="driver-shift-field mobile-shift__field">
-                            <span class="driver-shift-field-label"><span>Моточасы</span><small>Начало <strong>{{ open_shift.start_engine_hours|default_if_none:"—" }}</strong> м/ч</small></span>
-                            <span class="driver-shift-metric-value mobile-shift__metric-value">{{ close_form.end_engine_hours }}<em>м/ч</em></span>{{ close_form.end_engine_hours.errors }}
-                        </label>
-                    </div>
-                </div>
-                <div class="driver-push-invite" data-push-invite data-shift-key="{{ open_shift.id }}" data-app-name="Водитель" hidden>
-                    <strong data-push-title>Включите уведомления</strong>
-                    <span data-push-text>Точка разгрузки придёт, даже если приложение закрыто.</span>
-                    <div class="driver-push-invite-actions" data-push-actions>
-                        <button class="driver-push-enable" type="button" data-push-enable>Включить</button>
-                        <button class="driver-push-later" type="button" data-push-later>Позже</button>
-                    </div>
-                </div>
-                <div class="driver-shift-section mobile-shift__section mobile-shift__summary">
-                    <div class="driver-shift-section-head mobile-shift__section-head"><span>Итог смены</span><b>Сейчас</b></div>
-                    <div class="driver-shift-result-grid mobile-shift__grid">
-                        <div class="driver-shift-result-cell mobile-shift__cell"><span>План</span><strong>{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}{{ shift_plan_short_label }}{% endif %}</strong></div>
-                        <div class="driver-shift-result-cell mobile-shift__cell"><span>Рейсы</span><strong>{{ shift_trip_count }} шт.</strong></div>
-                        <div class="driver-shift-result-cell mobile-shift__cell"><span>Самосвал</span><strong>{{ current_truck.garage_number|default:"—" }}</strong></div>
-                        <div class="driver-shift-result-cell mobile-shift__cell"><span>Состояние</span><strong>{% if active_trip %}В пути{% else %}Свободен{% endif %}</strong></div>
-                    </div>
-                </div>
-                </div>
-                <div class="driver-shift-actions mobile-shift__actions">
-                    <button class="driver-shift-submit mobile-shift__action mobile-shift__action--danger" type="submit" data-driver-shift-close-button style="--driver-shift-hold: 0%; --mobile-shift-hold: 0%;" aria-label="Удерживайте 2 секунды, чтобы закрыть смену"><span data-mobile-shift-label>Закрыть смену</span></button>
-                    <button class="driver-shift-logout mobile-shift__action mobile-shift__action--secondary" type="button" data-driver-shift-logout data-driver-logout-url="{% url 'logout' %}" style="--driver-logout-hold: 0%; --mobile-shift-hold: 0%;"><span data-mobile-shift-label>Выйти</span></button>
-                </div>
+                {% include "includes/mobile_shift_screen.html" with mobile_shift_role="driver" mobile_shift_state="open" mobile_shift_form=close_form mobile_shift_previous=False %}
+            </form>
+        {% elif form %}
+            <form method="post" class="mobile-shift-host driver-shift-opening-form" data-driver-in-place="shift-open">
+                {% csrf_token %}
+                {{ form.client_action_id }}
+                {% include "includes/mobile_shift_screen.html" with mobile_shift_role="driver" mobile_shift_state="closed" mobile_shift_form=form mobile_shift_previous=last_closed_shift %}
             </form>
         {% else %}
-            <div class="driver-shift-workspace driver-shift-opening mobile-shift">
-                <div class="driver-shift-titlebar mobile-shift__titlebar">
-                    <h2 class="mobile-shift__title">Смена</h2>
-                    {% if is_native_app %}<span class="driver-native-app-version native-app-version" data-native-app-version="{{ native_app_version }}" aria-label="Текущая версия приложения"{% if not native_app_version %} hidden{% endif %}>Версия {{ native_app_version }}</span>{% endif %}
-                </div>
-                {% if form %}
-                <form method="post" class="driver-shift-opening-form" data-driver-in-place="shift-open">
-                    {% csrf_token %}
-                    {{ form.client_action_id }}
-                    {{ form.non_field_errors }}
-                <div class="driver-shift-scroll mobile-shift__scroll" data-driver-shift-scroll>
-                <div class="driver-shift-section mobile-shift__section mobile-shift__readings">
-                    <div class="driver-shift-section-head mobile-shift__section-head"><span>Показатели техники</span>{% if last_closed_shift %}<b>Предыдущая смена</b>{% endif %}</div>
-                    <div class="driver-shift-metrics mobile-shift__metrics">
-                        <label class="driver-shift-field mobile-shift__field"><span>Топливо</span><span class="driver-shift-metric-value mobile-shift__metric-value">{{ form.start_fuel }}<em>л</em></span>{{ form.start_fuel.errors }}</label>
-                        <label class="driver-shift-field mobile-shift__field"><span>Одометр</span><span class="driver-shift-metric-value mobile-shift__metric-value">{{ form.start_mileage }}<em>км</em></span>{{ form.start_mileage.errors }}</label>
-                        <label class="driver-shift-field mobile-shift__field"><span>Моточасы</span><span class="driver-shift-metric-value mobile-shift__metric-value">{{ form.start_engine_hours }}<em>м/ч</em></span>{{ form.start_engine_hours.errors }}</label>
-                    </div>
-                </div>
-                <div class="driver-shift-section mobile-shift__section mobile-shift__summary">
-                    <div class="driver-shift-section-head mobile-shift__section-head"><span>Итог смены</span><b>Сейчас</b></div>
-                    <div class="driver-shift-result-grid mobile-shift__grid">
-                        <div class="driver-shift-result-cell mobile-shift__cell"><span>План</span><strong>0%</strong></div>
-                        <div class="driver-shift-result-cell mobile-shift__cell"><span>Рейсы</span><strong>0 шт.</strong></div>
-                        <div class="driver-shift-result-cell mobile-shift__cell"><span>Самосвал</span><strong>{{ work_assignment_equipment.garage_number|default:"—" }}</strong></div>
-                        <div class="driver-shift-result-cell mobile-shift__cell"><span>Состояние</span><strong>Смена закрыта</strong></div>
-                    </div>
-                </div>
-                </div>
-                <div class="driver-shift-actions mobile-shift__actions">
-                    <button class="driver-shift-open mobile-shift__action mobile-shift__action--primary" type="submit" data-driver-shift-open-button style="--driver-shift-open-hold: 0%; --mobile-shift-hold: 0%;" aria-label="Удерживайте 1 секунду, чтобы начать смену" disabled><span data-mobile-shift-label>Начать смену</span></button>
-                    <button class="driver-shift-logout mobile-shift__action mobile-shift__action--secondary" type="button" data-driver-shift-logout data-driver-logout-url="{% url 'logout' %}" style="--driver-logout-hold: 0%; --mobile-shift-hold: 0%;"><span data-mobile-shift-label>Выйти</span></button>
-                </div>
-                </form>
-                {% else %}
-                <div class="driver-shift-scroll mobile-shift__scroll" data-driver-shift-scroll>
-                <div class="driver-shift-section mobile-shift__section mobile-shift__readings">
-                    <div class="driver-shift-section-head mobile-shift__section-head"><span>Показатели техники</span></div>
-                    <div class="driver-shift-empty-state" role="status">
-                        {% if shift_start_conflict_message %}
-                        <strong>Начало смены заблокировано</strong>
-                        <span>{{ shift_start_conflict_message }}</span>
-                        {% else %}
-                        <strong>Смена и самосвал еще не назначены</strong>
-                        <span>Обратитесь к руководителю. После назначения данные появятся здесь автоматически.</span>
-                        {% endif %}
-                    </div>
-                    <div class="driver-shift-metrics mobile-shift__metrics">
-                        <div class="driver-shift-field mobile-shift__field"><span>Топливо</span><span class="driver-shift-metric-value mobile-shift__metric-value"><strong>—</strong><em>л</em></span></div>
-                        <div class="driver-shift-field mobile-shift__field"><span>Пробег</span><span class="driver-shift-metric-value mobile-shift__metric-value"><strong>—</strong><em>км</em></span></div>
-                        <div class="driver-shift-field mobile-shift__field"><span>Моточасы</span><span class="driver-shift-metric-value mobile-shift__metric-value"><strong>—</strong><em>м/ч</em></span></div>
-                    </div>
-                </div>
-                <div class="driver-shift-section mobile-shift__section mobile-shift__summary">
-                    <div class="driver-shift-section-head mobile-shift__section-head"><span>Итог смены</span><b>Сейчас</b></div>
-                    <div class="driver-shift-result-grid mobile-shift__grid">
-                        <div class="driver-shift-result-cell mobile-shift__cell"><span>План</span><strong>Нет плана</strong></div>
-                        <div class="driver-shift-result-cell mobile-shift__cell"><span>Рейсы</span><strong>0 шт.</strong></div>
-                        <div class="driver-shift-result-cell mobile-shift__cell"><span>Самосвал</span><strong>—</strong></div>
-                        <div class="driver-shift-result-cell mobile-shift__cell"><span>Состояние</span><strong>Нет назначения</strong></div>
-                    </div>
-                </div>
-                </div>
-                <div class="driver-shift-actions mobile-shift__actions">
-                    <button class="driver-shift-open mobile-shift__action mobile-shift__action--primary" type="button" disabled><span data-mobile-shift-label>Начать смену</span></button>
-                    <button class="driver-shift-logout mobile-shift__action mobile-shift__action--secondary" type="button" data-driver-shift-logout data-driver-logout-url="{% url 'logout' %}" style="--driver-logout-hold: 0%; --mobile-shift-hold: 0%;"><span data-mobile-shift-label>Выйти</span></button>
-                </div>
-                {% endif %}
+            <div class="mobile-shift-host">
+                {% include "includes/mobile_shift_screen.html" with mobile_shift_role="driver" mobile_shift_state="blocked" mobile_shift_previous=False %}
             </div>
         {% endif %}
     </section>
@@ -4748,7 +4413,6 @@ function isDriverOperationalRefreshUnsafe(shell) {
     var activeShiftForm = shell.querySelector("[data-driver-shift-close-form]");
     if (activeShiftForm && (
         activeShiftForm.dataset.driverShiftDirty === "true" ||
-        activeShiftForm.classList.contains("is-reviewed") ||
         activeShiftForm.querySelector(".errorlist")
     )) {
         return true;
@@ -4862,92 +4526,20 @@ window.submitDriverFormInPlace = function (form, options) {
 
 function bindDriverShiftHoldAction(form, button, options) {
     options = options || {};
-    if (!form || !button || button.dataset.driverShiftHoldBound === "true") {
+    if (!form || !button || !window.MobileShiftHold) {
         return null;
     }
-    button.dataset.driverShiftHoldBound = "true";
-    var labelNode = button.querySelector("[data-mobile-shift-label]");
-    var readyLabel = options.readyLabel || button.textContent.trim();
-    var progressProperty = options.progressProperty || "--driver-shift-hold";
-    var holdCompleted = false;
-    function renderLabel(value) {
-        if (labelNode) {
-            labelNode.textContent = value;
-        } else {
-            button.textContent = value;
-        }
-    }
-    var guard = window.createDriverRoleHoldGuard({
+    return window.MobileShiftHold.bind(button, {
         holdMs: options.holdMs || 2000,
-        onStart: function () {
-            holdCompleted = false;
-            button.classList.add("is-holding");
-            renderLabel("Держите");
-        },
-        onProgress: function (percent) {
-            button.style.setProperty(progressProperty, percent.toFixed(2) + "%");
-            button.style.setProperty("--mobile-shift-hold", percent.toFixed(2) + "%");
-        },
-        onReset: function () {
-            button.classList.remove("is-holding");
-            button.style.setProperty(progressProperty, "0%");
-            button.style.setProperty("--mobile-shift-hold", "0%");
-            if (!button.classList.contains("is-pending")) {
-                renderLabel(readyLabel);
-            }
+        readyLabel: options.readyLabel || button.textContent.trim(),
+        onShortPress: function () {
+            if (typeof window.showDriverToast === "function") window.showDriverToast("Удерживайте кнопку");
         },
         onComplete: function () {
-            holdCompleted = true;
-            button.classList.remove("is-holding");
             form.dataset.driverShiftHoldComplete = "true";
             form.requestSubmit(button);
         }
     });
-
-    function startHold(event) {
-        if (button.disabled || button.classList.contains("is-pending")) {
-            return;
-        }
-        if (event) {
-            event.preventDefault();
-        }
-        if (event && event.pointerId != null && button.setPointerCapture) {
-            try { button.setPointerCapture(event.pointerId); } catch (error) { /* already released */ }
-        }
-        guard.start();
-    }
-
-    function cancelHold(event) {
-        if (event) {
-            event.preventDefault();
-        }
-        if (!holdCompleted && !button.classList.contains("is-pending")) {
-            guard.cancel();
-        }
-    }
-
-    button.addEventListener("pointerdown", startHold);
-    ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
-        button.addEventListener(eventName, cancelHold);
-    });
-    button.addEventListener("click", function (event) {
-        event.preventDefault();
-        if (!holdCompleted && !button.disabled && typeof window.showDriverToast === "function") {
-            window.showDriverToast("Удерживайте кнопку");
-        }
-        holdCompleted = false;
-    });
-    button.addEventListener("keydown", function (event) {
-        if ((event.key === "Enter" || event.key === " ") && !event.repeat) {
-            startHold(event);
-        }
-    });
-    button.addEventListener("keyup", function (event) {
-        if (event.key === "Enter" || event.key === " ") {
-            cancelHold(event);
-        }
-    });
-    return guard;
 }
 
 function bindDriverShiftOpeningForm(shell) {
@@ -5046,6 +4638,9 @@ window.bindDriverMobileShell = function () {
         return;
     }
     shell.dataset.driverShellBound = "true";
+    if (typeof window.bindMobileShiftScreens === "function") {
+        window.bindMobileShiftScreens();
+    }
     /* Banners rendered by base.html sit in normal flow above the shell and steal
        height from it; without subtracting them the bottom actions fall off screen. */
     function driverLeadingBannerHeight() {
@@ -5166,6 +4761,7 @@ window.bindDriverMobileShell = function () {
         shell.addEventListener("focusin", function (event) {
             var field = event.target;
             if (!field || !field.matches || !field.matches("input, select, textarea")) return;
+            if (field.closest(".mobile-shift")) return;
             var reveal = function () {
                 if (!field.scrollIntoView) return;
                 try {
@@ -5348,7 +4944,7 @@ window.bindDriverMobileShell = function () {
             && window.isAppRoleReadonly()
         );
     }
-    shell.querySelectorAll(".driver-shift-metric-value input").forEach(function (input) {
+    shell.querySelectorAll(".mobile-shift__metric-value input").forEach(function (input) {
         if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
     });
 
@@ -5358,6 +4954,7 @@ window.bindDriverMobileShell = function () {
        открывает и закрывает смену, и удержание в две секунды тут не
        перестраховка, а осознанное подтверждение. */
     shell.querySelectorAll("[data-driver-shift-inputs], .driver-shift-opening-form").forEach(function (group) {
+        if (group.closest(".mobile-shift") || group.querySelector(".mobile-shift")) return;
         var fields = Array.prototype.filter.call(
             group.querySelectorAll("input"),
             function (input) {
@@ -5495,16 +5092,11 @@ window.bindDriverMobileShell = function () {
                 progressProperty: "--driver-shift-hold"
             });
 
-            var firstError = form.querySelector(".driver-shift-field .errorlist");
+            var firstError = form.querySelector(".mobile-shift__field .errorlist");
             if (firstError) {
                 window.requestAnimationFrame(function () {
-                    var errorField = firstError.closest(".driver-shift-field");
+                    var errorField = firstError.closest(".mobile-shift__field");
                     var errorInput = errorField ? errorField.querySelector("input") : null;
-                    if (errorField) {
-                        errorField.scrollIntoView({block: "center"});
-                    } else if (shiftScroll) {
-                        shiftScroll.scrollTop = 0;
-                    }
                     if (errorInput) {
                         errorInput.focus({preventScroll: true});
                     }
@@ -5514,40 +5106,17 @@ window.bindDriverMobileShell = function () {
 
         if (logoutButton && logoutButton.dataset.driverLogoutBound !== "true") {
             logoutButton.dataset.driverLogoutBound = "true";
-            const logoutHoldMs = 2000;
-            var logoutStartedAt = 0;
-            var logoutFrame = null;
-            function resetLogoutHold() {
-                logoutStartedAt = 0;
-                if (logoutFrame) {
-                    window.cancelAnimationFrame(logoutFrame);
-                    logoutFrame = null;
-                }
-                logoutButton.style.setProperty("--driver-logout-hold", "0%");
-                logoutButton.style.setProperty("--mobile-shift-hold", "0%");
-            }
-            function drawLogoutHold() {
-                if (!logoutStartedAt) {
-                    return;
-                }
-                var progress = Math.min(100, ((Date.now() - logoutStartedAt) / logoutHoldMs) * 100);
-                logoutButton.style.setProperty("--driver-logout-hold", progress + "%");
-                logoutButton.style.setProperty("--mobile-shift-hold", progress + "%");
-                if (progress >= 100) {
-                    logoutStartedAt = 0;
-                    logoutFrame = null;
+            window.MobileShiftHold.bind(logoutButton, {
+                holdMs: 2000,
+                readyLabel: "Выйти",
+                onShortPress: function () {
+                    if (typeof window.showDriverToast === "function") window.showDriverToast("Удерживайте кнопку");
+                },
+                onComplete: function () {
+                    var logoutLabel = logoutButton.querySelector("[data-driver-logout-label]");
+                    if (logoutLabel) logoutLabel.textContent = "Выходим";
                     window.location.href = logoutButton.dataset.driverLogoutUrl;
-                    return;
                 }
-                logoutFrame = window.requestAnimationFrame(drawLogoutHold);
-            }
-            logoutButton.addEventListener("pointerdown", function (event) {
-                event.preventDefault();
-                logoutStartedAt = Date.now();
-                logoutFrame = window.requestAnimationFrame(drawLogoutHold);
-            });
-            ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
-                logoutButton.addEventListener(eventName, resetLogoutHold);
             });
         }
     }

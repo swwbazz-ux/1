@@ -858,21 +858,25 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v173')
-        self.assertContains(response, 'function requestShiftCloseConfirmation()')
-        self.assertContains(response, 'event.type === "pointerup" || event.type === "touchend"')
-        self.assertContains(response, 'shiftTapConfirmationOpened = true')
-        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 173</span>')
+        self.assertContains(response, 'excavator-mobile-shell-v174')
+        self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
+        self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
+        self.assertContains(response, 'mobile-shift__version')
+        self.assertContains(response, 'Версия 174')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
         self.assertContains(response, 'data-eo-shift-scroll')
         self.assertContains(response, 'data-eo-shift-inputs')
-        self.assertContains(response, 'data-eo-shift-review hidden')
+        self.assertContains(response, 'data-mobile-shift-role="excavator"')
+        self.assertContains(response, 'data-mobile-shift-field="fuel"')
+        self.assertContains(response, 'data-mobile-shift-field="engine_hours"')
+        self.assertNotContains(response, 'data-mobile-shift-field="mileage"')
+        self.assertNotContains(response, 'data-eo-shift-review')
+        self.assertNotContains(response, 'Проверить показания')
         self.assertContains(response, 'shiftScreen.dataset.eoShiftDirty === "true"')
-        self.assertContains(response, 'shiftScreen.classList.contains("is-reviewed")')
-        self.assertContains(response, 'firstErrorField.scrollIntoView')
-        self.assertContains(response, 'var hasReadings = validation.fuel !== null')
+        self.assertNotContains(response, 'firstErrorField.scrollIntoView')
+        self.assertContains(response, 'shiftButton.disabled = !validation.valid')
         self.assertNotContains(response, 'class="eo-pin-icon"')
         self.assertContains(response, 'class="eo-face-coordinates"')
         self.assertContains(response, 'class="eo-face-rock"')
@@ -883,7 +887,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-active-duration')
         self.assertNotContains(response, 'data-eo-active-title')
         self.assertNotContains(response, 'data-eo-active-reason')
-        self.assertContains(response, 'data-eo-apply-settings data-eo-hold-label="Применить настройки"')
+        self.assertContains(response, 'data-eo-apply-settings')
+        self.assertContains(response, 'data-eo-hold-label="Применить настройки"')
         self.assertContains(response, 'data-eo-settings-applied="')
         self.assertContains(response, 'data-eo-settings-applied="false"')
         self.assertContains(response, 'appliedExcavatorSettingsSnapshot')
@@ -2095,7 +2100,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '<span data-eo-shift-label data-mobile-shift-label>Начать смену</span>', html=True)
         self.assertNotContains(response, 'mobile-shift__assignment')
         self.assertContains(response, 'return isShiftCloseAction() ? shiftHoldMs : 1000;')
-        self.assertContains(response, 'shiftLabel.textContent = "Держите";')
+        self.assertContains(response, 'shiftLabel.textContent = action === "close" ? "Закрываем смену" : "Открываем смену";')
+        self.assertContains(response, 'showExcavatorNotice("Удерживайте кнопку");')
+        self.assertNotContains(response, 'shiftLabel.textContent = "Держите";')
 
 
     def test_excavator_manifest_is_installable_pwa_manifest(self):
@@ -2120,7 +2127,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v173', script)
+        self.assertIn('excavator-mobile-shell-v174', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2130,6 +2137,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('/static/css/excavator-work-v55-final.css', script)
         self.assertIn('/static/css/excavator-work-v55-shift.css', script)
         self.assertIn('/static/css/mobile-shift-unified-v1.css', script)
+        self.assertIn('/static/js/mobile-shift-unified-v1.js', script)
         self.assertIn('/static/css/native-app-update-v1.css', script)
         self.assertNotIn('ignoreSearch: true', script)
         self.assertIn('networkFirstStatic(request)', script)
@@ -2156,7 +2164,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             Path(__file__).resolve().parents[1]
             / 'static'
             / 'css'
-            / 'excavator-work-v55-shift.css'
+            / 'mobile-shift-unified-v1.css'
         )
         css = css_path.read_text(encoding='utf-8')
         self.assertIn(
@@ -2164,10 +2172,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             css,
         )
         self.assertIn('display: none !important;', css)
-        self.assertIn(
-            'repeat(2, minmax(clamp(82px, 21cqh, 94px), auto))',
-            css,
-        )
+        self.assertIn('grid-template-rows: minmax(34px, .1fr) minmax(0, 1fr) !important;', css)
 
     def test_excavator_shift_uses_shared_driver_visual_rhythm_without_layout_overlap(self):
         legacy_css_path = (
@@ -2182,21 +2187,44 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             / 'css'
             / 'mobile-shift-unified-v1.css'
         )
+        shared_js_path = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'js'
+            / 'mobile-shift-unified-v1.js'
+        )
         legacy_css = legacy_css_path.read_text(encoding='utf-8')
         css = shared_css_path.read_text(encoding='utf-8')
+        javascript = shared_js_path.read_text(encoding='utf-8')
 
-        self.assertIn('overflow-y: hidden !important;', css)
-        self.assertIn('grid-template-rows: minmax(0, 1.08fr) minmax(0, .92fr)', css)
+        self.assertIn('overflow: hidden !important;', css)
+        self.assertNotIn('overflow-y: auto', css)
+        self.assertIn('grid-template-rows: minmax(0, 1.24fr) minmax(0, .76fr);', css)
         self.assertIn('grid-template-rows: repeat(3, minmax(0, 1fr))', css)
         self.assertIn('grid-template-rows: repeat(2, minmax(0, 1fr))', css)
-        self.assertIn('grid-template-columns: repeat(2, minmax(0, 1fr)) !important;', css)
-        self.assertIn('grid-template-columns: minmax(0, 1fr) minmax(104px, 31%)', css)
-        self.assertIn('inline-size: var(--mobile-shift-hold, 0%)', css)
+        self.assertIn('grid-template-columns: repeat(2, minmax(0, 1fr));', css)
+        self.assertIn('grid-template-columns: minmax(0, 1fr) minmax(92px, 31%);', css)
+        self.assertIn('inline-size: var(--mobile-shift-hold);', css)
         self.assertIn('.mobile-shift-nav-item .mobile-shift-nav-icon', css)
         self.assertIn('.eo-shell[data-eo-ime-open="true"] .mobile-shift__actions', css)
         self.assertNotIn('@media (width: 390px)', css)
         self.assertNotIn('@media (height: 844px)', css)
-        self.assertIn('data-eo-ime-open="true"', legacy_css)
+        self.assertNotIn('data-eo-ime-open="true"', legacy_css)
+        self.assertIn('function bindFieldNavigation(component)', javascript)
+        self.assertIn('input.setAttribute("enterkeyhint", isLast ? "done" : "next")', javascript)
+        self.assertIn('[data-driver-shift-open-button], [data-driver-shift-close-button], [data-eo-shift-button]', javascript)
+
+        partial_path = (
+            Path(__file__).resolve().parents[1]
+            / 'templates'
+            / 'includes'
+            / 'mobile_shift_screen.html'
+        )
+        partial = partial_path.read_text(encoding='utf-8')
+        self.assertIn('data-mobile-shift-role="{{ mobile_shift_role }}"', partial)
+        self.assertIn('data-mobile-shift-field="mileage"', partial)
+        self.assertNotIn('Проверить показания', partial)
+        self.assertNotIn('mobile-shift__assignment', partial)
 
     def test_excavator_work_hides_pending_assignment_until_driver_accepts(self):
         pending_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='77')

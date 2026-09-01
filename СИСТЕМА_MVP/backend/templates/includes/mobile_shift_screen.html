@@ -1,0 +1,121 @@
+<section
+    class="mobile-shift"
+    data-mobile-shift-role="{{ mobile_shift_role }}"
+    data-mobile-shift-state="{{ mobile_shift_state }}"
+    {% if mobile_shift_role == "excavator" %}
+    data-eo-screen="shift"
+    data-eo-shift-state="{% if open_shift %}open{% else %}closed{% endif %}"
+    data-eo-assignment-state="{{ work_assignment_state|default:'none' }}"
+    {% endif %}
+>
+    <header class="mobile-shift__titlebar">
+        <h1 class="mobile-shift__title">Смена</h1>
+        <div class="mobile-shift__update-group">
+            {% if is_native_app and mobile_shift_role == "driver" %}
+                <span class="driver-native-app-version native-app-version" data-native-app-version="{{ native_app_version }}" aria-label="Текущая версия приложения"{% if not native_app_version %} hidden{% endif %}>Версия {{ native_app_version }}</span>
+            {% elif is_native_app %}
+                <span class="eo-current-app-version native-app-version" data-native-app-version="{{ native_app_version }}" aria-label="Текущая версия приложения"{% if not native_app_version %} hidden{% endif %}>Версия {{ native_app_version }}</span>
+            {% elif mobile_shift_role == "driver" %}
+                <span class="mobile-shift__version">Версия {{ driver_shell_version|default:'driver-mobile-shell-v0'|cut:'driver-mobile-shell-v' }}</span>
+            {% else %}
+                <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия {{ app_shell_version|default:'excavator-mobile-shell-v0'|cut:'excavator-mobile-shell-v' }}</span>
+                <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения"><span aria-hidden="true"></span><b data-eo-pwa-update-check-label>Обновить</b><em data-eo-pwa-update-check-version hidden></em></button>
+            {% endif %}
+        </div>
+    </header>
+
+    <div
+        class="mobile-shift__content"
+        {% if mobile_shift_role == "driver" %}data-driver-shift-scroll{% else %}data-eo-shift-scroll{% endif %}
+    >
+        <section
+            class="mobile-shift__section mobile-shift__readings"
+            {% if mobile_shift_role == "driver" %}data-driver-shift-inputs{% else %}data-eo-shift-inputs{% endif %}
+        >
+            <header class="mobile-shift__section-head">
+                <span>Показатели техники</span>
+                <b>{% if mobile_shift_state == "open" %}Конец смены{% elif mobile_shift_previous %}Предыдущая смена{% else %}Начало смены{% endif %}</b>
+            </header>
+
+            {% if mobile_shift_role == "driver" %}
+                {{ mobile_shift_form.non_field_errors }}
+            {% else %}
+                <div class="mobile-shift__form-error" data-eo-shift-form-error hidden></div>
+            {% endif %}
+
+            <div class="mobile-shift__metrics">
+                {% if mobile_shift_role == "driver" %}
+                    {% if mobile_shift_state == "blocked" %}
+                        <div class="mobile-shift__field" data-mobile-shift-field="fuel"><span class="mobile-shift__field-label"><span>Топливо</span></span><span class="mobile-shift__metric-value"><strong>—</strong><em>л</em></span></div>
+                        <div class="mobile-shift__field" data-mobile-shift-field="mileage"><span class="mobile-shift__field-label"><span>Одометр</span></span><span class="mobile-shift__metric-value"><strong>—</strong><em>км</em></span></div>
+                        <div class="mobile-shift__field" data-mobile-shift-field="engine_hours"><span class="mobile-shift__field-label"><span>Моточасы</span></span><span class="mobile-shift__metric-value"><strong>—</strong><em>м/ч</em></span></div>
+                    {% elif mobile_shift_state == "open" %}
+                        <label class="mobile-shift__field" data-mobile-shift-field="fuel">
+                            <span class="mobile-shift__field-label"><span>Топливо</span><small>Начало <strong>{{ open_shift.start_fuel|default_if_none:"—" }}</strong> л</small></span>
+                            <span class="mobile-shift__metric-value">{{ mobile_shift_form.end_fuel }}<em>л</em></span>{{ mobile_shift_form.end_fuel.errors }}
+                        </label>
+                        <label class="mobile-shift__field" data-mobile-shift-field="mileage">
+                            <span class="mobile-shift__field-label"><span>Одометр</span><small>Начало <strong>{{ open_shift.start_mileage|default_if_none:"—" }}</strong> км</small></span>
+                            <span class="mobile-shift__metric-value">{{ mobile_shift_form.end_mileage }}<em>км</em></span>{{ mobile_shift_form.end_mileage.errors }}
+                        </label>
+                        <label class="mobile-shift__field" data-mobile-shift-field="engine_hours">
+                            <span class="mobile-shift__field-label"><span>Моточасы</span><small>Начало <strong>{{ open_shift.start_engine_hours|default_if_none:"—" }}</strong> м/ч</small></span>
+                            <span class="mobile-shift__metric-value">{{ mobile_shift_form.end_engine_hours }}<em>м/ч</em></span>{{ mobile_shift_form.end_engine_hours.errors }}
+                        </label>
+                    {% else %}
+                        <label class="mobile-shift__field" data-mobile-shift-field="fuel"><span class="mobile-shift__field-label"><span>Топливо</span></span><span class="mobile-shift__metric-value">{{ mobile_shift_form.start_fuel }}<em>л</em></span>{{ mobile_shift_form.start_fuel.errors }}</label>
+                        <label class="mobile-shift__field" data-mobile-shift-field="mileage"><span class="mobile-shift__field-label"><span>Одометр</span></span><span class="mobile-shift__metric-value">{{ mobile_shift_form.start_mileage }}<em>км</em></span>{{ mobile_shift_form.start_mileage.errors }}</label>
+                        <label class="mobile-shift__field" data-mobile-shift-field="engine_hours"><span class="mobile-shift__field-label"><span>Моточасы</span></span><span class="mobile-shift__metric-value">{{ mobile_shift_form.start_engine_hours }}<em>м/ч</em></span>{{ mobile_shift_form.start_engine_hours.errors }}</label>
+                    {% endif %}
+                {% else %}
+                    <label class="mobile-shift__field" data-mobile-shift-field="fuel" data-eo-shift-field="fuel">
+                        <span class="mobile-shift__field-label"><span>Топливо</span>{% if open_shift %}<small>Начало <strong>{{ shift_start_fuel_display }}</strong> л</small>{% endif %}</span>
+                        <span class="mobile-shift__metric-value"><input type="number" inputmode="decimal" step="0.01" min="0" name="shift_fuel" value="{{ shift_fuel_display }}" placeholder="0" data-eo-shift-fuel data-eo-fuel-limit="{{ shift_fuel_limit|default:'' }}" {% if equipment_open_shift %}disabled{% endif %}><em>л</em></span>
+                        <small class="mobile-shift__field-error" data-eo-shift-field-error="fuel"></small>
+                    </label>
+                    <label class="mobile-shift__field" data-mobile-shift-field="engine_hours" data-eo-shift-field="engine_hours">
+                        <span class="mobile-shift__field-label"><span>Моточасы</span>{% if open_shift %}<small>Начало <strong>{{ shift_start_engine_hours_display }}</strong> м/ч</small>{% endif %}</span>
+                        <span class="mobile-shift__metric-value"><input type="number" inputmode="decimal" step="0.01" min="0" name="shift_engine_hours" value="{{ shift_engine_hours_display }}" placeholder="0" data-eo-shift-engine-hours data-eo-start-engine-hours="{{ shift_start_engine_hours_display }}" {% if equipment_open_shift %}disabled{% endif %}><em>м/ч</em></span>
+                        <small class="mobile-shift__field-error" data-eo-shift-field-error="engine_hours"></small>
+                    </label>
+                {% endif %}
+            </div>
+
+            {% if mobile_shift_role == "driver" and mobile_shift_state == "blocked" %}
+                <div class="mobile-shift__notice">{% if shift_start_conflict_message %}{{ shift_start_conflict_message }}{% else %}Смена и техника ещё не назначены.{% endif %}</div>
+            {% elif mobile_shift_role == "excavator" and not shift_fuel_limit and shift_start_excavator %}
+                <div class="mobile-shift__notice">Для модели не настроен допустимый объём топлива.</div>
+            {% endif %}
+        </section>
+
+        <section class="mobile-shift__section mobile-shift__summary">
+            <header class="mobile-shift__section-head"><span>Итог смены</span><b>Сейчас</b></header>
+            <div class="mobile-shift__grid">
+                <div class="mobile-shift__cell"><span>План</span><strong>{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}Нет плана{% endif %}</strong></div>
+                <div class="mobile-shift__cell"><span>Факт</span><strong>{% if mobile_shift_role == "driver" %}{{ shift_trip_count }} шт.{% else %}{{ shift_fact_value }}{% endif %}</strong>{% if mobile_shift_role == "excavator" and shift_fact_meta %}<em>{{ shift_fact_meta }}</em>{% endif %}</div>
+                <div class="mobile-shift__cell"><span>Техника</span><strong>{% if mobile_shift_role == "driver" %}{% if mobile_shift_state == "blocked" %}—{% elif current_truck %}{{ current_truck.garage_number }}{% elif work_assignment_equipment %}{{ work_assignment_equipment.garage_number }}{% else %}—{% endif %}{% else %}{{ shift_start_excavator.garage_number|default:"—" }}{% endif %}</strong></div>
+                <div class="mobile-shift__cell"><span>Состояние</span><strong>{% if mobile_shift_role == "driver" %}{% if mobile_shift_state == "open" %}{% if active_trip %}В пути{% else %}Свободен{% endif %}{% elif mobile_shift_state == "blocked" %}Недоступен{% else %}Смена закрыта{% endif %}{% else %}{% if open_shift %}{% if active_trips_count %}В работе{% else %}Свободен{% endif %}{% elif equipment_open_shift %}Занят{% elif work_assignment_state == "assigned" %}Смена закрыта{% else %}Недоступен{% endif %}{% endif %}</strong></div>
+            </div>
+        </section>
+    </div>
+
+    <footer class="mobile-shift__actions">
+        {% if mobile_shift_role == "driver" %}
+            {% if mobile_shift_state == "open" %}
+                <button class="mobile-shift__action mobile-shift__action--danger" type="submit" data-driver-shift-close-button aria-label="Удерживайте 2 секунды, чтобы закрыть смену"><span data-mobile-shift-label>Закрыть смену</span></button>
+            {% else %}
+                <button class="mobile-shift__action mobile-shift__action--primary" type="{% if mobile_shift_state == 'blocked' %}button{% else %}submit{% endif %}" {% if mobile_shift_state != "blocked" %}data-driver-shift-open-button aria-label="Удерживайте 1 секунду, чтобы начать смену"{% endif %} disabled><span data-mobile-shift-label>Начать смену</span></button>
+            {% endif %}
+            <button class="mobile-shift__action mobile-shift__action--secondary" type="button" data-driver-shift-logout data-driver-logout-url="{% url 'logout' %}" aria-label="Удерживайте 2 секунды, чтобы выйти"><span data-mobile-shift-label>Выйти</span></button>
+        {% else %}
+            <button class="mobile-shift__action {% if open_shift %}mobile-shift__action--danger{% else %}mobile-shift__action--primary{% endif %}" type="button" data-eo-shift-button data-eo-shift-action="{% if open_shift %}close{% else %}open{% endif %}" {% if open_shift %}aria-label="Удерживайте 2 секунды, чтобы закрыть смену"{% else %}aria-label="Удерживайте 1 секунду, чтобы начать смену"{% if work_assignment_state != "assigned" or equipment_open_shift or not shift_fuel_limit %} disabled aria-disabled="true"{% endif %}{% endif %}><span data-eo-shift-label data-mobile-shift-label>{% if open_shift %}Закрыть смену{% else %}Начать смену{% endif %}</span></button>
+            <button class="mobile-shift__action mobile-shift__action--secondary" type="button" data-eo-logout-button data-eo-logout-url="{% url 'logout' %}" aria-label="Удерживайте 2 секунды, чтобы выйти"><span data-eo-logout-label data-mobile-shift-label>Выйти</span></button>
+        {% endif %}
+    </footer>
+
+    {% if mobile_shift_role == "driver" and open_shift %}
+        <div class="driver-push-invite" data-push-invite data-shift-key="{{ open_shift.id }}" data-app-name="Водитель" hidden><strong data-push-title>Включите уведомления</strong><span data-push-text>Точка разгрузки придёт, даже если приложение закрыто.</span><div class="driver-push-invite-actions" data-push-actions><button class="driver-push-enable" type="button" data-push-enable>Включить</button><button class="driver-push-later" type="button" data-push-later>Позже</button></div></div>
+    {% elif mobile_shift_role == "excavator" and open_shift %}
+        <div class="eo-push-invite" data-push-invite data-shift-key="{{ open_shift.id }}" data-app-name="Экскаватор" hidden><strong data-push-title>Включите уведомления</strong><span data-push-text>Сообщим о самосвале, даже если приложение закрыто.</span><div class="eo-push-invite-actions" data-push-actions><button class="eo-push-enable" type="button" data-push-enable>Включить</button><button class="eo-push-later" type="button" data-push-later>Позже</button></div></div>
+    {% endif %}
+</section>

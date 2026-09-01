@@ -128,24 +128,28 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Работа водителя')
         self.assertContains(response, '>Начать смену<')
-        self.assertContains(response, 'driver-shift-workspace driver-shift-opening')
+        self.assertContains(response, 'data-mobile-shift-role="driver"')
+        self.assertContains(response, 'data-mobile-shift-state="closed"')
         self.assertContains(response, 'Показатели техники')
         self.assertContains(response, 'Итог смены')
         self.assertContains(response, 'Смена закрыта')
         self.assertContains(response, '0 шт.')
-        self.assertContains(response, 'driver-shift-actions')
+        self.assertContains(response, 'mobile-shift__actions')
         self.assertContains(response, 'aria-label="Удерживайте 1 секунду, чтобы начать смену"')
         self.assertContains(response, 'function bindDriverShiftHoldAction(form, button, options)')
+        self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertNotContains(response, 'class="driver-form-card"')
         self.assertEqual(self.client.session.get('employee_access_id'), self.access.id)
 
-    def test_driver_active_shift_uses_excavator_shift_layout(self):
+    def test_driver_active_shift_uses_shared_mobile_shift_component(self):
         self.create_registered_driver_shift()
 
         response = self.client.get(f"{reverse('driver_shift')}?tab=shift", HTTP_HOST='localhost')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'class="driver-shift-workspace mobile-shift"')
+        self.assertContains(response, 'class="mobile-shift"')
+        self.assertContains(response, 'data-mobile-shift-role="driver"')
+        self.assertContains(response, 'data-mobile-shift-state="open"')
         self.assertContains(response, 'Показатели техники')
         self.assertContains(response, 'Итог смены')
         self.assertContains(response, 'data-driver-shift-close-button')
@@ -160,33 +164,20 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'mobile-shift__actions')
         self.assertContains(response, 'mobile-shift-nav-icon')
         self.assertNotContains(response, 'data-driver-shift-inputs hidden')
+        self.assertContains(response, 'data-mobile-shift-field="fuel"')
+        self.assertContains(response, 'data-mobile-shift-field="mileage"')
+        self.assertContains(response, 'data-mobile-shift-field="engine_hours"')
         self.assertContains(response, '>Закрыть смену<')
         self.assertContains(response, 'Начало')
         self.assertContains(response, '12560')
         self.assertContains(response, '1354')
         self.assertContains(response, '>Выйти<')
-        self.assertContains(
-            response,
-            'grid-template-columns: minmax(0, 2.25fr) minmax(116px, 1fr);',
-        )
-        self.assertContains(response, 'gap: clamp(10px, 2.7vw, 12px);')
-        self.assertContains(response, '--mobile-shift-summary-size: clamp(220px, 29dvh, 280px);')
-        self.assertContains(
-            response,
-            '.driver-shift-section:has(> .driver-shift-result-grid)',
-        )
-        self.assertContains(response, 'grid-template-rows: repeat(2, minmax(0, 1fr));')
-        self.assertContains(response, 'font-size: clamp(23px, 6vw, 26px);')
-        self.assertContains(response, '--mobile-shift-reading-size: clamp(88px, 10.2svh, 106px);')
-        self.assertContains(
-            response,
-            'grid-template-rows: repeat(3, var(--mobile-shift-reading-size));',
-        )
-        self.assertContains(response, '--mobile-shift-hold: 0%;')
+        self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'data-mobile-shift-label')
-        self.assertContains(response, 'margin: 0;')
+        self.assertContains(response, 'if (logoutLabel) logoutLabel.textContent = "Выходим";')
         self.assertNotContains(response, '>Закрытие смены<')
         self.assertNotContains(response, 'Проверить показания')
+        self.assertNotContains(response, 'data-eo-shift-review')
         self.assertNotContains(response, 'data-driver-shift-review')
         self.assertNotContains(response, 'driverShiftCloseHoldGuard')
         self.assertContains(response, 'data-driver-manifest-view-open="report"')
@@ -217,7 +208,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v176')
+        self.assertContains(response, 'driver-mobile-shell-v177')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(
@@ -425,7 +416,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v176', script)
+        self.assertIn('driver-mobile-shell-v177', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -433,6 +424,7 @@ class AccessLoginTests(TestCase):
         self.assertIn('/static/css/native-app-update-v1.css', script)
         self.assertIn('/static/js/role-readonly.js', script)
         self.assertIn('/static/css/mobile-shift-unified-v1.css', script)
+        self.assertIn('/static/js/mobile-shift-unified-v1.js', script)
         self.assertNotIn('ignoreSearch: true', script)
         self.assertIn('networkFirstStatic(request)', script)
         self.assertIn('GET_VERSION', script)
@@ -2759,7 +2751,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v176')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v177')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

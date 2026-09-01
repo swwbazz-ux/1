@@ -992,9 +992,9 @@ class DriverOpenShiftForm(forms.ModelForm):
             'start_engine_hours': 'Моточасы на начало смены',
         }
         widgets = {
-            'start_fuel': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
-            'start_mileage': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
-            'start_engine_hours': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
+            'start_fuel': forms.NumberInput(attrs={'step': '0.01', 'min': '0', 'inputmode': 'decimal'}),
+            'start_mileage': forms.NumberInput(attrs={'step': '0.01', 'min': '0', 'inputmode': 'decimal'}),
+            'start_engine_hours': forms.NumberInput(attrs={'step': '0.01', 'min': '0', 'inputmode': 'decimal'}),
         }
 
     def __init__(self, *args, employee=None, work_assignment=None, **kwargs):
@@ -1056,9 +1056,9 @@ class DriverCloseShiftForm(forms.ModelForm):
             'end_engine_hours': 'Моточасы на конец смены',
         }
         widgets = {
-            'end_fuel': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
-            'end_mileage': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
-            'end_engine_hours': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
+            'end_fuel': forms.NumberInput(attrs={'step': '0.01', 'min': '0', 'inputmode': 'decimal'}),
+            'end_mileage': forms.NumberInput(attrs={'step': '0.01', 'min': '0', 'inputmode': 'decimal'}),
+            'end_engine_hours': forms.NumberInput(attrs={'step': '0.01', 'min': '0', 'inputmode': 'decimal'}),
         }
 
     def __init__(self, *args, **kwargs):

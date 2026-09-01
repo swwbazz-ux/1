@@ -224,7 +224,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v176'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v177'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -278,6 +278,7 @@ const CORE_ASSETS = [
     MANIFEST_URL,
     "/static/css/app.css",
     "/static/css/mobile-shift-unified-v1.css",
+    "/static/js/mobile-shift-unified-v1.js",
     "/static/css/native-app-update-v1.css",
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
