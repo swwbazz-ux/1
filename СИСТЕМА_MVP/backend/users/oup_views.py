@@ -16,6 +16,7 @@ from .employee_access_locks import (
     build_employee_access_lock_plan,
     lock_employee_access_plan,
 )
+from .live_monitor import presence_by_employee_id
 from .models import (
     AdminActionLog,
     Employee,
@@ -199,6 +200,10 @@ def oup_employees_view(request, scope='active'):
             if rotation.isdigit()
             else employees.filter(rotation=rotation)
         )
+    employees = list(employees)
+    presences = presence_by_employee_id(employee.id for employee in employees)
+    for employee in employees:
+        employee.presence = presences.get(employee.id)
 
     active_queryset = _employees_queryset('active')
     today = timezone.localdate()
@@ -461,6 +466,9 @@ def oup_employee_detail_view(request, employee_id):
         .first()
         or employee_accesses.first()
     )
+    employee_presence = presence_by_employee_id([employee.id]).get(employee.id)
+    for employee_access in employee_accesses:
+        employee_access.presence = employee_presence
     work_assignment_role = (
         active_equipment_assignment.role
         if active_equipment_assignment

@@ -19,6 +19,7 @@ from references.models import Equipment
 from shifts.models import WatchPeriod
 from users.models import AdminActionLog, Employee, EmployeeAccess, ProductionSpecialization, Role, TemporaryWorkTransfer
 from users.role_apps import role_app_manifest_response, role_app_service_worker_response
+from users.live_monitor import presence_by_employee_id
 from users.work_profiles import (
     eligible_employee_ids_for_work_role,
     expire_due_temporary_work_transfers,
@@ -383,7 +384,7 @@ def _employee_brigade_code(employee):
     return brigade_match.group(1) if brigade_match else ''
 
 
-def _employee_payload(employee):
+def _employee_payload(employee, *, presence=None):
     if not employee:
         return None
     photo_url = ''
@@ -416,6 +417,12 @@ def _employee_payload(employee):
         'brigade_code': brigade_code,
         'brigade_label': f'Бригада {brigade_code}' if brigade_code else 'Не указана',
         'search': f'{employee.full_name} {employee.personnel_number}'.strip().lower(),
+        'presence': presence or {
+            'status': 'not_registered',
+            'label': 'Не зарегистрирован',
+            'last_seen_at': '',
+            'app_code': '',
+        },
     }
 
 
@@ -554,6 +561,12 @@ def build_crew_plan_payload(plan, *, request=None):
     for slot in slots:
         slot_map[(slot.equipment_id, slot.shift_type)] = slot
 
+    payload_employee_ids = set(eligible_employee_ids)
+    payload_employee_ids.update(employee.id for employee in transfer_candidates)
+    payload_employee_ids.update(slot.employee_id for slot in slots if slot.employee_id)
+    payload_employee_ids.update(slot.baseline_employee_id for slot in slots if slot.baseline_employee_id)
+    presence_by_employee = presence_by_employee_id(payload_employee_ids)
+
     equipment_items = []
     seen_equipment_ids = set()
     for slot in slots:
@@ -600,7 +613,10 @@ def build_crew_plan_payload(plan, *, request=None):
                 'shift_type': shift_type,
                 'label': 'День' if shift_type == WorkShiftType.SHIFT_1 else 'Ночь',
                 'time_label': '07:00–19:00' if shift_type == WorkShiftType.SHIFT_1 else '19:00–07:00',
-                'employee': _employee_payload(slot.employee),
+                'employee': _employee_payload(
+                    slot.employee,
+                    presence=presence_by_employee.get(slot.employee_id),
+                ),
                 'changed': changed,
                 'conflict': bool(issue),
                 'issue': issue,
@@ -692,7 +708,10 @@ def build_crew_plan_payload(plan, *, request=None):
             'conflict_count': conflict_count,
             'changed_count': changed_count,
         },
-        'employees': [_employee_payload(employee) for employee in eligible_employees],
+        'employees': [
+            _employee_payload(employee, presence=presence_by_employee.get(employee.id))
+            for employee in eligible_employees
+        ],
         'temporary_transfer': {
             'available': bool(
                 editable
@@ -700,7 +719,10 @@ def build_crew_plan_payload(plan, *, request=None):
                 and transfer_specializations
                 and current_watch_periods
             ),
-            'candidates': [_employee_payload(employee) for employee in transfer_candidates],
+            'candidates': [
+                _employee_payload(employee, presence=presence_by_employee.get(employee.id))
+                for employee in transfer_candidates
+            ],
             'target_specializations': [
                 {'id': specialization.id, 'name': specialization.name}
                 for specialization in transfer_specializations

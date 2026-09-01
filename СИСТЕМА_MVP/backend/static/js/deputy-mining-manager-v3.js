@@ -148,6 +148,17 @@
         }).join("").toUpperCase() || "??";
     }
 
+    function employeePresence(employee) {
+        var presence = employee && employee.presence && typeof employee.presence === "object"
+            ? employee.presence
+            : {};
+        var status = textValue(presence.status) || "not_registered";
+        return {
+            status: status,
+            label: textValue(presence.label) || "Нет связи с приложением"
+        };
+    }
+
     function normalizeSearch(value) {
         return textValue(value).normalize("NFKC").trim().replace(/\s+/g, " ")
             .toLocaleLowerCase("ru").replace(/ё/g, "е");
@@ -491,6 +502,11 @@
             avatar.textContent = employeeInitials(employee);
             avatar.setAttribute("aria-hidden", "true");
         }
+        var presence = employeePresence(employee);
+        var dot = createElement("i", "employee-presence-dot is-" + presence.status);
+        dot.setAttribute("aria-label", presence.label);
+        dot.setAttribute("title", presence.label);
+        avatar.appendChild(dot);
         return avatar;
     }
 
@@ -645,7 +661,12 @@
         preview.appendChild(createAvatar(employee, false));
         var main = createElement("span", "deputy-employee-main");
         main.appendChild(createElement("strong", "", employeeName(employee)));
-        main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
+        var presence = employeePresence(employee);
+        main.appendChild(createElement(
+            "small",
+            "deputy-employee-presence is-" + presence.status,
+            (employeeMeta(employee) || "Сотрудник") + " · " + presence.label
+        ));
         preview.appendChild(main);
         applyDragPreviewTheme(preview);
         document.body.appendChild(preview);

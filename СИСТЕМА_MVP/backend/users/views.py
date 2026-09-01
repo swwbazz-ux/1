@@ -112,6 +112,7 @@ from .models import (
     WatchComposition,
     WorkSchedule,
 )
+from .live_monitor import presence_by_employee_id
 from .oup_undo import (
     get_oup_action_undo_state,
     undo_oup_action,
@@ -2176,6 +2177,11 @@ def system_admin_employees_view(request):
     if query:
         employees = employees.filter(full_name__icontains=query)
 
+    employees = list(employees)
+    presences = presence_by_employee_id(employee.id for employee in employees)
+    for employee in employees:
+        employee.presence = presences.get(employee.id)
+
     return render(
         request,
         'users/system_admin_employees.html',
@@ -2393,6 +2399,9 @@ def system_admin_employee_detail_view(request, employee_id):
         work_assignment_role = effective_employee_specialization.access_role
     if not work_assignment_role and current_role_access:
         work_assignment_role = current_role_access.role
+    employee_presence = presence_by_employee_id([employee.id]).get(employee.id)
+    for employee_access in employee_accesses:
+        employee_access.presence = employee_presence
 
     return render(
         request,

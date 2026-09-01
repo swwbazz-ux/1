@@ -617,6 +617,7 @@
 }
 
 .deputy-avatar {
+    position: relative;
     display: grid;
     width: 38px;
     height: 38px;
@@ -642,6 +643,27 @@ button.deputy-avatar {
     height: 100%;
     object-fit: cover;
 }
+
+.employee-presence-dot {
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    width: 11px;
+    height: 11px;
+    border: 2px solid var(--admin-panel);
+    border-radius: 50%;
+    background: var(--admin-gray);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--admin-line) 65%, transparent);
+}
+
+.employee-presence-dot.is-online { background: var(--admin-green); }
+.employee-presence-dot.is-recent { background: var(--admin-yellow); }
+.employee-presence-dot.is-offline { background: var(--admin-red); }
+.employee-presence-dot.is-not_registered { background: var(--admin-gray); }
+
+.deputy-employee-presence.is-online { color: var(--admin-green); }
+.deputy-employee-presence.is-recent { color: #9d6800; }
+.deputy-employee-presence.is-offline { color: var(--admin-red); }
 
 .deputy-assignment-board {
     position: relative;

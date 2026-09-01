@@ -6,10 +6,10 @@
 {% block extra_head %}
 <link rel="stylesheet" href="{% static 'css/admin-employee-detail.css' %}?v=20260828-4">
 {% if employee_card_context == "oup" %}
-<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260828-4">
+<link rel="stylesheet" href="{% static 'css/oup-workplace-v1.css' %}?v=20260901-1">
 <link rel="stylesheet" href="{% static 'css/oup-work-period-v1.css' %}?v=20260718-3">
 {% endif %}
-<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260828-4">
+<link rel="stylesheet" href="{% static 'css/employee-card-unified.css' %}?v=20260901-1">
 {% endblock %}
 
 {% block body %}
@@ -436,7 +436,7 @@
                                 <article class="employee-card-access status-{{ item.status }}">
                                     <div class="employee-card-access-head"><strong>{{ item.role.name }}</strong><span>{{ item.get_status_display }}</span></div>
                                     <p>{% if item.status == "not_activated" and item.primary_code_issued_at %}ожидает первого входа{% elif item.status == "activated" %}Пинкод активирован{% elif item.status == "blocked" %}Доступ заблокирован{% else %}Доступ отключен{% endif %}</p>
-                                    <small>Последний вход: {{ item.last_login_at|date:"d.m.Y H:i"|default:"—" }}</small>
+                                    <small class="employee-presence-summary{% if item.presence %} is-{{ item.presence.status }}{% endif %}">{% if item.presence %}<i class="employee-presence-dot is-{{ item.presence.status }}"></i>{{ item.presence.label }} · {% endif %}Последний вход: {{ item.last_login_at|date:"d.m.Y H:i"|default:"—" }}{% if item.presence.last_seen_at %} · связь: {{ item.presence.last_seen_at|date:"d.m.Y H:i" }}{% endif %}</small>
                                     {% if item.status == "not_activated" and item.primary_code_issued_at %}
                                         <div class="employee-card-login-share employee-login-share" data-login-share data-login-url="https://driverform.ru/apps/" data-login-phone="{{ employee.phone|default:'—' }}" data-login-code="{{ item.access_code }}">
                                             <div data-login-share-text><span>https://driverform.ru/apps/</span><span>Телефон: {{ employee.phone|default:"—" }}</span><span>Пин код: {{ item.access_code }}</span></div>

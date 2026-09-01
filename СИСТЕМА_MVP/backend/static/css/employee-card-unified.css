@@ -906,6 +906,26 @@ summary.employee-card-section-heading {
     text-transform: uppercase;
 }
 
+.employee-presence-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 4px;
+}
+
+.employee-presence-summary .employee-presence-dot {
+    position: static;
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--employee-muted);
+}
+
+.employee-presence-summary .employee-presence-dot.is-online { background: var(--employee-primary); }
+.employee-presence-summary .employee-presence-dot.is-recent { background: var(--employee-warning); }
+.employee-presence-summary .employee-presence-dot.is-offline { background: var(--employee-danger); }
+
 .employee-card-access p {
     margin: 5px 0 1px;
 }
