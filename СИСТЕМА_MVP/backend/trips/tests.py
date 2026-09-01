@@ -858,11 +858,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v174')
+        self.assertContains(response, 'excavator-mobile-shell-v175')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 174')
+        self.assertContains(response, 'Версия 175')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -2127,7 +2127,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v174', script)
+        self.assertIn('excavator-mobile-shell-v175', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2206,6 +2206,15 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('grid-template-columns: minmax(0, 1fr) minmax(92px, 31%);', css)
         self.assertIn('inline-size: var(--mobile-shift-hold);', css)
         self.assertIn('.mobile-shift-nav-item .mobile-shift-nav-icon', css)
+        self.assertIn('display: none !important;', css)
+        self.assertIn(
+            '.driver-shell[data-active-tab="shift"] [data-driver-tab-panel="shift"].is-active .mobile-shift',
+            css,
+        )
+        self.assertIn(
+            '.eo-shell[data-eo-active-tab="shift"] .mobile-shift:not([hidden])',
+            css,
+        )
         self.assertIn('.eo-shell[data-eo-ime-open="true"] .mobile-shift__actions', css)
         self.assertNotIn('@media (width: 390px)', css)
         self.assertNotIn('@media (height: 844px)', css)

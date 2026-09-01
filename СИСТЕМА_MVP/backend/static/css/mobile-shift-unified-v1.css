@@ -74,7 +74,10 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     min-block-size: 0 !important;
     margin: 0 !important;
     padding: var(--ms-edge) !important;
-    display: grid !important;
+    /* Экран по умолчанию закрыт. Показываем его только когда родительская
+       вкладка явно активна: fixed-позиционирование не должно позволять
+       «Смене» накрывать соседние экраны. */
+    display: none !important;
     grid-template-columns: minmax(0, 1fr) !important;
     grid-template-rows: minmax(38px, .12fr) minmax(0, 1fr) minmax(48px, .12fr) !important;
     gap: var(--ms-gap) !important;
@@ -647,7 +650,8 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] > .eo-form 
     overflow: hidden !important;
 }
 
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] .mobile-shift {
+body.driver-mobile-screen .driver-shell[data-active-tab="shift"] [data-driver-tab-panel="shift"].is-active .mobile-shift,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] .mobile-shift:not([hidden]) {
     display: grid !important;
 }
 
