@@ -1,9 +1,9 @@
 /*
  * Единый адаптивный экран «Смена» для водителя и машиниста экскаватора.
  *
- * Компонент намеренно не привязан к отдельным моделям телефонов. Высота
- * секций определяется содержимым, а нехватку места принимает один внутренний
- * скроллер. Число показателей и подписи остаются ролевыми данными.
+ * Компонент намеренно не привязан к отдельным моделям телефонов. Две рабочие
+ * секции делят доступную высоту, не создавая прокрутку страницы или внутренней
+ * области. Число показателей и подписи остаются ролевыми данными.
  */
 
 .mobile-shift {
@@ -34,6 +34,7 @@
     overflow: hidden !important;
     color: var(--mobile-shift-text);
     font-family: "Roboto Condensed", "Arial Narrow", Arial, sans-serif;
+    container: mobile-shift / size;
 }
 
 .mobile-shift.driver-shift-opening:has(> .driver-shift-opening-form) {
@@ -110,40 +111,40 @@ body.driver-mobile-screen .driver-shift-workspace.driver-shift-opening.mobile-sh
     inline-size: 100% !important;
     min-inline-size: 0 !important;
     min-block-size: 0 !important;
-    block-size: auto !important;
+    block-size: 100% !important;
+    max-block-size: 100% !important;
     margin: 0 !important;
-    padding: 0 .125rem .125rem 0 !important;
+    padding: 0 !important;
     display: grid !important;
     grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: none !important;
+    grid-template-rows: minmax(0, 1.08fr) minmax(0, .92fr) !important;
     grid-auto-flow: row !important;
-    grid-auto-rows: max-content !important;
-    align-content: start !important;
+    grid-auto-rows: minmax(0, 1fr) !important;
+    align-content: stretch !important;
     gap: var(--mobile-shift-gap) !important;
     overflow-x: hidden !important;
-    overflow-y: auto !important;
-    overscroll-behavior-y: contain;
-    scroll-padding-block: var(--mobile-shift-gap);
-    scrollbar-width: thin;
+    overflow-y: hidden !important;
+    overscroll-behavior: none;
+    position: relative;
 }
 
 .mobile-shift__section {
     inline-size: 100% !important;
     min-inline-size: 0 !important;
     min-block-size: 0 !important;
-    block-size: auto !important;
-    height: auto !important;
+    block-size: 100% !important;
+    height: 100% !important;
     max-block-size: none !important;
     margin: 0 !important;
     padding: var(--mobile-shift-section-pad) !important;
     display: grid !important;
     grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: none !important;
-    grid-auto-rows: max-content !important;
-    align-content: start !important;
+    grid-template-rows: auto minmax(0, 1fr) !important;
+    grid-auto-rows: minmax(0, 1fr) !important;
+    align-content: stretch !important;
     gap: clamp(.5rem, 1.2vmin, .75rem) !important;
     flex: none !important;
-    overflow: visible !important;
+    overflow: hidden !important;
     border: 1px solid var(--mobile-shift-section-line) !important;
     border-radius: clamp(.625rem, 2.5vw, .875rem) !important;
     background: var(--mobile-shift-section-bg) !important;
@@ -184,24 +185,29 @@ body.driver-mobile-screen .driver-shift-workspace.driver-shift-opening.mobile-sh
     inline-size: 100% !important;
     min-inline-size: 0 !important;
     min-block-size: 0 !important;
-    block-size: auto !important;
+    block-size: 100% !important;
+    height: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
     display: grid !important;
     grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: none !important;
-    grid-auto-rows: minmax(clamp(68px, 9.5svh, 96px), auto) !important;
-    align-content: start !important;
+    grid-template-rows: repeat(3, minmax(0, 1fr)) !important;
+    grid-auto-rows: minmax(0, 1fr) !important;
+    align-content: stretch !important;
     gap: clamp(.5rem, 1.25vmin, .75rem) !important;
-    overflow: visible !important;
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .mobile-shift .mobile-shift__metrics {
+    grid-template-rows: repeat(2, minmax(0, 1fr)) !important;
 }
 
 .mobile-shift__field {
     inline-size: 100% !important;
     min-inline-size: 0 !important;
-    min-block-size: clamp(68px, 9.5svh, 96px) !important;
-    block-size: auto !important;
-    height: auto !important;
+    min-block-size: 0 !important;
+    block-size: 100% !important;
+    height: 100% !important;
     margin: 0 !important;
     padding: var(--mobile-shift-card-pad-y) var(--mobile-shift-card-pad-x) !important;
     display: grid !important;
@@ -257,10 +263,11 @@ body.driver-mobile-screen .driver-shift-workspace.driver-shift-opening.mobile-sh
     grid-column: 2;
     grid-row: 1;
     min-inline-size: 0 !important;
-    inline-size: auto !important;
+    inline-size: min(48%, 180px) !important;
+    max-inline-size: 48% !important;
     margin: 0 !important;
     display: grid !important;
-    grid-template-columns: minmax(0, auto) auto !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
     align-items: baseline !important;
     justify-content: end !important;
     gap: clamp(.35rem, 1.6vw, .6rem) !important;
@@ -270,7 +277,7 @@ body.driver-mobile-screen .driver-shift-workspace.driver-shift-opening.mobile-sh
 .mobile-shift__metric-value input,
 .mobile-shift__metric-value > strong {
     min-inline-size: 0 !important;
-    inline-size: min(42vw, 176px) !important;
+    inline-size: 100% !important;
     max-inline-size: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -352,15 +359,16 @@ body.driver-mobile-screen .driver-shift-workspace.driver-shift-opening.mobile-sh
     inline-size: 100% !important;
     min-inline-size: 0 !important;
     min-block-size: 0 !important;
-    block-size: auto !important;
+    block-size: 100% !important;
+    height: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
     display: grid !important;
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    grid-template-rows: none !important;
-    grid-auto-rows: minmax(clamp(64px, 8.5svh, 92px), auto) !important;
+    grid-template-rows: repeat(2, minmax(0, 1fr)) !important;
+    grid-auto-rows: minmax(0, 1fr) !important;
     gap: clamp(.5rem, 1.25vmin, .75rem) !important;
-    overflow: visible !important;
+    overflow: hidden !important;
 }
 
 .mobile-shift__grid--assignment {
@@ -370,9 +378,9 @@ body.driver-mobile-screen .driver-shift-workspace.driver-shift-opening.mobile-sh
 .mobile-shift__cell {
     inline-size: 100% !important;
     min-inline-size: 0 !important;
-    min-block-size: clamp(64px, 8.5svh, 92px) !important;
-    block-size: auto !important;
-    height: auto !important;
+    min-block-size: 0 !important;
+    block-size: 100% !important;
+    height: 100% !important;
     margin: 0 !important;
     padding: var(--mobile-shift-card-pad-y) var(--mobile-shift-card-pad-x) !important;
     display: grid !important;
@@ -466,11 +474,11 @@ body.driver-mobile-screen .driver-shift-workspace.driver-shift-opening.mobile-sh
     margin: 0 !important;
     padding: 0 !important;
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) minmax(108px, 31%) !important;
-    grid-template-rows: minmax(clamp(52px, 7svh, 64px), auto) !important;
+    grid-template-columns: minmax(0, 1fr) minmax(104px, 31%) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
     gap: clamp(.5rem, 2.5vw, .75rem) !important;
     align-items: stretch !important;
-    overflow: visible !important;
+    overflow: hidden !important;
 }
 
 .mobile-shift__action[hidden] {
@@ -498,6 +506,38 @@ body.driver-mobile-screen .driver-shift-workspace.driver-shift-opening.mobile-sh
     text-transform: uppercase;
     white-space: nowrap;
     position: relative;
+    isolation: isolate;
+}
+
+.mobile-shift__action::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 auto 0 0 !important;
+    inline-size: var(--mobile-shift-hold, 0%) !important;
+    block-size: 100% !important;
+    z-index: 0 !important;
+    pointer-events: none !important;
+    transition: none !important;
+}
+
+.mobile-shift__action--primary::before {
+    background: rgba(118, 237, 101, .22) !important;
+}
+
+.mobile-shift__action--danger::before {
+    background: rgba(255, 131, 136, .22) !important;
+}
+
+.mobile-shift__action--secondary::before {
+    background: rgba(205, 221, 227, .14) !important;
+}
+
+.mobile-shift__action > [data-mobile-shift-label] {
+    min-inline-size: 0;
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .mobile-shift__action--primary {
@@ -532,26 +572,277 @@ body.driver-mobile-screen .driver-shift-workspace.driver-shift-opening.mobile-sh
  */
 body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__actions,
 body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__actions {
-    block-size: auto !important;
-    height: auto !important;
+    block-size: 100% !important;
+    height: 100% !important;
     min-height: 0 !important;
-    max-height: none !important;
-    grid-template-columns: minmax(0, 1fr) minmax(108px, 31%) !important;
-    grid-template-rows: minmax(clamp(52px, 7svh, 64px), auto) !important;
+    max-height: 100% !important;
+    grid-template-columns: minmax(0, 1fr) minmax(104px, 31%) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
     gap: clamp(.5rem, 2.5vw, .75rem) !important;
 }
 
 body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__actions > .mobile-shift__action,
 body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__actions > .mobile-shift__action {
-    block-size: auto !important;
-    min-block-size: clamp(52px, 7svh, 64px) !important;
-    max-block-size: none !important;
-    height: auto !important;
-    min-height: clamp(52px, 7svh, 64px) !important;
-    max-height: none !important;
+    block-size: 100% !important;
+    min-block-size: 0 !important;
+    max-block-size: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
     padding: .65rem clamp(.75rem, 3vw, 1.1rem) !important;
     border-radius: clamp(.5rem, 2vw, .75rem) !important;
     font: 650 clamp(17px, 4.8vw, 21.6px) / 1.1 "Roboto Condensed", "Arial Narrow", Arial, sans-serif !important;
+}
+
+/*
+ * Терминальный контракт. Старые ролевые файлы содержат поздние правила с
+ * фиксированными строками и overflow:auto; здесь оба экрана окончательно
+ * получают одну непрокручиваемую адаптивную сетку.
+ */
+@media (orientation: portrait) {
+    body.driver-mobile-screen .driver-shell[data-active-tab="shift"],
+    body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] {
+        inline-size: min(100vw, 430px) !important;
+        width: min(100vw, 430px) !important;
+        max-inline-size: 430px !important;
+        max-width: 430px !important;
+        margin-inline: auto !important;
+    }
+
+    body.driver-mobile-screen .driver-shell[data-active-tab="shift"] {
+        --driver-edge: clamp(10px, 3.35vw, 16px);
+    }
+
+    body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] {
+        --eo-page-x: clamp(10px, 3.35vw, 16px);
+        padding-inline: var(--eo-page-x) !important;
+    }
+}
+
+body.driver-mobile-screen:has(.driver-shell[data-active-tab="shift"]) {
+    min-inline-size: 0 !important;
+    min-width: 0 !important;
+}
+
+html:has(body.driver-mobile-screen .driver-shell[data-active-tab="shift"]),
+html:has(body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"]) {
+    overflow-x: hidden !important;
+    overflow-y: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shell[data-active-tab="shift"] {
+    min-inline-size: 0 !important;
+    min-width: 0 !important;
+}
+
+@media (orientation: landscape) {
+    body.driver-mobile-screen .driver-shell[data-active-tab="shift"],
+    body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] {
+        inline-size: 100% !important;
+        width: 100% !important;
+        max-inline-size: none !important;
+        max-width: none !important;
+        margin-inline: 0 !important;
+    }
+
+    body.driver-mobile-screen .driver-shell[data-active-tab="shift"] {
+        --driver-edge: clamp(8px, 2vw, 16px);
+    }
+
+    body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] {
+        --eo-page-x: clamp(8px, 2vw, 16px);
+        padding-inline: var(--eo-page-x) !important;
+    }
+}
+
+body.driver-mobile-screen [data-driver-tab-panel="shift"],
+body.excavator-operator-screen [data-eo-screen="shift"] {
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift > .mobile-shift__titlebar,
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__scroll,
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__actions,
+body.excavator-operator-screen .eo-screen.mobile-shift > .mobile-shift__titlebar,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__scroll,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__actions {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__scroll,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__scroll {
+    block-size: 100% !important;
+    min-block-size: 0 !important;
+    max-block-size: 100% !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1.08fr) minmax(0, .92fr) !important;
+    grid-auto-rows: minmax(0, 1fr) !important;
+    align-content: stretch !important;
+    overflow-x: hidden !important;
+    overflow-y: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__section,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__section {
+    block-size: 100% !important;
+    min-block-size: 0 !important;
+    max-block-size: 100% !important;
+    grid-template-rows: auto minmax(0, 1fr) !important;
+    overflow-x: hidden !important;
+    overflow-y: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .driver-shift-section.mobile-shift__section,
+body.excavator-operator-screen .eo-screen.mobile-shift .eo-shift-section.mobile-shift__section {
+    block-size: 100% !important;
+    min-block-size: 0 !important;
+    max-block-size: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__metrics,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__metrics {
+    block-size: 100% !important;
+    min-block-size: 0 !important;
+    max-block-size: 100% !important;
+    align-content: stretch !important;
+    overflow-x: hidden !important;
+    overflow-y: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__metrics {
+    grid-template-rows: repeat(3, minmax(0, 1fr)) !important;
+}
+
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__metrics {
+    grid-template-rows: repeat(2, minmax(0, 1fr)) !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__field,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__field {
+    block-size: 100% !important;
+    min-block-size: 0 !important;
+    max-block-size: 100% !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .driver-shift-field.mobile-shift__field,
+body.excavator-operator-screen .eo-screen.mobile-shift .eo-field-card.mobile-shift__field {
+    block-size: 100% !important;
+    min-block-size: 0 !important;
+    max-block-size: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__grid,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__grid {
+    block-size: 100% !important;
+    min-block-size: 0 !important;
+    max-block-size: 100% !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-rows: repeat(2, minmax(0, 1fr)) !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__cell,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__cell {
+    block-size: 100% !important;
+    min-block-size: 0 !important;
+    max-block-size: 100% !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .driver-shift-result-cell.mobile-shift__cell,
+body.excavator-operator-screen .eo-screen.mobile-shift .eo-shift-result-cell.mobile-shift__cell {
+    block-size: 100% !important;
+    min-block-size: 0 !important;
+    max-block-size: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__action--primary,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__action--primary {
+    border-color: rgba(111, 245, 101, .8) !important;
+    background: linear-gradient(145deg, rgba(5, 47, 20, .92), rgba(1, 25, 10, .98)) !important;
+    color: #76ed65 !important;
+    opacity: 1 !important;
+    filter: none !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__action--danger,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__action--danger {
+    border-color: rgba(255, 111, 117, .82) !important;
+    background: linear-gradient(145deg, rgba(57, 12, 18, .92), rgba(31, 7, 11, .98)) !important;
+    color: #ff8388 !important;
+    opacity: 1 !important;
+    filter: none !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__action--secondary,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__action--secondary {
+    border-color: var(--mobile-shift-line) !important;
+    background: linear-gradient(145deg, rgba(24, 34, 39, .96), rgba(9, 16, 20, .98)) !important;
+    color: var(--mobile-shift-text) !important;
+    opacity: 1 !important;
+    filter: none !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__action:disabled,
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__action[aria-disabled="true"],
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__action:disabled,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__action[aria-disabled="true"] {
+    border-color: rgba(126, 145, 154, .2) !important;
+    background: rgba(9, 16, 20, .82) !important;
+    color: rgba(166, 181, 189, .38) !important;
+    opacity: 1 !important;
+    filter: none !important;
+    box-shadow: none !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__action::before,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__action::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 auto 0 0 !important;
+    inline-size: var(--mobile-shift-hold, 0%) !important;
+    block-size: 100% !important;
+    z-index: 0 !important;
+    pointer-events: none !important;
+    transition: none !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__action--primary::before,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__action--primary::before {
+    background: rgba(118, 237, 101, .22) !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__action--danger::before,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__action--danger::before {
+    background: rgba(255, 131, 136, .22) !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__action--secondary::before,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__action--secondary::before {
+    background: rgba(205, 221, 227, .14) !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__scroll > .driver-push-invite:not([hidden]) {
+    position: absolute !important;
+    inset: auto var(--mobile-shift-section-pad) var(--mobile-shift-section-pad) !important;
+    z-index: 4 !important;
+    max-block-size: calc(100% - (2 * var(--mobile-shift-section-pad))) !important;
+    overflow: hidden !important;
 }
 
 .mobile-shift-nav-item .mobile-shift-nav-icon {
@@ -608,8 +899,56 @@ body.excavator-operator-screen .eo-shell[data-eo-ime-open="true"] .mobile-shift 
     grid-template-rows: auto minmax(0, 1fr) !important;
 }
 
+body.excavator-operator-screen .eo-shell[data-eo-ime-open="true"] .mobile-shift__scroll {
+    grid-template-rows: minmax(0, 1.08fr) minmax(0, .92fr) !important;
+    overflow-x: hidden !important;
+    overflow-y: hidden !important;
+}
+
 body.excavator-operator-screen .eo-shell[data-eo-ime-open="true"] .mobile-shift__actions {
     display: none !important;
+}
+
+@media (orientation: landscape) {
+    .mobile-shift {
+        --mobile-shift-gap: .35rem;
+        --mobile-shift-edge: .4rem;
+        --mobile-shift-section-pad: .35rem;
+        --mobile-shift-card-pad-y: .25rem;
+        --mobile-shift-card-pad-x: .5rem;
+    }
+
+    body.driver-mobile-screen .driver-shift-workspace.mobile-shift,
+    body.excavator-operator-screen .eo-screen.mobile-shift {
+        grid-template-rows: 36px minmax(0, 1fr) 48px !important;
+    }
+
+    .mobile-shift__titlebar {
+        min-block-size: 0 !important;
+        block-size: 36px !important;
+    }
+
+    body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__scroll,
+    body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__scroll {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        grid-template-rows: minmax(0, 1fr) !important;
+    }
+
+    body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__actions,
+    body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__actions {
+        block-size: 48px !important;
+        height: 48px !important;
+        max-block-size: 48px !important;
+        max-height: 48px !important;
+    }
+
+    .mobile-shift__section {
+        gap: .3rem !important;
+    }
+
+    .mobile-shift__section-head {
+        min-block-size: 1rem !important;
+    }
 }
 
 /* На очень узком экране сетка остаётся двухколоночной, но тексту даётся место. */
@@ -620,13 +959,36 @@ body.excavator-operator-screen .eo-shell[data-eo-ime-open="true"] .mobile-shift_
         --mobile-shift-card-pad-x: .6rem;
     }
 
-    .mobile-shift__metric-value input,
-    .mobile-shift__metric-value > strong {
-        inline-size: min(38vw, 128px) !important;
+    .mobile-shift__actions {
+        grid-template-columns: minmax(0, 1fr) minmax(92px, 31%) !important;
+    }
+}
+
+@media (max-width: 300px) and (orientation: portrait) {
+    .mobile-shift {
+        --mobile-shift-gap: .35rem;
+        --mobile-shift-edge: .45rem;
+        --mobile-shift-section-pad: .38rem;
+        --mobile-shift-card-pad-y: .3rem;
+        --mobile-shift-card-pad-x: .5rem;
     }
 
-    .mobile-shift__actions {
-        grid-template-columns: minmax(0, 1fr) minmax(96px, 31%) !important;
+    .mobile-shift__titlebar {
+        min-block-size: 38px !important;
+    }
+
+    .mobile-shift__section {
+        gap: .3rem !important;
+    }
+
+    .mobile-shift__section-head {
+        min-block-size: 1rem !important;
+    }
+
+    .mobile-shift__actions,
+    body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__actions,
+    body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__actions {
+        gap: .35rem !important;
     }
 }
 
