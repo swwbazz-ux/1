@@ -159,6 +159,26 @@
         };
     }
 
+    function createPresenceBadge(employee) {
+        var presence = employeePresence(employee);
+        var shortLabels = {
+            online: "В сети",
+            recent: "Недавно",
+            offline: "Нет связи",
+            not_registered: "Нет входа"
+        };
+        var badge = createElement("span", "deputy-presence-badge is-" + presence.status);
+        badge.setAttribute("aria-label", "Приложение: " + presence.label);
+        badge.setAttribute("title", "Приложение: " + presence.label);
+        badge.appendChild(createElement("i", "deputy-presence-badge__dot"));
+        badge.appendChild(createElement(
+            "span",
+            "deputy-presence-badge__label",
+            shortLabels[presence.status] || presence.label
+        ));
+        return badge;
+    }
+
     function normalizeSearch(value) {
         return textValue(value).normalize("NFKC").trim().replace(/\s+/g, " ")
             .toLocaleLowerCase("ru").replace(/ё/g, "е");
@@ -502,11 +522,6 @@
             avatar.textContent = employeeInitials(employee);
             avatar.setAttribute("aria-hidden", "true");
         }
-        var presence = employeePresence(employee);
-        var dot = createElement("i", "employee-presence-dot is-" + presence.status);
-        dot.setAttribute("aria-label", presence.label);
-        dot.setAttribute("title", presence.label);
-        avatar.appendChild(dot);
         return avatar;
     }
 
@@ -542,6 +557,7 @@
         }
         appendRecordField("Назначение", assignmentLabel || "Свободен");
         appendRecordField("Статус", employee.status_label || "Активен");
+        appendRecordField("Связь с приложением", employeePresence(employee).label);
         openDialog(recordDialog);
     }
 
@@ -718,6 +734,7 @@
         main.appendChild(createElement("strong", "", employeeName(employee)));
         main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
         card.appendChild(main);
+        card.appendChild(createPresenceBadge(employee));
         card.appendChild(createElement("span", "deputy-drag-mark", "⠿"));
         bindDragSource(card, employee);
         card.addEventListener("dblclick", function (event) {
@@ -870,6 +887,7 @@
             main.appendChild(createElement("strong", "", employeeName(employee)));
             main.appendChild(createElement("small", "", employee.busy_reason || employee.assigned_label || employeeMeta(employee) || "Сотрудник"));
             button.appendChild(main);
+            button.appendChild(createPresenceBadge(employee));
             button.addEventListener("click", function () {
                 var source = sourceForEmployee(employee);
                 closeDialog(candidateDialog);
@@ -936,6 +954,7 @@
             main.appendChild(createElement("small", "", employeeMeta(slot.employee) || slot.label || "Назначен"));
             person.appendChild(main);
             var flags = createElement("span", "deputy-slot-flags");
+            flags.appendChild(createPresenceBadge(slot.employee));
             if (slot.changed) flags.appendChild(createElement("span", "deputy-slot-flag", "ИЗМ"));
             if (slot.conflict) flags.appendChild(createElement("span", "deputy-slot-flag is-conflict", "!"));
             person.appendChild(flags);
