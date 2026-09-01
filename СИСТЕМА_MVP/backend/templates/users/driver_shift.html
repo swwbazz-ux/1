@@ -3852,6 +3852,114 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
     }
 }
 
+/* Второй шаг унификации снизу вверх: только блок «Итог смены».
+   На обычном портретном экране обе роли получают одну фактическую высоту,
+   сетку и типографику; состав карточек и поведение формы не меняются. */
+@media (orientation: portrait) and (min-height: 720px) {
+    body.driver-mobile-screen {
+        --mobile-shift-summary-size: clamp(220px, 29dvh, 280px);
+    }
+
+    body.driver-mobile-screen .driver-shift-opening {
+        grid-template-rows:
+            auto
+            minmax(0, 1fr)
+            var(--mobile-shift-summary-size)
+            auto;
+    }
+
+    body.driver-mobile-screen .driver-shift-scroll,
+    body.driver-mobile-screen [data-driver-shift-close-form].is-reviewed .driver-shift-scroll {
+        grid-template-rows:
+            minmax(0, 1fr)
+            var(--mobile-shift-summary-size);
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) {
+        box-sizing: border-box;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        gap: 0;
+        padding: clamp(8px, 1.25dvh, 12px) clamp(10px, 3vw, 16px) !important;
+        overflow: hidden;
+        border: 1px solid rgba(74, 222, 128, .34);
+        border-radius: 8px;
+        background: linear-gradient(180deg, rgba(9, 27, 16, .52), rgba(8, 14, 18, .86));
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) > .driver-shift-section-head {
+        height: clamp(17px, 2.1dvh, 20px);
+        min-height: clamp(17px, 2.1dvh, 20px);
+        margin-bottom: clamp(6px, .85dvh, 9px) !important;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) > .driver-shift-section-head span {
+        font-size: clamp(14px, 3.5vw, 15px);
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: .14em;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) > .driver-shift-section-head b {
+        font-size: clamp(12px, 2.95vw, 13px);
+        font-weight: 500;
+        line-height: 1;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) > .driver-shift-result-grid {
+        min-height: 0;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: repeat(2, minmax(0, 1fr));
+        gap: clamp(8px, 1.15dvh, 12px);
+        overflow: hidden;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) .driver-shift-result-cell {
+        box-sizing: border-box;
+        min-width: 0;
+        min-height: 0;
+        height: 100%;
+        display: grid;
+        align-content: center;
+        justify-content: stretch;
+        justify-items: start;
+        gap: 4px;
+        padding: clamp(10px, 1.45dvh, 14px) clamp(13px, 3.5vw, 17px) !important;
+        overflow: hidden;
+        border: 1px solid rgba(127, 163, 177, .18);
+        border-radius: 7px;
+        background: rgba(4, 15, 19, .72);
+        text-align: left;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) .driver-shift-result-cell span {
+        width: 100%;
+        color: #84989e;
+        font-size: clamp(14px, 3.55vw, 15px);
+        font-weight: 500;
+        line-height: 1;
+        letter-spacing: .02em;
+        text-align: left;
+        text-transform: uppercase;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-result-grid) .driver-shift-result-cell strong {
+        width: 100%;
+        min-width: 0;
+        margin: 0;
+        overflow: hidden;
+        color: #f6fbfd;
+        font-size: clamp(23px, 6vw, 26px);
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: 0;
+        text-align: left;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
 @media (min-width: 900px) {
     body.driver-mobile-screen .driver-work-screen.is-active {
         --driver-dial-size: clamp(320px, min(42vw, 58dvh), 520px);
