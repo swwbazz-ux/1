@@ -858,11 +858,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v176')
+        self.assertContains(response, 'excavator-mobile-shell-v177')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 176')
+        self.assertContains(response, 'Версия 177')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -1484,9 +1484,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             data=json.dumps({
                 'action': 'close',
                 'client_action_id': 'shift-close-1',
-                'fuel': '87.5',
+                'fuel': '88',
                 'mileage': '1234',
-                'engine_hours': '1208.25',
+                'engine_hours': '1208',
             }),
             content_type='application/json',
         )
@@ -1498,9 +1498,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertFalse(payload['shift_open'])
         shift.refresh_from_db()
         self.assertIsNotNone(shift.closed_at)
-        self.assertEqual(str(shift.end_fuel), '87.50')
+        self.assertEqual(str(shift.end_fuel), '88.00')
         self.assertIsNone(shift.end_mileage)
-        self.assertEqual(str(shift.end_engine_hours), '1208.25')
+        self.assertEqual(str(shift.end_engine_hours), '1208.00')
         self.assertTrue(
             OperationalStateEvent.objects.filter(
                 event_type='shift_changed',
@@ -1528,9 +1528,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             data=json.dumps({
                 'action': 'close',
                 'client_action_id': 'shift-close-carryover',
-                'fuel': '87.5',
+                'fuel': '88',
                 'mileage': '1234',
-                'engine_hours': '1208.25',
+                'engine_hours': '1208',
             }),
             content_type='application/json',
         )
@@ -1706,8 +1706,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         screen = self.client.get(reverse('excavator_work'))
 
         self.assertEqual(screen.status_code, 200)
-        self.assertEqual(screen.context['shift_fuel_display'], '87.5')
-        self.assertEqual(screen.context['shift_engine_hours_display'], '1208.25')
+        self.assertEqual(screen.context['shift_fuel_display'], '88')
+        self.assertEqual(screen.context['shift_engine_hours_display'], '1208')
 
         response = self.client.post(
             reverse('excavator_shift_action'),
@@ -1715,17 +1715,17 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
                 'action': 'open',
                 'client_action_id': 'shift-open-inherit-meters',
                 'excavator_id': self.excavator.id,
-                'fuel': '87.5',
-                'engine_hours': '1208.25',
+                'fuel': '88',
+                'engine_hours': '1208',
             }),
             content_type='application/json',
         )
 
         self.assertEqual(response.status_code, 200)
         shift = EmployeeShift.objects.get(id=response.json()['shift_id'])
-        self.assertEqual(str(shift.start_fuel), '87.50')
+        self.assertEqual(str(shift.start_fuel), '88.00')
         self.assertIsNone(shift.start_mileage)
-        self.assertEqual(str(shift.start_engine_hours), '1208.25')
+        self.assertEqual(str(shift.start_engine_hours), '1208.00')
 
     def test_excavator_shift_open_requires_fuel_and_engine_hours(self):
         EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
@@ -1797,7 +1797,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         response = self.client.post(
             reverse('excavator_shift_action'),
-            data=json.dumps({'action': 'open', 'client_action_id': 'handover-correction', 'fuel': '90', 'engine_hours': '1208.5'}),
+            data=json.dumps({'action': 'open', 'client_action_id': 'handover-correction', 'fuel': '90', 'engine_hours': '1209'}),
             content_type='application/json',
         )
 
@@ -1964,6 +1964,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         self.assertEqual(lower.status_code, 400)
         self.assertEqual(excessive.status_code, 400)
+        self.assertIn('целое число', lower.json()['field_errors']['engine_hours'])
+        self.assertIn('целое число', excessive.json()['field_errors']['engine_hours'])
         self.assertEqual(allowed.status_code, 200)
         shift.refresh_from_db()
         self.assertEqual(str(shift.end_fuel), '150.00')
@@ -2127,7 +2129,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v176', script)
+        self.assertIn('excavator-mobile-shell-v177', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2147,7 +2149,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('GET_VERSION', script)
         self.assertIn('event.ports && event.ports[0]', script)
 
-    def test_excavator_shift_ime_hides_actions_and_preserves_large_fields(self):
+    def test_excavator_shift_keyboard_overlays_stable_layout(self):
         response = self.client.get(reverse('excavator_work'))
         html = response.content.decode('utf-8')
 
@@ -2159,6 +2161,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             html.index('syncExcavatorKeyboardState(metrics);'),
             html.index('metrics.height < 320'),
         )
+        self.assertIn('excavatorStableViewportHeight : metrics.height', html)
 
         css_path = (
             Path(__file__).resolve().parents[1]
@@ -2167,12 +2170,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             / 'mobile-shift-unified-v1.css'
         )
         css = css_path.read_text(encoding='utf-8')
-        self.assertIn(
-            '.eo-shell[data-eo-ime-open="true"][data-eo-active-tab="shift"]',
-            css,
-        )
-        self.assertIn('display: none !important;', css)
-        self.assertIn('grid-template-rows: minmax(34px, .1fr) minmax(0, 1fr) !important;', css)
+        self.assertIn('position: absolute !important;', css)
+        self.assertNotIn('data-mobile-shift-ime-open', css)
+        self.assertNotIn('.eo-shell[data-eo-ime-open="true"] .mobile-shift__actions', css)
 
     def test_excavator_shift_uses_shared_driver_visual_rhythm_without_layout_overlap(self):
         legacy_css_path = (
@@ -2220,11 +2220,15 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             '.eo-shell[data-eo-active-tab="shift"] .mobile-shift:not([hidden])',
             css,
         )
-        self.assertIn('.eo-shell[data-eo-ime-open="true"] .mobile-shift__actions', css)
+        self.assertIn('position: absolute !important;', css)
+        self.assertNotIn('data-mobile-shift-ime-open', css)
         self.assertNotIn('@media (width: 390px)', css)
         self.assertNotIn('@media (height: 844px)', css)
         self.assertNotIn('data-eo-ime-open="true"', legacy_css)
         self.assertIn('function bindFieldNavigation(component)', javascript)
+        self.assertIn('input.setAttribute("inputmode", "numeric")', javascript)
+        self.assertIn('input.setAttribute("step", "1")', javascript)
+        self.assertNotIn('bindKeyboardState', javascript)
         self.assertIn('input.setAttribute("enterkeyhint", isLast ? "done" : "next")', javascript)
         self.assertIn('[data-driver-shift-open-button], [data-driver-shift-close-button], [data-eo-shift-button]', javascript)
 

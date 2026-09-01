@@ -713,7 +713,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v176";
+const CACHE_NAME = "excavator-mobile-shell-v177";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -980,14 +980,14 @@ def format_whole_number(value):
     return f'{rounded:,}'.replace(',', ' ')
 
 
-def format_decimal_input_value(value):
+def format_whole_input_value(value):
     if value in {None, ''}:
         return ''
     try:
         parsed = Decimal(value)
     except (InvalidOperation, TypeError, ValueError):
         return str(value)
-    return format(parsed, 'f').rstrip('0').rstrip('.') or '0'
+    return str(int(parsed.to_integral_value(rounding=ROUND_HALF_UP)))
 
 
 def format_whole_value_with_unit(value, unit):
@@ -4534,8 +4534,8 @@ def excavator_work_view(request):
             'equipment_open_shift': equipment_open_shift,
             'shift_fuel_limit': getattr(getattr(shift_start_excavator, 'model', None), 'fuel_capacity_limit_l', None),
             'shift_previous_readings': bool(previous_equipment_shift),
-            'shift_start_fuel_display': format_decimal_input_value(open_shift.start_fuel if open_shift else None),
-            'shift_start_engine_hours_display': format_decimal_input_value(open_shift.start_engine_hours if open_shift else None),
+            'shift_start_fuel_display': format_whole_input_value(open_shift.start_fuel if open_shift else None),
+            'shift_start_engine_hours_display': format_whole_input_value(open_shift.start_engine_hours if open_shift else None),
             'shift_plan_percent': shift_plan_percent,
             'shift_plan_visual': shift_plan_visual,
             'shift_plan_status': shift_plan['status'],
@@ -4548,10 +4548,10 @@ def excavator_work_view(request):
             'shift_fact_label': shift_fact_label,
             'shift_fact_value': shift_fact_value,
             'shift_fact_meta': shift_fact_meta,
-            'shift_fuel_display': format_decimal_input_value(
+            'shift_fuel_display': format_whole_input_value(
                 open_shift.end_fuel if open_shift else getattr(previous_equipment_shift, 'end_fuel', None)
             ),
-            'shift_engine_hours_display': format_decimal_input_value(
+            'shift_engine_hours_display': format_whole_input_value(
                 open_shift.end_engine_hours if open_shift else getattr(previous_equipment_shift, 'end_engine_hours', None)
             ),
             'active_downtime': active_downtime,

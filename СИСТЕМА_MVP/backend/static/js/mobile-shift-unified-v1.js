@@ -106,89 +106,11 @@
         return { reset: reset, setLabel: function (text) { setLabel(button, text); } };
     }
 
-    var viewportBaselineWidth = 0;
-    var viewportBaselineHeight = 0;
-    var imeComponent = null;
-    var viewportFrame = null;
-    var viewportTimer = null;
-
-    function focusedShiftComponent() {
-        var active = document.activeElement;
-        if (!active || !active.matches || !active.matches(".mobile-shift__metric-value input")) return null;
-        return active.closest(".mobile-shift");
-    }
-
-    function clearImeState() {
-        document.querySelectorAll('.mobile-shift[data-mobile-shift-ime-open="true"]').forEach(function (component) {
-            delete component.dataset.mobileShiftImeOpen;
-            component.style.removeProperty("--mobile-shift-keyboard-inset");
-        });
-        imeComponent = null;
-    }
-
-    function syncKeyboardState() {
-        viewportFrame = null;
-        var viewport = window.visualViewport;
-        var width = Math.round(viewport && viewport.width || window.innerWidth || 0);
-        var height = Math.round(viewport && viewport.height || window.innerHeight || 0);
-        if (!width || !height) return;
-
-        if (!viewportBaselineWidth || Math.abs(width - viewportBaselineWidth) > 80) {
-            viewportBaselineWidth = width;
-            viewportBaselineHeight = height;
-            clearImeState();
-            return;
-        }
-
-        var focused = focusedShiftComponent();
-        if (!imeComponent && !focused) {
-            viewportBaselineHeight = Math.max(viewportBaselineHeight, height);
-        } else if (!imeComponent) {
-            viewportBaselineHeight = Math.max(viewportBaselineHeight, height);
-        }
-
-        var threshold = Math.max(120, viewportBaselineHeight * .22);
-        var reduced = viewportBaselineHeight - height >= threshold;
-        var nextComponent = reduced ? (focused || imeComponent) : null;
-        if (!nextComponent || !nextComponent.isConnected) {
-            clearImeState();
-            viewportBaselineHeight = Math.max(viewportBaselineHeight, height);
-            return;
-        }
-
-        if (imeComponent && imeComponent !== nextComponent) clearImeState();
-        imeComponent = nextComponent;
-        imeComponent.dataset.mobileShiftImeOpen = "true";
-        var keyboardInset = Math.max(0, Math.round((window.innerHeight || height) - height - Number(viewport && viewport.offsetTop || 0)));
-        imeComponent.style.setProperty("--mobile-shift-keyboard-inset", keyboardInset + "px");
-    }
-
-    function scheduleKeyboardState() {
-        if (!viewportFrame) viewportFrame = window.requestAnimationFrame(syncKeyboardState);
-        window.clearTimeout(viewportTimer);
-        viewportTimer = window.setTimeout(syncKeyboardState, 180);
-    }
-
-    function bindKeyboardState() {
-        if (document.documentElement.dataset.mobileShiftKeyboardBound === "true") return;
-        document.documentElement.dataset.mobileShiftKeyboardBound = "true";
-        var viewport = window.visualViewport;
-        viewportBaselineWidth = Math.round(viewport && viewport.width || window.innerWidth || 0);
-        viewportBaselineHeight = Math.round(viewport && viewport.height || window.innerHeight || 0);
-        if (viewport) {
-            viewport.addEventListener("resize", scheduleKeyboardState, { passive: true });
-            viewport.addEventListener("scroll", scheduleKeyboardState, { passive: true });
-        }
-        window.addEventListener("resize", scheduleKeyboardState, { passive: true });
-        window.addEventListener("orientationchange", function () {
-            viewportBaselineWidth = 0;
-            viewportBaselineHeight = 0;
-            clearImeState();
-            scheduleKeyboardState();
-        }, { passive: true });
-        document.addEventListener("focusin", scheduleKeyboardState);
-        document.addEventListener("focusout", scheduleKeyboardState);
-        scheduleKeyboardState();
+    function keepWholeNumber(input) {
+        var raw = String(input.value || "");
+        var match = raw.match(/^\d+/);
+        var next = match ? match[0] : "";
+        if (raw !== next) input.value = next;
     }
 
     function bindFieldNavigation(component) {
@@ -200,8 +122,15 @@
         );
         fields.forEach(function (input, index) {
             var isLast = index === fields.length - 1;
+            input.setAttribute("inputmode", "numeric");
+            input.setAttribute("step", "1");
+            input.setAttribute("pattern", "[0-9]*");
             input.setAttribute("enterkeyhint", isLast ? "done" : "next");
             if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
+            input.addEventListener("beforeinput", function (event) {
+                if (event.data && /\D/.test(event.data)) event.preventDefault();
+            });
+            input.addEventListener("input", function () { keepWholeNumber(input); });
             input.addEventListener("keydown", function (event) {
                 if (event.key !== "Enter" && event.keyCode !== 13) return;
                 event.preventDefault();
@@ -229,8 +158,21 @@
         document.querySelectorAll(".mobile-shift").forEach(bindFieldNavigation);
     }
 
+    function syncPhysicalOrientation() {
+        var orientation = window.screen && window.screen.orientation;
+        var type = orientation && String(orientation.type || "");
+        var landscape = type
+            ? type.indexOf("landscape") === 0
+            : Number(window.screen && window.screen.width || 0) > Number(window.screen && window.screen.height || 0);
+        document.documentElement.dataset.mobileShiftOrientation = landscape ? "landscape" : "portrait";
+    }
+
     function init() {
-        bindKeyboardState();
+        syncPhysicalOrientation();
+        window.addEventListener("orientationchange", syncPhysicalOrientation, { passive: true });
+        if (window.screen && window.screen.orientation && window.screen.orientation.addEventListener) {
+            window.screen.orientation.addEventListener("change", syncPhysicalOrientation);
+        }
         bindScreens();
     }
 

@@ -167,6 +167,9 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'data-mobile-shift-field="fuel"')
         self.assertContains(response, 'data-mobile-shift-field="mileage"')
         self.assertContains(response, 'data-mobile-shift-field="engine_hours"')
+        self.assertContains(response, 'inputmode="numeric"')
+        self.assertContains(response, 'step="1"')
+        self.assertNotContains(response, 'inputmode="decimal"')
         self.assertContains(response, '>Закрыть смену<')
         self.assertContains(response, 'Начало')
         self.assertContains(response, '12560')
@@ -208,7 +211,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v179')
+        self.assertContains(response, 'driver-mobile-shell-v180')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(
@@ -416,7 +419,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v179', script)
+        self.assertIn('driver-mobile-shell-v180', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -2178,6 +2181,27 @@ class AccessLoginTests(TestCase):
         self.assertContains(next_open_response, 'value="2600')
         self.assertContains(next_open_response, 'value="712')
 
+    def test_driver_shift_rejects_fractional_readings(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10-1')
+        self.assign_driver_work(truck)
+        self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
+
+        response = self.client.post(
+            '/driver/shift/',
+            {
+                'start_fuel': '100.5',
+                'start_mileage': '2500',
+                'start_engine_hours': '700',
+            },
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Укажите целое число без точки и запятой.')
+        self.assertFalse(EmployeeShift.objects.filter(employee=self.employee, closed_at__isnull=True).exists())
+
     def test_driver_manifest_keeps_last_closed_shift_report(self):
         truck = self.create_registered_driver_shift()
         shift = EmployeeShift.objects.get(employee=self.employee, closed_at__isnull=True)
@@ -2751,7 +2775,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v179')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v180')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

@@ -51,15 +51,15 @@
                         <div class="mobile-shift__field" data-mobile-shift-field="engine_hours"><span class="mobile-shift__field-label"><span>Моточасы</span></span><span class="mobile-shift__metric-value"><strong>—</strong><em>м/ч</em></span></div>
                     {% elif mobile_shift_state == "open" %}
                         <label class="mobile-shift__field" data-mobile-shift-field="fuel">
-                            <span class="mobile-shift__field-label"><span>Топливо</span><small>Начало <strong>{{ open_shift.start_fuel|default_if_none:"—" }}</strong> л</small></span>
+                            <span class="mobile-shift__field-label"><span>Топливо</span><small>Начало <strong>{{ open_shift.start_fuel|floatformat:"0"|default:"—" }}</strong> л</small></span>
                             <span class="mobile-shift__metric-value">{{ mobile_shift_form.end_fuel }}<em>л</em></span>{{ mobile_shift_form.end_fuel.errors }}
                         </label>
                         <label class="mobile-shift__field" data-mobile-shift-field="mileage">
-                            <span class="mobile-shift__field-label"><span>Одометр</span><small>Начало <strong>{{ open_shift.start_mileage|default_if_none:"—" }}</strong> км</small></span>
+                            <span class="mobile-shift__field-label"><span>Одометр</span><small>Начало <strong>{{ open_shift.start_mileage|floatformat:"0"|default:"—" }}</strong> км</small></span>
                             <span class="mobile-shift__metric-value">{{ mobile_shift_form.end_mileage }}<em>км</em></span>{{ mobile_shift_form.end_mileage.errors }}
                         </label>
                         <label class="mobile-shift__field" data-mobile-shift-field="engine_hours">
-                            <span class="mobile-shift__field-label"><span>Моточасы</span><small>Начало <strong>{{ open_shift.start_engine_hours|default_if_none:"—" }}</strong> м/ч</small></span>
+                            <span class="mobile-shift__field-label"><span>Моточасы</span><small>Начало <strong>{{ open_shift.start_engine_hours|floatformat:"0"|default:"—" }}</strong> м/ч</small></span>
                             <span class="mobile-shift__metric-value">{{ mobile_shift_form.end_engine_hours }}<em>м/ч</em></span>{{ mobile_shift_form.end_engine_hours.errors }}
                         </label>
                     {% else %}
@@ -70,12 +70,12 @@
                 {% else %}
                     <label class="mobile-shift__field" data-mobile-shift-field="fuel" data-eo-shift-field="fuel">
                         <span class="mobile-shift__field-label"><span>Топливо</span>{% if open_shift %}<small>Начало <strong>{{ shift_start_fuel_display }}</strong> л</small>{% endif %}</span>
-                        <span class="mobile-shift__metric-value"><input type="number" inputmode="decimal" step="0.01" min="0" name="shift_fuel" value="{{ shift_fuel_display }}" placeholder="0" data-eo-shift-fuel data-eo-fuel-limit="{{ shift_fuel_limit|default:'' }}" {% if equipment_open_shift %}disabled{% endif %}><em>л</em></span>
+                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" step="1" pattern="[0-9]*" min="0" name="shift_fuel" value="{{ shift_fuel_display }}" placeholder="0" data-eo-shift-fuel data-eo-fuel-limit="{{ shift_fuel_limit|default:'' }}" {% if equipment_open_shift %}disabled{% endif %}><em>л</em></span>
                         <small class="mobile-shift__field-error" data-eo-shift-field-error="fuel"></small>
                     </label>
                     <label class="mobile-shift__field" data-mobile-shift-field="engine_hours" data-eo-shift-field="engine_hours">
                         <span class="mobile-shift__field-label"><span>Моточасы</span>{% if open_shift %}<small>Начало <strong>{{ shift_start_engine_hours_display }}</strong> м/ч</small>{% endif %}</span>
-                        <span class="mobile-shift__metric-value"><input type="number" inputmode="decimal" step="0.01" min="0" name="shift_engine_hours" value="{{ shift_engine_hours_display }}" placeholder="0" data-eo-shift-engine-hours data-eo-start-engine-hours="{{ shift_start_engine_hours_display }}" {% if equipment_open_shift %}disabled{% endif %}><em>м/ч</em></span>
+                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" step="1" pattern="[0-9]*" min="0" name="shift_engine_hours" value="{{ shift_engine_hours_display }}" placeholder="0" data-eo-shift-engine-hours data-eo-start-engine-hours="{{ shift_start_engine_hours_display }}" {% if equipment_open_shift %}disabled{% endif %}><em>м/ч</em></span>
                         <small class="mobile-shift__field-error" data-eo-shift-field-error="engine_hours"></small>
                     </label>
                 {% endif %}

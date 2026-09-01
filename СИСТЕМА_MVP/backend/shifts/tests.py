@@ -315,7 +315,12 @@ class DriverShiftLifecycleTests(TestCase):
     def test_engine_hours_above_12_is_blocked(self):
         shift = self.open_shift()
         with self.assertRaisesMessage(ValidationError, 'не могут увеличиться более чем на 12'):
-            validate_driver_close_readings(shift, **self.close_readings(hours='1012.01'))
+            validate_driver_close_readings(shift, **self.close_readings(hours='1013'))
+
+    def test_fractional_close_reading_is_blocked(self):
+        shift = self.open_shift()
+        with self.assertRaisesMessage(ValidationError, 'целое число'):
+            validate_driver_close_readings(shift, **self.close_readings(hours='1011.5'))
 
     def test_engine_hours_decrease_is_blocked(self):
         shift = self.open_shift()

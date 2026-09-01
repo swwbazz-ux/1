@@ -16,8 +16,8 @@
     --mobile-shift-card-border: rgba(142, 169, 181, .26);
     --mobile-shift-text: #f3f7f8;
     --mobile-shift-muted: #9baab1;
-    --mobile-shift-role-header-h: clamp(52px, 7dvh, 60px);
-    --mobile-shift-role-nav-h: clamp(68px, 9dvh, 78px);
+    --mobile-shift-role-header-h: clamp(52px, 14vw, 60px);
+    --mobile-shift-role-nav-h: clamp(68px, 19vw, 78px);
 }
 
 html:has(.mobile-shift),
@@ -27,6 +27,33 @@ body:has(.mobile-shift) {
     min-inline-size: 0;
     min-block-size: 0;
     overflow: hidden !important;
+}
+
+body.driver-mobile-screen:has(.mobile-shift) {
+    position: relative !important;
+    block-size: var(--driver-viewport-h, 100dvh) !important;
+    min-block-size: var(--driver-viewport-h, 100dvh) !important;
+    max-block-size: var(--driver-viewport-h, 100dvh) !important;
+}
+
+body.excavator-operator-screen:has(.mobile-shift) {
+    block-size: var(--eo-app-height, 100dvh) !important;
+    min-block-size: var(--eo-app-height, 100dvh) !important;
+    max-block-size: var(--eo-app-height, 100dvh) !important;
+}
+
+body.driver-mobile-screen .driver-shell:has(.mobile-shift) {
+    block-size: var(--driver-viewport-h, 100dvh) !important;
+    min-block-size: var(--driver-viewport-h, 100dvh) !important;
+    max-block-size: var(--driver-viewport-h, 100dvh) !important;
+}
+
+body.excavator-operator-screen .eo-shell:has(.mobile-shift) {
+    inline-size: 100% !important;
+    max-inline-size: 100% !important;
+    block-size: var(--eo-app-height, 100dvh) !important;
+    min-block-size: var(--eo-app-height, 100dvh) !important;
+    max-block-size: var(--eo-app-height, 100dvh) !important;
 }
 
 .mobile-shift,
@@ -52,20 +79,20 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
 }
 
 .mobile-shift {
-    --ms-gap: clamp(6px, 1.2vmin, 10px);
-    --ms-edge: clamp(8px, 2.8vmin, 14px);
-    --ms-section-pad: clamp(7px, 1.6vmin, 12px);
-    --ms-card-pad-x: clamp(9px, 2.7vmin, 14px);
-    --ms-card-pad-y: clamp(5px, 1.2vmin, 9px);
-    --ms-title-size: clamp(28px, 7.2vmin, 38px);
-    --ms-section-size: clamp(12px, 3.45vmin, 15px);
-    --ms-label-size: clamp(12px, 3.6vmin, 16px);
-    --ms-value-size: clamp(21px, 6.4vmin, 30px);
-    --ms-unit-size: clamp(11px, 3vmin, 13px);
-    --ms-summary-size: clamp(19px, 5.7vmin, 26px);
-    --ms-action-size: clamp(16px, 4.9vmin, 22px);
+    --ms-gap: clamp(6px, 1.2vw, 10px);
+    --ms-edge: clamp(8px, 2.8vw, 14px);
+    --ms-section-pad: clamp(7px, 1.6vw, 12px);
+    --ms-card-pad-x: clamp(9px, 2.7vw, 14px);
+    --ms-card-pad-y: clamp(5px, 1.2vw, 9px);
+    --ms-title-size: clamp(28px, 7.2vw, 38px);
+    --ms-section-size: clamp(12px, 3.45vw, 15px);
+    --ms-label-size: clamp(12px, 3.6vw, 16px);
+    --ms-value-size: clamp(21px, 6.4vw, 30px);
+    --ms-unit-size: clamp(11px, 3vw, 13px);
+    --ms-summary-size: clamp(19px, 5.7vw, 26px);
+    --ms-action-size: clamp(16px, 4.9vw, 22px);
     container: mobile-shift / size;
-    position: fixed !important;
+    position: absolute !important;
     inset: calc(env(safe-area-inset-top, 0px) + var(--mobile-shift-role-header-h)) 0 calc(env(safe-area-inset-bottom, 0px) + var(--mobile-shift-role-nav-h)) !important;
     z-index: 8 !important;
     inline-size: auto !important;
@@ -111,7 +138,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: clamp(4px, 1vmin, 7px);
+    gap: clamp(4px, 1vw, 7px);
     overflow: hidden;
 }
 
@@ -120,7 +147,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
 .mobile-shift__update-group .eo-current-app-version {
     flex: 0 0 auto;
     color: rgba(178, 192, 198, .78);
-    font-size: clamp(11px, 3.2vmin, 14px);
+    font-size: clamp(11px, 3.2vw, 14px);
     font-weight: 600;
     line-height: 1;
     white-space: nowrap;
@@ -129,12 +156,12 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
 .mobile-shift__update-group .eo-shift-update-button {
     min-inline-size: 0;
     min-block-size: 0;
-    block-size: clamp(26px, 4.6vmin, 34px);
+    block-size: clamp(26px, 4.6vw, 34px);
     margin: 0;
-    padding: 0 clamp(6px, 1.7vmin, 10px);
+    padding: 0 clamp(6px, 1.7vw, 10px);
     overflow: hidden;
-    border-radius: clamp(5px, 1.5vmin, 7px);
-    font-size: clamp(10px, 2.8vmin, 12px);
+    border-radius: clamp(5px, 1.5vw, 7px);
+    font-size: clamp(10px, 2.8vw, 12px);
     line-height: 1;
 }
 
@@ -161,7 +188,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     gap: var(--ms-gap);
     overflow: hidden;
     border: 1px solid var(--mobile-shift-border);
-    border-radius: clamp(8px, 2.5vmin, 12px);
+    border-radius: clamp(8px, 2.5vw, 12px);
     background: var(--mobile-shift-panel);
     box-shadow: inset 0 0 18px rgba(70, 196, 107, .05);
 }
@@ -186,7 +213,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     min-inline-size: 0;
     overflow: hidden;
     color: var(--mobile-shift-muted);
-    font-size: clamp(10px, 2.9vmin, 13px);
+    font-size: clamp(10px, 2.9vw, 13px);
     font-weight: 550;
     letter-spacing: 0;
     text-overflow: ellipsis;
@@ -226,7 +253,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     gap: var(--ms-gap);
     overflow: hidden;
     border: 1px solid var(--mobile-shift-card-border);
-    border-radius: clamp(7px, 2vmin, 10px);
+    border-radius: clamp(7px, 2vw, 10px);
     background: var(--mobile-shift-card);
     color: var(--mobile-shift-text);
     transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
@@ -256,7 +283,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     min-inline-size: 0;
     display: grid;
     align-content: center;
-    gap: clamp(2px, .7vmin, 5px);
+    gap: clamp(2px, .7vw, 5px);
     overflow: hidden;
     color: #aab7bd;
     font-size: var(--ms-label-size);
@@ -268,7 +295,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
 .mobile-shift__field-label small {
     overflow: hidden;
     color: #829199;
-    font-size: clamp(9px, 2.65vmin, 12px);
+    font-size: clamp(9px, 2.65vw, 12px);
     font-weight: 550;
     line-height: 1;
     text-overflow: ellipsis;
@@ -285,7 +312,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: baseline;
-    gap: clamp(4px, 1.4vmin, 8px);
+    gap: clamp(4px, 1.4vw, 8px);
     overflow: hidden;
 }
 
@@ -330,7 +357,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     padding: 0;
     overflow: hidden;
     color: var(--mobile-shift-danger);
-    font-size: clamp(8px, 2.35vmin, 10px);
+    font-size: clamp(8px, 2.35vw, 10px);
     line-height: 1;
     list-style: none;
     text-align: right;
@@ -350,7 +377,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     border-radius: 5px;
     background: rgba(45, 14, 17, .92);
     color: #ffb0b4;
-    font-size: clamp(8px, 2.45vmin, 11px);
+    font-size: clamp(8px, 2.45vw, 11px);
     line-height: 1.1;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -378,7 +405,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     gap: 2px;
     overflow: hidden;
     border: 1px solid var(--mobile-shift-card-border);
-    border-radius: clamp(7px, 2vmin, 10px);
+    border-radius: clamp(7px, 2vw, 10px);
     background: var(--mobile-shift-card);
 }
 
@@ -412,7 +439,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
 
 .mobile-shift__cell > em {
     color: #87969d;
-    font-size: clamp(8px, 2.5vmin, 11px);
+    font-size: clamp(8px, 2.5vw, 11px);
     font-style: normal;
     font-weight: 550;
     line-height: 1;
@@ -437,12 +464,12 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     inline-size: 100%;
     block-size: 100%;
     margin: 0;
-    padding: 6px clamp(8px, 2.8vmin, 16px);
+    padding: 6px clamp(8px, 2.8vw, 16px);
     display: grid;
     place-items: center;
     overflow: hidden;
     border: 1px solid;
-    border-radius: clamp(7px, 2vmin, 10px);
+    border-radius: clamp(7px, 2vw, 10px);
     font-family: inherit;
     font-size: var(--ms-action-size) !important;
     font-weight: 700 !important;
@@ -505,7 +532,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     z-index: 6;
     min-inline-size: 0;
     margin: 0;
-    padding: clamp(7px, 1.6vmin, 11px);
+    padding: clamp(7px, 1.6vw, 11px);
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas: "title actions" "text actions";
@@ -513,7 +540,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     gap: 2px var(--ms-gap);
     overflow: hidden;
     border: 1px solid var(--mobile-shift-accent);
-    border-radius: clamp(7px, 2vmin, 10px);
+    border-radius: clamp(7px, 2vw, 10px);
     background: rgba(4, 20, 12, .98);
     box-shadow: 0 8px 24px rgba(0, 0, 0, .42);
 }
@@ -521,7 +548,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
 .mobile-shift [data-push-title] {
     grid-area: title;
     color: var(--mobile-shift-accent);
-    font-size: clamp(12px, 3.2vmin, 14px);
+    font-size: clamp(12px, 3.2vw, 14px);
     line-height: 1;
 }
 
@@ -530,7 +557,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     min-inline-size: 0;
     overflow: hidden;
     color: #bdcbd0;
-    font-size: clamp(9px, 2.6vmin, 12px);
+    font-size: clamp(9px, 2.6vw, 12px);
     line-height: 1.1;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -548,7 +575,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     padding: 0 9px;
     border-radius: 6px;
     font-family: inherit;
-    font-size: clamp(10px, 2.8vmin, 12px);
+    font-size: clamp(10px, 2.8vw, 12px);
     font-weight: 700;
     line-height: 1;
 }
@@ -633,7 +660,7 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] .eo-topbar 
 body.driver-mobile-screen:has(.mobile-shift) .mm-mobile-bottom-nav,
 body.excavator-operator-screen:has(.mobile-shift) .mm-mobile-bottom-nav {
     box-sizing: border-box !important;
-    position: fixed !important;
+    position: absolute !important;
     inset: auto 0 0 !important;
     z-index: 20 !important;
     inline-size: 100% !important;
@@ -653,6 +680,14 @@ body.driver-mobile-screen [data-driver-tab-panel="shift"] {
     padding: 0 !important;
 }
 
+/* Оба компонента позиционируются от стабильной оболочки роли. Промежуточная
+   панель Водителя не должна становиться containing block: её старые правила
+   плотности зависят от visualViewport и раньше двигали экран при клавиатуре. */
+body.driver-mobile-screen .driver-shell[data-active-tab="shift"] [data-driver-tab-panel="shift"].is-active,
+body.driver-mobile-screen .driver-shell[data-active-tab="shift"] .mobile-shift-host {
+    position: static !important;
+}
+
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] > .eo-form {
     min-inline-size: 0 !important;
     min-block-size: 0 !important;
@@ -664,46 +699,11 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] .mobile-shi
     display: grid !important;
 }
 
-body.excavator-operator-screen .eo-shell[data-eo-ime-open="true"][data-eo-active-tab="shift"] .mobile-shift {
-    grid-template-rows: minmax(34px, .1fr) minmax(0, 1fr) !important;
+html[data-mobile-shift-orientation="landscape"] .mobile-shift {
+    grid-template-rows: minmax(30px, .12fr) minmax(0, 1fr) minmax(44px, .16fr) !important;
 }
 
-body.excavator-operator-screen .eo-shell[data-eo-ime-open="true"] .mobile-shift__actions {
-    display: none !important;
-}
-
-.mobile-shift[data-mobile-shift-ime-open="true"] {
-    inset-block-end: calc(var(--mobile-shift-keyboard-inset, 0px) + env(safe-area-inset-bottom, 0px) + var(--mobile-shift-role-nav-h)) !important;
-    grid-template-rows: minmax(34px, .1fr) minmax(0, 1fr) !important;
-}
-
-.mobile-shift[data-mobile-shift-ime-open="true"] .mobile-shift__actions {
-    display: none !important;
-}
-
-@media (max-height: 650px) {
-    .mobile-shift {
-        --ms-gap: clamp(4px, 1vmin, 7px);
-        --ms-edge: clamp(5px, 1.8vmin, 9px);
-        --ms-section-pad: clamp(5px, 1.1vmin, 8px);
-        --ms-card-pad-x: clamp(7px, 2vmin, 11px);
-        --ms-card-pad-y: clamp(3px, .8vmin, 6px);
-        --ms-title-size: clamp(23px, 6.2vmin, 31px);
-        --ms-section-size: clamp(10px, 3vmin, 13px);
-        --ms-label-size: clamp(10px, 3.1vmin, 13px);
-        --ms-value-size: clamp(18px, 5.6vmin, 25px);
-        --ms-summary-size: clamp(16px, 5vmin, 22px);
-        --ms-action-size: clamp(14px, 4.3vmin, 18px);
-    }
-}
-
-@media (orientation: landscape) {
-    .mobile-shift {
-        grid-template-rows: minmax(30px, .12fr) minmax(0, 1fr) minmax(44px, .16fr) !important;
-    }
-
-    .mobile-shift__content {
-        grid-template-columns: minmax(0, 1.24fr) minmax(0, .76fr);
-        grid-template-rows: minmax(0, 1fr);
-    }
+html[data-mobile-shift-orientation="landscape"] .mobile-shift__content {
+    grid-template-columns: minmax(0, 1.24fr) minmax(0, .76fr);
+    grid-template-rows: minmax(0, 1fr);
 }

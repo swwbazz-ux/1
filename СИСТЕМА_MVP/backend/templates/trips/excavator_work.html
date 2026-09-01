@@ -6,11 +6,11 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v176">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v176">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v176">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v176">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v176" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v177">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v177">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v177">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v177">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v177" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -370,7 +370,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v176";
+var excavatorShellVersion = "excavator-mobile-shell-v177";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -663,7 +663,13 @@ function syncExcavatorViewportHeight() {
     var metrics = readExcavatorViewportMetrics();
     syncExcavatorKeyboardState(metrics);
     if (!metrics.height || metrics.height < 320) return;
-    var value = metrics.height + "px";
+    var shell = document.querySelector("[data-eo-shell]");
+    var height = (
+        shell
+        && shell.dataset.eoImeOpen === "true"
+        && excavatorStableViewportHeight > 0
+    ) ? excavatorStableViewportHeight : metrics.height;
+    var value = height + "px";
     document.documentElement.style.setProperty("--app-height", value);
     document.documentElement.style.setProperty("--eo-app-height", value);
 }
