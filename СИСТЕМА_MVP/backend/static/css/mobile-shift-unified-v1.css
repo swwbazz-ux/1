@@ -1,0 +1,642 @@
+/*
+ * Единый адаптивный экран «Смена» для водителя и машиниста экскаватора.
+ *
+ * Компонент намеренно не привязан к отдельным моделям телефонов. Высота
+ * секций определяется содержимым, а нехватку места принимает один внутренний
+ * скроллер. Число показателей и подписи остаются ролевыми данными.
+ */
+
+.mobile-shift {
+    --mobile-shift-accent: #8cff2e;
+    --mobile-shift-danger: #ff6f75;
+    --mobile-shift-text: #edf3f5;
+    --mobile-shift-muted: #9aa8ae;
+    --mobile-shift-line: rgba(122, 151, 160, .34);
+    --mobile-shift-section-line: rgba(82, 208, 139, .38);
+    --mobile-shift-section-bg: rgba(2, 13, 17, .72);
+    --mobile-shift-cell-bg: rgba(10, 20, 25, .88);
+    --mobile-shift-gap: clamp(.5rem, 1.35vmin, .75rem);
+    --mobile-shift-edge: clamp(.75rem, 3vw, 1.25rem);
+    --mobile-shift-section-pad: clamp(.625rem, 1.55vmin, .875rem);
+    --mobile-shift-card-pad-y: clamp(.625rem, 1.35vmin, .875rem);
+    --mobile-shift-card-pad-x: clamp(.75rem, 3vw, 1rem);
+    box-sizing: border-box !important;
+    inline-size: 100% !important;
+    min-inline-size: 0 !important;
+    block-size: 100% !important;
+    min-block-size: 0 !important;
+    padding: var(--mobile-shift-edge) !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: auto minmax(0, 1fr) auto !important;
+    gap: var(--mobile-shift-gap) !important;
+    align-content: stretch !important;
+    overflow: hidden !important;
+    color: var(--mobile-shift-text);
+    font-family: "Roboto Condensed", "Arial Narrow", Arial, sans-serif;
+}
+
+.mobile-shift.driver-shift-opening:has(> .driver-shift-opening-form) {
+    grid-template-rows: auto minmax(0, 1fr) !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift,
+body.excavator-operator-screen .eo-screen.mobile-shift {
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: var(--mobile-shift-edge) !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: auto minmax(0, 1fr) minmax(clamp(52px, 7svh, 64px), auto) !important;
+    gap: var(--mobile-shift-gap) !important;
+    align-content: stretch !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.driver-shift-opening.mobile-shift:has(> .driver-shift-opening-form) {
+    grid-template-rows: auto minmax(0, 1fr) !important;
+}
+
+.mobile-shift > .driver-shift-opening-form {
+    min-block-size: 0 !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) auto !important;
+    gap: var(--mobile-shift-gap) !important;
+    overflow: hidden !important;
+}
+
+.mobile-shift *,
+.mobile-shift *::before,
+.mobile-shift *::after {
+    box-sizing: border-box;
+}
+
+.mobile-shift__titlebar {
+    min-inline-size: 0 !important;
+    min-block-size: clamp(44px, 7svh, 64px) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 1rem !important;
+}
+
+.mobile-shift__title {
+    margin: 0 !important;
+    color: var(--mobile-shift-text) !important;
+    font: 700 clamp(30px, 7vw, 38px) / 1 "Roboto Condensed", "Arial Narrow", Arial, sans-serif !important;
+    letter-spacing: -.02em !important;
+}
+
+.mobile-shift__titlebar .native-app-version,
+.mobile-shift__titlebar .eo-current-app-version {
+    flex: 0 1 auto;
+    min-inline-size: 0;
+    color: var(--mobile-shift-muted) !important;
+    font-size: clamp(12px, 3vw, 14px) !important;
+    font-weight: 600 !important;
+    line-height: 1.1 !important;
+    white-space: nowrap;
+}
+
+.mobile-shift__scroll {
+    inline-size: 100% !important;
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    block-size: auto !important;
+    margin: 0 !important;
+    padding: 0 .125rem .125rem 0 !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: none !important;
+    grid-auto-flow: row !important;
+    grid-auto-rows: max-content !important;
+    align-content: start !important;
+    gap: var(--mobile-shift-gap) !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior-y: contain;
+    scroll-padding-block: var(--mobile-shift-gap);
+    scrollbar-width: thin;
+}
+
+.mobile-shift__section {
+    inline-size: 100% !important;
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    block-size: auto !important;
+    height: auto !important;
+    max-block-size: none !important;
+    margin: 0 !important;
+    padding: var(--mobile-shift-section-pad) !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: none !important;
+    grid-auto-rows: max-content !important;
+    align-content: start !important;
+    gap: clamp(.5rem, 1.2vmin, .75rem) !important;
+    flex: none !important;
+    overflow: visible !important;
+    border: 1px solid var(--mobile-shift-section-line) !important;
+    border-radius: clamp(.625rem, 2.5vw, .875rem) !important;
+    background: var(--mobile-shift-section-bg) !important;
+    box-shadow: inset 0 0 1.15rem rgba(48, 216, 135, .05) !important;
+}
+
+.mobile-shift__section-head {
+    inline-size: 100% !important;
+    min-inline-size: 0 !important;
+    min-block-size: 1.25rem !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: .75rem !important;
+}
+
+.mobile-shift__section-head > span {
+    min-inline-size: 0;
+    color: #dce6e9 !important;
+    font-size: clamp(14px, 3.55vw, 15.6px) !important;
+    font-weight: 650 !important;
+    line-height: 1.1 !important;
+    letter-spacing: .115em !important;
+    text-transform: uppercase;
+}
+
+.mobile-shift__section-head > b {
+    flex: 0 0 auto;
+    color: var(--mobile-shift-muted) !important;
+    font-size: clamp(12px, 3vw, 14px) !important;
+    font-weight: 500 !important;
+    line-height: 1.1 !important;
+}
+
+.mobile-shift__metrics {
+    inline-size: 100% !important;
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    block-size: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: none !important;
+    grid-auto-rows: minmax(clamp(68px, 9.5svh, 96px), auto) !important;
+    align-content: start !important;
+    gap: clamp(.5rem, 1.25vmin, .75rem) !important;
+    overflow: visible !important;
+}
+
+.mobile-shift__field {
+    inline-size: 100% !important;
+    min-inline-size: 0 !important;
+    min-block-size: clamp(68px, 9.5svh, 96px) !important;
+    block-size: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: var(--mobile-shift-card-pad-y) var(--mobile-shift-card-pad-x) !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    grid-template-rows: minmax(0, 1fr) auto !important;
+    grid-auto-flow: row !important;
+    align-items: center !important;
+    align-content: center !important;
+    column-gap: clamp(.75rem, 3vw, 1.25rem) !important;
+    row-gap: .25rem !important;
+    overflow: hidden !important;
+    border: 1px solid var(--mobile-shift-line) !important;
+    border-radius: clamp(.5rem, 2vw, .75rem) !important;
+    background: var(--mobile-shift-cell-bg) !important;
+    color: var(--mobile-shift-text) !important;
+    box-shadow: none !important;
+}
+
+.mobile-shift__field > span:first-child,
+.mobile-shift__field > .driver-shift-field-label {
+    grid-column: 1;
+    grid-row: 1;
+    min-inline-size: 0;
+    margin: 0 !important;
+    color: var(--mobile-shift-muted) !important;
+    font-size: clamp(14px, 3.55vw, 15.6px) !important;
+    font-weight: 650 !important;
+    line-height: 1.05 !important;
+    letter-spacing: 0 !important;
+    text-transform: uppercase;
+    text-align: left !important;
+}
+
+.mobile-shift__field > .driver-shift-field-label {
+    display: grid;
+    gap: .25rem;
+}
+
+.mobile-shift__field > .driver-shift-field-label > span,
+.mobile-shift__field > .driver-shift-field-label > small {
+    margin: 0 !important;
+    font: inherit;
+    line-height: 1.05 !important;
+}
+
+.mobile-shift__field > .driver-shift-field-label > small {
+    color: #788b92 !important;
+    font-size: clamp(11px, 2.7vw, 12.8px) !important;
+    font-weight: 500 !important;
+}
+
+.mobile-shift__metric-value {
+    grid-column: 2;
+    grid-row: 1;
+    min-inline-size: 0 !important;
+    inline-size: auto !important;
+    margin: 0 !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, auto) auto !important;
+    align-items: baseline !important;
+    justify-content: end !important;
+    gap: clamp(.35rem, 1.6vw, .6rem) !important;
+    text-align: right !important;
+}
+
+.mobile-shift__metric-value input,
+.mobile-shift__metric-value > strong {
+    min-inline-size: 0 !important;
+    inline-size: min(42vw, 176px) !important;
+    max-inline-size: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: var(--mobile-shift-text) !important;
+    font: 600 clamp(25px, 6.6vw, 30px) / 1 "Roboto Condensed", "Arial Narrow", Arial, sans-serif !important;
+    text-align: right !important;
+    outline: 0 !important;
+}
+
+.mobile-shift__metric-value > strong {
+    inline-size: auto !important;
+}
+
+.mobile-shift__metric-value em {
+    margin: 0 !important;
+    color: var(--mobile-shift-muted) !important;
+    font-size: clamp(12px, 3vw, 13.6px) !important;
+    font-style: normal !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    white-space: nowrap;
+}
+
+.mobile-shift__field > small,
+.mobile-shift__field > .errorlist {
+    grid-column: 1 / -1 !important;
+    grid-row: 2 !important;
+    min-inline-size: 0;
+    margin: 0 !important;
+    padding: 0 !important;
+    color: var(--mobile-shift-danger) !important;
+    font-size: clamp(11px, 2.6vw, 12.8px) !important;
+    line-height: 1.15 !important;
+    text-align: left !important;
+}
+
+.mobile-shift__field:focus-within {
+    border-color: var(--mobile-shift-accent) !important;
+    box-shadow: 0 0 0 2px rgba(140, 255, 46, .22), inset 0 0 1rem rgba(140, 255, 46, .05) !important;
+}
+
+.mobile-shift__field:focus-within > span:first-child,
+.mobile-shift__field:focus-within > .driver-shift-field-label {
+    color: var(--mobile-shift-accent) !important;
+}
+
+.mobile-shift__field.has-error,
+.mobile-shift__field:has(> .errorlist),
+.mobile-shift__field.has-error:focus-within,
+.mobile-shift__field:has(> .errorlist):focus-within {
+    border-color: var(--mobile-shift-danger) !important;
+    box-shadow: 0 0 0 2px rgba(255, 91, 73, .2), inset 0 0 .9rem rgba(255, 91, 73, .08) !important;
+}
+
+.mobile-shift__field.has-error > span:first-child,
+.mobile-shift__field.has-error:focus-within > span:first-child,
+.mobile-shift__field:has(> .errorlist) > span:first-child,
+.mobile-shift__field:has(> .errorlist):focus-within > span:first-child,
+.mobile-shift__field:has(> .errorlist) > .driver-shift-field-label,
+.mobile-shift__field:has(> .errorlist):focus-within > .driver-shift-field-label {
+    color: var(--mobile-shift-danger) !important;
+}
+
+.mobile-shift__field:has(input:disabled) {
+    border-color: rgba(126, 145, 154, .24) !important;
+    background: rgba(14, 22, 26, .55) !important;
+    box-shadow: none !important;
+}
+
+.mobile-shift__field:has(input:disabled) > span,
+.mobile-shift__field:has(input:disabled) input,
+.mobile-shift__field:has(input:disabled) em {
+    color: rgba(166, 181, 189, .46) !important;
+}
+
+.mobile-shift__grid {
+    inline-size: 100% !important;
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    block-size: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-rows: none !important;
+    grid-auto-rows: minmax(clamp(64px, 8.5svh, 92px), auto) !important;
+    gap: clamp(.5rem, 1.25vmin, .75rem) !important;
+    overflow: visible !important;
+}
+
+.mobile-shift__grid--assignment {
+    grid-auto-rows: minmax(clamp(64px, 8svh, 84px), auto) !important;
+}
+
+.mobile-shift__cell {
+    inline-size: 100% !important;
+    min-inline-size: 0 !important;
+    min-block-size: clamp(64px, 8.5svh, 92px) !important;
+    block-size: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: var(--mobile-shift-card-pad-y) var(--mobile-shift-card-pad-x) !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: none !important;
+    grid-auto-rows: max-content !important;
+    align-content: center !important;
+    justify-content: stretch !important;
+    justify-items: start !important;
+    gap: .25rem !important;
+    overflow: hidden !important;
+    border: 1px solid var(--mobile-shift-line) !important;
+    border-radius: clamp(.5rem, 2vw, .75rem) !important;
+    background: var(--mobile-shift-cell-bg) !important;
+    text-align: left !important;
+}
+
+.mobile-shift__grid--assignment .mobile-shift__cell {
+    min-block-size: clamp(64px, 8svh, 84px) !important;
+}
+
+.mobile-shift__cell > span,
+.mobile-shift__cell > strong,
+.mobile-shift__cell > em {
+    grid-column: 1 !important;
+    inline-size: 100% !important;
+    min-inline-size: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    text-align: left !important;
+}
+
+.mobile-shift__cell > span {
+    color: var(--mobile-shift-muted) !important;
+    font-size: clamp(12.8px, 3.35vw, 15.2px) !important;
+    font-weight: 550 !important;
+    line-height: 1.05 !important;
+    text-transform: uppercase;
+}
+
+.mobile-shift__cell > strong {
+    overflow: hidden !important;
+    color: var(--mobile-shift-text) !important;
+    font-size: clamp(20px, 5.8vw, 26.4px) !important;
+    font-weight: 650 !important;
+    line-height: 1.05 !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis !important;
+}
+
+.mobile-shift__cell > em {
+    overflow: hidden !important;
+    color: var(--mobile-shift-muted) !important;
+    font-size: clamp(11px, 2.7vw, 12.8px) !important;
+    font-style: normal !important;
+    font-weight: 500 !important;
+    line-height: 1.05 !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis !important;
+}
+
+.mobile-shift__empty {
+    inline-size: 100% !important;
+    min-inline-size: 0 !important;
+    min-block-size: clamp(72px, 9svh, 96px) !important;
+    block-size: auto !important;
+    margin: 0 !important;
+    padding: var(--mobile-shift-card-pad-y) var(--mobile-shift-card-pad-x) !important;
+    display: grid !important;
+    place-content: center !important;
+    gap: .25rem !important;
+    overflow: hidden !important;
+    border: 1px dashed var(--mobile-shift-line) !important;
+    border-radius: clamp(.5rem, 2vw, .75rem) !important;
+    background: rgba(8, 17, 22, .72) !important;
+    text-align: center !important;
+}
+
+.mobile-shift__empty > strong,
+.mobile-shift__empty > span {
+    margin: 0 !important;
+    line-height: 1.15 !important;
+}
+
+.mobile-shift__actions {
+    inline-size: 100% !important;
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    block-size: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(108px, 31%) !important;
+    grid-template-rows: minmax(clamp(52px, 7svh, 64px), auto) !important;
+    gap: clamp(.5rem, 2.5vw, .75rem) !important;
+    align-items: stretch !important;
+    overflow: visible !important;
+}
+
+.mobile-shift__action[hidden] {
+    display: none !important;
+}
+
+.mobile-shift__action {
+    min-inline-size: 0 !important;
+    min-block-size: clamp(52px, 7svh, 64px) !important;
+    block-size: auto !important;
+    height: auto !important;
+    max-block-size: none !important;
+    margin: 0 !important;
+    padding: .65rem clamp(.75rem, 3vw, 1.1rem) !important;
+    display: grid !important;
+    place-items: center !important;
+    overflow: hidden !important;
+    border: 1px solid var(--mobile-shift-line) !important;
+    border-radius: clamp(.5rem, 2vw, .75rem) !important;
+    background: linear-gradient(145deg, rgba(24, 34, 39, .96), rgba(9, 16, 20, .98)) !important;
+    color: var(--mobile-shift-text) !important;
+    font: 650 clamp(17px, 4.8vw, 21.6px) / 1.1 "Roboto Condensed", "Arial Narrow", Arial, sans-serif !important;
+    letter-spacing: 0 !important;
+    text-align: center !important;
+    text-transform: uppercase;
+    white-space: nowrap;
+    position: relative;
+}
+
+.mobile-shift__action--primary {
+    border-color: rgba(111, 245, 101, .8) !important;
+    background: linear-gradient(145deg, rgba(5, 47, 20, .92), rgba(1, 25, 10, .98)) !important;
+    color: #76ed65 !important;
+}
+
+.mobile-shift__action--danger {
+    border-color: rgba(255, 111, 117, .82) !important;
+    background: linear-gradient(145deg, rgba(57, 12, 18, .92), rgba(31, 7, 11, .98)) !important;
+    color: #ff8388 !important;
+}
+
+.mobile-shift__action:disabled,
+.mobile-shift__action[aria-disabled="true"] {
+    border-color: rgba(126, 145, 154, .2) !important;
+    background: rgba(9, 16, 20, .82) !important;
+    color: rgba(166, 181, 189, .38) !important;
+    box-shadow: none !important;
+}
+
+.mobile-shift__action:focus-visible {
+    outline: 2px solid var(--mobile-shift-accent) !important;
+    outline-offset: 2px !important;
+}
+
+/*
+ * Старые ролевые таблицы имеют очень специфичные правила высоты. Эти два
+ * одинаковых селектора закрепляют общий контракт, не затрагивая состояния
+ * удержания, отправки и блокировки.
+ */
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__actions,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__actions {
+    block-size: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    grid-template-columns: minmax(0, 1fr) minmax(108px, 31%) !important;
+    grid-template-rows: minmax(clamp(52px, 7svh, 64px), auto) !important;
+    gap: clamp(.5rem, 2.5vw, .75rem) !important;
+}
+
+body.driver-mobile-screen .driver-shift-workspace.mobile-shift .mobile-shift__actions > .mobile-shift__action,
+body.excavator-operator-screen .eo-screen.mobile-shift .mobile-shift__actions > .mobile-shift__action {
+    block-size: auto !important;
+    min-block-size: clamp(52px, 7svh, 64px) !important;
+    max-block-size: none !important;
+    height: auto !important;
+    min-height: clamp(52px, 7svh, 64px) !important;
+    max-height: none !important;
+    padding: .65rem clamp(.75rem, 3vw, 1.1rem) !important;
+    border-radius: clamp(.5rem, 2vw, .75rem) !important;
+    font: 650 clamp(17px, 4.8vw, 21.6px) / 1.1 "Roboto Condensed", "Arial Narrow", Arial, sans-serif !important;
+}
+
+.mobile-shift-nav-item .mobile-shift-nav-icon {
+    inline-size: clamp(35.2px, 9vw, 42.4px) !important;
+    block-size: clamp(35.2px, 9vw, 42.4px) !important;
+    margin: 0 auto !important;
+    display: grid !important;
+    place-items: center !important;
+    border: 2px solid currentColor !important;
+    border-radius: clamp(.45rem, 2vw, .6rem) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.mobile-shift-nav-item .mobile-shift-nav-icon svg {
+    inline-size: 72% !important;
+    block-size: 72% !important;
+    margin: 0 !important;
+    stroke-width: 2 !important;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mobile-shift-nav-item > .mobile-shift-nav-icon,
+body.excavator-operator-screen .mm-mobile-bottom-nav .mobile-shift-nav-item > .mobile-shift-nav-icon {
+    inline-size: clamp(35.2px, 9vw, 42.4px) !important;
+    block-size: clamp(35.2px, 9vw, 42.4px) !important;
+    width: clamp(35.2px, 9vw, 42.4px) !important;
+    height: clamp(35.2px, 9vw, 42.4px) !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    max-width: none !important;
+    max-height: none !important;
+    padding: 0 !important;
+    flex: 0 0 auto !important;
+    aspect-ratio: 1 / 1 !important;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mobile-shift-nav-item > .mobile-shift-nav-icon svg,
+body.excavator-operator-screen .mm-mobile-bottom-nav .mobile-shift-nav-item > .mobile-shift-nav-icon svg {
+    width: 72% !important;
+    height: 72% !important;
+}
+
+.mobile-shift-nav-item .driver-nav-label,
+.mobile-shift-nav-item .mm-mobile-nav-label {
+    font-family: "Roboto Condensed", "Arial Narrow", Arial, sans-serif !important;
+    font-size: clamp(12.5px, 3.3vw, 14.4px) !important;
+    font-weight: 600 !important;
+    line-height: 1 !important;
+}
+
+/* IME-состояние экскаваторщика: действия исчезают, всё место получает скроллер. */
+body.excavator-operator-screen .eo-shell[data-eo-ime-open="true"] .mobile-shift[data-eo-active-tab="shift"],
+body.excavator-operator-screen .eo-shell[data-eo-ime-open="true"] .mobile-shift {
+    grid-template-rows: auto minmax(0, 1fr) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-ime-open="true"] .mobile-shift__actions {
+    display: none !important;
+}
+
+/* На очень узком экране сетка остаётся двухколоночной, но тексту даётся место. */
+@media (max-width: 340px) and (orientation: portrait) {
+    .mobile-shift {
+        --mobile-shift-edge: .6rem;
+        --mobile-shift-section-pad: .55rem;
+        --mobile-shift-card-pad-x: .6rem;
+    }
+
+    .mobile-shift__metric-value input,
+    .mobile-shift__metric-value > strong {
+        inline-size: min(38vw, 128px) !important;
+    }
+
+    .mobile-shift__actions {
+        grid-template-columns: minmax(0, 1fr) minmax(96px, 31%) !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mobile-shift *,
+    .mobile-shift *::before,
+    .mobile-shift *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}

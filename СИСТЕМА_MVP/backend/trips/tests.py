@@ -858,11 +858,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v171')
+        self.assertContains(response, 'excavator-mobile-shell-v172')
         self.assertContains(response, 'function requestShiftCloseConfirmation()')
         self.assertContains(response, 'event.type === "pointerup" || event.type === "touchend"')
         self.assertContains(response, 'shiftTapConfirmationOpened = true')
-        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 171</span>')
+        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 172</span>')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -2089,9 +2089,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         response = self.client.get(reverse('excavator_work'))
 
-        self.assertContains(response, 'class="mm-mobile-shift-button"')
-        self.assertNotContains(response, 'class="mm-mobile-shift-button is-danger"')
-        self.assertContains(response, 'Подтвердить показания и начать смену')
+        self.assertContains(response, 'data-eo-shift-action="open"')
+        self.assertNotContains(response, 'data-eo-shift-action="close"')
+        self.assertContains(response, 'mobile-shift__action--primary')
+        self.assertContains(response, '<span data-eo-shift-label>Начать смену</span>', html=True)
+        self.assertContains(response, 'return isShiftCloseAction() ? shiftHoldMs : 1000;')
+        self.assertContains(response, 'shiftLabel.textContent = "Держите";')
 
 
     def test_excavator_manifest_is_installable_pwa_manifest(self):
@@ -2116,7 +2119,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v171', script)
+        self.assertIn('excavator-mobile-shell-v172', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2125,6 +2128,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('/static/css/excavator-work-v55.css', script)
         self.assertIn('/static/css/excavator-work-v55-final.css', script)
         self.assertIn('/static/css/excavator-work-v55-shift.css', script)
+        self.assertIn('/static/css/mobile-shift-unified-v1.css', script)
         self.assertIn('/static/css/native-app-update-v1.css', script)
         self.assertNotIn('ignoreSearch: true', script)
         self.assertIn('networkFirstStatic(request)', script)
@@ -2165,56 +2169,31 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
 
     def test_excavator_shift_uses_shared_driver_visual_rhythm_without_layout_overlap(self):
-        css_path = (
+        legacy_css_path = (
             Path(__file__).resolve().parents[1]
             / 'static'
             / 'css'
             / 'excavator-work-v55-shift.css'
         )
-        css = css_path.read_text(encoding='utf-8')
+        shared_css_path = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'css'
+            / 'mobile-shift-unified-v1.css'
+        )
+        legacy_css = legacy_css_path.read_text(encoding='utf-8')
+        css = shared_css_path.read_text(encoding='utf-8')
 
-        self.assertIn('@media (orientation: portrait) and (min-width: 380px)', css)
-        self.assertIn('@container eo-shift (min-height: 670px)', css)
-        self.assertIn('justify-content: stretch !important;', css)
-        self.assertIn('font-size: clamp(25px, 6.6vw, 30px) !important;', css)
-        self.assertIn(
-            '.eo-shift-check-panel:has(> .eo-shift-config-error:not([hidden]))',
-            css,
-        )
-        self.assertIn(
-            '@container eo-shift (min-height: 670px) and (max-height: 729px) and (min-width: 356px)',
-            css,
-        )
-        self.assertIn(
-            'grid-template-columns: minmax(0, 2.25fr) minmax(116px, 1fr) !important;',
-            css,
-        )
-        self.assertIn('gap: clamp(10px, 2.7vw, 12px) !important;', css)
-        self.assertIn('clamp(48px, 6.6dvh, 58px) !important;', css)
-        self.assertIn('font-size: clamp(18px, 4.8vw, 22px) !important;', css)
-        self.assertIn('--mobile-shift-summary-size: clamp(220px, 29dvh, 280px);', css)
-        self.assertLess(
-            css.rindex('--mobile-shift-summary-size: clamp(220px, 29dvh, 280px);'),
-            css.index('@container eo-shift (min-height: 570px)'),
-        )
-        self.assertIn(
-            '.eo-shift-scroll > .eo-shift-result-panel:last-child',
-            css,
-        )
-        self.assertIn('grid-template-rows: repeat(2, minmax(0, 1fr)) !important;', css)
-        self.assertIn('font-size: clamp(23px, 6vw, 26px) !important;', css)
-        self.assertIn('grid-template-rows: auto auto auto !important;', css)
-        self.assertIn('--mobile-shift-reading-size: clamp(88px, 10.2svh, 106px);', css)
-        self.assertIn(
-            'grid-template-rows: repeat(2, var(--mobile-shift-reading-size)) !important;',
-            css,
-        )
-        self.assertIn(
-            '.eo-shell:not([data-eo-ime-open="true"])',
-            css,
-        )
-        self.assertIn('max-content\n                max-content', css)
+        self.assertIn('grid-auto-rows: max-content !important;', css)
         self.assertIn('overflow-y: auto !important;', css)
+        self.assertIn('grid-auto-rows: minmax(clamp(68px, 9.5svh, 96px), auto)', css)
+        self.assertIn('grid-template-columns: repeat(2, minmax(0, 1fr)) !important;', css)
+        self.assertIn('grid-template-columns: minmax(0, 1fr) minmax(108px, 31%)', css)
+        self.assertIn('.mobile-shift-nav-item .mobile-shift-nav-icon', css)
+        self.assertIn('.eo-shell[data-eo-ime-open="true"] .mobile-shift__actions', css)
+        self.assertNotIn('@media (width: 390px)', css)
+        self.assertNotIn('@media (height: 844px)', css)
+        self.assertIn('data-eo-ime-open="true"', legacy_css)
 
     def test_excavator_work_hides_pending_assignment_until_driver_accepts(self):
         pending_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='77')
