@@ -858,11 +858,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v170')
+        self.assertContains(response, 'excavator-mobile-shell-v171')
         self.assertContains(response, 'function requestShiftCloseConfirmation()')
         self.assertContains(response, 'event.type === "pointerup" || event.type === "touchend"')
         self.assertContains(response, 'shiftTapConfirmationOpened = true')
-        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 170</span>')
+        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 171</span>')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -2116,7 +2116,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v170', script)
+        self.assertIn('excavator-mobile-shell-v171', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2204,6 +2204,17 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('grid-template-rows: repeat(2, minmax(0, 1fr)) !important;', css)
         self.assertIn('font-size: clamp(23px, 6vw, 26px) !important;', css)
         self.assertIn('grid-template-rows: auto auto auto !important;', css)
+        self.assertIn('--mobile-shift-reading-size: clamp(88px, 10.2svh, 106px);', css)
+        self.assertIn(
+            'grid-template-rows: repeat(2, var(--mobile-shift-reading-size)) !important;',
+            css,
+        )
+        self.assertIn(
+            '.eo-shell:not([data-eo-ime-open="true"])',
+            css,
+        )
+        self.assertIn('max-content\n                max-content', css)
+        self.assertIn('overflow-y: auto !important;', css)
 
     def test_excavator_work_hides_pending_assignment_until_driver_accepts(self):
         pending_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='77')

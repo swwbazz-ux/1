@@ -3960,6 +3960,130 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
     }
 }
 
+/* Третий шаг унификации снизу вверх: одна карточка показаний имеет одинаковую
+   геометрию у Водителя и Экскаваторщика. Число строк остаётся ролевым: три
+   у Водителя и две у Экскаваторщика. Клавиатурный landscape-контракт ниже
+   не затрагивается, потому что этот слой действует только в portrait. */
+@media (orientation: portrait) and (min-height: 720px) {
+    body.driver-mobile-screen {
+        --mobile-shift-reading-size: clamp(88px, 10.2svh, 106px);
+        --mobile-shift-reading-gap: clamp(8px, 1.15dvh, 12px);
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) {
+        width: 100%;
+        padding: clamp(8px, 1.25dvh, 12px) clamp(10px, 3vw, 16px) !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        scroll-padding-block: 6px;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics):has(.errorlist) {
+        align-self: stretch;
+        height: 100%;
+        max-height: 100%;
+        overflow-y: auto !important;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) > .driver-shift-section-head {
+        height: clamp(17px, 2.1dvh, 20px);
+        min-height: clamp(17px, 2.1dvh, 20px);
+        margin-bottom: clamp(6px, .85dvh, 9px) !important;
+        line-height: 1;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) > .driver-shift-section-head span {
+        font-size: clamp(14px, 3.5vw, 15px);
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: .14em;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) > .driver-shift-metrics {
+        flex: 0 0 auto;
+        width: 100%;
+        grid-template-rows: repeat(3, var(--mobile-shift-reading-size));
+        align-content: center;
+        gap: var(--mobile-shift-reading-gap);
+        overflow: visible !important;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) > .driver-shift-metrics:has(.errorlist) {
+        grid-template-rows: repeat(3, minmax(var(--mobile-shift-reading-size), max-content));
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field,
+    body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field {
+        box-sizing: border-box;
+        width: 100%;
+        height: var(--mobile-shift-reading-size);
+        min-height: var(--mobile-shift-reading-size);
+        max-height: var(--mobile-shift-reading-size);
+        margin: 0;
+        gap: 12px;
+        padding: clamp(5px, .8dvh, 9px) clamp(9px, 2.6vw, 13px) !important;
+        border: 1px solid rgba(127, 163, 177, .24);
+        border-radius: 7px;
+        background: rgba(2, 12, 17, .76);
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field:has(.errorlist) {
+        height: auto;
+        min-height: var(--mobile-shift-reading-size);
+        max-height: none;
+        border-color: #ff5b49;
+        box-shadow: inset 0 0 0 1px rgba(255, 91, 73, .35);
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field:focus-within {
+        border-color: #8cff2e;
+        background: rgba(12, 30, 22, .88);
+        box-shadow: 0 0 0 2px rgba(140, 255, 46, .26);
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field:focus-within .driver-shift-field-label > span,
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field:focus-within > span:first-child {
+        color: #8cff2e;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field:has(.errorlist):focus-within {
+        border-color: #ff5b49;
+        box-shadow: 0 0 0 2px rgba(255, 91, 73, .28), inset 0 0 0 1px rgba(255, 91, 73, .35);
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field > span:first-child,
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-field-label > span {
+        color: #91a4aa;
+        font-size: clamp(14px, 3.55vw, 15px);
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: 0;
+        text-transform: uppercase;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-metric-value {
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-metric-value input,
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-metric-value strong {
+        color: #f6fbfd;
+        font-size: clamp(25px, 6.6vw, 30px);
+        font-weight: 600;
+        line-height: 1;
+        text-align: right;
+    }
+
+    body.driver-mobile-screen .driver-shift-section:has(> .driver-shift-metrics) .driver-shift-metric-value em {
+        color: #82969d;
+        font-size: clamp(12px, 3vw, 13px);
+        font-weight: 400;
+        line-height: 1;
+    }
+}
+
 @media (min-width: 900px) {
     body.driver-mobile-screen .driver-work-screen.is-active {
         --driver-dial-size: clamp(320px, min(42vw, 58dvh), 520px);

@@ -5128,3 +5128,227 @@ body.excavator-operator-screen
         }
     }
 }
+
+/* Третий шаг унификации снизу вверх: карточки «Топливо» и «Моточасы»
+   повторяют фактическую высоту, отступы и типографику карточек Водителя.
+   Панель становится content-sized внутри своей строки, поэтому свободное
+   место распределяется между разделами, а не растягивает сами поля. */
+@media (orientation: portrait) {
+    body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
+        --mobile-shift-reading-size: clamp(88px, 10.2svh, 106px);
+        --mobile-shift-reading-gap: clamp(8px, 1.15dvh, 12px);
+    }
+
+    @container eo-shift (min-height: 570px) {
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form[data-eo-shift-state="closed"] .eo-shift-scroll {
+            grid-template-rows:
+                max-content
+                max-content
+                var(--mobile-shift-summary-size) !important;
+            align-content: space-between !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            overscroll-behavior-y: contain !important;
+            scroll-padding-block: 6px;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form[data-eo-shift-state="open"] .eo-shift-scroll {
+            grid-template-rows:
+                max-content
+                var(--mobile-shift-summary-size) !important;
+            align-content: space-between !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            overscroll-behavior-y: contain !important;
+            scroll-padding-block: 6px;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs] {
+            align-self: center !important;
+            width: 100% !important;
+            height: auto !important;
+            padding: clamp(8px, 1.25dvh, 12px) clamp(10px, 3vw, 16px) !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs] > .eo-shift-section-head {
+            height: clamp(17px, 2.1dvh, 20px) !important;
+            min-height: clamp(17px, 2.1dvh, 20px) !important;
+            margin-bottom: clamp(6px, .85dvh, 9px) !important;
+            line-height: 1 !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs] > .eo-shift-section-head span {
+            font-size: clamp(14px, 3.5vw, 15px) !important;
+            font-weight: 600 !important;
+            line-height: 1 !important;
+            letter-spacing: .14em !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs] > .eo-shift-metrics {
+            flex: 0 0 auto !important;
+            width: 100% !important;
+            grid-template-rows: repeat(2, var(--mobile-shift-reading-size)) !important;
+            align-content: center !important;
+            gap: var(--mobile-shift-reading-gap) !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs] > .eo-shift-metrics:has(.eo-field-card.has-error) {
+            grid-template-rows: repeat(2, minmax(var(--mobile-shift-reading-size), max-content)) !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs]
+            .eo-shift-metrics .eo-field-card {
+            box-sizing: border-box !important;
+            width: 100% !important;
+            height: var(--mobile-shift-reading-size) !important;
+            min-height: var(--mobile-shift-reading-size) !important;
+            max-height: var(--mobile-shift-reading-size) !important;
+            margin: 0 !important;
+            align-items: center !important;
+            gap: 12px !important;
+            padding: clamp(5px, .8dvh, 9px) clamp(9px, 2.6vw, 13px) !important;
+            border: 1px solid rgba(127, 163, 177, .24) !important;
+            border-radius: 7px !important;
+            background: rgba(2, 12, 17, .76) !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs]
+            .eo-shift-metrics .eo-field-card.has-error {
+            height: auto !important;
+            min-height: var(--mobile-shift-reading-size) !important;
+            max-height: none !important;
+            border-color: #ff5b49 !important;
+            box-shadow: inset 0 0 0 1px rgba(255, 91, 73, .35) !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs]
+            .eo-shift-metrics .eo-field-card:has(input:disabled) {
+            border-color: rgba(126, 145, 154, .28) !important;
+            background: rgba(14, 22, 26, .58) !important;
+            box-shadow: none !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs]
+            .eo-shift-metrics .eo-field-card:has(input:disabled) > span:first-child,
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs]
+            .eo-shift-metrics .eo-field-card:has(input:disabled) input,
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs]
+            .eo-shift-metrics .eo-field-card:has(input:disabled) em {
+            color: rgba(166, 181, 189, .46) !important;
+            -webkit-text-fill-color: rgba(166, 181, 189, .46) !important;
+            opacity: 1 !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs]
+            .eo-shift-metrics .eo-field-card > span:first-child {
+            color: #91a4aa !important;
+            font-size: clamp(14px, 3.55vw, 15px) !important;
+            font-weight: 600 !important;
+            line-height: 1 !important;
+            letter-spacing: 0 !important;
+            text-transform: uppercase !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs]
+            .eo-shift-metric-value {
+            align-items: center !important;
+            justify-content: flex-end !important;
+            gap: 6px !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs]
+            .eo-shift-metrics input {
+            color: #f6fbfd !important;
+            caret-color: #8cff2e !important;
+            font-size: clamp(25px, 6.6vw, 30px) !important;
+            font-weight: 600 !important;
+            line-height: 1 !important;
+            text-align: right !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs]
+            .eo-shift-metric-value em {
+            color: #82969d !important;
+            font-size: clamp(12px, 3vw, 13px) !important;
+            font-weight: 400 !important;
+            line-height: 1 !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs]
+            .eo-shift-metrics .eo-field-card:focus-within {
+            border-color: #8cff2e !important;
+            background: rgba(12, 30, 22, .88) !important;
+            box-shadow: 0 0 0 2px rgba(140, 255, 46, .26) !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs]
+            .eo-shift-metrics .eo-field-card:focus-within > span:first-child {
+            color: #8cff2e !important;
+            -webkit-text-fill-color: currentColor !important;
+        }
+
+        body.excavator-operator-screen
+            .eo-shell:not([data-eo-ime-open="true"])
+            .eo-screen.mm-mobile-shift-form
+            .eo-shift-check-panel[data-eo-shift-inputs]
+            .eo-shift-metrics .eo-field-card.has-error:focus-within {
+            border-color: #ff5b49 !important;
+            box-shadow: 0 0 0 2px rgba(255, 91, 73, .28), inset 0 0 0 1px rgba(255, 91, 73, .35) !important;
+        }
+    }
+}
