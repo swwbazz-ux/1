@@ -858,11 +858,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v168')
+        self.assertContains(response, 'excavator-mobile-shell-v169')
         self.assertContains(response, 'function requestShiftCloseConfirmation()')
         self.assertContains(response, 'event.type === "pointerup" || event.type === "touchend"')
         self.assertContains(response, 'shiftTapConfirmationOpened = true')
-        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 168</span>')
+        self.assertContains(response, 'class="eo-current-app-version" aria-label="Текущая версия приложения">Версия 169</span>')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -2116,7 +2116,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v168', script)
+        self.assertIn('excavator-mobile-shell-v169', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2185,6 +2185,13 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             '@container eo-shift (min-height: 670px) and (max-height: 729px) and (min-width: 356px)',
             css,
         )
+        self.assertIn(
+            'grid-template-columns: minmax(0, 2.25fr) minmax(116px, 1fr) !important;',
+            css,
+        )
+        self.assertIn('gap: clamp(10px, 2.7vw, 12px) !important;', css)
+        self.assertIn('clamp(48px, 6.6dvh, 58px) !important;', css)
+        self.assertIn('font-size: clamp(18px, 4.8vw, 22px) !important;', css)
 
     def test_excavator_work_hides_pending_assignment_until_driver_accepts(self):
         pending_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='77')

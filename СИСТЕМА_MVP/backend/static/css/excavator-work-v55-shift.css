@@ -3697,7 +3697,7 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form {
     grid-template-rows:
         clamp(40px, 8%, 58px)
         minmax(0, 1fr)
-        clamp(48px, 10%, 64px) !important;
+        clamp(48px, 6.6dvh, 58px) !important;
     gap: clamp(4px, 1.1cqh, 10px) !important;
     min-width: 0 !important;
     min-height: 0 !important;
@@ -3971,8 +3971,10 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-actions {
     box-sizing: border-box !important;
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) clamp(84px, 16cqh, 108px) !important;
-    gap: clamp(5px, 1cqh, 8px) !important;
+    /* Первый шаг унификации снизу вверх: геометрия ряда точно повторяет
+       нижние действия экрана Водителя. Цвета и логика ролей остаются свои. */
+    grid-template-columns: minmax(0, 2.25fr) minmax(116px, 1fr) !important;
+    gap: clamp(10px, 2.7vw, 12px) !important;
     width: 100% !important;
     height: 100% !important;
     min-width: 0 !important;
@@ -3987,11 +3989,14 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-logout-button
     height: 100% !important;
     min-width: 0 !important;
     min-height: 0 !important;
-    padding: 5px 7px !important;
+    padding: 6px 12px !important;
     overflow: hidden !important;
-    font-size: clamp(13px, 2.6cqh, 17px) !important;
-    line-height: 1.05 !important;
+    border-radius: 8px !important;
+    font-size: clamp(18px, 4.8vw, 22px) !important;
+    font-weight: 600 !important;
+    line-height: 1.15 !important;
     letter-spacing: 0 !important;
+    text-transform: uppercase !important;
     white-space: normal !important;
     overflow-wrap: anywhere !important;
 }
@@ -4089,7 +4094,7 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-review-
 
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button,
 body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-logout-button {
-    font-size: clamp(13px, 2.3cqh, 15px) !important;
+    font-size: clamp(18px, 4.8vw, 22px) !important;
 }
 
 body.excavator-operator-screen.eo-notice-open {
@@ -4910,7 +4915,7 @@ body.excavator-operator-screen
     body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .mm-mobile-shift-button,
     body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-logout-button {
         border-radius: 8px !important;
-        font-size: 16px !important;
+        font-size: clamp(18px, 4.8vw, 22px) !important;
         font-weight: 600 !important;
         line-height: 1.1 !important;
         text-transform: uppercase !important;
