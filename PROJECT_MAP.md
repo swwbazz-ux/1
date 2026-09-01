@@ -39,7 +39,7 @@ Backend является основным рабочим приложением.
 - Маршруты: `/driver/`, `/driver/shift/`.
 - Manifest: `/driver.webmanifest`.
 - Service worker: `/driver-sw.js`.
-- Shell: `driver-mobile-shell-v174` (опубликован на production 01.09.2026).
+- Shell: `driver-mobile-shell-v175` (опубликован на production 01.09.2026).
 
 ### Машинист экскаватора
 
@@ -48,9 +48,9 @@ Backend является основным рабочим приложением.
 - Маршрут: `/excavator/work/`.
 - Manifest: `/excavator.webmanifest`.
 - Service worker: `/excavator-sw.js`.
-- Shell: `excavator-mobile-shell-v171` (опубликован в production 01.09.2026).
+- Shell: `excavator-mobile-shell-v172` (опубликован в production 01.09.2026).
 
-### Общий адаптивный экран «Смена» — локальный кандидат
+### Общий адаптивный экран «Смена»
 
 - Общий поздний слой двух мобильных ролей:
   `СИСТЕМА_MVP/backend/static/css/mobile-shift-unified-v1.css`.
@@ -63,8 +63,8 @@ Backend является основным рабочим приложением.
   экскаватора два; серверные формы и доменные проверки остаются раздельными.
 - Основное действие у обеих ролей использует одинаковую механику удержания:
   одна секунда для начала смены и две секунды для закрытия.
-- Кандидат подготовлен локально как Driver shell `v175` и Excavator shell
-  `v172`; в production пока остаются `v174/v171`.
+- Компонент опубликован commit `d93a4106` как Driver shell `v175` и
+  Excavator shell `v172`.
 
 ### Нативные Android-приложения
 
