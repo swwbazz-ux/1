@@ -14,6 +14,10 @@ const DRIVER_TEMPLATE_PATH = path.resolve(
     "driver_shift.html"
 );
 const DRIVER_TEMPLATE_SOURCE = fs.readFileSync(DRIVER_TEMPLATE_PATH, "utf8");
+const MOBILE_SHIFT_HOLD_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "mobile-shift-unified-v1.js"),
+    "utf8"
+);
 
 function extractDriverLogoutBindingSource() {
     const startMarker =
@@ -35,11 +39,27 @@ class FakeLogoutButton {
         this.dataset = {
             driverLogoutUrl: "/logout/",
         };
+        this.attributes = new Map();
+        this.disabled = false;
+        this.hidden = false;
         this.listeners = new Map();
         this.progress = "";
+        this.textContent = "Выйти";
+        const classNames = new Set();
+        this.classList = {
+            add(name) {
+                classNames.add(name);
+            },
+            remove(name) {
+                classNames.delete(name);
+            },
+            contains(name) {
+                return classNames.has(name);
+            },
+        };
         this.style = {
             setProperty: (name, value) => {
-                if (name === "--driver-logout-hold") {
+                if (name === "--mobile-shift-hold") {
                     this.progress = value;
                 }
             },
@@ -62,12 +82,22 @@ class FakeLogoutButton {
         (this.listeners.get(type) || []).forEach((listener) => listener(event));
         return event;
     }
+
+    getAttribute(name) {
+        return this.attributes.has(name) ? this.attributes.get(name) : null;
+    }
+
+    querySelector() {
+        return null;
+    }
 }
 
 function createLogoutRuntime({readonly = false} = {}) {
     let now = 1000;
     let nextFrameId = 1;
+    let nextTimerId = 1;
     const frames = new Map();
+    const timers = new Map();
     const navigations = [];
     let href = "http://driver.localhost:8000/driver/?tab=shift";
     const location = {};
@@ -93,6 +123,14 @@ function createLogoutRuntime({readonly = false} = {}) {
         cancelAnimationFrame(frameId) {
             frames.delete(frameId);
         },
+        setTimeout(callback, milliseconds) {
+            const timerId = nextTimerId++;
+            timers.set(timerId, {callback, dueAt: now + milliseconds});
+            return timerId;
+        },
+        clearTimeout(timerId) {
+            timers.delete(timerId);
+        },
     };
     const FakeDate = {
         now() {
@@ -103,6 +141,7 @@ function createLogoutRuntime({readonly = false} = {}) {
 
     vm.runInNewContext(
         `
+        ${MOBILE_SHIFT_HOLD_SOURCE}
         (function () {
             var logoutButton = context.logoutButton;
             ${extractDriverLogoutBindingSource()}
@@ -111,6 +150,10 @@ function createLogoutRuntime({readonly = false} = {}) {
         {
             context: {logoutButton: button},
             Date: FakeDate,
+            document: {
+                readyState: "loading",
+                addEventListener() {},
+            },
             window,
         },
         {filename: "templates/users/driver_shift.html#logout-hold"}
@@ -121,6 +164,13 @@ function createLogoutRuntime({readonly = false} = {}) {
         navigations,
         advance(milliseconds) {
             now += milliseconds;
+            const due = Array.from(timers.entries())
+                .filter(([, timer]) => timer.dueAt <= now)
+                .sort((left, right) => left[1].dueAt - right[1].dueAt);
+            due.forEach(([timerId, timer]) => {
+                timers.delete(timerId);
+                timer.callback();
+            });
         },
         runFrames() {
             const callbacks = Array.from(frames.values());
@@ -129,6 +179,9 @@ function createLogoutRuntime({readonly = false} = {}) {
         },
         pendingFrames() {
             return frames.size;
+        },
+        pendingTimers() {
+            return timers.size;
         },
     };
 }
@@ -143,14 +196,17 @@ test("production Driver logout hold navigates exactly once and can be repeated",
     assert.deepEqual(runtime.navigations, ["/logout/"]);
     assert.equal(runtime.button.progress, "100%");
     assert.equal(runtime.pendingFrames(), 0);
+    assert.equal(runtime.pendingTimers(), 0);
 
     runtime.button.dispatch("pointerup");
-    assert.equal(runtime.button.progress, "0%");
+    runtime.button.dispatch("click");
     runtime.button.dispatch("pointerdown");
+    assert.equal(runtime.button.progress, "0%");
     runtime.advance(2000);
     runtime.runFrames();
     assert.deepEqual(runtime.navigations, ["/logout/", "/logout/"]);
     assert.equal(runtime.pendingFrames(), 0);
+    assert.equal(runtime.pendingTimers(), 0);
 });
 
 test("production Driver logout hold resets after an early release", () => {
@@ -167,6 +223,7 @@ test("production Driver logout hold resets after an early release", () => {
     assert.deepEqual(runtime.navigations, []);
     assert.equal(runtime.button.progress, "0%");
     assert.equal(runtime.pendingFrames(), 0);
+    assert.equal(runtime.pendingTimers(), 0);
 });
 
 test("production Driver logout hold remains available in read-only mode", () => {
@@ -178,4 +235,5 @@ test("production Driver logout hold remains available in read-only mode", () => 
 
     assert.deepEqual(runtime.navigations, ["/logout/"]);
     assert.equal(runtime.pendingFrames(), 0);
+    assert.equal(runtime.pendingTimers(), 0);
 });

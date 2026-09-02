@@ -122,6 +122,7 @@ function loadScheduler(options) {
     const callbackTabs = [];
     const fullFitCalls = [];
     const overflowResults = [];
+    const eventsScreen = {dataset: {eoDowntimeAvailable: "true"}};
     let overflowCalls = 0;
     let viewportFitGeneration = 0;
     const activePanel = {
@@ -155,6 +156,7 @@ function loadScheduler(options) {
     };
     const sandbox = {
         context,
+        eventsScreen,
         shell,
         window: queue.window,
         fitDriverText(panel) {
@@ -978,6 +980,7 @@ test("Excavator downtime status applies only the latest connected-shell response
     const applied = [];
     const cleared = [];
     const shell = {isConnected: true};
+    const eventsScreen = {dataset: {eoDowntimeAvailable: "true"}};
     const context = {
         currentShell: shell,
         sync: null,
@@ -989,6 +992,7 @@ test("Excavator downtime status applies only the latest connected-shell response
     }
     vm.runInNewContext(
         `
+        var downtimeActionPending = false;
         var downtimeStatusSyncGeneration = 0;
         ${source}
         context.sync = syncDowntimeStatus;
@@ -1002,6 +1006,7 @@ test("Excavator downtime status applies only the latest connected-shell response
                 },
             },
             shell,
+            eventsScreen,
             fetch: fakeFetch,
             applyActiveDowntime(payload) {
                 applied.push(payload.id);

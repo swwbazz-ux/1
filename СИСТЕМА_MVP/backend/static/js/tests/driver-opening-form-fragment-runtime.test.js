@@ -11,6 +11,10 @@ const DRIVER_TEMPLATE_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "..", "..", "templates", "users", "driver_shift.html"),
     "utf8"
 );
+const MOBILE_SHIFT_HOLD_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "mobile-shift-unified-v1.js"),
+    "utf8"
+);
 
 
 function extractBraceBlock(source, signature, label) {
@@ -122,10 +126,26 @@ function createInput(initialValue = "") {
 function createRuntime(options = {}) {
     const inputs = (options.initialValues || ["", "", ""]).map(createInput);
     const formListeners = new Map();
+    const buttonListeners = new Map();
+    const buttonAttributes = new Map();
     const button = {
+        dataset: {},
         disabled: false,
+        hidden: false,
         textContent: "Начать смену",
         classList: new FakeClassList(),
+        style: {setProperty() {}},
+        addEventListener(type, callback) {
+            const listeners = buttonListeners.get(type) || [];
+            listeners.push(callback);
+            buttonListeners.set(type, listeners);
+        },
+        getAttribute(name) {
+            return buttonAttributes.has(name) ? buttonAttributes.get(name) : null;
+        },
+        querySelector() {
+            return null;
+        },
     };
     const form = {
         dataset: {},
@@ -142,7 +162,19 @@ function createRuntime(options = {}) {
         },
         dispatch(type) {
             const callback = formListeners.get(type);
-            if (callback) callback({type, target: this});
+            const event = {
+                type,
+                target: this,
+                defaultPrevented: false,
+                preventDefault() {
+                    this.defaultPrevented = true;
+                },
+            };
+            if (callback) callback(event);
+            return event;
+        },
+        requestSubmit() {
+            return this.dispatch("submit");
         },
         reset() {
             this.dispatch("reset");
@@ -188,6 +220,8 @@ function createRuntime(options = {}) {
     const fakeDocument = {
         activeElement: null,
         body: {dataset: {}},
+        readyState: "loading",
+        addEventListener() {},
         querySelector(selector) {
             if (selector === "[data-driver-shell]") return currentShell;
             return null;
@@ -236,6 +270,11 @@ function createRuntime(options = {}) {
         "function bindDriverShiftOpeningForm(shell)",
         "Driver opening shift form binding"
     );
+    const holdSource = extractBraceBlock(
+        DRIVER_TEMPLATE_SOURCE,
+        "function bindDriverShiftHoldAction(form, button, options)",
+        "Driver shared Shift hold adapter"
+    );
     const guardSource = extractBraceBlock(
         DRIVER_TEMPLATE_SOURCE,
         "function isDriverOperationalRefreshUnsafe(shell)",
@@ -247,7 +286,7 @@ function createRuntime(options = {}) {
         "Driver operational refresh"
     );
     vm.runInNewContext(
-        `${guardSource}\n${refreshSource};\n${bindSource}`,
+        `${MOBILE_SHIFT_HOLD_SOURCE}\n${guardSource}\n${refreshSource};\n${holdSource}\n${bindSource}`,
         context,
         {filename: "templates/users/driver_shift.html#opening-form-refresh"}
     );
@@ -268,6 +307,7 @@ function createRuntime(options = {}) {
 test("driver opening readings survive blur and realtime fragment event; reset applies deferred version", async () => {
     const runtime = createRuntime();
     runtime.bind(runtime.shell);
+    assert.equal(runtime.button.dataset.mobileShiftHoldBound, "true");
 
     runtime.fakeDocument.activeElement = runtime.inputs[0];
     ["321", "654", "987"].forEach((value, index) => {
@@ -317,6 +357,11 @@ test("driver opening form errors and pending submit both block fragment replacem
         initialValues: ["321", "654", "987"],
     });
     pendingRuntime.bind(pendingRuntime.shell);
+    assert.equal(pendingRuntime.button.dataset.mobileShiftHoldBound, "true");
+    const blockedSubmit = pendingRuntime.form.dispatch("submit");
+    assert.equal(blockedSubmit.defaultPrevented, true);
+    assert.equal(pendingRuntime.form.dataset.driverShiftOpeningPending, "false");
+    pendingRuntime.form.dataset.driverShiftHoldComplete = "true";
     pendingRuntime.form.dispatch("submit");
 
     assert.equal(pendingRuntime.form.dataset.driverShiftOpeningPending, "true");

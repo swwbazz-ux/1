@@ -143,6 +143,16 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     line-height: 1;
 }
 
+/* Current Excavator tabs share one title contract. The explicit owner selector
+   replaces legacy role-screen h1 rules without leaking into other screens. */
+body.excavator-operator-screen .eo-screen.mobile-work-screen .mobile-shift__title {
+    margin: 0 !important;
+    color: var(--mobile-shift-text) !important;
+    font-size: var(--ms-title-size) !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+}
+
 .mobile-shift__update-group {
     min-inline-size: 0;
     display: flex;
@@ -163,16 +173,15 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     white-space: nowrap;
 }
 
-.mobile-shift__update-group .eo-shift-update-button {
-    min-inline-size: 0;
-    min-block-size: 0;
-    block-size: clamp(26px, 4.6vw, 34px);
-    margin: 0;
-    padding: 0 clamp(6px, 1.7vw, 10px);
-    overflow: hidden;
-    border-radius: clamp(5px, 1.5vw, 7px);
-    font-size: clamp(10px, 2.8vw, 12px);
-    line-height: 1;
+body.excavator-operator-screen .eo-screen.mobile-work-screen .mobile-shift__update-group .mobile-shift__version,
+body.excavator-operator-screen .eo-screen.mobile-work-screen .mobile-shift__update-group .native-app-version,
+body.excavator-operator-screen .eo-screen.mobile-work-screen .mobile-shift__update-group .eo-current-app-version {
+    color: rgba(178, 192, 198, .78) !important;
+    font-size: clamp(11px, 3.2vw, 14px) !important;
+    font-weight: 600 !important;
+    line-height: 1 !important;
+    letter-spacing: 0 !important;
+    white-space: nowrap !important;
 }
 
 .mobile-shift__content {
@@ -244,6 +253,10 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     grid-row: 1;
 }
 
+.mobile-shift[data-mobile-shift-role="excavator"] [data-mobile-shift-field="fuel_limit"] {
+    grid-row: 2;
+}
+
 .mobile-shift[data-mobile-shift-role="excavator"] [data-mobile-shift-field="engine_hours"] {
     grid-row: 3;
 }
@@ -286,6 +299,17 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
 .mobile-shift__field:has(input:disabled) {
     opacity: .5;
     background: rgba(12, 20, 24, .7);
+}
+
+.mobile-shift__field--reference {
+    border-style: dashed;
+    background: rgba(7, 18, 23, .72);
+    pointer-events: none;
+}
+
+.mobile-shift__field--reference .mobile-shift__field-label,
+.mobile-shift__field--reference .mobile-shift__metric-value {
+    opacity: .72;
 }
 
 .mobile-shift__field-label,
@@ -526,10 +550,20 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     color: #e0e8eb;
 }
 
-.mobile-shift__action:disabled,
-.mobile-shift__action[aria-disabled="true"] {
+.mobile-shift__action:focus-visible {
+    outline: 2px solid #f3f7f8;
+    outline-offset: -4px;
+    box-shadow: 0 0 0 2px rgba(103, 232, 84, .24);
+}
+
+.mobile-shift__action:disabled {
     opacity: .38;
     filter: saturate(.55);
+}
+
+.mobile-shift__action[aria-disabled="true"]:not(:disabled) {
+    opacity: .72;
+    filter: saturate(.8);
 }
 
 .mobile-shift__action.is-pending {
@@ -753,6 +787,17 @@ body.excavator-operator-screen:has(.mobile-shift) .mm-mobile-bottom-nav {
     max-block-size: calc(env(safe-area-inset-bottom, 0px) + var(--mobile-shift-role-nav-h)) !important;
 }
 
+/* Пункты навигации занимают ровно высоту общей нижней панели. Старые
+   ролевые стили задавали им собственные 76/78px и создавали скрытый
+   вертикальный диапазон на узких экранах. */
+body.driver-mobile-screen:has(.mobile-shift) .mm-mobile-bottom-nav > .mm-mobile-nav-item,
+body.excavator-operator-screen:has(.mobile-shift) .mm-mobile-bottom-nav > .mm-mobile-nav-item {
+    block-size: 100% !important;
+    height: 100% !important;
+    min-block-size: 0 !important;
+    min-height: 0 !important;
+}
+
 body.driver-mobile-screen [data-driver-tab-panel="shift"] {
     padding: 0 !important;
 }
@@ -783,4 +828,38 @@ html[data-mobile-shift-orientation="landscape"] .mobile-shift {
 html[data-mobile-shift-orientation="landscape"] .mobile-shift__content {
     grid-template-columns: minmax(0, 1.24fr) minmax(0, .76fr);
     grid-template-rows: minmax(0, 1fr);
+}
+
+/* На низком горизонтальном экране обе роли используют одну компактную
+   типографику карточек. Размеры зависят от доступной области, а не от
+   конкретной модели телефона: так три показателя Водителя и сводка
+   Экскаваторщика остаются читаемыми без внутренней прокрутки. */
+@media (max-height: 500px) {
+    html[data-mobile-shift-orientation="landscape"] .mobile-shift {
+        --ms-gap: 4px;
+        --ms-section-pad: 5px;
+        --ms-card-pad-x: 6px;
+        --ms-card-pad-y: 1px;
+        --ms-section-size: 11px;
+        --ms-label-size: 9px;
+        --ms-value-size: 18px;
+        --ms-unit-size: 9px;
+        --ms-summary-size: 15px;
+    }
+
+    html[data-mobile-shift-orientation="landscape"] .mobile-shift__cell {
+        gap: 1px;
+    }
+
+    html[data-mobile-shift-orientation="landscape"] .mobile-shift__field-label {
+        gap: 1px;
+    }
+
+    html[data-mobile-shift-orientation="landscape"] .mobile-shift__field-label small {
+        font-size: 8px;
+    }
+
+    html[data-mobile-shift-orientation="landscape"] .mobile-shift__cell > em {
+        font-size: 8px;
+    }
 }

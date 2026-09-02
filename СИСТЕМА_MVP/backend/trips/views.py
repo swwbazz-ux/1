@@ -754,7 +754,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v187";
+const CACHE_NAME = "excavator-mobile-shell-v188";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -3114,10 +3114,16 @@ def excavator_work_settings_from_session(request, current_excavator, form):
     rock_by_id = {str(rock.id): rock for rock in rock_choices}
     dump_by_id = {str(point.id): point for point in dump_point_choices}
 
+    raw_rock_id = str(raw_settings.get('rock_type_id') or '')
     default_rock_id = str(form['rock_type'].value() or '')
     placement_rock_id = str(getattr(placement, 'work_rock_type_id', '') or '')
-    rock_id = str(raw_settings.get('rock_type_id') or placement_rock_id or default_rock_id or (rock_choices[0].id if rock_choices else ''))
-    current_rock = rock_by_id.get(rock_id) or (rock_choices[0] if rock_choices else None)
+    persisted_rock_id = raw_rock_id or placement_rock_id
+    persisted_rock = rock_by_id.get(persisted_rock_id)
+    current_rock = (
+        persisted_rock
+        or rock_by_id.get(default_rock_id)
+        or (rock_choices[0] if rock_choices else None)
+    )
 
     raw_dump_ids = raw_settings.get('dump_point_ids')
     if not isinstance(raw_dump_ids, list):
@@ -3131,6 +3137,8 @@ def excavator_work_settings_from_session(request, current_excavator, form):
         if dump_id in dump_by_id and dump_id not in seen_dump_ids:
             selected_dump_points.append(dump_by_id[dump_id])
             seen_dump_ids.add(dump_id)
+
+    persisted_dump_point_ids = [point.id for point in selected_dump_points]
 
     form_dump_id = str(form['dump_point'].value() or '')
     if not selected_dump_points and form_dump_id in dump_by_id:
@@ -3150,26 +3158,45 @@ def excavator_work_settings_from_session(request, current_excavator, form):
     )
 
     selected_dump_ids = [point.id for point in selected_dump_points]
+    has_placement_settings = bool(
+        placement
+        and (
+            placement.work_context_updated_at
+            or placement.work_rock_type_id
+            or placement.work_dump_point_id
+            or placement.loading_horizon
+            or placement.loading_block
+        )
+    )
     return {
-        'has_applied_settings': bool(raw_settings or placement),
+        # Настройки считаются применёнными только вместе с действующими породой
+        # и точкой разгрузки. Если сохранённый справочник изменился, резервные
+        # значения остаются черновиком и кнопку можно нажать снова.
+        'has_applied_settings': bool(
+            persisted_rock
+            and persisted_dump_point_ids
+            and (raw_settings or has_placement_settings)
+        ),
         'rock_choices': rock_choices,
         'dump_point_choices': dump_point_choices,
         'current_rock': current_rock,
         'default_rock': current_rock.id if current_rock else '',
         'selected_dump_points': selected_dump_points,
         'selected_dump_point_ids': selected_dump_ids,
+        'persisted_dump_point_ids': persisted_dump_point_ids,
         'default_dump_point': selected_dump_ids[0] if selected_dump_ids else '',
         'face_horizon': face_horizon,
         'face_block': face_block,
     }
 
 
-def build_excavator_dump_cards(points, *, selected_ids=None, include_all=False):
+def build_excavator_dump_cards(points, *, selected_ids=None, persisted_ids=None, include_all=False):
     selected_ids = {str(point_id) for point_id in (selected_ids or [])}
+    persisted_ids = {str(point_id) for point_id in (persisted_ids or [])}
     cards = []
     for index, point in enumerate(points):
         is_selected = str(point.id) in selected_ids if include_all else True
-        if include_all and not is_selected:
+        if include_all:
             status_key = 'gray'
         elif index == 0:
             status_key = 'yellow'
@@ -3181,6 +3208,7 @@ def build_excavator_dump_cards(points, *, selected_ids=None, include_all=False):
             'status_key': status_key,
             'is_default': index == 0 and is_selected,
             'is_selected': is_selected,
+            'is_persisted': include_all and str(point.id) in persisted_ids,
         })
     return cards
 
@@ -3915,6 +3943,19 @@ def excavator_work_view(request):
             .order_by('-opened_at')
             .first()
         )
+    shift_fuel_limit = getattr(
+        getattr(shift_start_excavator, 'model', None),
+        'fuel_capacity_limit_l',
+        None,
+    )
+    shift_action_block_message = ''
+    if not open_shift:
+        if assignment_state != 'assigned':
+            shift_action_block_message = work_assignment_error_message(assignment_state)
+        elif equipment_open_shift:
+            shift_action_block_message = 'Техника занята в другой смене.'
+        elif not shift_fuel_limit:
+            shift_action_block_message = 'Для модели не настроен допустимый объём топлива.'
     previous_equipment_shift = None if open_shift or equipment_open_shift else get_previous_closed_equipment_shift(shift_start_excavator)
 
     legacy_trip_client_action_id = (
@@ -4317,6 +4358,7 @@ def excavator_work_view(request):
     dump_choice_cards = build_excavator_dump_cards(
         work_settings['dump_point_choices'],
         selected_ids=work_settings['selected_dump_point_ids'],
+        persisted_ids=work_settings['persisted_dump_point_ids'],
         include_all=True,
     )
     rock_choices = work_settings['rock_choices']
@@ -4590,7 +4632,8 @@ def excavator_work_view(request):
             'work_assignment_error': work_assignment_error_message(assignment_state),
             'work_assignment_shift_label': work_assignment.work_shift_label if work_assignment else '',
             'equipment_open_shift': equipment_open_shift,
-            'shift_fuel_limit': getattr(getattr(shift_start_excavator, 'model', None), 'fuel_capacity_limit_l', None),
+            'shift_fuel_limit': shift_fuel_limit,
+            'shift_action_block_message': shift_action_block_message,
             'shift_previous_readings': bool(previous_equipment_shift),
             'shift_start_fuel_display': format_whole_input_value(open_shift.start_fuel if open_shift else None),
             'shift_start_engine_hours_display': format_whole_input_value(open_shift.start_engine_hours if open_shift else None),

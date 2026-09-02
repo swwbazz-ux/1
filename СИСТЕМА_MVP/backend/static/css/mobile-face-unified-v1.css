@@ -25,15 +25,6 @@
     min-block-size: 0;
 }
 
-.mobile-face .mobile-shift__update-group .eo-current-app-version,
-.mobile-face .mobile-shift__update-group .native-app-version {
-    color: rgba(178, 192, 198, .78) !important;
-    font-size: clamp(11px, 3.2vw, 14px) !important;
-    font-weight: 600 !important;
-    line-height: 1 !important;
-    letter-spacing: 0 !important;
-}
-
 .mobile-face__content {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -127,6 +118,42 @@
     overflow: hidden !important;
     border-radius: clamp(7px, 2vw, 10px) !important;
     font-family: inherit !important;
+    border-color: rgba(142, 169, 181, .26) !important;
+    background: rgba(7, 18, 23, .96) !important;
+    color: #aab7bd !important;
+    box-shadow: none !important;
+    transition: border-color .15s ease, background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+
+/* Applied server state is green; unsaved additions are yellow. Removing an
+   applied point immediately returns it to the neutral state until Apply. */
+.mobile-face .mobile-face__destination.eo-unload-card.is-dump-applied {
+    border-style: solid !important;
+    border-color: #67e854 !important;
+    background: rgba(17, 62, 24, .52) !important;
+    color: #7df06c !important;
+    box-shadow: inset 0 0 18px rgba(103, 232, 84, .08) !important;
+}
+
+.mobile-face .mobile-face__destination.eo-unload-card.is-dump-pending {
+    border-style: dashed !important;
+    border-color: #ffd52a !important;
+    background: rgba(72, 55, 2, .56) !important;
+    color: #ffe063 !important;
+    box-shadow: inset 0 0 18px rgba(255, 213, 42, .09) !important;
+}
+
+.mobile-face .mobile-face__destination.eo-unload-card.is-dump-pending-remove {
+    border-style: solid !important;
+    border-color: rgba(142, 169, 181, .26) !important;
+    background: rgba(7, 18, 23, .96) !important;
+    color: #aab7bd !important;
+    box-shadow: none !important;
+}
+
+.mobile-face .mobile-face__destination.eo-unload-card:focus-visible {
+    outline: 2px solid currentColor !important;
+    outline-offset: -4px;
 }
 
 .mobile-face .mobile-face__destination.eo-unload-card strong {

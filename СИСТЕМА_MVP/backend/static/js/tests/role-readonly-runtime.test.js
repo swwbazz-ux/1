@@ -364,9 +364,9 @@ test("live role switch makes mutations readonly and preserves safe controls", as
         method: "post",
         action: "/excavator/work/",
     });
-    const safeRefresh = new FakeElement("button", {"data-eo-refresh-work": ""});
+    const safeTab = new FakeElement("button", {"data-eo-tab": "shift"});
     const mutationButton = new FakeElement("button", {"data-eo-shift-button": ""});
-    mutationForm.appendChild(safeRefresh);
+    mutationForm.appendChild(safeTab);
     mutationForm.appendChild(mutationButton);
 
     const getForm = new FakeFormElement({method: "get", action: "/reports/"});
@@ -395,10 +395,10 @@ test("live role switch makes mutations readonly and preserves safe controls", as
     assert.equal(runtime.document.body.dataset.roleReadonly, "true");
     assert.ok(runtime.document.querySelector("[data-inactive-role-banner]"));
     assert.equal(mutationButton.disabled, true);
-    assert.equal(safeRefresh.disabled, false);
+    assert.equal(safeTab.disabled, false);
     assert.equal(navigationButton.disabled, false);
 
-    const safeClick = runtime.dispatchDocumentEvent("click", safeRefresh);
+    const safeClick = runtime.dispatchDocumentEvent("click", safeTab);
     const mutationClick = runtime.dispatchDocumentEvent("click", mutationButton);
     const navigationClick = runtime.dispatchDocumentEvent("click", navigationButton);
     assert.equal(safeClick.defaultPrevented, false);
@@ -878,10 +878,12 @@ test("driver hold final callback rechecks readonly before local state changes", 
     assert.ok(state.resets >= 1);
 });
 
-test("production driver shift-close submits in one tap and blocks readonly role", () => {
+test("production driver shift-close requires its hold marker and blocks readonly role", () => {
     const runtime = createHoldRuntime();
     const form = new FakeFormElement({method: "post", action: "/driver/shift/close/"});
     const closeButton = new FakeElement("button");
+    const closeLabel = new FakeElement("span", {"data-mobile-shift-label": ""});
+    closeButton.appendChild(closeLabel);
     const binding = extractDriverShiftCloseBindingSource();
     vm.runInNewContext(
         `
@@ -891,6 +893,9 @@ test("production driver shift-close submits in one tap and blocks readonly role"
             var shiftScroll = null;
             function driverRoleIsReadonly() {
                 return window.isAppRoleReadonly();
+            }
+            function bindDriverShiftHoldAction(boundForm, boundButton, options) {
+                context.holdBinding = {form: boundForm, button: boundButton, options: options};
             }
             ${binding.source}
         })();
@@ -904,10 +909,15 @@ test("production driver shift-close submits in one tap and blocks readonly role"
         }
     );
 
+    assert.equal(form.dispatchEvent(createEvent("submit", form)), false);
+    assert.equal(closeButton.disabled, false);
+    assert.equal(closeButton.classList.contains("is-pending"), false);
+    form.dataset.driverShiftHoldComplete = "true";
     assert.equal(form.dispatchEvent(createEvent("submit", form)), true);
     assert.equal(closeButton.disabled, true);
     assert.equal(closeButton.classList.contains("is-pending"), true);
-    assert.equal(closeButton.textContent, "Закрываем смену");
+    assert.equal(closeLabel.textContent, "Закрываем смену");
+    assert.equal(form.dataset.driverShiftHoldComplete, undefined);
 
     const readonlyRuntime = createHoldRuntime();
     readonlyRuntime.setReadonly(true);
@@ -922,6 +932,7 @@ test("production driver shift-close submits in one tap and blocks readonly role"
             function driverRoleIsReadonly() {
                 return window.isAppRoleReadonly();
             }
+            function bindDriverShiftHoldAction() {}
             ${binding.source}
         })();
         `,
@@ -930,8 +941,8 @@ test("production driver shift-close submits in one tap and blocks readonly role"
             context: {form: readonlyForm, closeButton: readonlyButton},
         }
     );
+    readonlyForm.dataset.driverShiftHoldComplete = "true";
     assert.equal(readonlyForm.dispatchEvent(createEvent("submit", readonlyForm)), false);
     assert.equal(readonlyButton.disabled, false);
-    assert.equal(binding.source.includes("holdMs"), false);
-    assert.equal(binding.template.includes("driverShiftCloseHoldGuard"), false);
+    assert.equal(binding.source.includes("holdMs: 2000"), true);
 });

@@ -2295,14 +2295,6 @@ body.excavator-operator-screen .eo-shift-occupied {
     }
 }
 
-body.excavator-operator-screen .eo-current-app-version {
-    color: rgba(184, 199, 206, .7) !important;
-    font-size: clamp(14px, 3.25vw, 16px) !important;
-    font-weight: 800 !important;
-    line-height: 1 !important;
-    white-space: nowrap !important;
-}
-
 @media (max-width: 767px) {
     body.excavator-operator-screen .eo-topbar .eo-face-cell-full {
         grid-template-columns: auto minmax(0, 1fr) !important;
@@ -3000,12 +2992,6 @@ body.excavator-operator-screen .eo-shift-update-group {
     justify-content: flex-end !important;
     gap: clamp(5px, 1cqh, 8px) !important;
     min-width: 0 !important;
-}
-
-body.excavator-operator-screen .eo-current-app-version {
-    font-size: clamp(11px, 2.3cqh, 15px) !important;
-    line-height: 1 !important;
-    white-space: nowrap !important;
 }
 
 body.excavator-operator-screen .eo-shift-update-button {

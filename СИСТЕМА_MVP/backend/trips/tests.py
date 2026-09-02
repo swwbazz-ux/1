@@ -859,11 +859,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v187')
+        self.assertContains(response, 'excavator-mobile-shell-v188')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 187')
+        self.assertContains(response, 'Версия 188')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -871,13 +871,22 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-shift-inputs')
         self.assertContains(response, 'data-mobile-shift-role="excavator"')
         self.assertContains(response, 'data-mobile-shift-field="fuel"')
+        self.assertContains(response, 'data-mobile-shift-field="fuel_limit"')
+        self.assertContains(response, 'mobile-shift__field--reference')
+        self.assertContains(response, 'Лимит топлива')
+        self.assertContains(response, 'Для этой модели')
+        self.assertContains(response, '<strong>7000</strong><em>л</em>', html=True)
         self.assertContains(response, 'data-mobile-shift-field="engine_hours"')
         self.assertNotContains(response, 'data-mobile-shift-field="mileage"')
         self.assertNotContains(response, 'data-eo-shift-review')
         self.assertNotContains(response, 'Проверить показания')
         self.assertContains(response, 'shiftScreen.dataset.eoShiftDirty === "true"')
         self.assertNotContains(response, 'firstErrorField.scrollIntoView')
-        self.assertContains(response, 'shiftButton.disabled = !validation.valid')
+        self.assertContains(response, 'var isSoftBlocked = shiftServerBlocked || !validation.valid;')
+        self.assertContains(response, 'shiftButton.disabled = false;')
+        self.assertContains(response, 'shiftButton.setAttribute("aria-disabled", isSoftBlocked ? "true" : "false");')
+        self.assertContains(response, 'canStart: function ()')
+        self.assertContains(response, 'onBlockedPress: function ()')
         self.assertNotContains(response, 'class="eo-pin-icon"')
         self.assertContains(response, 'class="eo-face-coordinates"')
         self.assertContains(response, 'class="eo-face-rock"')
@@ -928,27 +937,31 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'serverContractVersion')
         self.assertContains(response, 'syncContractState')
         self.assertContains(response, 'normalizeExcavatorVersion')
-        self.assertContains(response, 'data-eo-pwa-update-check')
-        self.assertContains(response, 'data-eo-pwa-update-check-label')
-        self.assertContains(response, 'data-eo-pwa-update-check-version')
+        self.assertNotContains(response, '<button class="eo-shift-update-button"')
+        self.assertNotContains(response, 'data-eo-pwa-update-check-label')
+        self.assertNotContains(response, 'data-eo-pwa-update-check-version')
+        self.assertNotContains(response, 'data-eo-refresh-work')
         self.assertNotContains(response, 'Сверьте с фактом')
         self.assertNotContains(response, 'eo-shift-attention-label')
         self.assertContains(response, 'Обновить')
-        self.assertContains(response, 'runManualUpdateCheck')
-        self.assertContains(response, 'Проверка...')
+        self.assertContains(response, 'data-eo-pwa-update-apply')
+        self.assertNotContains(response, 'runManualUpdateCheck')
+        self.assertNotContains(response, 'Проверка...')
 
-    def test_browser_excavator_keeps_pwa_update_ui(self):
+    def test_browser_excavator_keeps_automatic_pwa_update_ui_without_manual_controls(self):
         response = self.client.get(reverse('excavator_work'))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<span class="eo-current-app-version" aria-label="Текущая версия приложения">')
-        self.assertContains(response, '<button class="eo-shift-update-button" type="button" data-eo-pwa-update-check')
         self.assertContains(response, '<div class="eo-mobile-update-modal" data-eo-pwa-update-modal hidden>')
         self.assertContains(response, '<span class="mm-mobile-update-badge" data-eo-pwa-update-badge')
         self.assertContains(response, 'data-eo-tab="shift" data-eo-pwa-update-nav-target')
-        self.assertContains(response, 'data-eo-refresh-work')
+        self.assertContains(response, 'data-eo-pwa-update-apply')
+        self.assertNotContains(response, '<button class="eo-shift-update-button"')
+        self.assertNotContains(response, 'runManualUpdateCheck')
+        self.assertNotContains(response, 'data-eo-refresh-work')
 
-    def test_native_excavator_hides_pwa_update_ui_but_keeps_work_refresh(self):
+    def test_native_excavator_hides_pwa_update_ui_without_manual_refresh(self):
         response = self.client.get(
             reverse('excavator_work'),
             HTTP_USER_AGENT='Mozilla/5.0 CopperResourcesNative/excavator',
@@ -964,7 +977,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, '<div class="eo-mobile-update-modal" data-eo-pwa-update-modal')
         self.assertNotContains(response, '<span class="mm-mobile-update-badge" data-eo-pwa-update-badge')
         self.assertNotContains(response, 'data-eo-tab="shift" data-eo-pwa-update-nav-target')
-        self.assertContains(response, 'data-eo-refresh-work')
+        self.assertNotContains(response, 'runManualUpdateCheck')
+        self.assertNotContains(response, 'data-eo-refresh-work')
 
     def test_native_excavator_shows_real_app_version_when_reported(self):
         """Приложение сообщает свою версию — показываем именно её, а не
@@ -1001,12 +1015,21 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-eo-settings-applied="true"')
         self.assertContains(response, 'disabled aria-disabled="true" aria-label="Настройки уже применены"')
+        html = response.content.decode('utf-8')
+        dump_marker = f'data-eo-dump-select="{self.dump_point.id}"'
+        dump_marker_index = html.index(dump_marker)
+        dump_tag = html[html.rfind('<button', 0, dump_marker_index):html.index('>', dump_marker_index) + 1]
+        self.assertIn('status-gray is-selected is-dump-applied', dump_tag)
+        self.assertIn('data-eo-dump-persisted="true"', dump_tag)
+        self.assertIn('aria-label="Дробилка. Активная точка разгрузки."', dump_tag)
+        self.assertNotIn('is-dump-pending"', dump_tag)
         self.assertContains(response, 'registration && registration.active')
         self.assertNotContains(response, 'newVersion || "new"')
         self.assertNotContains(response, 'registration.active || navigator.serviceWorker.controller')
         self.assertContains(response, reverse('excavator_work_settings'))
         self.assertContains(response, reverse('excavator_shift_action'))
         self.assertContains(response, reverse('excavator_truck_loaded_cancel'))
+
         self.assertContains(response, 'eo-truck-detail-cards-data')
         self.assertContains(response, 'data-eo-truck-detail')
         self.assertContains(response, 'data-eo-truck-detail-id')
@@ -1059,8 +1082,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'return Array.isArray(events) && events.length > 0;')
         self.assertContains(response, 'data-eo-pwa-update-modal')
         self.assertContains(response, 'data-eo-pwa-update-badge')
-        self.assertContains(response, 'data-eo-refresh-work')
-        self.assertContains(response, 'refreshExcavatorWorkFromServer({ preserveTab: true })')
+        self.assertNotContains(response, 'data-eo-refresh-work')
+        self.assertContains(response, 'refreshExcavatorWorkFromServer({ preserveTab: true, pendingOwner: "shift" })')
+        self.assertContains(response, 'shiftScreen.dataset.eoShiftDirty = "false"')
         self.assertContains(response, 'class="eo-dashboard-head"')
         self.assertContains(response, 'class="eo-dashboard-main-zone"')
         self.assertContains(response, 'class="eo-dashboard-dump-zone"')
@@ -1121,6 +1145,56 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'ожидает сервер')
         self.assertNotContains(response, 'Под погрузкой')
         self.assertContains(response, 'mobile-shift__action--danger')
+
+    def test_excavator_work_keeps_fallback_dump_point_as_applyable_draft(self):
+        session = self.client.session
+        session['excavator_work_settings'] = {
+            str(self.excavator.id): {
+                'rock_type_id': self.rock.id,
+                'dump_point_ids': [999999],
+                'loading_horizon': '125',
+                'loading_block': '4',
+            },
+        }
+        session.save()
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-eo-settings-applied="false"')
+        self.assertContains(response, 'aria-disabled="false" aria-label="Применить настройки"')
+        html = response.content.decode('utf-8')
+        dump_marker = f'data-eo-dump-select="{self.dump_point.id}"'
+        dump_marker_index = html.index(dump_marker)
+        dump_tag = html[html.rfind('<button', 0, dump_marker_index):html.index('>', dump_marker_index) + 1]
+        self.assertIn('is-selected is-dump-pending', dump_tag)
+        self.assertIn('data-eo-dump-persisted="false"', dump_tag)
+        self.assertNotIn('is-dump-applied', dump_tag)
+
+    def test_excavator_work_keeps_fallback_rock_as_applyable_draft(self):
+        session = self.client.session
+        session['excavator_work_settings'] = {
+            str(self.excavator.id): {
+                'rock_type_id': 999999,
+                'dump_point_ids': [self.dump_point.id],
+                'loading_horizon': '125',
+                'loading_block': '4',
+            },
+        }
+        session.save()
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-eo-settings-applied="false"')
+        self.assertContains(response, 'aria-disabled="false" aria-label="Применить настройки"')
+        self.assertEqual(response.context['current_rock'], self.rock)
+        html = response.content.decode('utf-8')
+        dump_marker = f'data-eo-dump-select="{self.dump_point.id}"'
+        dump_marker_index = html.index(dump_marker)
+        dump_tag = html[html.rfind('<button', 0, dump_marker_index):html.index('>', dump_marker_index) + 1]
+        self.assertIn('is-selected is-dump-applied', dump_tag)
+        self.assertIn('data-eo-dump-persisted="true"', dump_tag)
 
     def test_excavator_progress_cycle_visual_context_preserves_completed_boundaries(self):
         cases = {
@@ -2205,6 +2279,49 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         ).read_text(encoding='utf-8')
         self.assertIn('.mobile-downtime.is-shift-inactive .mobile-downtime__reasons', downtime_css)
 
+    def test_excavator_shift_soft_block_keeps_button_pressable_for_feedback(self):
+        EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
+        self.excavator_model.fuel_capacity_limit_l = None
+        self.excavator_model.save(update_fields=['fuel_capacity_limit_l'])
+
+        response = self.client.get(reverse('excavator_work'))
+        html = response.content.decode('utf-8')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context['shift_action_block_message'],
+            'Для модели не настроен допустимый объём топлива.',
+        )
+        shift_marker_index = html.index('data-eo-shift-button')
+        shift_tag = html[html.rfind('<button', 0, shift_marker_index):html.index('>', shift_marker_index) + 1]
+        self.assertIn('data-eo-shift-action="open"', shift_tag)
+        self.assertIn('data-eo-shift-server-blocked="true"', shift_tag)
+        self.assertIn(
+            'data-eo-shift-block-message="Для модели не настроен допустимый объём топлива."',
+            shift_tag,
+        )
+        self.assertIn('aria-disabled="true"', shift_tag)
+        self.assertIn('aria-label="Для модели не настроен допустимый объём топлива."', shift_tag)
+        self.assertNotIn(' disabled', shift_tag)
+        self.assertContains(response, 'data-mobile-shift-field="fuel_limit"')
+        self.assertContains(response, 'mobile-shift__field--reference')
+        self.assertContains(response, '<strong>—</strong><em>л</em>', html=True)
+        self.assertContains(response, 'shiftButton.disabled = false;')
+        self.assertContains(response, 'showExcavatorNotice(shiftBlockMessage || "Смена сейчас недоступна.");')
+
+        shared_css = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'css'
+            / 'mobile-shift-unified-v1.css'
+        ).read_text(encoding='utf-8')
+        self.assertIn('.mobile-shift__field--reference {', shared_css)
+        self.assertIn('pointer-events: none;', shared_css)
+        self.assertIn('.mobile-shift__action:disabled {', shared_css)
+        self.assertIn('opacity: .38;', shared_css)
+        self.assertIn('.mobile-shift__action[aria-disabled="true"]:not(:disabled) {', shared_css)
+        self.assertIn('opacity: .72;', shared_css)
+
     def test_excavator_work_tab_is_interactive_only_with_open_shift(self):
         response = self.client.get(reverse('excavator_work'))
         html = response.content.decode('utf-8')
@@ -2262,7 +2379,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v187', script)
+        self.assertIn('excavator-mobile-shell-v188', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2328,6 +2445,20 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotIn('class="eo-face-form"', html)
         self.assertNotIn('class="eo-large-field"', html)
         self.assertNotIn('class="eo-unload-grid eo-unload-grid-settings"', html)
+        dump_marker = f'data-eo-dump-select="{self.dump_point.id}"'
+        dump_marker_index = html.index(dump_marker)
+        dump_tag = html[html.rfind('<button', 0, dump_marker_index):html.index('>', dump_marker_index) + 1]
+        self.assertIn('status-gray is-selected is-dump-pending', dump_tag)
+        self.assertIn('data-eo-dump-persisted="false"', dump_tag)
+        self.assertIn('aria-label="Дробилка. Будет добавлена после применения."', dump_tag)
+        self.assertNotIn('is-dump-applied', dump_tag)
+        self.assertIn('? "applied"', html)
+        self.assertIn('? "pending-add"', html)
+        self.assertIn('? "pending-remove"', html)
+        self.assertIn('button.classList.toggle("is-dump-applied", state === "applied");', html)
+        self.assertIn('button.classList.toggle("is-dump-pending", state === "pending-add");', html)
+        self.assertIn('button.classList.toggle("is-dump-pending-remove", state === "pending-remove");', html)
+        self.assertIn('replacePersistedDumpPointIds(savedIds);', html)
 
         css_path = (
             Path(__file__).resolve().parents[1]
@@ -2350,6 +2481,13 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('white-space: normal !important;', css)
         self.assertIn('.mobile-face__actions.mobile-shift__actions', css)
         self.assertIn('overflow: hidden !important', css)
+        self.assertIn('.mobile-face .mobile-face__destination.eo-unload-card.is-dump-applied {', css)
+        self.assertIn('border-color: #67e854 !important;', css)
+        self.assertIn('background: rgba(17, 62, 24, .52) !important;', css)
+        self.assertIn('.mobile-face .mobile-face__destination.eo-unload-card.is-dump-pending {', css)
+        self.assertIn('border-color: #ffd52a !important;', css)
+        self.assertIn('background: rgba(72, 55, 2, .56) !important;', css)
+        self.assertIn('.mobile-face .mobile-face__destination.eo-unload-card.is-dump-pending-remove {', css)
 
         shared_css_path = css_path.with_name('mobile-shift-unified-v1.css')
         shared_css = shared_css_path.read_text(encoding='utf-8')
@@ -2408,6 +2546,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('gap: 5px !important;', css)
         self.assertIn('font-size: 12px !important;', css)
         self.assertIn('line-height: 16px !important;', css)
+        self.assertIn(
+            'body.driver-mobile-screen:has(.mobile-shift) .mm-mobile-bottom-nav > .mm-mobile-nav-item',
+            css,
+        )
+        self.assertIn('block-size: 100% !important;', css)
+        self.assertIn('min-block-size: 0 !important;', css)
         self.assertIn('display: none !important;', css)
         self.assertIn(
             '.driver-shell[data-active-tab="shift"] [data-driver-tab-panel="shift"].is-active .mobile-shift',
@@ -3710,20 +3854,29 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('mobile-work-screen mobile-face', html)
         self.assertIn('mobile-work-screen mobile-downtime', html)
         self.assertEqual(html.count('class="mobile-shift__titlebar'), 3)
+        self.assertIn('class="mobile-shift__titlebar"', html)
+        self.assertIn('class="mobile-shift__titlebar mobile-face__titlebar"', html)
+        self.assertIn('class="mobile-shift__titlebar mobile-downtime__titlebar"', html)
+        self.assertEqual(html.count('class="mobile-shift__title"'), 3)
+        self.assertEqual(html.count('class="mobile-shift__update-group"'), 3)
         self.assertEqual(html.count('class="mobile-shift__actions'), 3)
         self.assertIn('class="mobile-downtime__content"', html)
         self.assertIn('/static/css/mobile-downtime-unified-v1.css', html)
+        self.assertNotIn('class="eo-shift-update-button"', html)
+        self.assertNotIn('runManualUpdateCheck', html)
+        self.assertNotIn('data-eo-refresh-work', html)
 
         backend_root = Path(__file__).resolve().parents[1]
         work_tabs_css = (backend_root / 'static' / 'css' / 'mobile-downtime-unified-v1.css').read_text(encoding='utf-8')
         face_css = (backend_root / 'static' / 'css' / 'mobile-face-unified-v1.css').read_text(encoding='utf-8')
+        shift_css = (backend_root / 'static' / 'css' / 'mobile-shift-unified-v1.css').read_text(encoding='utf-8')
         self.assertIn('.eo-screen.mobile-work-screen[data-eo-screen]', work_tabs_css)
         self.assertIn('grid-template-rows: var(--ms-screen-rows) !important;', work_tabs_css)
         self.assertIn('overflow: hidden !important;', work_tabs_css)
         self.assertIn('grid-template-rows: minmax(0, 1.08fr) minmax(0, .92fr) !important;', work_tabs_css)
-        self.assertIn('--ms-section-pad: 5px;', work_tabs_css)
-        self.assertIn('--ms-card-pad-y: 1px;', work_tabs_css)
-        self.assertIn('--ms-summary-size: 15px;', work_tabs_css)
+        self.assertIn('--ms-section-pad: 5px;', shift_css)
+        self.assertIn('--ms-card-pad-y: 1px;', shift_css)
+        self.assertIn('--ms-summary-size: 15px;', shift_css)
         self.assertIn('padding: 2px 6px !important;', work_tabs_css)
         self.assertIn('font-size: 26px !important;', work_tabs_css)
         self.assertIn('white-space: normal !important;', face_css)

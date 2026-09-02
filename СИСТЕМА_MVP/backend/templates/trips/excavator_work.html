@@ -6,13 +6,13 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v187">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v187">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v187">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v187">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v187">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v187">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v187" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v188">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v188">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v188">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v188">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v188">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v188">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v188" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -108,10 +108,13 @@
                 <div class="mobile-face__destinations" aria-label="Выбор точек разгрузки">
                     {% for card in dump_choice_cards %}
                         <button
-                            class="eo-unload-card mobile-face__destination status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}"
+                            class="eo-unload-card mobile-face__destination status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_persisted %} is-dump-applied{% elif card.is_selected %} is-dump-pending{% endif %}"
                             type="button"
                             data-eo-dump-select="{{ card.point.id }}"
+                            data-eo-dump-name="{{ card.name }}"
+                            data-eo-dump-persisted="{% if card.is_persisted %}true{% else %}false{% endif %}"
                             aria-pressed="{% if card.is_selected %}true{% else %}false{% endif %}"
+                            aria-label="{{ card.name }}. {% if card.is_persisted %}Активная точка разгрузки{% elif card.is_selected %}Будет добавлена после применения{% else %}Не выбрана{% endif %}."
                             {% if not open_shift %}disabled aria-disabled="true"{% endif %}
                         >
                             <strong>{{ card.name }}</strong>
@@ -283,7 +286,6 @@
                     {% else %}
                         <span class="mobile-shift__version">Версия {{ app_shell_version|default:'excavator-mobile-shell-v0'|cut:'excavator-mobile-shell-v' }}</span>
                     {% endif %}
-                    <button class="eo-refresh-button mobile-downtime__refresh" type="button" aria-label="Обновить" data-eo-refresh-work>↻</button>
                 </div>
             </header>
             <div class="mobile-downtime__content">
@@ -395,7 +397,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v187";
+var excavatorShellVersion = "excavator-mobile-shell-v188";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -722,7 +724,11 @@ document.addEventListener("visibilitychange", function () {
     }
 });
 
-function isExcavatorRefreshUnsafe() {
+function isExcavatorRefreshUnsafe(options) {
+    options = options || {};
+    var pendingOwner = options.pendingOwner === "face" || options.pendingOwner === "shift"
+        ? options.pendingOwner
+        : "";
     var shell = document.querySelector("[data-eo-shell]");
     if (!shell) return false;
     var active = document.activeElement;
@@ -738,7 +744,25 @@ function isExcavatorRefreshUnsafe() {
     )) {
         return true;
     }
-    return !!document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-shift-update-button.is-checking, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden])");
+    var faceScreen = shell.querySelector('[data-eo-screen="face"]');
+    if (faceScreen && (
+        faceScreen.dataset.eoFaceDirty === "true"
+        || (pendingOwner !== "face" && faceScreen.dataset.eoFacePending === "true")
+    )) {
+        return true;
+    }
+    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden])")) {
+        return true;
+    }
+    return Array.prototype.some.call(
+        document.querySelectorAll(".mobile-shift__action.is-pending"),
+        function (pendingAction) {
+            return !(
+                (pendingOwner === "face" && pendingAction.matches("[data-eo-apply-settings]"))
+                || (pendingOwner === "shift" && pendingAction.matches("[data-eo-shift-button]"))
+            );
+        }
+    );
 }
 
 function storeExcavatorRealtimeVersion(version) {
@@ -760,7 +784,7 @@ function invalidateExcavatorWorkRefresh() {
 
 function refreshExcavatorWorkFromServer(options) {
     options = options || {};
-    if (isExcavatorRefreshUnsafe()) {
+    if (isExcavatorRefreshUnsafe(options)) {
         return Promise.resolve(false);
     }
     var oldShell = document.querySelector("[data-eo-shell]");
@@ -774,7 +798,7 @@ function refreshExcavatorWorkFromServer(options) {
         "excavator",
         Number(options.version || 0)
     ).then(function (payload) {
-        if (mutationGeneration !== excavatorWorkMutationGeneration || isExcavatorRefreshUnsafe()) return false;
+        if (mutationGeneration !== excavatorWorkMutationGeneration || isExcavatorRefreshUnsafe(options)) return false;
         var newShell = window.AppOperationalFragment.parseRoot(
             payload.html,
             "[data-eo-shell]"
@@ -881,7 +905,11 @@ window.initExcavatorWorkShell = function () {
     var faceScreen = shell.querySelector('[data-eo-screen="face"]');
     var faceContent = shell.querySelector("[data-eo-face-settings-available]");
     var eventsScreen = shell.querySelector('[data-eo-screen="events"]');
-    var shiftServerBlocked = !!(shiftButton && shiftButton.disabled);
+    var shiftServerBlocked = !!(
+        shiftButton
+        && shiftButton.dataset.eoShiftServerBlocked === "true"
+    );
+    var shiftBlockMessage = shiftButton ? shiftButton.dataset.eoShiftBlockMessage || "" : "";
     var shiftHoldMs = 2000;
     var shiftHoldController = null;
     var logoutButton = shell.querySelector("[data-eo-logout-button]");
@@ -1676,9 +1704,77 @@ window.initExcavatorWorkShell = function () {
         });
     }
 
+    var dumpChoiceButtons = Array.prototype.slice.call(shell.querySelectorAll("[data-eo-dump-select]"));
+    var persistedDumpPointIds = Object.create(null);
+    var faceDraftTouched = false;
+    var faceSettingsPending = false;
+
+    dumpChoiceButtons.forEach(function (button) {
+        if (button.dataset.eoDumpPersisted === "true") {
+            persistedDumpPointIds[String(button.dataset.eoDumpSelect || "")] = true;
+        }
+    });
+
+    function normalizeDumpPointIds(ids) {
+        return (Array.isArray(ids) ? ids : []).map(String).filter(Boolean);
+    }
+
+    function renderDumpChoiceState(button) {
+        if (!button) return;
+        var id = String(button.dataset.eoDumpSelect || "");
+        var name = button.dataset.eoDumpName || "Точка разгрузки";
+        var selected = button.classList.contains("is-selected");
+        var persisted = !!persistedDumpPointIds[id];
+        var state = selected && persisted
+            ? "applied"
+            : selected
+                ? "pending-add"
+                : persisted
+                    ? "pending-remove"
+                    : "idle";
+        var stateLabel = state === "applied"
+            ? "Активная точка разгрузки"
+            : state === "pending-add"
+                ? "Будет добавлена после применения"
+                : state === "pending-remove"
+                    ? "Будет отключена после применения"
+                    : "Не выбрана";
+        button.classList.toggle("is-dump-applied", state === "applied");
+        button.classList.toggle("is-dump-pending", state === "pending-add");
+        button.classList.toggle("is-dump-pending-remove", state === "pending-remove");
+        button.dataset.eoDumpState = state;
+        button.dataset.eoDumpPersisted = persisted ? "true" : "false";
+        button.setAttribute("aria-pressed", selected ? "true" : "false");
+        button.setAttribute("aria-label", name + ". " + stateLabel + ".");
+    }
+
+    function renderDumpChoiceStates() {
+        dumpChoiceButtons.forEach(renderDumpChoiceState);
+    }
+
+    function replacePersistedDumpPointIds(ids) {
+        persistedDumpPointIds = Object.create(null);
+        normalizeDumpPointIds(ids).forEach(function (id) {
+            persistedDumpPointIds[id] = true;
+        });
+        renderDumpChoiceStates();
+    }
+
+    function replaceDraftDumpPointIds(ids) {
+        var selectedIds = Object.create(null);
+        normalizeDumpPointIds(ids).forEach(function (id) {
+            selectedIds[id] = true;
+        });
+        dumpChoiceButtons.forEach(function (button) {
+            button.classList.toggle("is-selected", !!selectedIds[String(button.dataset.eoDumpSelect || "")]);
+        });
+        renderDumpChoiceStates();
+    }
+
     function selectedDumpPointIds() {
         var ids = [];
-        shell.querySelectorAll("[data-eo-dump-select].is-selected").forEach(function (button) {
+        dumpChoiceButtons.forEach(function (button) {
+            if (!button.classList.contains("is-selected")) return;
             var id = button.dataset.eoDumpSelect || "";
             if (id && ids.indexOf(id) === -1) {
                 ids.push(id);
@@ -1699,14 +1795,18 @@ window.initExcavatorWorkShell = function () {
     }
 
     function toggleDumpChoice(button) {
-        if (!button || button.disabled || button.getAttribute("aria-disabled") === "true") return;
-        var selectedButtons = shell.querySelectorAll("[data-eo-dump-select].is-selected");
+        if (faceSettingsPending || !button || button.disabled || button.getAttribute("aria-disabled") === "true") return;
+        var selectedButtons = dumpChoiceButtons.filter(function (item) {
+            return item.classList.contains("is-selected");
+        });
         var isSelected = button.classList.contains("is-selected");
         if (isSelected && selectedButtons.length <= 1) {
+            showExcavatorNotice("Оставьте хотя бы одну точку разгрузки.");
             return;
         }
         button.classList.toggle("is-selected", !isSelected);
-        button.setAttribute("aria-pressed", isSelected ? "false" : "true");
+        faceDraftTouched = true;
+        renderDumpChoiceState(button);
         syncDumpPointInputs();
         updateApplySettingsState();
     }
@@ -1732,6 +1832,23 @@ window.initExcavatorWorkShell = function () {
     var appliedExcavatorSettingsSnapshot = settingsApplyButton && settingsApplyButton.dataset.eoSettingsApplied === "true"
         ? currentExcavatorSettingsSnapshot()
         : null;
+    renderDumpChoiceStates();
+
+    function setFaceSettingsPending(isPending) {
+        faceSettingsPending = !!isPending;
+        if (faceScreen) {
+            faceScreen.dataset.eoFacePending = faceSettingsPending ? "true" : "false";
+        }
+        var isAvailable = !!(faceContent && faceContent.dataset.eoFaceSettingsAvailable === "true");
+        dumpChoiceButtons.forEach(function (button) {
+            button.disabled = faceSettingsPending || !isAvailable;
+            button.setAttribute("aria-disabled", button.disabled ? "true" : "false");
+        });
+        shell.querySelectorAll("[data-eo-face-horizon], [data-eo-face-block], [data-eo-rock-select]").forEach(function (control) {
+            control.disabled = faceSettingsPending || !isAvailable;
+            control.setAttribute("aria-disabled", control.disabled ? "true" : "false");
+        });
+    }
 
     function updateApplySettingsState() {
         var button = shell.querySelector("[data-eo-apply-settings]");
@@ -1741,6 +1858,9 @@ window.initExcavatorWorkShell = function () {
         var isAvailable = button.dataset.eoSettingsAvailable === "true";
         var isDirty = appliedExcavatorSettingsSnapshot === null
             || currentExcavatorSettingsSnapshot() !== appliedExcavatorSettingsSnapshot;
+        if (faceScreen) {
+            faceScreen.dataset.eoFaceDirty = faceDraftTouched && isDirty ? "true" : "false";
+        }
         var isDisabled = !isAvailable || !isDirty;
         button.disabled = isDisabled;
         button.classList.toggle("is-disabled", isDisabled);
@@ -2408,13 +2528,19 @@ window.initExcavatorWorkShell = function () {
 
     var applySettings = shell.querySelector("[data-eo-apply-settings]");
     if (applySettings) {
+        function markFaceDraftChanged() {
+            if (faceSettingsPending) return;
+            faceDraftTouched = true;
+            updateApplySettingsState();
+        }
+
         shell.querySelectorAll("[data-eo-face-horizon], [data-eo-face-block]").forEach(function (input) {
-            input.addEventListener("input", updateApplySettingsState);
-            input.addEventListener("change", updateApplySettingsState);
+            input.addEventListener("input", markFaceDraftChanged);
+            input.addEventListener("change", markFaceDraftChanged);
         });
         var settingsRockSelect = shell.querySelector("[data-eo-rock-select]");
         if (settingsRockSelect) {
-            settingsRockSelect.addEventListener("change", updateApplySettingsState);
+            settingsRockSelect.addEventListener("change", markFaceDraftChanged);
         }
         updateApplySettingsState();
 
@@ -2448,8 +2574,11 @@ window.initExcavatorWorkShell = function () {
                 loading_horizon: horizonInput ? horizonInput.value : "",
                 loading_block: blockInput ? blockInput.value : ""
             };
+            invalidateExcavatorWorkRefresh();
+            setFaceSettingsPending(true);
             applySettings.disabled = true;
             applySettings.classList.add("is-pending");
+            applySettings.setAttribute("aria-disabled", "true");
             setApplySettingsLabel("Сохраняю");
             fetch(settingsUrl, {
                 method: "POST",
@@ -2469,42 +2598,41 @@ window.initExcavatorWorkShell = function () {
                     return data;
                 });
             }).then(function (data) {
-                if (dumpInput && data.dump_point_ids && data.dump_point_ids.length) {
-                    dumpInput.value = String(data.dump_point_ids[0]);
-                }
-                if (dumpPointsInput && data.dump_point_ids) {
-                    dumpPointsInput.value = data.dump_point_ids.join(",");
-                }
+                var savedIds = normalizeDumpPointIds(data.dump_point_ids || ids);
+                replaceDraftDumpPointIds(savedIds);
+                replacePersistedDumpPointIds(savedIds);
+                syncDumpPointInputs();
+                faceDraftTouched = false;
                 appliedExcavatorSettingsSnapshot = currentExcavatorSettingsSnapshot();
-                applySettings.classList.remove("is-pending");
-                updateApplySettingsState();
-                shell.dataset.eoActiveTab = data.work_context_changed && data.active_downtime_reason
+                if (faceScreen) faceScreen.dataset.eoFaceDirty = "false";
+                var nextTab = data.work_context_changed && data.active_downtime_reason
                     ? "events"
                     : "trucks";
-                return refreshExcavatorWorkFromServer({ preserveTab: true }).then(function (applied) {
+                shell.dataset.eoActiveTab = nextTab;
+                return refreshExcavatorWorkFromServer({ preserveTab: true, pendingOwner: "face" }).then(function (applied) {
                     if (!applied) {
-                        activateTab("trucks");
+                        shell.dataset.eoActiveTab = "face";
+                        activateTab("face");
+                        setFaceSettingsPending(false);
+                        applySettings.classList.remove("is-pending");
+                        setApplySettingsLabel("Применить настройки");
+                        updateApplySettingsState();
+                        showExcavatorNotice("Настройки сохранены. Экран обновится автоматически.");
                     }
                     if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
-                        window.AppRealtime.wake("excavator_settings_saved");
+                        try {
+                            window.AppRealtime.wake("excavator_settings_saved");
+                        } catch (error) {
+                            /* Сервер уже подтвердил сохранение; realtime только ускоряет синхронизацию. */
+                        }
                     }
                 });
-            }).catch(function (error) {
-                showExcavatorNotice(error.message || "Настройки не сохранены");
-            }).finally(function () {
+            }, function (error) {
+                setFaceSettingsPending(false);
                 applySettings.classList.remove("is-pending");
                 setApplySettingsLabel("Применить настройки");
                 updateApplySettingsState();
-            });
-        });
-    }
-
-    var refreshWorkButton = shell.querySelector("[data-eo-refresh-work]");
-    if (refreshWorkButton) {
-        refreshWorkButton.addEventListener("click", function () {
-            refreshWorkButton.disabled = true;
-            refreshExcavatorWorkFromServer({ preserveTab: true }).finally(function () {
-                refreshWorkButton.disabled = false;
+                showExcavatorNotice(error.message || "Настройки не сохранены");
             });
         });
     }
@@ -2578,10 +2706,22 @@ window.initExcavatorWorkShell = function () {
 
     function updateShiftActionState() {
         var validation = validateShiftReadings(false);
-        if (shiftButton && !shiftServerBlocked) {
-            shiftButton.disabled = !validation.valid;
-            shiftButton.setAttribute("aria-disabled", validation.valid ? "false" : "true");
-        }
+        if (!shiftButton || shiftButton.classList.contains("is-pending")) return;
+        if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) return;
+        var isSoftBlocked = shiftServerBlocked || !validation.valid;
+        shiftButton.disabled = false;
+        shiftButton.dataset.eoShiftReadingsValid = validation.valid ? "true" : "false";
+        shiftButton.setAttribute("aria-disabled", isSoftBlocked ? "true" : "false");
+        shiftButton.setAttribute(
+            "aria-label",
+            shiftServerBlocked
+                ? (shiftBlockMessage || "Смена сейчас недоступна")
+                : validation.valid
+                    ? (isShiftCloseAction()
+                        ? "Удерживайте 2 секунды, чтобы закрыть смену"
+                        : "Удерживайте 1 секунду, чтобы начать смену")
+                    : "Заполните показания. Нажмите, чтобы увидеть подсказку"
+        );
     }
 
     [shiftFuelInput, shiftHoursInput].forEach(function (input) {
@@ -2590,43 +2730,6 @@ window.initExcavatorWorkShell = function () {
             if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "true";
             clearShiftErrors();
             updateShiftActionState();
-        });
-    });
-
-    /* Enter на клавиатуре телефона уводит на следующее поле, а с последнего
-       убирает клавиатуру и переводит фокус на общее действие смены. */
-    var shiftReadingFields = [shiftFuelInput, shiftHoursInput].filter(function (input) {
-        return !!input;
-    });
-    shiftReadingFields.forEach(function (input, index) {
-        if (input.closest(".mobile-shift")) return;
-        var isLast = index === shiftReadingFields.length - 1;
-        input.setAttribute("enterkeyhint", isLast ? "done" : "next");
-        input.addEventListener("keydown", function (event) {
-            if (event.key !== "Enter" && event.keyCode !== 13) return;
-            event.preventDefault();
-            var next = shiftReadingFields[index + 1];
-            if (next && !next.disabled) {
-                next.focus();
-                if (next.select) next.select();
-                return;
-            }
-            /* Одного blur мало: телефон нередко оставляет клавиатуру на экране.
-               Переводим фокус на кнопку — она клавиатуру не вызывает, та
-               гарантированно уезжает, и до кнопки сразу можно дотянуться. */
-            input.blur();
-            if (shiftButton && !shiftButton.hidden && !shiftButton.disabled) {
-                shiftButton.focus();
-                return;
-            }
-            /* Ни одна кнопка не активна — показания не сошлись. Всё равно уводим
-               фокус с поля на сам экран, иначе клавиатура может остаться висеть
-               и закрывать пол-экрана. */
-            var host = input.closest('[data-eo-screen="shift"]') || shell;
-            if (host && !host.hasAttribute("tabindex")) host.setAttribute("tabindex", "-1");
-            if (host) {
-                try { host.focus({preventScroll: true}); } catch (error) { host.focus(); }
-            }
         });
     });
 
@@ -2639,7 +2742,13 @@ window.initExcavatorWorkShell = function () {
         if (!shiftButton) {
             return;
         }
-        if (!shiftUrl || shiftButton.disabled) {
+        if (
+            !shiftUrl
+            || shiftButton.disabled
+            || shiftButton.classList.contains("is-pending")
+            || shiftServerBlocked
+            || (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly())
+        ) {
             return;
         }
         var action = shiftButton.dataset.eoShiftAction || "toggle";
@@ -2690,21 +2799,30 @@ window.initExcavatorWorkShell = function () {
         }).then(function () {
             shiftPendingActionKey = "";
             shiftPendingActionId = "";
+            if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "false";
+            clearShiftErrors();
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
-                window.AppRealtime.wake("excavator_shift_saved");
+                try {
+                    window.AppRealtime.wake("excavator_shift_saved");
+                } catch (error) {
+                    /* Сервер уже сохранил смену; realtime только ускоряет обновление. */
+                }
             }
-            return refreshExcavatorWorkFromServer({ preserveTab: true }).then(function (applied) {
+            return refreshExcavatorWorkFromServer({ preserveTab: true, pendingOwner: "shift" }).then(function (applied) {
                 if (!applied) {
                     window.location.reload();
                 }
+            }, function () {
+                window.location.reload();
             });
-        }).catch(function (error) {
+        }, function (error) {
             showShiftErrors(error.error || error.message || "Смена не сохранена", error.field_errors || {});
             shiftButton.disabled = false;
             shiftButton.classList.remove("is-pending");
             if (shiftLabel) {
                 shiftLabel.textContent = action === "close" ? "Закрыть смену" : "Начать смену";
             }
+            updateShiftActionState();
         });
     }
 
@@ -2712,8 +2830,22 @@ window.initExcavatorWorkShell = function () {
         shiftHoldController = window.MobileShiftHold.bind(shiftButton, {
             holdMs: currentShiftHoldMs,
             readyLabel: isShiftCloseAction() ? "Закрыть смену" : "Начать смену",
+            canStart: function () {
+                return !shiftServerBlocked && validateShiftReadings(false).valid;
+            },
+            onBlockedPress: function () {
+                if (shiftServerBlocked) {
+                    showExcavatorNotice(shiftBlockMessage || "Смена сейчас недоступна.");
+                    return;
+                }
+                validateShiftReadings(true);
+            },
             onShortPress: function () {
-                showExcavatorNotice("Удерживайте кнопку");
+                showExcavatorNotice(
+                    isShiftCloseAction()
+                        ? "Удерживайте 2 секунды, чтобы закрыть смену."
+                        : "Удерживайте 1 секунду, чтобы начать смену."
+                );
             },
             onComplete: submitExcavatorShiftAction
         });
@@ -2853,14 +2985,10 @@ function initExcavatorPwaUpdates() {
     var textNode = document.querySelector("[data-eo-pwa-update-text]");
     var laterButton = document.querySelector("[data-eo-pwa-update-later]");
     var applyButton = document.querySelector("[data-eo-pwa-update-apply]");
-    var checkButton = document.querySelector("[data-eo-pwa-update-check]");
-    var checkLabel = document.querySelector("[data-eo-pwa-update-check-label]");
-    var checkVersion = document.querySelector("[data-eo-pwa-update-check-version]");
     var registrationRef = null;
     var waitingWorker = null;
     var waitingInspectionGeneration = 0;
     var contractSyncGeneration = 0;
-    var manualUpdatePromise = null;
     var storageKey = "excavator-pwa-update-available";
 
     function readStoredUpdate() {
@@ -2892,18 +3020,6 @@ function initExcavatorPwaUpdates() {
         document.querySelectorAll("[data-eo-pwa-update-badge]").forEach(function (badge) {
             badge.hidden = !visible;
         });
-        if (checkButton) {
-            checkButton.classList.toggle("has-pwa-update", visible);
-            checkButton.classList.remove("is-checking", "is-current");
-            checkButton.disabled = false;
-        }
-        if (checkLabel) {
-            checkLabel.textContent = "Обновить";
-        }
-        if (checkVersion) {
-            checkVersion.hidden = !visible;
-            checkVersion.textContent = visible ? formatExcavatorVersion(newVersion) : "";
-        }
         document.querySelectorAll("[data-eo-pwa-update-nav-target]").forEach(function (item) {
             item.classList.toggle("has-pwa-update", visible);
             item.setAttribute("aria-label", visible ? "Смена, доступно обновление" : "Смена");
@@ -3035,65 +3151,6 @@ function initExcavatorPwaUpdates() {
         });
     }
 
-    function runManualUpdateCheck() {
-        if (!checkButton) return;
-        if (manualUpdatePromise) return manualUpdatePromise;
-        checkButton.classList.add("is-checking");
-        checkButton.classList.remove("is-current");
-        checkButton.disabled = true;
-        if (checkLabel) checkLabel.textContent = "Проверка...";
-        var registrationPromise = registrationRef ? Promise.resolve(registrationRef) : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'excavator_operator' %}/{% else %}/excavator/{% endif %}");
-        manualUpdatePromise = registrationPromise.then(function (registration) {
-            if (registration) registrationRef = registration;
-            var guard = window.AppPwaContractGuard;
-            var updatePromise = guard && typeof guard.requestManualUpdate === "function"
-                ? guard.requestManualUpdate()
-                : registration && registration.update
-                    ? registration.update().then(function () {
-                        return {status: "current", registration: registration};
-                    })
-                    : Promise.resolve({status: "unavailable", registration: null});
-            return Promise.resolve(updatePromise).then(function (result) {
-                var updateStatus = result && result.status;
-                if (updateStatus === "error" || updateStatus === "unavailable") {
-                    var updateError = new Error("PWA manual update " + updateStatus);
-                    updateError.pwaUpdateStatus = updateStatus;
-                    throw updateError;
-                }
-                if (result && result.registration) registrationRef = result.registration;
-                registration = registrationRef || registration;
-                if (registration && registration.waiting) {
-                    return inspectWaitingWorker(registration, registration.waiting).then(function (shown) {
-                        return shown ? "shown" : syncContractState();
-                    });
-                }
-                return syncContractState();
-            });
-        }).then(function (result) {
-            if (result === "shown" || result === true) return;
-            checkButton.classList.add("is-current");
-            if (checkLabel) checkLabel.textContent = "Актуально";
-            window.setTimeout(function () {
-                checkButton.classList.remove("is-current");
-                if (checkLabel) checkLabel.textContent = "Обновить";
-            }, 1800);
-        }).catch(function (error) {
-            if (checkLabel) {
-                checkLabel.textContent = error && error.pwaUpdateStatus === "unavailable"
-                    ? "Недоступно"
-                    : "Ошибка";
-            }
-            window.setTimeout(function () {
-                if (checkLabel) checkLabel.textContent = "Обновить";
-            }, 1800);
-        }).finally(function () {
-            checkButton.classList.remove("is-checking");
-            checkButton.disabled = false;
-            manualUpdatePromise = null;
-        });
-        return manualUpdatePromise;
-    }
-
     function syncContractState() {
         var syncGeneration = ++contractSyncGeneration;
         if (
@@ -3190,9 +3247,6 @@ function initExcavatorPwaUpdates() {
     }
     if (applyButton) {
         applyButton.addEventListener("click", applyUpdate);
-    }
-    if (checkButton) {
-        checkButton.addEventListener("click", runManualUpdateCheck);
     }
     if (modal) {
         modal.addEventListener("click", function (event) {

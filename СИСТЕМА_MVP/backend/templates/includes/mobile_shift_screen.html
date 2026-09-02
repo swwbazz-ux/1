@@ -19,7 +19,6 @@
                 <span class="mobile-shift__version">Версия {{ driver_shell_version|default:'driver-mobile-shell-v0'|cut:'driver-mobile-shell-v' }}</span>
             {% else %}
                 <span class="eo-current-app-version" aria-label="Текущая версия приложения">Версия {{ app_shell_version|default:'excavator-mobile-shell-v0'|cut:'excavator-mobile-shell-v' }}</span>
-                <button class="eo-shift-update-button" type="button" data-eo-pwa-update-check aria-label="Проверить обновление приложения"><span aria-hidden="true"></span><b data-eo-pwa-update-check-label>Обновить</b><em data-eo-pwa-update-check-version hidden></em></button>
             {% endif %}
         </div>
     </header>
@@ -70,12 +69,16 @@
                 {% else %}
                     <label class="mobile-shift__field" data-mobile-shift-field="fuel" data-eo-shift-field="fuel">
                         <span class="mobile-shift__field-label"><span>Топливо</span>{% if open_shift %}<small>Начало <strong>{{ shift_start_fuel_display }}</strong> л</small>{% endif %}</span>
-                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" step="1" pattern="[0-9]*" min="0" name="shift_fuel" value="{{ shift_fuel_display }}" placeholder="0" data-eo-shift-fuel data-eo-fuel-limit="{{ shift_fuel_limit|default:'' }}" {% if equipment_open_shift %}disabled{% endif %}><em>л</em></span>
+                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" step="1" pattern="[0-9]*" min="0" name="shift_fuel" value="{{ shift_fuel_display }}" placeholder="—" data-eo-shift-fuel data-eo-fuel-limit="{{ shift_fuel_limit|default:'' }}" {% if equipment_open_shift %}disabled{% endif %}><em>л</em></span>
                         <small class="mobile-shift__field-error" data-eo-shift-field-error="fuel"></small>
                     </label>
+                    <div class="mobile-shift__field mobile-shift__field--reference" data-mobile-shift-field="fuel_limit">
+                        <span class="mobile-shift__field-label"><span>Лимит топлива</span><small>Для этой модели</small></span>
+                        <span class="mobile-shift__metric-value"><strong>{{ shift_fuel_limit|floatformat:"0"|default:"—" }}</strong><em>л</em></span>
+                    </div>
                     <label class="mobile-shift__field" data-mobile-shift-field="engine_hours" data-eo-shift-field="engine_hours">
                         <span class="mobile-shift__field-label"><span>Моточасы</span>{% if open_shift %}<small>Начало <strong>{{ shift_start_engine_hours_display }}</strong> м/ч</small>{% endif %}</span>
-                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" step="1" pattern="[0-9]*" min="0" name="shift_engine_hours" value="{{ shift_engine_hours_display }}" placeholder="0" data-eo-shift-engine-hours data-eo-start-engine-hours="{{ shift_start_engine_hours_display }}" {% if equipment_open_shift %}disabled{% endif %}><em>м/ч</em></span>
+                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" step="1" pattern="[0-9]*" min="0" name="shift_engine_hours" value="{{ shift_engine_hours_display }}" placeholder="—" data-eo-shift-engine-hours data-eo-start-engine-hours="{{ shift_start_engine_hours_display }}" {% if equipment_open_shift %}disabled{% endif %}><em>м/ч</em></span>
                         <small class="mobile-shift__field-error" data-eo-shift-field-error="engine_hours"></small>
                     </label>
                 {% endif %}
@@ -108,7 +111,7 @@
             {% endif %}
             <button class="mobile-shift__action mobile-shift__action--secondary" type="button" data-driver-shift-logout data-driver-logout-url="{% url 'logout' %}" aria-label="Удерживайте 2 секунды, чтобы выйти"><span data-mobile-shift-label>Выйти</span></button>
         {% else %}
-            <button class="mobile-shift__action {% if open_shift %}mobile-shift__action--danger{% else %}mobile-shift__action--primary{% endif %}" type="button" data-eo-shift-button data-eo-shift-action="{% if open_shift %}close{% else %}open{% endif %}" {% if open_shift %}aria-label="Удерживайте 2 секунды, чтобы закрыть смену"{% else %}aria-label="Удерживайте 1 секунду, чтобы начать смену"{% if work_assignment_state != "assigned" or equipment_open_shift or not shift_fuel_limit %} disabled aria-disabled="true"{% endif %}{% endif %}><span data-eo-shift-label data-mobile-shift-label>{% if open_shift %}Закрыть смену{% else %}Начать смену{% endif %}</span></button>
+            <button class="mobile-shift__action {% if open_shift %}mobile-shift__action--danger{% else %}mobile-shift__action--primary{% endif %}" type="button" data-eo-shift-button data-eo-shift-action="{% if open_shift %}close{% else %}open{% endif %}" data-eo-shift-server-blocked="{% if shift_action_block_message %}true{% else %}false{% endif %}" data-eo-shift-block-message="{{ shift_action_block_message }}" {% if shift_action_block_message %}aria-disabled="true" aria-label="{{ shift_action_block_message }}"{% elif open_shift %}aria-label="Удерживайте 2 секунды, чтобы закрыть смену"{% else %}aria-label="Удерживайте 1 секунду, чтобы начать смену"{% endif %}><span data-eo-shift-label data-mobile-shift-label>{% if open_shift %}Закрыть смену{% else %}Начать смену{% endif %}</span></button>
             <button class="mobile-shift__action mobile-shift__action--secondary" type="button" data-eo-logout-button data-eo-logout-url="{% url 'logout' %}" aria-label="Удерживайте 2 секунды, чтобы выйти"><span data-eo-logout-label data-mobile-shift-label>Выйти</span></button>
         {% endif %}
     </footer>

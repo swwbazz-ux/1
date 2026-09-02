@@ -40,8 +40,8 @@ function extractMarkedSource(source, startMarker, endMarker, label) {
 }
 
 
-function extractBraceBlock(source, signature, label) {
-    const start = source.indexOf(signature);
+function extractBraceBlock(source, signature, label, fromIndex = 0) {
+    const start = source.indexOf(signature, fromIndex);
     assert.notEqual(start, -1, `${label} signature was not found.`);
     const open = source.indexOf("{", start + signature.length);
     assert.notEqual(open, -1, `${label} opening brace was not found.`);
@@ -103,6 +103,115 @@ function extractBraceBlock(source, signature, label) {
         }
     }
     assert.fail(`${label} closing brace was not found.`);
+}
+
+
+function createExcavatorRefreshRuntime() {
+    let currentShell = null;
+    let requestCount = 0;
+    let replacementCount = 0;
+    const shiftPendingButton = {
+        matches(selector) {
+            return selector === "[data-eo-shift-button]";
+        },
+    };
+    const shiftScreen = {
+        dataset: {eoShiftDirty: "false"},
+        querySelector() {
+            return null;
+        },
+    };
+    const faceScreen = {
+        dataset: {eoFaceDirty: "false", eoFacePending: "false"},
+    };
+    const oldShell = {
+        dataset: {eoActiveTab: "shift"},
+        contains() {
+            return false;
+        },
+        querySelector(selector) {
+            if (selector === '[data-eo-screen="shift"]') return shiftScreen;
+            if (selector === '[data-eo-screen="face"]') return faceScreen;
+            return null;
+        },
+        replaceWith(replacement) {
+            replacementCount += 1;
+            currentShell = replacement;
+        },
+    };
+    const newShell = {dataset: {eoActiveTab: "shift"}};
+    currentShell = oldShell;
+    const document = {
+        activeElement: null,
+        getElementById() {
+            return null;
+        },
+        querySelector(selector) {
+            if (selector === "[data-eo-shell]") return currentShell;
+            return null;
+        },
+        querySelectorAll(selector) {
+            assert.equal(selector, ".mobile-shift__action.is-pending");
+            return [shiftPendingButton];
+        },
+    };
+    const window = {
+        AppOperationalFragment: {
+            request(screen) {
+                assert.equal(screen, "excavator");
+                requestCount += 1;
+                return Promise.resolve({html: "<main></main>"});
+            },
+            parseRoot() {
+                return newShell;
+            },
+        },
+        bindMobileShiftScreens() {},
+        initExcavatorWorkShell() {},
+    };
+    const source = [
+        "var excavatorWorkMutationGeneration = 0;",
+        "function readExcavatorAssignmentSnapshot() { return {}; }",
+        "function syncExcavatorAssignmentSnapshot() {}",
+        "function scheduleExcavatorViewportHeightSync() {}",
+        extractBraceBlock(
+            EXCAVATOR_TEMPLATE_SOURCE,
+            "function isExcavatorRefreshUnsafe(options)",
+            "Excavator refresh safety predicate"
+        ),
+        extractBraceBlock(
+            EXCAVATOR_TEMPLATE_SOURCE,
+            "function refreshExcavatorWorkFromServer(options)",
+            "Excavator fragment refresh"
+        ),
+        "context.refresh = refreshExcavatorWorkFromServer;",
+    ].join("\n");
+    const context = {context: {}, document, window, Promise, Array};
+    vm.runInNewContext(source, context, {
+        filename: "templates/trips/excavator_work.html#shift-fragment-refresh",
+    });
+    return {
+        refresh: context.context.refresh,
+        requestCount() {
+            return requestCount;
+        },
+        replacementCount() {
+            return replacementCount;
+        },
+    };
+}
+
+
+function extractExcavatorShiftSuccessHandler() {
+    const marker = '}).then(function () {\n            shiftPendingActionKey = "";';
+    const start = EXCAVATOR_TEMPLATE_SOURCE.indexOf(marker);
+    assert.notEqual(start, -1, "Excavator Shift success handler was not found.");
+    return extractBraceBlock(
+        EXCAVATOR_TEMPLATE_SOURCE,
+        "function ()",
+        "Excavator Shift success handler",
+        start
+    );
 }
 
 
@@ -350,6 +459,62 @@ test("production fragment helper parses only the requested root", () => {
         html: '<section data-test-root="1"></section>',
         selector: "[data-test-root]",
     }]);
+});
+
+
+test("Excavator fragment refresh admits only its scoped pending Shift owner", async () => {
+    const runtime = createExcavatorRefreshRuntime();
+
+    const blocked = await runtime.refresh({preserveTab: true});
+    assert.equal(blocked, false);
+    assert.equal(runtime.requestCount(), 0);
+    assert.equal(runtime.replacementCount(), 0);
+
+    const applied = await runtime.refresh({preserveTab: true, pendingOwner: "shift"});
+    assert.equal(applied, true);
+    assert.equal(runtime.requestCount(), 1);
+    assert.equal(runtime.replacementCount(), 1);
+});
+
+
+test("successful Excavator Shift save clears its draft before owned fragment reconciliation", async () => {
+    const refreshCalls = [];
+    let clearCalls = 0;
+    let reloadCalls = 0;
+    const shiftScreen = {dataset: {eoShiftDirty: "true"}};
+    const sandbox = {
+        shiftPendingActionKey: "pending-key",
+        shiftPendingActionId: "pending-id",
+        shiftScreen,
+        clearShiftErrors() {
+            clearCalls += 1;
+        },
+        refreshExcavatorWorkFromServer(options) {
+            refreshCalls.push(options);
+            return Promise.resolve(true);
+        },
+        window: {
+            AppRealtime: null,
+            location: {
+                reload() {
+                    reloadCalls += 1;
+                },
+            },
+        },
+    };
+    vm.runInNewContext(
+        `context.success = ${extractExcavatorShiftSuccessHandler()};`,
+        {...sandbox, context: sandbox},
+        {filename: "templates/trips/excavator_work.html#shift-save-success"}
+    );
+
+    await sandbox.success();
+
+    assert.equal(shiftScreen.dataset.eoShiftDirty, "false");
+    assert.equal(clearCalls, 1);
+    assert.equal(refreshCalls.length, 1);
+    assert.equal(refreshCalls[0].pendingOwner, "shift");
+    assert.equal(reloadCalls, 0);
 });
 
 

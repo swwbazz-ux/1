@@ -2379,65 +2379,6 @@ test(
 );
 
 test(
-    "double manual Excavator check is single-flight and keeps an understandable result",
-    async () => {
-        const runtime = createRolePwaRuntime({
-            roleCode: "excavator_operator",
-            shellVersion: "excavator-mobile-shell-v127",
-        });
-        const checkButton = runtime.addNode(
-            "[data-eo-pwa-update-check]",
-            new ElementStub("button")
-        );
-        const checkLabel = runtime.addNode(
-            "[data-eo-pwa-update-check-label]",
-            new ElementStub("b")
-        );
-        runtime.addNode(
-            "[data-eo-pwa-update-check-version]",
-            new ElementStub("em")
-        );
-        runtime.addNode(
-            "[data-eo-pwa-update-status]",
-            new ElementStub("div")
-        );
-        runtime.context.excavatorShellVersion =
-            "excavator-mobile-shell-v127";
-        runtime.context.scheduleExcavatorViewportHeightSync = function () {};
-        vm.runInContext(extractExcavatorPwaSource(), runtime.context, {
-            filename: "templates/trips/excavator_work.html::PwaUpdates",
-        });
-        runtime.context.initExcavatorPwaUpdates();
-        await flushPromises();
-        const baselineUpdates = runtime.updateCalls;
-
-        runtime.deferManualUpdates();
-        checkButton.dispatchEvent(new CustomEventStub("click"));
-        checkButton.dispatchEvent(new CustomEventStub("click"));
-        await flushPromises();
-
-        assert.equal(
-            runtime.updateCalls - baselineUpdates,
-            1,
-            "double click while a manual check is pending must reuse one update"
-        );
-        assert.match(
-            checkLabel.textContent,
-            /Провер/,
-            "the pending manual check must have an understandable status"
-        );
-
-        runtime.resolveManualUpdate();
-        await flushPromises(24);
-        assert.match(
-            checkLabel.textContent,
-            /Актуально|Доступно|Обнов/,
-            "the completed manual check must keep an understandable result"
-        );
-    }
-);
-
-test(
     "unfinished Driver action never receives SKIP_WAITING or a forced reload",
     {skip: guardUnavailable},
     async () => {
@@ -2747,7 +2688,6 @@ test(
 
         for (const attribute of [
             "data-eo-pwa-update-nav-target",
-            "data-eo-pwa-update-check",
         ]) {
             const updateButton = new ElementStub("button", {[attribute]: ""});
             runtime.document.body.appendChild(updateButton);

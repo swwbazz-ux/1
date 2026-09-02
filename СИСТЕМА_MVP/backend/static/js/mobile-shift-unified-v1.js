@@ -18,14 +18,27 @@
         var frame = null;
         var startedAt = 0;
         var completed = false;
+        var blockedClick = false;
 
         function holdMs() {
             var value = typeof options.holdMs === "function" ? options.holdMs() : options.holdMs;
             return Math.max(250, Number(value) || 2000);
         }
 
-        function enabled() {
-            return !button.disabled && button.getAttribute("aria-disabled") !== "true" && !button.classList.contains("is-pending");
+        function interactable() {
+            return !button.disabled && !button.hidden && !button.classList.contains("is-pending");
+        }
+
+        function allowed() {
+            if (!interactable() || button.getAttribute("aria-disabled") === "true") return false;
+            return typeof options.canStart !== "function" || options.canStart() !== false;
+        }
+
+        function reportBlocked(event) {
+            if (event) event.preventDefault();
+            if (!interactable()) return;
+            blockedClick = true;
+            if (typeof options.onBlockedPress === "function") options.onBlockedPress();
         }
 
         function setProgress(value) {
@@ -56,8 +69,9 @@
         }
 
         function finish() {
-            if (!enabled()) {
+            if (!allowed()) {
                 reset();
+                reportBlocked();
                 return;
             }
             setProgress(100);
@@ -69,8 +83,13 @@
         }
 
         function start(event) {
-            if (!enabled() || startedAt) return;
+            if (startedAt || !interactable()) return;
+            if (!allowed()) {
+                reportBlocked(event);
+                return;
+            }
             if (event) event.preventDefault();
+            blockedClick = false;
             startedAt = Date.now();
             button.classList.add("is-holding");
             setLabel(button, holdLabel);
@@ -90,11 +109,21 @@
         });
         button.addEventListener("click", function (event) {
             event.preventDefault();
+            if (blockedClick) {
+                blockedClick = false;
+                return;
+            }
             if (completed) {
                 completed = false;
                 return;
             }
-            if (enabled() && typeof options.onShortPress === "function") options.onShortPress();
+            if (!interactable()) return;
+            if (!allowed()) {
+                reportBlocked();
+                blockedClick = false;
+                return;
+            }
+            if (typeof options.onShortPress === "function") options.onShortPress();
         });
         button.addEventListener("keydown", function (event) {
             if ((event.key === "Enter" || event.key === " ") && !event.repeat) start(event);
@@ -144,12 +173,20 @@
                 var action = component.querySelector(
                     "[data-driver-shift-open-button], [data-driver-shift-close-button], [data-eo-shift-button]"
                 );
-                if (action && !action.disabled && action.getAttribute("aria-disabled") !== "true") {
-                    action.focus({ preventScroll: true });
+                if (action && !action.disabled && !action.hidden && !action.classList.contains("is-pending")) {
+                    try {
+                        action.focus({ preventScroll: true });
+                    } catch (error) {
+                        action.focus();
+                    }
                     return;
                 }
                 if (!component.hasAttribute("tabindex")) component.setAttribute("tabindex", "-1");
-                component.focus({ preventScroll: true });
+                try {
+                    component.focus({ preventScroll: true });
+                } catch (error) {
+                    component.focus();
+                }
             });
         });
     }

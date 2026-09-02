@@ -423,10 +423,7 @@ function addExcavatorNodes(runtime) {
     runtime.document.addNode("[data-eo-pwa-update-text]");
     runtime.document.addNode("[data-eo-pwa-update-later]");
     const applyButton = runtime.document.addNode("[data-eo-pwa-update-apply]");
-    const checkButton = runtime.document.addNode("[data-eo-pwa-update-check]");
-    const checkLabel = runtime.document.addNode("[data-eo-pwa-update-check-label]");
-    runtime.document.addNode("[data-eo-pwa-update-check-version]");
-    return {badge, modal, applyButton, checkButton, checkLabel};
+    return {badge, modal, applyButton};
 }
 
 function addMiningMasterNodes(runtime) {
@@ -451,34 +448,6 @@ async function flushPromises(iterations = 20) {
         await Promise.resolve();
     }
 }
-
-test(
-    "Excavator manual check stops on an unavailable shared-guard result",
-    async () => {
-        const runtime = createRoleRuntime({
-            roleCode: "excavator_operator",
-            activeVersion: "excavator-mobile-shell-v127",
-            waitingVersion: "excavator-mobile-shell-v127",
-            hasWaitingWorker: false,
-            manualUpdateResult: {status: "unavailable", registration: null},
-        });
-        const nodes = addExcavatorNodes(runtime);
-        runtime.context.excavatorShellVersion = "excavator-mobile-shell-v127";
-        vm.runInContext(extractExcavatorPwaSource(), runtime.context, {
-            filename: "templates/trips/excavator_work.html::PwaUpdates",
-        });
-        runtime.context.initExcavatorPwaUpdates();
-        await flushPromises();
-
-        nodes.checkButton.dispatchEvent(new CustomEventStub("click"));
-        await flushPromises();
-
-        assert.equal(runtime.manualUpdateCalls, 1);
-        assert.equal(runtime.registrationUpdateCalls, 0);
-        assert.equal(nodes.checkLabel.textContent, "Недоступно");
-        assert.equal(nodes.checkButton.classList.contains("is-current"), false);
-    }
-);
 
 test(
     "Mining Master manual check stops on a shared-guard error before fallback registration",

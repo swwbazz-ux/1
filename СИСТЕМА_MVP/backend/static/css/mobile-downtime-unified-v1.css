@@ -83,30 +83,6 @@ body.excavator-operator-screen .eo-screen.mobile-work-screen.mobile-downtime[dat
     min-block-size: 0;
 }
 
-.mobile-downtime .mobile-shift__update-group .eo-current-app-version,
-.mobile-downtime .mobile-shift__update-group .native-app-version {
-    color: rgba(178, 192, 198, .78) !important;
-    font-size: clamp(11px, 3.2vw, 14px) !important;
-    font-weight: 600 !important;
-    line-height: 1 !important;
-    letter-spacing: 0 !important;
-}
-
-.mobile-downtime__refresh.eo-refresh-button {
-    flex: 0 0 auto !important;
-    inline-size: clamp(28px, 7vw, 34px) !important;
-    block-size: clamp(28px, 7vw, 34px) !important;
-    min-inline-size: 0 !important;
-    min-block-size: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    display: grid !important;
-    place-items: center !important;
-    border-radius: clamp(7px, 2vw, 10px) !important;
-    font-size: clamp(17px, 4.8vw, 22px) !important;
-    line-height: 1 !important;
-}
-
 .mobile-downtime__content {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -240,18 +216,6 @@ body.excavator-operator-screen .mobile-downtime__actions.mobile-shift__actions {
 }
 
 @media (orientation: landscape) and (max-height: 500px) {
-    body.excavator-operator-screen .mobile-shift {
-        --ms-gap: 4px;
-        --ms-section-pad: 5px;
-        --ms-card-pad-x: 6px;
-        --ms-card-pad-y: 1px;
-        --ms-section-size: 11px;
-        --ms-label-size: 9px;
-        --ms-value-size: 18px;
-        --ms-unit-size: 9px;
-        --ms-summary-size: 15px;
-    }
-
     body.excavator-operator-screen .eo-shell .eo-screen.mobile-work-screen[data-eo-screen] {
         grid-template-rows: var(--ms-screen-rows-landscape) !important;
     }
@@ -268,14 +232,6 @@ body.excavator-operator-screen .mobile-downtime__actions.mobile-shift__actions {
 
     body.excavator-operator-screen .eo-screen.mobile-downtime[data-eo-screen="events"] .mobile-downtime__total b[data-eo-active-duration] {
         font-size: 26px !important;
-    }
-
-    body.excavator-operator-screen .mobile-shift .mobile-shift__cell {
-        gap: 1px !important;
-    }
-
-    body.excavator-operator-screen .mobile-shift .mobile-shift__cell > em {
-        font-size: 8px !important;
     }
 
     body.excavator-operator-screen .mobile-downtime__reasons.eo-reason-grid {

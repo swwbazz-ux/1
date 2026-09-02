@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -130,6 +131,8 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '>Начать смену<')
         self.assertContains(response, 'data-mobile-shift-role="driver"')
         self.assertContains(response, 'data-mobile-shift-state="closed"')
+        self.assertNotContains(response, 'data-mobile-shift-field="fuel_limit"')
+        self.assertNotContains(response, 'mobile-shift__field--reference')
         self.assertContains(response, 'Показатели техники')
         self.assertContains(response, 'Итог смены')
         self.assertContains(response, 'Смена закрыта')
@@ -167,6 +170,8 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'data-mobile-shift-field="fuel"')
         self.assertContains(response, 'data-mobile-shift-field="mileage"')
         self.assertContains(response, 'data-mobile-shift-field="engine_hours"')
+        self.assertNotContains(response, 'data-mobile-shift-field="fuel_limit"')
+        self.assertNotContains(response, 'mobile-shift__field--reference')
         self.assertContains(response, 'inputmode="numeric"')
         self.assertContains(response, 'step="1"')
         self.assertNotContains(response, 'inputmode="decimal"')
@@ -191,6 +196,29 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Отчёт водителя за смену')
         self.assertContains(response, 'Событий в текущей смене пока нет')
 
+    def test_shared_shift_hold_distinguishes_soft_and_native_disabled_actions(self):
+        backend_root = Path(__file__).resolve().parents[1]
+        script = (backend_root / 'static' / 'js' / 'mobile-shift-unified-v1.js').read_text(encoding='utf-8')
+        css = (backend_root / 'static' / 'css' / 'mobile-shift-unified-v1.css').read_text(encoding='utf-8')
+
+        self.assertIn(
+            'return !button.disabled && !button.hidden && !button.classList.contains("is-pending");',
+            script,
+        )
+        self.assertIn(
+            'if (!interactable() || button.getAttribute("aria-disabled") === "true") return false;',
+            script,
+        )
+        self.assertIn('return typeof options.canStart !== "function" || options.canStart() !== false;', script)
+        self.assertIn('function reportBlocked(event)', script)
+        self.assertIn('if (!interactable()) return;', script)
+        self.assertIn('if (typeof options.onBlockedPress === "function") options.onBlockedPress();', script)
+        self.assertIn('.mobile-shift__action:disabled {', css)
+        self.assertIn('.mobile-shift__action[aria-disabled="true"]:not(:disabled) {', css)
+        self.assertIn('html[data-mobile-shift-orientation="landscape"] .mobile-shift {', css)
+        self.assertIn('--ms-label-size: 9px;', css)
+        self.assertIn('--ms-summary-size: 15px;', css)
+
     def test_driver_screen_includes_own_pwa_install_metadata(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         Equipment.objects.create(equipment_type=truck_type, garage_number='10')
@@ -211,7 +239,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v181')
+        self.assertContains(response, 'driver-mobile-shell-v182')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
         self.assertContains(
@@ -238,14 +266,14 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'body.driver-mobile-screen .driver-online::after')
         self.assertContains(response, 'display: none !important')
         self.assertNotContains(response, '>Активная смена<')
-        self.assertContains(response, '--driver-dial-size: clamp(320px, min(92vw, 62dvh), 520px)')
+        self.assertContains(response, '--driver-dial-size: clamp(220px, min(92vw, 62dvh), 520px)')
         self.assertContains(response, 'grid-template-areas:')
         self.assertContains(response, '"context"')
         self.assertContains(response, '"dial"')
         self.assertContains(response, '"assign"')
         self.assertContains(response, 'gap: var(--driver-work-gap)')
         self.assertContains(response, 'class="driver-work-context-card"')
-        self.assertContains(response, '--driver-work-column: min(100%, clamp(320px, 92vw, 720px))')
+        self.assertContains(response, '--driver-work-column: min(100%, 720px)')
         self.assertContains(response, 'class="driver-work-context-heading"')
         self.assertContains(response, 'class="driver-work-context-machine"')
         self.assertContains(response, 'class="driver-work-context-geology"')
@@ -261,7 +289,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'function splitDriverDialLabel(text)')
         self.assertContains(response, 'function preferredDriverDialFontSize(coreWidth, lineCount, textLength)')
         self.assertContains(response, 'function minimumDriverDialFontSize(lineCount, textLength)')
-        self.assertContains(response, 'function fitDriverDialLabel(label)')
+        self.assertContains(response, 'function fitDriverDialLabel(label, force)')
         self.assertContains(response, 'Math.min(60, Math.max(50, coreWidth * 0.23))')
         self.assertContains(response, 'Math.min(54, Math.max(42, coreWidth * 0.2))')
         self.assertContains(response, 'Math.min(48, Math.max(35, coreWidth * 0.18))')
@@ -301,7 +329,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'width: 74%')
         self.assertContains(response, 'width: max-content')
         self.assertNotContains(response, '--driver-dial-size: clamp(260px, 76vw, 380px)')
-        self.assertContains(response, 'var holdMs = 2000')
+        self.assertContains(response, 'var holdMs = Math.max(0, Number(options.holdMs || 2000))')
         self.assertContains(
             response,
             'holdButton.style.setProperty("--driver-hold", percent.toFixed(2))',
@@ -419,7 +447,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v181', script)
+        self.assertIn('driver-mobile-shell-v182', script)
         self.assertIn('/driver/', script)
         self.assertIn('/driver/shift/', script)
         self.assertIn('/driver.webmanifest', script)
@@ -2775,7 +2803,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v181')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v182')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
