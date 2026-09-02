@@ -859,11 +859,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v179')
+        self.assertContains(response, 'excavator-mobile-shell-v180')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 179')
+        self.assertContains(response, 'Версия 180')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -889,6 +889,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'data-eo-active-title')
         self.assertNotContains(response, 'data-eo-active-reason')
         self.assertContains(response, 'data-eo-apply-settings')
+        self.assertContains(response, 'data-eo-settings-available="true"')
         self.assertContains(response, 'aria-label="Применить настройки"')
         self.assertNotContains(response, 'data-eo-hold-label="Применить настройки"')
         self.assertContains(response, 'data-eo-settings-applied="')
@@ -2109,6 +2110,39 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'showExcavatorNotice("Удерживайте кнопку");')
         self.assertNotContains(response, 'shiftLabel.textContent = "Держите";')
 
+        self.assertContains(response, 'data-eo-settings-available="false"')
+        self.assertContains(response, 'disabled aria-disabled="true" aria-label="Сначала начните смену"')
+        self.assertContains(response, '<span data-mobile-shift-label>Сначала начните смену</span>', html=True)
+        self.assertContains(response, 'class="mobile-shift-toast" data-eo-notice hidden')
+        self.assertNotContains(response, 'data-eo-notice-modal')
+        self.assertNotContains(response, 'class="eo-notice-dialog"')
+
+        rejected = self.client.post(
+            reverse('excavator_work_settings'),
+            data=json.dumps({
+                'client_action_id': 'settings-without-shift',
+                'rock_type_id': self.rock.id,
+                'dump_point_ids': [self.dump_point.id],
+                'loading_horizon': '75',
+                'loading_block': '52',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(rejected.status_code, 409)
+        self.assertEqual(rejected.json()['error'], 'Сначала нужно открыть смену на экскаваторе.')
+        self.assertEqual(OperationalStateEvent.objects.filter(payload__action='excavator_work_settings').count(), 0)
+
+        shared_css = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'css'
+            / 'mobile-shift-unified-v1.css'
+        ).read_text(encoding='utf-8')
+        self.assertIn('.mobile-shift-toast[hidden]', shared_css)
+        self.assertIn('.mobile-shift-toast {', shared_css)
+        self.assertIn('position: fixed;', shared_css)
+        self.assertIn('pointer-events: none;', shared_css)
+
 
     def test_excavator_manifest_is_installable_pwa_manifest(self):
         response = self.client.get(reverse('excavator_manifest'))
@@ -2132,7 +2166,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v179', script)
+        self.assertIn('excavator-mobile-shell-v180', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)

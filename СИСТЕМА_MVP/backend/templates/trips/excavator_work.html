@@ -6,12 +6,12 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v179">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v179">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v179">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v179">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v179">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v179" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v180">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v180">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v180">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v180">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v180">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v180" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -126,7 +126,7 @@
             <input type="hidden" name="dump_point" value="{{ default_dump_point }}" data-eo-dump-input>
             <input type="hidden" name="dump_points" value="{% for id in selected_dump_point_ids %}{% if not forloop.first %},{% endif %}{{ id }}{% endfor %}" data-eo-dump-points-input>
             <footer class="mobile-shift__actions mobile-face__actions">
-                <button class="mobile-shift__action mobile-shift__action--primary mobile-face__apply{% if has_applied_settings %} is-disabled{% endif %}" type="button" data-eo-apply-settings data-eo-settings-applied="{% if has_applied_settings %}true{% else %}false{% endif %}"{% if has_applied_settings %} disabled aria-disabled="true" aria-label="Настройки уже применены"{% else %} aria-disabled="false" aria-label="Применить настройки"{% endif %}><span data-mobile-shift-label>Применить настройки</span></button>
+                <button class="mobile-shift__action mobile-shift__action--primary mobile-face__apply{% if not open_shift or has_applied_settings %} is-disabled{% endif %}" type="button" data-eo-apply-settings data-eo-settings-available="{% if open_shift %}true{% else %}false{% endif %}" data-eo-settings-applied="{% if has_applied_settings %}true{% else %}false{% endif %}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Сначала начните смену"{% elif has_applied_settings %} disabled aria-disabled="true" aria-label="Настройки уже применены"{% else %} aria-disabled="false" aria-label="Применить настройки"{% endif %}><span data-mobile-shift-label>{% if not open_shift %}Сначала начните смену{% else %}Применить настройки{% endif %}</span></button>
             </footer>
         </section>
 
@@ -371,17 +371,7 @@
 </div>
 {% endif %}
 
-<div class="eo-notice-modal" data-eo-notice-modal hidden aria-hidden="true">
-    <section class="eo-notice-dialog" role="alertdialog" aria-modal="true" aria-labelledby="eo-notice-title" aria-describedby="eo-notice-message">
-        <button class="eo-notice-close" type="button" data-eo-notice-close aria-label="Закрыть">×</button>
-        <div class="eo-notice-icon" aria-hidden="true">!</div>
-        <div class="eo-notice-copy">
-            <h2 id="eo-notice-title">Сообщение</h2>
-            <p id="eo-notice-message" data-eo-notice-message></p>
-        </div>
-        <button class="eo-notice-accept" type="button" data-eo-notice-close>Понятно</button>
-    </section>
-</div>
+<div class="mobile-shift-toast" data-eo-notice hidden role="status" aria-live="assertive" aria-atomic="true"></div>
 
 {{ truck_detail_cards|json_script:"eo-truck-detail-cards-data" }}
 {% get_static_prefix as static_prefix %}
@@ -389,17 +379,16 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v179";
+var excavatorShellVersion = "excavator-mobile-shell-v180";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
 var excavatorStableViewportWidth = 0;
 document.body.dataset.realtimeVisibilityOnly = "true";
-var excavatorNoticeModal = document.querySelector("[data-eo-notice-modal]");
-var excavatorNoticeMessage = excavatorNoticeModal ? excavatorNoticeModal.querySelector("[data-eo-notice-message]") : null;
+var excavatorNotice = document.querySelector("[data-eo-notice]");
+var excavatorNoticeTimer = null;
 var excavatorNoticeLastKey = "";
 var excavatorNoticeLastShownAt = 0;
-var excavatorNoticeReturnFocus = null;
 var excavatorAssignmentAudioContext = null;
 var excavatorAssignmentAudioUnlocked = false;
 
@@ -417,32 +406,24 @@ function compactExcavatorNotice(message) {
 }
 
 function closeExcavatorNotice() {
-    if (!excavatorNoticeModal || excavatorNoticeModal.hidden) return;
-    excavatorNoticeModal.hidden = true;
-    excavatorNoticeModal.setAttribute("aria-hidden", "true");
-    document.body.classList.remove("eo-notice-open");
-    if (excavatorNoticeReturnFocus && excavatorNoticeReturnFocus.isConnected && typeof excavatorNoticeReturnFocus.focus === "function") {
-        excavatorNoticeReturnFocus.focus();
-    }
-    excavatorNoticeReturnFocus = null;
+    window.clearTimeout(excavatorNoticeTimer);
+    excavatorNoticeTimer = null;
+    if (excavatorNotice) excavatorNotice.hidden = true;
 }
 
 function showExcavatorNotice(message) {
-    if (!excavatorNoticeModal || !excavatorNoticeMessage) return;
+    if (!excavatorNotice) return;
     var text = compactExcavatorNotice(message);
     var now = Date.now();
-    if ((!excavatorNoticeModal.hidden && excavatorNoticeMessage.textContent === text) || (excavatorNoticeLastKey === text && now - excavatorNoticeLastShownAt < 2200)) {
+    if ((!excavatorNotice.hidden && excavatorNotice.textContent === text) || (excavatorNoticeLastKey === text && now - excavatorNoticeLastShownAt < 2200)) {
         return;
     }
     excavatorNoticeLastKey = text;
     excavatorNoticeLastShownAt = now;
-    excavatorNoticeReturnFocus = document.activeElement;
-    excavatorNoticeMessage.textContent = text;
-    excavatorNoticeModal.hidden = false;
-    excavatorNoticeModal.setAttribute("aria-hidden", "false");
-    document.body.classList.add("eo-notice-open");
-    var accept = excavatorNoticeModal.querySelector(".eo-notice-accept");
-    if (accept) accept.focus();
+    excavatorNotice.textContent = text;
+    excavatorNotice.hidden = false;
+    window.clearTimeout(excavatorNoticeTimer);
+    excavatorNoticeTimer = window.setTimeout(closeExcavatorNotice, 3600);
 }
 
 window.showExcavatorNotice = showExcavatorNotice;
@@ -597,18 +578,6 @@ function syncExcavatorAssignmentSnapshot(root, previousSnapshot) {
     storeExcavatorAssignments(root, nextSnapshot);
 }
 
-if (excavatorNoticeModal) {
-    excavatorNoticeModal.querySelectorAll("[data-eo-notice-close]").forEach(function (button) {
-        button.addEventListener("click", closeExcavatorNotice);
-    });
-    excavatorNoticeModal.addEventListener("click", function (event) {
-        if (event.target === excavatorNoticeModal) closeExcavatorNotice();
-    });
-    document.addEventListener("keydown", function (event) {
-        if (event.key === "Escape" && !excavatorNoticeModal.hidden) closeExcavatorNotice();
-    });
-}
-
 if (typeof window.bindAchievementPrizeUnlock === "function") {
     window.bindAchievementPrizeUnlock();
 }
@@ -747,7 +716,7 @@ function isExcavatorRefreshUnsafe() {
     )) {
         return true;
     }
-    return !!document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .mobile-shift__action.is-holding, .eo-hold-action.is-holding, .eo-shift-update-button.is-checking, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .eo-notice-modal:not([hidden]), .app-confirm-modal:not([hidden])");
+    return !!document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .mobile-shift__action.is-holding, .eo-hold-action.is-holding, .eo-shift-update-button.is-checking, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .app-confirm-modal:not([hidden])");
 }
 
 function storeExcavatorRealtimeVersion(version) {
@@ -1810,14 +1779,16 @@ window.initExcavatorWorkShell = function () {
         if (!button || button.classList.contains("is-pending")) {
             return;
         }
+        var isAvailable = button.dataset.eoSettingsAvailable === "true";
         var isDirty = appliedExcavatorSettingsSnapshot === null
             || currentExcavatorSettingsSnapshot() !== appliedExcavatorSettingsSnapshot;
-        button.disabled = !isDirty;
-        button.classList.toggle("is-disabled", !isDirty);
-        button.setAttribute("aria-disabled", isDirty ? "false" : "true");
+        var isDisabled = !isAvailable || !isDirty;
+        button.disabled = isDisabled;
+        button.classList.toggle("is-disabled", isDisabled);
+        button.setAttribute("aria-disabled", isDisabled ? "true" : "false");
         button.setAttribute(
             "aria-label",
-            isDirty ? "Применить настройки" : "Настройки уже применены"
+            !isAvailable ? "Сначала начните смену" : isDirty ? "Применить настройки" : "Настройки уже применены"
         );
     }
 
