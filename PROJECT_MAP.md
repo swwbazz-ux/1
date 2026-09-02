@@ -39,7 +39,7 @@ Backend является основным рабочим приложением.
 - Маршруты: `/driver/`, `/driver/shift/`.
 - Manifest: `/driver.webmanifest`.
 - Service worker: `/driver-sw.js`.
-- Shell: `driver-mobile-shell-v181` (опубликован на production 02.09.2026).
+- Shell: `driver-mobile-shell-v182` (опубликован на production 03.09.2026).
 
 ### Машинист экскаватора
 
@@ -48,7 +48,7 @@ Backend является основным рабочим приложением.
 - Маршрут: `/excavator/work/`.
 - Manifest: `/excavator.webmanifest`.
 - Service worker: `/excavator-sw.js`.
-- Shell: `excavator-mobile-shell-v187` (опубликован в production 03.09.2026).
+- Shell: `excavator-mobile-shell-v188` (опубликован в production 03.09.2026).
 
 ### Общий адаптивный экран «Смена»
 
