@@ -6,12 +6,12 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v185">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v185">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v185">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v185">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v185">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v185" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v186">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v186">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v186">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v186">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v186">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v186" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -273,7 +273,7 @@
             </section>
         </div>
 
-        <section class="eo-screen{% if not open_shift %} is-shift-inactive{% endif %}" data-eo-screen="events" data-eo-downtime-available="{% if open_shift %}true{% else %}false{% endif %}"{% if not open_shift %} aria-disabled="true"{% endif %}>
+        <section class="eo-screen mobile-work-controls{% if not open_shift %} is-shift-inactive{% endif %}" data-eo-screen="events" data-eo-downtime-available="{% if open_shift %}true{% else %}false{% endif %}"{% if not open_shift %} aria-disabled="true"{% endif %}>
             <div class="eo-title-row">
                 <h1>Простои</h1>
                 <button class="eo-refresh-button" type="button" aria-label="Обновить" data-eo-refresh-work>↻</button>
@@ -291,7 +291,7 @@
             </div>
             <div class="eo-reason-grid">
                 {% for card in downtime_reason_cards %}
-                    <button class="eo-hold-action status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}" type="button" data-eo-downtime-reason-id="{{ card.reason.id }}" data-eo-reason="{{ card.full_name }}" data-eo-reason-seconds="{{ card.total_seconds }}" data-eo-equipment-state="{{ card.equipment_state_code }}" data-eo-hold-label="{{ card.name }}" data-eo-instant="true" style="--eo-action-hold: 0%"{% if not open_shift %} disabled aria-disabled="true" aria-label="Недоступно: сначала начните смену"{% elif card.is_used %} aria-label="Начать простой: {{ card.name }}. За смену: {{ card.total_label }}"{% else %} aria-label="Начать простой: {{ card.name }}"{% endif %}>
+                    <button class="eo-reason-action status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}" type="button" data-eo-downtime-reason-id="{{ card.reason.id }}" data-eo-reason="{{ card.full_name }}" data-eo-reason-name="{{ card.name }}" data-eo-reason-seconds="{{ card.total_seconds }}" data-eo-equipment-state="{{ card.equipment_state_code }}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Недоступно: сначала начните смену"{% elif card.is_used %} aria-label="Начать простой: {{ card.name }}. За смену: {{ card.total_label }}"{% else %} aria-label="Начать простой: {{ card.name }}"{% endif %}>
                         <span class="eo-reason-label" data-eo-reason-label>{{ card.name }}</span>
                         <span class="eo-reason-duration" data-eo-reason-duration{% if not card.is_used %} hidden{% endif %}>{{ card.total_label }}</span>
                     </button>
@@ -302,7 +302,9 @@
                     </div>
                 {% endfor %}
             </div>
-            <button class="eo-primary-action eo-hold-action{% if not active_downtime %} is-disabled{% endif %}" type="button" data-eo-close-event data-eo-hold-label="Завершить простой" style="--eo-action-hold: 0%" {% if not active_downtime %}disabled aria-disabled="true"{% else %}aria-label="Удерживайте 2 секунды, чтобы завершить простой"{% endif %}>Завершить простой</button>
+            <footer class="mobile-shift__actions mobile-downtime__actions">
+                <button class="mobile-shift__action mobile-shift__action--danger{% if not active_downtime %} is-disabled{% endif %}" type="button" data-eo-close-event {% if not active_downtime %}disabled aria-disabled="true" aria-label="Завершение недоступно: активного простоя нет"{% else %}aria-label="Удерживайте 2 секунды, чтобы завершить простой"{% endif %}><span data-mobile-shift-label>Завершить простой</span></button>
+            </footer>
         </section>
     </form>
 
@@ -383,7 +385,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v185";
+var excavatorShellVersion = "excavator-mobile-shell-v186";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -726,7 +728,7 @@ function isExcavatorRefreshUnsafe() {
     )) {
         return true;
     }
-    return !!document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .mobile-shift__action.is-holding, .eo-hold-action.is-holding, .eo-shift-update-button.is-checking, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .app-confirm-modal:not([hidden])");
+    return !!document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .mobile-shift__action.is-holding, .eo-shift-update-button.is-checking, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden])");
 }
 
 function storeExcavatorRealtimeVersion(version) {
@@ -839,6 +841,8 @@ window.initExcavatorWorkShell = function () {
     var downtimeCard = shell.querySelector("[data-eo-active-downtime-id]");
     var downtimeIndicator = shell.querySelector("[data-eo-downtime-indicator]");
     var downtimeReasonButtons = shell.querySelectorAll("[data-eo-downtime-reason-id]");
+    var closeEvent = shell.querySelector("[data-eo-close-event]");
+    var closeEventHoldController = null;
     var selectedTruck = shell.querySelector("[data-eo-truck-card].is-selected");
     var csrfToken = shell.querySelector("input[name='csrfmiddlewaretoken']") ? shell.querySelector("input[name='csrfmiddlewaretoken']").value : "";
     var settingsUrl = shell.dataset.eoSettingsUrl || "";
@@ -1101,136 +1105,6 @@ window.initExcavatorWorkShell = function () {
         return isShiftCloseAction() ? shiftHoldMs : 1000;
     }
 
-    function registerHoldAction(button, onComplete, options) {
-        if (!button || typeof onComplete !== "function") {
-            return;
-        }
-        options = options || {};
-        var holdMs = Number(options.holdMs || 2000);
-        var defaultLabel = options.defaultLabel || button.dataset.eoHoldLabel || button.textContent.trim();
-        var holdLabel = options.holdLabel || "Держите";
-        var labelNode = options.labelSelector ? button.querySelector(options.labelSelector) : null;
-        var timer = null;
-        var frame = null;
-        var startedAt = 0;
-        var completedByHold = false;
-
-        function setLabel(text) {
-            if (labelNode) {
-                labelNode.textContent = text;
-            } else {
-                button.textContent = text;
-            }
-        }
-
-        function resetHold() {
-            window.clearTimeout(timer);
-            if (frame) {
-                window.cancelAnimationFrame(frame);
-            }
-            timer = null;
-            frame = null;
-            startedAt = 0;
-            button.classList.remove("is-holding");
-            button.style.setProperty("--eo-action-hold", "0%");
-            if (!button.classList.contains("is-pending")) {
-                setLabel(defaultLabel);
-            }
-        }
-
-        function drawHold() {
-            if (!startedAt) {
-                return;
-            }
-            var elapsed = Date.now() - startedAt;
-            var percent = Math.max(0, Math.min(100, Math.round((elapsed / holdMs) * 100)));
-            button.style.setProperty("--eo-action-hold", percent + "%");
-            if (percent < 100) {
-                frame = window.requestAnimationFrame(drawHold);
-            }
-        }
-
-        function completeHold() {
-            if (button.disabled || button.getAttribute("aria-disabled") === "true") {
-                resetHold();
-                return;
-            }
-            window.clearTimeout(timer);
-            if (frame) {
-                window.cancelAnimationFrame(frame);
-            }
-            timer = null;
-            frame = null;
-            startedAt = 0;
-            button.classList.remove("is-holding");
-            button.style.setProperty("--eo-action-hold", "0%");
-            completedByHold = true;
-            onComplete({ resetHold: resetHold, defaultLabel: defaultLabel });
-        }
-
-        function startHold(event) {
-            if (button.disabled || button.getAttribute("aria-disabled") === "true") {
-                return;
-            }
-            if (startedAt) {
-                return;
-            }
-            resetHold();
-            startedAt = Date.now();
-            button.classList.add("is-holding");
-            setLabel(holdLabel);
-            drawHold();
-            timer = window.setTimeout(completeHold, holdMs);
-        }
-
-        function cancelHold(event) {
-            if (!button.classList.contains("is-pending")) {
-                resetHold();
-            }
-        }
-
-        button.addEventListener("click", function (event) {
-            event.preventDefault();
-            if (completedByHold) {
-                completedByHold = false;
-                return;
-            }
-            if (button.disabled || button.getAttribute("aria-disabled") === "true") return;
-            /* Оперативные настройки и причины простоя легко исправить следующим
-               выбором. Для них отдельное подтверждение только замедляет работу. */
-            if (button.dataset.eoInstant === "true") {
-                onComplete({ resetHold: resetHold, defaultLabel: defaultLabel });
-                return;
-            }
-            if (typeof window.openAppConfirmDialog === "function") {
-                window.openAppConfirmDialog(
-                    "Подтвердите действие: " + defaultLabel + ".",
-                    function () { onComplete({ resetHold: resetHold, defaultLabel: defaultLabel }); },
-                    0,
-                    "Подтвердить"
-                );
-            }
-        });
-        button.addEventListener("pointerdown", startHold);
-        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
-            button.addEventListener(eventName, cancelHold);
-        });
-        button.addEventListener("touchstart", startHold, { passive: false });
-        ["touchend", "touchcancel"].forEach(function (eventName) {
-            button.addEventListener(eventName, cancelHold, { passive: false });
-        });
-        button.addEventListener("keydown", function (event) {
-            if ((event.key === "Enter" || event.key === " ") && !event.repeat) {
-                startHold(event);
-            }
-        });
-        button.addEventListener("keyup", function (event) {
-            if (event.key === "Enter" || event.key === " ") {
-                cancelHold(event);
-            }
-        });
-    }
-
     function formatDowntimeDuration(totalSeconds) {
         var seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
         var hours = Math.floor(seconds / 3600);
@@ -1257,7 +1131,7 @@ window.initExcavatorWorkShell = function () {
             duration.textContent = formatDowntimeDuration(seconds);
         }
         if (eventsScreen && eventsScreen.dataset.eoDowntimeAvailable === "true") {
-            var reasonName = button.dataset.eoHoldLabel || button.dataset.eoReason || "Причина простоя";
+            var reasonName = button.dataset.eoReasonName || button.dataset.eoReason || "Причина простоя";
             var actionLabel = isActive ? "Активный простой" : "Начать простой";
             button.setAttribute(
                 "aria-label",
@@ -1335,7 +1209,8 @@ window.initExcavatorWorkShell = function () {
             closeEvent.classList.remove("is-disabled");
             closeEvent.classList.remove("is-pending");
             closeEvent.removeAttribute("aria-disabled");
-            closeEvent.textContent = closeEvent.dataset.eoHoldLabel || "Завершить простой";
+            closeEvent.setAttribute("aria-label", "Удерживайте 2 секунды, чтобы завершить простой");
+            if (closeEventHoldController) closeEventHoldController.reset();
         }
     }
 
@@ -1358,7 +1233,8 @@ window.initExcavatorWorkShell = function () {
             closeEvent.classList.add("is-disabled");
             closeEvent.classList.remove("is-pending");
             closeEvent.setAttribute("aria-disabled", "true");
-            closeEvent.textContent = closeEvent.dataset.eoHoldLabel || "Завершить простой";
+            closeEvent.setAttribute("aria-label", "Завершение недоступно: активного простоя нет");
+            if (closeEventHoldController) closeEventHoldController.reset();
         }
         downtimeReasonButtons.forEach(function (item) {
             item.classList.remove("is-selected");
@@ -2322,7 +2198,7 @@ window.initExcavatorWorkShell = function () {
     if (eventsScreen) {
         eventsScreen.addEventListener("click", function (event) {
             if (eventsScreen.dataset.eoDowntimeAvailable === "true") return;
-            var lockedRegion = event.target.closest(".eo-reason-grid, [data-eo-close-event]");
+            var lockedRegion = event.target.closest(".eo-reason-grid, .mobile-downtime__actions");
             if (!lockedRegion || !eventsScreen.contains(lockedRegion)) return;
             event.preventDefault();
             showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "shift-lock" });
@@ -2457,7 +2333,9 @@ window.initExcavatorWorkShell = function () {
     }
 
     downtimeReasonButtons.forEach(function (button) {
-        registerHoldAction(button, function (hold) {
+        button.addEventListener("click", function (event) {
+            event.preventDefault();
+            if (button.disabled || button.getAttribute("aria-disabled") === "true") return;
             downtimeReasonButtons.forEach(function (item) {
                 item.classList.remove("is-selected");
             });
@@ -2484,10 +2362,10 @@ window.initExcavatorWorkShell = function () {
                 }).finally(function () {
                     button.disabled = false;
                     button.classList.remove("is-pending");
-                    if (reasonLabel) reasonLabel.textContent = button.dataset.eoHoldLabel || hold.defaultLabel;
+                    if (reasonLabel) reasonLabel.textContent = button.dataset.eoReasonName || button.dataset.eoReason || "Причина простоя";
                 });
             }
-        }, { labelSelector: "[data-eo-reason-label]" });
+        });
     });
 
     var applySettings = shell.querySelector("[data-eo-apply-settings]");
@@ -2803,35 +2681,40 @@ window.initExcavatorWorkShell = function () {
         });
     }
 
-    var closeEvent = shell.querySelector("[data-eo-close-event]");
     if (closeEvent) {
-        registerHoldAction(closeEvent, function (hold) {
-            if (closeEvent.disabled || closeEvent.getAttribute("aria-disabled") === "true") {
-                return;
-            }
-            if (!downtimeCard || !downtimeCard.dataset.eoActiveDowntimeId) {
-                closeEvent.disabled = true;
-                closeEvent.classList.add("is-disabled");
-                closeEvent.setAttribute("aria-disabled", "true");
-                return;
-            }
-            closeEvent.disabled = true;
-            closeEvent.classList.add("is-pending");
-            closeEvent.textContent = "Завершаю";
-            postDowntimeAction({
-                action: "close",
-                client_action_id: generateClientActionId("excavator-downtime-close")
-            }).then(function (payload) {
-                clearActiveDowntime(payload);
-                if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
-                    window.AppRealtime.wake("excavator_downtime_closed");
+        closeEventHoldController = window.MobileShiftHold.bind(closeEvent, {
+            holdMs: 2000,
+            readyLabel: "Завершить простой",
+            onShortPress: function () {
+                showExcavatorNotice("Удерживайте кнопку");
+            },
+            onComplete: function (hold) {
+                if (!downtimeCard || !downtimeCard.dataset.eoActiveDowntimeId) {
+                    closeEvent.disabled = true;
+                    closeEvent.classList.add("is-disabled");
+                    closeEvent.setAttribute("aria-disabled", "true");
+                    hold.reset();
+                    return;
                 }
-            }).catch(function (error) {
-                showExcavatorNotice(error.message || "Простой не завершен");
-                closeEvent.disabled = false;
-                closeEvent.classList.remove("is-pending");
-                closeEvent.textContent = hold.defaultLabel;
-            });
+                closeEvent.disabled = true;
+                closeEvent.classList.add("is-pending");
+                hold.setLabel("Завершаю");
+                postDowntimeAction({
+                    action: "close",
+                    client_action_id: generateClientActionId("excavator-downtime-close")
+                }).then(function (payload) {
+                    clearActiveDowntime(payload);
+                    if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                        window.AppRealtime.wake("excavator_downtime_closed");
+                    }
+                }).catch(function (error) {
+                    showExcavatorNotice(error.message || "Простой не завершен");
+                    closeEvent.disabled = false;
+                    closeEvent.classList.remove("is-pending");
+                    closeEvent.removeAttribute("aria-disabled");
+                    hold.reset();
+                });
+            }
         });
     }
 

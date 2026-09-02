@@ -650,7 +650,7 @@ body.excavator-operator-screen .eo-screen.is-shift-inactive button:disabled {
 }
 
 body.excavator-operator-screen .eo-screen[data-eo-screen="events"].is-shift-inactive > .eo-reason-grid,
-body.excavator-operator-screen .eo-screen[data-eo-screen="events"].is-shift-inactive > [data-eo-close-event] {
+body.excavator-operator-screen .eo-screen[data-eo-screen="events"].is-shift-inactive > .mobile-downtime__actions {
     opacity: .32;
     filter: saturate(.35);
 }

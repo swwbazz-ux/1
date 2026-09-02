@@ -31093,47 +31093,6 @@ body.excavator-operator-screen {
     opacity: .78;
 }
 
-.eo-hold-action {
-    position: relative;
-    overflow: hidden;
-    touch-action: none;
-    user-select: none;
-}
-
-.eo-hold-action::before {
-    content: "";
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: var(--eo-action-hold, 0%);
-    background: linear-gradient(90deg, rgba(88, 223, 82, .34), rgba(88, 223, 82, .1));
-    transition: width .08s linear;
-}
-
-.eo-hold-action.status-red::before,
-.eo-hold-action.is-danger::before {
-    background: linear-gradient(90deg, rgba(255, 69, 64, .36), rgba(255, 69, 64, .1));
-}
-
-.eo-hold-action.status-yellow::before {
-    background: linear-gradient(90deg, rgba(255, 216, 0, .34), rgba(255, 216, 0, .1));
-}
-
-.eo-hold-action.status-orange::before {
-    background: linear-gradient(90deg, rgba(255, 154, 54, .34), rgba(255, 154, 54, .1));
-}
-
-.eo-hold-action.status-blue::before {
-    background: linear-gradient(90deg, rgba(110, 178, 255, .34), rgba(110, 178, 255, .1));
-}
-
-.eo-hold-action.is-holding {
-    filter: brightness(1.08);
-}
-
-.eo-hold-action.is-pending {
-    cursor: progress;
-}
-
 .eo-shift-metrics {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
