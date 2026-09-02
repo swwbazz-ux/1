@@ -612,6 +612,8 @@ body.start-page > .app-connection-dot {
     }
 
     .start-screen--entry {
+        display: flex;
+        flex-direction: column;
         height: var(--start-vv-height, 100dvh);
         min-height: 0;
         max-height: var(--start-vv-height, 100dvh);
@@ -640,7 +642,11 @@ body.start-page > .app-connection-dot {
     }
 
     .start-screen--entry .start-screen__inner {
+        flex: 1 1 auto;
+        grid-template-rows: auto minmax(0, 1fr);
         gap: 12px;
+        width: min(100%, 560px);
+        min-height: 0;
         margin-top: -18px;
         padding: 0 16px max(8px, env(safe-area-inset-bottom));
     }
@@ -701,6 +707,7 @@ body.start-page > .app-connection-dot {
     }
 
     .start-screen--entry .start-screen__inner > .max-support-link {
+        align-self: end;
         min-height: 48px;
         padding-block: 7px;
     }

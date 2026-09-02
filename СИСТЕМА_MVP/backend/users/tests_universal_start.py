@@ -119,8 +119,8 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'start-hero-v1.webp')
         self.assertContains(response, 'start-hero-v1.jpg')
         self.assertContains(response, 'fetchpriority="high"')
-        self.assertContains(response, 'start-page-v1.css?v=20260903-2')
-        self.assertContains(response, 'start-page-v1.js?v=20260903-2')
+        self.assertContains(response, 'start-page-v1.css?v=20260903-3')
+        self.assertContains(response, 'start-page-v1.js?v=20260903-3')
         self.assertRegex(html, r'<body[^>]+class="start-page"')
         self.assertNotRegex(html, r'<body[^>]+class="[^"]*dispatcher-shell')
 
@@ -428,7 +428,7 @@ class UniversalStartTests(TestCase):
         script = (backend_root / 'static' / 'js' / 'start-page-v1.js').read_text(encoding='utf-8')
         stylesheet = (backend_root / 'static' / 'css' / 'start-page-v1.css').read_text(encoding='utf-8')
 
-        self.assertContains(response, 'start-page-v1.js?v=20260903-2')
+        self.assertContains(response, 'start-page-v1.js?v=20260903-3')
         self.assertIn('window.visualViewport || null', script)
         self.assertIn('Math.max(120, baselineHeight * 0.22)', script)
         self.assertIn('viewport.addEventListener("resize"', script)
@@ -445,6 +445,8 @@ class UniversalStartTests(TestCase):
         self.assertIn('body.start-page.is-keyboard-open .start-hero', stylesheet)
         self.assertIn('aspect-ratio: 853 / 373', stylesheet)
         self.assertIn('height: var(--start-vv-height, 100dvh)', stylesheet)
+        self.assertIn('grid-template-rows: auto minmax(0, 1fr)', stylesheet)
+        self.assertIn('align-self: end', stylesheet)
 
     def test_start_phone_runtime_formats_country_prefix_and_guards_double_submit(self):
         script = (
