@@ -61,7 +61,6 @@ body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"][hid
 }
 
 .mobile-face__content {
-    position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: calc(var(--ms-standard-field-h) + var(--ms-standard-field-h) + var(--ms-gap)) minmax(0, 1fr);
@@ -75,46 +74,25 @@ body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"][hid
     filter: saturate(.35);
 }
 
-.mobile-face__content.is-shift-inactive input:disabled,
-.mobile-face__content.is-shift-inactive select:disabled,
-.mobile-face__content.is-shift-inactive button:disabled {
+.mobile-face.is-shift-inactive input:disabled,
+.mobile-face.is-shift-inactive select:disabled,
+.mobile-face.is-shift-inactive button:disabled {
     cursor: not-allowed;
     pointer-events: none;
 }
 
-.mobile-face__inactive-notice {
-    position: absolute;
+.mobile-shift-toast.is-face-lock {
     inset: 50% auto auto 50%;
-    z-index: 3;
-    inline-size: min(280px, calc(100% - clamp(20px, 6vw, 32px)));
-    min-inline-size: 0;
-    margin: 0;
-    padding: clamp(10px, 2.6vw, 14px) clamp(14px, 4vw, 20px);
-    display: grid;
-    gap: 3px;
+    inline-size: min(280px, calc(100vw - clamp(24px, 8vw, 40px)));
     transform: translate(-50%, -50%);
     border: 1px solid rgba(255, 212, 91, .72);
     border-radius: clamp(8px, 2.2vw, 11px);
     background: rgba(27, 23, 10, .96);
     box-shadow: 0 10px 28px rgba(0, 0, 0, .46), 0 0 18px rgba(255, 212, 91, .12);
-    color: #f7fbfa;
-    font-family: inherit;
-    text-align: center;
-    pointer-events: none;
-}
-
-.mobile-face__inactive-notice strong {
     color: #ffd45b;
     font-size: clamp(15px, 4vw, 18px);
     font-weight: 700;
-    line-height: 1.08;
-}
-
-.mobile-face__inactive-notice span {
-    color: rgba(229, 237, 234, .82);
-    font-size: clamp(12px, 3.2vw, 14px);
-    font-weight: 600;
-    line-height: 1.16;
+    line-height: 1.18;
 }
 
 .mobile-face__settings {

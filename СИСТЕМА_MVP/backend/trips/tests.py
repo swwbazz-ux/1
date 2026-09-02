@@ -859,11 +859,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v181')
+        self.assertContains(response, 'excavator-mobile-shell-v182')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 181')
+        self.assertContains(response, 'Версия 182')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -2122,9 +2122,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
                 response.content.decode('utf-8'),
                 rf'data-eo-dump-select="{card["point"].id}"[^>]*disabled aria-disabled="true"',
             )
-        self.assertContains(response, 'data-eo-face-inactive-notice')
-        self.assertContains(response, '<strong>Смена не активна</strong>', html=True)
-        self.assertContains(response, '<span>Сначала начните смену</span>', html=True)
+        self.assertContains(response, 'mobile-face mobile-work-controls is-shift-inactive')
+        self.assertNotContains(response, 'data-eo-face-inactive-notice')
+        self.assertContains(response, 'showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "face-lock" });')
+        self.assertContains(response, 'faceScreen.addEventListener("click"')
         self.assertContains(response, 'disabled aria-disabled="true" aria-label="Настройки недоступны: сначала начните смену"')
         self.assertContains(response, '<span data-mobile-shift-label>Применить настройки</span>', html=True)
         self.assertContains(response, 'class="mobile-shift-toast" data-eo-notice hidden')
@@ -2156,6 +2157,15 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('.mobile-shift-toast {', shared_css)
         self.assertIn('position: fixed;', shared_css)
         self.assertIn('pointer-events: none;', shared_css)
+        face_css = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'css'
+            / 'mobile-face-unified-v1.css'
+        ).read_text(encoding='utf-8')
+        self.assertIn('.mobile-shift-toast.is-face-lock {', face_css)
+        self.assertIn('inset: 50% auto auto 50%;', face_css)
+        self.assertIn('.mobile-face.is-shift-inactive input:disabled', face_css)
 
 
     def test_excavator_manifest_is_installable_pwa_manifest(self):
@@ -2180,7 +2190,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v181', script)
+        self.assertIn('excavator-mobile-shell-v182', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)

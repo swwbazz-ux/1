@@ -6,12 +6,12 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v181">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v181">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v181">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v181">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v181">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v181" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v182">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v182">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v182">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v182">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v182">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v182" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -70,7 +70,7 @@
 
         {% include "includes/mobile_shift_screen.html" with mobile_shift_role="excavator" mobile_shift_state=open_shift|yesno:"open,closed" mobile_shift_previous=shift_previous_readings %}
 
-        <section class="eo-screen mobile-face mobile-work-controls" data-eo-screen="face">
+        <section class="eo-screen mobile-face mobile-work-controls{% if not open_shift %} is-shift-inactive{% endif %}" data-eo-screen="face">
             <header class="mobile-shift__titlebar mobile-face__titlebar">
                 <h1 class="mobile-shift__title">Забой</h1>
                 <div class="mobile-shift__update-group">
@@ -122,12 +122,6 @@
                         </div>
                     {% endfor %}
                 </div>
-                {% if not open_shift %}
-                    <div class="mobile-face__inactive-notice" data-eo-face-inactive-notice role="status" aria-live="polite">
-                        <strong>Смена не активна</strong>
-                        <span>Сначала начните смену</span>
-                    </div>
-                {% endif %}
             </div>
 
             <input type="hidden" name="dump_point" value="{{ default_dump_point }}" data-eo-dump-input>
@@ -386,7 +380,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v181";
+var excavatorShellVersion = "excavator-mobile-shell-v182";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -415,19 +409,25 @@ function compactExcavatorNotice(message) {
 function closeExcavatorNotice() {
     window.clearTimeout(excavatorNoticeTimer);
     excavatorNoticeTimer = null;
-    if (excavatorNotice) excavatorNotice.hidden = true;
+    if (excavatorNotice) {
+        excavatorNotice.hidden = true;
+        excavatorNotice.classList.remove("is-face-lock");
+    }
 }
 
-function showExcavatorNotice(message) {
+function showExcavatorNotice(message, options) {
     if (!excavatorNotice) return;
     var text = compactExcavatorNotice(message);
+    var isFaceLock = !!(options && options.variant === "face-lock");
+    var noticeKey = (isFaceLock ? "face-lock:" : "default:") + text;
     var now = Date.now();
-    if ((!excavatorNotice.hidden && excavatorNotice.textContent === text) || (excavatorNoticeLastKey === text && now - excavatorNoticeLastShownAt < 2200)) {
+    if ((!excavatorNotice.hidden && excavatorNotice.textContent === text && excavatorNotice.classList.contains("is-face-lock") === isFaceLock) || (excavatorNoticeLastKey === noticeKey && now - excavatorNoticeLastShownAt < 2200)) {
         return;
     }
-    excavatorNoticeLastKey = text;
+    excavatorNoticeLastKey = noticeKey;
     excavatorNoticeLastShownAt = now;
     excavatorNotice.textContent = text;
+    excavatorNotice.classList.toggle("is-face-lock", isFaceLock);
     excavatorNotice.hidden = false;
     window.clearTimeout(excavatorNoticeTimer);
     excavatorNoticeTimer = window.setTimeout(closeExcavatorNotice, 3600);
@@ -852,6 +852,8 @@ window.initExcavatorWorkShell = function () {
     var shiftFuelInput = shell.querySelector("[data-eo-shift-fuel]");
     var shiftHoursInput = shell.querySelector("[data-eo-shift-engine-hours]");
     var shiftFormError = shell.querySelector("[data-eo-shift-form-error]");
+    var faceScreen = shell.querySelector('[data-eo-screen="face"]');
+    var faceContent = shell.querySelector("[data-eo-face-settings-available]");
     var shiftServerBlocked = !!(shiftButton && shiftButton.disabled);
     var shiftHoldMs = 2000;
     var shiftHoldController = null;
@@ -2250,6 +2252,16 @@ window.initExcavatorWorkShell = function () {
             toggleDumpChoice(button);
         });
     });
+
+    if (faceScreen && faceContent) {
+        faceScreen.addEventListener("click", function (event) {
+            if (faceContent.dataset.eoFaceSettingsAvailable === "true") return;
+            var lockedRegion = event.target.closest(".mobile-face__content, .mobile-face__actions");
+            if (!lockedRegion || !faceScreen.contains(lockedRegion)) return;
+            event.preventDefault();
+            showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "face-lock" });
+        });
+    }
 
     shell.querySelectorAll("[data-eo-dump-target]").forEach(function (target) {
         var queueHoldTimer = null;
