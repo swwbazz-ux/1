@@ -6,12 +6,12 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v184">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v184">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v184">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v184">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v184">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v184" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v185">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v185">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v185">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v185">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v185">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v185" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -278,7 +278,7 @@
                 <h1>Простои</h1>
                 <button class="eo-refresh-button" type="button" aria-label="Обновить" data-eo-refresh-work>↻</button>
             </div>
-            <div class="eo-downtime-card status-{{ active_downtime_state.color_group }}{% if active_downtime %} is-active{% endif %}" data-eo-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-eo-active-started-at="{{ active_downtime_started_at }}" data-eo-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-eo-shift-downtime-seconds="{{ shift_downtime_total_seconds }}" data-eo-downtime-state="{% if active_downtime %}{{ active_downtime_state.code }}{% endif %}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Простои за смену: {{ shift_downtime_total_label }}{% endif %}">
+            <div class="eo-downtime-card status-{{ active_downtime_state.color_group }}{% if active_downtime %} is-active{% endif %}" data-eo-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-eo-active-reason-id="{% if active_downtime %}{{ active_downtime.reason_id }}{% endif %}" data-eo-active-counts-towards-shift="{% if active_downtime_counts_towards_shift %}true{% else %}false{% endif %}" data-eo-active-started-at="{{ active_downtime_started_at }}" data-eo-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-eo-shift-downtime-seconds="{{ shift_downtime_total_seconds }}" data-eo-downtime-calculated-at="{{ downtime_calculated_at }}" data-eo-downtime-state="{% if active_downtime %}{{ active_downtime_state.code }}{% endif %}" role="status" aria-label="Простои за смену: {{ shift_downtime_total_label }}">
                 <span class="eo-downtime-state-dot" data-eo-downtime-indicator aria-hidden="true">
                     <svg class="eo-downtime-state-icon eo-downtime-state-icon-play" viewBox="0 0 24 24" focusable="false">
                         <path d="M7 4.8v14.4L19 12 7 4.8Z"></path>
@@ -287,11 +287,14 @@
                         <path d="M6.5 5h4v14h-4V5Zm7 0h4v14h-4V5Z"></path>
                     </svg>
                 </span>
-                <b data-eo-active-duration>{% if active_downtime %}{{ active_downtime_elapsed_label }}{% else %}{{ shift_downtime_total_label }}{% endif %}</b>
+                <b data-eo-active-duration>{{ shift_downtime_total_label }}</b>
             </div>
             <div class="eo-reason-grid">
                 {% for card in downtime_reason_cards %}
-                    <button class="eo-hold-action status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}" type="button" data-eo-downtime-reason-id="{{ card.reason.id }}" data-eo-reason="{{ card.full_name }}" data-eo-equipment-state="{{ card.equipment_state_code }}" data-eo-hold-label="{{ card.name }}" data-eo-instant="true" style="--eo-action-hold: 0%"{% if not open_shift %} disabled aria-disabled="true" aria-label="Недоступно: сначала начните смену"{% else %} aria-label="Начать простой: {{ card.name }}"{% endif %}>{{ card.name }}</button>
+                    <button class="eo-hold-action status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}" type="button" data-eo-downtime-reason-id="{{ card.reason.id }}" data-eo-reason="{{ card.full_name }}" data-eo-reason-seconds="{{ card.total_seconds }}" data-eo-equipment-state="{{ card.equipment_state_code }}" data-eo-hold-label="{{ card.name }}" data-eo-instant="true" style="--eo-action-hold: 0%"{% if not open_shift %} disabled aria-disabled="true" aria-label="Недоступно: сначала начните смену"{% elif card.is_used %} aria-label="Начать простой: {{ card.name }}. За смену: {{ card.total_label }}"{% else %} aria-label="Начать простой: {{ card.name }}"{% endif %}>
+                        <span class="eo-reason-label" data-eo-reason-label>{{ card.name }}</span>
+                        <span class="eo-reason-duration" data-eo-reason-duration{% if not card.is_used %} hidden{% endif %}>{{ card.total_label }}</span>
+                    </button>
                 {% empty %}
                     <div class="eo-empty-state eo-empty-state-compact">
                         <strong>Причины не настроены</strong>
@@ -380,7 +383,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v184";
+var excavatorShellVersion = "excavator-mobile-shell-v185";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -835,6 +838,7 @@ window.initExcavatorWorkShell = function () {
     var activeDuration = shell.querySelector("[data-eo-active-duration]");
     var downtimeCard = shell.querySelector("[data-eo-active-downtime-id]");
     var downtimeIndicator = shell.querySelector("[data-eo-downtime-indicator]");
+    var downtimeReasonButtons = shell.querySelectorAll("[data-eo-downtime-reason-id]");
     var selectedTruck = shell.querySelector("[data-eo-truck-card].is-selected");
     var csrfToken = shell.querySelector("input[name='csrfmiddlewaretoken']") ? shell.querySelector("input[name='csrfmiddlewaretoken']").value : "";
     var settingsUrl = shell.dataset.eoSettingsUrl || "";
@@ -1105,13 +1109,18 @@ window.initExcavatorWorkShell = function () {
         var holdMs = Number(options.holdMs || 2000);
         var defaultLabel = options.defaultLabel || button.dataset.eoHoldLabel || button.textContent.trim();
         var holdLabel = options.holdLabel || "Держите";
+        var labelNode = options.labelSelector ? button.querySelector(options.labelSelector) : null;
         var timer = null;
         var frame = null;
         var startedAt = 0;
         var completedByHold = false;
 
         function setLabel(text) {
-            button.textContent = text;
+            if (labelNode) {
+                labelNode.textContent = text;
+            } else {
+                button.textContent = text;
+            }
         }
 
         function resetHold() {
@@ -1237,17 +1246,62 @@ window.initExcavatorWorkShell = function () {
         }
     }
 
-    function startDowntimeTimer(startedAt, fallbackElapsedSeconds) {
+    function renderReasonDuration(button, totalSeconds, isActive) {
+        if (!button) return;
+        var duration = button.querySelector("[data-eo-reason-duration]");
+        if (!duration) return;
+        var seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+        var isVisible = seconds > 0 || !!isActive;
+        duration.hidden = !isVisible;
+        if (isVisible) {
+            duration.textContent = formatDowntimeDuration(seconds);
+        }
+        if (eventsScreen && eventsScreen.dataset.eoDowntimeAvailable === "true") {
+            var reasonName = button.dataset.eoHoldLabel || button.dataset.eoReason || "Причина простоя";
+            var actionLabel = isActive ? "Активный простой" : "Начать простой";
+            button.setAttribute(
+                "aria-label",
+                actionLabel + ": " + reasonName + (isVisible ? ". За смену: " + formatDowntimeDuration(seconds) : "")
+            );
+        }
+    }
+
+    function startDowntimeTimer(payload) {
         clearDowntimeTimer();
-        if (!activeDuration) return;
-        var startedAtMs = startedAt ? Date.parse(startedAt) : NaN;
-        var fallbackStartedAtMs = Date.now() - (Math.max(0, Number(fallbackElapsedSeconds) || 0) * 1000);
-        var startMs = Number.isNaN(startedAtMs) ? fallbackStartedAtMs : startedAtMs;
+        payload = payload || {};
+        var isActive = !!payload.active;
+        var activeReasonId = isActive ? String(payload.reason_id || "") : "";
+        var activeCountsTowardsShift = isActive && payload.active_counts_towards_shift !== false;
+        var shiftBaseSeconds = Math.max(0, Math.floor(Number(payload.shift_total_seconds) || 0));
+        var reasonTotals = payload.reason_totals;
+        if (reasonTotals && typeof reasonTotals === "object") {
+            downtimeReasonButtons.forEach(function (button) {
+                var reasonId = String(button.dataset.eoDowntimeReasonId || "");
+                button.dataset.eoReasonSeconds = String(Math.max(0, Math.floor(Number(reasonTotals[reasonId]) || 0)));
+            });
+        }
+        var syncedAtMs = Date.now();
         function tick() {
-            activeDuration.textContent = formatDowntimeDuration((Date.now() - startMs) / 1000);
+            var liveSeconds = activeCountsTowardsShift ? Math.max(0, Math.floor((Date.now() - syncedAtMs) / 1000)) : 0;
+            var shiftSeconds = shiftBaseSeconds + liveSeconds;
+            if (activeDuration) {
+                activeDuration.textContent = formatDowntimeDuration(shiftSeconds);
+            }
+            if (downtimeCard) {
+                downtimeCard.dataset.eoShiftDowntimeSeconds = String(shiftSeconds);
+                downtimeCard.setAttribute("aria-label", "Простои за смену: " + formatDowntimeDuration(shiftSeconds));
+            }
+            downtimeReasonButtons.forEach(function (button) {
+                var reasonId = String(button.dataset.eoDowntimeReasonId || "");
+                var baseSeconds = Math.max(0, Math.floor(Number(button.dataset.eoReasonSeconds) || 0));
+                var reasonIsActive = isActive && reasonId === activeReasonId;
+                renderReasonDuration(button, baseSeconds + (reasonIsActive ? liveSeconds : 0), reasonIsActive);
+            });
         }
         tick();
-        window.eoDowntimeTimerId = window.setInterval(tick, 1000);
+        if (activeCountsTowardsShift) {
+            window.eoDowntimeTimerId = window.setInterval(tick, 1000);
+        }
     }
 
     function setDowntimeStatusClass(statusKey) {
@@ -1264,14 +1318,16 @@ window.initExcavatorWorkShell = function () {
     function applyActiveDowntime(payload) {
         if (!downtimeCard || !payload || !payload.event_id) return;
         downtimeCard.dataset.eoActiveDowntimeId = payload.event_id;
+        downtimeCard.dataset.eoActiveReasonId = String(payload.reason_id || "");
         downtimeCard.dataset.eoActiveStartedAt = payload.started_at || "";
         downtimeCard.dataset.eoActiveElapsedSeconds = String(payload.elapsed_seconds || 0);
+        downtimeCard.dataset.eoActiveCountsTowardsShift = payload.active_counts_towards_shift === false ? "false" : "true";
+        downtimeCard.dataset.eoDowntimeCalculatedAt = payload.calculated_at || "";
         downtimeCard.dataset.eoDowntimeState = payload.equipment_state_code || "waiting";
         downtimeCard.classList.add("is-active");
         setDowntimeStatusClass(payload.status_key || "yellow");
-        downtimeCard.setAttribute("aria-label", "Простой активен");
-        startDowntimeTimer(payload.started_at, payload.elapsed_seconds);
-        shell.querySelectorAll("[data-eo-downtime-reason-id]").forEach(function (item) {
+        startDowntimeTimer(payload);
+        downtimeReasonButtons.forEach(function (item) {
             item.classList.toggle("is-selected", String(item.dataset.eoDowntimeReasonId || "") === String(payload.reason_id || ""));
         });
         if (closeEvent) {
@@ -1284,20 +1340,19 @@ window.initExcavatorWorkShell = function () {
     }
 
     function clearActiveDowntime(payload) {
-        clearDowntimeTimer();
         if (downtimeInput) downtimeInput.value = "";
-        var shiftTotalSeconds = Math.max(0, Number(payload && payload.shift_total_seconds) || 0);
-        if (activeDuration) activeDuration.textContent = (payload && payload.shift_total_label) || formatDowntimeDuration(shiftTotalSeconds);
         if (downtimeCard) {
             downtimeCard.dataset.eoActiveDowntimeId = "";
+            downtimeCard.dataset.eoActiveReasonId = "";
             downtimeCard.dataset.eoActiveStartedAt = "";
             downtimeCard.dataset.eoActiveElapsedSeconds = "0";
-            downtimeCard.dataset.eoShiftDowntimeSeconds = String(shiftTotalSeconds);
+            downtimeCard.dataset.eoActiveCountsTowardsShift = "false";
+            downtimeCard.dataset.eoDowntimeCalculatedAt = (payload && payload.calculated_at) || "";
             downtimeCard.dataset.eoDowntimeState = "";
             downtimeCard.classList.remove("is-active");
-            downtimeCard.setAttribute("aria-label", "Простои за смену: " + formatDowntimeDuration(shiftTotalSeconds));
             setDowntimeStatusClass("gray");
         }
+        startDowntimeTimer(payload);
         if (closeEvent) {
             closeEvent.disabled = true;
             closeEvent.classList.add("is-disabled");
@@ -1305,7 +1360,7 @@ window.initExcavatorWorkShell = function () {
             closeEvent.setAttribute("aria-disabled", "true");
             closeEvent.textContent = closeEvent.dataset.eoHoldLabel || "Завершить простой";
         }
-        shell.querySelectorAll("[data-eo-reason]").forEach(function (item) {
+        downtimeReasonButtons.forEach(function (item) {
             item.classList.remove("is-selected");
         });
     }
@@ -2401,9 +2456,9 @@ window.initExcavatorWorkShell = function () {
         });
     }
 
-    shell.querySelectorAll("[data-eo-reason]").forEach(function (button) {
+    downtimeReasonButtons.forEach(function (button) {
         registerHoldAction(button, function (hold) {
-            shell.querySelectorAll("[data-eo-reason]").forEach(function (item) {
+            downtimeReasonButtons.forEach(function (item) {
                 item.classList.remove("is-selected");
             });
             button.classList.add("is-selected");
@@ -2413,7 +2468,8 @@ window.initExcavatorWorkShell = function () {
             if (button.dataset.eoDowntimeReasonId) {
                 button.disabled = true;
                 button.classList.add("is-pending");
-                button.textContent = "Запускаю";
+                var reasonLabel = button.querySelector("[data-eo-reason-label]");
+                if (reasonLabel) reasonLabel.textContent = "Запускаю";
                 postDowntimeAction({
                     action: "start",
                     reason_id: button.dataset.eoDowntimeReasonId,
@@ -2428,10 +2484,10 @@ window.initExcavatorWorkShell = function () {
                 }).finally(function () {
                     button.disabled = false;
                     button.classList.remove("is-pending");
-                    button.textContent = hold.defaultLabel;
+                    if (reasonLabel) reasonLabel.textContent = button.dataset.eoHoldLabel || hold.defaultLabel;
                 });
             }
-        });
+        }, { labelSelector: "[data-eo-reason-label]" });
     });
 
     var applySettings = shell.querySelector("[data-eo-apply-settings]");
@@ -2779,12 +2835,12 @@ window.initExcavatorWorkShell = function () {
         });
     }
 
-    if (downtimeCard && downtimeCard.dataset.eoActiveDowntimeId && downtimeCard.dataset.eoActiveStartedAt) {
-        startDowntimeTimer(downtimeCard.dataset.eoActiveStartedAt, downtimeCard.dataset.eoActiveElapsedSeconds);
-    } else if (activeDuration) {
-        activeDuration.textContent = "00:00:00";
-        clearDowntimeTimer();
-    }
+    startDowntimeTimer({
+        active: !!(downtimeCard && downtimeCard.dataset.eoActiveDowntimeId),
+        reason_id: downtimeCard ? downtimeCard.dataset.eoActiveReasonId : "",
+        active_counts_towards_shift: !!(downtimeCard && downtimeCard.dataset.eoActiveCountsTowardsShift === "true"),
+        shift_total_seconds: downtimeCard ? downtimeCard.dataset.eoShiftDowntimeSeconds : 0
+    });
     if (logoutButton) {
         window.MobileShiftHold.bind(logoutButton, {
             holdMs: logoutHoldMs,

@@ -859,11 +859,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v184')
+        self.assertContains(response, 'excavator-mobile-shell-v185')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 183')
+        self.assertContains(response, 'Версия 185')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -887,7 +887,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'eo-downtime-state-icon-pause')
         self.assertContains(response, 'data-eo-active-duration')
         self.assertNotContains(response, 'data-eo-active-title')
-        self.assertNotContains(response, 'data-eo-active-reason')
+        self.assertContains(response, 'data-eo-active-reason-id')
         self.assertContains(response, 'data-eo-apply-settings')
         self.assertContains(response, 'data-eo-settings-available="true"')
         self.assertContains(response, 'data-eo-face-settings-available="true"')
@@ -899,14 +899,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'appliedExcavatorSettingsSnapshot')
         self.assertContains(response, 'currentExcavatorSettingsSnapshot() !== appliedExcavatorSettingsSnapshot')
         self.assertContains(response, 'data.work_context_changed && data.active_downtime_reason')
-        self.assertContains(response, '? "downtime"')
+        self.assertContains(response, '? "events"')
         self.assertContains(response, 'Простои')
         self.assertContains(response, '>Работа</span>')
         self.assertContains(response, '>Простой</span>')
-        self.assertContains(response, 'class="mm-mobile-nav-icon"')
+        self.assertContains(response, 'mm-mobile-nav-icon')
         self.assertContains(response, 'data-eo-tab="shift" data-eo-pwa-update-nav-target')
         self.assertContains(response, 'tab.setAttribute("aria-current", "page")')
-        self.assertContains(response, 'if (tabName === "events")')
+        self.assertContains(response, 'if (name !== "events") return;')
         self.assertContains(response, 'syncDowntimeStatus()')
         self.assertContains(response, 'cache: "no-store"')
         self.assertNotContains(response, 'class="eo-nav-clock"')
@@ -1021,7 +1021,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-logout-button')
         self.assertContains(response, 'data-eo-logout-url')
         self.assertContains(response, 'data-eo-shift-label')
-        self.assertContains(response, '--eo-shift-hold: 0%')
+        self.assertContains(response, 'data-mobile-shift-label')
         self.assertContains(response, 'Показатели техники')
         self.assertContains(response, 'Итог смены')
         self.assertNotContains(response, 'eo-shift-face-panel')
@@ -1031,8 +1031,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-screen="face"')
         self.assertContains(response, 'Забой')
         self.assertContains(response, 'Точки разгрузки')
-        self.assertContains(response, 'Назначено')
-        self.assertContains(response, 'В пути')
+        self.assertContains(response, 'Техника')
+        self.assertContains(response, 'Состояние')
         self.assertContains(response, 'data-eo-shift-fuel')
         self.assertContains(response, '<em>л</em>')
         self.assertNotContains(response, 'data-eo-shift-mileage')
@@ -1051,7 +1051,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-dump-points-input')
         self.assertContains(response, 'dump_point_ids')
         self.assertContains(response, 'data-eo-apply-settings')
-        self.assertContains(response, 'aria-label="Применить настройки"')
+        self.assertContains(response, 'aria-label="Настройки уже применены"')
         self.assertNotContains(response, 'Удерживайте 2 секунды, чтобы применить настройки')
         self.assertContains(response, 'window.applyOperationalStateRefresh')
         self.assertContains(response, 'refreshExcavatorWorkFromServer')
@@ -1120,7 +1120,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'card.dataset.eoEquipmentState = "loaded_waiting_unload";')
         self.assertNotContains(response, 'ожидает сервер')
         self.assertNotContains(response, 'Под погрузкой')
-        self.assertContains(response, 'class="mm-mobile-shift-button is-danger"')
+        self.assertContains(response, 'mobile-shift__action--danger')
 
     def test_excavator_progress_cycle_visual_context_preserves_completed_boundaries(self):
         cases = {
@@ -2017,7 +2017,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             self.assertIn(reason.id, rendered_ids)
             self.assertContains(response, f'data-eo-downtime-reason-id="{reason.id}"')
             self.assertContains(response, 'eo-hold-action')
-            self.assertContains(response, f'>{reason.button_label}</button>')
+            self.assertContains(response, f'data-eo-reason-label>{reason.button_label}</span>')
         self.assertNotIn(hidden_reason.id, rendered_ids)
         self.assertNotIn(wrong_type_reason.id, rendered_ids)
         self.assertGreaterEqual(len(cards), len(created_reasons))
@@ -2046,7 +2046,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-equipment-state="maintenance"')
         self.assertContains(response, 'data-eo-instant="true"')
         self.assertContains(response, 'aria-label="Начать простой: ТО смены"')
-        self.assertContains(response, '>ТО смены</button>')
+        self.assertContains(response, 'data-eo-reason-label>ТО смены</span>')
 
     def test_excavator_downtime_reason_uses_effective_server_semantics_without_local_red_default(self):
         waiting_reason = DowntimeReason.objects.create(
@@ -2255,7 +2255,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v184', script)
+        self.assertIn('excavator-mobile-shell-v185', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -3408,6 +3408,196 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertFalse(payload['active'])
         self.assertEqual(payload['shift_total_seconds'], 15 * 60)
         self.assertEqual(payload['shift_total_label'], '00:15:00')
+
+    def test_excavator_events_screen_shows_totals_only_on_used_reason_buttons(self):
+        now = timezone.now()
+        shift_start = now - timedelta(hours=2)
+        excavator_shift = EmployeeShift.objects.get(
+            employee=self.operator,
+            equipment=self.excavator,
+            closed_at__isnull=True,
+        )
+        excavator_shift.opened_at = shift_start
+        excavator_shift.save(update_fields=['opened_at'])
+        second_reason = DowntimeReason.objects.create(
+            name='Ремонт по смене',
+            short_label='Ремонт',
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+            sort_order=200,
+        )
+        unused_reason = DowntimeReason.objects.create(
+            name='Не использовалась',
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+            sort_order=300,
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=self.reason,
+            started_at=shift_start + timedelta(minutes=10),
+            ended_at=shift_start + timedelta(minutes=20),
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=self.reason,
+            started_at=shift_start + timedelta(minutes=30),
+            ended_at=shift_start + timedelta(minutes=35),
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=second_reason,
+            started_at=shift_start + timedelta(minutes=40),
+            ended_at=shift_start + timedelta(minutes=47),
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        cards = {card['reason'].id: card for card in response.context['downtime_reason_cards']}
+        self.assertEqual(cards[self.reason.id]['total_seconds'], 15 * 60)
+        self.assertEqual(cards[self.reason.id]['total_label'], '00:15:00')
+        self.assertTrue(cards[self.reason.id]['is_used'])
+        self.assertEqual(cards[second_reason.id]['total_seconds'], 7 * 60)
+        self.assertTrue(cards[second_reason.id]['is_used'])
+        self.assertEqual(cards[unused_reason.id]['total_seconds'], 0)
+        self.assertFalse(cards[unused_reason.id]['is_used'])
+        self.assertEqual(response.context['shift_downtime_total_seconds'], 22 * 60)
+        self.assertContains(response, 'data-eo-reason-seconds="900"')
+        self.assertContains(response, '>00:15:00</span>')
+        self.assertContains(response, 'data-eo-reason-duration hidden>00:00:00</span>')
+
+    def test_excavator_active_downtime_header_keeps_total_for_whole_shift(self):
+        now = timezone.now()
+        shift_start = now - timedelta(hours=2)
+        excavator_shift = EmployeeShift.objects.get(
+            employee=self.operator,
+            equipment=self.excavator,
+            closed_at__isnull=True,
+        )
+        excavator_shift.opened_at = shift_start
+        excavator_shift.save(update_fields=['opened_at'])
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=self.reason,
+            started_at=shift_start + timedelta(minutes=10),
+            ended_at=shift_start + timedelta(minutes=20),
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=self.reason,
+            started_at=now - timedelta(minutes=5),
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        total_seconds = response.context['shift_downtime_total_seconds']
+        self.assertGreaterEqual(total_seconds, (15 * 60) - 1)
+        self.assertLessEqual(total_seconds, (15 * 60) + 1)
+        total_label = response.context['shift_downtime_total_label']
+        self.assertContains(response, f'<b data-eo-active-duration>{total_label}</b>', html=True)
+        self.assertContains(response, 'data-eo-active-reason-id=')
+        self.assertContains(response, 'data-eo-reason-duration')
+
+    def test_excavator_switching_downtime_reason_preserves_category_intervals(self):
+        excavator_shift = EmployeeShift.objects.get(
+            employee=self.operator,
+            equipment=self.excavator,
+            closed_at__isnull=True,
+        )
+        excavator_shift.opened_at = timezone.now() - timedelta(hours=1)
+        excavator_shift.save(update_fields=['opened_at'])
+        active_event = DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=self.reason,
+            started_at=timezone.now() - timedelta(minutes=8),
+        )
+        second_reason = DowntimeReason.objects.create(
+            name='Технический ремонт',
+            short_label='Ремонт',
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+            sort_order=200,
+        )
+
+        response = self.client.post(
+            reverse('excavator_downtime_action'),
+            data=json.dumps({
+                'action': 'start',
+                'reason_id': second_reason.id,
+                'client_action_id': 'switch-reason',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        events = list(DowntimeEvent.objects.filter(equipment=self.excavator).order_by('started_at', 'id'))
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0].id, active_event.id)
+        self.assertIsNotNone(events[0].ended_at)
+        self.assertEqual(events[0].reason, self.reason)
+        self.assertEqual(events[1].reason, second_reason)
+        self.assertIsNone(events[1].ended_at)
+        self.assertEqual(events[0].ended_at, events[1].started_at)
+        self.assertEqual(payload['action'], 'downtime_switched')
+        self.assertEqual(payload['reason_id'], second_reason.id)
+        self.assertGreaterEqual(payload['reason_totals'][str(self.reason.id)], (8 * 60) - 1)
+        self.assertIn(str(second_reason.id), payload['reason_totals'])
+        self.assertGreaterEqual(payload['shift_total_seconds'], (8 * 60) - 1)
+
+    def test_excavator_reselecting_active_reason_does_not_split_interval(self):
+        active_event = DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=self.reason,
+            started_at=timezone.now() - timedelta(minutes=3),
+        )
+
+        response = self.client.post(
+            reverse('excavator_downtime_action'),
+            data=json.dumps({
+                'action': 'start',
+                'reason_id': self.reason.id,
+                'client_action_id': 'repeat-reason',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['action'], 'downtime_updated')
+        self.assertEqual(DowntimeEvent.objects.filter(equipment=self.excavator).count(), 1)
+        active_event.refresh_from_db()
+        self.assertIsNone(active_event.ended_at)
+
+    def test_excavator_shift_totals_preserve_transferred_downtime_attribution(self):
+        now = timezone.now()
+        excavator_shift = EmployeeShift.objects.get(
+            employee=self.operator,
+            equipment=self.excavator,
+            closed_at__isnull=True,
+        )
+        excavator_shift.opened_at = now - timedelta(minutes=30)
+        excavator_shift.save(update_fields=['opened_at'])
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=self.reason,
+            started_at=now - timedelta(minutes=45),
+        )
+
+        response = self.client.get(reverse('excavator_downtime_action'))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload['shift_total_seconds'], 0)
+        self.assertEqual(payload['reason_totals'], {})
+        self.assertFalse(payload['active_counts_towards_shift'])
 
     def test_excavator_close_downtime_button_disabled_without_active_downtime(self):
         response = self.client.get(reverse('excavator_work'))

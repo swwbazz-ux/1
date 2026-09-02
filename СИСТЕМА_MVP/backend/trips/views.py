@@ -427,25 +427,64 @@ def downtime_event_payload(event, *, action='', closed=False):
     }
 
 
-def equipment_shift_downtime_seconds(equipment, shift, *, until=None):
+def equipment_shift_downtime_seconds_by_reason(equipment, shift, *, until=None):
     if not equipment or not shift or not shift.opened_at:
-        return 0
+        return {}
     calculation_end = until or timezone.now()
     source_period_end = shift.closed_at or calculation_end
-    events = DowntimeEvent.objects.filter(
-        equipment=equipment,
-        started_at__gte=shift.opened_at,
-        started_at__lt=source_period_end,
+    if source_period_end <= shift.opened_at:
+        return {}
+    events = (
+        DowntimeEvent.objects
+        .filter(
+            equipment=equipment,
+            started_at__gte=shift.opened_at,
+            started_at__lt=source_period_end,
+        )
     )
-    total_seconds = 0
-    for event in events.only('started_at', 'ended_at'):
+    totals = {}
+    for event in events.only('reason_id', 'started_at', 'ended_at'):
         event_end = min(event.ended_at or calculation_end, calculation_end)
-        total_seconds += max(0, int((event_end - event.started_at).total_seconds()))
-    return total_seconds
+        elapsed_seconds = max(0, int((event_end - event.started_at).total_seconds()))
+        totals[event.reason_id] = totals.get(event.reason_id, 0) + elapsed_seconds
+    return totals
+
+
+def equipment_shift_downtime_seconds(equipment, shift, *, until=None):
+    return sum(equipment_shift_downtime_seconds_by_reason(equipment, shift, until=until).values())
+
+
+def downtime_event_counts_towards_shift(event, shift):
+    if not event or not shift or not shift.opened_at or not event.started_at:
+        return False
+    return event.started_at >= shift.opened_at and (
+        not shift.closed_at or event.started_at < shift.closed_at
+    )
+
+
+def excavator_downtime_totals_payload(excavator, shift, *, calculated_at=None):
+    calculated_at = calculated_at or timezone.now()
+    reason_totals = equipment_shift_downtime_seconds_by_reason(
+        excavator,
+        shift,
+        until=calculated_at,
+    )
+    shift_total_seconds = sum(reason_totals.values())
+    return {
+        'calculated_at': calculated_at.isoformat(),
+        'shift_total_seconds': shift_total_seconds,
+        'shift_total_label': format_duration_label(shift_total_seconds),
+        'reason_totals': reason_totals,
+    }
 
 
 def excavator_downtime_status_payload(excavator, shift):
-    shift_total_seconds = equipment_shift_downtime_seconds(excavator, shift)
+    calculated_at = timezone.now()
+    totals_payload = excavator_downtime_totals_payload(
+        excavator,
+        shift,
+        calculated_at=calculated_at,
+    )
     active_event = (
         DowntimeEvent.objects
         .filter(equipment=excavator, ended_at__isnull=True)
@@ -455,6 +494,10 @@ def excavator_downtime_status_payload(excavator, shift):
     ) if excavator else None
     if active_event:
         payload = downtime_event_payload(active_event)
+        payload['active_counts_towards_shift'] = downtime_event_counts_towards_shift(
+            active_event,
+            shift,
+        )
     else:
         payload = {
             'ok': True,
@@ -470,11 +513,9 @@ def excavator_downtime_status_payload(excavator, shift):
             'equipment_state_code': '',
             'status_key': 'gray',
             'status_label': '',
+            'active_counts_towards_shift': False,
         }
-    payload.update({
-        'shift_total_seconds': shift_total_seconds,
-        'shift_total_label': format_duration_label(shift_total_seconds),
-    })
+    payload.update(totals_payload)
     return payload
 
 
@@ -713,7 +754,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v184";
+const CACHE_NAME = "excavator-mobile-shell-v185";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -4290,11 +4331,19 @@ def excavator_work_view(request):
             .first()
         )
 
+    downtime_calculated_at = timezone.now()
+    downtime_reason_totals = equipment_shift_downtime_seconds_by_reason(
+        current_excavator,
+        open_shift,
+        until=downtime_calculated_at,
+    )
+
     def downtime_reason_card(reason):
         label = reason.button_label
         full_name = str(reason)
         reason_state_code = downtime_reason_equipment_state_code(reason)
         reason_state_ui = downtime_reason_state_ui(equipment_state_map, reason)
+        total_seconds = downtime_reason_totals.get(reason.id, 0)
         return {
             'reason': reason,
             'name': label,
@@ -4302,13 +4351,16 @@ def excavator_work_view(request):
             'equipment_state_code': reason_state_code,
             'status_key': reason_state_ui['color_group'],
             'is_selected': bool(active_downtime and active_downtime.reason_id == reason.id),
+            'total_seconds': total_seconds,
+            'total_label': format_duration_label(total_seconds),
+            'is_used': bool(total_seconds or (active_downtime and active_downtime.reason_id == reason.id)),
         }
 
     downtime_reason_cards = [downtime_reason_card(reason) for reason in downtime_reasons]
 
     active_downtime_elapsed_seconds = 0
     active_downtime_elapsed_label = '00:00:00'
-    shift_downtime_total_seconds = equipment_shift_downtime_seconds(current_excavator, open_shift)
+    shift_downtime_total_seconds = sum(downtime_reason_totals.values())
     shift_downtime_total_label = format_duration_label(shift_downtime_total_seconds)
     active_downtime_state = equipment_state_ui(equipment_state_map, 'waiting')
     active_downtime_started_at = ''
@@ -4317,6 +4369,10 @@ def excavator_work_view(request):
         active_downtime_elapsed_label = format_duration_label(active_downtime_elapsed_seconds)
         active_downtime_state = downtime_reason_state_ui(equipment_state_map, active_downtime.reason)
         active_downtime_started_at = active_downtime.started_at.isoformat()
+    active_downtime_counts_towards_shift = downtime_event_counts_towards_shift(
+        active_downtime,
+        open_shift,
+    )
 
     default_rock = work_settings['default_rock']
     default_dump_point = work_settings['default_dump_point']
@@ -4559,8 +4615,10 @@ def excavator_work_view(request):
             'active_downtime_started_at': active_downtime_started_at,
             'active_downtime_elapsed_seconds': active_downtime_elapsed_seconds,
             'active_downtime_elapsed_label': active_downtime_elapsed_label,
+            'active_downtime_counts_towards_shift': active_downtime_counts_towards_shift,
             'shift_downtime_total_seconds': shift_downtime_total_seconds,
             'shift_downtime_total_label': shift_downtime_total_label,
+            'downtime_calculated_at': downtime_calculated_at.isoformat(),
             'active_downtime_state': active_downtime_state,
             'downtime_reason_cards': downtime_reason_cards,
             'operational_state_version': operational_state_version,
@@ -4637,25 +4695,22 @@ def excavator_downtime_action_view(request):
 
     if action == 'close':
         if not active_event:
-            shift_total_seconds = equipment_shift_downtime_seconds(current_excavator, open_shift)
-            return JsonResponse({
+            response_payload = {
                 'ok': True,
                 'active': False,
                 'closed': False,
                 'elapsed_seconds': 0,
                 'elapsed_label': '00:00:00',
-                'shift_total_seconds': shift_total_seconds,
-                'shift_total_label': format_duration_label(shift_total_seconds),
                 'version': get_operational_state_version(),
-            })
+                'active_counts_towards_shift': False,
+            }
+            response_payload.update(excavator_downtime_totals_payload(current_excavator, open_shift))
+            return JsonResponse(response_payload)
         active_event.ended_at = timezone.now()
         active_event.save(update_fields=['ended_at'])
         response_payload = downtime_event_payload(active_event, action='downtime_closed', closed=True)
-        shift_total_seconds = equipment_shift_downtime_seconds(current_excavator, open_shift)
-        response_payload.update({
-            'shift_total_seconds': shift_total_seconds,
-            'shift_total_label': format_duration_label(shift_total_seconds),
-        })
+        response_payload['active_counts_towards_shift'] = False
+        response_payload.update(excavator_downtime_totals_payload(current_excavator, open_shift))
         return JsonResponse(response_payload)
 
     if action != 'start':
@@ -4668,6 +4723,7 @@ def excavator_downtime_action_view(request):
     )
     if not reason:
         return JsonResponse({'ok': False, 'error': 'Причина простоя недоступна для экскаваторщика.'}, status=400)
+    action_label = 'downtime_started'
     if active_event:
         if active_event.employee_id != access.employee_id:
             return JsonResponse(
@@ -4681,10 +4737,23 @@ def excavator_downtime_action_view(request):
                 },
                 status=409,
             )
-        active_event.reason = reason
-        active_event.comment = (payload.get('comment') or '')[:255]
-        active_event.save(update_fields=['reason', 'comment'])
-        event = active_event
+        if active_event.reason_id == reason.id:
+            active_event.comment = (payload.get('comment') or '')[:255]
+            active_event.save(update_fields=['comment'])
+            event = active_event
+            action_label = 'downtime_updated'
+        else:
+            switched_at = timezone.now()
+            active_event.ended_at = switched_at
+            active_event.save(update_fields=['ended_at'])
+            event = DowntimeEvent.objects.create(
+                equipment=current_excavator,
+                employee=access.employee,
+                reason=reason,
+                started_at=switched_at,
+                comment=(payload.get('comment') or '')[:255],
+            )
+            action_label = 'downtime_switched'
     else:
         event = DowntimeEvent.objects.create(
             equipment=current_excavator,
@@ -4693,8 +4762,13 @@ def excavator_downtime_action_view(request):
             started_at=timezone.now(),
             comment=(payload.get('comment') or '')[:255],
         )
-    action_label = 'downtime_updated' if active_event else 'downtime_started'
-    return JsonResponse(downtime_event_payload(event, action=action_label))
+    response_payload = downtime_event_payload(event, action=action_label)
+    response_payload['active_counts_towards_shift'] = downtime_event_counts_towards_shift(
+        event,
+        open_shift,
+    )
+    response_payload.update(excavator_downtime_totals_payload(current_excavator, open_shift))
+    return JsonResponse(response_payload)
 
 def protect_dispatcher_equipment_detail_response(response):
     response['Cache-Control'] = 'private, no-store, max-age=0'
