@@ -859,11 +859,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v182')
+        self.assertContains(response, 'excavator-mobile-shell-v183')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 182')
+        self.assertContains(response, 'Версия 183')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -2042,7 +2042,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, f'data-eo-downtime-reason-id="{reason.id}"')
         self.assertContains(response, 'data-eo-reason="Полное название регламентного обслуживания экскаватора"')
         self.assertContains(response, 'data-eo-equipment-state="maintenance"')
-        self.assertContains(response, 'Удерживайте 2 секунды, чтобы начать простой: ТО смены')
+        self.assertContains(response, 'data-eo-instant="true"')
+        self.assertContains(response, 'aria-label="Начать простой: ТО смены"')
         self.assertContains(response, '>ТО смены</button>')
 
     def test_excavator_downtime_reason_uses_effective_server_semantics_without_local_red_default(self):
@@ -2114,6 +2115,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         self.assertContains(response, 'data-eo-settings-available="false"')
         self.assertContains(response, 'data-eo-face-settings-available="false"')
+        self.assertContains(response, 'data-eo-downtime-available="false"')
         self.assertContains(response, 'data-eo-face-horizon disabled aria-disabled="true"')
         self.assertContains(response, 'data-eo-face-block disabled aria-disabled="true"')
         self.assertContains(response, 'data-eo-rock-select disabled aria-disabled="true"')
@@ -2124,8 +2126,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             )
         self.assertContains(response, 'mobile-face mobile-work-controls is-shift-inactive')
         self.assertNotContains(response, 'data-eo-face-inactive-notice')
-        self.assertContains(response, 'showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "face-lock" });')
+        self.assertContains(response, 'showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "shift-lock" });')
         self.assertContains(response, 'faceScreen.addEventListener("click"')
+        self.assertContains(response, 'eventsScreen.addEventListener("click"')
+        for card in response.context['downtime_reason_cards']:
+            self.assertRegex(
+                response.content.decode('utf-8'),
+                rf'data-eo-downtime-reason-id="{card["reason"].id}"[^>]*data-eo-instant="true"[^>]*disabled aria-disabled="true"',
+            )
         self.assertContains(response, 'disabled aria-disabled="true" aria-label="Настройки недоступны: сначала начните смену"')
         self.assertContains(response, '<span data-mobile-shift-label>Применить настройки</span>', html=True)
         self.assertContains(response, 'class="mobile-shift-toast" data-eo-notice hidden')
@@ -2157,15 +2165,16 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('.mobile-shift-toast {', shared_css)
         self.assertIn('position: fixed;', shared_css)
         self.assertIn('pointer-events: none;', shared_css)
-        face_css = (
+        lock_css = (
             Path(__file__).resolve().parents[1]
             / 'static'
             / 'css'
-            / 'mobile-face-unified-v1.css'
+            / 'mobile-shift-unified-v1.css'
         ).read_text(encoding='utf-8')
-        self.assertIn('.mobile-shift-toast.is-face-lock {', face_css)
-        self.assertIn('inset: 50% auto auto 50%;', face_css)
-        self.assertIn('.mobile-face.is-shift-inactive input:disabled', face_css)
+        self.assertIn('.mobile-shift-toast.is-shift-lock {', lock_css)
+        self.assertIn('inset: 50% auto auto 50%;', lock_css)
+        self.assertIn('.eo-screen.is-shift-inactive input:disabled', lock_css)
+        self.assertIn('.eo-screen[data-eo-screen="events"].is-shift-inactive > .eo-reason-grid', lock_css)
 
 
     def test_excavator_manifest_is_installable_pwa_manifest(self):
@@ -2190,7 +2199,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v182', script)
+        self.assertIn('excavator-mobile-shell-v183', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2251,7 +2260,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('inputmode="numeric" pattern="[0-9]*" name="loading_block"', html)
         self.assertIn('applySettings.addEventListener("click"', html)
         self.assertNotIn('registerHoldAction(applySettings', html)
-        self.assertNotIn('data-eo-instant="true"', html)
+        self.assertNotIn('data-eo-apply-settings data-eo-instant="true"', html)
         self.assertNotIn('class="eo-face-form"', html)
         self.assertNotIn('class="eo-large-field"', html)
         self.assertNotIn('class="eo-unload-grid eo-unload-grid-settings"', html)
@@ -3193,6 +3202,32 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('elapsed_seconds', close_payload)
         self.assertIn('shift_total_seconds', close_payload)
         self.assertIn('shift_total_label', close_payload)
+
+    def test_excavator_downtime_is_locked_without_open_shift(self):
+        EmployeeShift.objects.filter(
+            employee=self.operator,
+            closed_at__isnull=True,
+        ).update(closed_at=timezone.now())
+
+        page = self.client.get(reverse('excavator_work'))
+
+        self.assertContains(page, 'data-eo-downtime-available="false"')
+        self.assertContains(page, 'data-eo-screen="events" data-eo-downtime-available="false" aria-disabled="true"')
+        self.assertNotContains(page, 'aria-label="Удерживайте 2 секунды, чтобы начать простой:')
+
+        response = self.client.post(
+            reverse('excavator_downtime_action'),
+            data=json.dumps({
+                'action': 'start',
+                'reason_id': self.reason.id,
+                'client_action_id': 'downtime-without-shift',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['error'], 'Сначала нужно открыть смену на экскаваторе.')
+        self.assertFalse(DowntimeEvent.objects.filter(equipment=self.excavator).exists())
 
     def test_excavator_downtime_action_rejects_reason_outside_role_reference(self):
         wrong_type = EquipmentType.objects.create(name='Погрузчик')

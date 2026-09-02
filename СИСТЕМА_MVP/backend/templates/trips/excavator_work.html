@@ -6,12 +6,12 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v182">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v182">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v182">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v182">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v182">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v182" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v183">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v183">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v183">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v183">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v183">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v183" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -273,7 +273,7 @@
             </section>
         </div>
 
-        <section class="eo-screen" data-eo-screen="events">
+        <section class="eo-screen{% if not open_shift %} is-shift-inactive{% endif %}" data-eo-screen="events" data-eo-downtime-available="{% if open_shift %}true{% else %}false{% endif %}"{% if not open_shift %} aria-disabled="true"{% endif %}>
             <div class="eo-title-row">
                 <h1>Простои</h1>
                 <button class="eo-refresh-button" type="button" aria-label="Обновить" data-eo-refresh-work>↻</button>
@@ -291,7 +291,7 @@
             </div>
             <div class="eo-reason-grid">
                 {% for card in downtime_reason_cards %}
-                    <button class="eo-hold-action status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}" type="button" data-eo-downtime-reason-id="{{ card.reason.id }}" data-eo-reason="{{ card.full_name }}" data-eo-equipment-state="{{ card.equipment_state_code }}" data-eo-hold-label="{{ card.name }}" style="--eo-action-hold: 0%" aria-label="Удерживайте 2 секунды, чтобы начать простой: {{ card.name }}">{{ card.name }}</button>
+                    <button class="eo-hold-action status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}" type="button" data-eo-downtime-reason-id="{{ card.reason.id }}" data-eo-reason="{{ card.full_name }}" data-eo-equipment-state="{{ card.equipment_state_code }}" data-eo-hold-label="{{ card.name }}" data-eo-instant="true" style="--eo-action-hold: 0%"{% if not open_shift %} disabled aria-disabled="true" aria-label="Недоступно: сначала начните смену"{% else %} aria-label="Начать простой: {{ card.name }}"{% endif %}>{{ card.name }}</button>
                 {% empty %}
                     <div class="eo-empty-state eo-empty-state-compact">
                         <strong>Причины не настроены</strong>
@@ -380,7 +380,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v182";
+var excavatorShellVersion = "excavator-mobile-shell-v183";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -411,23 +411,23 @@ function closeExcavatorNotice() {
     excavatorNoticeTimer = null;
     if (excavatorNotice) {
         excavatorNotice.hidden = true;
-        excavatorNotice.classList.remove("is-face-lock");
+        excavatorNotice.classList.remove("is-shift-lock");
     }
 }
 
 function showExcavatorNotice(message, options) {
     if (!excavatorNotice) return;
     var text = compactExcavatorNotice(message);
-    var isFaceLock = !!(options && options.variant === "face-lock");
-    var noticeKey = (isFaceLock ? "face-lock:" : "default:") + text;
+    var isShiftLock = !!(options && options.variant === "shift-lock");
+    var noticeKey = (isShiftLock ? "shift-lock:" : "default:") + text;
     var now = Date.now();
-    if ((!excavatorNotice.hidden && excavatorNotice.textContent === text && excavatorNotice.classList.contains("is-face-lock") === isFaceLock) || (excavatorNoticeLastKey === noticeKey && now - excavatorNoticeLastShownAt < 2200)) {
+    if ((!excavatorNotice.hidden && excavatorNotice.textContent === text && excavatorNotice.classList.contains("is-shift-lock") === isShiftLock) || (excavatorNoticeLastKey === noticeKey && now - excavatorNoticeLastShownAt < 2200)) {
         return;
     }
     excavatorNoticeLastKey = noticeKey;
     excavatorNoticeLastShownAt = now;
     excavatorNotice.textContent = text;
-    excavatorNotice.classList.toggle("is-face-lock", isFaceLock);
+    excavatorNotice.classList.toggle("is-shift-lock", isShiftLock);
     excavatorNotice.hidden = false;
     window.clearTimeout(excavatorNoticeTimer);
     excavatorNoticeTimer = window.setTimeout(closeExcavatorNotice, 3600);
@@ -854,6 +854,7 @@ window.initExcavatorWorkShell = function () {
     var shiftFormError = shell.querySelector("[data-eo-shift-form-error]");
     var faceScreen = shell.querySelector('[data-eo-screen="face"]');
     var faceContent = shell.querySelector("[data-eo-face-settings-available]");
+    var eventsScreen = shell.querySelector('[data-eo-screen="events"]');
     var shiftServerBlocked = !!(shiftButton && shiftButton.disabled);
     var shiftHoldMs = 2000;
     var shiftHoldController = null;
@@ -1185,9 +1186,8 @@ window.initExcavatorWorkShell = function () {
                 return;
             }
             if (button.disabled || button.getAttribute("aria-disabled") === "true") return;
-            /* Настройки забоя меняются по ходу смены и легко правятся обратно —
-               лишнее окно подтверждения только держит человека на экране забоя,
-               вместо того чтобы вернуть его к работе. */
+            /* Оперативные настройки и причины простоя легко исправить следующим
+               выбором. Для них отдельное подтверждение только замедляет работу. */
             if (button.dataset.eoInstant === "true") {
                 onComplete({ resetHold: resetHold, defaultLabel: defaultLabel });
                 return;
@@ -2259,7 +2259,17 @@ window.initExcavatorWorkShell = function () {
             var lockedRegion = event.target.closest(".mobile-face__content, .mobile-face__actions");
             if (!lockedRegion || !faceScreen.contains(lockedRegion)) return;
             event.preventDefault();
-            showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "face-lock" });
+            showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "shift-lock" });
+        });
+    }
+
+    if (eventsScreen) {
+        eventsScreen.addEventListener("click", function (event) {
+            if (eventsScreen.dataset.eoDowntimeAvailable === "true") return;
+            var lockedRegion = event.target.closest(".eo-reason-grid, [data-eo-close-event]");
+            if (!lockedRegion || !eventsScreen.contains(lockedRegion)) return;
+            event.preventDefault();
+            showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "shift-lock" });
         });
     }
 
