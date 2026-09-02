@@ -6,12 +6,12 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v180">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v180">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v180">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v180">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v180">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v180" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v181">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v181">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v181">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v181">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v181">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v181" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -82,20 +82,20 @@
                 </div>
             </header>
 
-            <div class="mobile-face__content">
+            <div class="mobile-face__content{% if not open_shift %} is-shift-inactive{% endif %}" data-eo-face-settings-available="{% if open_shift %}true{% else %}false{% endif %}"{% if not open_shift %} aria-disabled="true"{% endif %}>
                 <div class="mobile-face__settings" aria-label="Настройки забоя">
                     <label class="mobile-shift__field mobile-face__setting">
                         <span class="mobile-shift__field-label"><span>Горизонт</span></span>
-                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" pattern="[0-9]*" name="loading_horizon" value="{{ face_horizon }}" placeholder="75" data-eo-face-horizon></span>
+                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" pattern="[0-9]*" name="loading_horizon" value="{{ face_horizon }}" placeholder="75" data-eo-face-horizon{% if not open_shift %} disabled aria-disabled="true"{% endif %}></span>
                     </label>
                     <label class="mobile-shift__field mobile-face__setting">
                         <span class="mobile-shift__field-label"><span>Блок</span></span>
-                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" pattern="[0-9]*" name="loading_block" value="{{ face_block }}" placeholder="52" data-eo-face-block></span>
+                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" pattern="[0-9]*" name="loading_block" value="{{ face_block }}" placeholder="52" data-eo-face-block{% if not open_shift %} disabled aria-disabled="true"{% endif %}></span>
                     </label>
                     <label class="mobile-shift__field mobile-face__setting">
                         <span class="mobile-shift__field-label"><span>Порода</span></span>
                         <span class="mobile-shift__metric-value">
-                            <select name="rock_type" data-eo-rock-select>
+                            <select name="rock_type" data-eo-rock-select{% if not open_shift %} disabled aria-disabled="true"{% endif %}>
                                 {% for rock in rock_choices %}
                                     <option value="{{ rock.id }}" {% if rock.id|stringformat:"s" == default_rock|stringformat:"s" %}selected{% endif %}>{{ rock }}</option>
                                 {% endfor %}
@@ -111,6 +111,7 @@
                             type="button"
                             data-eo-dump-select="{{ card.point.id }}"
                             aria-pressed="{% if card.is_selected %}true{% else %}false{% endif %}"
+                            {% if not open_shift %}disabled aria-disabled="true"{% endif %}
                         >
                             <strong>{{ card.name }}</strong>
                         </button>
@@ -121,12 +122,18 @@
                         </div>
                     {% endfor %}
                 </div>
+                {% if not open_shift %}
+                    <div class="mobile-face__inactive-notice" data-eo-face-inactive-notice role="status" aria-live="polite">
+                        <strong>Смена не активна</strong>
+                        <span>Сначала начните смену</span>
+                    </div>
+                {% endif %}
             </div>
 
             <input type="hidden" name="dump_point" value="{{ default_dump_point }}" data-eo-dump-input>
             <input type="hidden" name="dump_points" value="{% for id in selected_dump_point_ids %}{% if not forloop.first %},{% endif %}{{ id }}{% endfor %}" data-eo-dump-points-input>
             <footer class="mobile-shift__actions mobile-face__actions">
-                <button class="mobile-shift__action mobile-shift__action--primary mobile-face__apply{% if not open_shift or has_applied_settings %} is-disabled{% endif %}" type="button" data-eo-apply-settings data-eo-settings-available="{% if open_shift %}true{% else %}false{% endif %}" data-eo-settings-applied="{% if has_applied_settings %}true{% else %}false{% endif %}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Сначала начните смену"{% elif has_applied_settings %} disabled aria-disabled="true" aria-label="Настройки уже применены"{% else %} aria-disabled="false" aria-label="Применить настройки"{% endif %}><span data-mobile-shift-label>{% if not open_shift %}Сначала начните смену{% else %}Применить настройки{% endif %}</span></button>
+                <button class="mobile-shift__action mobile-shift__action--primary mobile-face__apply{% if not open_shift or has_applied_settings %} is-disabled{% endif %}" type="button" data-eo-apply-settings data-eo-settings-available="{% if open_shift %}true{% else %}false{% endif %}" data-eo-settings-applied="{% if has_applied_settings %}true{% else %}false{% endif %}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Настройки недоступны: сначала начните смену"{% elif has_applied_settings %} disabled aria-disabled="true" aria-label="Настройки уже применены"{% else %} aria-disabled="false" aria-label="Применить настройки"{% endif %}><span data-mobile-shift-label>Применить настройки</span></button>
             </footer>
         </section>
 
@@ -379,7 +386,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v180";
+var excavatorShellVersion = "excavator-mobile-shell-v181";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1740,7 +1747,7 @@ window.initExcavatorWorkShell = function () {
     }
 
     function toggleDumpChoice(button) {
-        if (!button) return;
+        if (!button || button.disabled || button.getAttribute("aria-disabled") === "true") return;
         var selectedButtons = shell.querySelectorAll("[data-eo-dump-select].is-selected");
         var isSelected = button.classList.contains("is-selected");
         if (isSelected && selectedButtons.length <= 1) {
@@ -1788,7 +1795,7 @@ window.initExcavatorWorkShell = function () {
         button.setAttribute("aria-disabled", isDisabled ? "true" : "false");
         button.setAttribute(
             "aria-label",
-            !isAvailable ? "Сначала начните смену" : isDirty ? "Применить настройки" : "Настройки уже применены"
+            !isAvailable ? "Настройки недоступны: сначала начните смену" : isDirty ? "Применить настройки" : "Настройки уже применены"
         );
     }
 
