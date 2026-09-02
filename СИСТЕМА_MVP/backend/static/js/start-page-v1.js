@@ -88,6 +88,7 @@
 
         body.classList.toggle("is-input-mode", focused);
         body.classList.toggle("is-keyboard-open", keyboardOpen);
+        body.classList.toggle("is-start-viewport-tight", snapshot.height <= 620);
         body.style.setProperty("--start-vv-height", snapshot.height + "px");
         body.style.setProperty("--start-vv-top", snapshot.offsetTop + "px");
         keepFormVisible(snapshot, keyboardOpen);
