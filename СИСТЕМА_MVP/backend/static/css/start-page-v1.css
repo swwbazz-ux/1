@@ -387,6 +387,11 @@ body.start-page > .app-connection-dot {
     position: relative;
     left: auto;
     bottom: auto;
+    display: grid;
+    grid-template-columns: 30px minmax(0, auto);
+    align-items: center;
+    justify-content: center;
+    column-gap: 10px;
     width: min(100%, 380px);
     min-height: 52px;
     max-width: 380px;
@@ -410,9 +415,20 @@ body.start-page > .app-connection-dot {
 }
 
 .start-screen__inner > .max-support-link .max-support-link__icon {
-    flex-basis: 27px;
-    width: 27px;
-    height: 27px;
+    width: 30px;
+    height: 30px;
+    padding: 4px;
+}
+
+.start-screen__inner > .max-support-link .max-support-link__label {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    min-height: 30px;
+    line-height: 1.15;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 /* Result state keeps the existing app-selection contract but uses the new shell. */
@@ -743,7 +759,7 @@ body.start-page > .app-connection-dot {
     }
 
     body.start-page.is-input-mode .start-kicker,
-    body.start-page.is-input-mode .start-screen__inner > .max-support-link {
+    body.start-page.is-keyboard-open .start-screen__inner > .max-support-link {
         display: none;
     }
 
