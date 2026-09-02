@@ -429,6 +429,7 @@ body.start-page > .app-connection-dot {
     text-align: left;
     white-space: normal;
     overflow-wrap: anywhere;
+    transform: translateY(2px);
 }
 
 /* Result state keeps the existing app-selection contract but uses the new shell. */

@@ -119,8 +119,8 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'start-hero-v1.webp')
         self.assertContains(response, 'start-hero-v1.jpg')
         self.assertContains(response, 'fetchpriority="high"')
-        self.assertContains(response, 'start-page-v1.css?v=20260903-4')
-        self.assertContains(response, 'start-page-v1.js?v=20260903-4')
+        self.assertContains(response, 'start-page-v1.css?v=20260903-5')
+        self.assertContains(response, 'start-page-v1.js?v=20260903-5')
         self.assertRegex(html, r'<body[^>]+class="start-page"')
         self.assertNotRegex(html, r'<body[^>]+class="[^"]*dispatcher-shell')
 
@@ -428,7 +428,7 @@ class UniversalStartTests(TestCase):
         script = (backend_root / 'static' / 'js' / 'start-page-v1.js').read_text(encoding='utf-8')
         stylesheet = (backend_root / 'static' / 'css' / 'start-page-v1.css').read_text(encoding='utf-8')
 
-        self.assertContains(response, 'start-page-v1.js?v=20260903-4')
+        self.assertContains(response, 'start-page-v1.js?v=20260903-5')
         self.assertIn('window.visualViewport || null', script)
         self.assertIn('Math.max(120, baselineHeight * 0.22)', script)
         self.assertIn('viewport.addEventListener("resize"', script)
@@ -448,6 +448,7 @@ class UniversalStartTests(TestCase):
         self.assertIn('align-self: end', stylesheet)
         self.assertIn('grid-template-columns: 30px minmax(0, auto)', stylesheet)
         self.assertIn('overflow-wrap: anywhere', stylesheet)
+        self.assertIn('transform: translateY(2px)', stylesheet)
         self.assertIn('body.start-page.is-keyboard-open .start-screen__inner > .max-support-link', stylesheet)
         self.assertNotIn('body.start-page.is-input-mode .start-screen__inner > .max-support-link', stylesheet)
 
