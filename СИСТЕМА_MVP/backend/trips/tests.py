@@ -859,11 +859,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v186')
+        self.assertContains(response, 'excavator-mobile-shell-v187')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 186')
+        self.assertContains(response, 'Версия 187')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -1086,7 +1086,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-plan-status="no_plan_group"')
         self.assertContains(response, 'class="mm-mobile-bottom-nav"')
         self.assertNotContains(response, 'class="bottom-nav"')
-        self.assertContains(response, 'class="eo-reason-grid"')
+        self.assertContains(response, 'class="eo-reason-grid mobile-downtime__reasons"')
         self.assertNotContains(response, 'class="eo-event-actions"')
         self.assertIn('Перегон', [card['name'] for card in response.context['downtime_reason_cards']])
         self.assertContains(response, 'data-eo-dump-target')
@@ -2097,9 +2097,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.context['active_downtime_state']['color_group'], reason.effective_color_group)
         self.assertEqual(response.context['active_downtime_state']['code'], 'waiting')
         self.assertEqual(response.context['active_downtime_state']['color_group'], 'yellow')
-        self.assertContains(response, 'class="eo-downtime-card status-yellow is-active"')
+        self.assertContains(response, 'class="eo-downtime-card mobile-downtime__total status-yellow is-active"')
         self.assertContains(response, 'data-eo-downtime-state="waiting"')
-        self.assertContains(response, 'class="eo-reason-action status-yellow is-selected"')
+        self.assertContains(response, 'class="eo-reason-action mobile-downtime__reason status-yellow is-selected"')
 
     def test_excavator_work_shift_button_shows_start_style_without_open_shift(self):
         EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
@@ -2196,8 +2196,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('.mobile-shift-toast.is-shift-lock {', lock_css)
         self.assertIn('inset: 50% auto auto 50%;', lock_css)
         self.assertIn('.eo-screen.is-shift-inactive input:disabled', lock_css)
-        self.assertIn('.eo-screen[data-eo-screen="events"].is-shift-inactive > .eo-reason-grid', lock_css)
         self.assertIn('.eo-screen[data-eo-screen="trucks"].is-shift-inactive .eo-dashboard-truck-grid', lock_css)
+        downtime_css = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'css'
+            / 'mobile-downtime-unified-v1.css'
+        ).read_text(encoding='utf-8')
+        self.assertIn('.mobile-downtime.is-shift-inactive .mobile-downtime__reasons', downtime_css)
 
     def test_excavator_work_tab_is_interactive_only_with_open_shift(self):
         response = self.client.get(reverse('excavator_work'))
@@ -2256,7 +2262,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v186', script)
+        self.assertIn('excavator-mobile-shell-v187', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2267,6 +2273,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('/static/css/excavator-work-v55-shift.css', script)
         self.assertIn('/static/css/mobile-shift-unified-v1.css', script)
         self.assertIn('/static/css/mobile-face-unified-v1.css', script)
+        self.assertIn('/static/css/mobile-downtime-unified-v1.css', script)
         self.assertIn('/static/js/mobile-shift-unified-v1.js', script)
         self.assertIn('/static/css/native-app-update-v1.css', script)
         self.assertNotIn('ignoreSearch: true', script)
@@ -2308,7 +2315,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         html = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('class="eo-screen mobile-face mobile-work-controls"', html)
+        self.assertIn('class="eo-screen mobile-work-screen mobile-face mobile-work-controls"', html)
         self.assertIn('class="mobile-shift__titlebar mobile-face__titlebar"', html)
         self.assertEqual(html.count('mobile-shift__field mobile-face__setting'), 3)
         self.assertIn('class="mobile-shift__actions mobile-face__actions"', html)
@@ -2329,7 +2336,6 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             / 'mobile-face-unified-v1.css'
         )
         css = css_path.read_text(encoding='utf-8')
-        self.assertIn('grid-template-rows: var(--ms-screen-rows)', css)
         self.assertIn('grid-template-rows: calc(var(--ms-standard-field-h) + var(--ms-standard-field-h) + var(--ms-gap)) minmax(0, 1fr)', css)
         self.assertIn('grid-template-columns: repeat(2, minmax(0, 1fr))', css)
         self.assertIn('grid-template-rows: repeat(2, minmax(0, 1fr))', css)
@@ -2340,13 +2346,30 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('grid-template-columns: repeat(2, minmax(0, 1fr))', css)
         self.assertIn('grid-auto-rows: minmax(0, 1fr)', css)
         self.assertIn('grid-template-columns: minmax(0, .42fr) minmax(0, .58fr)', css)
+        self.assertIn('font-size: 11px !important;', css)
+        self.assertIn('white-space: normal !important;', css)
         self.assertIn('.mobile-face__actions.mobile-shift__actions', css)
         self.assertIn('overflow: hidden !important', css)
 
         shared_css_path = css_path.with_name('mobile-shift-unified-v1.css')
         shared_css = shared_css_path.read_text(encoding='utf-8')
-        self.assertIn('.mobile-work-controls', shared_css)
         self.assertIn('--ms-standard-field-h:', shared_css)
+        legacy_css = css_path.with_name('excavator-work-v55-shift.css').read_text(encoding='utf-8')
+        self.assertNotIn('data-eo-screen="face"', legacy_css)
+        self.assertNotIn('.eo-face-form', legacy_css)
+        self.assertNotIn('.eo-large-field', legacy_css)
+        self.assertNotIn('.eo-unload-grid-settings', legacy_css)
+        self.assertNotIn('--eo-mobile-downtime-h', legacy_css)
+        self.assertIn(
+            'min-block-size: 0 !important;\n'
+            '    min-height: 0 !important;\n'
+            '    block-size: 100% !important;\n'
+            '    height: 100% !important;',
+            legacy_css,
+        )
+        work_tabs_css = css_path.with_name('mobile-downtime-unified-v1.css').read_text(encoding='utf-8')
+        self.assertIn('.eo-screen.mobile-work-screen[data-eo-screen]', work_tabs_css)
+        self.assertIn('container-type: size;', work_tabs_css)
 
     def test_excavator_shift_uses_shared_driver_visual_rhythm_without_layout_overlap(self):
         legacy_css_path = (
@@ -3260,6 +3283,20 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('shift_total_seconds', close_payload)
         self.assertIn('shift_total_label', close_payload)
 
+        ended_at = event.ended_at
+        repeat_close_response = self.client.post(
+            reverse('excavator_downtime_action'),
+            data=json.dumps({'action': 'close', 'client_action_id': 'test-close-repeat'}),
+            content_type='application/json',
+        )
+        event.refresh_from_db()
+
+        self.assertEqual(repeat_close_response.status_code, 200)
+        self.assertFalse(repeat_close_response.json()['active'])
+        self.assertFalse(repeat_close_response.json()['closed'])
+        self.assertEqual(event.ended_at, ended_at)
+        self.assertEqual(DowntimeEvent.objects.filter(equipment=self.excavator).count(), 1)
+
     def test_excavator_downtime_is_locked_without_open_shift(self):
         EmployeeShift.objects.filter(
             employee=self.operator,
@@ -3623,15 +3660,30 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-close-event')
         self.assertNotContains(response, 'data-eo-close-event disabled aria-disabled="true"')
         self.assertNotContains(response, 'eo-primary-action is-disabled')
-        self.assertContains(response, 'Удерживайте 2 секунды, чтобы завершить простой')
+        self.assertContains(response, 'aria-label="Завершить активный простой"')
+        self.assertContains(response, 'mobile-shift__action--instant')
 
-    def test_excavator_downtime_controls_use_click_for_reasons_and_shared_hold_for_close(self):
+    def test_excavator_downtime_controls_use_single_click_without_hold_or_modal(self):
         response = self.client.get(reverse('excavator_work'))
         html = response.content.decode('utf-8')
 
         self.assertIn('button.addEventListener("click", function (event)', html)
-        self.assertIn('window.MobileShiftHold.bind(closeEvent', html)
-        self.assertIn('showExcavatorNotice("Удерживайте кнопку")', html)
+        self.assertIn('closeEvent.addEventListener("click", function (event)', html)
+        self.assertIn('var downtimeActionPending = false;', html)
+        self.assertIn('if (downtimeActionPending || button.disabled', html)
+        self.assertIn('downtimeStatusSyncGeneration += 1;', html)
+        self.assertIn('|| downtimeActionPending', html)
+        self.assertIn('if (downtimeActionPending) return Promise.resolve(null);', html)
+        self.assertIn('if (!eventsScreen || eventsScreen.dataset.eoDowntimeAvailable !== "true") {', html)
+        self.assertIn('if (!eventsScreen || eventsScreen.dataset.eoDowntimeAvailable !== "true") return;', html)
+        self.assertIn('.eo-reason-action.is-pending, [data-eo-close-event].is-pending', html)
+        self.assertIn('previousSelectedReason', html)
+        self.assertIn('var excavatorWorkMutationGeneration = 0;', html)
+        self.assertIn('mutationGeneration !== excavatorWorkMutationGeneration', html)
+        self.assertGreaterEqual(html.count('invalidateExcavatorWorkRefresh();'), 2)
+        self.assertNotIn('window.MobileShiftHold.bind(closeEvent', html)
+        self.assertNotIn('closeEventHoldController', html)
+        self.assertNotIn('Удерживайте 2 секунды, чтобы завершить простой', html)
         self.assertNotIn('function registerHoldAction', html)
         self.assertNotIn('window.openAppConfirmDialog(', html)
         self.assertNotIn('eo-hold-action', html)
@@ -3640,11 +3692,43 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         backend_root = Path(__file__).resolve().parents[1]
         app_css = (backend_root / 'static' / 'css' / 'app.css').read_text(encoding='utf-8')
         shift_css = (backend_root / 'static' / 'css' / 'excavator-work-v55-shift.css').read_text(encoding='utf-8')
+        downtime_css = (backend_root / 'static' / 'css' / 'mobile-downtime-unified-v1.css').read_text(encoding='utf-8')
         self.assertNotIn('.eo-hold-action', app_css)
         self.assertNotIn('.eo-hold-action', shift_css)
         self.assertIn('.eo-reason-grid .eo-reason-action', shift_css)
-        self.assertIn('--eo-downtime-action-h: clamp(48px, 10.2dvh, 106px)', shift_css)
-        self.assertIn('> .mobile-downtime__actions', shift_css)
+        self.assertIn('.mobile-shift__action--instant::before', downtime_css)
+        self.assertIn('grid-template-rows: var(--ms-screen-rows) !important;', downtime_css)
+        self.assertIn('grid-template-columns: repeat(2, minmax(0, 1fr)) !important;', downtime_css)
+        self.assertIn('grid-template-columns: repeat(4, minmax(0, 1fr)) !important;', downtime_css)
+
+    def test_excavator_three_work_tabs_share_one_adaptive_outer_frame(self):
+        response = self.client.get(reverse('excavator_work'))
+        html = response.content.decode('utf-8')
+
+        self.assertEqual(html.count('mobile-work-screen'), 3)
+        self.assertIn('mobile-shift mobile-work-screen', html)
+        self.assertIn('mobile-work-screen mobile-face', html)
+        self.assertIn('mobile-work-screen mobile-downtime', html)
+        self.assertEqual(html.count('class="mobile-shift__titlebar'), 3)
+        self.assertEqual(html.count('class="mobile-shift__actions'), 3)
+        self.assertIn('class="mobile-downtime__content"', html)
+        self.assertIn('/static/css/mobile-downtime-unified-v1.css', html)
+
+        backend_root = Path(__file__).resolve().parents[1]
+        work_tabs_css = (backend_root / 'static' / 'css' / 'mobile-downtime-unified-v1.css').read_text(encoding='utf-8')
+        face_css = (backend_root / 'static' / 'css' / 'mobile-face-unified-v1.css').read_text(encoding='utf-8')
+        self.assertIn('.eo-screen.mobile-work-screen[data-eo-screen]', work_tabs_css)
+        self.assertIn('grid-template-rows: var(--ms-screen-rows) !important;', work_tabs_css)
+        self.assertIn('overflow: hidden !important;', work_tabs_css)
+        self.assertIn('grid-template-rows: minmax(0, 1.08fr) minmax(0, .92fr) !important;', work_tabs_css)
+        self.assertIn('--ms-section-pad: 5px;', work_tabs_css)
+        self.assertIn('--ms-card-pad-y: 1px;', work_tabs_css)
+        self.assertIn('--ms-summary-size: 15px;', work_tabs_css)
+        self.assertIn('padding: 2px 6px !important;', work_tabs_css)
+        self.assertIn('font-size: 26px !important;', work_tabs_css)
+        self.assertIn('white-space: normal !important;', face_css)
+        self.assertIn('@media (prefers-reduced-motion: reduce)', work_tabs_css)
+        self.assertIn('.mobile-downtime__reason.eo-reason-action.is-selected::after', work_tabs_css)
 
 
 class DispatcherAssignmentRealtimeTests(TestCase):

@@ -1,5 +1,5 @@
 <section
-    class="mobile-shift"
+    class="mobile-shift{% if mobile_shift_role == 'excavator' %} mobile-work-screen{% endif %}"
     data-mobile-shift-role="{{ mobile_shift_role }}"
     data-mobile-shift-state="{{ mobile_shift_state }}"
     {% if mobile_shift_role == "excavator" %}

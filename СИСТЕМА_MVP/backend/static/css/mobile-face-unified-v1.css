@@ -12,34 +12,8 @@
     box-sizing: border-box;
 }
 
-body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"] {
-    container: mobile-face / size;
-    position: absolute !important;
-    inset: calc(env(safe-area-inset-top, 0px) + var(--mobile-shift-role-header-h)) 0 calc(env(safe-area-inset-bottom, 0px) + var(--mobile-shift-role-nav-h)) !important;
-    z-index: 8 !important;
-    inline-size: auto !important;
-    block-size: auto !important;
-    min-inline-size: 0 !important;
-    min-block-size: 0 !important;
-    margin: 0 !important;
-    padding: var(--ms-edge) !important;
-    display: none !important;
-    grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: var(--ms-screen-rows) !important;
-    gap: var(--ms-gap) !important;
-    overflow: hidden !important;
-    overscroll-behavior: none !important;
-    color: var(--mobile-shift-text);
-    background: var(--mobile-shift-bg);
-    font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
-}
-
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="face"] .eo-screen.mobile-face[data-eo-screen="face"]:not([hidden]) {
-    display: grid !important;
-}
-
-body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"][hidden] {
-    display: none !important;
+.mobile-face {
+    container-name: mobile-face;
 }
 
 .mobile-face__titlebar,
@@ -166,6 +140,7 @@ body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"][hid
     text-overflow: ellipsis !important;
     overflow-wrap: anywhere;
     hyphens: auto;
+    white-space: normal !important;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
 }
@@ -210,6 +185,7 @@ html[data-mobile-shift-orientation="landscape"] body.excavator-operator-screen .
     }
 
     .mobile-face .mobile-face__destination.eo-unload-card strong {
-        font-size: clamp(12px, 1.9vw, 15px) !important;
+        font-size: 11px !important;
+        white-space: normal !important;
     }
 }
