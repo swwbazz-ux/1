@@ -63,17 +63,21 @@ body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"][hid
 .mobile-face__content {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: var(--ms-standard-field-h) minmax(0, 1fr);
+    grid-template-rows: calc(var(--ms-standard-field-h) + var(--ms-standard-field-h) + var(--ms-gap)) minmax(0, 1fr);
     gap: var(--ms-gap);
     overflow: hidden;
 }
 
 .mobile-face__settings {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr));
     gap: var(--ms-gap);
     overflow: hidden;
+}
+
+.mobile-face .mobile-face__setting:nth-child(3) {
+    grid-column: 1 / -1;
 }
 
 .mobile-face .mobile-face__setting.mobile-shift__field {
@@ -149,12 +153,13 @@ body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"][hid
     display: -webkit-box !important;
     max-inline-size: 100% !important;
     overflow: hidden !important;
-    font-size: clamp(13px, 3.45vw, 17px) !important;
+    font-size: clamp(14px, min(4vw, 3.4cqh), 19px) !important;
     font-weight: 650 !important;
-    line-height: 1.08 !important;
+    line-height: 1.06 !important;
     text-align: center !important;
     text-overflow: ellipsis !important;
     overflow-wrap: anywhere;
+    hyphens: auto;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
 }
@@ -199,6 +204,6 @@ html[data-mobile-shift-orientation="landscape"] body.excavator-operator-screen .
     }
 
     .mobile-face .mobile-face__destination.eo-unload-card strong {
-        font-size: clamp(11px, 1.8vw, 14px) !important;
+        font-size: clamp(12px, 1.9vw, 15px) !important;
     }
 }
