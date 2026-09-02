@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
+from django.conf import settings
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -90,6 +91,38 @@ class UniversalStartTests(TestCase):
             f'<meta name="theme-color" content="{ENTRY_SCREEN_BROWSER_BAR}">',
             count=1,
         )
+
+    def test_start_form_preserves_contract_and_uses_accessible_brand_markup(self):
+        response = self.client.get(reverse('universal_start'))
+        html = response.content.decode('utf-8')
+        form = re.search(r'<form method="post" data-start-form>(.*?)</form>', html, re.S)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(form)
+        form_html = form.group(1)
+        self.assertIn('name="csrfmiddlewaretoken"', form_html)
+        self.assertIn('id="start-phone" name="phone" type="text"', form_html)
+        self.assertIn('inputmode="numeric"', form_html)
+        self.assertIn('autocomplete="tel-national"', form_html)
+        self.assertIn('enterkeyhint="go"', form_html)
+        self.assertIn('aria-describedby="start-phone-hint"', form_html)
+        self.assertIn('aria-invalid="false"', form_html)
+        self.assertIn('type="submit"', form_html)
+        self.assertNotIn(' action=', form.group(0))
+        self.assertNotIn('autofocus', form_html)
+        self.assertNotIn('maxlength=', form_html)
+        self.assertContains(response, 'ДОСТУП К РАБОЧИМ ПРИЛОЖЕНИЯМ')
+        self.assertContains(response, 'Вход в рабочее приложение')
+        self.assertContains(response, 'Введите свой номер телефона — система подскажет, какое приложение вам нужно.')
+        self.assertContains(response, '>ТЕЛЕФОН<')
+        self.assertContains(response, 'placeholder="900-000-00-00"')
+        self.assertContains(response, 'start-hero-v1.webp')
+        self.assertContains(response, 'start-hero-v1.jpg')
+        self.assertContains(response, 'fetchpriority="high"')
+        self.assertContains(response, 'start-page-v1.css?v=20260903-1')
+        self.assertContains(response, 'start-page-v1.js?v=20260903-1')
+        self.assertRegex(html, r'<body[^>]+class="start-page"')
+        self.assertNotRegex(html, r'<body[^>]+class="[^"]*dispatcher-shell')
 
     def test_start_form_keeps_same_origin_csrf_evidence(self):
         client = Client(enforce_csrf_checks=True)
@@ -391,9 +424,39 @@ class UniversalStartTests(TestCase):
 
     def test_start_support_hides_only_for_a_real_visual_keyboard(self):
         response = self.client.get(reverse('universal_start'))
+        backend_root = Path(settings.BASE_DIR)
+        script = (backend_root / 'static' / 'js' / 'start-page-v1.js').read_text(encoding='utf-8')
+        stylesheet = (backend_root / 'static' / 'css' / 'start-page-v1.css').read_text(encoding='utf-8')
 
-        self.assertContains(response, 'viewport.height < window.innerHeight - 120')
-        self.assertContains(response, 'is-start-keyboard-active')
+        self.assertContains(response, 'start-page-v1.js?v=20260903-1')
+        self.assertIn('window.visualViewport || null', script)
+        self.assertIn('Math.max(120, baselineHeight * 0.22)', script)
+        self.assertIn('viewport.addEventListener("resize"', script)
+        self.assertIn('viewport.addEventListener("scroll"', script)
+        self.assertIn('window.addEventListener("orientationchange"', script)
+        self.assertIn('form.addEventListener("focusin"', script)
+        self.assertIn('form.addEventListener("focusout"', script)
+        self.assertIn('body.classList.toggle("is-input-mode"', script)
+        self.assertIn('body.classList.toggle("is-keyboard-open"', script)
+        self.assertIn('--start-vv-height', script)
+        self.assertIn('form.scrollIntoView', script)
+        self.assertIn('body.start-page.is-input-mode .start-screen__inner > .max-support-link', stylesheet)
+        self.assertIn('body.start-page.is-keyboard-open .start-hero', stylesheet)
+
+    def test_start_phone_runtime_formats_country_prefix_and_guards_double_submit(self):
+        script = (
+            Path(settings.BASE_DIR) / 'static' / 'js' / 'start-page-v1.js'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('if (digits.charAt(0) === "8")', script)
+        self.assertIn('if (digits.charAt(0) === "7")', script)
+        self.assertIn('digits.slice(0, 10)', script)
+        self.assertIn('result += "-" + digits.slice(3, 6)', script)
+        self.assertIn('var showInvalid = Boolean', script)
+        self.assertIn('phoneShell.classList.toggle("is-invalid", showInvalid)', script)
+        self.assertIn('form.addEventListener("submit"', script)
+        self.assertIn('if (submitting)', script)
+        self.assertIn('submitLabel.textContent = "Проверяем…"', script)
 
     def test_desktop_does_not_see_apk_button(self):
         self.add_apk('apk/excavator-15.apk')
