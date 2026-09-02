@@ -6,12 +6,12 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v183">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v183">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v183">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v183">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v183">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v183" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v184">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v184">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v184">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v184">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v184">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v184" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -131,7 +131,7 @@
             </footer>
         </section>
 
-        <section class="eo-screen eo-dashboard-screen" data-eo-screen="trucks">
+        <section class="eo-screen eo-dashboard-screen{% if not open_shift %} is-shift-inactive{% endif %}" data-eo-screen="trucks" data-eo-work-available="{% if open_shift %}true{% else %}false{% endif %}"{% if not open_shift %} aria-disabled="true"{% endif %}>
             <div class="eo-dashboard-main-zone">
                 <div class="eo-dashboard-head">
                     <div class="eo-dashboard-driver-card">
@@ -150,9 +150,9 @@
                     {% for card in truck_cards %}
                         {% if forloop.counter <= 9 %}
                             <button
-                                class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_inactive %} is-inactive{% endif %}{% if card.is_load_blocked %} is-load-blocked{% endif %}{% if card.load_block_reason_code == 'driver_shift_not_started' %} is-shift-pending{% endif %}{% if card.load_block_reason_code == 'no_driver' %} is-no-driver{% endif %}{% if card.plan_visual.is_overrun %} is-plan-overrun{% endif %}"
+                                class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if open_shift and card.is_selected %} is-selected{% endif %}{% if card.is_inactive %} is-inactive{% endif %}{% if card.is_load_blocked %} is-load-blocked{% endif %}{% if card.load_block_reason_code == 'driver_shift_not_started' %} is-shift-pending{% endif %}{% if card.load_block_reason_code == 'no_driver' %} is-no-driver{% endif %}{% if card.plan_visual.is_overrun %} is-plan-overrun{% endif %}"
                                 type="button"
-                                draggable="{% if card.can_drag %}true{% else %}false{% endif %}"
+                                draggable="{% if open_shift and card.can_drag %}true{% else %}false{% endif %}"
                                 style="--eo-truck-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --eo-truck-total-progress: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}%; --plan-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --truck-plan-percent: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %};"
                                 data-eo-truck-card
                                 data-eo-dashboard-truck
@@ -160,7 +160,7 @@
                                 data-truck-id="{{ card.assignment.truck.id }}"
                                 data-eo-truck-detail-id="{{ card.detail_card_id }}"
                                 data-eo-equipment-state="{{ card.equipment_state_code }}"
-                                data-eo-can-load="{% if card.can_load %}1{% else %}0{% endif %}"
+                                data-eo-can-load="{% if open_shift and card.can_load %}1{% else %}0{% endif %}"
                                 {% if card.load_block_reason_code %}data-eo-load-block-reason-code="{{ card.load_block_reason_code }}"{% endif %}
                                 {% if card.load_block_reason_label %}data-eo-load-block-reason-label="{{ card.load_block_reason_label }}"{% endif %}
                                 data-eo-plan-percent="{% if card.plan_has_plan %}{{ card.plan_percent }}{% endif %}"
@@ -171,7 +171,7 @@
                                 data-plan-status="{{ card.plan_status|default:'no_plan_group' }}"
                                 data-plan-progress-status="{{ card.plan_status_key|default:'empty' }}"
                                 {% if card.is_inactive %}data-eo-truck-inactive="1"{% endif %}
-                                {% if card.is_locked %}aria-disabled="true"{% endif %}
+                                {% if not open_shift %}disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% elif card.is_locked %}aria-disabled="true"{% endif %}
                             >
                                 <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
                                 <strong>{{ card.number }}</strong>
@@ -202,7 +202,7 @@
             <div class="eo-dashboard-dump-zone">
                 <div class="eo-unload-grid eo-unload-grid-work eo-dashboard-unload-grid is-count-{{ dump_cards|length }}{% if dump_cards|length == 1 %} is-single{% endif %}" aria-label="Точки разгрузки">
                     {% for card in dump_cards %}
-                        <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_default %} is-selected{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}">
+                        <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_default %} is-selected{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% endif %}>
                             <span class="eo-dashboard-unload-top">
                                 <strong>{{ card.name }}</strong>
                                 <small>{{ card.completed_count|default:0 }}</small>
@@ -380,7 +380,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v183";
+var excavatorShellVersion = "excavator-mobile-shell-v184";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -847,6 +847,7 @@ window.initExcavatorWorkShell = function () {
     var shiftButton = shell.querySelector("[data-eo-shift-button]");
     var shiftLabel = shell.querySelector("[data-eo-shift-label]");
     var shiftScreen = shell.querySelector('[data-eo-screen="shift"]');
+    var workScreen = shell.querySelector('[data-eo-screen="trucks"]');
     var shiftScroll = shell.querySelector("[data-eo-shift-scroll]");
     var shiftInputs = shell.querySelector("[data-eo-shift-inputs]");
     var shiftFuelInput = shell.querySelector("[data-eo-shift-fuel]");
@@ -2268,6 +2269,16 @@ window.initExcavatorWorkShell = function () {
             if (eventsScreen.dataset.eoDowntimeAvailable === "true") return;
             var lockedRegion = event.target.closest(".eo-reason-grid, [data-eo-close-event]");
             if (!lockedRegion || !eventsScreen.contains(lockedRegion)) return;
+            event.preventDefault();
+            showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "shift-lock" });
+        });
+    }
+
+    if (workScreen) {
+        workScreen.addEventListener("click", function (event) {
+            if (workScreen.dataset.eoWorkAvailable === "true") return;
+            var lockedRegion = event.target.closest(".eo-dashboard-truck-grid, .eo-dashboard-unload-grid");
+            if (!lockedRegion || !workScreen.contains(lockedRegion)) return;
             event.preventDefault();
             showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "shift-lock" });
         });

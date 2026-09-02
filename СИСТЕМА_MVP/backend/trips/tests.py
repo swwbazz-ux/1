@@ -859,7 +859,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v183')
+        self.assertContains(response, 'excavator-mobile-shell-v184')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
@@ -1064,6 +1064,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'class="eo-dashboard-head"')
         self.assertContains(response, 'class="eo-dashboard-main-zone"')
         self.assertContains(response, 'class="eo-dashboard-dump-zone"')
+        self.assertContains(response, 'data-eo-screen="trucks" data-eo-work-available="true"')
+        self.assertNotContains(response, 'data-eo-screen="trucks" data-eo-work-available="true" aria-disabled="true"')
         self.assertContains(response, 'class="eo-dashboard-plan-widget"')
         self.assertContains(response, 'aria-label="Нет активного плана"')
         self.assertNotContains(response, '<small>Выполнение нормы</small>')
@@ -2116,6 +2118,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-settings-available="false"')
         self.assertContains(response, 'data-eo-face-settings-available="false"')
         self.assertContains(response, 'data-eo-downtime-available="false"')
+        self.assertContains(response, 'data-eo-screen="trucks" data-eo-work-available="false" aria-disabled="true"')
         self.assertContains(response, 'data-eo-face-horizon disabled aria-disabled="true"')
         self.assertContains(response, 'data-eo-face-block disabled aria-disabled="true"')
         self.assertContains(response, 'data-eo-rock-select disabled aria-disabled="true"')
@@ -2129,6 +2132,18 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "shift-lock" });')
         self.assertContains(response, 'faceScreen.addEventListener("click"')
         self.assertContains(response, 'eventsScreen.addEventListener("click"')
+        self.assertContains(response, 'workScreen.addEventListener("click"')
+        self.assertContains(response, 'event.target.closest(".eo-dashboard-truck-grid, .eo-dashboard-unload-grid")')
+        for card in response.context['truck_cards']:
+            self.assertRegex(
+                response.content.decode('utf-8'),
+                rf'data-eo-truck-card[^>]*data-assignment-id="{card["assignment"].id}"[^>]*data-eo-can-load="0"[^>]*disabled aria-disabled="true"',
+            )
+        for card in response.context['dump_cards']:
+            self.assertRegex(
+                response.content.decode('utf-8'),
+                rf'data-eo-dump-target="{card["point"].id}"[^>]*disabled aria-disabled="true"',
+            )
         for card in response.context['downtime_reason_cards']:
             self.assertRegex(
                 response.content.decode('utf-8'),
@@ -2155,6 +2170,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(rejected.json()['error'], 'Сначала нужно открыть смену на экскаваторе.')
         self.assertEqual(OperationalStateEvent.objects.filter(payload__action='excavator_work_settings').count(), 0)
 
+        trip_count = Trip.objects.count()
+        rejected_load = self.post_truck_loaded(client_action_id='load-without-excavator-shift')
+        self.assertEqual(rejected_load.status_code, 409)
+        self.assertEqual(rejected_load.json()['error'], 'Сначала нужно открыть смену на экскаваторе.')
+        self.assertEqual(Trip.objects.count(), trip_count)
+
         shared_css = (
             Path(__file__).resolve().parents[1]
             / 'static'
@@ -2175,6 +2196,41 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('inset: 50% auto auto 50%;', lock_css)
         self.assertIn('.eo-screen.is-shift-inactive input:disabled', lock_css)
         self.assertIn('.eo-screen[data-eo-screen="events"].is-shift-inactive > .eo-reason-grid', lock_css)
+        self.assertIn('.eo-screen[data-eo-screen="trucks"].is-shift-inactive .eo-dashboard-truck-grid', lock_css)
+
+    def test_excavator_work_tab_is_interactive_only_with_open_shift(self):
+        response = self.client.get(reverse('excavator_work'))
+        html = response.content.decode('utf-8')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-eo-screen="trucks" data-eo-work-available="true"')
+
+        def button_tag(marker):
+            marker_index = html.find(marker)
+            self.assertGreaterEqual(marker_index, 0, marker)
+            tag_start = html.rfind('<button', 0, marker_index)
+            tag_end = html.find('>', marker_index)
+            self.assertGreaterEqual(tag_start, 0, marker)
+            self.assertGreaterEqual(tag_end, 0, marker)
+            return html[tag_start:tag_end + 1]
+
+        truck_tag = button_tag(f'data-truck-id="{self.truck.id}"')
+        self.assertIn('data-eo-can-load="1"', truck_tag)
+        self.assertIn('draggable="true"', truck_tag)
+        self.assertNotIn(' disabled', truck_tag)
+
+        dump_tag = button_tag(f'data-eo-dump-target="{self.dump_point.id}"')
+        self.assertNotIn(' disabled', dump_tag)
+
+        EmployeeShift.objects.filter(
+            employee=self.operator,
+            closed_at__isnull=True,
+        ).update(closed_at=timezone.now())
+        locked_response = self.client.get(reverse('excavator_work'))
+        self.assertContains(
+            locked_response,
+            'data-eo-screen="trucks" data-eo-work-available="false" aria-disabled="true"',
+        )
 
 
     def test_excavator_manifest_is_installable_pwa_manifest(self):
@@ -2199,7 +2255,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v183', script)
+        self.assertIn('excavator-mobile-shell-v184', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)

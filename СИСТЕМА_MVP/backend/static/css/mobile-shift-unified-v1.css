@@ -655,6 +655,12 @@ body.excavator-operator-screen .eo-screen[data-eo-screen="events"].is-shift-inac
     filter: saturate(.35);
 }
 
+body.excavator-operator-screen .eo-screen[data-eo-screen="trucks"].is-shift-inactive .eo-dashboard-truck-grid,
+body.excavator-operator-screen .eo-screen[data-eo-screen="trucks"].is-shift-inactive .eo-dashboard-unload-grid {
+    opacity: .32;
+    filter: saturate(.35);
+}
+
 .mobile-shift-nav-item .mobile-shift-nav-icon {
     flex: 0 0 26px !important;
     inline-size: 26px !important;
