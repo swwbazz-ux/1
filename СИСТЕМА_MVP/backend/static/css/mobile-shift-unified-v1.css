@@ -78,7 +78,8 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     display: block;
 }
 
-.mobile-shift {
+.mobile-shift,
+.mobile-work-controls {
     --ms-gap: clamp(6px, 1.2vw, 10px);
     --ms-edge: clamp(8px, 2.8vw, 14px);
     --ms-section-pad: clamp(7px, 1.6vw, 12px);
@@ -91,6 +92,15 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
     --ms-unit-size: clamp(11px, 3vw, 13px);
     --ms-summary-size: clamp(19px, 5.7vw, 26px);
     --ms-action-size: clamp(16px, 4.9vw, 22px);
+    /* В дочернем контенте cqh считается от внутренней высоты экрана. Поправка
+       на треть edge возвращает размер к полной высоте контейнера и повторяет
+       фактическую строку показаний «Смены» с погрешностью менее пикселя. */
+    --ms-standard-field-h: clamp(48px, calc(16.6667cqh + clamp(2.6667px, .9333vw, 4.6667px) - 22.7px), 116px);
+    --ms-screen-rows: minmax(38px, .12fr) minmax(0, 1fr) minmax(48px, .12fr);
+    --ms-screen-rows-landscape: minmax(30px, .12fr) minmax(0, 1fr) minmax(44px, .16fr);
+}
+
+.mobile-shift {
     container: mobile-shift / size;
     position: absolute !important;
     inset: calc(env(safe-area-inset-top, 0px) + var(--mobile-shift-role-header-h)) 0 calc(env(safe-area-inset-bottom, 0px) + var(--mobile-shift-role-nav-h)) !important;
@@ -106,7 +116,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
        «Смене» накрывать соседние экраны. */
     display: none !important;
     grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: minmax(38px, .12fr) minmax(0, 1fr) minmax(48px, .12fr) !important;
+    grid-template-rows: var(--ms-screen-rows) !important;
     gap: var(--ms-gap) !important;
     overflow: hidden !important;
     color: var(--mobile-shift-text);
@@ -700,7 +710,7 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] .mobile-shi
 }
 
 html[data-mobile-shift-orientation="landscape"] .mobile-shift {
-    grid-template-rows: minmax(30px, .12fr) minmax(0, 1fr) minmax(44px, .16fr) !important;
+    grid-template-rows: var(--ms-screen-rows-landscape) !important;
 }
 
 html[data-mobile-shift-orientation="landscape"] .mobile-shift__content {

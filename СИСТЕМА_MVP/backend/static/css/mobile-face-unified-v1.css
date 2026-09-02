@@ -1,0 +1,204 @@
+/*
+ * Единая вкладка «Забой» Машиниста экскаватора.
+ * Заголовок, поля настроек и основное действие используют тот же визуальный
+ * контракт, что и общий экран «Смена». Центральная сетка всегда получает
+ * только оставшееся место и не создаёт прокрутку страницы.
+ */
+
+.mobile-face,
+.mobile-face *,
+.mobile-face *::before,
+.mobile-face *::after {
+    box-sizing: border-box;
+}
+
+body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"] {
+    container: mobile-face / size;
+    position: absolute !important;
+    inset: calc(env(safe-area-inset-top, 0px) + var(--mobile-shift-role-header-h)) 0 calc(env(safe-area-inset-bottom, 0px) + var(--mobile-shift-role-nav-h)) !important;
+    z-index: 8 !important;
+    inline-size: auto !important;
+    block-size: auto !important;
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    margin: 0 !important;
+    padding: var(--ms-edge) !important;
+    display: none !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: var(--ms-screen-rows) !important;
+    gap: var(--ms-gap) !important;
+    overflow: hidden !important;
+    overscroll-behavior: none !important;
+    color: var(--mobile-shift-text);
+    background: var(--mobile-shift-bg);
+    font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="face"] .eo-screen.mobile-face[data-eo-screen="face"]:not([hidden]) {
+    display: grid !important;
+}
+
+body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"][hidden] {
+    display: none !important;
+}
+
+.mobile-face__titlebar,
+.mobile-face__content,
+.mobile-face__settings,
+.mobile-face__destinations,
+.mobile-face__actions {
+    min-inline-size: 0;
+    min-block-size: 0;
+}
+
+.mobile-face .mobile-shift__update-group .eo-current-app-version,
+.mobile-face .mobile-shift__update-group .native-app-version {
+    color: rgba(178, 192, 198, .78) !important;
+    font-size: clamp(11px, 3.2vw, 14px) !important;
+    font-weight: 600 !important;
+    line-height: 1 !important;
+    letter-spacing: 0 !important;
+}
+
+.mobile-face__content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: var(--ms-standard-field-h) minmax(0, 1fr);
+    gap: var(--ms-gap);
+    overflow: hidden;
+}
+
+.mobile-face__settings {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr);
+    gap: var(--ms-gap);
+    overflow: hidden;
+}
+
+.mobile-face .mobile-face__setting.mobile-shift__field {
+    block-size: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    align-content: center;
+    align-items: stretch;
+    gap: clamp(3px, .8vw, 6px);
+}
+
+.mobile-face__setting .mobile-shift__field-label {
+    align-content: end;
+}
+
+.mobile-face__setting .mobile-shift__metric-value {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: center;
+}
+
+.mobile-face__setting .mobile-shift__metric-value input,
+.mobile-face__setting .mobile-shift__metric-value select {
+    min-inline-size: 0;
+    inline-size: 100%;
+    block-size: auto;
+    min-block-size: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--mobile-shift-text);
+    font-family: inherit;
+    font-size: var(--ms-value-size) !important;
+    font-weight: 650 !important;
+    line-height: 1 !important;
+    text-align: right !important;
+    text-overflow: ellipsis;
+}
+
+.mobile-face__setting .mobile-shift__metric-value select {
+    padding-inline-end: clamp(12px, 3vw, 18px);
+    text-align-last: right;
+    white-space: nowrap;
+}
+
+.mobile-face__destinations {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: minmax(0, 1fr);
+    align-content: stretch;
+    align-items: stretch;
+    gap: var(--ms-gap);
+    overflow: hidden;
+}
+
+.mobile-face .mobile-face__destination.eo-unload-card {
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    inline-size: 100% !important;
+    block-size: auto !important;
+    margin: 0 !important;
+    padding: clamp(5px, 1.5vw, 10px) !important;
+    display: grid !important;
+    place-items: center !important;
+    overflow: hidden !important;
+    border-radius: clamp(7px, 2vw, 10px) !important;
+    font-family: inherit !important;
+}
+
+.mobile-face .mobile-face__destination.eo-unload-card strong {
+    display: -webkit-box !important;
+    max-inline-size: 100% !important;
+    overflow: hidden !important;
+    font-size: clamp(13px, 3.45vw, 17px) !important;
+    font-weight: 650 !important;
+    line-height: 1.08 !important;
+    text-align: center !important;
+    text-overflow: ellipsis !important;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.mobile-face__empty {
+    grid-column: 1 / -1;
+    grid-row: 1 / -1;
+    min-inline-size: 0;
+    min-block-size: 0;
+    block-size: 100%;
+    place-self: stretch;
+}
+
+.mobile-face__actions.mobile-shift__actions {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.mobile-face__apply.mobile-shift__action {
+    touch-action: manipulation;
+}
+
+html[data-mobile-shift-orientation="landscape"] body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"] {
+    grid-template-rows: var(--ms-screen-rows-landscape) !important;
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+    body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"] {
+        grid-template-rows: var(--ms-screen-rows-landscape) !important;
+    }
+
+    .mobile-face__content {
+        grid-template-columns: minmax(0, .42fr) minmax(0, .58fr);
+        grid-template-rows: minmax(0, 1fr);
+    }
+
+    .mobile-face__destinations {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .mobile-face .mobile-face__setting.mobile-shift__field {
+        padding-block: clamp(3px, 1.1dvh, 5px);
+    }
+
+    .mobile-face .mobile-face__destination.eo-unload-card strong {
+        font-size: clamp(11px, 1.8vw, 14px) !important;
+    }
+}

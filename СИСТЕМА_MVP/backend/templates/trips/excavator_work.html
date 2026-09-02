@@ -6,11 +6,12 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v177">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v177">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v177">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v177">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v177" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v178">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v178">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v178">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v178">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v178">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v178" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -69,46 +70,64 @@
 
         {% include "includes/mobile_shift_screen.html" with mobile_shift_role="excavator" mobile_shift_state=open_shift|yesno:"open,closed" mobile_shift_previous=shift_previous_readings %}
 
-        <section class="eo-screen" data-eo-screen="face">
-            <h1>Забой</h1>
-            <div class="eo-face-form">
-                <label class="eo-large-field">
-                    <span>Горизонт</span>
-                    <input type="number" inputmode="numeric" pattern="[0-9]*" name="loading_horizon" value="{{ face_horizon }}" placeholder="75" data-eo-face-horizon>
-                </label>
-                <label class="eo-large-field">
-                    <span>Блок</span>
-                    <input type="number" inputmode="numeric" pattern="[0-9]*" name="loading_block" value="{{ face_block }}" placeholder="52" data-eo-face-block>
-                </label>
-                <label class="eo-large-field">
-                    <span>Порода</span>
-                    <select name="rock_type" data-eo-rock-select>
-                        {% for rock in rock_choices %}
-                            <option value="{{ rock.id }}" {% if rock.id|stringformat:"s" == default_rock|stringformat:"s" %}selected{% endif %}>{{ rock }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
+        <section class="eo-screen mobile-face mobile-work-controls" data-eo-screen="face">
+            <header class="mobile-shift__titlebar mobile-face__titlebar">
+                <h1 class="mobile-shift__title">Забой</h1>
+                <div class="mobile-shift__update-group">
+                    {% if is_native_app %}
+                        <span class="eo-current-app-version native-app-version" data-native-app-version="{{ native_app_version }}" aria-label="Текущая версия приложения"{% if not native_app_version %} hidden{% endif %}>Версия {{ native_app_version }}</span>
+                    {% else %}
+                        <span class="mobile-shift__version">Версия {{ app_shell_version|default:'excavator-mobile-shell-v0'|cut:'excavator-mobile-shell-v' }}</span>
+                    {% endif %}
+                </div>
+            </header>
+
+            <div class="mobile-face__content">
+                <div class="mobile-face__settings" aria-label="Настройки забоя">
+                    <label class="mobile-shift__field mobile-face__setting">
+                        <span class="mobile-shift__field-label"><span>Горизонт</span></span>
+                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" pattern="[0-9]*" name="loading_horizon" value="{{ face_horizon }}" placeholder="75" data-eo-face-horizon></span>
+                    </label>
+                    <label class="mobile-shift__field mobile-face__setting">
+                        <span class="mobile-shift__field-label"><span>Блок</span></span>
+                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" pattern="[0-9]*" name="loading_block" value="{{ face_block }}" placeholder="52" data-eo-face-block></span>
+                    </label>
+                    <label class="mobile-shift__field mobile-face__setting">
+                        <span class="mobile-shift__field-label"><span>Порода</span></span>
+                        <span class="mobile-shift__metric-value">
+                            <select name="rock_type" data-eo-rock-select>
+                                {% for rock in rock_choices %}
+                                    <option value="{{ rock.id }}" {% if rock.id|stringformat:"s" == default_rock|stringformat:"s" %}selected{% endif %}>{{ rock }}</option>
+                                {% endfor %}
+                            </select>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="mobile-face__destinations" aria-label="Выбор точек разгрузки">
+                    {% for card in dump_choice_cards %}
+                        <button
+                            class="eo-unload-card mobile-face__destination status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}"
+                            type="button"
+                            data-eo-dump-select="{{ card.point.id }}"
+                            aria-pressed="{% if card.is_selected %}true{% else %}false{% endif %}"
+                        >
+                            <strong>{{ card.name }}</strong>
+                        </button>
+                    {% empty %}
+                        <div class="eo-empty-state eo-empty-state-compact mobile-face__empty">
+                            <strong>Нет точек</strong>
+                            <span>Заполните справочник разгрузок</span>
+                        </div>
+                    {% endfor %}
+                </div>
             </div>
-            <div class="eo-unload-grid eo-unload-grid-settings" aria-label="Выбор точек разгрузки">
-                {% for card in dump_choice_cards %}
-                    <button
-                        class="eo-unload-card status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}"
-                        type="button"
-                        data-eo-dump-select="{{ card.point.id }}"
-                        aria-pressed="{% if card.is_selected %}true{% else %}false{% endif %}"
-                    >
-                        <strong>{{ card.name }}</strong>
-                    </button>
-                {% empty %}
-                    <div class="eo-empty-state eo-empty-state-compact">
-                        <strong>Нет точек</strong>
-                        <span>Заполните справочник разгрузок</span>
-                    </div>
-                {% endfor %}
-            </div>
+
             <input type="hidden" name="dump_point" value="{{ default_dump_point }}" data-eo-dump-input>
             <input type="hidden" name="dump_points" value="{% for id in selected_dump_point_ids %}{% if not forloop.first %},{% endif %}{{ id }}{% endfor %}" data-eo-dump-points-input>
-            <button class="eo-primary-action eo-hold-action{% if has_applied_settings %} is-disabled{% endif %}" type="button" data-eo-apply-settings data-eo-instant="true" data-eo-hold-label="Применить настройки" data-eo-settings-applied="{% if has_applied_settings %}true{% else %}false{% endif %}" style="--eo-action-hold: 0%"{% if has_applied_settings %} disabled aria-disabled="true" aria-label="Настройки уже применены"{% else %} aria-disabled="false" aria-label="Удерживайте 2 секунды, чтобы применить настройки"{% endif %}>Применить настройки</button>
+            <footer class="mobile-shift__actions mobile-face__actions">
+                <button class="mobile-shift__action mobile-shift__action--primary mobile-face__apply{% if has_applied_settings %} is-disabled{% endif %}" type="button" data-eo-apply-settings data-eo-settings-applied="{% if has_applied_settings %}true{% else %}false{% endif %}"{% if has_applied_settings %} disabled aria-disabled="true" aria-label="Настройки уже применены"{% else %} aria-disabled="false" aria-label="Применить настройки"{% endif %}><span data-mobile-shift-label>Применить настройки</span></button>
+            </footer>
         </section>
 
         <section class="eo-screen eo-dashboard-screen" data-eo-screen="trucks">
@@ -370,7 +389,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v177";
+var excavatorShellVersion = "excavator-mobile-shell-v178";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -604,12 +623,12 @@ function readExcavatorViewportMetrics() {
     };
 }
 
-function excavatorShiftFieldIsFocused() {
+function excavatorKeyboardFieldIsFocused() {
     var active = document.activeElement;
     return !!(
         active
         && active.matches
-        && active.matches("[data-eo-shift-fuel], [data-eo-shift-engine-hours]")
+        && active.matches("[data-eo-shift-fuel], [data-eo-shift-engine-hours], [data-eo-face-horizon], [data-eo-face-block]")
     );
 }
 
@@ -618,7 +637,7 @@ function syncExcavatorKeyboardState(metrics) {
     if (!shell || !metrics.height || !metrics.width) return;
 
     var wasOpen = shell.dataset.eoImeOpen === "true";
-    var fieldFocused = excavatorShiftFieldIsFocused();
+    var fieldFocused = excavatorKeyboardFieldIsFocused();
     var widthChanged = excavatorStableViewportWidth > 0
         && Math.abs(metrics.width - excavatorStableViewportWidth) > 80;
 
@@ -697,12 +716,12 @@ if (window.visualViewport) {
     window.visualViewport.addEventListener("scroll", scheduleExcavatorViewportHeightSync, { passive: true });
 }
 document.addEventListener("focusin", function (event) {
-    if (event.target && event.target.matches && event.target.matches("[data-eo-shift-fuel], [data-eo-shift-engine-hours]")) {
+    if (event.target && event.target.matches && event.target.matches("[data-eo-shift-fuel], [data-eo-shift-engine-hours], [data-eo-face-horizon], [data-eo-face-block]")) {
         scheduleExcavatorViewportHeightSync();
     }
 });
 document.addEventListener("focusout", function (event) {
-    if (event.target && event.target.matches && event.target.matches("[data-eo-shift-fuel], [data-eo-shift-engine-hours]")) {
+    if (event.target && event.target.matches && event.target.matches("[data-eo-shift-fuel], [data-eo-shift-engine-hours], [data-eo-face-horizon], [data-eo-face-block]")) {
         scheduleExcavatorViewportHeightSync();
     }
 });
@@ -1798,7 +1817,7 @@ window.initExcavatorWorkShell = function () {
         button.setAttribute("aria-disabled", isDirty ? "false" : "true");
         button.setAttribute(
             "aria-label",
-            isDirty ? "Удерживайте 2 секунды, чтобы применить настройки" : "Настройки уже применены"
+            isDirty ? "Применить настройки" : "Настройки уже применены"
         );
     }
 
@@ -2415,14 +2434,28 @@ window.initExcavatorWorkShell = function () {
             settingsRockSelect.addEventListener("change", updateApplySettingsState);
         }
         updateApplySettingsState();
-        registerHoldAction(applySettings, function (hold) {
+
+        function setApplySettingsLabel(text) {
+            var label = applySettings.querySelector("[data-mobile-shift-label]");
+            if (label) {
+                label.textContent = text;
+            } else {
+                applySettings.textContent = text;
+            }
+        }
+
+        applySettings.addEventListener("click", function (event) {
+            event.preventDefault();
+            if (applySettings.disabled || applySettings.classList.contains("is-pending")) {
+                return;
+            }
             var ids = syncDumpPointInputs();
             var rockSelect = shell.querySelector("[data-eo-rock-select]");
             var horizonInput = shell.querySelector("[data-eo-face-horizon]");
             var blockInput = shell.querySelector("[data-eo-face-block]");
             if (!settingsUrl || !rockSelect || !ids.length) {
                 showExcavatorNotice("Выберите породу и хотя бы одну точку разгрузки");
-                applySettings.textContent = hold.defaultLabel;
+                setApplySettingsLabel("Применить настройки");
                 return;
             }
             var payload = {
@@ -2434,7 +2467,7 @@ window.initExcavatorWorkShell = function () {
             };
             applySettings.disabled = true;
             applySettings.classList.add("is-pending");
-            applySettings.textContent = "Сохраняю";
+            setApplySettingsLabel("Сохраняю");
             fetch(settingsUrl, {
                 method: "POST",
                 credentials: "same-origin",
@@ -2477,7 +2510,7 @@ window.initExcavatorWorkShell = function () {
                 showExcavatorNotice(error.message || "Настройки не сохранены");
             }).finally(function () {
                 applySettings.classList.remove("is-pending");
-                applySettings.textContent = hold.defaultLabel;
+                setApplySettingsLabel("Применить настройки");
                 updateApplySettingsState();
             });
         });

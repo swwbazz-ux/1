@@ -855,14 +855,15 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55.css')
         self.assertContains(response, '/static/css/excavator-work-v55-final.css')
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
+        self.assertContains(response, '/static/css/mobile-face-unified-v1.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v177')
+        self.assertContains(response, 'excavator-mobile-shell-v178')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 177')
+        self.assertContains(response, 'Версия 178')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -888,7 +889,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'data-eo-active-title')
         self.assertNotContains(response, 'data-eo-active-reason')
         self.assertContains(response, 'data-eo-apply-settings')
-        self.assertContains(response, 'data-eo-hold-label="Применить настройки"')
+        self.assertContains(response, 'aria-label="Применить настройки"')
+        self.assertNotContains(response, 'data-eo-hold-label="Применить настройки"')
         self.assertContains(response, 'data-eo-settings-applied="')
         self.assertContains(response, 'data-eo-settings-applied="false"')
         self.assertContains(response, 'appliedExcavatorSettingsSnapshot')
@@ -1046,7 +1048,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-dump-points-input')
         self.assertContains(response, 'dump_point_ids')
         self.assertContains(response, 'data-eo-apply-settings')
-        self.assertContains(response, 'Удерживайте 2 секунды, чтобы применить настройки')
+        self.assertContains(response, 'aria-label="Применить настройки"')
+        self.assertNotContains(response, 'Удерживайте 2 секунды, чтобы применить настройки')
         self.assertContains(response, 'window.applyOperationalStateRefresh')
         self.assertContains(response, 'refreshExcavatorWorkFromServer')
         self.assertContains(response, 'function hasExcavatorRelevantEvents')
@@ -2129,7 +2132,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v177', script)
+        self.assertIn('excavator-mobile-shell-v178', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2139,6 +2142,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('/static/css/excavator-work-v55-final.css', script)
         self.assertIn('/static/css/excavator-work-v55-shift.css', script)
         self.assertIn('/static/css/mobile-shift-unified-v1.css', script)
+        self.assertIn('/static/css/mobile-face-unified-v1.css', script)
         self.assertIn('/static/js/mobile-shift-unified-v1.js', script)
         self.assertIn('/static/css/native-app-update-v1.css', script)
         self.assertNotIn('ignoreSearch: true', script)
@@ -2155,6 +2159,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('function syncExcavatorKeyboardState(metrics)', html)
+        self.assertIn('[data-eo-face-horizon], [data-eo-face-block]', html)
         self.assertIn('shell.dataset.eoImeOpen = "true"', html)
         self.assertIn('delete shell.dataset.eoImeOpen', html)
         self.assertLess(
@@ -2173,6 +2178,46 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('position: absolute !important;', css)
         self.assertNotIn('data-mobile-shift-ime-open', css)
         self.assertNotIn('.eo-shell[data-eo-ime-open="true"] .mobile-shift__actions', css)
+
+    def test_excavator_face_uses_shared_shift_controls_and_residual_grid(self):
+        response = self.client.get(reverse('excavator_work'))
+        html = response.content.decode('utf-8')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('class="eo-screen mobile-face mobile-work-controls"', html)
+        self.assertIn('class="mobile-shift__titlebar mobile-face__titlebar"', html)
+        self.assertEqual(html.count('mobile-shift__field mobile-face__setting'), 3)
+        self.assertIn('class="mobile-shift__actions mobile-face__actions"', html)
+        self.assertIn('mobile-shift__action--primary mobile-face__apply', html)
+        self.assertIn('inputmode="numeric" pattern="[0-9]*" name="loading_horizon"', html)
+        self.assertIn('inputmode="numeric" pattern="[0-9]*" name="loading_block"', html)
+        self.assertIn('applySettings.addEventListener("click"', html)
+        self.assertNotIn('registerHoldAction(applySettings', html)
+        self.assertNotIn('data-eo-instant="true"', html)
+        self.assertNotIn('class="eo-face-form"', html)
+        self.assertNotIn('class="eo-large-field"', html)
+        self.assertNotIn('class="eo-unload-grid eo-unload-grid-settings"', html)
+
+        css_path = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'css'
+            / 'mobile-face-unified-v1.css'
+        )
+        css = css_path.read_text(encoding='utf-8')
+        self.assertIn('grid-template-rows: var(--ms-screen-rows)', css)
+        self.assertIn('grid-template-rows: var(--ms-standard-field-h) minmax(0, 1fr)', css)
+        self.assertIn('grid-template-columns: repeat(3, minmax(0, 1fr))', css)
+        self.assertIn('grid-template-columns: repeat(2, minmax(0, 1fr))', css)
+        self.assertIn('grid-auto-rows: minmax(0, 1fr)', css)
+        self.assertIn('grid-template-columns: minmax(0, .42fr) minmax(0, .58fr)', css)
+        self.assertIn('.mobile-face__actions.mobile-shift__actions', css)
+        self.assertIn('overflow: hidden !important', css)
+
+        shared_css_path = css_path.with_name('mobile-shift-unified-v1.css')
+        shared_css = shared_css_path.read_text(encoding='utf-8')
+        self.assertIn('.mobile-work-controls', shared_css)
+        self.assertIn('--ms-standard-field-h:', shared_css)
 
     def test_excavator_shift_uses_shared_driver_visual_rhythm_without_layout_overlap(self):
         legacy_css_path = (
