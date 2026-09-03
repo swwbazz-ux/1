@@ -314,7 +314,7 @@ def prepare_excavator_qa_scenario() -> ExcavatorQAScenario:
     )
 
 
-def _complete_due_trips(scenario: ExcavatorQAScenario, now) -> int:
+def _complete_next_due_trip(scenario: ExcavatorQAScenario, now) -> int:
     from trips.views import finalize_trip_unloaded
 
     cutoff = now - timedelta(
@@ -326,9 +326,10 @@ def _complete_due_trips(scenario: ExcavatorQAScenario, now) -> int:
             truck__garage_number__startswith=QA_TRUCK_GARAGE_PREFIX,
             status=TripStatus.LOADED_WAITING_UNLOAD,
             created_at__lte=cutoff,
-        ).values_list('id', flat=True)
+        )
+        .order_by('created_at', 'id')
+        .values_list('id', flat=True)
     )
-    completed = 0
     for trip_id in due_ids:
         with transaction.atomic():
             trip = (
@@ -367,8 +368,11 @@ def _complete_due_trips(scenario: ExcavatorQAScenario, now) -> int:
                     'source': 'excavator_qa_simulator',
                 },
             )
-            completed += 1
-    return completed
+            # Один тик имитирует одну занятую разгрузочную операцию. Даже если
+            # несколько машин приехали одновременно, очередь выпускает их
+            # последовательно, а не меняет весь экран одной пачкой.
+            return 1
+    return 0
 
 
 def run_excavator_qa_tick(*, now=None) -> dict:
@@ -387,7 +391,7 @@ def run_excavator_qa_tick(*, now=None) -> dict:
     if not open_shift:
         return {'state': 'waiting_for_excavator_shift', 'assigned': 0, 'completed': 0}
 
-    completed = _complete_due_trips(scenario, now)
+    completed = _complete_next_due_trip(scenario, now)
     assigned = 0
     for truck in scenario.trucks:
         has_assignment = HaulAssignment.objects.filter(

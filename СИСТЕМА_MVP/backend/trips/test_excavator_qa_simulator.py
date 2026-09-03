@@ -120,6 +120,72 @@ class ExcavatorQASimulatorTests(TestCase):
         self.assertIsNotNone(trip.driver_id)
         self.assertIsNotNone(trip.unloading_shift_id)
 
+    def test_tick_unloads_due_trucks_one_at_a_time_in_arrival_order(self):
+        now = timezone.now()
+        with self.qa_settings():
+            scenario = prepare_excavator_qa_scenario()
+            loading_shift = EmployeeShift.objects.create(
+                employee=scenario.operator,
+                equipment=scenario.excavator,
+                shift_type='day',
+                workplace_code='excavator_operator',
+                start_fuel='6000',
+                start_engine_hours='1200',
+                opened_at=now,
+                opened_by=scenario.operator,
+            )
+            run_excavator_qa_tick(now=now)
+            assignments = list(
+                HaulAssignment.objects.filter(
+                    excavator=scenario.excavator,
+                    status=AssignmentStatus.ACCEPTED,
+                    ended_at__isnull=True,
+                ).order_by('truck__garage_number')
+            )
+            placement = scenario.excavator.excavator_placement
+            trips = [
+                create_loaded_waiting_unload_trip(
+                    assignment=assignment,
+                    excavator_operator=scenario.operator,
+                    loading_shift=loading_shift,
+                    rock_type=placement.work_rock_type,
+                    dump_point=placement.work_dump_point,
+                    loading_horizon=placement.loading_horizon,
+                    loading_block=placement.loading_block,
+                )
+                for assignment in assignments[:2]
+            ]
+            Trip.objects.filter(pk=trips[0].pk).update(
+                created_at=now - timedelta(seconds=7)
+            )
+            Trip.objects.filter(pk=trips[1].pk).update(
+                created_at=now - timedelta(seconds=6)
+            )
+
+            first_unload = run_excavator_qa_tick(now=now)
+            first_statuses = list(
+                Trip.objects.filter(pk__in=[trip.pk for trip in trips])
+                .order_by('created_at', 'id')
+                .values_list('status', flat=True)
+            )
+            second_unload = run_excavator_qa_tick(now=now + timedelta(seconds=2))
+            second_statuses = list(
+                Trip.objects.filter(pk__in=[trip.pk for trip in trips])
+                .order_by('created_at', 'id')
+                .values_list('status', flat=True)
+            )
+
+        self.assertEqual(first_unload['completed'], 1)
+        self.assertEqual(
+            first_statuses,
+            [TripStatus.COMPLETED, TripStatus.LOADED_WAITING_UNLOAD],
+        )
+        self.assertEqual(second_unload['completed'], 1)
+        self.assertEqual(
+            second_statuses,
+            [TripStatus.COMPLETED, TripStatus.COMPLETED],
+        )
+
     def test_invalid_credentials_are_rejected_before_seed(self):
         with self.qa_settings(EXCAVATOR_QA_PIN='12.34'):
             with self.assertRaisesMessage(ValueError, 'exactly 6 digits'):
