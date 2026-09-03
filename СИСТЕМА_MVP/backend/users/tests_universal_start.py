@@ -123,6 +123,10 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'start-page-v1.js?v=20260903-7')
         self.assertRegex(html, r'<body[^>]+class="start-page"')
         self.assertNotRegex(html, r'<body[^>]+class="[^"]*dispatcher-shell')
+        self.assertIn(
+            'if (/^\\/start\\/?$/.test(window.location.pathname || "")) return;',
+            html,
+        )
 
     def test_start_form_keeps_same_origin_csrf_evidence(self):
         client = Client(enforce_csrf_checks=True)

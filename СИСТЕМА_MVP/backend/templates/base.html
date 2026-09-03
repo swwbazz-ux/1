@@ -438,6 +438,13 @@
     (function (window, document) {
         "use strict";
 
+        /* /start/ is a neutral application selector, not a role PWA shell.
+           A previously installed root-scope worker on an Android phone can
+           emit controllerchange while this page is open. The role contract
+           guard must not react here: otherwise the result screen is reloaded
+           repeatedly before the user can open the selected application. */
+        if (/^\/start\/?$/.test(window.location.pathname || "")) return;
+
         var state = {
             javascriptVersion: "",
             serviceWorker: null,
