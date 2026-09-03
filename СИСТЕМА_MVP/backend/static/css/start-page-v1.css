@@ -612,7 +612,7 @@ body.start-page > .app-connection-dot {
 
 .start-screen__app-main {
     display: grid;
-    grid-template-columns: 40px minmax(0, 1fr) 44px;
+    grid-template-columns: minmax(0, 1fr) 44px;
     align-items: center;
     gap: 12px;
     min-width: 0;
@@ -626,24 +626,6 @@ body.start-page > .app-connection-dot {
     font-size: clamp(18px, 4.8vw, 22px);
     font-weight: 800;
     line-height: 1.16;
-}
-
-.start-screen__role-icon {
-    display: grid;
-    place-items: center;
-    width: 40px;
-    height: 40px;
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--role-accent) 13%, #071115);
-    box-shadow: 0 0 18px color-mix(in srgb, var(--role-accent) 18%, transparent);
-    overflow: hidden;
-}
-
-.start-screen__role-icon img {
-    display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
 }
 
 .start-screen__chevrons {
@@ -664,7 +646,7 @@ body.start-page > .app-connection-dot {
 
 .start-screen__opt {
     display: grid;
-    grid-template-columns: 56px minmax(0, 1fr) 32px;
+    grid-template-columns: 72px minmax(0, 1fr) 32px;
     align-items: center;
     gap: 16px;
     width: 100%;
@@ -708,24 +690,55 @@ body.start-page > .app-connection-dot {
     outline-offset: 4px;
 }
 
-.start-screen__method-badge {
+.start-screen__opt-icon {
+    position: relative;
     display: grid;
     place-items: center;
-    width: 52px;
-    height: 40px;
-    border: 1px solid color-mix(in srgb, var(--role-accent) 72%, transparent);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--role-accent) 16%, #071115);
-    color: color-mix(in srgb, var(--role-accent) 86%, #fff);
-    font-size: 11px;
-    font-weight: 900;
-    letter-spacing: .05em;
+    flex: 0 0 auto;
+    width: 72px;
+    height: 72px;
 }
 
-.start-screen__method-badge--web {
-    border-color: rgba(165, 175, 179, .44);
-    background: rgba(16, 29, 34, .92);
-    color: #c4ced1;
+.start-screen__opt-icon img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 18px;
+    object-fit: cover;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, .26);
+}
+
+.start-screen__opt-badge {
+    position: absolute;
+    right: -6px;
+    bottom: -6px;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border: 2px solid #071115;
+    border-radius: 50%;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .42);
+}
+
+.start-screen__opt-badge--apk {
+    background: var(--role-accent);
+    color: #031215;
+    font-size: 10px;
+    font-weight: 900;
+}
+
+.start-screen__opt-badge--chrome {
+    background: conic-gradient(from -60deg, #ea4335 0 120deg, #fbbc05 120deg 240deg, #34a853 240deg 360deg);
+}
+
+.start-screen__opt-badge--chrome::after {
+    content: "";
+    width: 13px;
+    height: 13px;
+    border: 3px solid #fff;
+    border-radius: 50%;
+    background: #4285f4;
 }
 
 .start-screen__opt-text {
@@ -1057,17 +1070,11 @@ body.start-page--result > .app-connection-dot i {
     }
 
     .start-screen--result .start-screen__app-main {
-        grid-template-columns: 34px minmax(0, 1fr) 28px;
+        grid-template-columns: minmax(0, 1fr) 28px;
         gap: 9px;
         min-height: 50px;
         padding: 7px 10px;
         font-size: clamp(15px, 4.15vw, 18px);
-    }
-
-    .start-screen--result .start-screen__role-icon {
-        width: 34px;
-        height: 34px;
-        border-radius: 10px;
     }
 
     .start-screen--result .start-screen__chevrons {
@@ -1093,11 +1100,31 @@ body.start-page--result > .app-connection-dot i {
         min-height: 76px;
     }
 
-    .start-screen--result .start-screen__method-badge {
-        width: 44px;
-        height: 36px;
-        border-radius: 10px;
-        font-size: 9px;
+    .start-screen--result .start-screen__opt-icon {
+        width: 48px;
+        height: 48px;
+    }
+
+    .start-screen--result .start-screen__opt-icon img {
+        border-radius: 13px;
+    }
+
+    .start-screen--result .start-screen__opt-badge {
+        right: -3px;
+        bottom: -3px;
+        width: 25px;
+        height: 25px;
+        border-width: 1px;
+    }
+
+    .start-screen--result .start-screen__opt-badge--apk {
+        font-size: 8px;
+    }
+
+    .start-screen--result .start-screen__opt-badge--chrome::after {
+        width: 10px;
+        height: 10px;
+        border-width: 2px;
     }
 
     .start-screen--result .start-screen__opt-text {
@@ -1229,16 +1256,10 @@ body.start-page--result > .app-connection-dot i {
     }
 
     .start-screen--result .start-screen__app-main {
-        grid-template-columns: 32px minmax(0, 1fr) 26px;
+        grid-template-columns: minmax(0, 1fr) 26px;
         gap: 8px;
         min-height: 46px;
         padding: 6px 9px;
-    }
-
-    .start-screen--result .start-screen__role-icon {
-        width: 32px;
-        height: 32px;
-        border-radius: 9px;
     }
 
     .start-screen--result .start-screen__chevrons {
@@ -1261,10 +1282,20 @@ body.start-page--result > .app-connection-dot i {
         min-height: 70px;
     }
 
-    .start-screen--result .start-screen__method-badge {
-        width: 40px;
-        height: 34px;
-        border-radius: 9px;
+    .start-screen--result .start-screen__opt-icon {
+        width: 44px;
+        height: 44px;
+    }
+
+    .start-screen--result .start-screen__opt-icon img {
+        border-radius: 12px;
+    }
+
+    .start-screen--result .start-screen__opt-badge {
+        right: -2px;
+        bottom: -2px;
+        width: 23px;
+        height: 23px;
     }
 
     .start-screen--result .start-screen__opt-note {

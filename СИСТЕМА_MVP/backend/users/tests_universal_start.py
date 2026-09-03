@@ -119,7 +119,7 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'start-hero-v1.webp')
         self.assertContains(response, 'start-hero-v1.jpg')
         self.assertContains(response, 'fetchpriority="high"')
-        self.assertContains(response, 'start-page-v1.css?v=20260903-10')
+        self.assertContains(response, 'start-page-v1.css?v=20260903-11')
         self.assertContains(response, 'start-page-v1.js?v=20260903-7')
         self.assertRegex(html, r'<body[^>]+class="start-page"')
         self.assertNotRegex(html, r'<body[^>]+class="[^"]*dispatcher-shell')
@@ -276,17 +276,19 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'Пинкод придумаете при первом входе')
 
     def test_apps_are_shown_as_icon_tiles(self):
+        self.add_apk('apk/driver-10.apk')
         self.add_access('driver', 'Водитель самосвала')
-        response = self.post()
+        response = self.post(user_agent=ANDROID_USER_AGENT)
         self.assertEqual(len(response.context['apps']), 1)
         self.assertContains(response, 'start-screen__apps')
         self.assertContains(
             response,
             response.context['apps'][0]['app'].icon_192_url,
-            count=1,
+            count=2,
         )
-        self.assertContains(response, 'start-screen__method-badge', count=2)
-        self.assertNotContains(response, 'start-screen__opt-icon')
+        self.assertNotContains(response, 'start-screen__role-icon')
+        self.assertContains(response, 'start-screen__opt-icon', count=2)
+        self.assertNotContains(response, 'start-screen__method-badge')
 
     def test_result_uses_semantic_dynamic_role_theme_and_accessible_status(self):
         self.add_access('driver', 'Водитель самосвала')
