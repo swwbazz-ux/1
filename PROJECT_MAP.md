@@ -48,7 +48,7 @@ Backend является основным рабочим приложением.
 - Маршрут: `/excavator/work/`.
 - Manifest: `/excavator.webmanifest`.
 - Service worker: `/excavator-sw.js`.
-- Shell: `excavator-mobile-shell-v188` (опубликован в production 03.09.2026).
+- Shell: `excavator-mobile-shell-v189` (опубликован в production 03.09.2026).
 
 ### Общий адаптивный экран «Смена»
 
