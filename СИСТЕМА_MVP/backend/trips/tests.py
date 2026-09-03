@@ -859,11 +859,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v192')
+        self.assertContains(response, 'excavator-mobile-shell-v193')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 192')
+        self.assertContains(response, 'Версия 193')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -2345,7 +2345,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.context['active_downtime_state']['color_group'], 'yellow')
         self.assertContains(response, 'class="eo-downtime-card mobile-downtime__total status-yellow is-active"')
         self.assertContains(response, 'data-eo-downtime-state="waiting"')
-        self.assertContains(response, 'class="eo-reason-action mobile-downtime__reason status-yellow is-selected"')
+        self.assertContains(response, 'class="eo-reason-action mobile-downtime__reason status-yellow is-selected is-used"')
 
     def test_excavator_work_shift_button_shows_start_style_without_open_shift(self):
         EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
@@ -2551,7 +2551,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v192', script)
+        self.assertIn('excavator-mobile-shell-v193', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -3831,6 +3831,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertFalse(cards[unused_reason.id]['is_used'])
         self.assertEqual(response.context['shift_downtime_total_seconds'], 22 * 60)
         self.assertContains(response, 'data-eo-reason-seconds="900"')
+        self.assertContains(response, 'mobile-downtime__reason status-yellow is-used')
         self.assertContains(response, '>00:15:00</span>')
         self.assertContains(response, 'data-eo-reason-duration hidden>00:00:00</span>')
 
@@ -4027,7 +4028,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('grid-template-rows: var(--ms-screen-rows) !important;', downtime_css)
         self.assertIn('grid-template-columns: repeat(2, minmax(0, 1fr)) !important;', downtime_css)
         self.assertIn('font-size: clamp(14px, min(4.4vw, 3cqh), 18px) !important;', downtime_css)
-        self.assertIn('font-size: clamp(10px, min(3.1vw, 2cqh), 13px) !important;', downtime_css)
+        self.assertIn('font-size: clamp(12px, min(3.55vw, 2.35cqh), 15px) !important;', downtime_css)
         self.assertIn('repeat(auto-fit, minmax(min(84px, 100%), 1fr))', downtime_css)
         self.assertIn('grid-template-columns: repeat(3, minmax(0, 1fr)) !important;', downtime_css)
         self.assertIn('font-variant-numeric: tabular-nums;', downtime_css)
@@ -4083,6 +4084,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotIn('.eo-shell[data-eo-active-tab="trucks"] .eo-topbar-cell:first-child strong', final_css)
         self.assertIn('@media (prefers-reduced-motion: reduce)', work_tabs_css)
         self.assertIn('.mobile-downtime__reason.eo-reason-action.is-selected::after', work_tabs_css)
+        self.assertIn('.mobile-downtime__reason.eo-reason-action.is-used:not(.is-selected)', work_tabs_css)
+        self.assertIn('color: #ff6658 !important;', work_tabs_css)
+        self.assertIn('button.classList.toggle("is-used", isVisible);', html)
+        self.assertIn('rotate(" + tilt + "deg)', html)
+        self.assertIn('.eo-dashboard-unload-grid:has(.eo-dashboard-unload-card.is-drop-ready)', legacy_css)
+        self.assertIn('transform: scale(1.045) !important;', legacy_css)
 
 
 class DispatcherAssignmentRealtimeTests(TestCase):

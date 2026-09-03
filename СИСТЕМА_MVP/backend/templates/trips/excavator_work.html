@@ -6,13 +6,13 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v192">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v192">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v192">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v192">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v192">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v192">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v192" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v193">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v193">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v193">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v193">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v193">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v193">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v193" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -302,7 +302,7 @@
                 </div>
                 <div class="eo-reason-grid mobile-downtime__reasons">
                     {% for card in downtime_reason_cards %}
-                        <button class="eo-reason-action mobile-downtime__reason status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}" type="button" data-eo-downtime-reason-id="{{ card.reason.id }}" data-eo-reason="{{ card.full_name }}" data-eo-reason-name="{{ card.name }}" data-eo-reason-seconds="{{ card.total_seconds }}" data-eo-equipment-state="{{ card.equipment_state_code }}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Недоступно: сначала начните смену"{% elif card.is_used %} aria-label="Начать простой: {{ card.name }}. За смену: {{ card.total_label }}"{% else %} aria-label="Начать простой: {{ card.name }}"{% endif %}>
+                        <button class="eo-reason-action mobile-downtime__reason status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_used %} is-used{% endif %}" type="button" data-eo-downtime-reason-id="{{ card.reason.id }}" data-eo-reason="{{ card.full_name }}" data-eo-reason-name="{{ card.name }}" data-eo-reason-seconds="{{ card.total_seconds }}" data-eo-equipment-state="{{ card.equipment_state_code }}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Недоступно: сначала начните смену"{% elif card.is_used %} aria-label="Начать простой: {{ card.name }}. За смену: {{ card.total_label }}"{% else %} aria-label="Начать простой: {{ card.name }}"{% endif %}>
                             <span class="eo-reason-label" data-eo-reason-label>{{ card.name }}</span>
                             <span class="eo-reason-duration" data-eo-reason-duration{% if not card.is_used %} hidden{% endif %}>{{ card.total_label }}</span>
                         </button>
@@ -397,7 +397,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v192";
+var excavatorShellVersion = "excavator-mobile-shell-v193";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1154,6 +1154,7 @@ window.initExcavatorWorkShell = function () {
         var seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
         var isVisible = seconds > 0 || !!isActive;
         duration.hidden = !isVisible;
+        button.classList.toggle("is-used", isVisible);
         if (isVisible) {
             duration.textContent = formatDowntimeDuration(seconds);
         }
@@ -2087,7 +2088,15 @@ window.initExcavatorWorkShell = function () {
 
     function moveTruckDragPreview(state, dx, dy) {
         if (!state || !state.preview) return;
-        state.preview.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0)";
+        var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        var tilt = 0;
+        if (!reduceMotion) {
+            tilt = Math.max(-7, Math.min(7, dx * 0.035));
+            if (Math.abs(tilt) < 2.5) {
+                tilt = dx < 0 ? -2.5 : 2.5;
+            }
+        }
+        state.preview.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0) rotate(" + tilt + "deg) scale(" + (reduceMotion ? "1" : "1.025") + ")";
     }
 
     function removeTruckDragPreview(state) {
