@@ -53,6 +53,8 @@ Backend является основным рабочим приложением.
 #### Изолированный контур RuStore QA
 
 - Публичный тестовый хост: `https://qa-excavator.driverform.ru/`.
+- Текущий QA web-shell: `excavator-mobile-shell-v193`; production остаётся
+  на `excavator-mobile-shell-v192` до отдельного решения о выпуске.
 - Код развёрнут отдельно от production в `/srv/accounting-mvp-excavator-qa`.
 - Используются отдельные PostgreSQL-база и пользователь, Redis DB `2`, свой
   cache prefix и два systemd-сервиса: Django-приложение и симулятор рейсов.
