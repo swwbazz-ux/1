@@ -1606,6 +1606,7 @@
     </div>
 </div>
 
+{% block global_realtime_ui %}
 <!-- Плашка «Связь потеряна» закрывала собой нижнюю панель вкладок и говорила
    ровно то же, что цветная точка в углу. Оставляем её в разметке только как
    запасной путь: realtime-client прячет её, если на экране есть индикатор
@@ -1651,6 +1652,7 @@
     <span data-app-realtime-update-text>На сервере появились новые данные.</span>
     <button class="app-realtime-update__button" type="button" data-app-realtime-update-button>Обновить</button>
 </div>
+{% endblock %}
 
 <div class="app-confirm-modal" id="app-confirm-modal" hidden>
     <div class="app-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="app-confirm-title">

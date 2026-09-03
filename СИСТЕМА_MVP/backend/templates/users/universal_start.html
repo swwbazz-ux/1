@@ -22,10 +22,12 @@
     <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'img/share/start-share.png' %}?v=2">
     <link rel="preload" as="image" href="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
     <link rel="stylesheet" href="{% static 'css/max-support-link-v1.css' %}?v=6">
-    <link rel="stylesheet" href="{% static 'css/start-page-v1.css' %}?v=20260903-11">
-    <script src="{% static 'js/start-page-v1.js' %}?v=20260903-7" defer></script>
+    <link rel="stylesheet" href="{% static 'css/start-page-v1.css' %}?v=20260903-12">
+    <script src="{% static 'js/start-page-v1.js' %}?v=20260904-8" defer></script>
 {% endblock %}
+{% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block body_class %}start-page{% if found %} start-page--result{% endif %}{% endblock %}
+{% block global_realtime_ui %}{% endblock %}
 
 {% block body %}
 <main class="start-screen{% if found %} start-screen--result{% else %} start-screen--entry{% endif %}"
@@ -62,34 +64,32 @@
                         <span>{{ submitted_phone }}</span>
                     </span>
                 </div>
-                {% if has_working_code %}
-                    <p class="start-result-card__lead">Установите на телефон и войдите своим пинкодом.</p>
-                {% else %}
-                    <p class="start-result-card__lead">Установите на телефон. Пинкод придумаете при первом входе.</p>
-                {% endif %}
+                <p class="start-result-card__lead">
+                    <span>Выберите способ запуска приложения.</span>
+                    {% if apps.0.apk %}<strong>Рекомендуем установить APK-версию.</strong>{% endif %}
+                </p>
                 <div class="start-screen__apps">
                     {% for item in apps %}
                         <section class="start-screen__app"
-                                 data-app-theme="{{ item.app.role_code }}">
-                            <h2 class="start-screen__app-main">
+                                 data-app-theme="{{ item.app.role_code }}"
+                                 aria-labelledby="start-app-title-{{ forloop.counter }}">
+                            <h2 class="start-screen__app-main" id="start-app-title-{{ forloop.counter }}">
+                                <span class="start-screen__role-accent" aria-hidden="true"></span>
                                 <span>{{ item.app.name }}</span>
-                                <svg class="start-screen__chevrons" viewBox="0 0 44 24" fill="none" aria-hidden="true">
-                                    <path d="m3 3 9 9-9 9M16 3l9 9-9 9M29 3l9 9-9 9" />
-                                </svg>
                             </h2>
                             <div class="start-screen__install-options">
                                 {% if item.apk %}
                                     <a class="start-screen__opt start-screen__opt--native"
                                        data-start-install-option="native"
                                        href="{{ item.apk.url }}"
-                                       aria-label="Скачать приложение {{ item.app.name }} для Android, версия {{ item.apk.version }}">
+                                       aria-label="Установить приложение {{ item.app.name }}. Рекомендуется. APK версии {{ item.apk.version }}. Скачать и установить.">
                                         <span class="start-screen__opt-icon" aria-hidden="true">
                                             <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
                                             <span class="start-screen__opt-badge start-screen__opt-badge--apk">APK</span>
                                         </span>
                                         <span class="start-screen__opt-text">
-                                            <b><span>Приложение</span> <i>стабильное</i></b>
-                                            <em><span>APK · версия {{ item.apk.version }}</span><span>скачать и установить</span></em>
+                                            <b><span>Установить приложение</span> <i>РЕКОМЕНДУЕТСЯ</i></b>
+                                            <em><span>APK · версия {{ item.apk.version }}</span><span>Скачать и установить</span></em>
                                         </span>
                                         <svg class="start-screen__opt-arrow" viewBox="0 0 32 24" fill="none" aria-hidden="true">
                                             <path d="M2 12h25M18 3l9 9-9 9" />
@@ -99,14 +99,14 @@
                                 <a class="start-screen__opt start-screen__opt--browser"
                                    data-start-install-option="browser"
                                    href="{{ item.url }}{% if '?' in item.url %}&amp;{% else %}?{% endif %}install=1"
-                                   aria-label="Установить {{ item.app.name }} как браузерное приложение">
+                                   aria-label="Открыть приложение {{ item.app.name }} в браузере. Веб-версия, PWA без установки. Может терять связь при свёрнутом окне.">
                                     <span class="start-screen__opt-icon" aria-hidden="true">
                                         <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
                                         <span class="start-screen__opt-badge start-screen__opt-badge--chrome"></span>
                                     </span>
                                     <span class="start-screen__opt-text">
-                                        <b><span>Браузер</span> <i>нестабильно</i></b>
-                                        <em><span>PWA · ярлык на экран</span><span>открыть</span></em>
+                                        <b><span>Открыть в браузере</span> <i>ВЕБ-ВЕРСИЯ</i></b>
+                                        <em><span>PWA · без установки</span><span>Может терять связь при свёрнутом окне</span></em>
                                     </span>
                                     <svg class="start-screen__opt-arrow" viewBox="0 0 32 24" fill="none" aria-hidden="true">
                                         <path d="M2 12h25M18 3l9 9-9 9" />
@@ -119,7 +119,7 @@
                                         <path d="M16 2 29 7v10c0 8-5.2 13.8-13 17C8.2 30.8 3 25 3 17V7l13-5Z" />
                                         <path d="M16 10v9M16 25h.01" />
                                     </svg>
-                                    <span>Приложение держит связь при свёрнутом окне. Телефон предупредит «файл может быть опасным» — нажмите «Всё равно скачать».</span>
+                                    <span>APK работает в фоне. Если Android предупредит о риске, выберите «Всё равно скачать».</span>
                                 </p>
                             {% elif is_ios %}
                                 <p class="start-screen__opt-note">После перехода добавьте значок на экран — покажем, как.</p>

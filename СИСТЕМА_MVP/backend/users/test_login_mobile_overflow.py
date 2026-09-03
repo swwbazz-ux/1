@@ -34,6 +34,17 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
                     f'<meta name="theme-color" content="{ENTRY_SCREEN_BROWSER_BAR}">',
                     count=1,
                 )
+                self.assertContains(response, 'data-connection-indicator', count=1)
+                self.assertContains(
+                    response,
+                    '<div class="app-realtime-status" data-app-realtime-status hidden',
+                    count=1,
+                )
+                self.assertContains(
+                    response,
+                    '<div class="app-realtime-update" data-app-realtime-update hidden',
+                    count=1,
+                )
 
     def test_login_assets_keep_focus_scrolling_vertical_only(self):
         backend_root = Path(settings.BASE_DIR)

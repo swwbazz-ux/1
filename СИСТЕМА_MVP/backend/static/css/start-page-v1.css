@@ -371,11 +371,6 @@ body.start-page *::after {
     opacity: .9;
 }
 
-/* Глобальный индикатор связи относится к рабочим PWA-экранам, а не к входу. */
-body.start-page > .app-connection-dot {
-    display: none;
-}
-
 .start-screen__submit.is-ready {
     animation: start-ready 420ms ease-out 1;
 }
@@ -426,13 +421,15 @@ body.start-page > .app-connection-dot {
     text-align: left;
     white-space: normal;
     overflow-wrap: anywhere;
-    transform: translateY(2px);
+    transform: none;
 }
 
 /* Result state: один рабочий компонент с ролевыми темами и neutral fallback. */
 .start-screen--result {
     --result-accent: var(--start-copper-light);
     --result-accent-soft: rgba(193, 139, 93, .14);
+    overflow-x: clip;
+    overflow-y: visible;
     background:
         radial-gradient(80% 42% at 50% 26%, var(--result-accent-soft), transparent 72%),
         linear-gradient(180deg, var(--start-bg) 0%, var(--start-bg-deep) 100%);
@@ -509,37 +506,37 @@ body.start-page > .app-connection-dot {
 
 .start-screen__person {
     display: grid;
-    grid-template-columns: 58px minmax(0, 1fr);
+    grid-template-columns: 50px minmax(0, 1fr);
     align-items: center;
     gap: 16px;
     width: 100%;
     min-width: 0;
     min-height: 96px;
     padding: 16px 18px;
-    border: 1px solid color-mix(in srgb, var(--result-accent) 34%, rgba(165, 175, 179, .34));
-    border-radius: 24px;
+    border: 1px solid rgba(151, 165, 171, .5);
+    border-radius: 22px;
     background:
         linear-gradient(145deg, rgba(15, 26, 31, .95), rgba(5, 13, 17, .96));
     box-shadow:
-        0 18px 44px rgba(0, 0, 0, .34),
-        inset 0 1px 0 rgba(255, 255, 255, .045);
+        0 12px 30px rgba(0, 0, 0, .24),
+        inset 0 1px 0 rgba(255, 255, 255, .035);
 }
 
 .start-screen__person-icon {
     display: grid;
     place-items: center;
-    width: 58px;
-    height: 58px;
-    border: 1px solid color-mix(in srgb, var(--result-accent) 78%, transparent);
+    width: 50px;
+    height: 50px;
+    border: 1px solid color-mix(in srgb, var(--result-accent) 58%, rgba(165, 175, 179, .3));
     border-radius: 50%;
     background: color-mix(in srgb, var(--result-accent) 9%, #081216);
     color: var(--result-accent);
-    box-shadow: 0 0 22px color-mix(in srgb, var(--result-accent) 24%, transparent);
+    box-shadow: none;
 }
 
 .start-screen__person-icon svg {
-    width: 38px;
-    height: 38px;
+    width: 32px;
+    height: 32px;
     stroke: currentColor;
     stroke-width: 2;
     stroke-linecap: round;
@@ -568,12 +565,25 @@ body.start-page > .app-connection-dot {
 }
 
 .start-result-card__lead {
+    display: grid;
+    gap: 2px;
     width: min(100%, 34ch);
     margin: 2px auto 6px;
     color: #b8c2c6;
     font-size: clamp(17px, 4.4vw, 20px);
     line-height: 1.4;
     text-align: center;
+}
+
+.start-result-card__lead span,
+.start-result-card__lead strong {
+    display: block;
+}
+
+.start-result-card__lead strong {
+    color: color-mix(in srgb, var(--result-accent) 84%, #fff);
+    font-size: .92em;
+    font-weight: 650;
 }
 
 .start-screen__apps,
@@ -591,14 +601,14 @@ body.start-page > .app-connection-dot {
     --role-accent: var(--start-copper-light);
     position: relative;
     min-width: 0;
-    border: 1px solid color-mix(in srgb, var(--role-accent) 62%, transparent);
+    border: 1px solid color-mix(in srgb, var(--role-accent) 40%, rgba(137, 151, 157, .22));
     border-radius: 26px;
     background:
-        radial-gradient(92% 50% at 50% 0%, color-mix(in srgb, var(--role-accent) 12%, transparent), transparent 74%),
+        radial-gradient(92% 50% at 50% 0%, color-mix(in srgb, var(--role-accent) 7%, transparent), transparent 74%),
         linear-gradient(150deg, rgba(10, 21, 25, .97), rgba(3, 10, 13, .98));
     box-shadow:
-        0 22px 54px rgba(0, 0, 0, .4),
-        inset 0 1px 0 rgba(255, 255, 255, .045);
+        0 16px 38px rgba(0, 0, 0, .3),
+        inset 0 1px 0 rgba(255, 255, 255, .035);
     overflow: hidden;
 }
 
@@ -612,31 +622,34 @@ body.start-page > .app-connection-dot {
 
 .start-screen__app-main {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 44px;
+    grid-template-columns: 6px minmax(0, 1fr);
     align-items: center;
     gap: 12px;
     min-width: 0;
     min-height: 62px;
     margin: 0;
     padding: 10px 14px;
-    border-bottom: 1px solid color-mix(in srgb, var(--role-accent) 38%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--role-accent) 28%, rgba(137, 151, 157, .16));
     background:
-        linear-gradient(90deg, color-mix(in srgb, var(--role-accent) 12%, transparent), transparent 78%);
+        linear-gradient(90deg, color-mix(in srgb, var(--role-accent) 9%, transparent), transparent 78%);
     color: var(--start-text);
     font-size: clamp(18px, 4.8vw, 22px);
     font-weight: 800;
     line-height: 1.16;
 }
 
-.start-screen__chevrons {
-    justify-self: end;
-    width: 40px;
-    height: 24px;
-    stroke: var(--role-accent);
-    stroke-width: 3;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    opacity: .38;
+.start-screen__app-main > span:last-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.start-screen__role-accent {
+    align-self: stretch;
+    width: 6px;
+    min-height: 28px;
+    border-radius: 999px;
+    background: var(--role-accent);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--role-accent) 24%, transparent);
 }
 
 .start-screen__install-options {
@@ -666,21 +679,28 @@ body.start-page > .app-connection-dot {
 
 .start-screen__opt--native {
     min-height: 132px;
-    border-color: color-mix(in srgb, var(--role-accent) 80%, transparent);
+    border-color: color-mix(in srgb, var(--role-accent) 88%, transparent);
     background:
         radial-gradient(100% 120% at 8% 50%, color-mix(in srgb, var(--role-accent) 24%, transparent), transparent 58%),
         linear-gradient(145deg, color-mix(in srgb, var(--role-accent) 13%, #132128), rgba(5, 15, 18, .98));
     box-shadow:
-        0 10px 30px color-mix(in srgb, var(--role-accent) 11%, transparent),
+        0 10px 28px color-mix(in srgb, var(--role-accent) 14%, transparent),
         inset 0 1px 0 rgba(255, 255, 255, .055);
 }
 
-.start-screen__opt:hover {
-    border-color: color-mix(in srgb, var(--role-accent) 72%, rgba(255, 255, 255, .18));
+@media (hover: hover) and (pointer: fine) {
+    .start-screen__opt--native:hover {
+        border-color: color-mix(in srgb, var(--role-accent) 72%, rgba(255, 255, 255, .18));
+    }
+
+    .start-screen__opt--browser:hover {
+        border-color: rgba(165, 175, 179, .48);
+    }
 }
 
 .start-screen__opt:active {
-    transform: translateY(2px);
+    transform: translateY(1px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .025);
 }
 
 .start-screen__opt:focus-visible,
@@ -747,6 +767,10 @@ body.start-page > .app-connection-dot {
 }
 
 .start-screen__opt-text b {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px 8px;
     min-width: 0;
     color: var(--start-text);
     font-size: clamp(17px, 4.5vw, 20px);
@@ -755,11 +779,20 @@ body.start-page > .app-connection-dot {
 
 .start-screen__opt-text b span {
     display: inline;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .start-screen__opt-text b i {
-    color: color-mix(in srgb, var(--role-accent) 80%, #fff);
-    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+    padding: 2px 9px;
+    border: 1px solid color-mix(in srgb, var(--role-accent) 66%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--role-accent) 18%, transparent);
+    color: color-mix(in srgb, var(--role-accent) 82%, #fff);
+    font-size: 10px;
     font-style: normal;
     font-weight: 800;
     letter-spacing: .04em;
@@ -768,7 +801,9 @@ body.start-page > .app-connection-dot {
 }
 
 .start-screen__opt--browser .start-screen__opt-text b i {
-    color: #e3b46b;
+    border-color: rgba(165, 175, 179, .38);
+    background: rgba(165, 175, 179, .11);
+    color: #c5ced1;
 }
 
 .start-screen__opt-text em {
@@ -790,6 +825,10 @@ body.start-page > .app-connection-dot {
     stroke-linejoin: round;
 }
 
+.start-screen__opt--browser .start-screen__opt-arrow {
+    stroke: color-mix(in srgb, var(--role-accent) 48%, #9ba7ab);
+}
+
 .start-screen__opt-note {
     display: grid;
     grid-template-columns: 28px minmax(0, 1fr);
@@ -797,7 +836,7 @@ body.start-page > .app-connection-dot {
     gap: 12px;
     margin: 0 16px 16px;
     padding: 14px;
-    border: 1px solid color-mix(in srgb, var(--role-accent) 48%, transparent);
+    border: 1px solid rgba(137, 151, 157, .3);
     border-radius: 17px;
     background: rgba(2, 11, 14, .58);
     color: var(--start-muted);
@@ -808,7 +847,7 @@ body.start-page > .app-connection-dot {
 .start-screen__opt-note svg {
     width: 28px;
     height: 32px;
-    stroke: var(--role-accent);
+    stroke: color-mix(in srgb, var(--role-accent) 74%, #d6bc75);
     stroke-width: 2;
     stroke-linecap: round;
     stroke-linejoin: round;
@@ -824,15 +863,6 @@ body.start-page > .app-connection-dot {
     text-align: center;
     text-underline-offset: 4px;
     text-decoration-thickness: 1px;
-}
-
-body.start-page--result > .app-connection-dot {
-    display: none;
-}
-
-body.start-page--result > .app-connection-dot i {
-    width: 13px;
-    height: 13px;
 }
 
 @keyframes start-ready {
@@ -973,19 +1003,17 @@ body.start-page--result > .app-connection-dot i {
     }
 
     body.start-page--result {
-        height: 100vh;
-        height: 100svh;
-        min-height: 0;
-        overflow: hidden;
+        min-height: 100vh;
+        min-height: 100dvh;
+        overflow-y: auto;
     }
 
     .start-screen--result {
         display: flex;
         flex-direction: column;
-        height: 100vh;
-        height: 100svh;
-        min-height: 0;
-        overflow: hidden;
+        min-height: 100vh;
+        min-height: 100dvh;
+        overflow: visible;
     }
 
     .start-screen--result .start-hero {
@@ -999,28 +1027,21 @@ body.start-page--result > .app-connection-dot i {
     }
 
     .start-screen--result .start-screen__inner {
-        flex: 1 1 auto;
-        grid-template-rows: minmax(0, 1fr) auto;
+        flex: 1 0 auto;
+        grid-template-rows: auto auto;
+        align-content: space-between;
         gap: clamp(7px, 1.1svh, 10px);
         width: min(100%, 720px);
-        min-height: 0;
         margin-top: -20px;
-        padding: 0 12px max(8px, env(safe-area-inset-bottom, 0px));
-        overflow: hidden;
+        padding: 0 max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+        overflow: visible;
     }
 
     .start-screen--result .start-result-card {
         align-self: start;
         gap: clamp(7px, 1.15svh, 11px);
-        max-height: 100%;
-        overflow-x: hidden;
-        overflow-y: auto;
-        overscroll-behavior-y: contain;
-        scrollbar-width: none;
-    }
-
-    .start-screen--result .start-result-card::-webkit-scrollbar {
-        display: none;
+        max-height: none;
+        overflow: visible;
     }
 
     .start-screen--result .start-result-card h1 {
@@ -1028,21 +1049,21 @@ body.start-page--result > .app-connection-dot i {
     }
 
     .start-screen--result .start-screen__person {
-        grid-template-columns: 44px minmax(0, 1fr);
+        grid-template-columns: 40px minmax(0, 1fr);
         gap: 11px;
         min-height: 68px;
         padding: 9px 12px;
-        border-radius: 19px;
+        border-radius: 20px;
     }
 
     .start-screen--result .start-screen__person-icon {
-        width: 44px;
-        height: 44px;
+        width: 40px;
+        height: 40px;
     }
 
     .start-screen--result .start-screen__person-icon svg {
-        width: 29px;
-        height: 29px;
+        width: 26px;
+        height: 26px;
     }
 
     .start-screen--result .start-screen__person-copy strong {
@@ -1056,6 +1077,7 @@ body.start-page--result > .app-connection-dot i {
     }
 
     .start-screen--result .start-result-card__lead {
+        gap: 1px;
         margin: 0 auto;
         font-size: clamp(13px, 3.7vw, 15px);
         line-height: 1.28;
@@ -1070,16 +1092,16 @@ body.start-page--result > .app-connection-dot i {
     }
 
     .start-screen--result .start-screen__app-main {
-        grid-template-columns: minmax(0, 1fr) 28px;
+        grid-template-columns: 5px minmax(0, 1fr);
         gap: 9px;
         min-height: 50px;
         padding: 7px 10px;
         font-size: clamp(15px, 4.15vw, 18px);
     }
 
-    .start-screen--result .start-screen__chevrons {
-        width: 28px;
-        height: 20px;
+    .start-screen--result .start-screen__role-accent {
+        width: 5px;
+        min-height: 26px;
     }
 
     .start-screen--result .start-screen__install-options {
@@ -1091,13 +1113,13 @@ body.start-page--result > .app-connection-dot i {
     .start-screen--result .start-screen__opt--native {
         grid-template-columns: 48px minmax(0, 1fr) 24px;
         gap: 9px;
-        min-height: 70px;
+        min-height: 88px;
         padding: 7px 9px;
         border-radius: 16px;
     }
 
     .start-screen--result .start-screen__opt--native {
-        min-height: 76px;
+        min-height: 88px;
     }
 
     .start-screen--result .start-screen__opt-icon {
@@ -1118,7 +1140,7 @@ body.start-page--result > .app-connection-dot i {
     }
 
     .start-screen--result .start-screen__opt-badge--apk {
-        font-size: 8px;
+        font-size: clamp(9px, 2.5vw, 10px);
     }
 
     .start-screen--result .start-screen__opt-badge--chrome::after {
@@ -1137,12 +1159,14 @@ body.start-page--result > .app-connection-dot i {
     }
 
     .start-screen--result .start-screen__opt-text b i {
-        font-size: 9px;
+        min-height: 18px;
+        padding: 1px 7px;
+        font-size: clamp(9px, 2.5vw, 10px);
     }
 
     .start-screen--result .start-screen__opt-text em {
         gap: 0;
-        font-size: clamp(11px, 3.15vw, 13px);
+        font-size: clamp(12px, 3.15vw, 13px);
         line-height: 1.18;
     }
 
@@ -1157,7 +1181,7 @@ body.start-page--result > .app-connection-dot i {
         margin: 0 8px 8px;
         padding: 7px 9px;
         border-radius: 13px;
-        font-size: clamp(10px, 2.8vw, 12px);
+        font-size: clamp(12px, 3vw, 13px);
         line-height: 1.28;
     }
 
@@ -1188,16 +1212,17 @@ body.start-page--result > .app-connection-dot i {
 
     .start-screen--result .start-screen__inner {
         margin-top: -17px;
-        padding-inline: 10px;
+        padding-right: max(10px, env(safe-area-inset-right, 0px));
+        padding-left: max(10px, env(safe-area-inset-left, 0px));
     }
 
-    .start-screen--result .start-result-card__lead,
-    .start-screen--result .start-screen__opt-note {
-        display: none;
+    .start-screen--result .start-result-card {
+        gap: 6px;
     }
 
-    .start-screen--result .start-screen__opt-text em span:last-child {
-        display: none;
+    .start-screen--result .start-screen__inner {
+        gap: 6px;
+        padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
     }
 }
 
@@ -1227,7 +1252,8 @@ body.start-page--result > .app-connection-dot i {
 
     .start-screen--result .start-screen__inner {
         gap: 7px;
-        padding-inline: 9px;
+        padding-right: max(9px, env(safe-area-inset-right, 0px));
+        padding-left: max(9px, env(safe-area-inset-left, 0px));
     }
 
     .start-screen--result .start-result-card {
@@ -1239,31 +1265,32 @@ body.start-page--result > .app-connection-dot i {
     }
 
     .start-screen--result .start-screen__person {
-        grid-template-columns: 42px minmax(0, 1fr);
+        grid-template-columns: 38px minmax(0, 1fr);
         gap: 10px;
         min-height: 62px;
         padding: 8px 10px;
     }
 
     .start-screen--result .start-screen__person-icon {
-        width: 42px;
-        height: 42px;
+        width: 38px;
+        height: 38px;
     }
 
     .start-screen--result .start-screen__person-icon svg {
-        width: 28px;
-        height: 28px;
+        width: 25px;
+        height: 25px;
     }
 
     .start-screen--result .start-screen__app-main {
-        grid-template-columns: minmax(0, 1fr) 26px;
+        grid-template-columns: 5px minmax(0, 1fr);
         gap: 8px;
         min-height: 46px;
         padding: 6px 9px;
     }
 
-    .start-screen--result .start-screen__chevrons {
-        width: 26px;
+    .start-screen--result .start-screen__role-accent {
+        width: 5px;
+        min-height: 24px;
     }
 
     .start-screen--result .start-screen__install-options {
@@ -1274,12 +1301,12 @@ body.start-page--result > .app-connection-dot i {
     .start-screen--result .start-screen__opt {
         grid-template-columns: 44px minmax(0, 1fr) 22px;
         gap: 8px;
-        min-height: 64px;
+        min-height: 88px;
         padding: 6px 8px;
     }
 
     .start-screen--result .start-screen__opt--native {
-        min-height: 70px;
+        min-height: 88px;
     }
 
     .start-screen--result .start-screen__opt-icon {
@@ -1318,6 +1345,19 @@ body.start-page--result > .app-connection-dot i {
 
     .start-screen--result .start-screen__inner {
         width: min(100%, 720px);
+    }
+}
+
+@media (min-width: 761px) and (max-width: 1023px) and (max-height: 600px) {
+    .start-screen--result .start-hero {
+        height: clamp(105px, 34svh, 140px);
+    }
+
+    .start-screen--result .start-screen__inner {
+        margin-top: -18px;
+        padding-right: max(16px, env(safe-area-inset-right, 0px));
+        padding-bottom: max(18px, env(safe-area-inset-bottom, 0px));
+        padding-left: max(16px, env(safe-area-inset-left, 0px));
     }
 }
 

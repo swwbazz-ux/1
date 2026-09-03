@@ -119,8 +119,12 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'start-hero-v1.webp')
         self.assertContains(response, 'start-hero-v1.jpg')
         self.assertContains(response, 'fetchpriority="high"')
-        self.assertContains(response, 'start-page-v1.css?v=20260903-11')
-        self.assertContains(response, 'start-page-v1.js?v=20260903-7')
+        self.assertContains(response, 'start-page-v1.css?v=20260903-12')
+        self.assertContains(response, 'start-page-v1.js?v=20260904-8')
+        self.assertNotContains(response, 'data-connection-indicator')
+        self.assertNotContains(response, 'data-app-realtime-status')
+        self.assertNotContains(response, 'data-app-realtime-update')
+        self.assertContains(response, 'viewport-fit=cover')
         self.assertRegex(html, r'<body[^>]+class="start-page"')
         self.assertNotRegex(html, r'<body[^>]+class="[^"]*dispatcher-shell')
         self.assertIn(
@@ -259,13 +263,14 @@ class UniversalStartTests(TestCase):
             count=1,
         )
 
-    def test_person_with_a_working_code_is_not_promised_a_new_one(self):
+    def test_person_with_a_working_code_sees_the_launch_choice(self):
         self.add_access('driver', 'Водитель самосвала')
         response = self.post()
         self.assertTrue(response.context['has_working_code'])
+        self.assertContains(response, 'Выберите способ запуска приложения.')
         self.assertNotContains(response, 'Пинкод придумаете при первом входе')
 
-    def test_person_without_a_code_is_told_to_invent_one(self):
+    def test_person_without_a_code_sees_the_same_launch_choice(self):
         self.add_access(
             'driver', 'Водитель самосвала',
             status=EmployeeAccess.Status.NOT_ACTIVATED,
@@ -273,7 +278,8 @@ class UniversalStartTests(TestCase):
         )
         response = self.post()
         self.assertFalse(response.context['has_working_code'])
-        self.assertContains(response, 'Пинкод придумаете при первом входе')
+        self.assertContains(response, 'Выберите способ запуска приложения.')
+        self.assertNotContains(response, 'Пинкод придумаете при первом входе')
 
     def test_apps_are_shown_as_icon_tiles(self):
         self.add_apk('apk/driver-10.apk')
@@ -297,13 +303,20 @@ class UniversalStartTests(TestCase):
         html = response.content.decode('utf-8')
 
         self.assertContains(response, '<h1 id="start-result-title">Ваше приложение</h1>', html=True)
-        self.assertContains(response, '<h2 class="start-screen__app-main">', count=1)
+        self.assertContains(
+            response,
+            '<h2 class="start-screen__app-main" id="start-app-title-1">',
+            count=1,
+        )
         self.assertContains(response, 'data-app-theme="driver"', count=2)
         self.assertContains(response, self.employee.full_name)
         self.assertContains(response, 'Это не я — ввести другой номер')
-        self.assertContains(response, 'data-connection-indicator', count=1)
+        self.assertNotContains(response, 'data-connection-indicator')
+        self.assertNotContains(response, 'data-app-realtime-status')
+        self.assertNotContains(response, 'data-app-realtime-update')
         self.assertIn('start-screen__opt-arrow', html)
-        self.assertIn('start-screen__chevrons', html)
+        self.assertIn('start-screen__role-accent', html)
+        self.assertNotIn('start-screen__chevrons', html)
 
     def test_supported_role_without_custom_theme_uses_neutral_component(self):
         self.add_access('mining_master', 'Горный мастер')
@@ -361,15 +374,21 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'data-start-install-option="native"', count=2)
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=2)
-        self.assertContains(response, '<span>Приложение</span> <i>стабильное</i>', count=2)
-        self.assertContains(response, '<span>Браузер</span> <i>нестабильно</i>', count=2)
+        self.assertContains(response, '<span>Установить приложение</span> <i>РЕКОМЕНДУЕТСЯ</i>', count=2)
+        self.assertContains(response, '<span>Открыть в браузере</span> <i>ВЕБ-ВЕРСИЯ</i>', count=2)
+        self.assertContains(response, 'Рекомендуем установить APK-версию.')
         self.assertContains(response, '<span>APK · версия 0.1.12</span>', count=1)
         self.assertContains(response, '<span>APK · версия 0.1.8</span>', count=1)
-        self.assertContains(response, '<span>скачать и установить</span>', count=2)
+        self.assertContains(response, '<span>Скачать и установить</span>', count=2)
         self.assertNotContains(response, '2. Открыть приложение')
         self.assertNotContains(response, '/native-handoff/')
-        self.assertContains(response, '<span>PWA · ярлык на экран</span>', count=2)
-        self.assertContains(response, '<span>открыть</span>', count=2)
+        self.assertContains(response, '<span>PWA · без установки</span>', count=2)
+        self.assertContains(response, '<span>Может терять связь при свёрнутом окне</span>', count=2)
+        self.assertContains(
+            response,
+            'APK работает в фоне. Если Android предупредит о риске, выберите «Всё равно скачать».',
+            count=2,
+        )
         self.assertContains(response, 'install=1', count=2)
         self.assertNotContains(response, 'class="start-screen__app-main" href=')
         # Атрибут download заставлял Chrome ругаться «файл может быть опасным».
@@ -419,7 +438,9 @@ class UniversalStartTests(TestCase):
         self.assertNotContains(response, 'data-start-install-option="native"')
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=1)
-        self.assertContains(response, '<span>Браузер</span> <i>нестабильно</i>')
+        self.assertContains(response, '<span>Открыть в браузере</span> <i>ВЕБ-ВЕРСИЯ</i>')
+        self.assertContains(response, '<span>PWA · без установки</span>')
+        self.assertContains(response, '<span>Может терять связь при свёрнутом окне</span>')
         self.assertContains(response, 'install=1', count=1)
         self.assertContains(response, 'После перехода добавьте значок на экран')
 
@@ -479,7 +500,7 @@ class UniversalStartTests(TestCase):
         script = (backend_root / 'static' / 'js' / 'start-page-v1.js').read_text(encoding='utf-8')
         stylesheet = (backend_root / 'static' / 'css' / 'start-page-v1.css').read_text(encoding='utf-8')
 
-        self.assertContains(response, 'start-page-v1.js?v=20260903-7')
+        self.assertContains(response, 'start-page-v1.js?v=20260904-8')
         self.assertIn('window.visualViewport || null', script)
         self.assertIn('Math.max(120, baselineHeight * 0.22)', script)
         self.assertIn('viewport.addEventListener("resize"', script)
@@ -503,19 +524,26 @@ class UniversalStartTests(TestCase):
         self.assertIn('align-self: end', stylesheet)
         self.assertIn('grid-template-columns: 30px minmax(0, auto)', stylesheet)
         self.assertIn('overflow-wrap: anywhere', stylesheet)
-        self.assertIn('transform: translateY(2px)', stylesheet)
+        self.assertRegex(
+            stylesheet,
+            r'(?s)\.start-screen__inner > \.max-support-link '
+            r'\.max-support-link__label\s*\{[^}]*transform: none;',
+        )
         self.assertIn('body.start-page.is-keyboard-open .start-screen__inner > .max-support-link', stylesheet)
         self.assertNotIn('body.start-page.is-input-mode .start-screen__inner > .max-support-link', stylesheet)
         self.assertNotIn('body.start-page.is-input-mode .start-hero', stylesheet)
         self.assertNotIn('body.start-page.is-keyboard-open .start-hero', stylesheet)
         self.assertNotIn('--start-vv-height', stylesheet)
-        self.assertIn('operational-state-connection', script)
-        self.assertIn('Связь с сервером нестабильна', script)
-        self.assertIn('body.start-page--result > .app-connection-dot', stylesheet)
+        self.assertNotIn('data-connection-indicator', script)
+        self.assertNotIn('syncConnectionAccessibility', script)
+        self.assertNotIn('operational-state-connection', script)
+        self.assertNotIn('app-connection-dot', stylesheet)
         self.assertRegex(
             stylesheet,
-            r'body\.start-page--result > \.app-connection-dot\s*\{\s*display: none;',
+            r'(?s)\.start-screen--result\s*\{[^}]*overflow-x: clip;'
+            r'[^}]*overflow-y: visible;',
         )
+        self.assertIn('min-height: 88px', stylesheet)
         self.assertRegex(
             stylesheet,
             r'\.start-screen--result \.start-hero__backdrop\s*\{\s*display: none;',
