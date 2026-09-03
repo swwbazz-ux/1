@@ -50,6 +50,23 @@ Backend является основным рабочим приложением.
 - Service worker: `/excavator-sw.js`.
 - Shell: `excavator-mobile-shell-v192` (опубликован в production 03.09.2026).
 
+#### Изолированный контур RuStore QA
+
+- Публичный тестовый хост: `https://qa-excavator.driverform.ru/`.
+- Код развёрнут отдельно от production в `/srv/accounting-mvp-excavator-qa`.
+- Используются отдельные PostgreSQL-база и пользователь, Redis DB `2`, свой
+  cache prefix и два systemd-сервиса: Django-приложение и симулятор рейсов.
+- Сценарий создаётся командой `prepare_excavator_qa`; симулятор назначает
+  тестовые самосвалы, завершает разгрузку и снимает cooldown без участия
+  production-диспетчера. Тестовые данные не смешиваются с рабочей базой.
+- Alpha-профиль `excavator_rustore_qa`: пакет
+  `ru.copperresources.excavator`, versionCode `16`, versionName
+  `0.1.13-alpha`, сервер QA, встроенное обновление APK отключено.
+- Следующий production-профиль `excavator_rustore`: тот же пакет и подпись,
+  versionCode `17`, versionName `0.1.14`, production-сервер, обновление только
+  через RuStore.
+- Инструкция развёртывания и сброса: `СИСТЕМА_MVP/backend/deploy/EXCAVATOR_QA.md`.
+
 ### Общий адаптивный экран «Смена»
 
 - Общий поздний слой двух мобильных ролей:
