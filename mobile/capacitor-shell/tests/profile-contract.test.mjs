@@ -67,7 +67,7 @@ const expectedProfiles = {
     serverUrl: "https://qa-excavator.driverform.ru/",
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
-    appName: "Экскаваторщик QA",
+    appName: "Экскаваторщик",
     versionCode: "16",
     versionName: "0.1.13-alpha",
     splashBackgroundColor: "#02080b",
