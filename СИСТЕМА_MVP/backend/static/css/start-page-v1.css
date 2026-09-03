@@ -678,7 +678,7 @@ body.start-page:not(.start-page--result) > .app-connection-dot {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
     text-decoration: none;
     -webkit-tap-highlight-color: transparent;
-    transition: transform 140ms ease, border-color 140ms ease, filter 140ms ease, box-shadow 140ms ease;
+    transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .start-screen__opt--native {
@@ -694,12 +694,10 @@ body.start-page:not(.start-page--result) > .app-connection-dot {
 
 .start-screen__opt:hover {
     border-color: color-mix(in srgb, var(--role-accent) 72%, rgba(255, 255, 255, .18));
-    filter: brightness(1.06);
 }
 
 .start-screen__opt:active {
     transform: translateY(2px);
-    filter: brightness(.97);
 }
 
 .start-screen__opt:focus-visible,
@@ -1000,39 +998,232 @@ body.start-page--result > .app-connection-dot i {
     }
 
     body.start-page--result {
-        min-height: 100vh;
-        min-height: 100dvh;
-        overflow-x: hidden;
-        overflow-y: auto;
+        height: 100vh;
+        height: 100svh;
+        min-height: 0;
+        overflow: hidden;
     }
 
     .start-screen--result {
-        display: block;
-        min-height: 100vh;
-        min-height: 100dvh;
-        overflow: clip;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        height: 100svh;
+        min-height: 0;
+        overflow: hidden;
     }
 
     .start-screen--result .start-hero {
-        height: clamp(230px, 34dvh, 320px);
+        flex: 0 0 clamp(124px, 22svh, 188px);
+        height: clamp(124px, 22svh, 188px);
     }
 
     .start-screen--result .start-screen__inner {
-        gap: 26px;
+        flex: 1 1 auto;
+        grid-template-rows: minmax(0, 1fr) auto;
+        gap: clamp(7px, 1.1svh, 10px);
         width: min(100%, 720px);
-        margin-top: -44px;
-        padding: 0 16px calc(env(safe-area-inset-bottom, 0px) + 34px);
+        min-height: 0;
+        margin-top: -20px;
+        padding: 0 12px max(8px, env(safe-area-inset-bottom, 0px));
+        overflow: hidden;
+    }
+
+    .start-screen--result .start-result-card {
+        align-self: start;
+        gap: clamp(7px, 1.15svh, 11px);
+        max-height: 100%;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+        scrollbar-width: none;
+    }
+
+    .start-screen--result .start-result-card::-webkit-scrollbar {
+        display: none;
+    }
+
+    .start-screen--result .start-result-card h1 {
+        font-size: clamp(24px, 6.6vw, 29px);
+    }
+
+    .start-screen--result .start-screen__person {
+        grid-template-columns: 44px minmax(0, 1fr);
+        gap: 11px;
+        min-height: 68px;
+        padding: 9px 12px;
+        border-radius: 19px;
+    }
+
+    .start-screen--result .start-screen__person-icon {
+        width: 44px;
+        height: 44px;
+    }
+
+    .start-screen--result .start-screen__person-icon svg {
+        width: 29px;
+        height: 29px;
+    }
+
+    .start-screen--result .start-screen__person-copy strong {
+        font-size: clamp(16px, 4.35vw, 19px);
+        line-height: 1.16;
+    }
+
+    .start-screen--result .start-screen__person-copy > span {
+        margin-top: 3px;
+        font-size: clamp(14px, 3.8vw, 16px);
+    }
+
+    .start-screen--result .start-result-card__lead {
+        margin: 0 auto;
+        font-size: clamp(13px, 3.7vw, 15px);
+        line-height: 1.28;
+    }
+
+    .start-screen--result .start-screen__apps {
+        gap: 8px;
+    }
+
+    .start-screen--result .start-screen__app {
+        border-radius: 20px;
+    }
+
+    .start-screen--result .start-screen__app-main {
+        grid-template-columns: 34px minmax(0, 1fr) 28px;
+        gap: 9px;
+        min-height: 50px;
+        padding: 7px 10px;
+        font-size: clamp(15px, 4.15vw, 18px);
+    }
+
+    .start-screen--result .start-screen__role-icon {
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+    }
+
+    .start-screen--result .start-screen__chevrons {
+        width: 28px;
+        height: 20px;
+    }
+
+    .start-screen--result .start-screen__install-options {
+        gap: 7px;
+        padding: 8px;
+    }
+
+    .start-screen--result .start-screen__opt,
+    .start-screen--result .start-screen__opt--native {
+        grid-template-columns: 48px minmax(0, 1fr) 24px;
+        gap: 9px;
+        min-height: 70px;
+        padding: 7px 9px;
+        border-radius: 16px;
+    }
+
+    .start-screen--result .start-screen__opt--native {
+        min-height: 76px;
+    }
+
+    .start-screen--result .start-screen__opt-icon {
+        width: 48px;
+        height: 48px;
+    }
+
+    .start-screen--result .start-screen__opt-icon img {
+        border-radius: 13px;
+    }
+
+    .start-screen--result .start-screen__opt-badge {
+        right: -3px;
+        bottom: -3px;
+        width: 25px;
+        height: 25px;
+        border-width: 1px;
+    }
+
+    .start-screen--result .start-screen__opt-badge--apk {
+        font-size: 8px;
+    }
+
+    .start-screen--result .start-screen__opt-badge--chrome::after {
+        width: 10px;
+        height: 10px;
+        border-width: 2px;
+    }
+
+    .start-screen--result .start-screen__opt-text {
+        gap: 3px;
+    }
+
+    .start-screen--result .start-screen__opt-text b {
+        font-size: clamp(14px, 3.9vw, 17px);
+        line-height: 1.12;
+    }
+
+    .start-screen--result .start-screen__opt-text b i {
+        font-size: 9px;
+    }
+
+    .start-screen--result .start-screen__opt-text em {
+        gap: 0;
+        font-size: clamp(11px, 3.15vw, 13px);
+        line-height: 1.18;
+    }
+
+    .start-screen--result .start-screen__opt-arrow {
+        width: 24px;
+        height: 20px;
+    }
+
+    .start-screen--result .start-screen__opt-note {
+        grid-template-columns: 20px minmax(0, 1fr);
+        gap: 8px;
+        margin: 0 8px 8px;
+        padding: 7px 9px;
+        border-radius: 13px;
+        font-size: clamp(10px, 2.8vw, 12px);
+        line-height: 1.28;
+    }
+
+    .start-screen--result .start-screen__opt-note svg {
+        width: 20px;
+        height: 23px;
+    }
+
+    .start-screen--result .start-screen__back {
+        min-height: 44px;
+        padding: 10px 6px;
+        font-size: clamp(13px, 3.65vw, 15px);
+    }
+
+    .start-screen--result .start-screen__inner > .max-support-link {
+        align-self: end;
+        min-height: 48px;
+        padding-block: 7px;
     }
 
 }
 
 @media (max-width: 760px) and (max-height: 700px) {
     .start-screen--result .start-hero {
-        height: clamp(205px, 32dvh, 235px);
+        flex-basis: clamp(105px, 21svh, 145px);
+        height: clamp(105px, 21svh, 145px);
     }
 
     .start-screen--result .start-screen__inner {
-        margin-top: -38px;
+        margin-top: -17px;
+        padding-inline: 10px;
+    }
+
+    .start-screen--result .start-result-card__lead,
+    .start-screen--result .start-screen__opt-note {
+        display: none;
+    }
+
+    .start-screen--result .start-screen__opt-text em span:last-child {
+        display: none;
     }
 }
 
@@ -1061,86 +1252,87 @@ body.start-page--result > .app-connection-dot i {
     }
 
     .start-screen--result .start-screen__inner {
-        gap: 22px;
-        padding-inline: 12px;
+        gap: 7px;
+        padding-inline: 9px;
     }
 
-    .start-result-card {
-        gap: 18px;
+    .start-screen--result .start-result-card {
+        gap: 7px;
     }
 
-    .start-result-card h1 {
-        font-size: 27px;
+    .start-screen--result .start-result-card h1 {
+        font-size: 24px;
     }
 
-    .start-screen__person {
-        grid-template-columns: 52px minmax(0, 1fr);
-        gap: 12px;
-        min-height: 88px;
-        padding: 14px;
-    }
-
-    .start-screen__person-icon {
-        width: 52px;
-        height: 52px;
-    }
-
-    .start-screen__person-icon svg {
-        width: 34px;
-        height: 34px;
-    }
-
-    .start-screen__app-main {
-        grid-template-columns: 36px minmax(0, 1fr) 32px;
+    .start-screen--result .start-screen__person {
+        grid-template-columns: 42px minmax(0, 1fr);
         gap: 10px;
-        padding-inline: 12px;
+        min-height: 62px;
+        padding: 8px 10px;
     }
 
-    .start-screen__role-icon {
-        width: 36px;
-        height: 36px;
-        border-radius: 10px;
+    .start-screen--result .start-screen__person-icon {
+        width: 42px;
+        height: 42px;
     }
 
-    .start-screen__chevrons {
+    .start-screen--result .start-screen__person-icon svg {
+        width: 28px;
+        height: 28px;
+    }
+
+    .start-screen--result .start-screen__app-main {
+        grid-template-columns: 32px minmax(0, 1fr) 26px;
+        gap: 8px;
+        min-height: 46px;
+        padding: 6px 9px;
+    }
+
+    .start-screen--result .start-screen__role-icon {
         width: 32px;
+        height: 32px;
+        border-radius: 9px;
     }
 
-    .start-screen__install-options {
-        gap: 10px;
-        padding: 12px;
+    .start-screen--result .start-screen__chevrons {
+        width: 26px;
     }
 
-    .start-screen__opt {
-        grid-template-columns: 60px minmax(0, 1fr) 26px;
-        gap: 12px;
-        min-height: 108px;
-        padding: 12px;
+    .start-screen--result .start-screen__install-options {
+        gap: 6px;
+        padding: 7px;
     }
 
-    .start-screen__opt--native {
-        min-height: 120px;
+    .start-screen--result .start-screen__opt {
+        grid-template-columns: 44px minmax(0, 1fr) 22px;
+        gap: 8px;
+        min-height: 64px;
+        padding: 6px 8px;
     }
 
-    .start-screen__opt-icon {
-        width: 60px;
-        height: 60px;
+    .start-screen--result .start-screen__opt--native {
+        min-height: 70px;
     }
 
-    .start-screen__opt-icon img {
-        border-radius: 15px;
+    .start-screen--result .start-screen__opt-icon {
+        width: 44px;
+        height: 44px;
     }
 
-    .start-screen__opt-badge {
-        right: -4px;
-        bottom: -4px;
-        width: 30px;
-        height: 30px;
+    .start-screen--result .start-screen__opt-icon img {
+        border-radius: 12px;
     }
 
-    .start-screen__opt-note {
-        margin: 0 12px 12px;
-        padding: 12px;
+    .start-screen--result .start-screen__opt-badge {
+        right: -2px;
+        bottom: -2px;
+        width: 23px;
+        height: 23px;
+    }
+
+    .start-screen--result .start-screen__opt-note {
+        margin: 0 7px 7px;
+        padding: 7px;
     }
 
 }
