@@ -20,11 +20,8 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
 
                 self.assertEqual(response.status_code, 200)
                 self.assertContains(response, app.name)
-                self.assertContains(
-                    response,
-                    '<main class="shared-shift-dialog unified-login-dialog">',
-                )
-                self.assertContains(response, 'class="app-confirm-content unified-login-form"')
+                self.assertContains(response, 'shared-shift-dialog unified-login-dialog')
+                self.assertContains(response, 'class="app-confirm-content unified-login-form')
                 self.assertContains(response, 'data-phone-input')
                 self.assertNotContains(response, ' autofocus')
                 self.assertContains(response, 'window.CopperUnifiedLogin')
@@ -135,7 +132,8 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         self.assertIn('function syncLoginKeyboardModeFromViewport()', template)
         self.assertIn('loginViewportBaselineHeight', template)
         self.assertIn('loginViewportBaselineHeight * 0.22', template)
-        self.assertIn('hasFocusedLoginInput() && keyboardShrink >= keyboardThreshold', template)
+        self.assertIn('&& hasFocusedLoginInput()', template)
+        self.assertIn('&& keyboardShrink >= keyboardThreshold', template)
         self.assertIn('window.visualViewport.addEventListener(', template)
         self.assertNotIn('setLoginKeyboardMode(true)', template)
 
@@ -144,7 +142,10 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
             Path(settings.BASE_DIR) / 'templates' / 'users' / 'login.html'
         ).read_text(encoding='utf-8')
 
-        self.assertIn("{% if login_step == 'pin' %} is-pin-step{% endif %}", template)
+        self.assertIn(
+            "{% if login_step == 'pin' and not combined_excavator_login %} is-pin-step{% endif %}",
+            template,
+        )
         self.assertIn(
             '.unified-login-form.is-pin-step .shared-shift-phone-shell',
             template,
@@ -170,3 +171,37 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
             template.count('min-height: var(--login-control-height)'),
             3,
         )
+
+    def test_excavator_combined_login_owns_visual_viewport_and_keyboard_contract(self):
+        backend_root = Path(settings.BASE_DIR)
+        template = (
+            backend_root / 'templates' / 'users' / 'login.html'
+        ).read_text(encoding='utf-8')
+        stylesheet = (
+            backend_root / 'static' / 'css' / 'excavator-login-v1.css'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('data-login-combined="true"', template)
+        self.assertIn('enterkeyhint="next"', template)
+        self.assertIn('enterkeyhint="go"', template)
+        self.assertIn('visualViewport.addEventListener(', template)
+        self.assertIn('"scroll",', template)
+        self.assertIn('--login-vv-height', template)
+        self.assertIn('--login-vv-top', template)
+        self.assertIn('position: fixed', stylesheet)
+        self.assertIn('height: var(--login-vv-height, 100dvh)', stylesheet)
+        self.assertIn('.is-login-keyboard-active .excavator-login__hero', stylesheet)
+        self.assertIn('.is-login-keyboard-active .max-support-link', stylesheet)
+        self.assertIn('overflow: hidden', stylesheet)
+
+    def test_excavator_combined_login_never_persists_pin(self):
+        template = (
+            Path(settings.BASE_DIR) / 'templates' / 'users' / 'login.html'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('JSON.stringify({phone: phoneDigits || ""})', template)
+        self.assertIn('Object.prototype.hasOwnProperty.call(remembered, "pin")', template)
+        self.assertIn('window.localStorage.removeItem(LOGIN_MEMORY_KEY)', template)
+        self.assertIn('requestedAction === "register" && pinField', template)
+        self.assertNotIn('pin: pinDigits', template)
+        self.assertNotIn('memory.pin', template)

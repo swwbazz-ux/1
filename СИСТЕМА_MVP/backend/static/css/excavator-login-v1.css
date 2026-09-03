@@ -1,0 +1,685 @@
+/* Одноэкранный вход машиниста экскаватора.
+   Этот файл владеет только role-host excavator и не меняет вход водителя. */
+
+body.login-page.login-fullscreen.login-combined {
+    --exc-login-bg: #03090d;
+    --exc-login-panel: rgba(8, 16, 20, .96);
+    --exc-login-field: #0c1418;
+    --exc-login-text: #f4f7f5;
+    --exc-login-muted: #9faab0;
+    --exc-login-copper: #a9794f;
+    --exc-login-accent: #ffd200;
+    --exc-login-success: #48d879;
+    --exc-login-danger: #ff6b6b;
+    --exc-login-side: clamp(12px, 4.7vw, 24px);
+    --exc-login-gap: clamp(6px, 1.25dvh, 11px);
+    --exc-login-control: clamp(52px, 7dvh, 62px);
+    position: relative;
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+    background: var(--exc-login-bg);
+    color: var(--exc-login-text);
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-dialog.excavator-login {
+    position: fixed;
+    inset-inline: 0;
+    top: var(--login-vv-top, 0px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: clamp(142px, 32dvh, 340px) minmax(0, 1fr) max-content;
+    gap: 0;
+    align-content: stretch;
+    justify-items: stretch;
+    width: 100%;
+    max-width: none;
+    height: var(--login-vv-height, 100dvh);
+    min-height: 0;
+    margin: 0;
+    padding: 0 max(var(--exc-login-side), env(safe-area-inset-right, 0px))
+        max(8px, env(safe-area-inset-bottom, 0px))
+        max(var(--exc-login-side), env(safe-area-inset-left, 0px));
+    overflow: hidden;
+    border: 0;
+    border-radius: 0;
+    background:
+        radial-gradient(95% 50% at 50% 20%, rgba(255, 210, 0, .08), transparent 72%),
+        var(--exc-login-bg);
+    box-shadow: none;
+    transform: none;
+}
+
+.excavator-login__hero {
+    position: relative;
+    grid-column: 1;
+    grid-row: 1;
+    width: calc(100% + max(var(--exc-login-side), env(safe-area-inset-left, 0px)) + max(var(--exc-login-side), env(safe-area-inset-right, 0px)));
+    min-width: 0;
+    height: 100%;
+    min-height: 0;
+    margin-left: calc(-1 * max(var(--exc-login-side), env(safe-area-inset-left, 0px)));
+    overflow: hidden;
+    background: #101719;
+    isolation: isolate;
+}
+
+.excavator-login__hero-backdrop {
+    position: absolute;
+    inset: -14px;
+    z-index: 0;
+    background:
+        linear-gradient(180deg, rgba(1, 5, 7, .15), rgba(1, 6, 9, .72)),
+        url("../img/start/start-hero-v1.webp") 61% center / cover no-repeat;
+    filter: blur(7px) saturate(.86) brightness(.68);
+    transform: scale(1.07);
+}
+
+.excavator-login__hero-picture,
+.excavator-login__hero-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.excavator-login__hero-picture {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+}
+
+.excavator-login__hero-image {
+    object-fit: contain;
+    object-position: center 16%;
+    filter: saturate(.9) brightness(.84) contrast(1.05);
+}
+
+.excavator-login__hero-shade {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    background:
+        linear-gradient(90deg, rgba(2, 7, 9, .16), transparent 34%, transparent 74%, rgba(2, 7, 9, .12)),
+        linear-gradient(180deg, rgba(1, 5, 7, .04) 0%, rgba(2, 8, 11, .08) 52%, var(--exc-login-bg) 100%);
+}
+
+.excavator-login__hero-lines {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 3;
+    width: clamp(38px, 14vw, 74px);
+    height: 100%;
+    fill: none;
+    stroke: rgba(193, 139, 93, .5);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-form.is-combined-login,
+body.login-page.login-fullscreen.login-combined .login-install-gate {
+    position: relative;
+    z-index: 5;
+    grid-column: 1;
+    grid-row: 2;
+    align-self: center;
+    justify-self: center;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--exc-login-gap);
+    width: min(100%, 460px);
+    max-width: 460px;
+    min-width: 0;
+    max-height: 100%;
+    margin: clamp(-28px, -3dvh, -16px) 0 0;
+    padding: clamp(12px, 2.1dvh, 20px) clamp(14px, 4vw, 22px);
+    overflow: hidden;
+    border: 1px solid rgba(169, 121, 79, .44);
+    border-radius: clamp(18px, 5vw, 24px);
+    background: linear-gradient(155deg, rgba(16, 27, 31, .97), rgba(5, 12, 16, .97));
+    box-shadow: 0 18px 44px rgba(0, 0, 0, .42), inset 0 1px rgba(255, 255, 255, .05);
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-role-identity {
+    display: grid;
+    justify-items: center;
+    gap: 4px;
+    margin: 0;
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-role-identity img {
+    width: clamp(44px, 12vw, 62px);
+    height: clamp(44px, 12vw, 62px);
+    border-radius: clamp(12px, 3.5vw, 17px);
+    box-shadow: 0 0 0 1px rgba(255, 210, 0, .22), 0 10px 26px rgba(0, 0, 0, .4);
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-role-identity span {
+    color: #9aa6ab;
+    font-size: clamp(9px, 2.55vw, 11px);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-dialog h1 {
+    min-width: 0;
+    margin: 0;
+    color: var(--exc-login-text);
+    font: 800 clamp(21px, 6.2vw, 31px)/1.08 "Segoe UI", Arial, sans-serif;
+    text-align: center;
+    text-transform: none;
+    overflow-wrap: anywhere;
+}
+
+.excavator-login__lead {
+    margin: -2px 0 2px;
+    color: #d6ad35;
+    font: 500 clamp(12px, 3.4vw, 15px)/1.2 "Segoe UI", Arial, sans-serif;
+    text-align: center;
+}
+
+body.login-page.login-fullscreen.login-combined .shared-shift-login-field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+    min-width: 0;
+    margin: 0;
+    color: var(--exc-login-muted);
+}
+
+body.login-page.login-fullscreen.login-combined .shared-shift-login-field > span:first-child {
+    color: #afb8bc;
+    font: 700 clamp(11px, 3vw, 13px)/1 "Segoe UI", Arial, sans-serif;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+body.login-page.login-fullscreen.login-combined .shared-shift-phone-shell,
+body.login-page.login-fullscreen.login-combined .login-pin-shell {
+    position: relative;
+    display: grid;
+    align-items: center;
+    min-width: 0;
+    min-height: var(--exc-login-control);
+    overflow: hidden;
+    border: 1px solid rgba(193, 139, 93, .72);
+    border-radius: clamp(12px, 3.8vw, 16px);
+    background: linear-gradient(180deg, rgba(16, 25, 29, .98), var(--exc-login-field));
+    box-shadow: inset 0 1px rgba(255, 255, 255, .04);
+    transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+body.login-page.login-fullscreen.login-combined .shared-shift-phone-shell {
+    grid-template-columns: auto minmax(0, 1fr);
+}
+
+body.login-page.login-fullscreen.login-combined .shared-shift-phone-shell::after {
+    content: "✓";
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    color: var(--exc-login-success);
+    font: 800 24px/1 "Segoe UI", Arial, sans-serif;
+    opacity: 0;
+    transform: translateY(-50%) scale(.72);
+    transition: opacity 120ms ease, transform 120ms ease;
+    pointer-events: none;
+}
+
+body.login-page.login-fullscreen.login-combined .shared-shift-phone-shell:has(input.is-valid)::after {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+}
+
+body.login-page.login-fullscreen.login-combined .shared-shift-phone-shell:focus-within,
+body.login-page.login-fullscreen.login-combined .login-pin-shell:focus-within {
+    border-color: var(--exc-login-accent);
+    background: #111a1e;
+    box-shadow: 0 0 0 2px rgba(255, 210, 0, .16), 0 0 22px rgba(255, 210, 0, .08);
+}
+
+body.login-page.login-fullscreen.login-combined .login-pin-shell:has(input.is-invalid),
+body.login-page.login-fullscreen.login-combined .shared-shift-phone-shell:has(input.is-invalid),
+body.login-page.login-fullscreen.login-combined .login-pin-shell:has(input[aria-invalid="true"]),
+body.login-page.login-fullscreen.login-combined .shared-shift-phone-shell:has(input[aria-invalid="true"]) {
+    border-color: var(--exc-login-danger);
+    box-shadow: 0 0 0 2px rgba(255, 107, 107, .14);
+}
+
+body.login-page.login-fullscreen.login-combined .shared-shift-country-code {
+    align-self: stretch;
+    display: grid;
+    place-items: center;
+    min-width: 58px;
+    padding: 0 12px;
+    border-right: 1px solid rgba(193, 139, 93, .3);
+    color: var(--exc-login-text);
+    font: 800 clamp(17px, 4.8vw, 21px)/1 "Segoe UI", Arial, sans-serif;
+}
+
+body.login-page.login-fullscreen.login-combined .shared-shift-login-field input {
+    width: 100%;
+    min-width: 0;
+    min-height: var(--exc-login-control);
+    padding: 0 14px;
+    border: 0;
+    border-radius: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--exc-login-text);
+    caret-color: var(--exc-login-accent);
+    font: 800 clamp(18px, 5vw, 22px)/1 "Segoe UI", Arial, sans-serif;
+    letter-spacing: .02em;
+    box-shadow: none;
+}
+
+body.login-page.login-fullscreen.login-combined .shared-shift-phone-shell input {
+    padding-right: 48px;
+}
+
+body.login-page.login-fullscreen.login-combined .login-pin-shell input {
+    padding-right: calc(var(--login-reveal-size, 44px) + 18px);
+    letter-spacing: .22em;
+}
+
+body.login-page.login-fullscreen.login-combined .login-pin-reveal {
+    right: 6px;
+    width: var(--login-reveal-size, 44px);
+    height: var(--login-reveal-size, 44px);
+    min-width: 44px;
+    min-height: 44px;
+    border-color: rgba(255, 210, 0, .32);
+    border-radius: 11px;
+    background: rgba(255, 210, 0, .08);
+    color: var(--exc-login-accent);
+}
+
+body.login-page.login-fullscreen.login-combined .input-hint {
+    display: block;
+    min-height: 13px;
+    margin: 0;
+    color: #7f8b90;
+    font: 500 clamp(10px, 2.8vw, 12px)/1.1 "Segoe UI", Arial, sans-serif;
+}
+
+body.login-page.login-fullscreen.login-combined .input-hint.is-valid {
+    color: #71957d;
+}
+
+body.login-page.login-fullscreen.login-combined .input-hint.is-invalid {
+    color: var(--exc-login-danger);
+}
+
+.excavator-login__feedback {
+    display: grid;
+    align-items: center;
+    min-width: 0;
+    min-height: 16px;
+    max-height: 30px;
+    margin: -2px 0;
+    overflow: hidden;
+    color: var(--exc-login-danger);
+    font: 600 clamp(10px, 2.9vw, 12px)/1.15 "Segoe UI", Arial, sans-serif;
+    text-align: center;
+}
+
+.excavator-login__feedback .message.error {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    overflow-wrap: anywhere;
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-actions {
+    min-width: 0;
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-submit {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    width: 100%;
+    min-height: clamp(52px, 7.2dvh, 64px);
+    padding: 0 clamp(18px, 5vw, 28px);
+    border: 1px solid #ffe666;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #ffe247 0%, var(--exc-login-accent) 58%, #e9b900 100%);
+    color: #211d0a;
+    font: 800 clamp(18px, 5.1vw, 22px)/1 "Segoe UI", Arial, sans-serif;
+    text-transform: none;
+    text-shadow: 0 1px rgba(255, 255, 255, .3);
+    box-shadow:
+        0 5px 0 #927a10,
+        0 10px 24px rgba(255, 210, 0, .22),
+        inset 0 1px rgba(255, 255, 255, .55);
+    cursor: pointer;
+    transition: transform 100ms ease, box-shadow 100ms ease, filter 100ms ease;
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-submit::before {
+    content: "";
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-submit .excavator-login__submit-arrow {
+    grid-column: 3;
+    justify-self: end;
+    font-size: 1.45em;
+    font-weight: 400;
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-submit:not(:disabled):active {
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 #927a10, 0 5px 14px rgba(255, 210, 0, .18);
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-submit:focus-visible,
+body.login-page.login-fullscreen.login-combined .unified-login-register:focus-visible,
+body.login-page.login-fullscreen.login-combined .login-pin-reveal:focus-visible,
+body.login-page.login-fullscreen.login-combined .max-support-link:focus-visible {
+    outline: 3px solid #fff;
+    outline-offset: 3px;
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-submit:disabled {
+    border-color: rgba(255, 226, 71, .32);
+    background: linear-gradient(180deg, #8f8437, #716820);
+    color: rgba(22, 20, 9, .72);
+    box-shadow: 0 3px 0 #504b21;
+    filter: saturate(.55);
+    cursor: default;
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-register {
+    justify-self: center;
+    min-height: 24px;
+    margin: 1px 0 0;
+    padding: 2px 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #9da9ae;
+    font: 600 clamp(11px, 3vw, 13px)/1.2 "Segoe UI", Arial, sans-serif;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+}
+
+body.login-page.login-fullscreen.login-combined .max-support-link {
+    position: static;
+    inset: auto;
+    z-index: 4;
+    grid-column: 1;
+    grid-row: 3;
+    align-self: end;
+    justify-self: center;
+    width: min(100%, 420px);
+    max-width: 420px;
+    min-height: 40px;
+    margin: 5px 0 0;
+    transform: none;
+}
+
+body.login-page.login-fullscreen.login-combined .app-connection-dot {
+    z-index: 20;
+}
+
+@media (max-width: 360px) and (max-height: 640px) {
+    body.login-page.login-fullscreen.login-combined {
+        --exc-login-side: 10px;
+        --exc-login-gap: 5px;
+        --exc-login-control: 48px;
+    }
+
+    body.login-page.login-fullscreen.login-combined .unified-login-dialog.excavator-login {
+        grid-template-rows: 128px minmax(0, 1fr) 38px;
+        padding-bottom: max(4px, env(safe-area-inset-bottom, 0px));
+    }
+
+    body.login-page.login-fullscreen.login-combined .unified-login-form.is-combined-login {
+        margin-top: -15px;
+        padding: 9px 12px;
+        border-radius: 17px;
+    }
+
+    body.login-page.login-fullscreen.login-combined .unified-login-role-identity img {
+        width: 38px;
+        height: 38px;
+        border-radius: 11px;
+    }
+
+    body.login-page.login-fullscreen.login-combined .unified-login-dialog h1 {
+        font-size: 20px;
+    }
+
+    .excavator-login__lead {
+        display: none;
+    }
+
+    body.login-page.login-fullscreen.login-combined .unified-login-submit {
+        min-height: 48px;
+        font-size: 18px;
+    }
+
+    body.login-page.login-fullscreen.login-combined .max-support-link {
+        min-height: 36px;
+        margin-top: 2px;
+    }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+    body.login-page.login-fullscreen.login-combined {
+        --exc-login-side: clamp(10px, 2.6vw, 20px);
+        --exc-login-gap: 4px;
+        --exc-login-control: 44px;
+    }
+
+    body.login-page.login-fullscreen.login-combined .unified-login-dialog.excavator-login {
+        grid-template-columns: minmax(180px, .72fr) minmax(320px, 1.28fr);
+        grid-template-rows: minmax(0, 1fr) 38px;
+        column-gap: clamp(10px, 2vw, 18px);
+        padding: 8px max(var(--exc-login-side), env(safe-area-inset-right, 0px))
+            max(4px, env(safe-area-inset-bottom, 0px))
+            max(var(--exc-login-side), env(safe-area-inset-left, 0px));
+    }
+
+    .excavator-login__hero {
+        grid-column: 1;
+        grid-row: 1 / span 2;
+        width: calc(100% + max(var(--exc-login-side), env(safe-area-inset-left, 0px)));
+        height: calc(100% + 12px);
+        margin: -8px 0 -4px calc(-1 * max(var(--exc-login-side), env(safe-area-inset-left, 0px)));
+    }
+
+    .excavator-login__hero-image {
+        object-fit: cover;
+        object-position: 56% center;
+    }
+
+    body.login-page.login-fullscreen.login-combined .unified-login-form.is-combined-login,
+    body.login-page.login-fullscreen.login-combined .login-install-gate {
+        grid-column: 2;
+        grid-row: 1;
+        grid-template-columns: minmax(0, 1fr) !important;
+        grid-template-rows: none !important;
+        grid-auto-rows: max-content !important;
+        align-content: center !important;
+        width: min(100%, 540px);
+        max-width: 540px;
+        height: auto !important;
+        margin: 0;
+        padding: 7px 12px;
+        border-radius: 16px;
+    }
+
+    body.login-page.login-fullscreen.login-combined .unified-login-form.is-combined-login > * {
+        grid-column: 1 !important;
+        grid-row: auto !important;
+    }
+
+    body.login-page.login-fullscreen.login-combined .unified-login-role-identity,
+    .excavator-login__lead {
+        display: none;
+    }
+
+    body.login-page.login-fullscreen.login-combined .unified-login-dialog h1 {
+        font-size: clamp(18px, 3.2vw, 22px);
+    }
+
+    body.login-page.login-fullscreen.login-combined .shared-shift-login-field > span:first-child {
+        font-size: 10px;
+    }
+
+    body.login-page.login-fullscreen.login-combined .input-hint {
+        display: none;
+    }
+
+    body.login-page.login-fullscreen.login-combined .unified-login-submit {
+        min-height: 44px;
+        font-size: 17px;
+        box-shadow: 0 3px 0 #927a10, 0 6px 16px rgba(255, 210, 0, .18);
+    }
+
+    body.login-page.login-fullscreen.login-combined .unified-login-register {
+        min-height: 18px;
+        padding-block: 0;
+        font-size: 10px;
+    }
+
+    body.login-page.login-fullscreen.login-combined .max-support-link {
+        grid-column: 2;
+        grid-row: 2;
+        width: min(100%, 420px);
+        min-height: 34px;
+        margin: 3px 0 0;
+    }
+}
+
+/* IME-mode: shell повторяет visualViewport, поэтому клавиатура перекрывает
+   только декор. Оба поля и кнопка остаются в реальной видимой области. */
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active {
+    --exc-login-side: clamp(8px, 3.4vw, 14px);
+    --exc-login-gap: 5px;
+    --exc-login-control: 44px;
+}
+
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .unified-login-dialog.excavator-login {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    align-content: start;
+    padding: max(4px, env(safe-area-inset-top, 0px)) var(--exc-login-side) 5px;
+}
+
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .excavator-login__hero,
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .unified-login-role-identity,
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .excavator-login__lead,
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .input-hint,
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .unified-login-register,
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .max-support-link,
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .login-install-gate {
+    display: none;
+}
+
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .unified-login-form.is-combined-login {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: start;
+    width: min(100%, 560px);
+    max-width: 560px;
+    max-height: 100%;
+    margin: 0;
+    padding: 6px 10px 8px;
+    gap: var(--exc-login-gap);
+    border-radius: 14px;
+    overflow: hidden;
+}
+
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .unified-login-dialog h1 {
+    font-size: clamp(18px, 5.4vw, 22px);
+    line-height: 1;
+}
+
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .shared-shift-login-field > span:first-child {
+    font-size: 10px;
+}
+
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .excavator-login__feedback {
+    min-height: 14px;
+    max-height: 24px;
+    font-size: 10px;
+}
+
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .unified-login-submit {
+    min-height: 46px;
+    font-size: 18px;
+    box-shadow: 0 3px 0 #927a10, 0 5px 14px rgba(255, 210, 0, .16);
+}
+
+body.login-page.login-fullscreen.login-combined.is-login-a11y-overflow .unified-login-dialog.excavator-login {
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+}
+
+body.login-page.login-fullscreen.login-combined.is-login-a11y-overflow .unified-login-form.is-combined-login {
+    max-height: none;
+    overflow: visible;
+}
+
+@media (min-width: 1024px) and (min-height: 560px) {
+    body.login-page.login-fullscreen.login-combined .unified-login-dialog.excavator-login {
+        grid-template-columns: minmax(0, 1.2fr) minmax(420px, .8fr);
+        grid-template-rows: minmax(0, 1fr) auto;
+        column-gap: clamp(26px, 4vw, 64px);
+        padding: 0 clamp(28px, 5vw, 72px) 24px 0;
+    }
+
+    .excavator-login__hero {
+        grid-column: 1;
+        grid-row: 1 / span 2;
+        width: 100%;
+        height: calc(100% + 24px);
+        margin: 0 0 -24px;
+    }
+
+    .excavator-login__hero-image {
+        object-fit: cover;
+        object-position: 54% center;
+    }
+
+    body.login-page.login-fullscreen.login-combined .unified-login-form.is-combined-login,
+    body.login-page.login-fullscreen.login-combined .login-install-gate {
+        grid-column: 2;
+        grid-row: 1;
+        width: min(100%, 520px);
+        max-width: 520px;
+        margin: 0;
+        padding: 20px 24px;
+    }
+
+    body.login-page.login-fullscreen.login-combined .max-support-link {
+        grid-column: 2;
+        grid-row: 2;
+        width: min(100%, 460px);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.login-page.login-fullscreen.login-combined *,
+    body.login-page.login-fullscreen.login-combined *::before,
+    body.login-page.login-fullscreen.login-combined *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}

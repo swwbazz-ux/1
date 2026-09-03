@@ -224,7 +224,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v184'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v185'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -572,6 +572,11 @@ def login_view(
 ):
     role_app = get_role_app_for_request(request)
     login_role_app = target_role_app or role_app
+    combined_excavator_login = bool(
+        role_app
+        and role_app.role_code == 'excavator_operator'
+        and target_role_app is None
+    )
     allowed_role_codes = tuple(allowed_role_codes or ())
     next_url = forced_next_url or _validated_next_url(
         request,
@@ -676,6 +681,10 @@ def login_view(
                     'selected_device_kind': selected_device_kind,
                     'next_url': next_url,
                     'login_role_app': login_role_app,
+                    # Старый cached-клиент action=continue заменяет только
+                    # <main>, но не может подхватить новый CSS из <head>.
+                    # Возвращаем ему прежний самостоятельный PIN-шаг.
+                    'combined_excavator_login': False,
                     'submitted_phone': phone,
                     'login_step': 'pin',
                 },
@@ -785,6 +794,7 @@ def login_view(
                         'selected_device_kind': selected_device_kind,
                         'next_url': next_url,
                         'login_role_app': login_role_app,
+                        'combined_excavator_login': combined_excavator_login,
                         'submitted_phone': submitted_phone,
                         'login_step': 'pin' if submitted_phone else '',
                     },
@@ -856,6 +866,7 @@ def login_view(
             'selected_device_kind': selected_device_kind,
             'next_url': next_url,
             'login_role_app': login_role_app,
+            'combined_excavator_login': combined_excavator_login,
             'submitted_phone': submitted_phone or prefilled_phone,
             'login_step': 'pin' if submitted_phone else '',
             # Отличаем «номер пришёл в ссылке со /start/» от «человек уже

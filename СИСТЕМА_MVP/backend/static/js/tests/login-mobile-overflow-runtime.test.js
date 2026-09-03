@@ -125,6 +125,10 @@ function createInput(id, attributeName) {
 function createLoginRuntime(options) {
     const runtimeOptions = options || {};
     const viewportHeight = Number(runtimeOptions.viewportHeight || 844);
+    const storageValues = new Map();
+    if (typeof runtimeOptions.rememberedCredentials === "string") {
+        storageValues.set("login-remembered-credentials", runtimeOptions.rememberedCredentials);
+    }
     const timers = createTimers();
     const phoneInput = createInput("login-phone", "data-phone-input");
     const pinInput = createInput("login-pin", "data-pin-input");
@@ -196,6 +200,17 @@ function createLoginRuntime(options) {
         requestAnimationFrame(callback) {
             callback();
         },
+        localStorage: {
+            getItem(key) {
+                return storageValues.has(key) ? storageValues.get(key) : null;
+            },
+            setItem(key, value) {
+                storageValues.set(key, String(value));
+            },
+            removeItem(key) {
+                storageValues.delete(key);
+            },
+        },
         scrollTo(optionsValue) {
             scrollCalls.push(optionsValue);
             if (optionsValue && typeof optionsValue.left !== "undefined") {
@@ -227,6 +242,9 @@ function createLoginRuntime(options) {
         main,
         phoneInput,
         pinInput,
+        rememberedCredentials() {
+            return window.localStorage.getItem("login-remembered-credentials");
+        },
         scrollCalls,
         timers,
         focus(input, initialScrollLeft) {
@@ -315,4 +333,25 @@ test("desktop focus remains stable when the field is already visible", () => {
     assertHorizontalOrigin(runtime, "desktop autofocus");
     assert.deepEqual(runtime.scrollCalls, []);
     assert.equal(runtime.phoneInput.scrollIntoViewCalls, 0);
+});
+
+test("legacy remembered credentials are migrated to phone-only storage", () => {
+    const runtime = createLoginRuntime({
+        rememberedCredentials: JSON.stringify({phone: "9000000003", pin: "654321"}),
+    });
+
+    assert.equal(runtime.phoneInput.value, "900-000-00-03");
+    assert.equal(runtime.pinInput.value, "");
+    assert.deepEqual(
+        JSON.parse(runtime.rememberedCredentials()),
+        {phone: "9000000003"}
+    );
+});
+
+test("malformed remembered credentials are removed instead of retained", () => {
+    const runtime = createLoginRuntime({rememberedCredentials: '{"phone":'});
+
+    assert.equal(runtime.phoneInput.value, "");
+    assert.equal(runtime.pinInput.value, "");
+    assert.equal(runtime.rememberedCredentials(), null);
 });

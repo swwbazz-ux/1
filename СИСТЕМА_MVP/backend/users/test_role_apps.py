@@ -282,6 +282,17 @@ class RoleAppLoginTests(TestCase):
         self.assertContains(rejected, 'для приложения «Водитель»')
         self.assertNotIn('employee_access_id', self.client.session)
 
+        rejected = self.client.post(
+            '/',
+            {**self._credentials(self.driver_access), 'action': 'login'},
+            HTTP_HOST='excavator.localhost',
+        )
+        self.assertEqual(rejected.status_code, 200)
+        self.assertContains(rejected, 'Телефон или пинкод указаны неверно')
+        self.assertNotIn('employee_access_id', self.client.session)
+        self.assertContains(rejected, 'для приложения «Экскаватор»')
+        self.assertNotIn('employee_access_id', self.client.session)
+
         accepted = self.client.post(
             '/',
             self._credentials(self.driver_access),
@@ -360,10 +371,138 @@ class RoleAppLoginTests(TestCase):
         self.assertContains(response, 'history.replaceState', html=False)
         self.assertContains(
             response,
-            'state.locked = hasContract && !state.ready && !isEntryScreen();',
+            '&& !isEntryScreen()',
             html=False,
         )
+        self.assertContains(response, '&& !isNativeApp();', html=False)
         self.assertNotContains(response, ' autofocus')
+
+    def test_excavator_host_renders_one_combined_login_while_driver_stays_two_step(self):
+        excavator_response = self.client.get('/?form=1', HTTP_HOST='excavator.localhost')
+        driver_response = self.client.get('/?form=1', HTTP_HOST='driver.localhost')
+
+        self.assertContains(
+            excavator_response,
+            '<form method="post" data-validated-login data-login-combined="true"',
+        )
+        self.assertContains(excavator_response, 'name="phone"')
+        self.assertContains(excavator_response, 'name="access_code"')
+        self.assertContains(excavator_response, 'value="login">Войти')
+        self.assertContains(excavator_response, 'Первый вход — создать пинкод')
+        self.assertNotContains(excavator_response, 'value="continue">Далее')
+        self.assertContains(excavator_response, 'excavator-login-v1.css')
+        self.assertContains(excavator_response, 'start-hero-v1.webp')
+
+        self.assertNotContains(
+            driver_response,
+            '<form method="post" data-validated-login data-login-combined="true"',
+        )
+        self.assertNotContains(driver_response, 'name="access_code"')
+        self.assertContains(driver_response, 'value="continue">Далее')
+        self.assertNotContains(driver_response, 'excavator-login-v1.css')
+
+    def test_excavator_combined_post_keeps_existing_session_and_redirect(self):
+        response = self.client.post(
+            '/',
+            {**self._credentials(self.excavator_access), 'action': 'login'},
+            HTTP_HOST='excavator.localhost',
+        )
+
+        self.assertRedirects(response, '/excavator/work/', fetch_redirect_response=False)
+        self.assertEqual(self.client.session['employee_access_id'], self.excavator_access.id)
+        self.assertEqual(self.client.session['active_role_access_id'], self.excavator_access.id)
+        self.assertEqual(self.client.session['active_role_code'], 'excavator_operator')
+
+    def test_excavator_combined_error_keeps_phone_and_never_reflects_pin(self):
+        response = self.client.post(
+            '/',
+            {
+                'phone': self.excavator_access.employee.phone,
+                'access_code': '999999',
+                'action': 'login',
+                'device_kind': 'personal',
+            },
+            HTTP_HOST='excavator.localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.excavator_access.employee.phone)
+        self.assertContains(response, 'data-login-feedback')
+        self.assertContains(response, 'Телефон или пинкод указаны неверно')
+        self.assertNotContains(response, 'value="999999"')
+        self.assertNotIn('employee_access_id', self.client.session)
+
+    def test_old_excavator_continue_post_remains_compatible(self):
+        response = self.client.post(
+            '/',
+            {
+                'phone': self.excavator_access.employee.phone,
+                'action': 'continue',
+                'device_kind': 'personal',
+            },
+            HTTP_HOST='excavator.localhost',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(
+            response,
+            '<form method="post" data-validated-login data-login-combined="true"',
+        )
+        self.assertContains(response, 'class="app-confirm-content unified-login-form is-pin-step"')
+        self.assertContains(response, 'data-phone-input')
+        self.assertContains(response, ' readonly')
+        self.assertContains(response, 'data-pin-input')
+        self.assertNotIn('employee_access_id', self.client.session)
+
+    def test_excavator_first_entry_still_reaches_activation_without_pin(self):
+        pending = self._create_access(
+            role_code='excavator_operator',
+            role_name='Машинист экскаватора',
+            full_name='Новый машинист',
+            phone='+79990000123',
+            access_code='',
+        )
+        pending.status = EmployeeAccess.Status.NOT_ACTIVATED
+        pending.activated_at = None
+        pending.save(update_fields=['status', 'activated_at'])
+
+        response = self.client.post(
+            '/',
+            {
+                'phone': pending.employee.phone,
+                'action': 'register',
+                'device_kind': 'personal',
+            },
+            HTTP_HOST='excavator.localhost',
+        )
+
+        self.assertRedirects(response, '/activate-access/', fetch_redirect_response=False)
+        self.assertEqual(self.client.session['pending_activation_access_id'], pending.id)
+
+    def test_excavator_combined_login_remains_csrf_protected(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        get_response = csrf_client.get('/?form=1', HTTP_HOST='excavator.localhost')
+        token = get_response.cookies['csrftoken'].value
+
+        rejected = csrf_client.post(
+            '/',
+            {**self._credentials(self.excavator_access), 'action': 'login'},
+            HTTP_HOST='excavator.localhost',
+        )
+        accepted = csrf_client.post(
+            '/',
+            {
+                **self._credentials(self.excavator_access),
+                'action': 'login',
+                'csrfmiddlewaretoken': token,
+            },
+            HTTP_HOST='excavator.localhost',
+            HTTP_X_CSRFTOKEN=token,
+        )
+
+        self.assertEqual(rejected.status_code, 403)
+        self.assertRedirects(accepted, '/excavator/work/', fetch_redirect_response=False)
 
     def test_unknown_phone_partial_has_in_place_retry_hook(self):
         response = self.client.post(
