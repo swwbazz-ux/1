@@ -4069,10 +4069,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('font-size: 26px !important;', work_tabs_css)
         self.assertIn('white-space: normal !important;', face_css)
         legacy_css = (backend_root / 'static' / 'css' / 'excavator-work-v55-shift.css').read_text(encoding='utf-8')
+        final_css = (backend_root / 'static' / 'css' / 'excavator-work-v55-final.css').read_text(encoding='utf-8')
         self.assertIn('border: 0 !important;', legacy_css)
         self.assertIn('background: transparent !important;', legacy_css)
         self.assertIn('opacity: 1 !important;', legacy_css)
         self.assertNotIn('flex-basis: 24px !important;', legacy_css)
+        self.assertNotIn('.eo-shell[data-eo-active-tab="trucks"] .eo-topbar-cell:first-child strong', final_css)
         self.assertIn('@media (prefers-reduced-motion: reduce)', work_tabs_css)
         self.assertIn('.mobile-downtime__reason.eo-reason-action.is-selected::after', work_tabs_css)
 

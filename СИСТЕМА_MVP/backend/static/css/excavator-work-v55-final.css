@@ -1787,11 +1787,6 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-topbar
     grid-template-columns: minmax(94px, .75fr) clamp(40px, 9.4vw, 46px) minmax(0, 2.8fr) !important;
 }
 
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-topbar-cell:first-child strong {
-    font-size: clamp(13px, 3.85vw, 16px) !important;
-    line-height: 1.02 !important;
-}
-
 body.excavator-operator-screen .eo-face-cell-full strong {
     font-size: clamp(13px, 3.85vw, 16px) !important;
     line-height: 1.02 !important;
