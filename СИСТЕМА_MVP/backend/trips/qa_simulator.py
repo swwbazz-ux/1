@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import transaction
@@ -15,6 +16,7 @@ from assignments.models import (
 )
 from assignments.services import apply_pending_haul_assignment, schedule_haul_assignment
 from core.models import bump_operational_state
+from core.production_time import production_work_date
 from core.qa_environment import require_excavator_qa_environment
 from downtimes.models import DowntimeReason
 from references.models import (
@@ -25,7 +27,13 @@ from references.models import (
     RockType,
     TruckCapacityRule,
 )
-from shifts.models import EmployeeShift
+from shifts.models import (
+    EmployeeShift,
+    EquipmentPlanGroup,
+    PlanAssignmentStatus,
+    PlanCalculationMode,
+)
+from shifts.services import assign_shift_plan_snapshot
 from users.forms import normalize_phone
 from users.models import Employee, EmployeeAccess, Role
 
@@ -37,6 +45,7 @@ QA_OPERATOR_NUMBER = f'{QA_PREFIX}-EO-01'
 QA_DISPATCHER_NUMBER = f'{QA_PREFIX}-DISPATCHER'
 QA_EXCAVATOR_GARAGE = 'QA-EX-01'
 QA_TRUCK_GARAGE_PREFIX = 'QA-T-'
+QA_EXCAVATOR_PLAN_GROUP_CODE = 'rustore-qa-excavator'
 
 QA_EXCAVATOR_DOWNTIME_REASONS = (
     ('Заправка', 'Заправка', False, 40, False),
@@ -217,6 +226,32 @@ def prepare_excavator_qa_scenario() -> ExcavatorQAScenario:
             'activated_at': timezone.now(),
         },
     )
+    plan_trips = Decimal(int(getattr(settings, 'EXCAVATOR_QA_PLAN_TRIPS', 20)))
+    plan_group, _ = EquipmentPlanGroup.objects.update_or_create(
+        code=QA_EXCAVATOR_PLAN_GROUP_CODE,
+        defaults={
+            'name': 'Тестовый план экскаватора',
+            'calculation_mode': PlanCalculationMode.TRIPS,
+            'plan_value': plan_trips,
+            'is_active': True,
+            'active_from': production_work_date(),
+            'updated_by': dispatcher,
+            'comment': 'Изолированный сценарий закрытого тестирования RuStore.',
+        },
+    )
+    plan_group.equipment.set([excavator])
+    for open_shift in EmployeeShift.objects.filter(
+        employee=operator,
+        equipment=excavator,
+        closed_at__isnull=True,
+    ):
+        if (
+            open_shift.plan_group_id != plan_group.id
+            or open_shift.plan_status != PlanAssignmentStatus.ASSIGNED
+            or open_shift.plan_calculation_mode != PlanCalculationMode.TRIPS
+            or open_shift.plan_value != plan_trips
+        ):
+            assign_shift_plan_snapshot(open_shift)
     operator_assignment = EquipmentAssignment.objects.filter(
         employee=operator,
         equipment=excavator,

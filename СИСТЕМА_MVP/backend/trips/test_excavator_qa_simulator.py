@@ -8,7 +8,12 @@ from django.utils import timezone
 from assignments.models import AssignmentStatus, HaulAssignment
 from core.qa_environment import require_excavator_qa_environment
 from downtimes.models import DowntimeReason
-from shifts.models import EmployeeShift
+from shifts.models import (
+    EmployeeShift,
+    EquipmentPlanGroup,
+    PlanAssignmentStatus,
+    PlanCalculationMode,
+)
 
 from .models import Trip, TripStatus
 from .qa_simulator import (
@@ -27,6 +32,7 @@ class ExcavatorQASimulatorTests(TestCase):
             'EXCAVATOR_QA_PIN': '314159',
             'EXCAVATOR_QA_TRUCK_COUNT': 3,
             'EXCAVATOR_QA_TRANSIT_SECONDS': 5,
+            'EXCAVATOR_QA_PLAN_TRIPS': 20,
         }
         values.update(extra)
         return override_settings(**values)
@@ -47,6 +53,16 @@ class ExcavatorQASimulatorTests(TestCase):
             placement = first.excavator.excavator_placement
             placement.loading_horizon = '999'
             placement.save(update_fields=['loading_horizon'])
+            open_shift = EmployeeShift.objects.create(
+                employee=first.operator,
+                equipment=first.excavator,
+                shift_type='day',
+                workplace_code='excavator_operator',
+                start_fuel='6000',
+                start_engine_hours='1200',
+                opened_at=timezone.now(),
+                opened_by=first.operator,
+            )
             second = prepare_excavator_qa_scenario()
 
         self.assertEqual(first.operator.pk, second.operator.pk)
@@ -65,6 +81,15 @@ class ExcavatorQASimulatorTests(TestCase):
         )
         placement.refresh_from_db()
         self.assertEqual(placement.loading_horizon, '999')
+        plan_group = EquipmentPlanGroup.objects.get(code='rustore-qa-excavator')
+        self.assertEqual(plan_group.calculation_mode, PlanCalculationMode.TRIPS)
+        self.assertEqual(plan_group.plan_value, 20)
+        self.assertEqual(list(plan_group.equipment.all()), [first.excavator])
+        open_shift.refresh_from_db()
+        self.assertEqual(open_shift.plan_group, plan_group)
+        self.assertEqual(open_shift.plan_status, PlanAssignmentStatus.ASSIGNED)
+        self.assertEqual(open_shift.plan_calculation_mode, PlanCalculationMode.TRIPS)
+        self.assertEqual(open_shift.plan_value, 20)
 
     def test_tick_waits_for_human_to_open_excavator_shift(self):
         with self.qa_settings():
