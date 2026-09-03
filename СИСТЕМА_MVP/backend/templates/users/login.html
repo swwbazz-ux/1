@@ -170,6 +170,10 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         --login-glow: color-mix(in srgb, var(--login-accent) 18%, transparent);
         --login-ink: #04161A;
         --login-ink: color-mix(in srgb, var(--login-accent) 22%, #02080b);
+        /* Телефон и ПИН — один тип контрола. Высота меняется одним токеном,
+           чтобы при появлении клавиатуры оба поля сжимались синхронно. */
+        --login-control-height: 58px;
+        --login-reveal-size: 44px;
     }
 
     body.login-page.login-fullscreen {
@@ -299,7 +303,7 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
        кнопкой в 58 точек выглядели чужой деталью. */
     body.login-page.login-fullscreen .shared-shift-phone-shell {
         grid-template-columns: auto minmax(0, 1fr);
-        min-height: 58px;
+        min-height: var(--login-control-height);
         border: 1px solid rgba(255, 255, 255, .16);
         border-radius: 14px;
         background: rgba(255, 255, 255, .04);
@@ -329,7 +333,7 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     }
 
     body.login-page.login-fullscreen .login-pin-shell {
-        min-height: 58px;
+        min-height: var(--login-control-height);
         border: 1px solid rgba(255, 255, 255, .22);
         border-radius: 14px;
         background: rgba(255, 255, 255, .04);
@@ -352,6 +356,8 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     }
 
     body.login-page.login-fullscreen .login-pin-reveal {
+        width: var(--login-reveal-size);
+        height: var(--login-reveal-size);
         border-color: color-mix(in srgb, var(--login-accent) 34%, transparent);
         background: color-mix(in srgb, var(--login-accent) 10%, transparent);
         color: var(--login-accent);
@@ -371,7 +377,7 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     }
 
     body.login-page.login-fullscreen .shared-shift-login-field input {
-        min-height: 58px;
+        min-height: var(--login-control-height);
         padding: 0 14px;
         border: 0;
         border-radius: 0;
@@ -433,6 +439,11 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         min-height: 0;
         padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
         padding-bottom: 16px;
+    }
+
+    body.login-page.login-fullscreen.is-login-keyboard-active {
+        --login-control-height: 42px;
+        --login-reveal-size: 40px;
     }
 
     body.login-page.login-fullscreen.is-login-keyboard-active .unified-login-role-identity {

@@ -124,3 +124,19 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
             template,
         )
         self.assertIn('border-color: var(--login-accent)', template)
+
+    def test_phone_and_pin_share_one_height_token_in_keyboard_mode(self):
+        template = (
+            Path(settings.BASE_DIR) / 'templates' / 'users' / 'login.html'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('--login-control-height: 58px', template)
+        self.assertIn('--login-control-height: 42px', template)
+        self.assertIn('--login-reveal-size: 44px', template)
+        self.assertIn('--login-reveal-size: 40px', template)
+        self.assertIn('width: var(--login-reveal-size)', template)
+        self.assertIn('height: var(--login-reveal-size)', template)
+        self.assertEqual(
+            template.count('min-height: var(--login-control-height)'),
+            3,
+        )
