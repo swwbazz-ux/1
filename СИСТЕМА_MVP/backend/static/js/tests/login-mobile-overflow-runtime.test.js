@@ -87,11 +87,14 @@ function createTimers() {
 }
 
 function extractLoginRuntime() {
-    const start = LOGIN_TEMPLATE.indexOf("document.addEventListener('DOMContentLoaded'");
-    const serviceWorkerStart = LOGIN_TEMPLATE.indexOf('    if ("serviceWorker" in navigator)', start);
-    assert.notEqual(start, -1, "login DOMContentLoaded runtime must exist");
+    const memoryMarker = 'var LOGIN_MEMORY_KEY = "login-remembered-credentials";';
+    const memoryStart = LOGIN_TEMPLATE.indexOf(memoryMarker);
+    const start = LOGIN_TEMPLATE.lastIndexOf("(function (window, document) {", memoryStart);
+    assert.notEqual(memoryStart, -1, "login memory runtime must exist");
+    const serviceWorkerStart = LOGIN_TEMPLATE.indexOf('    {% if not role_app %}', start);
+    assert.notEqual(start, -1, "login runtime must exist");
     assert.notEqual(serviceWorkerStart, -1, "service worker boundary must exist");
-    return LOGIN_TEMPLATE.slice(start, serviceWorkerStart) + "\n});";
+    return LOGIN_TEMPLATE.slice(start, serviceWorkerStart) + "\n})(window, document);";
 }
 
 function createInput(id, attributeName) {
@@ -143,6 +146,7 @@ function createLoginRuntime(options) {
     };
     const formTarget = createEventTarget();
     const form = Object.assign(formTarget, {
+        dataset: {},
         querySelector(selector) {
             if (selector === 'button[type="submit"]') return submitButton;
             if (selector === "[data-phone-input]") return phoneInput;
@@ -159,6 +163,7 @@ function createLoginRuntime(options) {
     const documentTarget = createEventTarget();
     const document = Object.assign(documentTarget, {
         body,
+        documentElement: {dataset: {}},
         activeElement: runtimeOptions.autofocus ? phoneInput : body,
         scrollingElement: {
             scrollLeft: Number(runtimeOptions.documentScrollLeft || 0),
@@ -179,7 +184,7 @@ function createLoginRuntime(options) {
     });
     const viewportTarget = createEventTarget();
     const scrollCalls = [];
-    const window = {
+    const window = Object.assign(createEventTarget(), {
         innerHeight: viewportHeight,
         scrollY: 0,
         visualViewport: Object.assign(viewportTarget, {
@@ -188,13 +193,16 @@ function createLoginRuntime(options) {
         }),
         setTimeout: timers.setTimeout,
         clearTimeout: timers.clearTimeout,
+        requestAnimationFrame(callback) {
+            callback();
+        },
         scrollTo(optionsValue) {
             scrollCalls.push(optionsValue);
             if (optionsValue && typeof optionsValue.left !== "undefined") {
                 document.scrollingElement.scrollLeft = Number(optionsValue.left);
             }
         },
-    };
+    });
     window.window = window;
     window.document = document;
 
@@ -264,7 +272,7 @@ test("mobile login CSS constrains every grid child and wraps long role headings"
     );
 });
 
-test("natural autofocus and delayed correction keep the mobile login at x=0", () => {
+test("natural autofocus without viewport shrink keeps the mobile login at x=0", () => {
     const runtime = createLoginRuntime({
         autofocus: true,
         mainScrollLeft: 88,
@@ -274,7 +282,7 @@ test("natural autofocus and delayed correction keep the mobile login at x=0", ()
     runtime.timers.advance(350);
 
     assertHorizontalOrigin(runtime, "autofocus after 350ms");
-    assert.equal(runtime.body.classList.contains("is-login-keyboard-active"), true);
+    assert.equal(runtime.body.classList.contains("is-login-keyboard-active"), false);
     assert.equal(runtime.phoneInput.scrollIntoViewCalls, 0);
 });
 

@@ -58,6 +58,23 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         self.assertIn('overflow-wrap: anywhere', stylesheet)
         self.assertIn('white-space: normal', stylesheet)
 
+    def test_fullscreen_role_login_owns_exact_viewport_without_page_scroll(self):
+        template = (
+            Path(settings.BASE_DIR) / 'templates' / 'users' / 'login.html'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('body.login-page.login-fullscreen {', template)
+        self.assertIn('height: 100dvh;', template)
+        self.assertIn('min-height: 0;', template)
+        self.assertIn('padding: 0;', template)
+        self.assertIn('overflow: hidden;', template)
+        self.assertIn('overscroll-behavior: none;', template)
+        self.assertIn(
+            'body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog',
+            template,
+        )
+        self.assertIn('height: 100%;', template)
+
     def test_pwa_install_intent_keeps_button_and_status_copy_stable(self):
         response = Client().get(
             '/?install=1',

@@ -177,7 +177,15 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     }
 
     body.login-page.login-fullscreen {
-        min-height: 100dvh;
+        /* Полноэкранный вход сам владеет высотой WebView. Общий мобильный
+           login-слой добавляет body внешние отступы и vertical overflow —
+           вместе с внутренними 100dvh это создавало пустой диапазон
+           прокрутки, хотя всё содержимое уже помещалось на экране. */
+        height: 100dvh;
+        min-height: 0;
+        padding: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
         background:
             radial-gradient(120% 62% at 50% -8%, var(--login-glow), rgba(2, 8, 11, 0) 68%),
             #02080b;
@@ -190,7 +198,8 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         gap: 0;
         width: 100%;
         max-width: none;
-        min-height: 100dvh;
+        height: 100%;
+        min-height: 0;
         margin: 0;
         padding:
             calc(env(safe-area-inset-top, 0px) + clamp(24px, 7vh, 56px))
