@@ -66,9 +66,12 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         self.assertIn('body.login-page.login-fullscreen {', template)
         self.assertIn('height: 100dvh;', template)
         self.assertIn('min-height: 0;', template)
+        self.assertIn('width: 100%;', template)
         self.assertIn('padding: 0;', template)
         self.assertIn('overflow: hidden;', template)
         self.assertIn('overscroll-behavior: none;', template)
+        self.assertIn('transform: none;', template)
+        self.assertIn('transform-origin: initial;', template)
         self.assertIn(
             'body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog',
             template,

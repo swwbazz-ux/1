@@ -183,9 +183,17 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
            прокрутки, хотя всё содержимое уже помещалось на экране. */
         height: 100dvh;
         min-height: 0;
+        width: 100%;
         padding: 0;
         overflow: hidden;
         overscroll-behavior: none;
+        /* body исторически носит dispatcher-shell. Его общий landscape-режим
+           строит виртуальный пульт 1400x800 и уменьшает transform-ом; экрану
+           входа этот механизм не принадлежит и после запрета прокрутки он
+           обрезал нижний док. Полноэкранный login всегда работает в реальном
+           viewport без масштабирования диспетчерского интерфейса. */
+        transform: none;
+        transform-origin: initial;
         background:
             radial-gradient(120% 62% at 50% -8%, var(--login-glow), rgba(2, 8, 11, 0) 68%),
             #02080b;
