@@ -16,6 +16,7 @@ from assignments.models import (
 from assignments.services import apply_pending_haul_assignment, schedule_haul_assignment
 from core.models import bump_operational_state
 from core.qa_environment import require_excavator_qa_environment
+from downtimes.models import DowntimeReason
 from references.models import (
     DumpPoint,
     Equipment,
@@ -36,6 +37,21 @@ QA_OPERATOR_NUMBER = f'{QA_PREFIX}-EO-01'
 QA_DISPATCHER_NUMBER = f'{QA_PREFIX}-DISPATCHER'
 QA_EXCAVATOR_GARAGE = 'QA-EX-01'
 QA_TRUCK_GARAGE_PREFIX = 'QA-T-'
+
+QA_EXCAVATOR_DOWNTIME_REASONS = (
+    ('Заправка', 'Заправка', False, 40, False),
+    ('ТО', 'ТО', False, 50, False),
+    ('Ремонт', 'Ремонт', False, 60, False),
+    ('Поломка', 'Поломка', True, 70, False),
+    ('БВР', 'БВР', False, 80, False),
+    ('Обед', 'Обед', False, 90, False),
+    ('Ожидание самосвалов', 'Ожидание самосвалов', False, 110, True),
+    ('Зачистка забоя', 'Зачистка забоя', False, 120, True),
+    ('Подготовка забоя', 'Подготовка забоя', False, 130, True),
+    ('Перегон экскаватора', 'Перегон', False, 140, True),
+    ('Климатические условия', 'Погода', False, 150, False),
+    ('Прочие', 'Прочие', False, 160, False),
+)
 
 
 @dataclass(frozen=True)
@@ -124,6 +140,20 @@ def prepare_excavator_qa_scenario() -> ExcavatorQAScenario:
         name='БелАЗ-7513 QA',
         defaults={'body_volume_m3': '49.40', 'payload_tons': '130', 'is_active': True},
     )
+    for name, short_label, is_critical, sort_order, excavator_only in QA_EXCAVATOR_DOWNTIME_REASONS:
+        DowntimeReason.objects.update_or_create(
+            name=name,
+            defaults={
+                'short_label': short_label,
+                'equipment_type': excavator_type if excavator_only else None,
+                'is_critical': is_critical,
+                'show_for_truck_driver': False,
+                'show_for_excavator_operator': True,
+                'show_for_mechanic': False,
+                'sort_order': sort_order,
+                'is_active': True,
+            },
+        )
     excavator, _ = Equipment.objects.update_or_create(
         garage_number=QA_EXCAVATOR_GARAGE,
         defaults={

@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from assignments.models import AssignmentStatus, HaulAssignment
 from core.qa_environment import require_excavator_qa_environment
+from downtimes.models import DowntimeReason
 from shifts.models import EmployeeShift
 
 from .models import Trip, TripStatus
@@ -52,6 +53,12 @@ class ExcavatorQASimulatorTests(TestCase):
         self.assertEqual(first.excavator.pk, second.excavator.pk)
         self.assertEqual(len(first.trucks), 3)
         self.assertEqual(len(second.trucks), 3)
+        self.assertEqual(
+            DowntimeReason.for_workplace(
+                'excavator_operator', first.excavator.equipment_type
+            ).count(),
+            12,
+        )
         self.assertEqual(
             first.operator.accesses.get(role__code='excavator_operator').access_code,
             '314159',
