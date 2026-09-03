@@ -6,13 +6,13 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v189">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v189">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v189">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v189">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v189">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v189">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v189" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v190">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v190">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v190">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v190">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v190">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v190">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v190" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -397,7 +397,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v189";
+var excavatorShellVersion = "excavator-mobile-shell-v190";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -910,7 +910,7 @@ window.initExcavatorWorkShell = function () {
         && shiftButton.dataset.eoShiftServerBlocked === "true"
     );
     var shiftBlockMessage = shiftButton ? shiftButton.dataset.eoShiftBlockMessage || "" : "";
-    var shiftHoldMs = 2000;
+    var shiftHoldMs = 1000;
     var shiftHoldController = null;
     var logoutButton = shell.querySelector("[data-eo-logout-button]");
     var logoutLabel = shell.querySelector("[data-eo-logout-label]");
@@ -1089,24 +1089,6 @@ window.initExcavatorWorkShell = function () {
             if (event.key === "Escape") closeTruckDetailCard();
         });
     }
-
-    function fitTopbarLocationText() {
-        var faceText = shell.querySelector(".eo-face-cell-full strong");
-        var excavatorText = shell.querySelector(".eo-topbar-cell:first-child strong");
-        if (!faceText || !excavatorText) return;
-        faceText.style.removeProperty("font-size");
-        var excavatorSize = parseFloat(window.getComputedStyle(excavatorText).fontSize) || 14;
-        var currentSize = parseFloat(window.getComputedStyle(faceText).fontSize) || excavatorSize;
-        var nextSize = Math.min(currentSize, excavatorSize);
-        faceText.style.setProperty("font-size", nextSize + "px", "important");
-        while (nextSize > 10 && faceText.scrollWidth > faceText.clientWidth) {
-            nextSize -= 0.5;
-            faceText.style.setProperty("font-size", nextSize + "px", "important");
-        }
-    }
-
-    window.requestAnimationFrame(fitTopbarLocationText);
-    window.addEventListener("resize", fitTopbarLocationText);
 
     function isInactiveTruck(card) {
         return !!(card && card.dataset.eoTruckInactive === "1");
@@ -2718,7 +2700,7 @@ window.initExcavatorWorkShell = function () {
                 ? (shiftBlockMessage || "Смена сейчас недоступна")
                 : validation.valid
                     ? (isShiftCloseAction()
-                        ? "Удерживайте 2 секунды, чтобы закрыть смену"
+                        ? "Удерживайте 1 секунду, чтобы закрыть смену"
                         : "Удерживайте 1 секунду, чтобы начать смену")
                     : "Заполните показания. Нажмите, чтобы увидеть подсказку"
         );
@@ -2843,7 +2825,7 @@ window.initExcavatorWorkShell = function () {
             onShortPress: function () {
                 showExcavatorNotice(
                     isShiftCloseAction()
-                        ? "Удерживайте 2 секунды, чтобы закрыть смену."
+                        ? "Удерживайте 1 секунду, чтобы закрыть смену."
                         : "Удерживайте 1 секунду, чтобы начать смену."
                 );
             },

@@ -119,7 +119,7 @@ function createComponent(fields, action) {
 }
 
 
-function createRuntime({components = []} = {}) {
+function createRuntime({components = [], activeElement = null} = {}) {
     let now = 1000;
     let nextTimerId = 1;
     let nextFrameId = 1;
@@ -128,6 +128,7 @@ function createRuntime({components = []} = {}) {
     const documentListeners = new Map();
     const document = {
         readyState: "complete",
+        activeElement,
         documentElement: {dataset: {}},
         addEventListener(type, listener) {
             documentListeners.set(type, listener);
@@ -337,4 +338,21 @@ test("An allowed Shift hold still completes exactly once", () => {
     assert.equal(button.styleValues.get("--mobile-shift-hold"), "100%");
     assert.equal(runtime.pendingTimers(), 0);
     assert.equal(runtime.pendingFrames(), 0);
+});
+
+
+test("Starting a hold releases an active editor before the timer runs", () => {
+    const input = new FakeElement();
+    input.matches = (selector) => selector.includes("input");
+    input.focused = true;
+    const button = new FakeElement({textContent: "ЗАКРЫТЬ СМЕНУ"});
+    const runtime = createRuntime({activeElement: input});
+
+    runtime.window.MobileShiftHold.bind(button, {holdMs: 1000});
+    const pointerDown = button.dispatch("pointerdown");
+
+    assert.equal(pointerDown.defaultPrevented, true);
+    assert.equal(input.blurred, true, "The software keyboard owner must lose focus before holding.");
+    assert.equal(button.classList.contains("is-holding"), true);
+    assert.equal(runtime.pendingTimers(), 1);
 });

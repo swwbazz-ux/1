@@ -89,6 +89,16 @@
                 return;
             }
             if (event) event.preventDefault();
+            var active = document.activeElement;
+            if (
+                active
+                && active !== button
+                && active.matches
+                && active.matches("input, textarea, select, [contenteditable='true'], [contenteditable='']")
+                && typeof active.blur === "function"
+            ) {
+                active.blur();
+            }
             blockedClick = false;
             startedAt = Date.now();
             button.classList.add("is-holding");

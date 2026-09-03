@@ -127,11 +127,35 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
 .mobile-shift__titlebar {
     min-inline-size: 0;
     min-block-size: 0;
+    block-size: 100%;
+    align-self: stretch;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--ms-gap);
     overflow: hidden;
+}
+
+/* Одна шкала текста для постоянной шапки Экскаваторщика. Все рабочие вкладки
+   используют тот же DOM, поэтому размер больше не меняется от активного экрана
+   и не подгоняется отдельным JavaScript. */
+body.excavator-operator-screen .eo-topbar {
+    --eo-topbar-text-size: clamp(11px, 2.8vw, 14px);
+}
+
+body.excavator-operator-screen .eo-topbar .eo-topbar-cell strong,
+body.excavator-operator-screen .eo-topbar .eo-shift-status-text,
+body.excavator-operator-screen .eo-topbar .eo-face-coordinates,
+body.excavator-operator-screen .eo-topbar .eo-face-rock {
+    font-size: var(--eo-topbar-text-size) !important;
+    line-height: 1.04 !important;
+    letter-spacing: 0 !important;
+}
+
+body.excavator-operator-screen .eo-topbar .eo-topbar-cell strong,
+body.excavator-operator-screen .eo-topbar .eo-shift-status-text,
+body.excavator-operator-screen .eo-topbar .eo-face-coordinates {
+    font-weight: 700 !important;
 }
 
 .mobile-shift__title {
