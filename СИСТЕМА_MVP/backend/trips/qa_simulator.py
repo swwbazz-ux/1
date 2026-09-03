@@ -302,7 +302,7 @@ def _complete_due_trips(scenario: ExcavatorQAScenario, now) -> int:
     for trip_id in due_ids:
         with transaction.atomic():
             trip = (
-                Trip.objects.select_for_update()
+                Trip.objects.select_for_update(of=('self',))
                 .select_related('truck', 'rock_type', 'loading_shift', 'excavator')
                 .filter(pk=trip_id, status=TripStatus.LOADED_WAITING_UNLOAD)
                 .first()
