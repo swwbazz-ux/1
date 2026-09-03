@@ -22,7 +22,7 @@
     <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'img/share/start-share.png' %}?v=2">
     <link rel="preload" as="image" href="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
     <link rel="stylesheet" href="{% static 'css/max-support-link-v1.css' %}?v=6">
-    <link rel="stylesheet" href="{% static 'css/start-page-v1.css' %}?v=20260903-9">
+    <link rel="stylesheet" href="{% static 'css/start-page-v1.css' %}?v=20260903-10">
     <script src="{% static 'js/start-page-v1.js' %}?v=20260903-7" defer></script>
 {% endblock %}
 {% block body_class %}start-page{% if found %} start-page--result{% endif %}{% endblock %}
@@ -86,10 +86,7 @@
                                        data-start-install-option="native"
                                        href="{{ item.apk.url }}"
                                        aria-label="Скачать приложение {{ item.app.name }} для Android, версия {{ item.apk.version }}">
-                                        <span class="start-screen__opt-icon" aria-hidden="true">
-                                            <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
-                                            <span class="start-screen__opt-badge start-screen__opt-badge--apk">APK</span>
-                                        </span>
+                                        <span class="start-screen__method-badge" aria-hidden="true">APK</span>
                                         <span class="start-screen__opt-text">
                                             <b><span>Приложение</span> <i>стабильное</i></b>
                                             <em><span>APK · версия {{ item.apk.version }}</span><span>скачать и установить</span></em>
@@ -103,10 +100,7 @@
                                    data-start-install-option="browser"
                                    href="{{ item.url }}{% if '?' in item.url %}&amp;{% else %}?{% endif %}install=1"
                                    aria-label="Установить {{ item.app.name }} как браузерное приложение">
-                                    <span class="start-screen__opt-icon" aria-hidden="true">
-                                        <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
-                                        <span class="start-screen__opt-badge start-screen__opt-badge--chrome"></span>
-                                    </span>
+                                    <span class="start-screen__method-badge start-screen__method-badge--web" aria-hidden="true">WEB</span>
                                     <span class="start-screen__opt-text">
                                         <b><span>Браузер</span> <i>нестабильно</i></b>
                                         <em><span>PWA · ярлык на экран</span><span>открыть</span></em>

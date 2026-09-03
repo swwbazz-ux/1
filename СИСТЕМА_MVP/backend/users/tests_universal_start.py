@@ -119,7 +119,7 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'start-hero-v1.webp')
         self.assertContains(response, 'start-hero-v1.jpg')
         self.assertContains(response, 'fetchpriority="high"')
-        self.assertContains(response, 'start-page-v1.css?v=20260903-9')
+        self.assertContains(response, 'start-page-v1.css?v=20260903-10')
         self.assertContains(response, 'start-page-v1.js?v=20260903-7')
         self.assertRegex(html, r'<body[^>]+class="start-page"')
         self.assertNotRegex(html, r'<body[^>]+class="[^"]*dispatcher-shell')
@@ -280,7 +280,13 @@ class UniversalStartTests(TestCase):
         response = self.post()
         self.assertEqual(len(response.context['apps']), 1)
         self.assertContains(response, 'start-screen__apps')
-        self.assertContains(response, response.context['apps'][0]['app'].icon_192_url)
+        self.assertContains(
+            response,
+            response.context['apps'][0]['app'].icon_192_url,
+            count=1,
+        )
+        self.assertContains(response, 'start-screen__method-badge', count=2)
+        self.assertNotContains(response, 'start-screen__opt-icon')
 
     def test_result_uses_semantic_dynamic_role_theme_and_accessible_status(self):
         self.add_access('driver', 'Водитель самосвала')
@@ -504,6 +510,14 @@ class UniversalStartTests(TestCase):
         self.assertIn('operational-state-connection', script)
         self.assertIn('Связь с сервером нестабильна', script)
         self.assertIn('body.start-page--result > .app-connection-dot', stylesheet)
+        self.assertRegex(
+            stylesheet,
+            r'body\.start-page--result > \.app-connection-dot\s*\{\s*display: none;',
+        )
+        self.assertRegex(
+            stylesheet,
+            r'\.start-screen--result \.start-hero__backdrop\s*\{\s*display: none;',
+        )
 
     def test_start_phone_runtime_formats_country_prefix_and_guards_double_submit(self):
         script = (

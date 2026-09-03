@@ -372,7 +372,7 @@ body.start-page *::after {
 }
 
 /* Глобальный индикатор связи относится к рабочим PWA-экранам, а не к входу. */
-body.start-page:not(.start-page--result) > .app-connection-dot {
+body.start-page > .app-connection-dot {
     display: none;
 }
 
@@ -453,6 +453,7 @@ body.start-page:not(.start-page--result) > .app-connection-dot {
 }
 
 .start-screen--result .start-hero__backdrop {
+    display: none;
     background-position: center top;
     filter: none;
     transform: none;
@@ -663,7 +664,7 @@ body.start-page:not(.start-page--result) > .app-connection-dot {
 
 .start-screen__opt {
     display: grid;
-    grid-template-columns: 72px minmax(0, 1fr) 32px;
+    grid-template-columns: 56px minmax(0, 1fr) 32px;
     align-items: center;
     gap: 16px;
     width: 100%;
@@ -707,55 +708,24 @@ body.start-page:not(.start-page--result) > .app-connection-dot {
     outline-offset: 4px;
 }
 
-.start-screen__opt-icon {
-    position: relative;
+.start-screen__method-badge {
     display: grid;
     place-items: center;
-    flex: 0 0 auto;
-    width: 72px;
-    height: 72px;
-}
-
-.start-screen__opt-icon img {
-    display: block;
-    width: 100%;
-    height: 100%;
-    border-radius: 18px;
-    object-fit: cover;
-    box-shadow: 0 10px 24px rgba(0, 0, 0, .26);
-}
-
-.start-screen__opt-badge {
-    position: absolute;
-    right: -6px;
-    bottom: -6px;
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    border: 2px solid #071115;
-    border-radius: 50%;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, .42);
-}
-
-.start-screen__opt-badge--apk {
-    background: var(--role-accent);
-    color: #031215;
-    font-size: 10px;
+    width: 52px;
+    height: 40px;
+    border: 1px solid color-mix(in srgb, var(--role-accent) 72%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--role-accent) 16%, #071115);
+    color: color-mix(in srgb, var(--role-accent) 86%, #fff);
+    font-size: 11px;
     font-weight: 900;
+    letter-spacing: .05em;
 }
 
-.start-screen__opt-badge--chrome {
-    background: conic-gradient(from -60deg, #ea4335 0 120deg, #fbbc05 120deg 240deg, #34a853 240deg 360deg);
-}
-
-.start-screen__opt-badge--chrome::after {
-    content: "";
-    width: 13px;
-    height: 13px;
-    border: 3px solid #fff;
-    border-radius: 50%;
-    background: #4285f4;
+.start-screen__method-badge--web {
+    border-color: rgba(165, 175, 179, .44);
+    background: rgba(16, 29, 34, .92);
+    color: #c4ced1;
 }
 
 .start-screen__opt-text {
@@ -844,15 +814,7 @@ body.start-page:not(.start-page--result) > .app-connection-dot {
 }
 
 body.start-page--result > .app-connection-dot {
-    position: absolute;
-    top: max(18px, env(safe-area-inset-top, 0px));
-    right: max(16px, env(safe-area-inset-right, 0px));
-    z-index: 10;
-    display: inline-flex;
-    padding: 8px;
-    border: 1px solid rgba(193, 139, 93, .42);
-    background: rgba(3, 10, 13, .68);
-    box-shadow: 0 0 18px color-mix(in srgb, var(--app-connection-color) 34%, transparent);
+    display: none;
 }
 
 body.start-page--result > .app-connection-dot i {
@@ -1018,6 +980,11 @@ body.start-page--result > .app-connection-dot i {
         height: clamp(124px, 22svh, 188px);
     }
 
+    .start-screen--result .start-hero__image {
+        object-fit: cover;
+        object-position: center top;
+    }
+
     .start-screen--result .start-screen__inner {
         flex: 1 1 auto;
         grid-template-rows: minmax(0, 1fr) auto;
@@ -1126,31 +1093,11 @@ body.start-page--result > .app-connection-dot i {
         min-height: 76px;
     }
 
-    .start-screen--result .start-screen__opt-icon {
-        width: 48px;
-        height: 48px;
-    }
-
-    .start-screen--result .start-screen__opt-icon img {
-        border-radius: 13px;
-    }
-
-    .start-screen--result .start-screen__opt-badge {
-        right: -3px;
-        bottom: -3px;
-        width: 25px;
-        height: 25px;
-        border-width: 1px;
-    }
-
-    .start-screen--result .start-screen__opt-badge--apk {
-        font-size: 8px;
-    }
-
-    .start-screen--result .start-screen__opt-badge--chrome::after {
-        width: 10px;
-        height: 10px;
-        border-width: 2px;
+    .start-screen--result .start-screen__method-badge {
+        width: 44px;
+        height: 36px;
+        border-radius: 10px;
+        font-size: 9px;
     }
 
     .start-screen--result .start-screen__opt-text {
@@ -1314,20 +1261,10 @@ body.start-page--result > .app-connection-dot i {
         min-height: 70px;
     }
 
-    .start-screen--result .start-screen__opt-icon {
-        width: 44px;
-        height: 44px;
-    }
-
-    .start-screen--result .start-screen__opt-icon img {
-        border-radius: 12px;
-    }
-
-    .start-screen--result .start-screen__opt-badge {
-        right: -2px;
-        bottom: -2px;
-        width: 23px;
-        height: 23px;
+    .start-screen--result .start-screen__method-badge {
+        width: 40px;
+        height: 34px;
+        border-radius: 9px;
     }
 
     .start-screen--result .start-screen__opt-note {
