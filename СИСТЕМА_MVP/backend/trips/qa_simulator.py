@@ -34,8 +34,8 @@ from .models import Trip, TripStatus
 QA_PREFIX = 'RUSTORE-QA'
 QA_OPERATOR_NUMBER = f'{QA_PREFIX}-EO-01'
 QA_DISPATCHER_NUMBER = f'{QA_PREFIX}-DISPATCHER'
-QA_EXCAVATOR_GARAGE = f'{QA_PREFIX}-EX-01'
-QA_TRUCK_GARAGE_PREFIX = f'{QA_PREFIX}-TRUCK-'
+QA_EXCAVATOR_GARAGE = 'QA-EX-01'
+QA_TRUCK_GARAGE_PREFIX = 'QA-T-'
 
 
 @dataclass(frozen=True)
@@ -116,12 +116,12 @@ def prepare_excavator_qa_scenario() -> ExcavatorQAScenario:
     )
     excavator_model, _ = EquipmentModel.objects.update_or_create(
         equipment_type=excavator_type,
-        name=f'{QA_PREFIX} ЭКГ-10',
+        name='ЭКГ-10 QA',
         defaults={'fuel_capacity_limit_l': 7000, 'is_active': True},
     )
     truck_model, _ = EquipmentModel.objects.update_or_create(
         equipment_type=truck_type,
-        name=f'{QA_PREFIX} БелАЗ-7513',
+        name='БелАЗ-7513 QA',
         defaults={'body_volume_m3': '49.40', 'payload_tons': '130', 'is_active': True},
     )
     excavator, _ = Equipment.objects.update_or_create(
@@ -139,7 +139,7 @@ def prepare_excavator_qa_scenario() -> ExcavatorQAScenario:
         ('Смешанная руда', '2.3500'),
     ):
         rock, _ = RockType.objects.update_or_create(
-            name=f'{QA_PREFIX} {name}',
+            name=name,
             defaults={'density': density, 'is_active': True},
         )
         TruckCapacityRule.objects.update_or_create(
@@ -152,7 +152,7 @@ def prepare_excavator_qa_scenario() -> ExcavatorQAScenario:
     dump_points = []
     for name in ('Дробилка', 'Рудный склад', 'Склад вскрыши', 'Буферный склад'):
         point, _ = DumpPoint.objects.update_or_create(
-            name=f'{QA_PREFIX} {name}', defaults={'is_active': True}
+            name=name, defaults={'is_active': True}
         )
         dump_points.append(point)
     dump_point = dump_points[0]
