@@ -57,8 +57,19 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
+    versionCode: "17",
+    versionName: "0.1.14",
+    splashBackgroundColor: "#02080b",
+    splashAccentColor: "#FFD200",
+    splashIconResource: "app_icon",
+  },
+  excavator_rustore_qa: {
+    serverUrl: "https://qa-excavator.driverform.ru/",
+    startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
+    applicationId: "ru.copperresources.excavator",
+    appName: "Экскаваторщик QA",
     versionCode: "16",
-    versionName: "0.1.13",
+    versionName: "0.1.13-alpha",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -105,14 +116,21 @@ test("profiles remain isolated by URL and application id", () => {
 
 test("QA and RuStore variants keep role identity but disable sideload updates", () => {
   const qa = profile("excavator_qa");
+  const rustoreQa = profile("excavator_rustore_qa");
   const rustore = profile("excavator_rustore");
   assert.equal(qa.appProfileId, "excavator");
+  assert.equal(rustoreQa.appProfileId, "excavator");
   assert.equal(rustore.appProfileId, "excavator");
   assert.equal(qa.resourceProfile, "excavator");
+  assert.equal(rustoreQa.resourceProfile, "excavator");
   assert.equal(rustore.resourceProfile, "excavator");
   assert.equal(qa.inAppUpdaterEnabled, "false");
+  assert.equal(rustoreQa.inAppUpdaterEnabled, "false");
   assert.equal(rustore.inAppUpdaterEnabled, "false");
   assert.notEqual(qa.applicationId, rustore.applicationId);
+  assert.equal(rustoreQa.applicationId, rustore.applicationId);
+  assert.notEqual(rustoreQa.serverUrl, rustore.serverUrl);
+  assert.ok(Number(rustore.versionCode) > Number(rustoreQa.versionCode));
   assert.ok(Number(rustore.versionCode) > Number(profile("excavator").versionCode));
 });
 
@@ -297,7 +315,7 @@ test("native updater is profile-driven, deferrable and verifies the APK", () => 
 
 test("store variants remove package-installer permission", () => {
   const gradle = readFileSync(resolve(root, "android", "app", "build.gradle"), "utf8");
-  for (const profileName of ["excavator_qa", "excavator_rustore"]) {
+  for (const profileName of ["excavator_qa", "excavator_rustore_qa", "excavator_rustore"]) {
     const overlay = readFileSync(
       resolve(root, "profiles", profileName, "AndroidManifest.xml"),
       "utf8"

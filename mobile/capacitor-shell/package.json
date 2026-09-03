@@ -11,6 +11,7 @@
     "android:release:excavator": "node scripts/build-android.mjs excavator release",
     "android:build:excavator-qa": "node scripts/build-android.mjs excavator_qa debug",
     "android:release:excavator-qa": "node scripts/build-android.mjs excavator_qa release",
+    "android:release:excavator-rustore-qa": "node scripts/build-android.mjs excavator_rustore_qa release",
     "android:release:excavator-rustore": "node scripts/build-android.mjs excavator_rustore release",
     "android:build:driver": "node scripts/build-android.mjs driver debug",
     "android:assemble:driver": "node scripts/build-android.mjs driver debug --assemble-only",

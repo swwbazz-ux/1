@@ -57,10 +57,16 @@ package и QA-хостом:
 npm run android:build:excavator-qa
 ```
 
-Для RuStore используется профиль `excavator_rustore`: package и подпись те же,
-что у production-приложения, `versionCode` увеличен, а прямой APK-updater и
-разрешение `REQUEST_INSTALL_PACKAGES` отключены. Обновления этой сборки должны
-приходить только через RuStore.
+Для закрытого альфа-тестирования RuStore используется профиль
+`excavator_rustore_qa`: package и подпись те же, что у production-приложения,
+но WebView подключён к изолированному QA-хосту. Следующая публичная сборка
+`excavator_rustore` обязана иметь больший `versionCode` и подключается только к
+production-хосту. В обеих магазинных сборках прямой APK-updater и разрешение
+`REQUEST_INSTALL_PACKAGES` отключены: обновления должны приходить через RuStore.
+
+```powershell
+npm run android:release:excavator-rustore-qa
+```
 
 ```powershell
 npm run android:release:excavator-rustore
