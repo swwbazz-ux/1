@@ -46,7 +46,7 @@ body.start-page *::after {
     min-width: 0;
     min-height: 100vh;
     min-height: 100dvh;
-    overflow: clip;
+    overflow: hidden;
     background:
         radial-gradient(76% 34% at 50% 40%, rgba(35, 99, 58, .11), transparent 75%),
         var(--start-bg);
@@ -72,8 +72,8 @@ body.start-page *::after {
         url("../img/start/start-hero-v1.webp");
     background-position: 61% center;
     background-size: cover;
-    filter: blur(8px) saturate(.82) brightness(.72);
-    transform: scale(1.08);
+    filter: none;
+    transform: none;
 }
 
 .start-hero__picture,
@@ -92,7 +92,7 @@ body.start-page *::after {
 .start-hero__image {
     object-fit: contain;
     object-position: center 16%;
-    filter: saturate(.88) brightness(.84) contrast(1.04);
+    filter: none;
 }
 
 .start-hero__shade {
@@ -144,8 +144,8 @@ body.start-page *::after {
     box-shadow:
         0 28px 64px rgba(0, 0, 0, .55),
         inset 0 1px 0 rgba(255, 255, 255, .045);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
 }
 
 .start-entry-card::before,
@@ -454,8 +454,8 @@ body.start-page:not(.start-page--result) > .app-connection-dot {
 
 .start-screen--result .start-hero__backdrop {
     background-position: center top;
-    filter: blur(10px) saturate(.72) brightness(.5);
-    transform: scale(1.05);
+    filter: none;
+    transform: none;
 }
 
 .start-screen--result .start-hero__image {
