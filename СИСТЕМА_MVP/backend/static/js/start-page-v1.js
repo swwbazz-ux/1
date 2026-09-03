@@ -8,6 +8,7 @@
     var hint = document.querySelector("[data-start-hint]");
     var submit = document.querySelector("[data-start-submit]");
     var submitLabel = document.querySelector("[data-start-submit-label]");
+    var scrollHost = document.querySelector(".start-screen__inner");
     var viewport = window.visualViewport || null;
 
     if (!body || !form || !input || !submit) return;
@@ -16,9 +17,11 @@
     var baselineHeight = 0;
     var framePending = false;
     var blurTimer = 0;
-    var scrollSignature = "";
+    var revealTimer = 0;
+    var resetTimer = 0;
     var submitting = false;
     var wasValid = false;
+    var wasKeyboardOpen = false;
     var defaultSubmitLabel = submitLabel ? submitLabel.textContent : "Далее";
 
     function viewportSnapshot() {
@@ -38,26 +41,51 @@
         return document.activeElement === input;
     }
 
-    function keepFormVisible(snapshot, keyboardOpen) {
-        if (!keyboardOpen) {
-            scrollSignature = "";
-            return;
-        }
+    function cancelFormReveal() {
+        window.clearTimeout(revealTimer);
+        revealTimer = 0;
+    }
 
-        var rect = form.getBoundingClientRect();
-        var visibleTop = snapshot.offsetTop + 8;
-        var visibleBottom = snapshot.offsetTop + snapshot.height - 14;
-        var signature = [snapshot.height, Math.round(rect.top), Math.round(rect.bottom)].join(":");
-        if (signature === scrollSignature) return;
+    function cancelViewportReset() {
+        window.clearTimeout(resetTimer);
+        resetTimer = 0;
+    }
 
-        if (rect.bottom > visibleBottom || rect.top < visibleTop) {
-            scrollSignature = signature;
-            form.scrollIntoView({
-                block: "end",
-                inline: "nearest",
-                behavior: "auto"
-            });
-        }
+    function scheduleFormReveal() {
+        cancelFormReveal();
+        revealTimer = window.setTimeout(function () {
+            if (!body.classList.contains("is-keyboard-open") || !hasPhoneFocus()) return;
+
+            var snapshot = viewportSnapshot();
+            var rect = form.getBoundingClientRect();
+            var visibleBottom = Math.min(
+                snapshot.offsetTop + snapshot.height - 14,
+                scrollHost ? scrollHost.getBoundingClientRect().bottom - 14 : Infinity
+            );
+            var delta = Math.ceil(rect.bottom - visibleBottom);
+            if (delta <= 1) return;
+
+            var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            try {
+                (scrollHost || window).scrollBy({left: 0, top: delta, behavior: reduceMotion ? "auto" : "smooth"});
+            } catch (_error) {
+                if (scrollHost) scrollHost.scrollTop += delta;
+                else window.scrollTo(0, window.scrollY + delta);
+            }
+        }, 140);
+    }
+
+    function scheduleViewportReset() {
+        cancelViewportReset();
+        resetTimer = window.setTimeout(function () {
+            if (!scrollHost || body.classList.contains("is-keyboard-open")) return;
+            var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            try {
+                scrollHost.scrollTo({left: 0, top: 0, behavior: reduceMotion ? "auto" : "smooth"});
+            } catch (_error) {
+                scrollHost.scrollTop = 0;
+            }
+        }, 140);
     }
 
     function syncViewport() {
@@ -71,6 +99,7 @@
         if (!baselineWidth || orientationChanged) {
             baselineWidth = snapshot.width;
             baselineHeight = snapshot.height;
+            body.classList.toggle("is-start-viewport-tight", snapshot.height <= 620);
         }
 
         if (normalScale && (!focused || snapshot.height >= baselineHeight - 80)) {
@@ -88,10 +117,14 @@
 
         body.classList.toggle("is-input-mode", focused);
         body.classList.toggle("is-keyboard-open", keyboardOpen);
-        body.classList.toggle("is-start-viewport-tight", snapshot.height <= 620);
-        body.style.setProperty("--start-vv-height", snapshot.height + "px");
-        body.style.setProperty("--start-vv-top", snapshot.offsetTop + "px");
-        keepFormVisible(snapshot, keyboardOpen);
+        if (keyboardOpen) {
+            cancelViewportReset();
+            scheduleFormReveal();
+        } else {
+            cancelFormReveal();
+            if (wasKeyboardOpen) scheduleViewportReset();
+        }
+        wasKeyboardOpen = keyboardOpen;
     }
 
     function scheduleViewportSync() {
@@ -191,10 +224,7 @@
     function beginInputMode() {
         window.clearTimeout(blurTimer);
         body.classList.add("is-input-mode");
-        syncViewport();
         scheduleViewportSync();
-        window.setTimeout(scheduleViewportSync, 100);
-        window.setTimeout(scheduleViewportSync, 260);
     }
 
     function finishInputModeLater() {
@@ -203,7 +233,8 @@
             if (!hasFormFocus()) {
                 body.classList.remove("is-input-mode");
                 body.classList.remove("is-keyboard-open");
-                syncViewport();
+                cancelFormReveal();
+                scheduleViewportSync();
             }
         }, 240);
     }
@@ -249,6 +280,8 @@
     window.addEventListener("orientationchange", function () {
         baselineWidth = 0;
         baselineHeight = 0;
+        cancelFormReveal();
+        cancelViewportReset();
         body.classList.remove("is-keyboard-open");
         window.setTimeout(scheduleViewportSync, 120);
         window.setTimeout(scheduleViewportSync, 360);
