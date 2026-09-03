@@ -859,11 +859,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v188')
+        self.assertContains(response, 'excavator-mobile-shell-v189')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 188')
+        self.assertContains(response, 'Версия 189')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'item.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -1478,7 +1478,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         payload = json.loads(response.content.decode('utf-8'))
         self.assertTrue(payload['ok'])
         self.assertTrue(payload['work_context_changed'])
-        self.assertEqual(payload['active_downtime_reason'], 'Перегон экскаватора')
+        self.assertFalse(payload['face_position_changed'])
+        self.assertEqual(payload['active_downtime_reason'], '')
         self.assertEqual(payload['rock_type_id'], second_rock.id)
         self.assertEqual(payload['dump_point_ids'], [second_dump.id, self.dump_point.id])
         self.assertEqual(payload['loading_horizon'], '75')
@@ -1507,9 +1508,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(screen, f'data-eo-dump-target="{self.dump_point.id}"')
         self.assertContains(screen, f'value="{second_rock.id}" selected')
 
-        transfer = DowntimeEvent.objects.get(equipment=self.excavator, ended_at__isnull=True)
-        self.assertEqual(transfer.reason.name, 'Перегон экскаватора')
-        self.assertEqual(transfer.employee, self.operator)
+        self.assertFalse(DowntimeEvent.objects.filter(equipment=self.excavator, ended_at__isnull=True).exists())
 
     def test_excavator_work_settings_same_context_does_not_restart_transfer(self):
         settings = {
@@ -1518,27 +1517,200 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             'loading_horizon': '75',
             'loading_block': '52',
         }
-        first_response = self.client.post(
-            reverse('excavator_work_settings'),
-            data=json.dumps({'client_action_id': 'settings-first', **settings}),
-            content_type='application/json',
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            work_rock_type=self.rock,
+            work_dump_point=self.dump_point,
+            loading_horizon='75',
+            loading_block='52',
+            work_context_updated_at=timezone.now(),
         )
-        transfer = DowntimeEvent.objects.get(equipment=self.excavator, ended_at__isnull=True)
-        transfer.ended_at = timezone.now()
-        transfer.save(update_fields=['ended_at'])
+        transfer_reason = DowntimeReason.objects.get(name='Перегон экскаватора')
+        transfer_started_at = timezone.now() - timedelta(minutes=2)
+        transfer = DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=transfer_reason,
+            started_at=transfer_started_at,
+        )
 
-        second_response = self.client.post(
+        response = self.client.post(
             reverse('excavator_work_settings'),
             data=json.dumps({'client_action_id': 'settings-same', **settings}),
             content_type='application/json',
         )
 
-        self.assertEqual(first_response.status_code, 200)
-        self.assertEqual(second_response.status_code, 200)
-        second_payload = json.loads(second_response.content.decode('utf-8'))
-        self.assertFalse(second_payload['work_context_changed'])
-        self.assertEqual(second_payload['active_downtime_reason'], '')
-        self.assertFalse(DowntimeEvent.objects.filter(equipment=self.excavator, ended_at__isnull=True).exists())
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload['work_context_changed'])
+        self.assertFalse(payload['face_position_changed'])
+        self.assertEqual(payload['active_downtime_reason'], '')
+        transfer.refresh_from_db()
+        self.assertIsNone(transfer.ended_at)
+        self.assertEqual(transfer.started_at, transfer_started_at)
+        self.assertEqual(DowntimeEvent.objects.filter(equipment=self.excavator, ended_at__isnull=True).count(), 1)
+
+    def test_excavator_work_settings_rock_and_dump_changes_preserve_manual_downtime(self):
+        second_dump = DumpPoint.objects.create(name='Отвал')
+        second_rock = RockType.objects.create(name='Негабарит')
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            work_rock_type=self.rock,
+            work_dump_point=self.dump_point,
+            loading_horizon='75',
+            loading_block='52',
+            work_context_updated_at=timezone.now(),
+        )
+        manual_reason = DowntimeReason.objects.create(name='Ремонт рабочего оборудования')
+        manual_event = DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=manual_reason,
+            started_at=timezone.now() - timedelta(minutes=3),
+        )
+
+        response = self.client.post(
+            reverse('excavator_work_settings'),
+            data=json.dumps({
+                'client_action_id': 'settings-rock-dump-only',
+                'rock_type_id': second_rock.id,
+                'dump_point_ids': [second_dump.id, self.dump_point.id],
+                'loading_horizon': '75',
+                'loading_block': '52',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload['work_context_changed'])
+        self.assertFalse(payload['face_position_changed'])
+        self.assertEqual(payload['active_downtime_reason'], '')
+        manual_event.refresh_from_db()
+        self.assertIsNone(manual_event.ended_at)
+        self.assertFalse(
+            DowntimeEvent.objects.filter(
+                equipment=self.excavator,
+                reason__name='Перегон экскаватора',
+                ended_at__isnull=True,
+            ).exists()
+        )
+
+    def test_excavator_work_settings_horizon_or_block_change_starts_transfer(self):
+        placement = ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            work_rock_type=self.rock,
+            work_dump_point=self.dump_point,
+            loading_horizon='75',
+            loading_block='52',
+            work_context_updated_at=timezone.now(),
+        )
+        changes = (
+            ('horizon', '76', '52'),
+            ('block', '76', '53'),
+        )
+
+        for label, horizon, block in changes:
+            with self.subTest(position=label):
+                DowntimeEvent.objects.filter(equipment=self.excavator).delete()
+                response = self.client.post(
+                    reverse('excavator_work_settings'),
+                    data=json.dumps({
+                        'client_action_id': f'settings-{label}',
+                        'rock_type_id': self.rock.id,
+                        'dump_point_ids': [self.dump_point.id],
+                        'loading_horizon': horizon,
+                        'loading_block': block,
+                    }),
+                    content_type='application/json',
+                )
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertTrue(payload['work_context_changed'])
+                self.assertTrue(payload['face_position_changed'])
+                self.assertEqual(payload['active_downtime_reason'], 'Перегон экскаватора')
+                transfer = DowntimeEvent.objects.get(equipment=self.excavator, ended_at__isnull=True)
+                self.assertEqual(transfer.reason.name, 'Перегон экскаватора')
+                self.assertEqual(transfer.employee, self.operator)
+                placement.refresh_from_db()
+
+    def test_excavator_work_settings_uses_persisted_position_not_stale_session(self):
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            work_rock_type=self.rock,
+            work_dump_point=self.dump_point,
+            loading_horizon='75',
+            loading_block='52',
+            work_context_updated_at=timezone.now(),
+        )
+        session = self.client.session
+        session['excavator_work_settings'] = {
+            str(self.excavator.id): {
+                'rock_type_id': self.rock.id,
+                'dump_point_ids': [self.dump_point.id],
+                'loading_horizon': '76',
+                'loading_block': '52',
+            }
+        }
+        session.save()
+
+        response = self.client.post(
+            reverse('excavator_work_settings'),
+            data=json.dumps({
+                'client_action_id': 'settings-stale-session',
+                'rock_type_id': self.rock.id,
+                'dump_point_ids': [self.dump_point.id],
+                'loading_horizon': '76',
+                'loading_block': '52',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload['work_context_changed'])
+        self.assertTrue(payload['face_position_changed'])
+        self.assertEqual(payload['active_downtime_reason'], 'Перегон экскаватора')
+
+    def test_excavator_work_settings_does_not_infer_move_from_blank_or_leading_zero(self):
+        placement = ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            work_rock_type=self.rock,
+            work_dump_point=self.dump_point,
+            loading_horizon='075',
+            loading_block='052',
+            work_context_updated_at=timezone.now(),
+        )
+
+        for label, previous_horizon, next_horizon in (
+            ('leading-zero', '075', '75'),
+            ('clear', '75', ''),
+            ('establish', '', '76'),
+        ):
+            with self.subTest(transition=label):
+                DowntimeEvent.objects.filter(equipment=self.excavator).delete()
+                placement.loading_horizon = previous_horizon
+                placement.loading_block = '052'
+                placement.save(update_fields=['loading_horizon', 'loading_block'])
+                response = self.client.post(
+                    reverse('excavator_work_settings'),
+                    data=json.dumps({
+                        'client_action_id': f'settings-{label}',
+                        'rock_type_id': self.rock.id,
+                        'dump_point_ids': [self.dump_point.id],
+                        'loading_horizon': next_horizon,
+                        'loading_block': '52',
+                    }),
+                    content_type='application/json',
+                )
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertEqual(payload['work_context_changed'], label != 'leading-zero')
+                self.assertFalse(payload['face_position_changed'])
+                self.assertEqual(payload['active_downtime_reason'], '')
+                self.assertFalse(DowntimeEvent.objects.filter(equipment=self.excavator).exists())
 
     def test_excavator_work_settings_rejects_inactive_reference_values(self):
         inactive_dump = DumpPoint.objects.create(name='Закрытая точка', is_active=False)
@@ -2379,7 +2551,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v188', script)
+        self.assertIn('excavator-mobile-shell-v189', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2467,10 +2639,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             / 'mobile-face-unified-v1.css'
         )
         css = css_path.read_text(encoding='utf-8')
-        self.assertIn('grid-template-rows: calc(var(--ms-standard-field-h) + var(--ms-standard-field-h) + var(--ms-gap)) minmax(0, 1fr)', css)
+        self.assertIn('--mobile-face-settings-pad: clamp(3px, .9vw, 6px)', css)
+        self.assertIn('var(--mobile-face-settings-pad) + var(--mobile-face-settings-pad)', css)
         self.assertIn('grid-template-columns: repeat(2, minmax(0, 1fr))', css)
         self.assertIn('grid-template-rows: repeat(2, minmax(0, 1fr))', css)
-        self.assertIn('.mobile-face .mobile-face__setting:nth-child(3)', css)
+        self.assertIn('mobile-face__setting--rock', html)
+        self.assertIn('.mobile-face .mobile-face__setting--rock', css)
         self.assertIn('grid-column: 1 / -1', css)
         self.assertIn('font-size: clamp(14px, min(4vw, 3.4cqh), 19px)', css)
         self.assertIn('hyphens: auto', css)
@@ -2479,6 +2653,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('grid-template-columns: minmax(0, .42fr) minmax(0, .58fr)', css)
         self.assertIn('font-size: 11px !important;', css)
         self.assertIn('white-space: normal !important;', css)
+        self.assertIn('padding: var(--mobile-face-settings-pad);', css)
+        self.assertIn('border: 1px solid var(--mobile-shift-border);', css)
+        self.assertIn('appearance: none;', css)
+        self.assertIn('text-align: center !important;', css)
+        self.assertIn('text-align-last: center;', css)
+        self.assertIn('.mobile-shift__metric-value::after', css)
         self.assertIn('.mobile-face__actions.mobile-shift__actions', css)
         self.assertIn('overflow: hidden !important', css)
         self.assertIn('.mobile-face .mobile-face__destination.eo-unload-card.is-dump-applied {', css)
@@ -3843,7 +4023,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('.mobile-shift__action--instant::before', downtime_css)
         self.assertIn('grid-template-rows: var(--ms-screen-rows) !important;', downtime_css)
         self.assertIn('grid-template-columns: repeat(2, minmax(0, 1fr)) !important;', downtime_css)
-        self.assertIn('grid-template-columns: repeat(4, minmax(0, 1fr)) !important;', downtime_css)
+        self.assertIn('font-size: clamp(14px, min(4.4vw, 3cqh), 18px) !important;', downtime_css)
+        self.assertIn('font-size: clamp(10px, min(3.1vw, 2cqh), 13px) !important;', downtime_css)
+        self.assertIn('repeat(auto-fit, minmax(min(84px, 100%), 1fr))', downtime_css)
+        self.assertIn('grid-template-columns: repeat(3, minmax(0, 1fr)) !important;', downtime_css)
+        self.assertIn('font-variant-numeric: tabular-nums;', downtime_css)
 
     def test_excavator_three_work_tabs_share_one_adaptive_outer_frame(self):
         response = self.client.get(reverse('excavator_work'))
@@ -3880,6 +4064,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('padding: 2px 6px !important;', work_tabs_css)
         self.assertIn('font-size: 26px !important;', work_tabs_css)
         self.assertIn('white-space: normal !important;', face_css)
+        legacy_css = (backend_root / 'static' / 'css' / 'excavator-work-v55-shift.css').read_text(encoding='utf-8')
+        self.assertIn('border: 0 !important;', legacy_css)
+        self.assertIn('background: transparent !important;', legacy_css)
+        self.assertIn('opacity: 1 !important;', legacy_css)
+        self.assertNotIn('flex-basis: 24px !important;', legacy_css)
         self.assertIn('@media (prefers-reduced-motion: reduce)', work_tabs_css)
         self.assertIn('.mobile-downtime__reason.eo-reason-action.is-selected::after', work_tabs_css)
 

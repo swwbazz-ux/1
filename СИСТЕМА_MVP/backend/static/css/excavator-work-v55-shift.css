@@ -2378,6 +2378,10 @@ body.excavator-operator-screen .mm-mobile-nav-icon {
     width: 26px !important;
     height: 26px !important;
     min-width: 26px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    opacity: 1 !important;
     overflow: visible !important;
 }
 
@@ -2428,13 +2432,6 @@ body.excavator-operator-screen .mm-mobile-bottom-nav .mm-mobile-update-badge[hid
         --eo-fixed-nav-h: 72px;
     }
 
-    body.excavator-operator-screen .mm-mobile-nav-icon,
-    body.excavator-operator-screen .mm-mobile-nav-icon svg {
-        flex-basis: 24px !important;
-        width: 24px !important;
-        height: 24px !important;
-        min-width: 24px !important;
-    }
 }
 body.excavator-operator-screen .eo-downtime-state-dot {
     display: grid !important;

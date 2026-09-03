@@ -152,7 +152,7 @@ body.excavator-operator-screen .mobile-downtime__reason.eo-reason-action {
     min-inline-size: 0 !important;
     min-block-size: 0 !important;
     margin: 0 !important;
-    padding: clamp(4px, 1.2vw, 8px) clamp(5px, 1.6vw, 10px) !important;
+    padding: clamp(3px, .9vw, 6px) clamp(5px, 1.6vw, 10px) !important;
     display: grid !important;
     grid-template-columns: minmax(0, 1fr) !important;
     grid-template-rows: minmax(0, 1fr) auto !important;
@@ -163,9 +163,9 @@ body.excavator-operator-screen .mobile-downtime__reason.eo-reason-action {
     border-width: 1px !important;
     border-radius: clamp(7px, 2vw, 10px) !important;
     font-family: inherit !important;
-    font-size: clamp(13px, 3.8vw, 18px) !important;
+    font-size: clamp(14px, min(4.4vw, 3cqh), 18px) !important;
     font-weight: 700 !important;
-    line-height: 1.06 !important;
+    line-height: 1.18 !important;
     touch-action: manipulation !important;
     user-select: none !important;
 }
@@ -175,9 +175,10 @@ body.excavator-operator-screen .mobile-downtime__reason .eo-reason-label {
     min-inline-size: 0 !important;
     max-inline-size: 100% !important;
     overflow: hidden !important;
-    line-height: 1.06 !important;
+    line-height: 1.18 !important;
     text-align: center !important;
     overflow-wrap: anywhere !important;
+    white-space: normal !important;
     -webkit-box-orient: vertical !important;
     -webkit-line-clamp: 2 !important;
 }
@@ -186,8 +187,9 @@ body.excavator-operator-screen .mobile-downtime__reason .eo-reason-duration {
     min-inline-size: 0 !important;
     max-inline-size: 100% !important;
     overflow: hidden !important;
-    font-size: clamp(9px, 2.65vw, 12px) !important;
-    line-height: 1 !important;
+    font-size: clamp(10px, min(3.1vw, 2cqh), 13px) !important;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15 !important;
     text-align: center !important;
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
@@ -213,9 +215,29 @@ body.excavator-operator-screen .mobile-downtime__actions.mobile-shift__actions {
     body.excavator-operator-screen .mobile-shift .mobile-shift__content {
         grid-template-rows: minmax(0, 1.08fr) minmax(0, .92fr) !important;
     }
+
+    body.excavator-operator-screen .mobile-downtime__reason.eo-reason-action {
+        padding-block: 3px !important;
+    }
+
+    body.excavator-operator-screen .mobile-downtime__reasons.eo-reason-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
 }
 
 @media (orientation: landscape) and (max-height: 500px) {
+    html[data-mobile-shift-orientation="landscape"] body.excavator-operator-screen .mobile-work-controls {
+        --ms-gap: 4px;
+        --ms-section-pad: 5px;
+        --ms-card-pad-x: 6px;
+        --ms-card-pad-y: 1px;
+        --ms-section-size: 11px;
+        --ms-label-size: 9px;
+        --ms-value-size: 18px;
+        --ms-unit-size: 9px;
+        --ms-summary-size: 15px;
+    }
+
     body.excavator-operator-screen .eo-shell .eo-screen.mobile-work-screen[data-eo-screen] {
         grid-template-rows: var(--ms-screen-rows-landscape) !important;
     }
@@ -235,13 +257,15 @@ body.excavator-operator-screen .mobile-downtime__actions.mobile-shift__actions {
     }
 
     body.excavator-operator-screen .mobile-downtime__reasons.eo-reason-grid {
-        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        grid-template-columns: repeat(auto-fit, minmax(min(84px, 100%), 1fr)) !important;
     }
 
     body.excavator-operator-screen .mobile-downtime__reason.eo-reason-action {
         grid-template-rows: minmax(0, 1fr) auto !important;
         padding: 2px 4px !important;
-        font-size: clamp(9px, 1.55vw, 12px) !important;
+        font-size: clamp(11px, min(1.65vw, 5.4cqh), 12px) !important;
+        line-height: 1.03 !important;
+        gap: 1px !important;
     }
 
     body.excavator-operator-screen .mobile-downtime__reason .eo-reason-label {
@@ -249,7 +273,7 @@ body.excavator-operator-screen .mobile-downtime__actions.mobile-shift__actions {
     }
 
     body.excavator-operator-screen .mobile-downtime__reason .eo-reason-duration {
-        font-size: clamp(8px, 1.2vw, 10px) !important;
+        font-size: clamp(10px, min(1.5vw, 5cqh), 11px) !important;
     }
 }
 

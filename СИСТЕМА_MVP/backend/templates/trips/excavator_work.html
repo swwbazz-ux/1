@@ -6,13 +6,13 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v188">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v188">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v188">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v188">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v188">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v188">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v188" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v189">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v189">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v189">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v189">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v189">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v189">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v189" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -93,7 +93,7 @@
                         <span class="mobile-shift__field-label"><span>Блок</span></span>
                         <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" pattern="[0-9]*" name="loading_block" value="{{ face_block }}" placeholder="52" data-eo-face-block{% if not open_shift %} disabled aria-disabled="true"{% endif %}></span>
                     </label>
-                    <label class="mobile-shift__field mobile-face__setting">
+                    <label class="mobile-shift__field mobile-face__setting mobile-face__setting--rock">
                         <span class="mobile-shift__field-label"><span>Порода</span></span>
                         <span class="mobile-shift__metric-value">
                             <select name="rock_type" data-eo-rock-select{% if not open_shift %} disabled aria-disabled="true"{% endif %}>
@@ -397,7 +397,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v188";
+var excavatorShellVersion = "excavator-mobile-shell-v189";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;

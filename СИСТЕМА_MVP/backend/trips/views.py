@@ -754,7 +754,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v188";
+const CACHE_NAME = "excavator-mobile-shell-v189";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -3048,7 +3048,7 @@ def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_wh
 
 
 def excavator_work_context_changed(
-    current_excavator,
+    placement,
     previous_session_settings,
     *,
     rock_type,
@@ -3056,7 +3056,6 @@ def excavator_work_context_changed(
     loading_horizon,
     loading_block,
 ):
-    placement = get_excavator_work_placement(current_excavator)
     previous_session_settings = previous_session_settings or {}
     previous_dump_ids = previous_session_settings.get('dump_point_ids')
     if not isinstance(previous_dump_ids, list):
@@ -3064,17 +3063,18 @@ def excavator_work_context_changed(
     previous_rock_id = previous_session_settings.get('rock_type_id')
     if previous_rock_id is None and placement:
         previous_rock_id = placement.work_rock_type_id
-    previous_horizon = previous_session_settings.get('loading_horizon')
-    if previous_horizon is None and placement:
-        previous_horizon = placement.loading_horizon
-    previous_block = previous_session_settings.get('loading_block')
-    if previous_block is None and placement:
-        previous_block = placement.loading_block
+    # Координаты забоя принадлежат постоянному размещению экскаватора. Данные
+    # вкладки в session могут устареть, поэтому для горизонта и блока источником
+    # истины остаётся ExcavatorPlacement.
+    previous_horizon = placement.loading_horizon if placement else ''
+    previous_block = placement.loading_block if placement else ''
     return any((
         str(previous_rock_id or '') != str(rock_type.id),
         [str(value) for value in previous_dump_ids] != [str(point.id) for point in dump_points],
-        normalize_excavator_numeric_setting(previous_horizon) != loading_horizon,
-        normalize_excavator_numeric_setting(previous_block) != loading_block,
+        canonical_excavator_face_position(previous_horizon)
+        != canonical_excavator_face_position(loading_horizon),
+        canonical_excavator_face_position(previous_block)
+        != canonical_excavator_face_position(loading_block),
     ))
 
 
@@ -3102,6 +3102,28 @@ def save_excavator_work_context(*, current_excavator, actor, rock_type, dump_poi
 
 def normalize_excavator_numeric_setting(value, *, max_length=16):
     return re.sub(r'\D+', '', str(value or ''))[:max_length]
+
+
+def canonical_excavator_face_position(value):
+    normalized = normalize_excavator_numeric_setting(value)
+    if not normalized:
+        return ''
+    return normalized.lstrip('0') or '0'
+
+
+def excavator_face_position_changed(placement, *, loading_horizon, loading_block):
+    """Фиксирует только подтверждённый переезд между двумя известными забоями."""
+    if not placement:
+        return False
+
+    previous_horizon = canonical_excavator_face_position(placement.loading_horizon)
+    previous_block = canonical_excavator_face_position(placement.loading_block)
+    next_horizon = canonical_excavator_face_position(loading_horizon)
+    next_block = canonical_excavator_face_position(loading_block)
+    return any((
+        bool(previous_horizon and next_horizon and previous_horizon != next_horizon),
+        bool(previous_block and next_block and previous_block != next_block),
+    ))
 
 
 def excavator_work_settings_from_session(request, current_excavator, form):
@@ -3721,11 +3743,17 @@ def excavator_work_settings_view(request):
     loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
     session_settings = request.session.get(EXCAVATOR_WORK_SETTINGS_SESSION_KEY, {})
     setting_key = excavator_work_settings_key(current_excavator)
+    placement = get_excavator_work_placement(current_excavator)
     work_context_changed = excavator_work_context_changed(
-        current_excavator,
+        placement,
         session_settings.get(setting_key),
         rock_type=rock_type,
         dump_points=dump_points,
+        loading_horizon=loading_horizon,
+        loading_block=loading_block,
+    )
+    face_position_changed = excavator_face_position_changed(
+        placement,
         loading_horizon=loading_horizon,
         loading_block=loading_block,
     )
@@ -3749,7 +3777,7 @@ def excavator_work_settings_view(request):
             loading_block=loading_block,
         )
         active_downtime = None
-        if work_context_changed:
+        if face_position_changed:
             active_downtime = start_excavator_auto_downtime(
                 current_excavator,
                 access.employee,
@@ -3769,6 +3797,7 @@ def excavator_work_settings_view(request):
             'dump_point_ids': [point.id for point in dump_points],
             'loading_horizon': loading_horizon,
             'loading_block': loading_block,
+            'face_position_changed': face_position_changed,
         },
     )
     return JsonResponse({
@@ -3782,6 +3811,7 @@ def excavator_work_settings_view(request):
         'loading_horizon': loading_horizon,
         'loading_block': loading_block,
         'work_context_changed': work_context_changed,
+        'face_position_changed': face_position_changed,
         'active_downtime_reason': str(active_downtime.reason) if active_downtime else '',
         'version': state.version,
     })
