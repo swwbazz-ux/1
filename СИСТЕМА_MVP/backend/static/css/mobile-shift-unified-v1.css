@@ -30,6 +30,7 @@ body:has(.mobile-shift) {
 }
 
 body.driver-mobile-screen:has(.mobile-shift) {
+    --mobile-shift-role-header-h: var(--driver-header-h);
     position: relative !important;
     block-size: var(--driver-viewport-h, 100dvh) !important;
     min-block-size: var(--driver-viewport-h, 100dvh) !important;
@@ -37,6 +38,7 @@ body.driver-mobile-screen:has(.mobile-shift) {
 }
 
 body.excavator-operator-screen:has(.mobile-shift) {
+    --mobile-shift-role-header-h: var(--eo-fixed-header-h);
     block-size: var(--eo-app-height, 100dvh) !important;
     min-block-size: var(--eo-app-height, 100dvh) !important;
     max-block-size: var(--eo-app-height, 100dvh) !important;
@@ -783,13 +785,6 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] {
     min-inline-size: 0 !important;
     min-block-size: 0 !important;
     overflow: hidden !important;
-}
-
-body.driver-mobile-screen .driver-shell[data-active-tab="shift"] > .driver-header,
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] .eo-topbar {
-    block-size: calc(env(safe-area-inset-top, 0px) + var(--mobile-shift-role-header-h)) !important;
-    min-block-size: calc(env(safe-area-inset-top, 0px) + var(--mobile-shift-role-header-h)) !important;
-    max-block-size: calc(env(safe-area-inset-top, 0px) + var(--mobile-shift-role-header-h)) !important;
 }
 
 body.driver-mobile-screen:has(.mobile-shift) .mm-mobile-bottom-nav,
