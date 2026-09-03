@@ -119,8 +119,8 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'start-hero-v1.webp')
         self.assertContains(response, 'start-hero-v1.jpg')
         self.assertContains(response, 'fetchpriority="high"')
-        self.assertContains(response, 'start-page-v1.css?v=20260903-6')
-        self.assertContains(response, 'start-page-v1.js?v=20260903-6')
+        self.assertContains(response, 'start-page-v1.css?v=20260903-7')
+        self.assertContains(response, 'start-page-v1.js?v=20260903-7')
         self.assertRegex(html, r'<body[^>]+class="start-page"')
         self.assertNotRegex(html, r'<body[^>]+class="[^"]*dispatcher-shell')
 
@@ -278,6 +278,43 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'start-screen__apps')
         self.assertContains(response, response.context['apps'][0]['app'].icon_192_url)
 
+    def test_result_uses_semantic_dynamic_role_theme_and_accessible_status(self):
+        self.add_access('driver', 'Водитель самосвала')
+
+        response = self.post(user_agent=ANDROID_USER_AGENT)
+        html = response.content.decode('utf-8')
+
+        self.assertContains(response, '<h1 id="start-result-title">Ваше приложение</h1>', html=True)
+        self.assertContains(response, '<h2 class="start-screen__app-main">', count=1)
+        self.assertContains(response, 'data-app-theme="driver"', count=2)
+        self.assertContains(response, self.employee.full_name)
+        self.assertContains(response, 'Это не я — ввести другой номер')
+        self.assertContains(response, 'data-connection-indicator', count=1)
+        self.assertIn('start-screen__opt-arrow', html)
+        self.assertIn('start-screen__chevrons', html)
+
+    def test_supported_role_without_custom_theme_uses_neutral_component(self):
+        self.add_access('mining_master', 'Горный мастер')
+
+        response = self.post(user_agent=ANDROID_USER_AGENT)
+
+        self.assertContains(response, 'data-app-theme="mining_master"', count=2)
+        self.assertContains(response, 'Горный мастер')
+        self.assertNotContains(response, 'data-start-install-option="native"')
+        self.assertContains(response, 'data-start-install-option="browser"', count=1)
+
+    def test_result_template_does_not_hardcode_people_or_apk_versions(self):
+        template = (
+            Path(settings.BASE_DIR) / 'templates' / 'users' / 'universal_start.html'
+        ).read_text(encoding='utf-8')
+
+        self.assertNotIn('Тест Петров Петр Петрович', template)
+        self.assertNotIn('Тест Иванов Иван Иванович', template)
+        self.assertNotIn('0.1.8', template)
+        self.assertNotIn('0.1.12', template)
+        self.assertIn('{{ employee.full_name }}', template)
+        self.assertIn('{{ item.apk.version }}', template)
+
     def test_all_apps_are_shown(self):
         """Раньше список обрезался: кнопки в столбик занимали несколько
         экранов. Плитки в два столбца помещаются, прятать нечего."""
@@ -312,13 +349,15 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'data-start-install-option="native"', count=2)
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=2)
-        self.assertContains(response, '<b>Приложение <i>стабильное</i></b>', count=2)
-        self.assertContains(response, '<b>Браузер <i>нестабильно</i></b>', count=2)
-        self.assertContains(response, 'APK · версия 0.1.12 · скачать и установить', count=1)
-        self.assertContains(response, 'APK · версия 0.1.8 · скачать и установить', count=1)
+        self.assertContains(response, '<span>Приложение</span> <i>стабильное</i>', count=2)
+        self.assertContains(response, '<span>Браузер</span> <i>нестабильно</i>', count=2)
+        self.assertContains(response, '<span>APK · версия 0.1.12</span>', count=1)
+        self.assertContains(response, '<span>APK · версия 0.1.8</span>', count=1)
+        self.assertContains(response, '<span>скачать и установить</span>', count=2)
         self.assertNotContains(response, '2. Открыть приложение')
         self.assertNotContains(response, '/native-handoff/')
-        self.assertContains(response, 'PWA · ярлык на экран · открыть', count=2)
+        self.assertContains(response, '<span>PWA · ярлык на экран</span>', count=2)
+        self.assertContains(response, '<span>открыть</span>', count=2)
         self.assertContains(response, 'install=1', count=2)
         self.assertNotContains(response, 'class="start-screen__app-main" href=')
         # Атрибут download заставлял Chrome ругаться «файл может быть опасным».
@@ -368,7 +407,7 @@ class UniversalStartTests(TestCase):
         self.assertNotContains(response, 'data-start-install-option="native"')
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=1)
-        self.assertContains(response, '<b>Браузер <i>нестабильно</i></b>')
+        self.assertContains(response, '<span>Браузер</span> <i>нестабильно</i>')
         self.assertContains(response, 'install=1', count=1)
         self.assertContains(response, 'После перехода добавьте значок на экран')
 
@@ -428,7 +467,7 @@ class UniversalStartTests(TestCase):
         script = (backend_root / 'static' / 'js' / 'start-page-v1.js').read_text(encoding='utf-8')
         stylesheet = (backend_root / 'static' / 'css' / 'start-page-v1.css').read_text(encoding='utf-8')
 
-        self.assertContains(response, 'start-page-v1.js?v=20260903-6')
+        self.assertContains(response, 'start-page-v1.js?v=20260903-7')
         self.assertIn('window.visualViewport || null', script)
         self.assertIn('Math.max(120, baselineHeight * 0.22)', script)
         self.assertIn('viewport.addEventListener("resize"', script)
@@ -458,6 +497,9 @@ class UniversalStartTests(TestCase):
         self.assertNotIn('body.start-page.is-input-mode .start-hero', stylesheet)
         self.assertNotIn('body.start-page.is-keyboard-open .start-hero', stylesheet)
         self.assertNotIn('--start-vv-height', stylesheet)
+        self.assertIn('operational-state-connection', script)
+        self.assertIn('Связь с сервером нестабильна', script)
+        self.assertIn('body.start-page--result > .app-connection-dot', stylesheet)
 
     def test_start_phone_runtime_formats_country_prefix_and_guards_double_submit(self):
         script = (

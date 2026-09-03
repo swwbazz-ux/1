@@ -22,13 +22,14 @@
     <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'img/share/start-share.png' %}?v=2">
     <link rel="preload" as="image" href="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
     <link rel="stylesheet" href="{% static 'css/max-support-link-v1.css' %}?v=6">
-    <link rel="stylesheet" href="{% static 'css/start-page-v1.css' %}?v=20260903-6">
-    {% if not found %}<script src="{% static 'js/start-page-v1.js' %}?v=20260903-6" defer></script>{% endif %}
+    <link rel="stylesheet" href="{% static 'css/start-page-v1.css' %}?v=20260903-7">
+    <script src="{% static 'js/start-page-v1.js' %}?v=20260903-7" defer></script>
 {% endblock %}
 {% block body_class %}start-page{% if found %} start-page--result{% endif %}{% endblock %}
 
 {% block body %}
-<main class="start-screen{% if found %} start-screen--result{% else %} start-screen--entry{% endif %}" data-start-screen>
+<main class="start-screen{% if found %} start-screen--result{% else %} start-screen--entry{% endif %}"
+      data-start-screen{% if found %} data-app-theme="{{ apps.0.app.role_code|default:'neutral' }}"{% endif %}>
     <section class="start-hero" aria-label="Коппер Рисорсез — горнотранспортная компания">
         <div class="start-hero__backdrop" aria-hidden="true"></div>
         <picture class="start-hero__picture">
@@ -47,12 +48,19 @@
 
     <div class="start-screen__inner">
         {% if found %}
-            <section class="start-result-card" aria-labelledby="start-result-title">
-                <span class="start-kicker">ДОСТУП К РАБОЧИМ ПРИЛОЖЕНИЯМ</span>
+            <section class="start-result-card" aria-labelledby="start-result-title" data-start-result>
                 <h1 id="start-result-title">Ваше приложение</h1>
-                <div class="start-screen__person">
-                    <strong>{{ employee.full_name }}</strong>
-                    <span>{{ submitted_phone }}</span>
+                <div class="start-screen__person" aria-label="Сотрудник">
+                    <span class="start-screen__person-icon" aria-hidden="true">
+                        <svg viewBox="0 0 48 48" fill="none">
+                            <circle cx="24" cy="17" r="8" />
+                            <path d="M10 40c1.8-8 6.5-12 14-12s12.2 4 14 12" />
+                        </svg>
+                    </span>
+                    <span class="start-screen__person-copy">
+                        <strong>{{ employee.full_name }}</strong>
+                        <span>{{ submitted_phone }}</span>
+                    </span>
                 </div>
                 {% if has_working_code %}
                     <p class="start-result-card__lead">Установите на телефон и войдите своим пинкодом.</p>
@@ -61,10 +69,17 @@
                 {% endif %}
                 <div class="start-screen__apps">
                     {% for item in apps %}
-                        <div class="start-screen__app" style="--app-accent: {{ item.app.accent_color }}">
-                            <div class="start-screen__app-main">
-                                <b>{{ item.app.name }}</b>
-                            </div>
+                        <section class="start-screen__app"
+                                 data-app-theme="{{ item.app.role_code }}">
+                            <h2 class="start-screen__app-main">
+                                <span class="start-screen__role-icon" aria-hidden="true">
+                                    <img src="{{ item.app.icon_192_url }}" alt="" width="192" height="192" decoding="async">
+                                </span>
+                                <span>{{ item.app.name }}</span>
+                                <svg class="start-screen__chevrons" viewBox="0 0 44 24" fill="none" aria-hidden="true">
+                                    <path d="m3 3 9 9-9 9M16 3l9 9-9 9M29 3l9 9-9 9" />
+                                </svg>
+                            </h2>
                             <div class="start-screen__install-options">
                                 {% if item.apk %}
                                     <a class="start-screen__opt start-screen__opt--native"
@@ -76,9 +91,12 @@
                                             <span class="start-screen__opt-badge start-screen__opt-badge--apk">APK</span>
                                         </span>
                                         <span class="start-screen__opt-text">
-                                            <b>Приложение <i>стабильное</i></b>
-                                            <em>APK · версия {{ item.apk.version }} · скачать и установить →</em>
+                                            <b><span>Приложение</span> <i>стабильное</i></b>
+                                            <em><span>APK · версия {{ item.apk.version }}</span><span>скачать и установить</span></em>
                                         </span>
+                                        <svg class="start-screen__opt-arrow" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                                            <path d="M2 12h25M18 3l9 9-9 9" />
+                                        </svg>
                                     </a>
                                 {% endif %}
                                 <a class="start-screen__opt start-screen__opt--browser"
@@ -90,17 +108,26 @@
                                         <span class="start-screen__opt-badge start-screen__opt-badge--chrome"></span>
                                     </span>
                                     <span class="start-screen__opt-text">
-                                        <b>Браузер <i>нестабильно</i></b>
-                                        <em>PWA · ярлык на экран · открыть →</em>
+                                        <b><span>Браузер</span> <i>нестабильно</i></b>
+                                        <em><span>PWA · ярлык на экран</span><span>открыть</span></em>
                                     </span>
+                                    <svg class="start-screen__opt-arrow" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                                        <path d="M2 12h25M18 3l9 9-9 9" />
+                                    </svg>
                                 </a>
                             </div>
                             {% if item.apk %}
-                                <p class="start-screen__opt-note">Приложение держит связь при свёрнутом окне. Телефон предупредит «файл может быть опасным» — нажмите «Всё равно скачать».</p>
+                                <p class="start-screen__opt-note">
+                                    <svg viewBox="0 0 32 36" fill="none" aria-hidden="true">
+                                        <path d="M16 2 29 7v10c0 8-5.2 13.8-13 17C8.2 30.8 3 25 3 17V7l13-5Z" />
+                                        <path d="M16 10v9M16 25h.01" />
+                                    </svg>
+                                    <span>Приложение держит связь при свёрнутом окне. Телефон предупредит «файл может быть опасным» — нажмите «Всё равно скачать».</span>
+                                </p>
                             {% elif is_ios %}
                                 <p class="start-screen__opt-note">После перехода добавьте значок на экран — покажем, как.</p>
                             {% endif %}
-                        </div>
+                        </section>
                     {% endfor %}
                 </div>
                 <a class="start-screen__back" href="{% url 'universal_start' %}">Это не я — ввести другой номер</a>

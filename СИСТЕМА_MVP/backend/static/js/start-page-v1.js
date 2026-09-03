@@ -10,6 +10,29 @@
     var submitLabel = document.querySelector("[data-start-submit-label]");
     var scrollHost = document.querySelector(".start-screen__inner");
     var viewport = window.visualViewport || null;
+    var connectionIndicator = document.querySelector("[data-connection-indicator]");
+
+    function syncConnectionAccessibility() {
+        if (!body || !connectionIndicator) return;
+
+        var state = body.dataset.connectionState || (window.navigator.onLine === false ? "lost" : "ok");
+        var labels = {
+            ok: "Связь с сервером есть",
+            weak: "Связь с сервером нестабильна",
+            lost: "Связь с сервером потеряна"
+        };
+        var label = labels[state] || labels.ok;
+        connectionIndicator.setAttribute("aria-label", label);
+        connectionIndicator.setAttribute("title", label);
+        connectionIndicator.dataset.stateLabel = label;
+    }
+
+    if (connectionIndicator) {
+        window.addEventListener("operational-state-connection", syncConnectionAccessibility);
+        window.addEventListener("online", syncConnectionAccessibility);
+        window.addEventListener("offline", syncConnectionAccessibility);
+        syncConnectionAccessibility();
+    }
 
     if (!body || !form || !input || !submit) return;
 

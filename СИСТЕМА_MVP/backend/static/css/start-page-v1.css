@@ -372,7 +372,7 @@ body.start-page *::after {
 }
 
 /* Глобальный индикатор связи относится к рабочим PWA-экранам, а не к входу. */
-body.start-page > .app-connection-dot {
+body.start-page:not(.start-page--result) > .app-connection-dot {
     display: none;
 }
 
@@ -429,131 +429,321 @@ body.start-page > .app-connection-dot {
     transform: translateY(2px);
 }
 
-/* Result state keeps the existing app-selection contract but uses the new shell. */
+/* Result state: один рабочий компонент с ролевыми темами и neutral fallback. */
+.start-screen--result {
+    --result-accent: var(--start-copper-light);
+    --result-accent-soft: rgba(193, 139, 93, .14);
+    background:
+        radial-gradient(80% 42% at 50% 26%, var(--result-accent-soft), transparent 72%),
+        linear-gradient(180deg, var(--start-bg) 0%, var(--start-bg-deep) 100%);
+}
+
+.start-screen--result[data-app-theme="driver"] {
+    --result-accent: #20d6b1;
+    --result-accent-soft: rgba(32, 214, 177, .12);
+}
+
+.start-screen--result[data-app-theme="excavator_operator"] {
+    --result-accent: #f3ba22;
+    --result-accent-soft: rgba(243, 186, 34, .13);
+}
+
+.start-screen--result .start-hero {
+    height: clamp(240px, 36dvh, 340px);
+}
+
+.start-screen--result .start-hero__backdrop {
+    background-position: center top;
+    filter: blur(10px) saturate(.72) brightness(.5);
+    transform: scale(1.05);
+}
+
+.start-screen--result .start-hero__image {
+    object-fit: contain;
+    object-position: center top;
+}
+
+.start-screen--result .start-hero__shade {
+    background:
+        linear-gradient(90deg, rgba(2, 7, 9, .14), transparent 34%, transparent 76%, rgba(2, 7, 9, .1)),
+        linear-gradient(180deg, rgba(1, 5, 7, .04) 0%, rgba(2, 8, 11, .08) 58%, var(--start-bg) 100%);
+}
+
+.start-screen--result .start-screen__inner {
+    gap: 28px;
+    width: min(100%, 720px);
+    margin-top: -52px;
+    padding: 0 16px calc(env(safe-area-inset-bottom, 0px) + 42px);
+}
+
 .start-result-card {
-    gap: 14px;
+    display: grid;
+    gap: 22px;
+    width: 100%;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+.start-result-card::before {
+    content: none;
+}
+
+.start-result-card h1 {
+    position: relative;
+    z-index: 1;
+    margin: 0;
+    color: var(--start-text);
+    font-size: clamp(28px, 7vw, 34px);
+    font-weight: 820;
+    line-height: 1.08;
+    text-align: center;
+    letter-spacing: -.025em;
 }
 
 .start-screen__person {
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr);
+    align-items: center;
+    gap: 16px;
     width: 100%;
-    padding: 12px 14px;
-    border: 1px solid rgba(165, 175, 179, .24);
-    border-radius: 16px;
-    background: rgba(255, 255, 255, .035);
+    min-width: 0;
+    min-height: 96px;
+    padding: 16px 18px;
+    border: 1px solid color-mix(in srgb, var(--result-accent) 34%, rgba(165, 175, 179, .34));
+    border-radius: 24px;
+    background:
+        linear-gradient(145deg, rgba(15, 26, 31, .95), rgba(5, 13, 17, .96));
+    box-shadow:
+        0 18px 44px rgba(0, 0, 0, .34),
+        inset 0 1px 0 rgba(255, 255, 255, .045);
 }
 
-.start-screen__person strong,
-.start-screen__person span {
+.start-screen__person-icon {
+    display: grid;
+    place-items: center;
+    width: 58px;
+    height: 58px;
+    border: 1px solid color-mix(in srgb, var(--result-accent) 78%, transparent);
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--result-accent) 9%, #081216);
+    color: var(--result-accent);
+    box-shadow: 0 0 22px color-mix(in srgb, var(--result-accent) 24%, transparent);
+}
+
+.start-screen__person-icon svg {
+    width: 38px;
+    height: 38px;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.start-screen__person-copy,
+.start-screen__person-copy strong,
+.start-screen__person-copy > span {
     display: block;
+    min-width: 0;
 }
 
-.start-screen__person strong {
+.start-screen__person-copy strong {
     color: var(--start-text);
-    font-size: clamp(17px, 4.7vw, 20px);
+    font-size: clamp(18px, 4.9vw, 22px);
     line-height: 1.22;
+    overflow-wrap: anywhere;
 }
 
-.start-screen__person span,
-.start-screen__opt-text em,
-.start-screen__opt-note {
+.start-screen__person-copy > span {
+    margin-top: 5px;
     color: var(--start-muted);
+    font-size: clamp(16px, 4.1vw, 18px);
+    line-height: 1.2;
 }
 
-.start-screen__person span {
-    margin-top: 4px;
-    font-size: 14px;
+.start-result-card__lead {
+    width: min(100%, 34ch);
+    margin: 2px auto 6px;
+    color: #b8c2c6;
+    font-size: clamp(17px, 4.4vw, 20px);
+    line-height: 1.4;
+    text-align: center;
 }
 
 .start-screen__apps,
 .start-screen__install-options,
-.start-screen__opt-text {
+.start-screen__opt-text,
+.start-screen__opt-text em {
     display: grid;
 }
 
 .start-screen__apps {
-    gap: 10px;
+    gap: 18px;
 }
 
 .start-screen__app {
-    border: 1px solid rgba(255, 255, 255, .16);
-    border-color: color-mix(in srgb, var(--app-accent) 34%, transparent);
-    border-radius: 16px;
-    background: rgba(255, 255, 255, .045);
+    --role-accent: var(--start-copper-light);
+    position: relative;
+    min-width: 0;
+    border: 1px solid color-mix(in srgb, var(--role-accent) 62%, transparent);
+    border-radius: 26px;
+    background:
+        radial-gradient(92% 50% at 50% 0%, color-mix(in srgb, var(--role-accent) 12%, transparent), transparent 74%),
+        linear-gradient(150deg, rgba(10, 21, 25, .97), rgba(3, 10, 13, .98));
+    box-shadow:
+        0 22px 54px rgba(0, 0, 0, .4),
+        inset 0 1px 0 rgba(255, 255, 255, .045);
     overflow: hidden;
 }
 
-.start-screen__app-main {
-    padding: 10px 14px;
-    border-bottom: 1px solid rgba(255, 255, 255, .11);
-    color: var(--start-text);
+.start-screen__app[data-app-theme="driver"] {
+    --role-accent: #20d6b1;
 }
 
-.start-screen__app-main b {
-    font-size: 15px;
+.start-screen__app[data-app-theme="excavator_operator"] {
+    --role-accent: #f3ba22;
+}
+
+.start-screen__app-main {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) 44px;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    min-height: 62px;
+    margin: 0;
+    padding: 10px 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--role-accent) 38%, transparent);
+    background:
+        linear-gradient(90deg, color-mix(in srgb, var(--role-accent) 12%, transparent), transparent 78%);
+    color: var(--start-text);
+    font-size: clamp(18px, 4.8vw, 22px);
+    font-weight: 800;
+    line-height: 1.16;
+}
+
+.start-screen__role-icon {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--role-accent) 13%, #071115);
+    box-shadow: 0 0 18px color-mix(in srgb, var(--role-accent) 18%, transparent);
+    overflow: hidden;
+}
+
+.start-screen__role-icon img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.start-screen__chevrons {
+    justify-self: end;
+    width: 40px;
+    height: 24px;
+    stroke: var(--role-accent);
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: .38;
 }
 
 .start-screen__install-options {
-    gap: 8px;
-    padding: 10px;
+    gap: 12px;
+    padding: 16px;
 }
 
 .start-screen__opt {
     display: grid;
-    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-columns: 72px minmax(0, 1fr) 32px;
     align-items: center;
-    gap: 12px;
-    min-height: 66px;
-    padding: 8px 12px;
-    border: 1px solid rgba(255, 255, 255, .14);
-    border-radius: 13px;
-    background: rgba(255, 255, 255, .035);
+    gap: 16px;
+    width: 100%;
+    min-width: 0;
+    min-height: 118px;
+    padding: 14px 16px;
+    border: 1px solid rgba(165, 175, 179, .34);
+    border-radius: 20px;
+    background:
+        linear-gradient(145deg, rgba(18, 31, 36, .92), rgba(8, 17, 21, .96));
     color: var(--start-text);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
     text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 140ms ease, border-color 140ms ease, filter 140ms ease, box-shadow 140ms ease;
 }
 
 .start-screen__opt--native {
-    border-color: color-mix(in srgb, var(--app-accent) 58%, transparent);
-    background: color-mix(in srgb, var(--app-accent) 11%, transparent);
+    min-height: 132px;
+    border-color: color-mix(in srgb, var(--role-accent) 80%, transparent);
+    background:
+        radial-gradient(100% 120% at 8% 50%, color-mix(in srgb, var(--role-accent) 24%, transparent), transparent 58%),
+        linear-gradient(145deg, color-mix(in srgb, var(--role-accent) 13%, #132128), rgba(5, 15, 18, .98));
+    box-shadow:
+        0 10px 30px color-mix(in srgb, var(--role-accent) 11%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, .055);
+}
+
+.start-screen__opt:hover {
+    border-color: color-mix(in srgb, var(--role-accent) 72%, rgba(255, 255, 255, .18));
+    filter: brightness(1.06);
+}
+
+.start-screen__opt:active {
+    transform: translateY(2px);
+    filter: brightness(.97);
 }
 
 .start-screen__opt:focus-visible,
 .start-screen__back:focus-visible,
 .start-screen__inner > .max-support-link:focus-visible {
-    outline: 3px solid rgba(210, 255, 88, .72);
-    outline-offset: 3px;
+    outline: 3px solid color-mix(in srgb, var(--result-accent) 72%, #fff);
+    outline-offset: 4px;
 }
 
 .start-screen__opt-icon {
     position: relative;
     display: grid;
     place-items: center;
-    width: 48px;
-    height: 48px;
+    flex: 0 0 auto;
+    width: 72px;
+    height: 72px;
 }
 
 .start-screen__opt-icon img {
+    display: block;
     width: 100%;
     height: 100%;
-    border-radius: 11px;
+    border-radius: 18px;
     object-fit: cover;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, .26);
 }
 
 .start-screen__opt-badge {
     position: absolute;
-    right: -4px;
-    bottom: -4px;
+    right: -6px;
+    bottom: -6px;
     display: grid;
     place-items: center;
-    width: 23px;
-    height: 23px;
+    width: 34px;
+    height: 34px;
+    border: 2px solid #071115;
     border-radius: 50%;
-    box-shadow: 0 0 0 2px #0b1519;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .42);
 }
 
 .start-screen__opt-badge--apk {
-    background: var(--app-accent, var(--start-green));
-    color: #04161a;
-    font-size: 8px;
+    background: var(--role-accent);
+    color: #031215;
+    font-size: 10px;
     font-weight: 900;
 }
 
@@ -563,53 +753,113 @@ body.start-page > .app-connection-dot {
 
 .start-screen__opt-badge--chrome::after {
     content: "";
-    width: 8px;
-    height: 8px;
-    border: 2px solid #fff;
+    width: 13px;
+    height: 13px;
+    border: 3px solid #fff;
     border-radius: 50%;
     background: #4285f4;
 }
 
 .start-screen__opt-text {
-    gap: 3px;
+    gap: 7px;
     min-width: 0;
 }
 
 .start-screen__opt-text b {
-    font-size: 15px;
-    line-height: 1.15;
+    min-width: 0;
+    color: var(--start-text);
+    font-size: clamp(17px, 4.5vw, 20px);
+    line-height: 1.2;
+}
+
+.start-screen__opt-text b span {
+    display: inline;
 }
 
 .start-screen__opt-text b i {
-    color: color-mix(in srgb, var(--app-accent) 76%, #fff);
-    font-size: 10px;
+    color: color-mix(in srgb, var(--role-accent) 80%, #fff);
+    font-size: 11px;
     font-style: normal;
-    letter-spacing: .03em;
+    font-weight: 800;
+    letter-spacing: .04em;
     text-transform: uppercase;
+    white-space: nowrap;
 }
 
 .start-screen__opt--browser .start-screen__opt-text b i {
-    color: #e0b877;
+    color: #e3b46b;
 }
 
 .start-screen__opt-text em {
-    font-size: 12px;
+    gap: 2px;
+    min-width: 0;
+    color: var(--start-muted);
+    font-size: clamp(14px, 3.8vw, 17px);
     font-style: normal;
     line-height: 1.28;
 }
 
+.start-screen__opt-arrow {
+    justify-self: end;
+    width: 30px;
+    height: 24px;
+    stroke: var(--role-accent);
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
 .start-screen__opt-note {
-    margin: 0;
-    padding: 0 12px 12px;
-    font-size: 11px;
-    line-height: 1.35;
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    align-items: start;
+    gap: 12px;
+    margin: 0 16px 16px;
+    padding: 14px;
+    border: 1px solid color-mix(in srgb, var(--role-accent) 48%, transparent);
+    border-radius: 17px;
+    background: rgba(2, 11, 14, .58);
+    color: var(--start-muted);
+    font-size: clamp(13px, 3.5vw, 15px);
+    line-height: 1.45;
+}
+
+.start-screen__opt-note svg {
+    width: 28px;
+    height: 32px;
+    stroke: var(--role-accent);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
 .start-screen__back {
     justify-self: center;
-    color: #9ba8ad;
-    font-size: 15px;
-    text-underline-offset: 3px;
+    min-height: 44px;
+    padding: 11px 8px;
+    color: #aebbc0;
+    font-size: clamp(15px, 4vw, 17px);
+    line-height: 1.3;
+    text-align: center;
+    text-underline-offset: 4px;
+    text-decoration-thickness: 1px;
+}
+
+body.start-page--result > .app-connection-dot {
+    position: absolute;
+    top: max(18px, env(safe-area-inset-top, 0px));
+    right: max(16px, env(safe-area-inset-right, 0px));
+    z-index: 10;
+    display: inline-flex;
+    padding: 8px;
+    border: 1px solid rgba(193, 139, 93, .42);
+    background: rgba(3, 10, 13, .68);
+    box-shadow: 0 0 18px color-mix(in srgb, var(--app-connection-color) 34%, transparent);
+}
+
+body.start-page--result > .app-connection-dot i {
+    width: 13px;
+    height: 13px;
 }
 
 @keyframes start-ready {
@@ -749,21 +999,54 @@ body.start-page > .app-connection-dot {
         display: none;
     }
 
+    body.start-page--result {
+        min-height: 100vh;
+        min-height: 100dvh;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+
+    .start-screen--result {
+        display: block;
+        min-height: 100vh;
+        min-height: 100dvh;
+        overflow: clip;
+    }
+
+    .start-screen--result .start-hero {
+        height: clamp(230px, 34dvh, 320px);
+    }
+
+    .start-screen--result .start-screen__inner {
+        gap: 26px;
+        width: min(100%, 720px);
+        margin-top: -44px;
+        padding: 0 16px calc(env(safe-area-inset-bottom, 0px) + 34px);
+    }
+
+}
+
+@media (max-width: 760px) and (max-height: 700px) {
+    .start-screen--result .start-hero {
+        height: clamp(205px, 32dvh, 235px);
+    }
+
+    .start-screen--result .start-screen__inner {
+        margin-top: -38px;
+    }
 }
 
 @media (max-width: 360px) {
-    .start-screen__inner {
+    .start-screen--entry .start-screen__inner {
         padding-inline: 12px;
         margin-top: -16px;
     }
 
-    .start-entry-card,
-    .start-result-card {
+    .start-entry-card {
         padding: 17px;
     }
 
-    .start-entry-card h1,
-    .start-result-card h1 {
+    .start-entry-card h1 {
         font-size: 27px;
     }
 
@@ -777,6 +1060,89 @@ body.start-page > .app-connection-dot {
         font-size: 19px;
     }
 
+    .start-screen--result .start-screen__inner {
+        gap: 22px;
+        padding-inline: 12px;
+    }
+
+    .start-result-card {
+        gap: 18px;
+    }
+
+    .start-result-card h1 {
+        font-size: 27px;
+    }
+
+    .start-screen__person {
+        grid-template-columns: 52px minmax(0, 1fr);
+        gap: 12px;
+        min-height: 88px;
+        padding: 14px;
+    }
+
+    .start-screen__person-icon {
+        width: 52px;
+        height: 52px;
+    }
+
+    .start-screen__person-icon svg {
+        width: 34px;
+        height: 34px;
+    }
+
+    .start-screen__app-main {
+        grid-template-columns: 36px minmax(0, 1fr) 32px;
+        gap: 10px;
+        padding-inline: 12px;
+    }
+
+    .start-screen__role-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+    }
+
+    .start-screen__chevrons {
+        width: 32px;
+    }
+
+    .start-screen__install-options {
+        gap: 10px;
+        padding: 12px;
+    }
+
+    .start-screen__opt {
+        grid-template-columns: 60px minmax(0, 1fr) 26px;
+        gap: 12px;
+        min-height: 108px;
+        padding: 12px;
+    }
+
+    .start-screen__opt--native {
+        min-height: 120px;
+    }
+
+    .start-screen__opt-icon {
+        width: 60px;
+        height: 60px;
+    }
+
+    .start-screen__opt-icon img {
+        border-radius: 15px;
+    }
+
+    .start-screen__opt-badge {
+        right: -4px;
+        bottom: -4px;
+        width: 30px;
+        height: 30px;
+    }
+
+    .start-screen__opt-note {
+        margin: 0 12px 12px;
+        padding: 12px;
+    }
+
 }
 
 @media (min-width: 761px) and (max-width: 1023px) {
@@ -788,6 +1154,10 @@ body.start-page > .app-connection-dot {
         width: min(100%, 620px);
         margin-top: -52px;
         padding-bottom: 48px;
+    }
+
+    .start-screen--result .start-screen__inner {
+        width: min(100%, 720px);
     }
 }
 
@@ -822,6 +1192,17 @@ body.start-page > .app-connection-dot {
             linear-gradient(180deg, rgba(1, 5, 7, .08), rgba(2, 8, 11, .22));
     }
 
+    .start-screen--result .start-hero {
+        height: 100vh;
+        height: 100dvh;
+        min-height: 680px;
+    }
+
+    .start-screen--result .start-hero__picture {
+        -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 26%, rgba(0, 0, 0, .82) 34%, transparent 50%);
+        mask-image: linear-gradient(180deg, #000 0%, #000 26%, rgba(0, 0, 0, .82) 34%, transparent 50%);
+    }
+
     .start-screen__inner {
         align-content: center;
         width: 100%;
@@ -832,9 +1213,25 @@ body.start-page > .app-connection-dot {
         padding: 48px clamp(34px, 4vw, 62px);
     }
 
-    .start-entry-card,
-    .start-result-card {
+    .start-entry-card {
         max-width: 520px;
+    }
+
+    .start-screen--result .start-screen__inner {
+        align-content: start;
+        width: 100%;
+        max-width: 680px;
+        margin: 0;
+        padding: 42px clamp(28px, 3vw, 52px);
+    }
+
+    .start-screen--result .start-result-card {
+        max-width: none;
+    }
+
+    .start-screen--result .start-screen__inner > .max-support-link {
+        max-width: 420px;
+        margin-inline: auto;
     }
 
     .start-screen__inner > .max-support-link {
@@ -860,7 +1257,8 @@ body.start-page > .app-connection-dot {
 @media (prefers-reduced-motion: reduce) {
     .start-hero,
     .start-screen__phone,
-    .start-screen__submit {
+    .start-screen__submit,
+    .start-screen__opt {
         transition: none;
     }
 
@@ -876,8 +1274,7 @@ body.start-page > .app-connection-dot {
 }
 
 @supports not (backdrop-filter: blur(1px)) {
-    .start-entry-card,
-    .start-result-card {
+    .start-entry-card {
         background: var(--start-surface-solid);
     }
 }
