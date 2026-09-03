@@ -154,6 +154,19 @@ ROLE_APP_BASE_DOMAINS = tuple(
     for domain in os.getenv('DJANGO_ROLE_APP_BASE_DOMAINS', 'driverform.ru,localhost').split(',')
     if domain.strip()
 )
+ROLE_APP_HOST_ALIASES = {}
+for _role_host_alias in os.getenv('DJANGO_ROLE_APP_HOST_ALIASES', '').split(','):
+    _role_host_alias = _role_host_alias.strip()
+    if not _role_host_alias:
+        continue
+    _alias_separator = _role_host_alias.rfind('=')
+    if _alias_separator <= 0:
+        raise ValueError(
+            'DJANGO_ROLE_APP_HOST_ALIASES entries must use host=role_code'
+        )
+    ROLE_APP_HOST_ALIASES[
+        _role_host_alias[:_alias_separator].strip().lower().strip('.')
+    ] = _role_host_alias[_alias_separator + 1:].strip()
 ROLE_APP_PERSONAL_SESSION_AGE = int(
     os.getenv('DJANGO_ROLE_APP_PERSONAL_SESSION_AGE', str(60 * 60 * 24 * 365))
 )
@@ -247,7 +260,7 @@ if PORTAL_CACHE_URL:
         'default': {
             'BACKEND': 'django.core.cache.backends.redis.RedisCache',
             'LOCATION': PORTAL_CACHE_URL,
-            'KEY_PREFIX': 'accounting-mvp',
+            'KEY_PREFIX': os.getenv('DJANGO_CACHE_KEY_PREFIX', 'accounting-mvp').strip(),
             'TIMEOUT': 300,
             'OPTIONS': {
                 'socket_connect_timeout': 1,
@@ -255,6 +268,21 @@ if PORTAL_CACHE_URL:
             },
         }
     }
+
+# Изолированный стенд приложения экскаваторщика. Одного флага недостаточно:
+# команды стенда дополнительно сверяют фактическое имя базы с ожидаемым.
+EXCAVATOR_QA_ENABLED = _env_bool('EXCAVATOR_QA_ENABLED', default=False)
+EXCAVATOR_QA_DATABASE_NAME = os.getenv('EXCAVATOR_QA_DATABASE_NAME', '').strip()
+EXCAVATOR_QA_LABEL = os.getenv('EXCAVATOR_QA_LABEL', 'ТЕСТОВЫЙ СТЕНД').strip()
+EXCAVATOR_QA_PHONE = os.getenv('EXCAVATOR_QA_PHONE', '').strip()
+EXCAVATOR_QA_PIN = os.getenv('EXCAVATOR_QA_PIN', '').strip()
+EXCAVATOR_QA_TICK_SECONDS = _env_positive_int('EXCAVATOR_QA_TICK_SECONDS', 2)
+EXCAVATOR_QA_TRANSIT_SECONDS = _env_positive_int('EXCAVATOR_QA_TRANSIT_SECONDS', 12)
+EXCAVATOR_QA_TRUCK_COUNT = _env_positive_int('EXCAVATOR_QA_TRUCK_COUNT', 4)
+TRUCK_POST_UNLOAD_COOLDOWN_SECONDS = _env_positive_int(
+    'TRUCK_POST_UNLOAD_COOLDOWN_SECONDS',
+    600,
+)
 
 PORTAL_PRIVATE_MEDIA_ROOT = BASE_DIR / 'private_media'
 ROTATIONS_PRIVATE_MEDIA_ROOT = BASE_DIR / 'private_media' / 'rotations'

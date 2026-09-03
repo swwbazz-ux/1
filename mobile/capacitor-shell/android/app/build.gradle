@@ -141,6 +141,9 @@ android {
             String startPath = startUri.rawPath ?: '/'
             long heartbeatIntervalMs = Long.parseLong(profile.getProperty('heartbeatIntervalSeconds', '20')) * 1000L
             long updateCheckIntervalMs = Long.parseLong(profile.getProperty('updateCheckIntervalMinutes', '15')) * 60_000L
+            boolean inAppUpdaterEnabled = Boolean.parseBoolean(
+                    profile.getProperty('inAppUpdaterEnabled', 'true')
+            )
             String updateManifestUrl = profile.getProperty('updateManifestUrl', '').trim()
             String splashBackgroundColor = profile.getProperty('splashBackgroundColor', '').trim()
             String splashAccentColor = profile.getProperty('splashAccentColor', '').trim()
@@ -163,7 +166,7 @@ android {
                     || !(startPath == serverPath || startPath.startsWith(serverPath))) {
                 throw new GradleException("startUrl must stay inside the exact serverUrl origin in ${profileDir}/app.properties")
             }
-            if (!updateManifestUrl.startsWith('https://')) {
+            if (inAppUpdaterEnabled && !updateManifestUrl.startsWith('https://')) {
                 throw new GradleException("updateManifestUrl must use HTTPS in ${profileDir}/app.properties")
             }
 
@@ -181,13 +184,16 @@ android {
                 resValue "color", "startup_splash_background", splashBackgroundColor
                 resValue "drawable", "startup_splash_icon", "@drawable/${splashIconResource}"
 
-                buildConfigField "String", "APP_PROFILE_ID", javaStringLiteral(profileId)
+                buildConfigField "String", "APP_PROFILE_ID", javaStringLiteral(
+                        profile.getProperty('appProfileId', profileId)
+                )
                 buildConfigField "String", "APP_DISPLAY_NAME", javaStringLiteral(profile.getProperty('appName'))
                 buildConfigField "String", "APP_SERVER_URL", javaStringLiteral(serverUrl)
                 buildConfigField "String", "APP_START_URL", javaStringLiteral(startUrl)
                 buildConfigField "String", "HEARTBEAT_URL", javaStringLiteral(profile.getProperty('heartbeatUrl', profile.getProperty('serverUrl')))
                 buildConfigField "long", "HEARTBEAT_INTERVAL_MS", "${heartbeatIntervalMs}L"
                 buildConfigField "String", "UPDATE_MANIFEST_URL", javaStringLiteral(updateManifestUrl)
+                buildConfigField "boolean", "IN_APP_UPDATER_ENABLED", inAppUpdaterEnabled.toString()
                 buildConfigField "long", "UPDATE_CHECK_INTERVAL_MS", "${updateCheckIntervalMs}L"
                 buildConfigField "String", "SYNC_AUTH_HEADER", javaStringLiteral(profile.getProperty('syncAuthHeader', 'Authorization'))
                 buildConfigField "String", "SYNC_AUTH_TOKEN", javaStringLiteral(syncToken)
@@ -207,8 +213,17 @@ android {
     }
     sourceSets {
         profileFiles.each { profileDir ->
+            Properties profile = new Properties()
+            new File(profileDir, 'app.properties').withReader('UTF-8') { reader ->
+                profile.load(reader)
+            }
             named(profileDir.name) {
-                res.srcDir(new File(profileDir, 'res'))
+                String resourceProfile = profile.getProperty('resourceProfile', profileDir.name)
+                res.srcDir(new File(profileDirectory, "${resourceProfile}/res"))
+                File profileManifest = new File(profileDir, 'AndroidManifest.xml')
+                if (profileManifest.isFile()) {
+                    manifest.srcFile(profileManifest)
+                }
             }
         }
     }

@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -83,7 +84,9 @@ logger = logging.getLogger(__name__)
 
 TRUCK_WAITING_LOADING_REASON = 'Ожидание погрузки'
 TRUCK_WAITING_UNLOADING_REASON = 'Ожидание разгрузки'
-TRUCK_POST_UNLOAD_COOLDOWN = timedelta(minutes=10)
+TRUCK_POST_UNLOAD_COOLDOWN = timedelta(
+    seconds=getattr(settings, 'TRUCK_POST_UNLOAD_COOLDOWN_SECONDS', 600)
+)
 
 
 def downtime_event_has_reason(event, reason_name):

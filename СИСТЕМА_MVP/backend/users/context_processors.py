@@ -163,4 +163,6 @@ def role_app(request):
         # Копирование адреса вручную — единственный путь, который работает
         # независимо от того, что именно блокирует переход.
         'current_absolute_url': request.build_absolute_uri() if is_yandex_android else '',
+        'qa_environment_enabled': getattr(settings, 'EXCAVATOR_QA_ENABLED', False),
+        'qa_environment_label': getattr(settings, 'EXCAVATOR_QA_LABEL', ''),
     }

@@ -50,6 +50,22 @@ npm run android:build:excavator
 
 APK появляется в `dist/excavator-debug.apk`.
 
+Для проверки модераторского сценария используется отдельный профиль с другим
+package и QA-хостом:
+
+```powershell
+npm run android:build:excavator-qa
+```
+
+Для RuStore используется профиль `excavator_rustore`: package и подпись те же,
+что у production-приложения, `versionCode` увеличен, а прямой APK-updater и
+разрешение `REQUEST_INSTALL_PACKAGES` отключены. Обновления этой сборки должны
+приходить только через RuStore.
+
+```powershell
+npm run android:release:excavator-rustore
+```
+
 На Windows Gradle/AGP не всегда загружает JVM unit tests из рабочего пути с
 кириллицей, хотя production-код компилируется. Тесты и release-сборки нужно
 запускать через короткий ASCII-путь к тому же worktree, например:

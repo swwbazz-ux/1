@@ -444,6 +444,9 @@ def get_role_app(role_code):
 
 def get_role_app_for_host(host):
     host = _normalized_host(host)
+    alias_role_code = getattr(settings, 'ROLE_APP_HOST_ALIASES', {}).get(host)
+    if alias_role_code:
+        return ROLE_APPS_BY_CODE.get(alias_role_code)
     for base_domain in _base_domains():
         suffix = f'.{base_domain}'
         if not host.endswith(suffix):

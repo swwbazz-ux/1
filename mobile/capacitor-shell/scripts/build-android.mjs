@@ -63,21 +63,24 @@ if (buildType === "release") {
         return [line.slice(0, separator), line.slice(separator + 1)];
       })
   );
-  const apkBaseUrl = properties.updateApkBaseUrl;
-  if (!apkBaseUrl?.startsWith("https://")) {
-    throw new Error(`updateApkBaseUrl must use HTTPS for ${profile}`);
+  const updaterEnabled = properties.inAppUpdaterEnabled !== "false";
+  if (updaterEnabled) {
+    const apkBaseUrl = properties.updateApkBaseUrl;
+    if (!apkBaseUrl?.startsWith("https://")) {
+      throw new Error(`updateApkBaseUrl must use HTTPS for ${profile}`);
+    }
+    const versionCode = Number.parseInt(properties.versionCode, 10);
+    const manifest = {
+      schemaVersion: 1,
+      profile: properties.appProfileId || profile,
+      versionCode,
+      versionName: properties.versionName,
+      apkUrl: `${apkBaseUrl}${properties.appProfileId || profile}-${versionCode}.apk`,
+      sha256: createHash("sha256").update(readFileSync(delivery)).digest("hex"),
+      releaseNotes: "Исправления и улучшения рабочего приложения.",
+    };
+    const updateManifest = join(root, "dist", `${profile}-update.json`);
+    writeFileSync(updateManifest, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    console.log(`Update manifest: ${updateManifest}`);
   }
-  const versionCode = Number.parseInt(properties.versionCode, 10);
-  const manifest = {
-    schemaVersion: 1,
-    profile,
-    versionCode,
-    versionName: properties.versionName,
-    apkUrl: `${apkBaseUrl}${profile}-${versionCode}.apk`,
-    sha256: createHash("sha256").update(readFileSync(delivery)).digest("hex"),
-    releaseNotes: "Исправления и улучшения рабочего приложения.",
-  };
-  const updateManifest = join(root, "dist", `${profile}-update.json`);
-  writeFileSync(updateManifest, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  console.log(`Update manifest: ${updateManifest}`);
 }

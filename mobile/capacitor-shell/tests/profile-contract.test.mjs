@@ -41,6 +41,28 @@ const expectedProfiles = {
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
   },
+  excavator_qa: {
+    serverUrl: "https://qa-excavator.driverform.ru/",
+    startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
+    applicationId: "ru.copperresources.excavator.qa",
+    appName: "Экскаваторщик QA",
+    versionCode: "1",
+    versionName: "1.0.0-qa",
+    splashBackgroundColor: "#02080b",
+    splashAccentColor: "#FFD200",
+    splashIconResource: "app_icon",
+  },
+  excavator_rustore: {
+    serverUrl: "https://excavator.driverform.ru/",
+    startUrl: "https://excavator.driverform.ru/excavator/work/",
+    applicationId: "ru.copperresources.excavator",
+    appName: "Экскаваторщик",
+    versionCode: "16",
+    versionName: "0.1.13",
+    splashBackgroundColor: "#02080b",
+    splashAccentColor: "#FFD200",
+    splashIconResource: "app_icon",
+  },
 };
 
 for (const [profileName, expected] of Object.entries(expectedProfiles)) {
@@ -54,8 +76,13 @@ for (const [profileName, expected] of Object.entries(expectedProfiles)) {
     assert.match(config.applicationId, /^[a-z][a-z0-9_.]+$/);
     assert.ok(config.heartbeatUrl.startsWith(config.serverUrl));
     assert.ok(Number(config.heartbeatIntervalSeconds) >= 15);
-    assert.match(config.updateManifestUrl, /^https:\/\//);
-    assert.match(config.updateApkBaseUrl, /^https:\/\//);
+    if (config.inAppUpdaterEnabled === "false") {
+      assert.equal(config.updateManifestUrl, "");
+      assert.equal(config.updateApkBaseUrl, "");
+    } else {
+      assert.match(config.updateManifestUrl, /^https:\/\//);
+      assert.match(config.updateApkBaseUrl, /^https:\/\//);
+    }
     assert.ok(Number(config.updateCheckIntervalMinutes) >= 5);
     assert.ok(config.alertSoundResource);
     assert.ok(config.syncTokenEnv);
@@ -74,6 +101,19 @@ test("profiles remain isolated by URL and application id", () => {
   assert.notEqual(excavator.applicationId, driver.applicationId);
   assert.notEqual(excavator.foregroundChannelId, driver.foregroundChannelId);
   assert.notEqual(excavator.alertChannelId, driver.alertChannelId);
+});
+
+test("QA and RuStore variants keep role identity but disable sideload updates", () => {
+  const qa = profile("excavator_qa");
+  const rustore = profile("excavator_rustore");
+  assert.equal(qa.appProfileId, "excavator");
+  assert.equal(rustore.appProfileId, "excavator");
+  assert.equal(qa.resourceProfile, "excavator");
+  assert.equal(rustore.resourceProfile, "excavator");
+  assert.equal(qa.inAppUpdaterEnabled, "false");
+  assert.equal(rustore.inAppUpdaterEnabled, "false");
+  assert.notEqual(qa.applicationId, rustore.applicationId);
+  assert.ok(Number(rustore.versionCode) > Number(profile("excavator").versionCode));
 });
 
 test("rejected native phone handoff remains disabled", () => {
@@ -235,6 +275,7 @@ test("native updater is profile-driven, deferrable and verifies the APK", () => 
   const manifest = readFileSync(resolve(root, "android", "app", "src", "main", "AndroidManifest.xml"), "utf8");
   const buildScript = readFileSync(resolve(root, "scripts", "build-android.mjs"), "utf8");
 
+  assert.match(activity, /BuildConfig\.IN_APP_UPDATER_ENABLED/);
   assert.match(activity, /new AppUpdateManager\(this\)/);
   assert.match(activity, /appUpdateManager\.onPageLoaded\(loadedWebView\)/);
   assert.match(updater, /BuildConfig\.UPDATE_MANIFEST_URL/);
@@ -251,4 +292,18 @@ test("native updater is profile-driven, deferrable and verifies the APK", () => 
   assert.doesNotMatch(manifest, /android\.permission\.UPDATE_PACKAGES_WITHOUT_USER_ACTION/);
   assert.match(buildScript, /createHash\("sha256"\)/);
   assert.match(buildScript, /updateManifest/);
+  assert.match(buildScript, /properties\.inAppUpdaterEnabled !== "false"/);
+});
+
+test("store variants remove package-installer permission", () => {
+  const gradle = readFileSync(resolve(root, "android", "app", "build.gradle"), "utf8");
+  for (const profileName of ["excavator_qa", "excavator_rustore"]) {
+    const overlay = readFileSync(
+      resolve(root, "profiles", profileName, "AndroidManifest.xml"),
+      "utf8"
+    );
+    assert.match(overlay, /REQUEST_INSTALL_PACKAGES/);
+    assert.match(overlay, /tools:node="remove"/);
+  }
+  assert.match(gradle, /manifest\.srcFile\(profileManifest\)/);
 });

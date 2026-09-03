@@ -1,0 +1,16 @@
+[Unit]
+Description=Excavator RuStore QA simulator
+After=accounting-mvp-excavator-qa.service
+Requires=accounting-mvp-excavator-qa.service
+
+[Service]
+User=deploy
+Group=www-data
+WorkingDirectory=/srv/accounting-mvp-excavator-qa
+EnvironmentFile=/srv/accounting-mvp-excavator-qa/.env
+ExecStart=/srv/accounting-mvp-excavator-qa/.venv/bin/python manage.py run_excavator_qa_simulator
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -120,8 +120,10 @@ public class MainActivity extends BridgeActivity {
             startupLoadingOverlay.setPageRevealedListener(
                 () -> notifyWebViewPageRevealed(webView)
             );
-            appUpdateManager = new AppUpdateManager(this);
-            appUpdateManager.attach(webView);
+            if (BuildConfig.IN_APP_UPDATER_ENABLED) {
+                appUpdateManager = new AppUpdateManager(this);
+                appUpdateManager.attach(webView);
+            }
             /* BridgeWebViewClient may finish a cached document inside
                super.onCreate(), before the overlay exists. Buffering the
                listener state avoids both unreliable WebView progress and a
@@ -134,10 +136,12 @@ public class MainActivity extends BridgeActivity {
             if (lastObservedWebView == webView && lastObservedPageError) {
                 startupLoadingOverlay.onPageError(webView);
             }
-            if (lastObservedWebView == webView && lastObservedPageState == PageState.LOADED) {
-                appUpdateManager.onPageLoaded(webView);
-            } else {
-                appUpdateManager.onPageStarted(webView);
+            if (appUpdateManager != null) {
+                if (lastObservedWebView == webView && lastObservedPageState == PageState.LOADED) {
+                    appUpdateManager.onPageLoaded(webView);
+                } else {
+                    appUpdateManager.onPageStarted(webView);
+                }
             }
         }
         nativeCoverReady = true;
