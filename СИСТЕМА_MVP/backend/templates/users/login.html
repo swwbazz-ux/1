@@ -447,6 +447,53 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         }
     }
 
+    /* Полноэкранная форма не должна наследовать виртуальный landscape-пульт
+       dispatcher-shell. На низком широком экране располагаем фирменный знак
+       слева, рабочие поля справа, а связь с администратором оставляем отдельной
+       нижней строкой. Размеры остаются долевыми — без подгонки под один телефон. */
+    @media (orientation: landscape) and (max-height: 500px) {
+        body.login-page.login-fullscreen {
+            --login-control-height: 48px;
+            --login-reveal-size: 40px;
+        }
+
+        body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog {
+            align-content: stretch;
+            grid-template-rows: minmax(0, 1fr) auto;
+            row-gap: 8px;
+            padding: 10px 20px;
+        }
+
+        body.login-page.login-fullscreen .unified-login-form {
+            width: 100% !important;
+            max-width: 700px !important;
+            height: 100%;
+            grid-template-columns: minmax(132px, .75fr) minmax(0, 1.25fr);
+            grid-template-rows: none;
+            grid-auto-rows: max-content;
+            column-gap: 20px;
+            row-gap: 6px;
+            align-content: center;
+        }
+
+        body.login-page.login-fullscreen .unified-login-role-identity {
+            grid-column: 1;
+            grid-row: 1 / span 4;
+            align-self: center;
+        }
+
+        body.login-page.login-fullscreen .unified-login-form > h2,
+        body.login-page.login-fullscreen .unified-login-form > .shared-shift-login-field,
+        body.login-page.login-fullscreen .unified-login-form > .unified-login-actions,
+        body.login-page.login-fullscreen .unified-login-form > .unified-login-register {
+            grid-column: 2;
+        }
+
+        body.login-page.login-fullscreen .unified-login-actions button {
+            min-height: 48px;
+        }
+    }
+
     /* Пока открыта клавиатура, она закрывает нижнюю половину экрана. Содержимое
        больше не центрируем по всей высоте — иначе поля и кнопка «Войти»
        оказываются под клавиатурой. Прижимаем к верху и убираем крупную шапку:

@@ -77,6 +77,16 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
             template,
         )
         self.assertIn('height: 100%;', template)
+        self.assertIn(
+            '@media (orientation: landscape) and (max-height: 500px)',
+            template,
+        )
+        self.assertIn(
+            'grid-template-columns: minmax(132px, .75fr) minmax(0, 1.25fr);',
+            template,
+        )
+        self.assertIn('grid-template-rows: minmax(0, 1fr) auto;', template)
+        self.assertIn('grid-row: 1 / span 4;', template)
 
     def test_pwa_install_intent_keeps_button_and_status_copy_stable(self):
         response = Client().get(
