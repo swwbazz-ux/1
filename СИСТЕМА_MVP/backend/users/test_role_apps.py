@@ -392,6 +392,7 @@ class RoleAppLoginTests(TestCase):
         self.assertNotContains(excavator_response, 'value="continue">Далее')
         self.assertContains(excavator_response, 'excavator-login-v1.css')
         self.assertContains(excavator_response, 'start-hero-v1.webp')
+        self.assertNotContains(excavator_response, 'data-login-install-gate')
 
         self.assertNotContains(
             driver_response,
@@ -400,6 +401,7 @@ class RoleAppLoginTests(TestCase):
         self.assertNotContains(driver_response, 'name="access_code"')
         self.assertContains(driver_response, 'value="continue">Далее')
         self.assertNotContains(driver_response, 'excavator-login-v1.css')
+        self.assertContains(driver_response, 'data-login-install-gate')
 
     def test_excavator_combined_post_keeps_existing_session_and_redirect(self):
         response = self.client.post(

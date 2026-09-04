@@ -116,7 +116,7 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         self.assertContains(response, 'data-support-channel="max"', count=1)
         self.assertContains(response, 'max-support-link-v1.css?v=6')
         self.assertIn(
-            '</section>\n    {% comment %}\n    Общий нижний док',
+            '</section>\n    {% endif %}\n    {% comment %}\n    Общий нижний док',
             template,
         )
         self.assertIn('position: fixed', stylesheet)
