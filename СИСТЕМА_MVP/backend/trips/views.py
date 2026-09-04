@@ -533,7 +533,7 @@ EXCAVATOR_MANIFEST = {
 }
 
 EXCAVATOR_SERVICE_WORKER_JS = r"""
-const CACHE_NAME = "excavator-mobile-shell-v79";
+const CACHE_NAME = "excavator-mobile-shell-v80";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -3217,6 +3217,19 @@ def excavator_work_view(request):
     else:
         active_trips_queryset = active_trips_queryset.filter(excavator_operator=access.employee)
     active_trips = list(active_trips_queryset[:20])
+    last_sent_trip = None
+    if open_shift:
+        last_sent_trip = (
+            Trip.objects
+            .filter(loading_shift=open_shift)
+            .only('assigned_dump_point_id', 'dump_point_id', 'created_at')
+            .order_by('-created_at', '-id')
+            .first()
+        )
+    last_sent_dump_point_id = (
+        (last_sent_trip.assigned_dump_point_id or last_sent_trip.dump_point_id)
+        if last_sent_trip else None
+    )
     blocking_trips = []
     if assignment_truck_ids:
         blocking_trips = list(
@@ -3584,6 +3597,7 @@ def excavator_work_view(request):
     for card in dump_cards:
         point_id = card['point'].id
         card['completed_count'] = completed_by_dump_id[point_id]
+        card['is_last_sent'] = point_id == last_sent_dump_point_id
         card['pending_trucks'] = [
             {
                 'truck_id': trip.truck_id,

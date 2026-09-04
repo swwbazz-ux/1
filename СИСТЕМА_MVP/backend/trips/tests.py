@@ -637,7 +637,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-work-v55-shift.css')
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'scope: "/excavator/"')
-        self.assertContains(response, 'excavator-mobile-shell-v79')
+        self.assertContains(response, 'excavator-mobile-shell-v80')
         self.assertContains(response, 'Простои')
         self.assertNotContains(response, 'Отпустить сюда')
         self.assertContains(response, 'resolveExcavatorUpdateVersion')
@@ -1209,7 +1209,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v79', script)
+        self.assertIn('excavator-mobile-shell-v80', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -1416,6 +1416,40 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         pending_assignment.refresh_from_db()
         self.assertEqual(pending_assignment.status, AssignmentStatus.ACCEPTED)
         self.assertIsNotNone(pending_assignment.accepted_at)
+
+    def test_excavator_work_marks_last_sent_dump_point(self):
+        second_dump = DumpPoint.objects.create(name='Рудный склад')
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            loading_shift=shift,
+            rock_type=self.rock,
+            dump_point=second_dump,
+            assigned_dump_point=second_dump,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+        session = self.client.session
+        session['excavator_work_settings'] = {
+            str(self.excavator.id): {
+                'rock_type_id': self.rock.id,
+                'dump_point_ids': [self.dump_point.id, second_dump.id],
+                'loading_horizon': '125',
+                'loading_block': '4',
+            },
+        }
+        session.save()
+
+        response = self.client.get(reverse('excavator_work'))
+
+        last_sent_cards = [card for card in response.context['dump_cards'] if card['is_last_sent']]
+        self.assertEqual([card['point'].id for card in last_sent_cards], [second_dump.id])
+        self.assertContains(
+            response,
+            f'data-eo-dump-target="{second_dump.id}" data-eo-dump-name="Рудный склад"',
+        )
+        self.assertContains(response, 'is-last-dump')
 
     def post_truck_loaded(self, *, client_action_id='load-1', truck=None, dump_point=None, rock=None):
         return self.client.post(
