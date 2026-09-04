@@ -38,6 +38,9 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         SplashScreen splashScreen = SplashScreen.installSplashScreen(this);
         splashScreen.setKeepOnScreenCondition(() -> !nativeCoverReady);
+        if ("excavator".equals(BuildConfig.APP_PROFILE_ID)) {
+            registerPlugin(NativeSoundPlugin.class);
+        }
         CookieManager.getInstance().setAcceptCookie(true);
         bridgeBuilder.addWebViewListener(new WebViewListener() {
             @Override

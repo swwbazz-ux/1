@@ -281,6 +281,8 @@ test("production Excavator load handler retries a lost successful response with 
             function updatePendingTruckBadgeTrip() {}
             function applyActiveDowntime() {}
             function clearActiveDowntime() {}
+            function playExcavatorSound() { return Promise.resolve(true); }
+            function showExcavatorNotice() {}
             function generateClientActionId() {
                 return context.generateClientActionId();
             }
@@ -425,6 +427,8 @@ test("production Excavator late deduplicated load rolls back optimistic state an
             }
             function applyActiveDowntime() {}
             function clearActiveDowntime() {}
+            function playExcavatorSound() { return Promise.resolve(true); }
+            function showExcavatorNotice() {}
             function generateClientActionId() {
                 return "truck-loaded-terminal-action";
             }

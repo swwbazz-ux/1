@@ -24,8 +24,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "15",
-    versionName: "0.1.12",
+    versionCode: "18",
+    versionName: "0.1.15",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -46,8 +46,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator.qa",
     appName: "Экскаваторщик QA",
-    versionCode: "1",
-    versionName: "1.0.0-qa",
+    versionCode: "2",
+    versionName: "1.0.1-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -57,8 +57,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "17",
-    versionName: "0.1.14",
+    versionCode: "20",
+    versionName: "0.1.15",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -68,8 +68,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "16",
-    versionName: "0.1.13-alpha",
+    versionCode: "19",
+    versionName: "0.1.15-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -132,6 +132,40 @@ test("QA and RuStore variants keep role identity but disable sideload updates", 
   assert.notEqual(rustoreQa.serverUrl, rustore.serverUrl);
   assert.ok(Number(rustore.versionCode) > Number(rustoreQa.versionCode));
   assert.ok(Number(rustore.versionCode) > Number(profile("excavator").versionCode));
+});
+
+test("every excavator build embeds the complete loud sound pack", () => {
+  const soundNames = [
+    "excavator_truck_assigned.wav",
+    "excavator_action_ok.wav",
+    "excavator_action_error.wav",
+    "excavator_connection_lost.wav",
+    "excavator_connection_restored.wav",
+    "excavator_shift_start.wav",
+    "excavator_shift_end.wav",
+  ];
+  const nativeRaw = resolve(root, "profiles", "excavator", "res", "raw");
+  const webAudio = resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "static", "audio", "excavator");
+  for (const soundName of soundNames) {
+    const nativeBytes = readFileSync(resolve(nativeRaw, soundName));
+    const webBytes = readFileSync(resolve(webAudio, soundName));
+    assert.equal(nativeBytes.subarray(0, 4).toString("ascii"), "RIFF");
+    assert.equal(nativeBytes.subarray(8, 12).toString("ascii"), "WAVE");
+    assert.deepEqual(nativeBytes, webBytes);
+  }
+  for (const profileName of ["excavator", "excavator_qa", "excavator_rustore_qa", "excavator_rustore"]) {
+    const config = profile(profileName);
+    assert.equal(config.resourceProfile || profileName, "excavator");
+    assert.equal(config.alertSoundResource, "excavator_truck_assigned");
+    assert.match(config.alertChannelId, /_v2$/);
+  }
+
+  const activity = readFileSync(resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile", "MainActivity.java"), "utf8");
+  const plugin = readFileSync(resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile", "NativeSoundPlugin.java"), "utf8");
+  assert.match(activity, /"excavator"\.equals\(BuildConfig\.APP_PROFILE_ID\)[\s\S]*?registerPlugin\(NativeSoundPlugin\.class\)/);
+  assert.match(plugin, /@CapacitorPlugin\(name = "NativeSound"\)/);
+  assert.match(plugin, /setVolume\(1\.0f, 1\.0f\)/);
+  assert.match(plugin, /USAGE_ASSISTANCE_SONIFICATION/);
 });
 
 test("rejected native phone handoff remains disabled", () => {

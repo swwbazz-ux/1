@@ -6,13 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v196">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v196">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v196">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v196">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v196">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v196">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v196" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v197">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v197">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v197">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v197">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v197">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v197">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v197" defer></script>
+<script src="{% static 'js/excavator-sounds-v1.js' %}?v=excavator-mobile-shell-v197" data-excavator-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -397,7 +398,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v196";
+var excavatorShellVersion = "excavator-mobile-shell-v197";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -407,8 +408,6 @@ var excavatorNotice = document.querySelector("[data-eo-notice]");
 var excavatorNoticeTimer = null;
 var excavatorNoticeLastKey = "";
 var excavatorNoticeLastShownAt = 0;
-var excavatorAssignmentAudioContext = null;
-var excavatorAssignmentAudioUnlocked = false;
 
 function compactExcavatorNotice(message) {
     var text = String(message || "Действие не выполнено").trim();
@@ -452,26 +451,11 @@ function showExcavatorNotice(message, options) {
 
 window.showExcavatorNotice = showExcavatorNotice;
 
-function getExcavatorAssignmentAudioContext() {
-    if (excavatorAssignmentAudioContext) return excavatorAssignmentAudioContext;
-    var AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) return null;
-    try {
-        excavatorAssignmentAudioContext = new AudioContextClass();
-    } catch (error) {
-        excavatorAssignmentAudioContext = null;
+function playExcavatorSound(name) {
+    if (!window.ExcavatorSounds || typeof window.ExcavatorSounds.play !== "function") {
+        return Promise.resolve(false);
     }
-    return excavatorAssignmentAudioContext;
-}
-
-function unlockExcavatorAssignmentAudio() {
-    if (excavatorAssignmentAudioUnlocked) return;
-    var context = getExcavatorAssignmentAudioContext();
-    if (!context) return;
-    var unlock = context.state === "suspended" ? context.resume() : Promise.resolve();
-    Promise.resolve(unlock).then(function () {
-        excavatorAssignmentAudioUnlocked = context.state === "running";
-    }).catch(function () {});
+    return window.ExcavatorSounds.play(name);
 }
 
 function playExcavatorAssignmentAlert() {
@@ -480,42 +464,8 @@ function playExcavatorAssignmentAlert() {
             navigator.vibrate([180, 90, 180]);
         } catch (error) {}
     }
-    var context = getExcavatorAssignmentAudioContext();
-    if (!context) return;
-    var playTones = function () {
-        if (context.state !== "running") return;
-        var startAt = context.currentTime;
-        [
-            {frequency: 740, offset: 0},
-            {frequency: 980, offset: .22}
-        ].forEach(function (tone) {
-            var oscillator = context.createOscillator();
-            var gain = context.createGain();
-            oscillator.type = "sine";
-            oscillator.frequency.setValueAtTime(tone.frequency, startAt + tone.offset);
-            gain.gain.setValueAtTime(.0001, startAt + tone.offset);
-            gain.gain.exponentialRampToValueAtTime(.18, startAt + tone.offset + .025);
-            gain.gain.exponentialRampToValueAtTime(.0001, startAt + tone.offset + .17);
-            oscillator.connect(gain);
-            gain.connect(context.destination);
-            oscillator.start(startAt + tone.offset);
-            oscillator.stop(startAt + tone.offset + .18);
-        });
-    };
-    if (context.state === "suspended") {
-        context.resume().then(playTones).catch(function () {});
-        return;
-    }
-    playTones();
+    playExcavatorSound("truck_assigned");
 }
-
-["pointerdown", "touchstart", "keydown"].forEach(function (eventName) {
-    document.addEventListener(eventName, unlockExcavatorAssignmentAudio, {
-        capture: true,
-        passive: true,
-        once: true
-    });
-});
 
 function readExcavatorAssignmentSnapshot(root) {
     var snapshot = {};
@@ -1640,6 +1590,7 @@ window.initExcavatorWorkShell = function () {
             return;
         }
         if (!truckLoadedCancelUrl || !item || !item.dataset.tripId) {
+            playExcavatorSound("action_error");
             showQueueNote("Серверная отмена для этого рейса недоступна.", true);
             return;
         }
@@ -1670,6 +1621,7 @@ window.initExcavatorWorkShell = function () {
                 return data;
             });
         }).then(function (data) {
+            playExcavatorSound("action_ok");
             var dumpTarget = shell.querySelector('[data-eo-dump-target="' + (data.dump_point_id || item.dataset.dumpPointId) + '"]');
             removePendingTruckBadge(dumpTarget, data.truck_id || item.dataset.truckId, data.trip_id || item.dataset.tripId);
             restoreTruckAfterLoadedCancel(cardByTruckId(data.truck_id || item.dataset.truckId), data);
@@ -1679,6 +1631,7 @@ window.initExcavatorWorkShell = function () {
                 window.AppRealtime.wake("truck_loaded_cancel");
             }
         }).catch(function (error) {
+            playExcavatorSound("action_error");
             item.disabled = false;
             showQueueNote(error.message || "Назначение не отменено", true);
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
@@ -1784,6 +1737,7 @@ window.initExcavatorWorkShell = function () {
         });
         var isSelected = button.classList.contains("is-selected");
         if (isSelected && selectedButtons.length <= 1) {
+            playExcavatorSound("action_error");
             showExcavatorNotice("Оставьте хотя бы одну точку разгрузки.");
             return;
         }
@@ -1964,6 +1918,7 @@ window.initExcavatorWorkShell = function () {
         }
         if (!card || !dumpTarget || !truckLoadedUrl) return;
         if (!canTruckLoad(card)) {
+            playExcavatorSound("action_error");
             showExcavatorNotice(truckLoadBlockReason(card));
             return;
         }
@@ -2016,6 +1971,7 @@ window.initExcavatorWorkShell = function () {
                 return data;
             });
         }).then(function (data) {
+            playExcavatorSound("action_ok");
             delete card.dataset.eoLoadActionKey;
             delete card.dataset.eoLoadActionId;
             if (data.refresh_required) {
@@ -2043,6 +1999,7 @@ window.initExcavatorWorkShell = function () {
                 window.AppRealtime.wake("truck_loaded");
             }
         }).catch(function (error) {
+            playExcavatorSound("action_error");
             restoreTruckCard(card, snapshot);
             if (optimisticBadge) optimisticBadge.remove();
             ensureMutedPendingBadge(pendingBadgeList(dumpTarget));
@@ -2330,6 +2287,7 @@ window.initExcavatorWorkShell = function () {
             var lockedRegion = event.target.closest(".mobile-face__content, .mobile-face__actions");
             if (!lockedRegion || !faceScreen.contains(lockedRegion)) return;
             event.preventDefault();
+            playExcavatorSound("action_error");
             showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "shift-lock" });
         });
     }
@@ -2340,6 +2298,7 @@ window.initExcavatorWorkShell = function () {
             var lockedRegion = event.target.closest(".eo-reason-grid, .mobile-downtime__actions");
             if (!lockedRegion || !eventsScreen.contains(lockedRegion)) return;
             event.preventDefault();
+            playExcavatorSound("action_error");
             showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "shift-lock" });
         });
     }
@@ -2350,6 +2309,7 @@ window.initExcavatorWorkShell = function () {
             var lockedRegion = event.target.closest(".eo-dashboard-truck-grid, .eo-dashboard-unload-grid");
             if (!lockedRegion || !workScreen.contains(lockedRegion)) return;
             event.preventDefault();
+            playExcavatorSound("action_error");
             showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "shift-lock" });
         });
     }
@@ -2502,6 +2462,7 @@ window.initExcavatorWorkShell = function () {
                     reason_id: button.dataset.eoDowntimeReasonId,
                     client_action_id: generateClientActionId("excavator-downtime")
                 }).then(function (payload) {
+                    playExcavatorSound("action_ok");
                     applyActiveDowntime(payload);
                     if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                         try {
@@ -2511,6 +2472,7 @@ window.initExcavatorWorkShell = function () {
                         }
                     }
                 }, function (error) {
+                    playExcavatorSound("action_error");
                     downtimeReasonButtons.forEach(function (item) {
                         item.classList.remove("is-selected");
                     });
@@ -2564,6 +2526,7 @@ window.initExcavatorWorkShell = function () {
             var horizonInput = shell.querySelector("[data-eo-face-horizon]");
             var blockInput = shell.querySelector("[data-eo-face-block]");
             if (!settingsUrl || !rockSelect || !ids.length) {
+                playExcavatorSound("action_error");
                 showExcavatorNotice("Выберите породу и хотя бы одну точку разгрузки");
                 setApplySettingsLabel("Применить настройки");
                 return;
@@ -2599,6 +2562,7 @@ window.initExcavatorWorkShell = function () {
                     return data;
                 });
             }).then(function (data) {
+                playExcavatorSound("action_ok");
                 var savedIds = normalizeDumpPointIds(data.dump_point_ids || ids);
                 replaceDraftDumpPointIds(savedIds);
                 replacePersistedDumpPointIds(savedIds);
@@ -2629,6 +2593,7 @@ window.initExcavatorWorkShell = function () {
                     }
                 });
             }, function (error) {
+                playExcavatorSound("action_error");
                 setFaceSettingsPending(false);
                 applySettings.classList.remove("is-pending");
                 setApplySettingsLabel("Применить настройки");
@@ -2659,6 +2624,7 @@ window.initExcavatorWorkShell = function () {
     }
 
     function showShiftErrors(message, fieldErrors) {
+        playExcavatorSound("action_error");
         clearShiftErrors();
         if (shiftFormError) {
             shiftFormError.textContent = message || "Проверьте показания.";
@@ -2798,6 +2764,7 @@ window.initExcavatorWorkShell = function () {
                 return data;
             });
         }).then(function () {
+            playExcavatorSound(action === "close" ? "shift_end" : "shift_start");
             shiftPendingActionKey = "";
             shiftPendingActionId = "";
             if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "false";
@@ -2836,6 +2803,7 @@ window.initExcavatorWorkShell = function () {
             },
             onBlockedPress: function () {
                 if (shiftServerBlocked) {
+                    playExcavatorSound("action_error");
                     showExcavatorNotice(shiftBlockMessage || "Смена сейчас недоступна.");
                     return;
                 }
@@ -2875,6 +2843,7 @@ window.initExcavatorWorkShell = function () {
                 action: "close",
                 client_action_id: generateClientActionId("excavator-downtime-close")
             }).then(function (payload) {
+                playExcavatorSound("action_ok");
                 clearActiveDowntime(payload);
                 if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                     try {
@@ -2884,6 +2853,7 @@ window.initExcavatorWorkShell = function () {
                     }
                 }
             }, function (error) {
+                playExcavatorSound("action_error");
                 showExcavatorNotice(error.message || "Простой не завершен");
                 var canRetry = !!(
                     downtimeCard

@@ -757,7 +757,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v196";
+const CACHE_NAME = "excavator-mobile-shell-v197";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
@@ -774,6 +774,7 @@ const CORE_ASSETS = [
   "/static/css/mobile-downtime-unified-v1.css",
   "/static/css/excavator-login-v1.css",
   "/static/js/mobile-shift-unified-v1.js",
+  "/static/js/excavator-sounds-v1.js",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
   "/static/img/pwa/excavator-180.png",
@@ -789,7 +790,14 @@ const CORE_ASSETS = [
   "/static/img/equipment/truck-gray.png",
   "/static/img/equipment/truck-green.png",
   "/static/img/equipment/truck-yellow.png",
-  "/static/img/equipment/truck-red.png"
+  "/static/img/equipment/truck-red.png",
+  "/static/audio/excavator/excavator_truck_assigned.wav",
+  "/static/audio/excavator/excavator_action_ok.wav",
+  "/static/audio/excavator/excavator_action_error.wav",
+  "/static/audio/excavator/excavator_connection_lost.wav",
+  "/static/audio/excavator/excavator_connection_restored.wav",
+  "/static/audio/excavator/excavator_shift_start.wav",
+  "/static/audio/excavator/excavator_shift_end.wav"
 ];
 
 self.addEventListener("install", event => {
