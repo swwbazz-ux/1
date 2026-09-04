@@ -952,8 +952,8 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
     min-height: var(--eo-dump-card-min-h) !important;
     height: 100% !important;
     transform-origin: center center !important;
-    transition: flex-grow .18s cubic-bezier(.2, .8, .2, 1), opacity .16s ease, filter .16s ease, border-color .16s ease, box-shadow .16s ease !important;
-    will-change: flex-grow, opacity, filter !important;
+    transition: flex-grow .18s cubic-bezier(.2, .8, .2, 1), height .18s cubic-bezier(.2, .8, .2, 1), width .18s cubic-bezier(.2, .8, .2, 1), opacity .16s ease, filter .16s ease, border-color .16s ease, box-shadow .16s ease !important;
+    will-change: flex-grow, height, width, opacity, filter !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-card.is-drop-ready {
@@ -967,20 +967,40 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
 body.excavator-operator-screen .eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid {
     display: flex !important;
     flex-wrap: nowrap !important;
-    align-items: stretch !important;
-    overflow: hidden !important;
+    align-items: flex-end !important;
+    overflow: visible !important;
 }
 
 body.excavator-operator-screen .eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-card {
     flex: .72 1 0 !important;
+    align-self: flex-end !important;
+    height: 78% !important;
     opacity: .52 !important;
     filter: brightness(.72) saturate(.55) !important;
 }
 
 body.excavator-operator-screen .eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-card.is-drop-ready {
     flex: 1.56 1 0 !important;
+    height: 112% !important;
     opacity: 1 !important;
     filter: brightness(1.16) saturate(1.12) !important;
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+    body.excavator-operator-screen .eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid {
+        flex-direction: column !important;
+        align-items: flex-end !important;
+    }
+
+    body.excavator-operator-screen .eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-card {
+        width: 78% !important;
+        height: auto !important;
+    }
+
+    body.excavator-operator-screen .eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-card.is-drop-ready {
+        width: 112% !important;
+        height: auto !important;
+    }
 }
 
 body.excavator-operator-screen .eo-dashboard-unload-card.is-last-dump:not(.is-drop-ready) {

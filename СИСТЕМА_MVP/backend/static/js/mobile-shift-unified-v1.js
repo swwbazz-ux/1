@@ -152,6 +152,22 @@
         if (raw !== next) input.value = next;
     }
 
+    function focusWithoutScroll(element) {
+        try {
+            element.focus({ preventScroll: true });
+        } catch (error) {
+            element.focus();
+        }
+    }
+
+    function hideVirtualKeyboard() {
+        var keyboard = window.navigator.virtualKeyboard;
+        if (!keyboard || typeof keyboard.hide !== "function") return;
+        try {
+            keyboard.hide();
+        } catch (error) {}
+    }
+
     function bindFieldNavigation(component) {
         if (!component || component.dataset.mobileShiftFieldsBound === "true") return;
         component.dataset.mobileShiftFieldsBound = "true";
@@ -161,18 +177,17 @@
         );
         fields.forEach(function (input, index) {
             var isLast = index === fields.length - 1;
-            input.setAttribute("inputmode", "numeric");
-            input.setAttribute("step", "1");
-            input.setAttribute("pattern", "[0-9]*");
-            input.setAttribute("enterkeyhint", isLast ? "done" : "next");
-            if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
-            input.addEventListener("beforeinput", function (event) {
-                if (event.data && /\D/.test(event.data)) event.preventDefault();
-            });
-            input.addEventListener("input", function () { keepWholeNumber(input); });
-            input.addEventListener("keydown", function (event) {
-                if (event.key !== "Enter" && event.keyCode !== 13) return;
-                event.preventDefault();
+            var navigationLocked = false;
+
+            function isEnterEvent(event) {
+                return event.key === "Enter" || event.keyCode === 13;
+            }
+
+            function advanceField(event) {
+                if (event && event.preventDefault) event.preventDefault();
+                if (navigationLocked) return;
+                navigationLocked = true;
+                window.setTimeout(function () { navigationLocked = false; }, 240);
                 var next = fields[index + 1];
                 if (next) {
                     next.focus();
@@ -180,23 +195,40 @@
                     return;
                 }
                 input.blur();
+                hideVirtualKeyboard();
                 var action = component.querySelector(
                     "[data-driver-shift-open-button], [data-driver-shift-close-button], [data-eo-shift-button]"
                 );
-                if (action && !action.disabled && !action.hidden && !action.classList.contains("is-pending")) {
-                    try {
-                        action.focus({ preventScroll: true });
-                    } catch (error) {
-                        action.focus();
-                    }
+                var focusTarget = action && !action.disabled && !action.hidden && !action.classList.contains("is-pending")
+                    ? action
+                    : component;
+                if (focusTarget === component && !component.hasAttribute("tabindex")) {
+                    component.setAttribute("tabindex", "-1");
+                }
+                window.requestAnimationFrame(function () { focusWithoutScroll(focusTarget); });
+            }
+
+            input.setAttribute("inputmode", "numeric");
+            input.setAttribute("step", "1");
+            input.setAttribute("pattern", "[0-9]*");
+            input.setAttribute("enterkeyhint", isLast ? "done" : "next");
+            if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
+            input.addEventListener("beforeinput", function (event) {
+                if (event.inputType === "insertLineBreak" || event.inputType === "insertParagraph") {
+                    advanceField(event);
                     return;
                 }
-                if (!component.hasAttribute("tabindex")) component.setAttribute("tabindex", "-1");
-                try {
-                    component.focus({ preventScroll: true });
-                } catch (error) {
-                    component.focus();
-                }
+                if (event.data && /\D/.test(event.data)) event.preventDefault();
+            });
+            input.addEventListener("input", function () { keepWholeNumber(input); });
+            input.addEventListener("keydown", function (event) {
+                if (isEnterEvent(event)) advanceField(event);
+            });
+            input.addEventListener("keyup", function (event) {
+                if (isEnterEvent(event)) advanceField(event);
+            });
+            input.addEventListener("change", function () {
+                if (document.activeElement === input) advanceField();
             });
         });
     }
