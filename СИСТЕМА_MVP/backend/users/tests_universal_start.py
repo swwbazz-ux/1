@@ -119,7 +119,7 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'start-hero-v1.webp')
         self.assertContains(response, 'start-hero-v1.jpg')
         self.assertContains(response, 'fetchpriority="high"')
-        self.assertContains(response, 'start-page-v1.css?v=20260903-12')
+        self.assertContains(response, 'start-page-v1.css?v=20260904-14')
         self.assertContains(response, 'start-page-v1.js?v=20260904-8')
         self.assertNotContains(response, 'data-connection-indicator')
         self.assertNotContains(response, 'data-app-realtime-status')
@@ -267,7 +267,14 @@ class UniversalStartTests(TestCase):
         self.add_access('driver', 'Водитель самосвала')
         response = self.post()
         self.assertTrue(response.context['has_working_code'])
-        self.assertContains(response, 'Выберите способ запуска приложения.')
+        self.assertContains(
+            response,
+            '<span>Выберите способ запуска приложения</span>',
+            count=1,
+            html=True,
+        )
+        self.assertNotContains(response, 'Выберите способ запуска приложения.')
+        self.assertNotContains(response, 'Рекомендуем установить APK-версию.')
         self.assertNotContains(response, 'Пинкод придумаете при первом входе')
 
     def test_person_without_a_code_sees_the_same_launch_choice(self):
@@ -278,7 +285,14 @@ class UniversalStartTests(TestCase):
         )
         response = self.post()
         self.assertFalse(response.context['has_working_code'])
-        self.assertContains(response, 'Выберите способ запуска приложения.')
+        self.assertContains(
+            response,
+            '<span>Выберите способ запуска приложения</span>',
+            count=1,
+            html=True,
+        )
+        self.assertNotContains(response, 'Выберите способ запуска приложения.')
+        self.assertNotContains(response, 'Рекомендуем установить APK-версию.')
         self.assertNotContains(response, 'Пинкод придумаете при первом входе')
 
     def test_apps_are_shown_as_icon_tiles(self):
@@ -314,8 +328,28 @@ class UniversalStartTests(TestCase):
         self.assertNotContains(response, 'data-connection-indicator')
         self.assertNotContains(response, 'data-app-realtime-status')
         self.assertNotContains(response, 'data-app-realtime-update')
+        self.assertNotContains(response, '>Онлайн<')
         self.assertIn('start-screen__opt-arrow', html)
         self.assertIn('start-screen__role-accent', html)
+
+    def test_android_launch_options_are_whole_card_links(self):
+        self.add_apk('apk/driver-10.apk')
+        self.add_access('driver', 'Водитель самосвала')
+
+        response = self.post(user_agent=ANDROID_USER_AGENT)
+        html = response.content.decode('utf-8')
+        anchors = re.findall(
+            r'<a class="start-screen__opt [^"]+"[^>]*data-start-install-option="(native|browser)"[^>]*>(.*?)</a>',
+            html,
+            re.S,
+        )
+
+        self.assertEqual([kind for kind, _ in anchors], ['native', 'browser'])
+        for _kind, content in anchors:
+            self.assertIn('start-screen__opt-icon', content)
+            self.assertIn('start-screen__opt-text', content)
+            self.assertIn('start-screen__opt-arrow', content)
+            self.assertNotRegex(content, r'<(?:a|button|input|select|textarea)\b')
         self.assertNotIn('start-screen__chevrons', html)
 
     def test_supported_role_without_custom_theme_uses_neutral_component(self):
@@ -374,9 +408,9 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'data-start-install-option="native"', count=2)
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=2)
-        self.assertContains(response, '<span>Установить приложение</span> <i>РЕКОМЕНДУЕТСЯ</i>', count=2)
+        self.assertContains(response, '<span>Установить приложение</span> <i>Рекомендуется</i>', count=2)
         self.assertContains(response, '<span>Открыть в браузере</span> <i>ВЕБ-ВЕРСИЯ</i>', count=2)
-        self.assertContains(response, 'Рекомендуем установить APK-версию.')
+        self.assertNotContains(response, 'Рекомендуем установить APK-версию.')
         self.assertContains(response, '<span>APK · версия 0.1.12</span>', count=1)
         self.assertContains(response, '<span>APK · версия 0.1.8</span>', count=1)
         self.assertContains(response, '<span>Скачать и установить</span>', count=2)
@@ -543,7 +577,48 @@ class UniversalStartTests(TestCase):
             r'(?s)\.start-screen--result\s*\{[^}]*overflow-x: clip;'
             r'[^}]*overflow-y: visible;',
         )
-        self.assertIn('min-height: 88px', stylesheet)
+        self.assertRegex(
+            stylesheet,
+            r'(?s)\.start-screen--result \.start-screen__opt,\s*'
+            r'\.start-screen--result \.start-screen__opt--native\s*\{'
+            r'[^}]*min-height: 100px;',
+        )
+        self.assertRegex(
+            stylesheet,
+            r'(?s)\.start-screen--result \.start-screen__back\s*\{'
+            r'[^}]*min-height: 44px;',
+        )
+        self.assertRegex(
+            stylesheet,
+            r'(?s)\.start-screen--result \.start-screen__inner > \.max-support-link\s*\{'
+            r'[^}]*min-height: 48px;',
+        )
+        self.assertIn(
+            'border: 1px solid color-mix(in srgb, var(--role-accent) 24%, rgba(137, 151, 157, .16));',
+            stylesheet,
+        )
+        self.assertIn(
+            'border-bottom: 1px solid color-mix(in srgb, var(--role-accent) 17%, rgba(137, 151, 157, .11));',
+            stylesheet,
+        )
+        self.assertRegex(
+            stylesheet,
+            r'(?s)\.start-screen__opt--browser \.start-screen__opt-arrow\s*\{'
+            r'[^}]*opacity: \.66;[^}]*filter: none;',
+        )
+        self.assertIn('min-height: 100px', stylesheet)
+        self.assertIn('font-size: clamp(17px, 4.4vw, 18px)', stylesheet)
+        self.assertIn('font-size: clamp(13px, 3.45vw, 14px)', stylesheet)
+        self.assertIn('font-size: clamp(12.5px, 3.25vw, 13.5px)', stylesheet)
+        self.assertRegex(
+            stylesheet,
+            r'(?s)\.start-screen__opt-text b i\s*\{[^}]*letter-spacing: 0;'
+            r'[^}]*white-space: nowrap;',
+        )
+        self.assertIn(
+            'padding: 0 max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));',
+            stylesheet,
+        )
         self.assertRegex(
             stylesheet,
             r'\.start-screen--result \.start-hero__backdrop\s*\{\s*display: none;',

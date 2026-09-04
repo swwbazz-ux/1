@@ -22,7 +22,7 @@
     <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'img/share/start-share.png' %}?v=2">
     <link rel="preload" as="image" href="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
     <link rel="stylesheet" href="{% static 'css/max-support-link-v1.css' %}?v=6">
-    <link rel="stylesheet" href="{% static 'css/start-page-v1.css' %}?v=20260903-12">
+    <link rel="stylesheet" href="{% static 'css/start-page-v1.css' %}?v=20260904-14">
     <script src="{% static 'js/start-page-v1.js' %}?v=20260904-8" defer></script>
 {% endblock %}
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
@@ -65,8 +65,7 @@
                     </span>
                 </div>
                 <p class="start-result-card__lead">
-                    <span>Выберите способ запуска приложения.</span>
-                    {% if apps.0.apk %}<strong>Рекомендуем установить APK-версию.</strong>{% endif %}
+                    <span>Выберите способ запуска приложения</span>
                 </p>
                 <div class="start-screen__apps">
                     {% for item in apps %}
@@ -88,7 +87,7 @@
                                             <span class="start-screen__opt-badge start-screen__opt-badge--apk">APK</span>
                                         </span>
                                         <span class="start-screen__opt-text">
-                                            <b><span>Установить приложение</span> <i>РЕКОМЕНДУЕТСЯ</i></b>
+                                            <b><span>Установить приложение</span> <i>Рекомендуется</i></b>
                                             <em><span>APK · версия {{ item.apk.version }}</span><span>Скачать и установить</span></em>
                                         </span>
                                         <svg class="start-screen__opt-arrow" viewBox="0 0 32 24" fill="none" aria-hidden="true">
