@@ -47,6 +47,9 @@ public class MainActivity extends BridgeActivity {
             @Override
             public void onPageStarted(WebView loadingWebView) {
                 runOnUiThread(() -> {
+                    if (loadingWebView instanceof NativeImeWebView) {
+                        ((NativeImeWebView) loadingWebView).clearNativeImeAction();
+                    }
                     lastObservedWebView = loadingWebView;
                     lastObservedPageState = PageState.STARTED;
                     lastObservedPageError = false;

@@ -24,8 +24,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "21",
-    versionName: "0.1.16",
+    versionCode: "23",
+    versionName: "0.1.17",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -46,8 +46,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator.qa",
     appName: "Экскаваторщик QA",
-    versionCode: "3",
-    versionName: "1.0.2-qa",
+    versionCode: "4",
+    versionName: "1.0.3-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -57,8 +57,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "22",
-    versionName: "0.1.16",
+    versionCode: "24",
+    versionName: "0.1.17",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -68,8 +68,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "21",
-    versionName: "0.1.16-rc",
+    versionCode: "23",
+    versionName: "0.1.17-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -172,10 +172,20 @@ test("native builds expose an explicit keyboard close bridge", () => {
   const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
   const activity = readFileSync(resolve(javaRoot, "MainActivity.java"), "utf8");
   const plugin = readFileSync(resolve(javaRoot, "NativeKeyboardPlugin.java"), "utf8");
+  const imeWebView = readFileSync(resolve(javaRoot, "NativeImeWebView.java"), "utf8");
+  const bridgeLayout = readFileSync(resolve(root, "android", "app", "src", "main", "res", "layout", "capacitor_bridge_layout_main.xml"), "utf8");
 
   assert.match(activity, /registerPlugin\(NativeKeyboardPlugin\.class\)/);
   assert.match(plugin, /@CapacitorPlugin\(name = "NativeKeyboard"\)/);
   assert.match(plugin, /hideSoftInputFromWindow\(webView\.getWindowToken\(\), 0\)/);
+  assert.match(plugin, /setAction\(PluginCall call\)/);
+  assert.match(bridgeLayout, /ru\.copperresources\.mobile\.NativeImeWebView/);
+  assert.match(bridgeLayout, /android:id="@\+id\/webview"/);
+  assert.match(imeWebView, /extends CapacitorWebView/);
+  assert.match(imeWebView, /new InputConnectionWrapper\(inputConnection, false\)/);
+  assert.match(imeWebView, /performEditorAction\(int actionCode\)/);
+  assert.match(imeWebView, /native-ime-action/);
+  assert.match(imeWebView, /return true;/);
 });
 
 test("rejected native phone handoff remains disabled", () => {

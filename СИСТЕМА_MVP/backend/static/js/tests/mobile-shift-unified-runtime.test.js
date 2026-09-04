@@ -126,6 +126,7 @@ function createRuntime({components = [], activeElement = null, nativeKeyboard = 
     const timers = new Map();
     const frames = new Map();
     const documentListeners = new Map();
+    const windowListeners = new Map();
     const document = {
         readyState: "complete",
         activeElement,
@@ -143,10 +144,15 @@ function createRuntime({components = [], activeElement = null, nativeKeyboard = 
         addEventListener() {},
     };
     let nativeKeyboardHideCalls = 0;
+    const nativeKeyboardActions = [];
     const window = {
         navigator: {},
         screen: {orientation, width: 390, height: 844},
-        addEventListener() {},
+        addEventListener(type, listener) {
+            const listeners = windowListeners.get(type) || [];
+            listeners.push(listener);
+            windowListeners.set(type, listeners);
+        },
         setTimeout(callback, milliseconds) {
             const timerId = nextTimerId;
             nextTimerId += 1;
@@ -170,6 +176,10 @@ function createRuntime({components = [], activeElement = null, nativeKeyboard = 
         window.Capacitor = {
             Plugins: {
                 NativeKeyboard: {
+                    setAction({action}) {
+                        nativeKeyboardActions.push(action);
+                        return Promise.resolve({action});
+                    },
                     hide() {
                         nativeKeyboardHideCalls += 1;
                         return Promise.resolve({hidden: true});
@@ -192,6 +202,18 @@ function createRuntime({components = [], activeElement = null, nativeKeyboard = 
 
     return {
         window,
+        document,
+        dispatchWindow(type, detail = {}) {
+            const event = {
+                detail,
+                defaultPrevented: false,
+                preventDefault() {
+                    this.defaultPrevented = true;
+                },
+            };
+            (windowListeners.get(type) || []).forEach((listener) => listener(event));
+            return event;
+        },
         advance(milliseconds) {
             now += milliseconds;
             let due;
@@ -218,6 +240,9 @@ function createRuntime({components = [], activeElement = null, nativeKeyboard = 
         },
         nativeKeyboardHideCalls() {
             return nativeKeyboardHideCalls;
+        },
+        nativeKeyboardActions() {
+            return nativeKeyboardActions.slice();
         },
     };
 }
@@ -251,6 +276,34 @@ test("Enter advances between Shift inputs and finishes on the soft-disabled acti
     assert.equal(action.disabled, false, "Validation must not use native disabled state.");
     assert.equal(first.getAttribute("enterkeyhint"), "next");
     assert.equal(second.getAttribute("enterkeyhint"), "done");
+});
+
+
+test("Android IME actions advance fields without any DOM key event", () => {
+    const first = new FakeElement();
+    const second = new FakeElement();
+    const action = new FakeElement({textContent: "ЗАКРЫТЬ СМЕНУ"});
+    const component = createComponent([first, second], action);
+    const runtime = createRuntime({components: [component], nativeKeyboard: true});
+
+    runtime.document.activeElement = first;
+    first.dispatch("focus");
+    assert.equal(runtime.nativeKeyboardActions().at(-1), "next");
+    runtime.dispatchWindow("native-ime-action", {action: "next"});
+    assert.equal(second.focused, true);
+    assert.equal(second.selected, true);
+
+    runtime.advance(200);
+    runtime.document.activeElement = second;
+    second.dispatch("focus");
+    assert.equal(runtime.nativeKeyboardActions().at(-1), "done");
+    runtime.dispatchWindow("native-ime-action", {action: "done"});
+    runtime.runFrames();
+
+    assert.equal(second.blurred, true);
+    assert.equal(action.focused, true);
+    assert.equal(action.classList.contains("is-keyboard-target"), true);
+    assert.equal(runtime.nativeKeyboardHideCalls(), 1);
 });
 
 

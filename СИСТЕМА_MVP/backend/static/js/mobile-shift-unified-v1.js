@@ -160,10 +160,25 @@
         }
     }
 
-    function hideVirtualKeyboard() {
-        var nativeKeyboard = window.Capacitor
+    function nativeKeyboardPlugin() {
+        return window.Capacitor
             && window.Capacitor.Plugins
             && window.Capacitor.Plugins.NativeKeyboard;
+    }
+
+    function setNativeImeAction(action) {
+        var nativeKeyboard = nativeKeyboardPlugin();
+        if (!nativeKeyboard || typeof nativeKeyboard.setAction !== "function") return;
+        try {
+            var nativeResult = nativeKeyboard.setAction({ action: action || "" });
+            if (nativeResult && typeof nativeResult.catch === "function") {
+                nativeResult.catch(function () {});
+            }
+        } catch (error) {}
+    }
+
+    function hideVirtualKeyboard() {
+        var nativeKeyboard = nativeKeyboardPlugin();
         if (nativeKeyboard && typeof nativeKeyboard.hide === "function") {
             try {
                 var nativeResult = nativeKeyboard.hide();
@@ -215,6 +230,10 @@
         );
         var navigationLocked = false;
 
+        function armField(index) {
+            setNativeImeAction(index === fields.length - 1 ? "done" : "next");
+        }
+
         function advanceField(input, index, event) {
             if (event && event.preventDefault) event.preventDefault();
             if (navigationLocked) return;
@@ -225,10 +244,18 @@
             if (next) {
                 focusWithoutScroll(next);
                 if (next.select) next.select();
+                armField(index + 1);
                 return;
             }
             focusShiftAction(component, input);
         }
+
+        window.addEventListener("native-ime-action", function (event) {
+            var input = document.activeElement;
+            var index = fields.indexOf(input);
+            if (index < 0) return;
+            advanceField(input, index, event);
+        });
 
         component.addEventListener("keyup", function (event) {
             if (event.key === "Enter" || event.keyCode === 13) navigationLocked = false;
@@ -246,6 +273,8 @@
             input.setAttribute("pattern", "[0-9]*");
             input.setAttribute("enterkeyhint", isLast ? "done" : "next");
             if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
+            input.addEventListener("focus", function () { armField(index); });
+            input.addEventListener("blur", function () { setNativeImeAction(""); });
             input.addEventListener("beforeinput", function (event) {
                 if (event.inputType === "insertLineBreak" || event.inputType === "insertParagraph") {
                     advanceField(input, index, event);
