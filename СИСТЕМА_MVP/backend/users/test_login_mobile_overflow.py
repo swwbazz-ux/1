@@ -231,6 +231,14 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         self.assertIn('width: 22px', stylesheet)
         self.assertIn('height: 22px', stylesheet)
         self.assertIn(
+            '@media (orientation: landscape) and (max-width: 1023px)',
+            stylesheet,
+        )
+        self.assertIn(
+            '(orientation: landscape) and (min-width: 1024px) and (max-height: 679px)',
+            stylesheet,
+        )
+        self.assertIn(
             '@media (orientation: landscape) and (max-height: 360px)',
             stylesheet,
         )
@@ -239,6 +247,28 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
             stylesheet,
         )
         self.assertIn('grid-column: 1 / -1 !important', stylesheet)
+        self.assertIn(
+            'grid-template-rows: minmax(142px, min(32dvh, 340px)) minmax(max-content, 1fr) max-content;',
+            stylesheet,
+        )
+        self.assertIn(
+            'grid-template-rows: 128px minmax(max-content, 1fr) 38px;',
+            stylesheet,
+        )
+        self.assertIn(
+            '.unified-login-form.is-combined-login .mobile-role-login__lead',
+            stylesheet,
+        )
+        self.assertIn(
+            '@media (orientation: landscape) and (max-height: 320px)',
+            stylesheet,
+        )
+        self.assertIn('max-height: 100%', stylesheet)
+        self.assertIn(
+            '@media (orientation: portrait) and (max-width: 1023px)',
+            stylesheet,
+        )
+        self.assertIn('--mobile-login-control: 40px', stylesheet)
         self.assertIn(
             'is-login-a11y-overflow .unified-login-dialog.mobile-role-login',
             stylesheet,
