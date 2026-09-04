@@ -176,7 +176,7 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'start-hero-v1.webp')
         self.assertContains(response, 'start-hero-v1.jpg')
         self.assertContains(response, 'fetchpriority="high"')
-        self.assertContains(response, 'start-page-v1.css?v=20260904-14')
+        self.assertContains(response, 'start-page-v1.css?v=20260904-15')
         self.assertContains(response, 'start-page-v1.js?v=20260904-8')
         self.assertNotContains(response, 'data-connection-indicator')
         self.assertNotContains(response, 'data-app-realtime-status')
@@ -534,6 +534,9 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, '<span>Может терять связь при свёрнутом окне</span>')
         self.assertContains(response, 'install=1', count=1)
         self.assertContains(response, 'После перехода добавьте значок на экран')
+        self.assertContains(response, 'start-screen__opt-badge--safari', count=1)
+        self.assertNotContains(response, 'start-screen__opt-badge--chrome')
+        self.assertContains(response, 'start-screen__opt-note--ios', count=1)
 
     def test_iphone_shows_only_pwa_action_without_android_block(self):
         self.add_apk('apk/driver-10.apk')
@@ -592,6 +595,7 @@ class UniversalStartTests(TestCase):
         stylesheet = (backend_root / 'static' / 'css' / 'start-page-v1.css').read_text(encoding='utf-8')
 
         self.assertContains(response, 'start-page-v1.js?v=20260904-8')
+        self.assertContains(response, 'start-page-v1.css?v=20260904-15')
         self.assertIn('window.visualViewport || null', script)
         self.assertIn('Math.max(120, baselineHeight * 0.22)', script)
         self.assertIn('viewport.addEventListener("resize"', script)
@@ -680,6 +684,20 @@ class UniversalStartTests(TestCase):
             stylesheet,
             r'\.start-screen--result \.start-hero__backdrop\s*\{\s*display: none;',
         )
+        self.assertRegex(
+            stylesheet,
+            r'(?s)\.start-screen--result \.start-screen__opt-note--ios\s*\{'
+            r'[^}]*grid-template-columns: minmax\(0, 1fr\);',
+        )
+
+    def test_android_browser_option_keeps_chrome_badge(self):
+        self.add_apk('apk/driver-10.apk')
+        self.add_access('driver', 'Водитель самосвала')
+
+        response = self.post(user_agent=ANDROID_USER_AGENT)
+
+        self.assertContains(response, 'start-screen__opt-badge--chrome', count=1)
+        self.assertNotContains(response, 'start-screen__opt-badge--safari')
 
     def test_start_phone_runtime_formats_country_prefix_and_guards_double_submit(self):
         script = (

@@ -24,7 +24,7 @@
     <meta name="twitter:image" content="https://driverform.ru{% static 'img/share/og-start-v4.jpg' %}">
     <link rel="preload" as="image" href="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
     <link rel="stylesheet" href="{% static 'css/max-support-link-v1.css' %}?v=6">
-    <link rel="stylesheet" href="{% static 'css/start-page-v1.css' %}?v=20260904-14">
+    <link rel="stylesheet" href="{% static 'css/start-page-v1.css' %}?v=20260904-15">
     <script src="{% static 'js/start-page-v1.js' %}?v=20260904-8" defer></script>
 {% endblock %}
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
@@ -103,7 +103,17 @@
                                    aria-label="Открыть приложение {{ item.app.name }} в браузере. Веб-версия, PWA без установки. Может терять связь при свёрнутом окне.">
                                     <span class="start-screen__opt-icon" aria-hidden="true">
                                         <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
-                                        <span class="start-screen__opt-badge start-screen__opt-badge--chrome"></span>
+                                        {% if is_ios %}
+                                            <span class="start-screen__opt-badge start-screen__opt-badge--safari">
+                                                <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+                                                    <circle cx="16" cy="16" r="13" />
+                                                    <path d="m19.5 12.5-2.2 4.8-4.8 2.2 2.2-4.8 4.8-2.2Z" />
+                                                    <path d="M16 5.5v2M16 24.5v2M5.5 16h2M24.5 16h2" />
+                                                </svg>
+                                            </span>
+                                        {% else %}
+                                            <span class="start-screen__opt-badge start-screen__opt-badge--chrome"></span>
+                                        {% endif %}
                                     </span>
                                     <span class="start-screen__opt-text">
                                         <b><span>Открыть в браузере</span> <i>ВЕБ-ВЕРСИЯ</i></b>
@@ -123,7 +133,7 @@
                                     <span>APK работает в фоне. Если Android предупредит о риске, выберите «Всё равно скачать».</span>
                                 </p>
                             {% elif is_ios %}
-                                <p class="start-screen__opt-note">После перехода добавьте значок на экран — покажем, как.</p>
+                                <p class="start-screen__opt-note start-screen__opt-note--ios">После перехода добавьте значок на экран — покажем, как.</p>
                             {% endif %}
                         </section>
                     {% endfor %}
