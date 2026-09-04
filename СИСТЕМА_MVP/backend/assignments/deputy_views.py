@@ -947,7 +947,7 @@ def build_deputy_crew_plan_workbook(plan, *, actor):
     sheet.oddFooter.center.text = 'Страница &P из &N'
     sheet.oddFooter.center.size = 9
     sheet.oddFooter.center.color = colors['muted']
-    sheet.oddFooter.right.text = 'Коппер Ресорсез'
+    sheet.oddFooter.right.text = 'Коппер Рисорсез'
     sheet.oddFooter.right.size = 9
     sheet.oddFooter.right.color = colors['muted']
     return workbook

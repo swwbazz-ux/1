@@ -23,7 +23,7 @@ OUT_DIR = BASE_DIR / 'static' / 'img' / 'share'
 
 WIDTH, HEIGHT = 1200, 630
 BACKGROUND = (2, 8, 11)
-COMPANY = 'КОППЕР РЕСОРСЕЗ'
+COMPANY = 'КОППЕР РИСОРСЕЗ'
 
 FONT_CANDIDATES_BOLD = [
     Path('C:/Windows/Fonts/segoeuib.ttf'),

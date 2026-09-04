@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
+from PIL import Image
 from django.conf import settings
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -91,6 +92,60 @@ class UniversalStartTests(TestCase):
             f'<meta name="theme-color" content="{ENTRY_SCREEN_BROWSER_BAR}">',
             count=1,
         )
+
+    def test_start_has_canonical_social_metadata_and_new_og_image(self):
+        response = self.client.get(reverse('universal_start'))
+        html = response.content.decode('utf-8')
+        image_url = 'https://driverform.ru/static/img/share/og-start-v3.jpg'
+
+        self.assertContains(
+            response,
+            '<title>Вход в рабочие приложения — Коппер Рисорсез</title>',
+            count=1,
+            html=True,
+        )
+        expected_tags = (
+            '<meta name="description" content="Введите номер телефона — система покажет приложение, назначенное вашей роли.">',
+            '<link rel="canonical" href="https://driverform.ru/start/">',
+            '<meta property="og:type" content="website">',
+            '<meta property="og:site_name" content="Коппер Рисорсез">',
+            '<meta property="og:title" content="Вход в рабочие приложения">',
+            '<meta property="og:description" content="Введите номер телефона — система покажет приложение, назначенное вашей роли.">',
+            '<meta property="og:url" content="https://driverform.ru/start/">',
+            f'<meta property="og:image" content="{image_url}">',
+            f'<meta property="og:image:secure_url" content="{image_url}">',
+            '<meta property="og:image:type" content="image/jpeg">',
+            '<meta property="og:image:width" content="1200">',
+            '<meta property="og:image:height" content="630">',
+            '<meta property="og:image:alt" content="Рабочие приложения Коппер Рисорсез">',
+            '<meta name="twitter:card" content="summary_large_image">',
+            '<meta name="twitter:title" content="Вход в рабочие приложения">',
+            '<meta name="twitter:description" content="Введите номер телефона — система покажет приложение, назначенное вашей роли.">',
+            f'<meta name="twitter:image" content="{image_url}">',
+        )
+        for tag in expected_tags:
+            with self.subTest(tag=tag):
+                self.assertIn(tag, html)
+        self.assertNotIn('start-share.png', html)
+
+        image_path = (
+            Path(settings.BASE_DIR)
+            / 'static'
+            / 'img'
+            / 'share'
+            / 'og-start-v3.jpg'
+        )
+        with Image.open(image_path) as image:
+            self.assertEqual(image.format, 'JPEG')
+            self.assertEqual(image.mode, 'RGB')
+            self.assertEqual(image.size, (1200, 630))
+            self.assertIn('icc_profile', image.info)
+
+        preview = self.client.get(f"{reverse('universal_start')}?preview=v2")
+        self.assertEqual(preview.status_code, 200)
+        self.assertContains(preview, 'name="phone"')
+        self.assertContains(preview, '<link rel="canonical" href="https://driverform.ru/start/">')
+        self.assertContains(preview, '<meta property="og:url" content="https://driverform.ru/start/">')
 
     def test_start_form_preserves_contract_and_uses_accessible_brand_markup(self):
         response = self.client.get(reverse('universal_start'))

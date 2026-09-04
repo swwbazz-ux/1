@@ -1,25 +1,27 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}Вход в рабочее приложение · Коппер Рисорсез{% endblock %}
+{% block title %}Вход в рабочие приложения — Коппер Рисорсез{% endblock %}
 {% block extra_head %}
     <meta name="theme-color" content="{{ entry_screen_browser_bar }}">
-    <meta name="description" content="Введите номер телефона — система подскажет, какое приложение вам нужно.">
+    <meta name="description" content="Введите номер телефона — система покажет приложение, назначенное вашей роли.">
+    <link rel="canonical" href="https://driverform.ru/start/">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Коппер Рисорсез">
     <meta property="og:locale" content="ru_RU">
-    <meta property="og:title" content="Рабочее приложение · Коппер Рисорсез">
-    <meta property="og:description" content="Введите номер телефона — система подскажет, какое приложение вам нужно.">
-    <meta property="og:url" content="{{ request.scheme }}://{{ request.get_host }}{% url 'universal_start' %}">
-    <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'img/share/start-share.png' %}?v=2">
-    <meta property="og:image:type" content="image/png">
+    <meta property="og:title" content="Вход в рабочие приложения">
+    <meta property="og:description" content="Введите номер телефона — система покажет приложение, назначенное вашей роли.">
+    <meta property="og:url" content="https://driverform.ru/start/">
+    <meta property="og:image" content="https://driverform.ru{% static 'img/share/og-start-v3.jpg' %}">
+    <meta property="og:image:secure_url" content="https://driverform.ru{% static 'img/share/og-start-v3.jpg' %}">
+    <meta property="og:image:type" content="image/jpeg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
-    <meta property="og:image:alt" content="Рабочее приложение · Коппер Рисорсез">
+    <meta property="og:image:alt" content="Рабочие приложения Коппер Рисорсез">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Рабочее приложение · Коппер Рисорсез">
-    <meta name="twitter:description" content="Введите номер телефона — система подскажет, какое приложение вам нужно.">
-    <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'img/share/start-share.png' %}?v=2">
+    <meta name="twitter:title" content="Вход в рабочие приложения">
+    <meta name="twitter:description" content="Введите номер телефона — система покажет приложение, назначенное вашей роли.">
+    <meta name="twitter:image" content="https://driverform.ru{% static 'img/share/og-start-v3.jpg' %}">
     <link rel="preload" as="image" href="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
     <link rel="stylesheet" href="{% static 'css/max-support-link-v1.css' %}?v=6">
     <link rel="stylesheet" href="{% static 'css/start-page-v1.css' %}?v=20260904-14">
