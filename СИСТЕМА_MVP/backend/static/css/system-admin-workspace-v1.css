@@ -310,11 +310,10 @@
 }
 
 .admin-live-person-actions {
-    /* Четыре кнопки в столбик занимали пол-экрана телефона, и до карточки
-       следующего человека приходилось долго листать. Раскладываем два на два:
-       сверху наблюдение и управление, снизу служебные действия. */
+    /* На рабочем экране все четыре действия читаются как единая панель.
+       На телефоне ниже возвращаем компактную раскладку два на два. */
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
 }
 
@@ -498,6 +497,10 @@
     .admin-live-action-menu,
     .admin-live-action-menu > summary {
         width: 100%;
+    }
+
+    .admin-live-person-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .admin-live-danger-form {
