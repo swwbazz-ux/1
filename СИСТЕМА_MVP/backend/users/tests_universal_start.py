@@ -96,7 +96,7 @@ class UniversalStartTests(TestCase):
     def test_start_has_canonical_social_metadata_and_new_og_image(self):
         response = self.client.get(reverse('universal_start'))
         html = response.content.decode('utf-8')
-        image_url = 'https://driverform.ru/static/img/share/og-start-v3.jpg'
+        image_url = 'https://driverform.ru/static/img/share/og-start-v4.jpg'
 
         self.assertContains(
             response,
@@ -105,12 +105,12 @@ class UniversalStartTests(TestCase):
             html=True,
         )
         expected_tags = (
-            '<meta name="description" content="Введите номер телефона — система покажет приложение, назначенное вашей роли.">',
+            '<meta name="description" content="Введите номер телефона — система покажет нужное приложение.">',
             '<link rel="canonical" href="https://driverform.ru/start/">',
             '<meta property="og:type" content="website">',
             '<meta property="og:site_name" content="Коппер Рисорсез">',
             '<meta property="og:title" content="Вход в рабочие приложения">',
-            '<meta property="og:description" content="Введите номер телефона — система покажет приложение, назначенное вашей роли.">',
+            '<meta property="og:description" content="Введите номер телефона — система покажет нужное приложение.">',
             '<meta property="og:url" content="https://driverform.ru/start/">',
             f'<meta property="og:image" content="{image_url}">',
             f'<meta property="og:image:secure_url" content="{image_url}">',
@@ -120,7 +120,7 @@ class UniversalStartTests(TestCase):
             '<meta property="og:image:alt" content="Рабочие приложения Коппер Рисорсез">',
             '<meta name="twitter:card" content="summary_large_image">',
             '<meta name="twitter:title" content="Вход в рабочие приложения">',
-            '<meta name="twitter:description" content="Введите номер телефона — система покажет приложение, назначенное вашей роли.">',
+            '<meta name="twitter:description" content="Введите номер телефона — система покажет нужное приложение.">',
             f'<meta name="twitter:image" content="{image_url}">',
         )
         for tag in expected_tags:
@@ -133,13 +133,15 @@ class UniversalStartTests(TestCase):
             / 'static'
             / 'img'
             / 'share'
-            / 'og-start-v3.jpg'
+            / 'og-start-v4.jpg'
         )
         with Image.open(image_path) as image:
             self.assertEqual(image.format, 'JPEG')
             self.assertEqual(image.mode, 'RGB')
             self.assertEqual(image.size, (1200, 630))
             self.assertIn('icc_profile', image.info)
+        self.assertLess(image_path.stat().st_size, 600 * 1024)
+        self.assertNotIn('og-start-v3.jpg', html)
 
         preview = self.client.get(f"{reverse('universal_start')}?preview=v2")
         self.assertEqual(preview.status_code, 200)
