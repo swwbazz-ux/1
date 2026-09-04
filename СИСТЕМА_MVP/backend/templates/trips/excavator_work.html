@@ -6,14 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v199">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v199">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v199">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v199">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v199">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v199">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v199" defer></script>
-<script src="{% static 'js/excavator-sounds-v1.js' %}?v=excavator-mobile-shell-v199" data-excavator-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v200">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v200">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v200">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v200">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v200">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v200">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v200" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v200" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -398,7 +398,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v199";
+var excavatorShellVersion = "excavator-mobile-shell-v200";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -452,10 +452,10 @@ function showExcavatorNotice(message, options) {
 window.showExcavatorNotice = showExcavatorNotice;
 
 function playExcavatorSound(name) {
-    if (!window.ExcavatorSounds || typeof window.ExcavatorSounds.play !== "function") {
+    if (!window.MobileOperationalSounds || typeof window.MobileOperationalSounds.play !== "function") {
         return Promise.resolve(false);
     }
-    return window.ExcavatorSounds.play(name);
+    return window.MobileOperationalSounds.play(name);
 }
 
 function playExcavatorAssignmentAlert() {
@@ -1076,8 +1076,8 @@ window.initExcavatorWorkShell = function () {
         if (shiftHoldController) shiftHoldController.reset();
     }
 
-    /* Закрытие смены держим две секунды — оно необратимо. Начало держим одну:
-       случайное нажатие отсечь надо, но пугать длинным удержанием незачем. */
+    /* Открытие и закрытие смены подтверждаются одинаковым удержанием в одну
+       секунду: этого достаточно против случайного касания без задержки работы. */
     function currentShiftHoldMs() {
         return isShiftCloseAction() ? shiftHoldMs : 1000;
     }

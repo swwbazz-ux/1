@@ -3864,6 +3864,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 </style>
 <link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v={{ driver_shell_version }}">
 <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v={{ driver_shell_version }}" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v={{ driver_shell_version }}" data-mobile-sound-profile="driver" data-mobile-sound-base="{% static 'audio/driver/' %}" defer></script>
 {% endblock %}
 
 {% block body %}
@@ -4430,6 +4431,34 @@ if (
     window.AppPwaContractGuard.registerUnsafeCheck(isDriverOperationalRefreshUnsafe);
 }
 
+function playDriverSound(name) {
+    if (!window.MobileOperationalSounds || typeof window.MobileOperationalSounds.play !== "function") {
+        return Promise.resolve(false);
+    }
+    return window.MobileOperationalSounds.play(name);
+}
+
+function playDriverAssignmentAlert() {
+    if (navigator.vibrate) {
+        try { navigator.vibrate([180, 90, 180]); } catch (error) {}
+    }
+    playDriverSound("truck_assigned");
+}
+
+function driverAppliedActionSound(actionKind, freshShell) {
+    if (actionKind === "shift-open") {
+        return freshShell.querySelector("[data-driver-shift-close-button]")
+            ? "shift_start"
+            : "action_error";
+    }
+    if (actionKind === "shift-close") {
+        return freshShell.querySelector("[data-driver-shift-close-button]")
+            ? "action_error"
+            : "shift_end";
+    }
+    return "action_ok";
+}
+
 window.applyOperationalStateRefresh = function (context) {
     var currentShell = document.querySelector("[data-driver-shell]");
     if (!currentShell || !window.AppOperationalFragment || isDriverOperationalRefreshUnsafe(currentShell)) {
@@ -4447,6 +4476,14 @@ window.applyOperationalStateRefresh = function (context) {
             "[data-driver-shell]"
         );
         if (!freshShell) return false;
+        var previousAssignmentForm = oldShell.querySelector("#driver-assignment-action");
+        var nextAssignmentForm = freshShell.querySelector("#driver-assignment-action");
+        var previousAssignmentKey = previousAssignmentForm
+            ? String(previousAssignmentForm.getAttribute("action") || "")
+            : "";
+        var nextAssignmentKey = nextAssignmentForm
+            ? String(nextAssignmentForm.getAttribute("action") || "")
+            : "";
         freshShell.dataset.activeTab = activeTab;
         oldShell.replaceWith(freshShell);
 
@@ -4458,6 +4495,9 @@ window.applyOperationalStateRefresh = function (context) {
         }
         if (typeof window.checkAchievementPrize === "function") {
             window.checkAchievementPrize(context);
+        }
+        if (nextAssignmentKey && nextAssignmentKey !== previousAssignmentKey) {
+            playDriverAssignmentAlert();
         }
         return true;
     }).catch(function () {
@@ -4474,6 +4514,8 @@ window.applyOperationalStateRefresh = function (context) {
    браузеру — действие не потеряется. */
 window.submitDriverFormInPlace = function (form, options) {
     options = options || {};
+    var actionKind = String(form.dataset.driverInPlace || "");
+    if (!actionKind && form.matches("[data-driver-hold-form]")) actionKind = "complete-trip";
     if (!window.fetch || !window.AppOperationalFragment || !window.FormData) {
         form.submit();
         return Promise.resolve(false);
@@ -4494,6 +4536,7 @@ window.submitDriverFormInPlace = function (form, options) {
         var freshShell = window.AppOperationalFragment.parseRoot(result.html, "[data-driver-shell]");
         var oldShell = document.querySelector("[data-driver-shell]");
         if (!freshShell || !oldShell) throw new Error("driver shell missing");
+        var soundName = driverAppliedActionSound(actionKind, freshShell);
         oldShell.replaceWith(freshShell);
         if (result.url && window.history && window.history.replaceState) {
             var responseUrl = new URL(result.url, window.location.href);
@@ -4508,8 +4551,10 @@ window.submitDriverFormInPlace = function (form, options) {
         if (typeof window.bindDriverMobileShell === "function") {
             window.bindDriverMobileShell();
         }
+        playDriverSound(soundName);
         return true;
     }).catch(function () {
+        playDriverSound("action_error");
         if (options.fallbackToNavigation !== false) {
             form.submit();
             return false;
@@ -4948,11 +4993,9 @@ window.bindDriverMobileShell = function () {
         if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
     });
 
-    /* Enter на клавиатуре телефона уводит на следующее поле, а с последнего
-       просто убирает клавиатуру — иначе её приходится смахивать вручную,
-       чтобы дотянуться до кнопки. Саму кнопку за человека не нажимаем: она
-       открывает и закрывает смену, и удержание в две секунды тут не
-       перестраховка, а осознанное подтверждение. */
+    /* Резервная навигация для старой разметки: Enter уводит на следующее поле,
+       а с последнего убирает клавиатуру и фокусирует кнопку. Общий экран Смены
+       использует mobile-shift-unified-v1.js и в этот блок не попадает. */
     shell.querySelectorAll("[data-driver-shift-inputs], .driver-shift-opening-form").forEach(function (group) {
         if (group.closest(".mobile-shift") || group.querySelector(".mobile-shift")) return;
         var fields = Array.prototype.filter.call(
@@ -4975,11 +5018,8 @@ window.bindDriverMobileShell = function () {
                     if (next.select) next.select();
                     return;
                 }
-                /* Одного blur мало: телефон нередко оставляет клавиатуру на
-                   экране. Переводим фокус на кнопку действия — она клавиатуру
-                   не вызывает, та уезжает, и кнопка сразу под рукой. Нажимать
-                   её за человека нельзя: она открывает и закрывает смену, и
-                   удержание в две секунды там осознанное подтверждение. */
+                /* Одного blur мало: перевод фокуса на кнопку помогает старым
+                   WebView закрыть клавиатуру и сразу оставить действие доступным. */
                 input.blur();
                 var action = group.querySelector("[data-driver-shift-open-button], [data-driver-shift-close-button]")
                     || (group.closest("form") || document).querySelector("[data-driver-shift-open-button], [data-driver-shift-close-button]");
@@ -5657,6 +5697,7 @@ window.bindDriverMobileShell = function () {
                 reason_id: button.dataset.driverDowntimeReasonId,
                 client_action_id: generateClientActionId("driver-downtime")
             }).then(function (payload) {
+                playDriverSound("action_ok");
                 applyDriverActiveDowntime(payload);
                 if (
                     String(payload.reason || "").trim().toLocaleLowerCase("ru-RU") === "ожидание разгрузки"
@@ -5675,6 +5716,7 @@ window.bindDriverMobileShell = function () {
                     window.AppRealtime.wake("driver_downtime_saved");
                 }
             }).catch(function (error) {
+                playDriverSound("action_error");
                 showDriverToast(error.message || "Простой не сохранен");
                 button.classList.remove("is-selected");
             }).finally(function () {
@@ -5698,11 +5740,13 @@ window.bindDriverMobileShell = function () {
                 action: "close",
                 client_action_id: generateClientActionId("driver-downtime-close")
             }).then(function (payload) {
+                playDriverSound("action_ok");
                 clearDriverActiveDowntime(payload);
                 if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                     window.AppRealtime.wake("driver_downtime_closed");
                 }
             }).catch(function (error) {
+                playDriverSound("action_error");
                 showDriverToast(error.message || "Простой не завершен");
                 downtimeClose.disabled = false;
                 downtimeClose.classList.remove("is-disabled");

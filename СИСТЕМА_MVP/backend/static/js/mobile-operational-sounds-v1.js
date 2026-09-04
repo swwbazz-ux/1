@@ -2,18 +2,25 @@
     "use strict";
 
     var script = document.currentScript;
-    var baseUrl = script && script.dataset.excavatorSoundBase
-        ? script.dataset.excavatorSoundBase
-        : "/static/audio/excavator/";
-    var soundFiles = Object.freeze({
-        truck_assigned: "excavator_truck_assigned.wav",
-        action_ok: "excavator_action_ok.wav",
-        action_error: "excavator_action_error.wav",
-        connection_lost: "excavator_connection_lost.wav",
-        connection_restored: "excavator_connection_restored.wav",
-        shift_start: "excavator_shift_start.wav",
-        shift_end: "excavator_shift_end.wav"
-    });
+    var profile = script && script.dataset.mobileSoundProfile
+        ? String(script.dataset.mobileSoundProfile).trim()
+        : "";
+    var baseUrl = script && script.dataset.mobileSoundBase
+        ? script.dataset.mobileSoundBase
+        : "/static/audio/" + profile + "/";
+    var soundNames = Object.freeze([
+        "truck_assigned",
+        "action_ok",
+        "action_error",
+        "connection_lost",
+        "connection_restored",
+        "shift_start",
+        "shift_end"
+    ]);
+    var soundFiles = Object.freeze(soundNames.reduce(function (files, name) {
+        files[name] = profile + "_" + name + ".wav";
+        return files;
+    }, {}));
     var audioContext = null;
     var decodedBuffers = Object.create(null);
     var loadingBuffers = Object.create(null);
@@ -54,9 +61,7 @@
             }
             try {
                 var result = context.decodeAudioData(arrayBuffer, finish, fail);
-                if (result && typeof result.then === "function") {
-                    result.then(finish, fail);
-                }
+                if (result && typeof result.then === "function") result.then(finish, fail);
             } catch (error) {
                 fail(error);
             }
@@ -138,7 +143,7 @@
         if (!context) return;
         var resume = context.state === "suspended" ? context.resume() : Promise.resolve();
         Promise.resolve(resume).then(function () {
-            Object.keys(soundFiles).forEach(function (name) {
+            soundNames.forEach(function (name) {
                 loadWebSound(name).catch(function () {});
             });
         }).catch(function () {});
@@ -167,7 +172,8 @@
         }
     });
 
-    window.ExcavatorSounds = Object.freeze({
+    window.MobileOperationalSounds = Object.freeze({
+        profile: profile,
         files: soundFiles,
         play: play,
         preload: unlock

@@ -35,7 +35,7 @@ public class NativeSoundPlugin extends Plugin {
             return;
         }
         int resourceId = getContext().getResources().getIdentifier(
-            "excavator_" + soundName,
+            BuildConfig.APP_PROFILE_ID + "_" + soundName,
             "raw",
             getContext().getPackageName()
         );

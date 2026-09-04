@@ -224,7 +224,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v185'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v186'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -279,6 +279,7 @@ const CORE_ASSETS = [
     "/static/css/app.css",
     "/static/css/mobile-shift-unified-v1.css",
     "/static/js/mobile-shift-unified-v1.js",
+    "/static/js/mobile-operational-sounds-v1.js",
     "/static/css/native-app-update-v1.css",
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
@@ -286,7 +287,14 @@ const CORE_ASSETS = [
     "/static/img/pwa/driver-180.png",
     "/static/img/pwa/driver-192.png",
     "/static/img/pwa/driver-512.png",
-    "/static/img/pwa/driver-maskable-512.png"
+    "/static/img/pwa/driver-maskable-512.png",
+    "/static/audio/driver/driver_truck_assigned.wav",
+    "/static/audio/driver/driver_action_ok.wav",
+    "/static/audio/driver/driver_action_error.wav",
+    "/static/audio/driver/driver_connection_lost.wav",
+    "/static/audio/driver/driver_connection_restored.wav",
+    "/static/audio/driver/driver_shift_start.wav",
+    "/static/audio/driver/driver_shift_end.wav"
 ];
 
 self.addEventListener("install", (event) => {{

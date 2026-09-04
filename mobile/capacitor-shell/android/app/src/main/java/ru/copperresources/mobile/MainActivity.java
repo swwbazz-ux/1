@@ -39,7 +39,8 @@ public class MainActivity extends BridgeActivity {
         SplashScreen splashScreen = SplashScreen.installSplashScreen(this);
         splashScreen.setKeepOnScreenCondition(() -> !nativeCoverReady);
         registerPlugin(NativeKeyboardPlugin.class);
-        if ("excavator".equals(BuildConfig.APP_PROFILE_ID)) {
+        if ("excavator".equals(BuildConfig.APP_PROFILE_ID)
+                || "driver".equals(BuildConfig.APP_PROFILE_ID)) {
             registerPlugin(NativeSoundPlugin.class);
         }
         CookieManager.getInstance().setAcceptCookie(true);

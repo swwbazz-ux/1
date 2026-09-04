@@ -35,8 +35,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "10",
-    versionName: "0.1.8",
+    versionCode: "11",
+    versionName: "0.1.9",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -134,24 +134,27 @@ test("QA and RuStore variants keep role identity but disable sideload updates", 
   assert.ok(Number(rustore.versionCode) > Number(profile("excavator").versionCode));
 });
 
-test("every excavator build embeds the complete loud sound pack", () => {
-  const soundNames = [
-    "excavator_truck_assigned.wav",
-    "excavator_action_ok.wav",
-    "excavator_action_error.wav",
-    "excavator_connection_lost.wav",
-    "excavator_connection_restored.wav",
-    "excavator_shift_start.wav",
-    "excavator_shift_end.wav",
+test("driver and excavator builds embed the same complete loud sound pack", () => {
+  const eventNames = [
+    "truck_assigned",
+    "action_ok",
+    "action_error",
+    "connection_lost",
+    "connection_restored",
+    "shift_start",
+    "shift_end",
   ];
-  const nativeRaw = resolve(root, "profiles", "excavator", "res", "raw");
-  const webAudio = resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "static", "audio", "excavator");
-  for (const soundName of soundNames) {
-    const nativeBytes = readFileSync(resolve(nativeRaw, soundName));
-    const webBytes = readFileSync(resolve(webAudio, soundName));
-    assert.equal(nativeBytes.subarray(0, 4).toString("ascii"), "RIFF");
-    assert.equal(nativeBytes.subarray(8, 12).toString("ascii"), "WAVE");
-    assert.deepEqual(nativeBytes, webBytes);
+  for (const profileName of ["driver", "excavator"]) {
+    const nativeRaw = resolve(root, "profiles", profileName, "res", "raw");
+    const webAudio = resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "static", "audio", profileName);
+    for (const eventName of eventNames) {
+      const soundName = `${profileName}_${eventName}.wav`;
+      const nativeBytes = readFileSync(resolve(nativeRaw, soundName));
+      const webBytes = readFileSync(resolve(webAudio, soundName));
+      assert.equal(nativeBytes.subarray(0, 4).toString("ascii"), "RIFF");
+      assert.equal(nativeBytes.subarray(8, 12).toString("ascii"), "WAVE");
+      assert.deepEqual(nativeBytes, webBytes);
+    }
   }
   for (const profileName of ["excavator", "excavator_qa", "excavator_rustore_qa", "excavator_rustore"]) {
     const config = profile(profileName);
@@ -162,10 +165,14 @@ test("every excavator build embeds the complete loud sound pack", () => {
 
   const activity = readFileSync(resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile", "MainActivity.java"), "utf8");
   const plugin = readFileSync(resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile", "NativeSoundPlugin.java"), "utf8");
-  assert.match(activity, /"excavator"\.equals\(BuildConfig\.APP_PROFILE_ID\)[\s\S]*?registerPlugin\(NativeSoundPlugin\.class\)/);
+  assert.match(activity, /"excavator"\.equals\(BuildConfig\.APP_PROFILE_ID\)[\s\S]*?"driver"\.equals\(BuildConfig\.APP_PROFILE_ID\)[\s\S]*?registerPlugin\(NativeSoundPlugin\.class\)/);
   assert.match(plugin, /@CapacitorPlugin\(name = "NativeSound"\)/);
+  assert.match(plugin, /BuildConfig\.APP_PROFILE_ID \+ "_" \+ soundName/);
   assert.match(plugin, /setVolume\(1\.0f, 1\.0f\)/);
   assert.match(plugin, /USAGE_ASSISTANCE_SONIFICATION/);
+  const driver = profile("driver");
+  assert.equal(driver.alertSoundResource, "driver_truck_assigned");
+  assert.match(driver.alertChannelId, /_v2$/);
 });
 
 test("native builds expose an explicit keyboard close bridge", () => {

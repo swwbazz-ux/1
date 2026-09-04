@@ -522,6 +522,35 @@ test("successful Excavator Shift save clears its draft before owned fragment rec
 });
 
 
+test("Driver uses Shift sounds only after the returned shell confirms the state change", () => {
+    const sandbox = {context: {}};
+    vm.runInNewContext(
+        [
+            extractBraceBlock(
+                DRIVER_TEMPLATE_SOURCE,
+                "function driverAppliedActionSound(actionKind, freshShell)",
+                "Driver applied action sound mapper"
+            ),
+            "context.map = driverAppliedActionSound;",
+        ].join("\n"),
+        sandbox,
+        {filename: "templates/users/driver_shift.html#applied-action-sound"}
+    );
+    const openShell = {
+        querySelector(selector) {
+            return selector === "[data-driver-shift-close-button]" ? {} : null;
+        },
+    };
+    const closedShell = {querySelector() { return null; }};
+
+    assert.equal(sandbox.context.map("shift-open", openShell), "shift_start");
+    assert.equal(sandbox.context.map("shift-open", closedShell), "action_error");
+    assert.equal(sandbox.context.map("shift-close", openShell), "action_error");
+    assert.equal(sandbox.context.map("shift-close", closedShell), "shift_end");
+    assert.equal(sandbox.context.map("complete-trip", closedShell), "action_ok");
+});
+
+
 test("four production refresh handlers use narrow fragments, never a full HTML GET", () => {
     assertNarrowFragmentHandler(
         DRIVER_TEMPLATE_SOURCE,
