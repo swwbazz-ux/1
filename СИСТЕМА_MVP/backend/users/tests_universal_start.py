@@ -76,7 +76,7 @@ class UniversalStartTests(TestCase):
         apk_path.write_bytes(b'test apk placeholder')
 
     def add_excavator_release(self, *, version_code=23, version_name='0.1.17'):
-        self.add_apk(f'apk/excavator-{version_code}.apk')
+        self.add_apk(f'apk/excavator-{version_name}.apk')
         manifest_path = Path(self.media_directory.name) / 'apk/excavator-update.json'
         manifest_path.write_text(
             json.dumps({
@@ -289,7 +289,7 @@ class UniversalStartTests(TestCase):
         response = self.post(user_agent=ANDROID_USER_AGENT)
 
         self.assertContains(response, '/media/apk/driver-10.apk')
-        self.assertContains(response, '/media/apk/excavator-23.apk')
+        self.assertContains(response, '/media/apk/excavator-0.1.17.apk')
         self.assertContains(response, 'data-start-install-option="native"', count=2)
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=2)
@@ -307,6 +307,16 @@ class UniversalStartTests(TestCase):
         self.assertIn('no-store', response.headers['Cache-Control'])
         self.assertEqual(response.headers['Referrer-Policy'], 'no-referrer')
         self.assertContains(response, 'phone=79990000071', count=2)
+
+    def test_excavator_public_filename_follows_the_manifest_version_name(self):
+        self.add_excavator_release(version_code=29, version_name='0.2.0')
+        self.add_access('excavator_operator', 'Машинист экскаватора')
+
+        response = self.post(user_agent=ANDROID_USER_AGENT)
+
+        self.assertContains(response, '/media/apk/excavator-0.2.0.apk')
+        self.assertContains(response, 'APK · версия 0.2.0 · скачать и установить')
+        self.assertNotContains(response, '/media/apk/excavator-29.apk')
 
     def test_native_phone_handoff_routes_are_removed(self):
         for path in (
@@ -329,7 +339,7 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'data-start-install-option="browser"')
 
     def test_android_does_not_see_excavator_apk_for_invalid_update_manifest(self):
-        self.add_apk('apk/excavator-23.apk')
+        self.add_apk('apk/excavator-0.1.17.apk')
         manifest_path = Path(self.media_directory.name) / 'apk/excavator-update.json'
         manifest_path.write_text('{"versionCode": 23}', encoding='utf-8')
         self.add_access('excavator_operator', 'Машинист экскаватора')
@@ -427,7 +437,7 @@ class UniversalStartTests(TestCase):
         response = self.post(user_agent=DESKTOP_USER_AGENT)
 
         self.assertIsNone(response.context['apps'][0]['apk'])
-        self.assertNotContains(response, 'href="/media/apk/excavator-23.apk"')
+        self.assertNotContains(response, 'href="/media/apk/excavator-0.1.17.apk"')
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"')
         self.assertContains(response, 'install=1', count=1)

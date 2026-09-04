@@ -365,6 +365,9 @@ test("native updater is profile-driven, deferrable and verifies the APK", () => 
   assert.match(buildScript, /createHash\("sha256"\)/);
   assert.match(buildScript, /updateManifest/);
   assert.match(buildScript, /properties\.inAppUpdaterEnabled !== "false"/);
+  assert.match(buildScript, /const publicApkName = `\$\{appProfileId\}-\$\{versionName\}\.apk`/);
+  assert.match(buildScript, /apkUrl: `\$\{apkBaseUrl\}\$\{publicApkName\}`/);
+  assert.doesNotMatch(buildScript, /apkUrl:[^\n]*versionCode/);
 });
 
 test("store variants remove package-installer permission", () => {

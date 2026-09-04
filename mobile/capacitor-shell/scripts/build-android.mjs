@@ -70,12 +70,21 @@ if (buildType === "release") {
       throw new Error(`updateApkBaseUrl must use HTTPS for ${profile}`);
     }
     const versionCode = Number.parseInt(properties.versionCode, 10);
+    const versionName = properties.versionName?.trim();
+    if (!/^\d+(?:\.\d+){2}(?:-[A-Za-z0-9][A-Za-z0-9._-]*)?$/.test(versionName || "")) {
+      throw new Error(`versionName cannot be used in a public APK name for ${profile}`);
+    }
+    const appProfileId = properties.appProfileId || profile;
+    const publicApkName = `${appProfileId}-${versionName}.apk`;
+    const publicApk = join(root, "dist", publicApkName);
+    copyFileSync(delivery, publicApk);
+    console.log(`Public APK: ${publicApk}`);
     const manifest = {
       schemaVersion: 1,
-      profile: properties.appProfileId || profile,
+      profile: appProfileId,
       versionCode,
-      versionName: properties.versionName,
-      apkUrl: `${apkBaseUrl}${properties.appProfileId || profile}-${versionCode}.apk`,
+      versionName,
+      apkUrl: `${apkBaseUrl}${publicApkName}`,
       sha256: createHash("sha256").update(readFileSync(delivery)).digest("hex"),
       releaseNotes: "Исправления и улучшения рабочего приложения.",
     };

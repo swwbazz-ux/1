@@ -55,6 +55,9 @@ START_RESULT_TTL_SECONDS = 30 * 60
 _START_RESULT_TOKEN_RE = re.compile(r'^[A-Za-z0-9_-]{43}$')
 _START_RESULT_CACHE_PREFIX = 'universal-start-result:v1:'
 logger = logging.getLogger(__name__)
+_ANDROID_PUBLIC_VERSION_RE = re.compile(
+    r'^\d+(?:\.\d+){2}(?:-[A-Za-z0-9][A-Za-z0-9._-]*)?$'
+)
 
 
 # Раньше здесь стоял предел на число показанных кнопок: восемь штук подряд
@@ -168,11 +171,12 @@ def android_apk_for_role(role_code):
             or not isinstance(version_name, str)
             or not version_name.strip()
             or len(version_name) > 64
+            or not _ANDROID_PUBLIC_VERSION_RE.fullmatch(version_name.strip())
         ):
             logger.error('Android update manifest is invalid for %s', role_code)
             return None
-        relative_path = Path('apk') / f'{profile}-{version_code}.apk'
         version = version_name.strip()
+        relative_path = Path('apk') / f'{profile}-{version}.apk'
     else:
         relative_path = Path(release['path'])
         version = release['version']
