@@ -24,8 +24,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "18",
-    versionName: "0.1.15",
+    versionCode: "21",
+    versionName: "0.1.16",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -46,8 +46,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator.qa",
     appName: "Экскаваторщик QA",
-    versionCode: "2",
-    versionName: "1.0.1-qa",
+    versionCode: "3",
+    versionName: "1.0.2-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -57,8 +57,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "20",
-    versionName: "0.1.15",
+    versionCode: "22",
+    versionName: "0.1.16",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -68,8 +68,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "19",
-    versionName: "0.1.15-rc",
+    versionCode: "21",
+    versionName: "0.1.16-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -166,6 +166,16 @@ test("every excavator build embeds the complete loud sound pack", () => {
   assert.match(plugin, /@CapacitorPlugin\(name = "NativeSound"\)/);
   assert.match(plugin, /setVolume\(1\.0f, 1\.0f\)/);
   assert.match(plugin, /USAGE_ASSISTANCE_SONIFICATION/);
+});
+
+test("native builds expose an explicit keyboard close bridge", () => {
+  const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
+  const activity = readFileSync(resolve(javaRoot, "MainActivity.java"), "utf8");
+  const plugin = readFileSync(resolve(javaRoot, "NativeKeyboardPlugin.java"), "utf8");
+
+  assert.match(activity, /registerPlugin\(NativeKeyboardPlugin\.class\)/);
+  assert.match(plugin, /@CapacitorPlugin\(name = "NativeKeyboard"\)/);
+  assert.match(plugin, /hideSoftInputFromWindow\(webView\.getWindowToken\(\), 0\)/);
 });
 
 test("rejected native phone handoff remains disabled", () => {

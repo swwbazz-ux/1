@@ -859,11 +859,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v197')
+        self.assertContains(response, 'excavator-mobile-shell-v198')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 197')
+        self.assertContains(response, 'Версия 198')
         self.assertContains(response, '/static/js/excavator-sounds-v1.js')
         self.assertContains(response, 'data-excavator-sound-base="/static/audio/excavator/"')
         self.assertContains(response, 'playExcavatorSound("truck_assigned")')
@@ -2556,7 +2556,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v197', script)
+        self.assertIn('excavator-mobile-shell-v198', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2768,9 +2768,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotIn('bindKeyboardState', javascript)
         self.assertIn('input.setAttribute("enterkeyhint", isLast ? "done" : "next")', javascript)
         self.assertIn('event.inputType === "insertLineBreak"', javascript)
-        self.assertIn('input.addEventListener("keyup"', javascript)
-        self.assertIn('input.addEventListener("change"', javascript)
+        self.assertIn('component.addEventListener("keyup"', javascript)
+        self.assertNotIn('input.addEventListener("keyup"', javascript)
+        self.assertNotIn('input.addEventListener("change"', javascript)
+        self.assertIn('window.Capacitor.Plugins.NativeKeyboard', javascript)
         self.assertIn('keyboard.hide()', javascript)
+        self.assertIn('.mobile-shift__action.is-keyboard-target', css)
         self.assertIn('[data-driver-shift-open-button], [data-driver-shift-close-button], [data-eo-shift-button]', javascript)
 
         partial_path = (
@@ -3961,7 +3964,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(payload['action'], 'downtime_switched')
         self.assertEqual(payload['reason_id'], second_reason.id)
         self.assertGreaterEqual(payload['reason_totals'][str(self.reason.id)], (8 * 60) - 1)
-        self.assertIn(str(second_reason.id), payload['reason_totals'])
+        # The replacement interval starts at the payload timestamp, so its
+        # accumulated whole-second total is legitimately zero on a fast run.
+        self.assertEqual(payload['reason_totals'].get(str(second_reason.id), 0), 0)
         self.assertGreaterEqual(payload['shift_total_seconds'], (8 * 60) - 1)
 
     def test_excavator_reselecting_active_reason_does_not_split_interval(self):

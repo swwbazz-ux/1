@@ -119,7 +119,7 @@ function createComponent(fields, action) {
 }
 
 
-function createRuntime({components = [], activeElement = null} = {}) {
+function createRuntime({components = [], activeElement = null, nativeKeyboard = false} = {}) {
     let now = 1000;
     let nextTimerId = 1;
     let nextFrameId = 1;
@@ -142,6 +142,7 @@ function createRuntime({components = [], activeElement = null} = {}) {
         type: "portrait-primary",
         addEventListener() {},
     };
+    let nativeKeyboardHideCalls = 0;
     const window = {
         navigator: {},
         screen: {orientation, width: 390, height: 844},
@@ -165,6 +166,18 @@ function createRuntime({components = [], activeElement = null} = {}) {
             frames.delete(frameId);
         },
     };
+    if (nativeKeyboard) {
+        window.Capacitor = {
+            Plugins: {
+                NativeKeyboard: {
+                    hide() {
+                        nativeKeyboardHideCalls += 1;
+                        return Promise.resolve({hidden: true});
+                    },
+                },
+            },
+        };
+    }
     const FakeDate = {
         now() {
             return now;
@@ -203,6 +216,9 @@ function createRuntime({components = [], activeElement = null} = {}) {
         pendingTimers() {
             return timers.size;
         },
+        nativeKeyboardHideCalls() {
+            return nativeKeyboardHideCalls;
+        },
     };
 }
 
@@ -216,7 +232,7 @@ test("Enter advances between Shift inputs and finishes on the soft-disabled acti
     });
     const component = createComponent([first, second], action);
 
-    const runtime = createRuntime({components: [component]});
+    const runtime = createRuntime({components: [component], nativeKeyboard: true});
 
     const firstEnter = first.dispatch("keydown", {key: "Enter", keyCode: 13});
     assert.equal(firstEnter.defaultPrevented, true);
@@ -224,11 +240,14 @@ test("Enter advances between Shift inputs and finishes on the soft-disabled acti
     assert.equal(second.selected, true);
     assert.equal(action.focused, false);
 
+    component.dispatch("keyup", {key: "Enter", keyCode: 13});
     const lastEnter = second.dispatch("keydown", {key: "Enter", keyCode: 13});
     runtime.runFrames();
     assert.equal(lastEnter.defaultPrevented, true);
     assert.equal(second.blurred, true, "The last input must release the mobile keyboard.");
     assert.equal(action.focused, true, "Soft-disabled actions must remain keyboard-focusable.");
+    assert.equal(action.classList.contains("is-keyboard-target"), true);
+    assert.equal(runtime.nativeKeyboardHideCalls(), 1, "The Android bridge must receive an explicit keyboard hide request.");
     assert.equal(action.disabled, false, "Validation must not use native disabled state.");
     assert.equal(first.getAttribute("enterkeyhint"), "next");
     assert.equal(second.getAttribute("enterkeyhint"), "done");

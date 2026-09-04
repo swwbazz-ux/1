@@ -38,6 +38,7 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         SplashScreen splashScreen = SplashScreen.installSplashScreen(this);
         splashScreen.setKeepOnScreenCondition(() -> !nativeCoverReady);
+        registerPlugin(NativeKeyboardPlugin.class);
         if ("excavator".equals(BuildConfig.APP_PROFILE_ID)) {
             registerPlugin(NativeSoundPlugin.class);
         }

@@ -582,6 +582,12 @@ body.excavator-operator-screen .eo-screen.mobile-work-screen .mobile-shift__upda
     box-shadow: 0 0 0 2px rgba(103, 232, 84, .24);
 }
 
+.mobile-shift__action.is-keyboard-target {
+    outline: 2px solid #f3f7f8;
+    outline-offset: -4px;
+    box-shadow: 0 0 0 2px rgba(103, 232, 84, .24);
+}
+
 .mobile-shift__action:disabled {
     opacity: .38;
     filter: saturate(.55);

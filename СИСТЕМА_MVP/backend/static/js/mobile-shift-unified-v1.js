@@ -161,11 +161,49 @@
     }
 
     function hideVirtualKeyboard() {
-        var keyboard = window.navigator.virtualKeyboard;
+        var nativeKeyboard = window.Capacitor
+            && window.Capacitor.Plugins
+            && window.Capacitor.Plugins.NativeKeyboard;
+        if (nativeKeyboard && typeof nativeKeyboard.hide === "function") {
+            try {
+                var nativeResult = nativeKeyboard.hide();
+                if (nativeResult && typeof nativeResult.catch === "function") {
+                    nativeResult.catch(function () {});
+                }
+            } catch (error) {}
+        }
+
+        var keyboard = window.navigator && window.navigator.virtualKeyboard;
         if (!keyboard || typeof keyboard.hide !== "function") return;
         try {
             keyboard.hide();
         } catch (error) {}
+    }
+
+    function focusShiftAction(component, input) {
+        var action = component.querySelector(
+            "[data-driver-shift-open-button], [data-driver-shift-close-button], [data-eo-shift-button]"
+        );
+        var focusTarget = action && !action.disabled && !action.hidden && !action.classList.contains("is-pending")
+            ? action
+            : component;
+        if (focusTarget === component && !component.hasAttribute("tabindex")) {
+            component.setAttribute("tabindex", "-1");
+        }
+
+        input.blur();
+        window.requestAnimationFrame(function () {
+            focusWithoutScroll(focusTarget);
+            hideVirtualKeyboard();
+            if (focusTarget !== action) return;
+
+            action.classList.add("is-keyboard-target");
+            var clearKeyboardTarget = function () {
+                action.classList.remove("is-keyboard-target");
+            };
+            action.addEventListener("blur", clearKeyboardTarget, { once: true });
+            action.addEventListener("pointerdown", clearKeyboardTarget, { once: true });
+        });
     }
 
     function bindFieldNavigation(component) {
@@ -175,37 +213,32 @@
             component.querySelectorAll(".mobile-shift__metric-value input"),
             function (input) { return !input.disabled && !input.readOnly; }
         );
+        var navigationLocked = false;
+
+        function advanceField(input, index, event) {
+            if (event && event.preventDefault) event.preventDefault();
+            if (navigationLocked) return;
+            navigationLocked = true;
+            window.setTimeout(function () { navigationLocked = false; }, 180);
+
+            var next = fields[index + 1];
+            if (next) {
+                focusWithoutScroll(next);
+                if (next.select) next.select();
+                return;
+            }
+            focusShiftAction(component, input);
+        }
+
+        component.addEventListener("keyup", function (event) {
+            if (event.key === "Enter" || event.keyCode === 13) navigationLocked = false;
+        });
+
         fields.forEach(function (input, index) {
             var isLast = index === fields.length - 1;
-            var navigationLocked = false;
 
             function isEnterEvent(event) {
                 return event.key === "Enter" || event.keyCode === 13;
-            }
-
-            function advanceField(event) {
-                if (event && event.preventDefault) event.preventDefault();
-                if (navigationLocked) return;
-                navigationLocked = true;
-                window.setTimeout(function () { navigationLocked = false; }, 240);
-                var next = fields[index + 1];
-                if (next) {
-                    next.focus();
-                    if (next.select) next.select();
-                    return;
-                }
-                input.blur();
-                hideVirtualKeyboard();
-                var action = component.querySelector(
-                    "[data-driver-shift-open-button], [data-driver-shift-close-button], [data-eo-shift-button]"
-                );
-                var focusTarget = action && !action.disabled && !action.hidden && !action.classList.contains("is-pending")
-                    ? action
-                    : component;
-                if (focusTarget === component && !component.hasAttribute("tabindex")) {
-                    component.setAttribute("tabindex", "-1");
-                }
-                window.requestAnimationFrame(function () { focusWithoutScroll(focusTarget); });
             }
 
             input.setAttribute("inputmode", "numeric");
@@ -215,20 +248,14 @@
             if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
             input.addEventListener("beforeinput", function (event) {
                 if (event.inputType === "insertLineBreak" || event.inputType === "insertParagraph") {
-                    advanceField(event);
+                    advanceField(input, index, event);
                     return;
                 }
                 if (event.data && /\D/.test(event.data)) event.preventDefault();
             });
             input.addEventListener("input", function () { keepWholeNumber(input); });
             input.addEventListener("keydown", function (event) {
-                if (isEnterEvent(event)) advanceField(event);
-            });
-            input.addEventListener("keyup", function (event) {
-                if (isEnterEvent(event)) advanceField(event);
-            });
-            input.addEventListener("change", function () {
-                if (document.activeElement === input) advanceField();
+                if (isEnterEvent(event)) advanceField(input, index, event);
             });
         });
     }
