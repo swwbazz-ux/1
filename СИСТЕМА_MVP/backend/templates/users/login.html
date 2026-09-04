@@ -595,6 +595,18 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         {% endif %}
 
         {% if combined_mobile_login %}
+        <label class="mobile-role-login__consent{% if privacy_consent_error %} is-invalid{% endif %}" for="login-privacy-consent">
+            <input id="login-privacy-consent"
+                   name="privacy_consent"
+                   type="checkbox"
+                   value="{{ privacy_policy_version }}"
+                   data-privacy-consent
+                   required
+                   aria-invalid="{% if privacy_consent_error %}true{% else %}false{% endif %}"
+                   {% if privacy_consent_is_current %}checked{% endif %}>
+            <span class="mobile-role-login__consent-box" aria-hidden="true"></span>
+            <span class="mobile-role-login__consent-copy">Соглашаюсь на обработку персональных данных по <a href="{% url 'portal:public_privacy' %}" data-login-privacy-link>Политике</a>.</span>
+        </label>
         <div id="login-auth-feedback" class="mobile-role-login__feedback" data-login-feedback role="status" aria-live="assertive">
             {% for message in messages %}<span class="message error">{{ message }}</span>{% endfor %}
         </div>
@@ -1029,8 +1041,10 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         if (!form || form.dataset.loginBound === "true") return;
         form.dataset.loginBound = "true";
         var submitButton = form.querySelector('.unified-login-submit');
+        var registerButton = form.querySelector('.unified-login-register');
         var phoneField = form.querySelector("[data-phone-input]");
         var pinField = form.querySelector("[data-pin-input]");
+        var consentField = form.querySelector("[data-privacy-consent]");
         var revealButton = form.querySelector("[data-pin-reveal]");
         var combinedLogin = form.dataset.loginCombined === "true";
         var loginFailed = !!document.querySelector("[data-login-feedback] .message.error, main > .message.error");
@@ -1044,12 +1058,22 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         if (pinField && loginFailed) pinField.value = "";
 
         function refreshSubmitState() {
-            if (!submitButton) return;
             var inputs = Array.from(form.querySelectorAll("[data-phone-input], [data-pin-input]"));
-            submitButton.disabled = form.dataset.loginPending === "true"
-                || inputs.some(function (input) {
-                    return !input.classList.contains("is-valid");
-                });
+            var pending = form.dataset.loginPending === "true";
+            var consentMissing = combinedLogin && (!consentField || !consentField.checked);
+            if (submitButton) {
+                submitButton.disabled = pending
+                    || consentMissing
+                    || inputs.some(function (input) {
+                        return !input.classList.contains("is-valid");
+                    });
+            }
+            if (registerButton) {
+                registerButton.disabled = pending
+                    || consentMissing
+                    || !phoneField
+                    || !phoneField.classList.contains("is-valid");
+            }
         }
 
         form.querySelectorAll("[data-phone-input], [data-pin-input]").forEach(function (input) {
@@ -1112,6 +1136,22 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
             validate();
         });
 
+        if (consentField) {
+            consentField.addEventListener("change", function () {
+                if (consentField.setAttribute) {
+                    consentField.setAttribute("aria-invalid", consentField.checked ? "false" : "true");
+                }
+                var consentLabel = consentField.closest
+                    ? consentField.closest(".mobile-role-login__consent")
+                    : null;
+                if (consentLabel && consentLabel.classList) {
+                    consentLabel.classList.toggle("is-invalid", !consentField.checked);
+                }
+                refreshSubmitState();
+            });
+            refreshSubmitState();
+        }
+
         if (combinedLogin && phoneField && pinField) {
             phoneField.addEventListener("keydown", function (event) {
                 if (event.key !== "Enter" || event.isComposing) return;
@@ -1126,6 +1166,9 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
                 event.preventDefault();
                 if (submitButton && !submitButton.disabled && form.dataset.loginPending !== "true") {
                     form.requestSubmit(submitButton);
+                } else if (consentField && !consentField.checked) {
+                    if (pinField.blur) pinField.blur();
+                    if (consentField.focus) consentField.focus({preventScroll: true});
                 }
             });
         }
@@ -1168,7 +1211,21 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
                     event.preventDefault();
                     return;
                 }
+                if (!consentField || !consentField.checked) {
+                    event.preventDefault();
+                    if (consentField) {
+                        consentField.setAttribute("aria-invalid", "true");
+                        var consentLabel = consentField.closest(".mobile-role-login__consent");
+                        if (consentLabel) consentLabel.classList.add("is-invalid");
+                        consentField.focus({preventScroll: true});
+                    }
+                    return;
+                }
                 if (requestedAction === "login" && submitButton.disabled) {
+                    event.preventDefault();
+                    return;
+                }
+                if (requestedAction === "register" && registerButton && registerButton.disabled) {
                     event.preventDefault();
                     return;
                 }

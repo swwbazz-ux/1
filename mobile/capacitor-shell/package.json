@@ -17,6 +17,10 @@
     "android:assemble:driver": "node scripts/build-android.mjs driver debug --assemble-only",
     "android:install:driver": "node scripts/install-android.mjs driver debug",
     "android:release:driver": "node scripts/build-android.mjs driver release",
+    "android:build:driver-qa": "node scripts/build-android.mjs driver_qa debug",
+    "android:release:driver-qa": "node scripts/build-android.mjs driver_qa release",
+    "android:release:driver-rustore-qa": "node scripts/build-android.mjs driver_rustore_qa release",
+    "android:release:driver-rustore": "node scripts/build-android.mjs driver_rustore release",
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {

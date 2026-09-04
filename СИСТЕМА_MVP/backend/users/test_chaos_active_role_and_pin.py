@@ -36,6 +36,7 @@ from users.models import (
     Role,
 )
 from users.oup_undo import OUP_ACTION_ACCESS_REISSUED
+from users.privacy_consent import PRIVACY_POLICY_VERSION
 
 
 ROLE_HOST_SETTINGS = override_settings(
@@ -195,6 +196,7 @@ class RoleRegressionFixtureMixin:
                 'phone': employee.phone,
                 'access_code': access.access_code,
                 'device_kind': device_kind,
+                'privacy_consent': PRIVACY_POLICY_VERSION,
             },
             follow=follow,
             HTTP_HOST=host,

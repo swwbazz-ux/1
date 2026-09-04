@@ -5,6 +5,11 @@ from django.conf import settings
 from .active_role import role_session_state
 from .app_catalog import app_catalog_public_url
 from .live_monitor import observer_context
+from .privacy_consent import (
+    PRIVACY_POLICY_EFFECTIVE_DATE,
+    PRIVACY_POLICY_VERSION,
+    privacy_consent_is_current,
+)
 from .role_apps import (
     APP_CONTRACT_VERSION,
     ENTRY_SCREEN_BROWSER_BAR,
@@ -156,6 +161,9 @@ def role_app(request):
         'is_ios': _is_ios(request),
         'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
         'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
+        'privacy_policy_effective_date': PRIVACY_POLICY_EFFECTIVE_DATE,
+        'privacy_policy_version': PRIVACY_POLICY_VERSION,
+        'privacy_consent_is_current': privacy_consent_is_current(request.session),
         # Программное открытие в Chrome (intent://, потом googlechromes://)
         # проверено пользователем на реальном телефоне и не срабатывает: сам
         # Chrome запускается нормально при прямом открытии, но и Яндекс, и

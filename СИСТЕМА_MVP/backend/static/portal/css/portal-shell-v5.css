@@ -223,6 +223,18 @@ h3 { font-size: 1.16rem; }
 
 .vacancies-layout, .contacts-grid { display: grid; gap: 24px; }
 .vacancies-callout, .contact-panel, .requisites-panel { padding: 26px; border: 1px solid var(--line); border-radius: var(--radius-lg); }
+.privacy-policy-hero h1 { max-width: 980px; font-size: clamp(2.15rem, 6.4vw, 4.4rem); }
+.privacy-policy { background: #fff; }
+.privacy-policy__document { display: grid; gap: 0; color: var(--public-ink); }
+.privacy-policy__document > section { padding: 32px 0; border-bottom: 1px solid var(--public-hairline); }
+.privacy-policy__document > section:last-child { border-bottom: 0; }
+.privacy-policy__document h2 { margin-bottom: 16px; font-size: clamp(1.28rem, 3.3vw, 1.75rem); }
+.privacy-policy__document p,
+.privacy-policy__document li { color: var(--public-ore); line-height: 1.72; }
+.privacy-policy__document ul { display: grid; margin: 0 0 20px; padding-left: 22px; gap: 10px; }
+.privacy-policy__revision { display: flex; padding: 18px 20px; align-items: center; justify-content: space-between; gap: 12px 24px; border-left: 4px solid var(--copper); background: var(--surface-warm); }
+.privacy-policy__revision span { color: var(--public-ore); font-size: .9rem; }
+.privacy-policy__actions { display: flex; margin-top: 24px; flex-wrap: wrap; gap: 10px; }
 .vacancies-callout { color: #fff; background: var(--graphite-2); border: 0; }
 .vacancies-callout p { color: #cbc9c5; }
 .work-principles { padding: 22px 4px; }
@@ -1075,7 +1087,7 @@ h3 { font-size: 1.16rem; }
     .leaders-section header { position: static; }
     .career-rail { padding: 82px 0; }
     .public-footer__grid { grid-template-columns: 1fr 1fr; }
-    .public-footer__links { grid-column: 1 / -1; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+    .public-footer__links { grid-column: 1 / -1; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 18px; }
 }
 
 @media (max-width: 639px) {
@@ -1142,6 +1154,8 @@ h3 { font-size: 1.16rem; }
     .public-footer__grid { padding: 54px 0; grid-template-columns: 1fr; gap: 46px; }
     .public-footer__links { grid-column: auto; grid-template-columns: 1fr; gap: 0; }
     .public-footer__bottom { grid-template-columns: 1fr; gap: 7px; }
+    .privacy-policy__revision { align-items: flex-start; flex-direction: column; }
+    .privacy-policy__actions .button { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

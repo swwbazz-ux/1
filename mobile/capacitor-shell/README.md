@@ -2,7 +2,8 @@
 
 Универсальная Android-оболочка Capacitor 8 для существующих ролевых PWA. Серверный интерфейс не копируется и не переписывается: WebView открывает URL, заданный профилем сборки.
 
-Первый профиль — `profiles/excavator/app.properties`:
+Каждая сборка описана отдельным файлом
+`profiles/<профиль>/app.properties`:
 
 - `applicationId` — Android package приложения;
 - `appName` — отображаемое имя;
@@ -72,6 +73,40 @@ npm run android:release:excavator-rustore-qa
 npm run android:release:excavator-rustore
 ```
 
+Для Водителя предусмотрены такие же три канала поставки:
+
+- `driver_qa` — отдельное внутреннее приложение `Водитель QA` с package
+  `ru.copperresources.driver.qa`; подключается к
+  `https://qa-driver.driverform.ru/`, устанавливается рядом с рабочим
+  приложением и имеет версию `1.0.0-qa (1)`;
+- `driver_rustore_qa` — модераторская сборка RuStore с рабочим package
+  `ru.copperresources.driver`, QA-хостом и версией `0.1.10-rc (13)`;
+- `driver_rustore` — следующая публичная сборка с тем же package,
+  production-хостом и версией `0.1.10 (14)`.
+
+Внутренний `driver_qa` можно держать на телефоне одновременно с рабочим
+Водителем. Две RuStore-сборки одновременно не устанавливаются: у них специально
+одинаковый package и одна релизная подпись, а `versionCode 14` production-сборки
+строго больше модераторского `versionCode 13`. Это позволяет обновить принятую
+QA-сборку штатной магазинной сборкой. Во всех трёх новых профилях отключены
+встроенный APK-updater и разрешение `REQUEST_INSTALL_PACKAGES`. QA-профили
+читают фоновый токен только из отдельной переменной окружения
+`COPPER_DRIVER_QA_SYNC_TOKEN`.
+
+```powershell
+npm run android:build:driver-qa
+npm run android:release:driver-qa
+npm run android:release:driver-rustore-qa
+npm run android:release:driver-rustore
+```
+
+Готовые файлы появляются соответственно в
+`dist/driver_qa-debug.apk`, `dist/driver_qa-release.apk`,
+`dist/driver_rustore_qa-release.apk` и `dist/driver_rustore-release.apk`.
+Перед отправкой новой версии Водителя в RuStore необходимо снова проверить
+максимальный уже опубликованный в кабинете `versionCode`: значение новой
+сборки обязано быть больше него.
+
 На Windows Gradle/AGP не всегда загружает JVM unit tests из рабочего пути с
 кириллицей, хотя production-код компилируется. Тесты и release-сборки нужно
 запускать через короткий ASCII-путь к тому же worktree, например:
@@ -101,8 +136,8 @@ npm run android:release:excavator
 
 Подписанный APK появляется в `dist/excavator-release.apk`. `versionCode` в профиле приложения необходимо увеличивать перед каждым следующим обновлением.
 Рядом формируется `dist/excavator-update.json`. При публикации APK нужно
-переименовать в версионное имя из поля `apkUrl` (например,
-`excavator-10.apk`) и только после проверки файла атомарно заменить JSON-манифест.
+переименовать в точное версионное имя из поля `apkUrl` сформированного
+манифеста и только после проверки файла атомарно заменить JSON-манифест.
 Именно порядок «APK, затем манифест» не позволяет приложению увидеть ещё не
 доставленную сборку.
 

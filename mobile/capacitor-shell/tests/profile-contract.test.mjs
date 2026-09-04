@@ -24,8 +24,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "23",
-    versionName: "0.1.17",
+    versionCode: "24",
+    versionName: "0.1.18",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -35,8 +35,41 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "11",
-    versionName: "0.1.9",
+    versionCode: "12",
+    versionName: "0.1.10",
+    splashBackgroundColor: "#02080b",
+    splashAccentColor: "#8CFF2E",
+    splashIconResource: "app_icon",
+  },
+  driver_qa: {
+    serverUrl: "https://qa-driver.driverform.ru/",
+    startUrl: "https://qa-driver.driverform.ru/driver/",
+    applicationId: "ru.copperresources.driver.qa",
+    appName: "Водитель QA",
+    versionCode: "1",
+    versionName: "1.0.0-qa",
+    splashBackgroundColor: "#02080b",
+    splashAccentColor: "#8CFF2E",
+    splashIconResource: "app_icon",
+  },
+  driver_rustore: {
+    serverUrl: "https://driver.driverform.ru/",
+    startUrl: "https://driver.driverform.ru/driver/",
+    applicationId: "ru.copperresources.driver",
+    appName: "Водитель",
+    versionCode: "14",
+    versionName: "0.1.10",
+    splashBackgroundColor: "#02080b",
+    splashAccentColor: "#8CFF2E",
+    splashIconResource: "app_icon",
+  },
+  driver_rustore_qa: {
+    serverUrl: "https://qa-driver.driverform.ru/",
+    startUrl: "https://qa-driver.driverform.ru/driver/",
+    applicationId: "ru.copperresources.driver",
+    appName: "Водитель",
+    versionCode: "13",
+    versionName: "0.1.10-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -46,8 +79,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator.qa",
     appName: "Экскаваторщик QA",
-    versionCode: "4",
-    versionName: "1.0.3-qa",
+    versionCode: "5",
+    versionName: "1.0.4-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -57,8 +90,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "24",
-    versionName: "0.1.17",
+    versionCode: "26",
+    versionName: "0.1.18",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -68,8 +101,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "23",
-    versionName: "0.1.17-rc",
+    versionCode: "25",
+    versionName: "0.1.18-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -115,23 +148,46 @@ test("profiles remain isolated by URL and application id", () => {
 });
 
 test("QA and RuStore variants keep role identity but disable sideload updates", () => {
-  const qa = profile("excavator_qa");
-  const rustoreQa = profile("excavator_rustore_qa");
-  const rustore = profile("excavator_rustore");
-  assert.equal(qa.appProfileId, "excavator");
-  assert.equal(rustoreQa.appProfileId, "excavator");
-  assert.equal(rustore.appProfileId, "excavator");
-  assert.equal(qa.resourceProfile, "excavator");
-  assert.equal(rustoreQa.resourceProfile, "excavator");
-  assert.equal(rustore.resourceProfile, "excavator");
-  assert.equal(qa.inAppUpdaterEnabled, "false");
-  assert.equal(rustoreQa.inAppUpdaterEnabled, "false");
-  assert.equal(rustore.inAppUpdaterEnabled, "false");
-  assert.notEqual(qa.applicationId, rustore.applicationId);
-  assert.equal(rustoreQa.applicationId, rustore.applicationId);
-  assert.notEqual(rustoreQa.serverUrl, rustore.serverUrl);
-  assert.ok(Number(rustore.versionCode) > Number(rustoreQa.versionCode));
-  assert.ok(Number(rustore.versionCode) > Number(profile("excavator").versionCode));
+  for (const role of ["excavator", "driver"]) {
+    const qa = profile(`${role}_qa`);
+    const rustoreQa = profile(`${role}_rustore_qa`);
+    const rustore = profile(`${role}_rustore`);
+    assert.equal(qa.appProfileId, role);
+    assert.equal(rustoreQa.appProfileId, role);
+    assert.equal(rustore.appProfileId, role);
+    assert.equal(qa.resourceProfile, role);
+    assert.equal(rustoreQa.resourceProfile, role);
+    assert.equal(rustore.resourceProfile, role);
+    assert.equal(qa.inAppUpdaterEnabled, "false");
+    assert.equal(rustoreQa.inAppUpdaterEnabled, "false");
+    assert.equal(rustore.inAppUpdaterEnabled, "false");
+    assert.notEqual(qa.applicationId, rustore.applicationId);
+    assert.equal(rustoreQa.applicationId, rustore.applicationId);
+    assert.notEqual(rustoreQa.serverUrl, rustore.serverUrl);
+    assert.ok(Number(profile(role).versionCode) < Number(rustoreQa.versionCode));
+    assert.ok(Number(rustore.versionCode) > Number(rustoreQa.versionCode));
+    assert.ok(Number(rustore.versionCode) > Number(profile(role).versionCode));
+  }
+});
+
+test("driver QA and store variants use isolated notification channels and QA credentials", () => {
+  const driverProfiles = ["driver", "driver_qa", "driver_rustore_qa", "driver_rustore"].map(profile);
+  assert.equal(new Set(driverProfiles.map((config) => config.foregroundChannelId)).size, driverProfiles.length);
+  assert.equal(new Set(driverProfiles.map((config) => config.alertChannelId)).size, driverProfiles.length);
+
+  for (const config of [profile("driver_qa"), profile("driver_rustore_qa")]) {
+    assert.equal(config.syncTokenEnv, "COPPER_DRIVER_QA_SYNC_TOKEN");
+    assert.match(config.heartbeatUrl, /[?&]role_app_code=driver(?:&|$)/);
+  }
+  assert.equal(profile("driver_rustore").syncTokenEnv, "COPPER_DRIVER_SYNC_TOKEN");
+});
+
+test("package scripts cover every driver QA and RuStore build", () => {
+  const scripts = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).scripts;
+  assert.equal(scripts["android:build:driver-qa"], "node scripts/build-android.mjs driver_qa debug");
+  assert.equal(scripts["android:release:driver-qa"], "node scripts/build-android.mjs driver_qa release");
+  assert.equal(scripts["android:release:driver-rustore-qa"], "node scripts/build-android.mjs driver_rustore_qa release");
+  assert.equal(scripts["android:release:driver-rustore"], "node scripts/build-android.mjs driver_rustore release");
 });
 
 test("driver and excavator builds embed the same complete loud sound pack", () => {
@@ -156,10 +212,20 @@ test("driver and excavator builds embed the same complete loud sound pack", () =
       assert.deepEqual(nativeBytes, webBytes);
     }
   }
-  for (const profileName of ["excavator", "excavator_qa", "excavator_rustore_qa", "excavator_rustore"]) {
+  for (const profileName of [
+    "excavator",
+    "excavator_qa",
+    "excavator_rustore_qa",
+    "excavator_rustore",
+    "driver",
+    "driver_qa",
+    "driver_rustore_qa",
+    "driver_rustore",
+  ]) {
     const config = profile(profileName);
-    assert.equal(config.resourceProfile || profileName, "excavator");
-    assert.equal(config.alertSoundResource, "excavator_truck_assigned");
+    const role = profileName.startsWith("excavator") ? "excavator" : "driver";
+    assert.equal(config.resourceProfile || profileName, role);
+    assert.equal(config.alertSoundResource, `${role}_truck_assigned`);
     assert.match(config.alertChannelId, /_v2$/);
   }
 
@@ -220,6 +286,15 @@ test("WebView cookies are accepted and flushed at every persistence boundary", (
   assert.match(activity, /onPause\(\)[\s\S]*?CookieManager\.getInstance\(\)\.flush\(\)/);
   assert.match(activity, /onStop\(\)[\s\S]*?CookieManager\.getInstance\(\)\.flush\(\)/);
   assert.doesNotMatch(activity, /remove(All|Session)Cookies|clearCookies/);
+});
+
+test("Android backup cannot export persisted WebView sessions", () => {
+  const manifest = readFileSync(
+    resolve(root, "android", "app", "src", "main", "AndroidManifest.xml"),
+    "utf8"
+  );
+  assert.match(manifest, /android:allowBackup="false"/);
+  assert.doesNotMatch(manifest, /android:allowBackup="true"/);
 });
 
 test("native implementation reads role data only from BuildConfig", () => {
@@ -377,9 +452,16 @@ test("native updater is profile-driven, deferrable and verifies the APK", () => 
   assert.doesNotMatch(buildScript, /apkUrl:[^\n]*versionCode/);
 });
 
-test("store variants remove package-installer permission", () => {
+test("profiles without the sideload updater remove package-installer permission", () => {
   const gradle = readFileSync(resolve(root, "android", "app", "build.gradle"), "utf8");
-  for (const profileName of ["excavator_qa", "excavator_rustore_qa", "excavator_rustore"]) {
+  for (const profileName of [
+    "excavator_qa",
+    "excavator_rustore_qa",
+    "excavator_rustore",
+    "driver_qa",
+    "driver_rustore_qa",
+    "driver_rustore",
+  ]) {
     const overlay = readFileSync(
       resolve(root, "profiles", profileName, "AndroidManifest.xml"),
       "utf8"

@@ -88,12 +88,12 @@ class UniversalStartTests(TestCase):
             encoding='utf-8',
         )
 
-    def add_driver_release(self, *, version_code=11, version_name='0.1.9'):
+    def add_driver_release(self, *, version_code=12, version_name='0.1.10'):
         self.add_android_release(
             'driver', version_code=version_code, version_name=version_name,
         )
 
-    def add_excavator_release(self, *, version_code=23, version_name='0.1.17'):
+    def add_excavator_release(self, *, version_code=24, version_name='0.1.18'):
         self.add_android_release(
             'excavator', version_code=version_code, version_name=version_name,
         )
@@ -298,15 +298,15 @@ class UniversalStartTests(TestCase):
 
         response = self.post(user_agent=ANDROID_USER_AGENT)
 
-        self.assertContains(response, '/media/apk/driver-0.1.9.apk')
-        self.assertContains(response, '/media/apk/excavator-0.1.17.apk')
+        self.assertContains(response, '/media/apk/driver-0.1.10.apk')
+        self.assertContains(response, '/media/apk/excavator-0.1.18.apk')
         self.assertContains(response, 'data-start-install-option="native"', count=2)
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=2)
         self.assertContains(response, '<b>Приложение <i>стабильное</i></b>', count=2)
         self.assertContains(response, '<b>Браузер <i>нестабильно</i></b>', count=2)
-        self.assertContains(response, 'APK · версия 0.1.17 · скачать и установить', count=1)
-        self.assertContains(response, 'APK · версия 0.1.9 · скачать и установить', count=1)
+        self.assertContains(response, 'APK · версия 0.1.18 · скачать и установить', count=1)
+        self.assertContains(response, 'APK · версия 0.1.10 · скачать и установить', count=1)
         self.assertNotContains(response, '2. Открыть приложение')
         self.assertNotContains(response, '/native-handoff/')
         self.assertContains(response, 'PWA · ярлык на экран · открыть', count=2)
@@ -353,15 +353,15 @@ class UniversalStartTests(TestCase):
         response = self.post(user_agent=ANDROID_USER_AGENT)
 
         self.assertIsNone(response.context['apps'][0]['apk'])
-        self.assertNotContains(response, 'href="/media/apk/driver-0.1.9.apk"')
+        self.assertNotContains(response, 'href="/media/apk/driver-0.1.10.apk"')
         self.assertNotContains(response, 'data-start-install-option="native"')
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"')
 
     def test_android_does_not_see_excavator_apk_for_invalid_update_manifest(self):
-        self.add_apk('apk/excavator-0.1.17.apk')
+        self.add_apk('apk/excavator-0.1.18.apk')
         manifest_path = Path(self.media_directory.name) / 'apk/excavator-update.json'
-        manifest_path.write_text('{"versionCode": 23}', encoding='utf-8')
+        manifest_path.write_text('{"versionCode": 24}', encoding='utf-8')
         self.add_access('excavator_operator', 'Машинист экскаватора')
 
         response = self.post(user_agent=ANDROID_USER_AGENT)
@@ -370,10 +370,10 @@ class UniversalStartTests(TestCase):
         self.assertNotContains(response, 'data-start-install-option="native"')
 
     def test_android_does_not_see_driver_apk_for_invalid_update_manifest(self):
-        self.add_apk('apk/driver-0.1.9.apk')
+        self.add_apk('apk/driver-0.1.10.apk')
         manifest_path = Path(self.media_directory.name) / 'apk/driver-update.json'
         manifest_path.write_text(
-            '{"schemaVersion": 1, "profile": "excavator", "versionCode": 11, "versionName": "0.1.9"}',
+            '{"schemaVersion": 1, "profile": "excavator", "versionCode": 12, "versionName": "0.1.10"}',
             encoding='utf-8',
         )
         self.add_access('driver', 'Водитель самосвала')
@@ -400,7 +400,7 @@ class UniversalStartTests(TestCase):
         response = self.post(user_agent=IPHONE_USER_AGENT)
 
         self.assertIsNone(response.context['apps'][0]['apk'])
-        self.assertNotContains(response, 'href="/media/apk/driver-0.1.9.apk"')
+        self.assertNotContains(response, 'href="/media/apk/driver-0.1.10.apk"')
         self.assertNotContains(response, 'data-start-install-option="native"')
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=1)
@@ -419,7 +419,7 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'data-start-install-option="browser"', count=1)
         self.assertNotContains(response, 'data-start-install-option="native"')
         self.assertContains(response, 'install=1', count=1)
-        self.assertNotContains(response, 'href="/media/apk/driver-0.1.9.apk"')
+        self.assertNotContains(response, 'href="/media/apk/driver-0.1.10.apk"')
         self.assertNotContains(response, 'data-start-native-open')
         self.assertNotContains(response, 'class="start-screen__app-main" href=')
 
@@ -471,7 +471,7 @@ class UniversalStartTests(TestCase):
         response = self.post(user_agent=DESKTOP_USER_AGENT)
 
         self.assertIsNone(response.context['apps'][0]['apk'])
-        self.assertNotContains(response, 'href="/media/apk/excavator-0.1.17.apk"')
+        self.assertNotContains(response, 'href="/media/apk/excavator-0.1.18.apk"')
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"')
         self.assertContains(response, 'install=1', count=1)

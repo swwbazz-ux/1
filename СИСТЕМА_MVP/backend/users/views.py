@@ -85,6 +85,13 @@ from .protected_cards import (
     PROTECTED_WRITE_CODE,
     allow_protected_card_write,
 )
+from .privacy_consent import (
+    PRIVACY_CONSENT_FIELD,
+    PRIVACY_CONSENT_REQUIRED_MESSAGE,
+    accept_current_privacy_policy,
+    privacy_consent_matches_access,
+    privacy_consent_submission_is_current,
+)
 from .forms import (
     AdminAccessBlockForm,
     AccessActivationForm,
@@ -224,7 +231,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v187'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v188'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -276,6 +283,9 @@ const CORE_ASSETS = [
     APP_SHELL_URL,
     LEGACY_SHELL_URL,
     MANIFEST_URL,
+    "/company/privacy/",
+    "/static/portal/css/portal-shell-v5.css?v=6",
+    "/static/portal/js/portal-shell-v5.js",
     "/static/css/app.css",
     "/static/css/mobile-role-login-v1.css",
     "/static/css/mobile-shift-unified-v1.css",
@@ -638,7 +648,35 @@ def login_view(
     prefilled_phone = (
         request.GET.get('phone', '').strip() if request.method == 'GET' else ''
     )
-    if request.method == 'POST' and request.POST.get('action') in {'register', 'continue'}:
+    submitted_action = request.POST.get('action', '') if request.method == 'POST' else ''
+    login_action = submitted_action if submitted_action in {'register', 'continue'} else 'login'
+    submitted_privacy_consent = (
+        request.POST.get(PRIVACY_CONSENT_FIELD, '')
+        if request.method == 'POST'
+        else ''
+    )
+    if (
+        request.method == 'POST'
+        and combined_mobile_login
+        and login_action in {'login', 'register', 'continue'}
+        and not privacy_consent_submission_is_current(submitted_privacy_consent)
+    ):
+        messages.error(request, PRIVACY_CONSENT_REQUIRED_MESSAGE)
+        return render(
+            request,
+            'users/login.html',
+            {
+                'selected_device_kind': selected_device_kind,
+                'next_url': next_url,
+                'login_role_app': login_role_app,
+                'combined_mobile_login': True,
+                'submitted_phone': submitted_phone or prefilled_phone,
+                'login_step': 'pin' if submitted_phone else '',
+                'privacy_consent_error': True,
+            },
+        )
+
+    if request.method == 'POST' and login_action in {'register', 'continue'}:
         # Первый вход. Раньше сюда пускал только выданный вручную временный код,
         # и раздавать его приходилось каждому — при текучке в двадцать человек за
         # вахту это неподъёмно. Теперь ключ — номер телефона из карточки, а ФИО
@@ -673,6 +711,11 @@ def login_view(
         if pending and not already_registered:
             access = pending[0]
             request.session.cycle_key()
+            accept_current_privacy_policy(
+                request,
+                submitted_privacy_consent,
+                access=access,
+            )
             request.session['pending_activation_access_id'] = access.id
             request.session['pending_activation_role_code'] = access.role.code
             if target_role_app:
@@ -740,7 +783,7 @@ def login_view(
                 },
             )
 
-    if request.method == 'POST' and request.POST.get('action') not in {'register', 'continue'}:
+    if request.method == 'POST' and login_action == 'login':
         phone = request.POST.get('phone', '').strip()
         access_code = request.POST.get('access_code', '').strip()
         access = find_employee_access_by_credentials(
@@ -763,6 +806,11 @@ def login_view(
             if access.status == EmployeeAccess.Status.NOT_ACTIVATED:
                 if access.primary_code_issued_at:
                     request.session.cycle_key()
+                    accept_current_privacy_policy(
+                        request,
+                        submitted_privacy_consent,
+                        access=access,
+                    )
                     request.session['pending_activation_access_id'] = access.id
                     request.session['pending_activation_role_code'] = access.role.code
                     if target_role_app:
@@ -812,6 +860,11 @@ def login_view(
                 )
             request.session.cycle_key()
             set_session_device_kind(request, selected_device_kind)
+            accept_current_privacy_policy(
+                request,
+                submitted_privacy_consent,
+                access=locked_access,
+            )
             return _login_redirect_response(
                 request,
                 next_url or _role_landing_url(access),
@@ -844,6 +897,11 @@ def login_view(
         if first_time:
             pending_access = first_time[0]
             request.session.cycle_key()
+            accept_current_privacy_policy(
+                request,
+                submitted_privacy_consent,
+                access=pending_access,
+            )
             request.session['pending_activation_access_id'] = pending_access.id
             request.session['pending_activation_role_code'] = pending_access.role.code
             if target_role_app:
@@ -971,6 +1029,20 @@ def activate_access_view(request):
         return redirect('login')
 
     activation_role_app = target_app or host_role_app
+    if (
+        activation_role_app
+        and activation_role_app.role_code in {'driver', 'excavator_operator'}
+        and not privacy_consent_matches_access(request.session, access)
+    ):
+        for key in (
+            'pending_activation_access_id',
+            'pending_activation_role_code',
+            'pending_activation_target_app_code',
+            'post_activation_next',
+        ):
+            request.session.pop(key, None)
+        messages.error(request, PRIVACY_CONSENT_REQUIRED_MESSAGE)
+        return redirect('login')
 
     if request.method == 'POST':
         form = AccessActivationForm(request.POST, access=access)

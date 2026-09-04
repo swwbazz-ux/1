@@ -34,6 +34,10 @@ CSRF_RE = re.compile(
     r'name=["\']csrfmiddlewaretoken["\']\s+value=["\']([^"\']+)["\']',
     re.IGNORECASE,
 )
+PRIVACY_CONSENT_RE = re.compile(
+    r'name=["\']privacy_consent["\'][^>]*\svalue=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -327,23 +331,26 @@ def login(
         path="/",
         timeout=timeout,
     )
-    token = CSRF_RE.search(body.decode("utf-8", errors="replace"))
+    login_html = body.decode("utf-8", errors="replace")
+    token = CSRF_RE.search(login_html)
     if get_result.status != 200 or not token:
         raise RuntimeError(
             f"{role.role}: login form unavailable ({get_result.status})."
         )
-    form = urllib.parse.urlencode(
-        {
-            "csrfmiddlewaretoken": token.group(1),
-            "phone": role.phone,
-            "access_code": role.pin,
-            "device_kind": (
-                "shared"
-                if role.role in {"dispatcher", "mining_master"}
-                else "personal"
-            ),
-        }
-    ).encode("ascii")
+    form_fields = {
+        "csrfmiddlewaretoken": token.group(1),
+        "phone": role.phone,
+        "access_code": role.pin,
+        "device_kind": (
+            "shared"
+            if role.role in {"dispatcher", "mining_master"}
+            else "personal"
+        ),
+    }
+    consent_match = PRIVACY_CONSENT_RE.search(login_html)
+    if consent_match:
+        form_fields["privacy_consent"] = consent_match.group(1)
+    form = urllib.parse.urlencode(form_fields).encode("ascii")
     post_result, _, _ = measure_request(
         opener,
         urllib.request.Request(

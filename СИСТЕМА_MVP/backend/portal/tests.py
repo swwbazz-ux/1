@@ -708,6 +708,54 @@ class PortalPublicHomeTests(PortalTestCase):
         self.assertEqual(response.content.decode('utf-8').count('KPI'), 1)
 
 
+class PortalPrivacyPolicyTests(PortalTestCase):
+    @override_settings(ALLOWED_HOSTS=['testserver', '.localhost'])
+    def test_policy_is_public_on_main_and_role_hosts(self):
+        url = reverse('portal:public_privacy')
+
+        for host in ('testserver', 'driver.localhost', 'excavator.localhost'):
+            with self.subTest(host=host):
+                response = self.client.get(url, HTTP_HOST=host)
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'ООО «Коппер Рисорсез»')
+                self.assertContains(response, 'ИНН 6685213657')
+                self.assertContains(response, 'ОГРН 1236600056945')
+                self.assertContains(response, '454090, г. Челябинск, ул. Труда, д. 64А')
+                self.assertContains(response, '74-25-037828')
+                self.assertContains(response, 'https://pd.rkn.gov.ru/operators-registry/operators-list/')
+                self.assertContains(response, 'Водитель самосвала')
+                self.assertContains(response, 'Машиниста экскаватора')
+                self.assertContains(response, 'HTTPS')
+                self.assertContains(response, 'Сборки для RuStore это разрешение не запрашивают')
+                self.assertContains(response, reverse('portal:public_contacts'))
+
+    def test_policy_states_only_the_supported_contact_and_data_contract(self):
+        response = self.client.get(reverse('portal:public_privacy'))
+        content = response.content.decode('utf-8')
+
+        self.assertContains(response, 'не передаёт их рекламным сетям')
+        self.assertContains(response, 'не запрашивают доступ к камере')
+        self.assertContains(response, 'обратиться в Роскомнадзор или суд')
+        self.assertNotIn('mailto:', content)
+        self.assertIn('приказ Роскомнадзора № 116 от 05.06.2025', content)
+        self.assertIn('уведомление зарегистрировано 03.06.2025', content)
+        self.assertNotIn('зарегистрирован в Роскомнадзоре', content)
+
+    @override_settings(SUPPORT_CHAT_URL='https://max.ru/copper-support')
+    def test_policy_offers_max_only_when_public_support_link_is_configured(self):
+        response = self.client.get(reverse('portal:public_privacy'))
+
+        self.assertContains(response, 'href="https://max.ru/copper-support"')
+        self.assertContains(response, 'Написать в MAX')
+
+    def test_public_footer_links_to_privacy_policy(self):
+        response = self.client.get(reverse('portal:public_home'))
+
+        self.assertContains(response, reverse('portal:public_privacy'))
+        self.assertContains(response, 'Персональные данные')
+
+
 class PortalPageRenderTests(PortalTestCase):
     def setUp(self):
         super().setUp()
@@ -747,6 +795,7 @@ class PortalPageRenderTests(PortalTestCase):
                 reverse('portal:public_people'),
                 reverse('portal:public_vacancies'),
                 reverse('portal:public_contacts'),
+                reverse('portal:public_privacy'),
                 reverse('portal:login'),
                 reverse('portal:public_publication_detail', args=[self.public_item.pk]),
             ]

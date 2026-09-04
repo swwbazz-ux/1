@@ -3,6 +3,7 @@ from pathlib import Path
 from django.conf import settings
 from django.test import Client, SimpleTestCase, override_settings
 
+from .privacy_consent import PRIVACY_POLICY_VERSION
 from .role_apps import ENTRY_SCREEN_BROWSER_BAR, ROLE_APPS
 
 
@@ -29,6 +30,28 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
                 self.assertContains(
                     response,
                     f'<meta name="theme-color" content="{ENTRY_SCREEN_BROWSER_BAR}">',
+                    count=1,
+                )
+
+    def test_combined_driver_and_excavator_login_render_one_active_consent_contract(self):
+        for host in ('driver.localhost', 'excavator.localhost'):
+            with self.subTest(host=host):
+                response = Client().get('/', HTTP_HOST=host)
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'data-login-combined="true"')
+                self.assertContains(response, 'data-privacy-consent')
+                self.assertContains(response, 'name="privacy_consent"', count=1)
+                self.assertContains(
+                    response,
+                    f'value="{PRIVACY_POLICY_VERSION}"',
+                    count=1,
+                )
+                self.assertContains(response, 'data-login-privacy-link', count=1)
+                self.assertContains(response, 'href="/company/privacy/"', count=1)
+                self.assertContains(
+                    response,
+                    'Соглашаюсь на обработку персональных данных',
                     count=1,
                 )
 
@@ -182,6 +205,14 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         ).read_text(encoding='utf-8')
 
         self.assertIn('data-login-combined="true"', template)
+        self.assertIn('data-privacy-consent', template)
+        self.assertIn('name="privacy_consent"', template)
+        self.assertIn('value="{{ privacy_policy_version }}"', template)
+        self.assertIn("{% url 'portal:public_privacy' %}", template)
+        self.assertIn('var consentField = form.querySelector("[data-privacy-consent]")', template)
+        self.assertIn('var consentMissing = combinedLogin && (!consentField || !consentField.checked)', template)
+        self.assertIn('registerButton.disabled = pending', template)
+        self.assertIn('consentField.focus({preventScroll: true})', template)
         self.assertIn('enterkeyhint="next"', template)
         self.assertIn('enterkeyhint="go"', template)
         self.assertIn('visualViewport.addEventListener(', template)
@@ -193,6 +224,25 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         self.assertIn('.is-login-keyboard-active .mobile-role-login__hero', stylesheet)
         self.assertIn('.is-login-keyboard-active .max-support-link', stylesheet)
         self.assertIn('overflow: hidden', stylesheet)
+        self.assertIn('.mobile-role-login__consent {', stylesheet)
+        self.assertIn('grid-template-columns: 22px minmax(0, 1fr)', stylesheet)
+        self.assertIn('min-height: 36px', stylesheet)
+        self.assertIn('.mobile-role-login__consent-box {', stylesheet)
+        self.assertIn('width: 22px', stylesheet)
+        self.assertIn('height: 22px', stylesheet)
+        self.assertIn(
+            '@media (orientation: landscape) and (max-height: 360px)',
+            stylesheet,
+        )
+        self.assertIn(
+            'grid-template-columns: repeat(2, minmax(0, 1fr)) !important',
+            stylesheet,
+        )
+        self.assertIn('grid-column: 1 / -1 !important', stylesheet)
+        self.assertIn(
+            'is-login-a11y-overflow .unified-login-dialog.mobile-role-login',
+            stylesheet,
+        )
         self.assertIn('.login-combined.login-role-driver {', stylesheet)
         self.assertIn('--mobile-login-accent: var(--login-accent, #ffd200)', stylesheet)
         self.assertIn('--mobile-login-button-top: #60e3d6', stylesheet)

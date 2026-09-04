@@ -757,12 +757,15 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v201";
+const CACHE_NAME = "excavator-mobile-shell-v202";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
   APP_SHELL_URL,
   MANIFEST_URL,
+  "/company/privacy/",
+  "/static/portal/css/portal-shell-v5.css?v=6",
+  "/static/portal/js/portal-shell-v5.js",
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
   "/static/css/app.css",

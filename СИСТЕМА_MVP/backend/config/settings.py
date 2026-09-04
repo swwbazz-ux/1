@@ -276,10 +276,16 @@ EXCAVATOR_QA_DATABASE_NAME = os.getenv('EXCAVATOR_QA_DATABASE_NAME', '').strip()
 EXCAVATOR_QA_LABEL = os.getenv('EXCAVATOR_QA_LABEL', 'ТЕСТОВЫЙ СТЕНД').strip()
 EXCAVATOR_QA_PHONE = os.getenv('EXCAVATOR_QA_PHONE', '').strip()
 EXCAVATOR_QA_PIN = os.getenv('EXCAVATOR_QA_PIN', '').strip()
+# Реквизиты человека-водителя живут только в защищённом .env QA-сервера.
+# Они намеренно отделены от реквизитов человека-экскаваторщика, хотя оба
+# приложения работают с одной изолированной QA-базой и одним симулятором.
+DRIVER_QA_PHONE = os.getenv('DRIVER_QA_PHONE', '').strip()
+DRIVER_QA_PIN = os.getenv('DRIVER_QA_PIN', '').strip()
 EXCAVATOR_QA_TICK_SECONDS = _env_positive_int('EXCAVATOR_QA_TICK_SECONDS', 2)
 EXCAVATOR_QA_TRANSIT_SECONDS = _env_positive_int('EXCAVATOR_QA_TRANSIT_SECONDS', 12)
 EXCAVATOR_QA_TRUCK_COUNT = _env_positive_int('EXCAVATOR_QA_TRUCK_COUNT', 4)
 EXCAVATOR_QA_PLAN_TRIPS = _env_positive_int('EXCAVATOR_QA_PLAN_TRIPS', 20)
+DRIVER_QA_LOADING_SECONDS = _env_positive_int('DRIVER_QA_LOADING_SECONDS', 8)
 TRUCK_POST_UNLOAD_COOLDOWN_SECONDS = _env_positive_int(
     'TRUCK_POST_UNLOAD_COOLDOWN_SECONDS',
     600,

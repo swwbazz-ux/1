@@ -5,7 +5,7 @@ from trips.qa_simulator import prepare_excavator_qa_scenario
 
 
 class Command(BaseCommand):
-    help = 'Идемпотентно готовит изолированный RuStore QA-сценарий экскаваторщика.'
+    help = 'Идемпотентно готовит изолированный RuStore QA-сценарий двух мобильных ролей.'
 
     def handle(self, *args, **options):
         environment = require_excavator_qa_environment()
@@ -16,5 +16,6 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             f'{environment.label}: база {environment.database_name}; '
             f'экскаватор {scenario.excavator.garage_number}; '
-            f'самосвалов {len(scenario.trucks)}.'
+            f'самосвалов-ботов {len(scenario.trucks)}; '
+            f'ручной самосвал {scenario.human_driver_truck.garage_number}.'
         ))

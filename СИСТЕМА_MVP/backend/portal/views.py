@@ -15,6 +15,10 @@ from django.views.decorators.http import require_POST
 from users.access_auth import find_employee_access_by_credentials
 from users.active_role import activate_role_session
 from users.models import Employee, EmployeeAccess
+from users.privacy_consent import (
+    PRIVACY_POLICY_EFFECTIVE_DATE,
+    PRIVACY_POLICY_VERSION,
+)
 from users.views import get_current_access
 
 from .auth import (
@@ -196,6 +200,18 @@ def public_vacancies(request):
 
 def public_contacts(request):
     return render(request, 'portal/public_contacts.html', {'company': COMPANY_PROFILE})
+
+
+def public_privacy(request):
+    return render(
+        request,
+        'portal/public_privacy.html',
+        {
+            'company': COMPANY_PROFILE,
+            'privacy_policy_effective_date': PRIVACY_POLICY_EFFECTIVE_DATE,
+            'privacy_policy_version': PRIVACY_POLICY_VERSION,
+        },
+    )
 
 
 def portal_login(request):

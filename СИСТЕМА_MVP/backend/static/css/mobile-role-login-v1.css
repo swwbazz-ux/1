@@ -366,6 +366,76 @@ body.login-page.login-fullscreen.login-combined .input-hint.is-invalid {
     color: var(--mobile-login-danger);
 }
 
+.mobile-role-login__consent {
+    position: relative;
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    min-width: 0;
+    min-height: 36px;
+    margin: -1px 0;
+    align-items: center;
+    gap: 8px;
+    color: var(--mobile-login-muted);
+    font: 500 clamp(10px, 2.75vw, 12px)/1.25 "Segoe UI", Arial, sans-serif;
+    cursor: pointer;
+}
+
+.mobile-role-login__consent > input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.mobile-role-login__consent-box {
+    display: grid;
+    width: 22px;
+    height: 22px;
+    place-items: center;
+    border: 1px solid var(--mobile-login-field-border);
+    border-radius: 6px;
+    background: var(--mobile-login-field);
+    color: var(--mobile-login-button-ink);
+    transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.mobile-role-login__consent > input:checked + .mobile-role-login__consent-box {
+    border-color: var(--mobile-login-accent);
+    background: var(--mobile-login-accent);
+}
+
+.mobile-role-login__consent > input:checked + .mobile-role-login__consent-box::after {
+    content: "\2713";
+    font: 900 15px/1 "Segoe UI", Arial, sans-serif;
+}
+
+.mobile-role-login__consent > input:focus-visible + .mobile-role-login__consent-box {
+    outline: 3px solid #fff;
+    outline-offset: 3px;
+}
+
+.mobile-role-login__consent.is-invalid .mobile-role-login__consent-box,
+.mobile-role-login__consent > input[aria-invalid="true"] + .mobile-role-login__consent-box {
+    border-color: var(--mobile-login-danger);
+    box-shadow: 0 0 0 2px rgba(255, 107, 107, .14);
+}
+
+.mobile-role-login__consent-copy {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.mobile-role-login__consent-copy a {
+    color: var(--mobile-login-accent);
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
 .mobile-role-login__feedback {
     display: grid;
     align-items: center;
@@ -436,6 +506,7 @@ body.login-page.login-fullscreen.login-combined .unified-login-submit:not(:disab
 body.login-page.login-fullscreen.login-combined .unified-login-submit:focus-visible,
 body.login-page.login-fullscreen.login-combined .unified-login-register:focus-visible,
 body.login-page.login-fullscreen.login-combined .login-pin-reveal:focus-visible,
+body.login-page.login-fullscreen.login-combined .mobile-role-login__consent-copy a:focus-visible,
 body.login-page.login-fullscreen.login-combined .max-support-link:focus-visible {
     outline: 3px solid #fff;
     outline-offset: 3px;
@@ -463,6 +534,12 @@ body.login-page.login-fullscreen.login-combined .unified-login-register {
     text-decoration: underline;
     text-underline-offset: 3px;
     cursor: pointer;
+}
+
+body.login-page.login-fullscreen.login-combined .unified-login-register:disabled {
+    color: #657176;
+    cursor: default;
+    opacity: .68;
 }
 
 body.login-page.login-fullscreen.login-combined .max-support-link {
@@ -514,6 +591,17 @@ body.login-page.login-fullscreen.login-combined .app-connection-dot {
 
     .mobile-role-login__lead {
         display: none;
+    }
+
+    body.login-page.login-fullscreen.login-combined .input-hint:not(.is-invalid) {
+        display: none;
+        min-height: 0;
+    }
+
+    .mobile-role-login__consent {
+        min-height: 30px;
+        gap: 6px;
+        font-size: 9.5px;
     }
 
     body.login-page.login-fullscreen.login-combined .unified-login-submit {
@@ -593,6 +681,12 @@ body.login-page.login-fullscreen.login-combined .app-connection-dot {
         display: none;
     }
 
+    .mobile-role-login__consent {
+        min-height: 27px;
+        font-size: 9.5px;
+        line-height: 1.15;
+    }
+
     body.login-page.login-fullscreen.login-combined .unified-login-submit {
         min-height: 44px;
         font-size: 17px;
@@ -667,10 +761,59 @@ body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .mobile
     font-size: 10px;
 }
 
+body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .mobile-role-login__consent {
+    min-height: 28px;
+    font-size: 10px;
+    line-height: 1.15;
+}
+
 body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .unified-login-submit {
     min-height: 46px;
     font-size: 18px;
     box-shadow: 0 3px 0 var(--mobile-login-button-depth), 0 5px 14px var(--mobile-login-focus-ring);
+}
+
+@media (orientation: landscape) and (max-height: 360px) {
+    body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .unified-login-form.is-combined-login {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        grid-template-rows: none !important;
+        grid-auto-rows: max-content !important;
+        align-content: start !important;
+        column-gap: 7px;
+        row-gap: 3px;
+        padding: 4px 8px 6px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .unified-login-form.is-combined-login > h1 {
+        display: none;
+    }
+
+    body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .unified-login-form.is-combined-login > .shared-shift-login-field {
+        grid-column: auto !important;
+        grid-row: auto !important;
+    }
+
+    body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .mobile-role-login__consent,
+    body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .mobile-role-login__feedback,
+    body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .unified-login-actions {
+        grid-column: 1 / -1 !important;
+        grid-row: auto !important;
+    }
+
+    body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .shared-shift-country-code {
+        min-width: 44px;
+        padding-inline: 7px;
+        font-size: 15px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .shared-shift-login-field input {
+        padding-inline: 8px;
+        font-size: 16px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.is-login-keyboard-active .shared-shift-phone-shell input {
+        padding-right: 30px;
+    }
 }
 
 body.login-page.login-fullscreen.login-combined.is-login-a11y-overflow .unified-login-dialog.mobile-role-login {
