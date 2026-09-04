@@ -859,7 +859,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v194')
+        self.assertContains(response, 'excavator-mobile-shell-v195')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
@@ -2551,7 +2551,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v194', script)
+        self.assertIn('excavator-mobile-shell-v195', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)
@@ -2955,6 +2955,36 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(pending_assignment.status, AssignmentStatus.PENDING)
         self.assertIsNone(pending_assignment.accepted_at)
         self.assertFalse(Trip.objects.filter(truck=pending_truck).exists())
+
+    def test_excavator_work_marks_last_sent_dump_point(self):
+        second_dump = DumpPoint.objects.create(name='Рудный склад')
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            loading_shift=shift,
+            rock_type=self.rock,
+            dump_point=second_dump,
+            assigned_dump_point=second_dump,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+        session = self.client.session
+        session['excavator_work_settings'] = {
+            str(self.excavator.id): {
+                'rock_type_id': self.rock.id,
+                'dump_point_ids': [self.dump_point.id, second_dump.id],
+                'loading_horizon': '125',
+                'loading_block': '4',
+            },
+        }
+        session.save()
+
+        response = self.client.get(reverse('excavator_work'))
+
+        last_sent_cards = [card for card in response.context['dump_cards'] if card['is_last_sent']]
+        self.assertEqual([card['point'].id for card in last_sent_cards], [second_dump.id])
+        self.assertContains(response, 'is-last-dump')
 
     def post_truck_loaded(self, *, client_action_id='load-1', truck=None, dump_point=None, rock=None):
         return self.client.post(
@@ -4087,9 +4117,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('.mobile-downtime__reason.eo-reason-action.is-used:not(.is-selected)', work_tabs_css)
         self.assertIn('color: #ff6658 !important;', work_tabs_css)
         self.assertIn('button.classList.toggle("is-used", isVisible);', html)
-        self.assertIn('rotate(" + tilt + "deg)', html)
-        self.assertIn('.eo-dashboard-unload-grid:has(.eo-dashboard-unload-card.is-drop-ready)', legacy_css)
-        self.assertIn('transform: scale(1.045) !important;', legacy_css)
+        self.assertNotIn('rotate(" + tilt + "deg)', html)
+        self.assertIn('findDumpTargetIntersectingPreview', html)
+        self.assertIn('@keyframes eo-truck-preview-float', legacy_css)
+        self.assertIn('.eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid', legacy_css)
+        self.assertNotIn('transform: scale(1.045) !important;', legacy_css)
 
 
 class DispatcherAssignmentRealtimeTests(TestCase):

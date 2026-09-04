@@ -565,13 +565,18 @@ body.excavator-operator-screen .eo-truck-card.is-drag-preview {
     max-height: none !important;
     aspect-ratio: auto !important;
     box-sizing: border-box !important;
-    opacity: .98 !important;
-    outline: 2px solid rgba(96, 213, 255, .96) !important;
-    outline-offset: 2px !important;
-    filter: brightness(1.16) saturate(1.12) !important;
+    opacity: .9 !important;
+    outline: 0 !important;
+    filter: brightness(1.08) saturate(1.04) !important;
     transform-origin: center center !important;
     transition: none !important;
-    box-shadow: inset 0 0 26px rgba(125, 245, 255, .18), 0 0 0 1px rgba(181, 242, 255, .46), 0 0 26px rgba(56, 189, 248, .38), 0 26px 48px rgba(0, 0, 0, .58) !important;
+    animation: eo-truck-preview-float 1.15s ease-in-out infinite !important;
+    box-shadow: inset 0 0 18px rgba(125, 245, 255, .1), 0 0 0 1px rgba(181, 242, 255, .32), 0 12px 28px rgba(0, 0, 0, .42) !important;
+}
+
+@keyframes eo-truck-preview-float {
+    0%, 100% { rotate: -1deg; translate: 0 -2px; }
+    50% { rotate: 1deg; translate: 0 2px; }
 }
 
 body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview[data-plan-status="empty"],
@@ -947,23 +952,55 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
     min-height: var(--eo-dump-card-min-h) !important;
     height: 100% !important;
     transform-origin: center center !important;
-    transition: transform .16s cubic-bezier(.2, .8, .2, 1), opacity .16s ease, filter .16s ease, border-color .16s ease, box-shadow .16s ease !important;
-    will-change: transform, opacity, filter !important;
+    transition: flex-grow .18s cubic-bezier(.2, .8, .2, 1), opacity .16s ease, filter .16s ease, border-color .16s ease, box-shadow .16s ease !important;
+    will-change: flex-grow, opacity, filter !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-card.is-drop-ready {
     z-index: 25 !important;
-    transform: scale(1.045) !important;
-    border-color: rgba(77, 255, 89, .96) !important;
+    transform: none !important;
+    border-color: rgba(255, 214, 41, .98) !important;
     filter: brightness(1.16) saturate(1.12) !important;
-    box-shadow: 0 0 0 2px rgba(77, 255, 89, .28), 0 0 24px rgba(77, 255, 89, .3), 0 12px 26px rgba(0, 0, 0, .28) !important;
+    box-shadow: inset 0 0 0 2px rgba(255, 214, 41, .58), 0 0 24px rgba(255, 214, 41, .3) !important;
 }
 
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid:has(.eo-dashboard-unload-card.is-drop-ready) .eo-dashboard-unload-card:not(.is-drop-ready) {
-    z-index: 4 !important;
-    transform: scale(.955) !important;
+body.excavator-operator-screen .eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    align-items: stretch !important;
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-card {
+    flex: .72 1 0 !important;
     opacity: .52 !important;
     filter: brightness(.72) saturate(.55) !important;
+}
+
+body.excavator-operator-screen .eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-card.is-drop-ready {
+    flex: 1.56 1 0 !important;
+    opacity: 1 !important;
+    filter: brightness(1.16) saturate(1.12) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card.is-last-dump:not(.is-drop-ready) {
+    border-color: rgba(255, 214, 41, .98) !important;
+    background: radial-gradient(circle at 50% 34%, rgba(255, 214, 41, .22), transparent 62%), rgba(42, 35, 10, .9) !important;
+    box-shadow: inset 0 0 0 2px rgba(255, 214, 41, .62), 0 0 20px rgba(255, 214, 41, .28) !important;
+    animation: eo-last-dump-pulse 1.8s ease-in-out infinite !important;
+}
+
+@keyframes eo-last-dump-pulse {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.13); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview,
+    body.excavator-operator-screen .eo-truck-card.is-drag-preview,
+    body.excavator-operator-screen .eo-dashboard-unload-card.is-last-dump:not(.is-drop-ready) {
+        animation: none !important;
+    }
 }
 
 @media (max-width: 480px) {
@@ -1073,16 +1110,13 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
             radial-gradient(circle at 50% 34%, rgba(96, 213, 255, .22), rgba(96, 213, 255, 0) 46%),
             linear-gradient(180deg, rgba(15, 23, 42, .98), rgba(6, 18, 24, .99)) !important;
         border-color: rgba(163, 230, 53, .96) !important;
-        outline: 3px solid rgba(125, 245, 255, .98) !important;
-        outline-offset: 2px !important;
-        filter: brightness(1.28) saturate(1.28) contrast(1.08) !important;
+        outline: 0 !important;
+        filter: brightness(1.08) saturate(1.04) !important;
         box-shadow:
-            inset 0 0 0 1px rgba(226, 255, 255, .28),
-            inset 0 0 34px rgba(96, 213, 255, .2),
-            0 0 0 2px rgba(163, 230, 53, .8),
-            0 0 32px rgba(125, 245, 255, .54),
-            0 0 46px rgba(132, 204, 22, .42),
-            0 28px 54px rgba(0, 0, 0, .72) !important;
+            inset 0 0 0 1px rgba(226, 255, 255, .18),
+            inset 0 0 22px rgba(96, 213, 255, .12),
+            0 0 0 1px rgba(163, 230, 53, .42),
+            0 14px 30px rgba(0, 0, 0, .5) !important;
     }
 
     body.excavator-operator-screen .eo-dashboard-truck-card.truck-drag-preview > *,
@@ -2396,7 +2430,7 @@ body.excavator-operator-screen .mm-mobile-nav-icon {
     border-radius: 0 !important;
     background: transparent !important;
     opacity: 1 !important;
-    overflow: visible !important;
+    overflow: hidden !important;
 }
 
 body.excavator-operator-screen .mm-mobile-nav-icon svg {

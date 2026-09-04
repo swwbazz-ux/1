@@ -6,13 +6,13 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v194">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v194">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v194">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v194">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v194">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v194">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v194" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v195">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v195">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v195">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v195">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v195">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v195">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v195" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -206,7 +206,7 @@
             <div class="eo-dashboard-dump-zone">
                 <div class="eo-unload-grid eo-unload-grid-work eo-dashboard-unload-grid is-count-{{ dump_cards|length }}{% if dump_cards|length == 1 %} is-single{% endif %}" aria-label="Точки разгрузки">
                     {% for card in dump_cards %}
-                        <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_default %} is-selected{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% endif %}>
+                        <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_last_sent %} is-last-dump{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% endif %}>
                             <span class="eo-dashboard-unload-top">
                                 <strong>{{ card.name }}</strong>
                                 <small>{{ card.completed_count|default:0 }}</small>
@@ -397,7 +397,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v194";
+var excavatorShellVersion = "excavator-mobile-shell-v195";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1996,7 +1996,6 @@ window.initExcavatorWorkShell = function () {
             downtime_text: downtimeInput ? downtimeInput.value : "",
             note: shell.querySelector("input[name='note']") ? shell.querySelector("input[name='note']").value : ""
         };
-        markLastDumpTarget(dumpTarget);
         applyTruckPending(card, dumpTarget);
         optimisticBadge = addPendingTruckBadge(dumpTarget, card, "");
         fetch(truckLoadedUrl, {
@@ -2031,6 +2030,7 @@ window.initExcavatorWorkShell = function () {
                 });
             }
             confirmTruckLoaded(card, data);
+            markLastDumpTarget(dumpTarget);
             updatePendingTruckBadgeTrip(dumpTarget, truckId, data.trip_id || "");
             if (data.downtime_status) {
                 if (data.downtime_status.active) {
@@ -2057,6 +2057,14 @@ window.initExcavatorWorkShell = function () {
         shell.querySelectorAll("[data-eo-dump-target].is-drop-ready").forEach(function (target) {
             target.classList.remove("is-drop-ready");
         });
+        shell.classList.remove("is-truck-drag-active");
+    }
+
+    function setTruckDragTarget(target) {
+        shell.classList.toggle("is-truck-drag-active", Boolean(target));
+        shell.querySelectorAll("[data-eo-dump-target]").forEach(function (item) {
+            item.classList.toggle("is-drop-ready", item === target);
+        });
     }
 
     function createTruckDragPreview(state) {
@@ -2080,7 +2088,8 @@ window.initExcavatorWorkShell = function () {
         preview.style.pointerEvents = "none";
         preview.style.zIndex = "20000";
         preview.style.boxSizing = "border-box";
-        preview.style.transform = "translate3d(0, 0, 0)";
+        preview.style.setProperty("border-radius", window.getComputedStyle(state.card).borderRadius, "important");
+        preview.style.transform = "translate3d(0, 0, 0) scale(.9)";
         preview.style.transformOrigin = "center center";
         document.body.appendChild(preview);
         state.preview = preview;
@@ -2089,14 +2098,7 @@ window.initExcavatorWorkShell = function () {
     function moveTruckDragPreview(state, dx, dy) {
         if (!state || !state.preview) return;
         var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        var tilt = 0;
-        if (!reduceMotion) {
-            tilt = Math.max(-7, Math.min(7, dx * 0.035));
-            if (Math.abs(tilt) < 2.5) {
-                tilt = dx < 0 ? -2.5 : 2.5;
-            }
-        }
-        state.preview.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0) rotate(" + tilt + "deg) scale(" + (reduceMotion ? "1" : "1.025") + ")";
+        state.preview.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0) scale(" + (reduceMotion ? "1" : ".9") + ")";
     }
 
     function removeTruckDragPreview(state) {
@@ -2105,17 +2107,28 @@ window.initExcavatorWorkShell = function () {
         state.preview = null;
     }
 
-    function findDumpTargetAtPoint(x, y) {
-        var previousPointerEvents = null;
-        if (activeTruckDrag && activeTruckDrag.card) {
-            previousPointerEvents = activeTruckDrag.card.style.pointerEvents;
-            activeTruckDrag.card.style.pointerEvents = "none";
-        }
-        var element = document.elementFromPoint(x, y);
-        if (activeTruckDrag && activeTruckDrag.card) {
-            activeTruckDrag.card.style.pointerEvents = previousPointerEvents;
-        }
-        return element ? element.closest("[data-eo-dump-target]") : null;
+    function findDumpTargetIntersectingPreview(state) {
+        if (!state || !state.preview) return null;
+        var previewRect = state.preview.getBoundingClientRect();
+        var previewCenterX = (previewRect.left + previewRect.right) / 2;
+        var previewCenterY = (previewRect.top + previewRect.bottom) / 2;
+        var bestTarget = null;
+        var bestScore = -Infinity;
+        shell.querySelectorAll("[data-eo-dump-target]").forEach(function (target) {
+            var targetRect = target.getBoundingClientRect();
+            var overlapX = Math.min(previewRect.right, targetRect.right) - Math.max(previewRect.left, targetRect.left);
+            var overlapY = Math.min(previewRect.bottom, targetRect.bottom) - Math.max(previewRect.top, targetRect.top);
+            if (overlapX < -2 || overlapY < -2) return;
+            var targetCenterX = (targetRect.left + targetRect.right) / 2;
+            var targetCenterY = (targetRect.top + targetRect.bottom) / 2;
+            var centerDistance = Math.hypot(previewCenterX - targetCenterX, previewCenterY - targetCenterY);
+            var score = Math.max(0, overlapX) * Math.max(0, overlapY) - centerDistance * .01;
+            if (score > bestScore) {
+                bestScore = score;
+                bestTarget = target;
+            }
+        });
+        return bestTarget;
     }
 
     function updateTruckDrag(event) {
@@ -2132,11 +2145,8 @@ window.initExcavatorWorkShell = function () {
             createTruckDragPreview(activeTruckDrag);
         }
         moveTruckDragPreview(activeTruckDrag, dx, dy);
-        var target = findDumpTargetAtPoint(event.clientX, event.clientY);
-        clearDropReady();
-        if (target) {
-            target.classList.add("is-drop-ready");
-        }
+        var target = findDumpTargetIntersectingPreview(activeTruckDrag);
+        setTruckDragTarget(target);
         activeTruckDrag.target = target;
     }
 
