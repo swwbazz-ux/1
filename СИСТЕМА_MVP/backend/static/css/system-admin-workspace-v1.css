@@ -13,7 +13,7 @@
 /* Admin live shift monitor */
 .admin-live-monitor-page {
     display: grid;
-    gap: 16px;
+    gap: 14px;
     overflow: auto;
 }
 
@@ -22,7 +22,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 20px;
-    padding: 18px 20px;
+    padding: 15px 18px;
     border: 1px solid var(--admin-line);
     border-radius: 8px;
     background: var(--admin-panel);
@@ -38,12 +38,12 @@
 
 .admin-live-monitor-intro h2 {
     margin: 3px 0 4px;
-    font-size: clamp(20px, 2vw, 28px);
+    font-size: clamp(20px, 1.8vw, 26px);
     line-height: 1.05;
 }
 
 .admin-live-monitor-intro p {
-    max-width: 900px;
+    max-width: 820px;
     margin: 0;
     color: var(--admin-muted);
     font-size: 13px;
@@ -116,19 +116,22 @@
 .admin-live-app-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 14px;
+    align-items: start;
+    gap: 16px;
 }
 
 .admin-live-app-card {
     min-width: 0;
+    align-self: start;
     overflow: hidden;
     border: 1px solid var(--admin-line);
     border-radius: 8px;
     background: var(--admin-panel);
+    box-shadow: 0 4px 14px rgba(53, 70, 78, .07);
 }
 
 .admin-live-app-card.has-online {
-    border-color: color-mix(in srgb, var(--admin-green) 55%, var(--admin-line));
+    border-color: color-mix(in srgb, var(--admin-green) 38%, var(--admin-line));
 }
 
 .admin-live-app-header {
@@ -136,9 +139,9 @@
     grid-template-columns: 42px minmax(0, 1fr) auto;
     align-items: center;
     gap: 10px;
-    padding: 12px 14px;
+    padding: 13px 14px;
     border-bottom: 1px solid var(--admin-line);
-    background: var(--admin-panel-soft);
+    background: color-mix(in srgb, var(--admin-panel-soft) 74%, var(--admin-panel));
 }
 
 .admin-live-app-icon,
@@ -165,7 +168,7 @@
 }
 
 .admin-live-app-header h3 {
-    font-size: 16px;
+    font-size: 17px;
     line-height: 1.15;
 }
 
@@ -173,7 +176,7 @@
     margin-top: 2px;
     overflow: hidden;
     color: var(--admin-muted);
-    font-size: 10px;
+    font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -205,17 +208,22 @@
 
 .admin-live-app-people {
     display: grid;
+    gap: 8px;
+    padding: 10px;
+    background: color-mix(in srgb, var(--admin-panel-soft) 48%, var(--admin-panel));
 }
 
 .admin-live-person-row {
     display: grid;
-    gap: 10px;
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--admin-line-soft);
+    gap: 9px;
+    padding: 12px;
+    border: 1px solid var(--admin-line-soft);
+    border-radius: 7px;
+    background: var(--admin-panel);
 }
 
 .admin-live-person-row:last-child {
-    border-bottom: 0;
+    border-bottom: 1px solid var(--admin-line-soft);
 }
 
 .admin-live-person-main {
@@ -253,7 +261,7 @@
 }
 
 .admin-live-person-main strong {
-    font-size: 13px;
+    font-size: 14px;
 }
 
 .admin-live-person-main span:not(.admin-live-person-avatar) {
@@ -274,18 +282,43 @@
     color: var(--admin-yellow);
 }
 
+.admin-live-person-main b.is-online,
+.admin-live-person-main b.is-recent {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    border-radius: 999px;
+}
+
+.admin-live-person-main b.is-online {
+    background: var(--admin-green-soft);
+}
+
+.admin-live-person-main b.is-recent {
+    background: var(--admin-yellow-soft);
+}
+
 .admin-live-person-facts {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
+    gap: 0;
     margin: 0;
+    overflow: hidden;
+    border: 1px solid var(--admin-line-soft);
+    border-radius: 6px;
+    background: var(--admin-panel-soft);
 }
 
 .admin-live-person-facts div {
     min-width: 0;
-    padding: 7px 8px;
-    border-radius: 6px;
-    background: var(--admin-panel-soft);
+    padding: 8px 10px;
+    border-right: 1px solid var(--admin-line-soft);
+    border-radius: 0;
+    background: transparent;
+}
+
+.admin-live-person-facts div:last-child {
+    border-right: 0;
 }
 
 .admin-live-person-facts dt,
@@ -300,12 +333,14 @@
     color: var(--admin-muted);
     font-size: 9px;
     font-weight: 900;
+    letter-spacing: .05em;
     text-transform: uppercase;
 }
 
 .admin-live-person-facts dd {
     margin-top: 2px;
-    font-size: 11px;
+    color: var(--admin-ink);
+    font-size: 12px;
     font-weight: 800;
 }
 
@@ -315,13 +350,16 @@
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
+    padding-top: 8px;
+    border-top: 1px solid var(--admin-line-soft);
 }
 
 .admin-live-person-actions > * {
     min-width: 0;
 }
 
-.admin-live-person-actions > .admin-live-action {
+.admin-live-person-actions > .admin-live-action,
+.admin-live-person-actions > .admin-live-action-menu > summary {
     width: 100%;
     justify-content: center;
 }
@@ -333,7 +371,7 @@
 
 .admin-live-action,
 .admin-live-action-menu > summary {
-    min-height: 34px;
+    min-height: 36px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -342,7 +380,7 @@
     border-radius: 6px;
     background: var(--admin-panel-soft);
     color: var(--admin-ink);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 900;
     text-decoration: none;
     cursor: pointer;
@@ -359,7 +397,17 @@
 }
 
 .admin-live-action-menu > summary {
+    border-color: transparent;
+    background: transparent;
+    color: var(--admin-muted);
     list-style: none;
+}
+
+.admin-live-action-menu > summary:hover,
+.admin-live-action-menu > summary:focus-visible {
+    border-color: color-mix(in srgb, var(--admin-red) 38%, var(--admin-line));
+    background: color-mix(in srgb, var(--admin-red-soft) 45%, transparent);
+    color: var(--admin-red);
 }
 
 .admin-live-action-menu > summary::-webkit-details-marker {
@@ -428,11 +476,11 @@
 }
 
 .admin-live-empty {
-    min-height: 92px;
+    min-height: 64px;
     display: grid;
     place-content: center;
     gap: 4px;
-    padding: 18px;
+    padding: 14px 18px;
     color: var(--admin-muted);
     text-align: center;
 }
@@ -490,6 +538,16 @@
 
     .admin-live-person-facts div:last-child {
         grid-column: 1 / -1;
+        border-top: 1px solid var(--admin-line-soft);
+    }
+
+    .admin-live-person-facts div:nth-child(2) {
+        border-right: 0;
+    }
+
+    .admin-live-person-facts dd {
+        white-space: normal;
+        overflow-wrap: anywhere;
     }
 
     .admin-live-person-actions,
@@ -501,6 +559,11 @@
 
     .admin-live-person-actions {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .admin-live-action,
+    .admin-live-action-menu > summary {
+        min-height: 44px;
     }
 
     .admin-live-danger-form {
@@ -557,14 +620,18 @@
     border-color: var(--admin-muted);
 }
 
-/* «Управлять» — действие с последствиями: администратор идёт работать от
-   имени сотрудника. Отличаем его от безобидного «Наблюдать» цветом. */
+/* «Управлять» остаётся заметным действием, но постоянный красный контур у
+   каждой строки создавал шум. Опасный акцент показываем при намеренном
+   наведении или фокусе. */
 .admin-live-action.control {
-    border-color: color-mix(in srgb, var(--admin-red) 55%, var(--admin-line));
-    color: var(--admin-red);
+    border-color: var(--admin-line);
+    background: var(--admin-panel);
+    color: var(--admin-ink);
 }
 
-.admin-live-action.control:hover {
+.admin-live-action.control:hover,
+.admin-live-action.control:focus-visible {
     border-color: var(--admin-red);
     background: color-mix(in srgb, var(--admin-red) 10%, transparent);
+    color: var(--admin-red);
 }
