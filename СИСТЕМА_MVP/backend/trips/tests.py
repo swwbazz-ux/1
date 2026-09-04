@@ -77,6 +77,28 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, 'name="device_kind"')
         self.assertContains(response, 'value="shared"')
 
+    def test_dispatcher_garage_does_not_truncate_trucks_or_rename_test_number(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        Equipment.objects.bulk_create([
+            Equipment(equipment_type=truck_type, garage_number=str(number))
+            for number in range(1, 64)
+        ])
+        Equipment.objects.create(equipment_type=truck_type, garage_number='ТЕСТ-1')
+
+        response = self.client.get(reverse('dispatcher_control'))
+
+        dashboard = response.context['dispatcher_dashboard']
+        desktop_names = [str(tile['name']) for tile in dashboard['truck_garage_tiles']]
+        mobile_names = [str(tile['name']) for tile in dashboard['mobile_truck_garage_tiles']]
+        self.assertEqual(len(desktop_names), 63)
+        self.assertEqual(len(mobile_names), 63)
+        self.assertIn('63', desktop_names)
+        self.assertIn('63', mobile_names)
+        self.assertIn('ТЕСТ-1', desktop_names)
+        self.assertIn('ТЕСТ-1', mobile_names)
+        self.assertNotIn('53', desktop_names)
+        self.assertNotIn('53', mobile_names)
+
     def test_empty_dispatcher_snapshot_uses_night_production_date_after_midnight(self):
         shift = EmployeeShift.objects.create(
             employee=self.current_dispatcher,

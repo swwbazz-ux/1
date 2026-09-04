@@ -858,13 +858,14 @@ def authenticate_dispatcher_shared_shift_start(request):
 
 def dispatcher_truck_garage_number(truck, fallback_index):
     raw_number = str(getattr(truck, 'garage_number', '') or '').strip()
-    match = re.search(r'\d+', raw_number)
-    if match:
-        number = int(match.group(0))
+    if not raw_number:
+        return None
+    if raw_number.isdigit():
+        number = int(raw_number)
         if number == 53:
             return None
         return str(number)
-    return None
+    return raw_number
 
 
 def dispatcher_employee_badge(employee):
@@ -2018,8 +2019,6 @@ def build_dispatcher_dashboard_context(
     }
     truck_garage_tiles = []
     for index, truck in enumerate([truck for truck in trucks_list if truck.id not in assigned_truck_ids], start=1):
-        if len(truck_garage_tiles) >= 52:
-            break
         truck_number = dispatcher_truck_garage_number(truck, len(truck_garage_tiles) + 1)
         if truck_number is None:
             continue
@@ -2052,8 +2051,6 @@ def build_dispatcher_dashboard_context(
     mobile_truck_garage_tiles = []
     mobile_truck_sort_source = sorted(trucks_list, key=garage_number_int)
     for index, truck in enumerate(mobile_truck_sort_source, start=1):
-        if len(mobile_truck_garage_tiles) >= 52:
-            break
         if truck.id in assigned_truck_ids:
             continue
         truck_number = dispatcher_truck_garage_number(truck, index)
