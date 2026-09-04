@@ -13,7 +13,10 @@ class CrewPlanSlotInline(admin.TabularInline):
     model = CrewPlanSlot
     extra = 0
     can_delete = False
-    fields = ('equipment', 'shift_type', 'employee', 'baseline_employee')
+    fields = (
+        'equipment', 'shift_type', 'employee', 'secondary_employee',
+        'baseline_employee', 'baseline_secondary_employee',
+    )
     readonly_fields = fields
 
     def has_add_permission(self, request, obj=None):

@@ -5,7 +5,7 @@
 {% block body_class %}deputy-mining-manager-screen deputy-placement-screen{% endblock %}
 {% block extra_head %}
 {% include "includes/deputy_mining_manager_pwa_head.html" %}
-<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20260901-2">
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20260904-2">
 {% endblock %}
 
 {% block body %}
@@ -232,6 +232,6 @@
 {% else %}
     {{ planning_payload|json_script:"deputy-planning-data" }}
 {% endif %}
-<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20260901-2" defer></script>
+<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20260904-1" defer></script>
 <script src="{% static 'js/deputy-mining-manager-pwa-v1.js' %}" defer></script>
 {% endblock %}

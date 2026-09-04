@@ -1678,6 +1678,63 @@ class OupWorkplaceTests(TestCase):
             ended_at__isnull=True,
         ).exists())
 
+    def test_dismissal_clears_secondary_employee_from_current_draft(self):
+        self.start_shift()
+        trainee = Employee.objects.create(
+            full_name='Стажер В Текущем Черновике',
+            personnel_number='CR-DRAFT-TRAINEE-1',
+            work_category=Employee.WorkCategory.DRIVER,
+            hired_at=timezone.localdate() - timedelta(days=10),
+            status=Employee.Status.ACTIVE,
+        )
+        primary = Employee.objects.create(
+            full_name='Основной Водитель Черновика',
+            personnel_number='CR-DRAFT-PRIMARY-1',
+            work_category=Employee.WorkCategory.DRIVER,
+            hired_at=timezone.localdate() - timedelta(days=10),
+            status=Employee.Status.ACTIVE,
+        )
+        equipment_type = EquipmentType.objects.create(name='Самосвал')
+        equipment_model = EquipmentModel.objects.create(equipment_type=equipment_type, name='БелАЗ')
+        equipment = Equipment.objects.create(
+            equipment_type=equipment_type,
+            model=equipment_model,
+            garage_number='DRAFT-TRAINEE-1',
+        )
+        production_date = timezone.localdate() - timedelta(days=1)
+        plan = CrewPlan.objects.create(
+            work_date=production_date,
+            role=self.driver_role,
+            status=CrewPlanStatus.DRAFT,
+            created_by=self.oup_employee,
+        )
+        slot = CrewPlanSlot.objects.create(
+            plan=plan,
+            equipment=equipment,
+            shift_type=WorkShiftType.SHIFT_1,
+            employee=primary,
+            secondary_employee=trainee,
+            baseline_secondary_employee=trainee,
+        )
+
+        with patch('users.oup_services.production_work_date', return_value=production_date):
+            response = self.client.post(
+                reverse('oup_employee_dismiss', args=[trainee.id]),
+                {'dismissed_at': timezone.localdate().isoformat(), 'reason': ''},
+            )
+
+        self.assertRedirects(
+            response,
+            reverse('oup_dismissed_employees'),
+            fetch_redirect_response=False,
+        )
+        slot.refresh_from_db()
+        plan.refresh_from_db()
+        self.assertEqual(slot.employee_id, primary.id)
+        self.assertIsNone(slot.secondary_employee_id)
+        self.assertIsNone(slot.baseline_secondary_employee_id)
+        self.assertEqual(plan.version, 2)
+
     def test_oup_log_contains_only_current_specialist_actions(self):
         self.start_shift()
         AdminActionLog.objects.create(

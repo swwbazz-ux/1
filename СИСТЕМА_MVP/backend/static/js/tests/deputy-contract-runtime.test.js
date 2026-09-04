@@ -576,7 +576,7 @@ test("saveSlot and postJson both recheck a locked contract", async () => {
 test("unlocked deputy drag-and-drop persists exactly once", async () => {
     const runtime = createDeputyRuntime({locked: false});
     const card = runtime.employeeList.querySelector(".deputy-employee-card");
-    const slot = runtime.board.querySelector(".deputy-slot");
+    const slot = runtime.board.querySelector(".deputy-crew-position");
 
     assert.equal(card.draggable, true);
     card.dispatchEvent(dragEvent("dragstart"));

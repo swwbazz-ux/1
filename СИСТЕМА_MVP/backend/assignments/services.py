@@ -21,7 +21,7 @@ from core.production_time import production_work_date as contract_production_wor
 from references.models import Equipment
 from shifts.models import EmployeeShift
 from users.models import Employee, EmployeeAccess, Role
-from users.work_profiles import employee_has_effective_access_role
+from users.work_profiles import effective_specialization, employee_has_effective_access_role
 
 from .models import (
     AssignmentStatus,
@@ -41,6 +41,12 @@ WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES = {
     'excavator_operator': 'Экскаватор',
 }
 CREW_PLAN_ROLE_CODES = frozenset(WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES)
+CREW_SLOT_POSITION_PRIMARY = 'primary'
+CREW_SLOT_POSITION_SECONDARY = 'secondary'
+CREW_SLOT_POSITIONS = frozenset({
+    CREW_SLOT_POSITION_PRIMARY,
+    CREW_SLOT_POSITION_SECONDARY,
+})
 
 
 def _bulk_create_published_plan_assignments(assignments):
@@ -164,12 +170,37 @@ def employee_matches_work_role(employee, role):
     return employee_has_effective_access_role(employee, role.code)
 
 
-def _validate_crew_employee(employee, role):
+def secondary_employee_matches_work_role(employee, role):
+    if role.code == 'driver':
+        return employee_matches_work_role(employee, role)
+    if role.code == 'excavator_operator':
+        specialization = effective_specialization(employee)
+        return bool(
+            specialization
+            and specialization.is_active
+            and specialization.code == 'assistant_excavator_operator'
+        )
+    return False
+
+
+def _validate_crew_employee(employee, role, *, position=CREW_SLOT_POSITION_PRIMARY):
     if not employee.is_active or employee.status != Employee.Status.ACTIVE:
         raise ValidationError('Сотрудник неактивен.', code='inactive_employee')
-    if not employee_matches_work_role(employee, role):
+    if position not in CREW_SLOT_POSITIONS:
+        raise ValidationError('Неизвестная позиция в экипаже.', code='invalid_crew_position')
+    matches_position = (
+        employee_matches_work_role(employee, role)
+        if position == CREW_SLOT_POSITION_PRIMARY
+        else secondary_employee_matches_work_role(employee, role)
+    )
+    if not matches_position:
+        position_label = (
+            'основной рабочей роли'
+            if position == CREW_SLOT_POSITION_PRIMARY
+            else ('стажёра' if role.code == 'driver' else 'помощника машиниста')
+        )
         raise ValidationError(
-            'Производственная специализация сотрудника не соответствует выбранной роли.',
+            f'Производственная специализация сотрудника не соответствует позиции {position_label}.',
             code='invalid_work_category',
         )
     has_other_role_assignment = (
@@ -242,8 +273,35 @@ def _sync_crew_draft_equipment_slots(plan, *, actor=None, bump_version=True):
             assignment.employee_id,
         )
 
+    published_plan = (
+        CrewPlan.objects.filter(
+            work_date=plan.work_date,
+            role=plan.role,
+            status=CrewPlanStatus.PUBLISHED,
+        )
+        .exclude(pk=plan.pk)
+        .order_by('-revision')
+        .first()
+    )
+    baseline_secondary_by_slot = {}
+    if published_plan:
+        baseline_secondary_by_slot = {
+            (equipment_id, shift_type): employee_id
+            for equipment_id, shift_type, employee_id in published_plan.slots.values_list(
+                'equipment_id',
+                'shift_type',
+                'secondary_employee_id',
+            )
+        }
+
     used_employee_ids = set(
         plan.slots.exclude(employee_id__isnull=True).values_list('employee_id', flat=True)
+    )
+    used_employee_ids.update(
+        plan.slots.exclude(secondary_employee_id__isnull=True).values_list(
+            'secondary_employee_id',
+            flat=True,
+        )
     )
     slots = []
     for item in equipment:
@@ -258,12 +316,19 @@ def _sync_crew_draft_equipment_slots(plan, *, actor=None, bump_version=True):
                 employee_id = None
             if employee_id:
                 used_employee_ids.add(employee_id)
+            secondary_employee_id = baseline_secondary_by_slot.get(slot_key)
+            if secondary_employee_id in used_employee_ids:
+                secondary_employee_id = None
+            if secondary_employee_id:
+                used_employee_ids.add(secondary_employee_id)
             slots.append(CrewPlanSlot(
                 plan=plan,
                 equipment=item,
                 shift_type=shift_type,
                 employee_id=employee_id,
+                secondary_employee_id=secondary_employee_id,
                 baseline_employee_id=employee_id,
+                baseline_secondary_employee_id=secondary_employee_id,
             ))
 
     CrewPlanSlot.objects.bulk_create(slots)
@@ -329,6 +394,7 @@ def update_crew_draft_slot(
     employee,
     expected_version,
     actor=None,
+    position=CREW_SLOT_POSITION_PRIMARY,
 ):
     locked_plan = _crew_plan_instance(plan, for_update=True)
     role = _crew_plan_role(locked_plan.role)
@@ -342,13 +408,21 @@ def update_crew_draft_slot(
         )
     if shift_type not in WorkShiftType.values:
         raise ValidationError('Выберите смену 1 или смену 2.', code='invalid_shift')
+    position = str(position or CREW_SLOT_POSITION_PRIMARY)
+    if position not in CREW_SLOT_POSITIONS:
+        raise ValidationError('Неизвестная позиция в экипаже.', code='invalid_crew_position')
+    employee_field = (
+        'employee'
+        if position == CREW_SLOT_POSITION_PRIMARY
+        else 'secondary_employee'
+    )
 
     equipment = _crew_plan_equipment(equipment)
     _validate_crew_equipment(equipment, role)
     try:
         target_slot = (
             CrewPlanSlot.objects.select_for_update(of=('self',))
-            .select_related('employee')
+            .select_related('employee', 'secondary_employee')
             .get(plan=locked_plan, equipment=equipment, shift_type=shift_type)
         )
     except CrewPlanSlot.DoesNotExist as error:
@@ -357,30 +431,58 @@ def update_crew_draft_slot(
     employee = _crew_plan_employee(employee)
     if employee:
         employee = Employee.objects.select_for_update().get(pk=employee.pk)
-        _validate_crew_employee(employee, role)
-    if target_slot.employee_id == getattr(employee, 'id', None):
+        _validate_crew_employee(employee, role, position=position)
+    if getattr(target_slot, f'{employee_field}_id') == getattr(employee, 'id', None):
         return locked_plan
 
     source_slot = None
+    source_position = None
     if employee:
-        source_slot = (
+        source_slots = list(
             CrewPlanSlot.objects.select_for_update()
-            .filter(plan=locked_plan, employee=employee)
-            .exclude(pk=target_slot.pk)
-            .first()
+            .select_related('employee', 'secondary_employee')
+            .filter(
+                Q(employee=employee) | Q(secondary_employee=employee),
+                plan=locked_plan,
+            )
+            .order_by('pk')
         )
+        if source_slots:
+            source_slot = source_slots[0]
+            source_position = (
+                CREW_SLOT_POSITION_PRIMARY
+                if source_slot.employee_id == employee.id
+                else CREW_SLOT_POSITION_SECONDARY
+            )
 
     if source_slot:
-        displaced_employee_id = target_slot.employee_id
-        slot_ids = [source_slot.id, target_slot.id]
-        # Clearing both rows first keeps swaps portable across SQLite and PostgreSQL.
-        CrewPlanSlot.objects.filter(id__in=slot_ids).update(employee=None)
-        source_slot.employee_id = displaced_employee_id
-        target_slot.employee = employee
-        CrewPlanSlot.objects.bulk_update([source_slot, target_slot], ['employee'])
+        source_field = (
+            'employee'
+            if source_position == CREW_SLOT_POSITION_PRIMARY
+            else 'secondary_employee'
+        )
+        displaced_employee = getattr(target_slot, employee_field)
+        if displaced_employee:
+            _validate_crew_employee(
+                displaced_employee,
+                role,
+                position=source_position,
+            )
+        # Clear the exact source and target columns first so swaps remain portable
+        # across SQLite and PostgreSQL unique constraints.
+        CrewPlanSlot.objects.filter(pk=source_slot.pk).update(**{source_field: None})
+        CrewPlanSlot.objects.filter(pk=target_slot.pk).update(**{employee_field: None})
+        setattr(source_slot, source_field, displaced_employee)
+        setattr(target_slot, employee_field, employee)
+        if source_slot.pk == target_slot.pk:
+            setattr(source_slot, employee_field, employee)
+            source_slot.save(update_fields=list({source_field, employee_field}))
+        else:
+            source_slot.save(update_fields=[source_field])
+            target_slot.save(update_fields=[employee_field])
     else:
-        target_slot.employee = employee
-        target_slot.save(update_fields=['employee'])
+        setattr(target_slot, employee_field, employee)
+        target_slot.save(update_fields=[employee_field])
 
     locked_plan.version += 1
     locked_plan.updated_by = actor
@@ -409,7 +511,14 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
     slots = list(
         CrewPlanSlot.objects.select_for_update(of=('self',))
         .filter(plan=locked_plan)
-        .select_related('equipment', 'equipment__equipment_type', 'employee', 'baseline_employee')
+        .select_related(
+            'equipment',
+            'equipment__equipment_type',
+            'employee',
+            'secondary_employee',
+            'baseline_employee',
+            'baseline_secondary_employee',
+        )
         .order_by('equipment_id', 'shift_type')
     )
     active_equipment = list(equipment_queryset_for_work_role(role.code))
@@ -429,14 +538,19 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
     target_employee_ids = set()
     for slot in slots:
         _validate_crew_equipment(slot.equipment, role)
-        if slot.employee_id:
-            _validate_crew_employee(slot.employee, role)
-            if slot.employee_id in target_employee_ids:
+        for position, employee in (
+            (CREW_SLOT_POSITION_PRIMARY, slot.employee),
+            (CREW_SLOT_POSITION_SECONDARY, slot.secondary_employee),
+        ):
+            if not employee:
+                continue
+            _validate_crew_employee(employee, role, position=position)
+            if employee.id in target_employee_ids:
                 raise ValidationError(
-                    'Сотрудник назначен более чем в один слот.',
+                    'Сотрудник назначен более чем в одну позицию экипажа.',
                     code='duplicate_employee',
                 )
-            target_employee_ids.add(slot.employee_id)
+            target_employee_ids.add(employee.id)
 
     if target_employee_ids:
         list(
@@ -448,7 +562,49 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
         for slot in slots:
             if slot.employee_id:
                 slot.employee = refreshed_employees[slot.employee_id]
-                _validate_crew_employee(slot.employee, role)
+                _validate_crew_employee(
+                    slot.employee,
+                    role,
+                    position=CREW_SLOT_POSITION_PRIMARY,
+                )
+            if slot.secondary_employee_id:
+                slot.secondary_employee = refreshed_employees[slot.secondary_employee_id]
+                _validate_crew_employee(
+                    slot.secondary_employee,
+                    role,
+                    position=CREW_SLOT_POSITION_SECONDARY,
+                )
+
+    current_published_plan = (
+        CrewPlan.objects.select_for_update()
+        .filter(
+            work_date=locked_plan.work_date,
+            role=role,
+            status=CrewPlanStatus.PUBLISHED,
+        )
+        .exclude(pk=locked_plan.pk)
+        .order_by('-revision')
+        .first()
+    )
+    current_secondary_by_slot = {}
+    if current_published_plan:
+        current_secondary_by_slot = {
+            (equipment_id, shift_type): employee_id
+            for equipment_id, shift_type, employee_id in (
+                CrewPlanSlot.objects.select_for_update(of=('self',))
+                .filter(plan=current_published_plan)
+                .values_list('equipment_id', 'shift_type', 'secondary_employee_id')
+            )
+        }
+    if any(
+        current_secondary_by_slot.get((slot.equipment_id, slot.shift_type))
+        != slot.baseline_secondary_employee_id
+        for slot in slots
+    ):
+        raise ValidationError(
+            'Состав помощников и стажёров изменился после создания черновика. Обновите данные.',
+            code='stale_baseline',
+        )
 
     current_role_assignments = list(
         EquipmentAssignment.objects.select_for_update()
@@ -483,10 +639,11 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
         for slot in slots
         if slot.employee_id
     }
+    primary_employee_ids = {slot.employee_id for slot in slots if slot.employee_id}
     other_role_employee_conflict = (
         EquipmentAssignment.objects.select_for_update()
         .filter(
-            employee_id__in=target_employee_ids,
+            employee_id__in=primary_employee_ids,
             status=AssignmentStatus.ACCEPTED,
             ended_at__isnull=True,
             shift__isnull=True,
@@ -615,6 +772,23 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
         for equipment_id, _shift_type, _employee_id in changed_semantic_triples
         if equipment_id
     }
+    changed_secondary_employee_ids = {
+        employee_id
+        for slot in slots
+        for employee_id in (
+            slot.secondary_employee_id,
+            slot.baseline_secondary_employee_id,
+        )
+        if employee_id
+        and slot.secondary_employee_id != slot.baseline_secondary_employee_id
+    }
+    changed_secondary_equipment_ids = {
+        slot.equipment_id
+        for slot in slots
+        if slot.secondary_employee_id != slot.baseline_secondary_employee_id
+    }
+    changed_employee_ids.update(changed_secondary_employee_ids)
+    changed_equipment_ids.update(changed_secondary_equipment_ids)
     (
         CrewPlan.objects.select_for_update()
         .filter(
