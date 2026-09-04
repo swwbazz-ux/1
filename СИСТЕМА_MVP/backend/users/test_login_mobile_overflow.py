@@ -88,7 +88,7 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
     def test_pwa_install_intent_keeps_button_and_status_copy_stable(self):
         response = Client().get(
             '/?install=1',
-            HTTP_HOST='driver.localhost',
+            HTTP_HOST='mining-master.localhost',
         )
         script = (
             Path(settings.BASE_DIR) / 'static' / 'js' / 'role-app-install-v1.js'
@@ -143,7 +143,7 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         ).read_text(encoding='utf-8')
 
         self.assertIn(
-            "{% if login_step == 'pin' and not combined_excavator_login %} is-pin-step{% endif %}",
+            "{% if login_step == 'pin' and not combined_mobile_login %} is-pin-step{% endif %}",
             template,
         )
         self.assertIn(
@@ -172,13 +172,13 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
             3,
         )
 
-    def test_excavator_combined_login_owns_visual_viewport_and_keyboard_contract(self):
+    def test_combined_mobile_login_owns_visual_viewport_and_keyboard_contract(self):
         backend_root = Path(settings.BASE_DIR)
         template = (
             backend_root / 'templates' / 'users' / 'login.html'
         ).read_text(encoding='utf-8')
         stylesheet = (
-            backend_root / 'static' / 'css' / 'excavator-login-v1.css'
+            backend_root / 'static' / 'css' / 'mobile-role-login-v1.css'
         ).read_text(encoding='utf-8')
 
         self.assertIn('data-login-combined="true"', template)
@@ -190,11 +190,20 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         self.assertIn('--login-vv-top', template)
         self.assertIn('position: fixed', stylesheet)
         self.assertIn('height: var(--login-vv-height, 100dvh)', stylesheet)
-        self.assertIn('.is-login-keyboard-active .excavator-login__hero', stylesheet)
+        self.assertIn('.is-login-keyboard-active .mobile-role-login__hero', stylesheet)
         self.assertIn('.is-login-keyboard-active .max-support-link', stylesheet)
         self.assertIn('overflow: hidden', stylesheet)
+        self.assertIn('.login-combined.login-role-driver {', stylesheet)
+        self.assertIn('--mobile-login-accent: var(--login-accent, #ffd200)', stylesheet)
+        self.assertIn('--mobile-login-button-top: #60e3d6', stylesheet)
+        self.assertIn(
+            'grid-template-columns: minmax(0, .65fr) minmax(0, 1.35fr)',
+            stylesheet,
+        )
+        self.assertNotIn('minmax(320px, 1.28fr)', stylesheet)
+        self.assertNotIn('excavator-login', stylesheet)
 
-    def test_excavator_combined_login_never_persists_pin(self):
+    def test_combined_mobile_login_never_persists_pin(self):
         template = (
             Path(settings.BASE_DIR) / 'templates' / 'users' / 'login.html'
         ).read_text(encoding='utf-8')

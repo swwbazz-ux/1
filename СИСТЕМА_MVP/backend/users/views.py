@@ -224,7 +224,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v186'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v187'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -277,6 +277,7 @@ const CORE_ASSETS = [
     LEGACY_SHELL_URL,
     MANIFEST_URL,
     "/static/css/app.css",
+    "/static/css/mobile-role-login-v1.css",
     "/static/css/mobile-shift-unified-v1.css",
     "/static/js/mobile-shift-unified-v1.js",
     "/static/js/mobile-operational-sounds-v1.js",
@@ -288,6 +289,8 @@ const CORE_ASSETS = [
     "/static/img/pwa/driver-192.png",
     "/static/img/pwa/driver-512.png",
     "/static/img/pwa/driver-maskable-512.png",
+    "/static/img/start/start-hero-v1.webp",
+    "/static/img/start/start-hero-v1.jpg",
     "/static/audio/driver/driver_truck_assigned.wav",
     "/static/audio/driver/driver_action_ok.wav",
     "/static/audio/driver/driver_action_error.wav",
@@ -580,9 +583,9 @@ def login_view(
 ):
     role_app = get_role_app_for_request(request)
     login_role_app = target_role_app or role_app
-    combined_excavator_login = bool(
+    combined_mobile_login = bool(
         role_app
-        and role_app.role_code == 'excavator_operator'
+        and role_app.role_code in {'driver', 'excavator_operator'}
         and target_role_app is None
     )
     allowed_role_codes = tuple(allowed_role_codes or ())
@@ -692,7 +695,7 @@ def login_view(
                     # Старый cached-клиент action=continue заменяет только
                     # <main>, но не может подхватить новый CSS из <head>.
                     # Возвращаем ему прежний самостоятельный PIN-шаг.
-                    'combined_excavator_login': False,
+                    'combined_mobile_login': False,
                     'submitted_phone': phone,
                     'login_step': 'pin',
                 },
@@ -802,7 +805,7 @@ def login_view(
                         'selected_device_kind': selected_device_kind,
                         'next_url': next_url,
                         'login_role_app': login_role_app,
-                        'combined_excavator_login': combined_excavator_login,
+                        'combined_mobile_login': combined_mobile_login,
                         'submitted_phone': submitted_phone,
                         'login_step': 'pin' if submitted_phone else '',
                     },
@@ -874,7 +877,7 @@ def login_view(
             'selected_device_kind': selected_device_kind,
             'next_url': next_url,
             'login_role_app': login_role_app,
-            'combined_excavator_login': combined_excavator_login,
+            'combined_mobile_login': combined_mobile_login,
             'submitted_phone': submitted_phone or prefilled_phone,
             'login_step': 'pin' if submitted_phone else '',
             # Отличаем «номер пришёл в ссылке со /start/» от «человек уже
