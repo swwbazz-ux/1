@@ -9,6 +9,22 @@
 - simulator unit `accounting-mvp-excavator-qa-simulator.service`;
 - собственные `staticfiles`, `media`, cookie и TLS-хост.
 
+## Установка отдельного QA-приложения
+
+Внутренняя сборка для владельца и ручной проверки доступна по адресу:
+
+`https://qa-excavator.driverform.ru/media/apk/excavator-qa-1.0.0.apk`
+
+Это отдельный Android-пакет `ru.copperresources.excavator.qa`, версия
+`1.0.0-qa (1)`, название `Экскаваторщик QA`. Он устанавливается рядом с
+production-приложением и не заменяет его. APK предназначен только для
+внутренней QA-проверки, не для загрузки в RuStore. Размер — `4 244 069` байт,
+SHA-256 — `42c5ee69daeb2a132b1fdd5d14512bb733eeb033c10512b572880cb7efa3b822`.
+
+RuStore alpha `excavator_rustore_qa` имеет тот же package id, что production,
+и при ручной установке заменяет установленное рабочее приложение. Для
+параллельной ручной проверки использовать именно отдельную сборку выше.
+
 ## Защитный контракт
 
 Команды `prepare_excavator_qa`, `run_excavator_qa_simulator` и
