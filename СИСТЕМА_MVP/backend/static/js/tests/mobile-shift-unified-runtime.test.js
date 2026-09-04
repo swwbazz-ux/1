@@ -143,6 +143,7 @@ function createRuntime({components = [], activeElement = null} = {}) {
         addEventListener() {},
     };
     const window = {
+        navigator: {},
         screen: {orientation, width: 390, height: 844},
         addEventListener() {},
         setTimeout(callback, milliseconds) {
@@ -194,6 +195,11 @@ function createRuntime({components = [], activeElement = null} = {}) {
         pendingFrames() {
             return frames.size;
         },
+        runFrames() {
+            const callbacks = Array.from(frames.values());
+            frames.clear();
+            callbacks.forEach((callback) => callback(now));
+        },
         pendingTimers() {
             return timers.size;
         },
@@ -210,7 +216,7 @@ test("Enter advances between Shift inputs and finishes on the soft-disabled acti
     });
     const component = createComponent([first, second], action);
 
-    createRuntime({components: [component]});
+    const runtime = createRuntime({components: [component]});
 
     const firstEnter = first.dispatch("keydown", {key: "Enter", keyCode: 13});
     assert.equal(firstEnter.defaultPrevented, true);
@@ -219,6 +225,7 @@ test("Enter advances between Shift inputs and finishes on the soft-disabled acti
     assert.equal(action.focused, false);
 
     const lastEnter = second.dispatch("keydown", {key: "Enter", keyCode: 13});
+    runtime.runFrames();
     assert.equal(lastEnter.defaultPrevented, true);
     assert.equal(second.blurred, true, "The last input must release the mobile keyboard.");
     assert.equal(action.focused, true, "Soft-disabled actions must remain keyboard-focusable.");
@@ -234,9 +241,10 @@ test("Last Enter does not focus an action while its mutation is pending", () => 
     action.classList.add("is-pending");
     const component = createComponent([input], action);
 
-    createRuntime({components: [component]});
+    const runtime = createRuntime({components: [component]});
 
     input.dispatch("keydown", {key: "Enter", keyCode: 13});
+    runtime.runFrames();
     assert.equal(input.blurred, true);
     assert.equal(action.focused, false);
     assert.equal(component.focused, true, "Pending actions fall back to the Shift component focus target.");

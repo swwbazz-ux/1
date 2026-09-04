@@ -944,5 +944,5 @@ test("production driver shift-close requires its hold marker and blocks readonly
     readonlyForm.dataset.driverShiftHoldComplete = "true";
     assert.equal(readonlyForm.dispatchEvent(createEvent("submit", readonlyForm)), false);
     assert.equal(readonlyButton.disabled, false);
-    assert.equal(binding.source.includes("holdMs: 2000"), true);
+    assert.equal(binding.source.includes("holdMs: 1000"), true);
 });

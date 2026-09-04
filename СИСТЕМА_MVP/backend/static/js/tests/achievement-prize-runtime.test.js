@@ -560,6 +560,9 @@ function installExcavatorFragmentHandler(runtime, nextExcavatorId = 31) {
         [
             "function isExcavatorRefreshUnsafe() { return false; }",
             "function scheduleExcavatorViewportHeightSync() {}",
+            "function readExcavatorAssignmentSnapshot() { return {}; }",
+            "function syncExcavatorAssignmentSnapshot() {}",
+            "var excavatorWorkMutationGeneration = 0;",
             "function storeExcavatorRealtimeVersion(version) {",
             "  if (version) document.body.dataset.operationalStateVersion = String(version);",
             "}",
