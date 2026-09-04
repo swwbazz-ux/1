@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 import secrets
@@ -35,13 +36,13 @@ from .models import EmployeeAccess
 from .work_profiles import employee_has_effective_access_role
 
 
-# Единственный реестр Android-сборок для универсального входа. При выпуске
-# новой версии меняются только URL и подпись версии здесь; шаблон о конкретных
-# ролях и именах APK ничего не знает.
+# Единственный реестр Android-сборок для универсального входа. Экскаваторщик
+# берёт имя APK и отображаемую версию из того же manifest, по которому нативное
+# приложение проверяет обновления: второй ручной номер неизбежно отставал.
 ANDROID_APK_BY_ROLE = {
     'excavator_operator': {
-        'path': 'apk/excavator-15.apk',
-        'version': '0.1.12',
+        'manifest_path': 'apk/excavator-update.json',
+        'profile': 'excavator',
     },
     'driver': {
         'path': 'apk/driver-10.apk',
@@ -147,13 +148,41 @@ def android_apk_for_role(role_code):
     release = ANDROID_APK_BY_ROLE.get(role_code)
     if release is None:
         return None
-    relative_path = Path(release['path'])
+
+    manifest_relative_path = release.get('manifest_path')
+    if manifest_relative_path:
+        try:
+            manifest_path = Path(settings.MEDIA_ROOT) / manifest_relative_path
+            payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            logger.exception('Android update manifest is unavailable for %s', role_code)
+            return None
+        profile = release.get('profile', '')
+        version_code = payload.get('versionCode')
+        version_name = payload.get('versionName')
+        if (
+            payload.get('schemaVersion') != 1
+            or payload.get('profile') != profile
+            or not isinstance(version_code, int)
+            or version_code < 1
+            or not isinstance(version_name, str)
+            or not version_name.strip()
+            or len(version_name) > 64
+        ):
+            logger.error('Android update manifest is invalid for %s', role_code)
+            return None
+        relative_path = Path('apk') / f'{profile}-{version_code}.apk'
+        version = version_name.strip()
+    else:
+        relative_path = Path(release['path'])
+        version = release['version']
+
     if not (Path(settings.MEDIA_ROOT) / relative_path).is_file():
         return None
     media_url = f"/{settings.MEDIA_URL.strip('/')}"
     return {
         'url': f"{media_url}/{relative_path.as_posix()}",
-        'version': release['version'],
+        'version': version,
     }
 
 

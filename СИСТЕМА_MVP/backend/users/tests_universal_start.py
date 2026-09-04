@@ -4,6 +4,7 @@
 тому, у кого он уже есть, и вываливала все приложения одним списком.
 """
 
+import json
 import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -73,6 +74,19 @@ class UniversalStartTests(TestCase):
         apk_path = Path(self.media_directory.name) / relative_path
         apk_path.parent.mkdir(parents=True, exist_ok=True)
         apk_path.write_bytes(b'test apk placeholder')
+
+    def add_excavator_release(self, *, version_code=23, version_name='0.1.17'):
+        self.add_apk(f'apk/excavator-{version_code}.apk')
+        manifest_path = Path(self.media_directory.name) / 'apk/excavator-update.json'
+        manifest_path.write_text(
+            json.dumps({
+                'schemaVersion': 1,
+                'profile': 'excavator',
+                'versionCode': version_code,
+                'versionName': version_name,
+            }),
+            encoding='utf-8',
+        )
 
     def post(self, *, user_agent='', follow=True):
         return self.client.post(
@@ -268,20 +282,20 @@ class UniversalStartTests(TestCase):
 
     def test_android_sees_configured_apk_buttons_for_its_roles(self):
         self.add_apk('apk/driver-10.apk')
-        self.add_apk('apk/excavator-15.apk')
+        self.add_excavator_release()
         self.add_access('driver', 'Водитель самосвала')
         self.add_access('excavator_operator', 'Машинист экскаватора')
 
         response = self.post(user_agent=ANDROID_USER_AGENT)
 
         self.assertContains(response, '/media/apk/driver-10.apk')
-        self.assertContains(response, '/media/apk/excavator-15.apk')
+        self.assertContains(response, '/media/apk/excavator-23.apk')
         self.assertContains(response, 'data-start-install-option="native"', count=2)
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=2)
         self.assertContains(response, '<b>Приложение <i>стабильное</i></b>', count=2)
         self.assertContains(response, '<b>Браузер <i>нестабильно</i></b>', count=2)
-        self.assertContains(response, 'APK · версия 0.1.12 · скачать и установить', count=1)
+        self.assertContains(response, 'APK · версия 0.1.17 · скачать и установить', count=1)
         self.assertContains(response, 'APK · версия 0.1.8 · скачать и установить', count=1)
         self.assertNotContains(response, '2. Открыть приложение')
         self.assertNotContains(response, '/native-handoff/')
@@ -313,6 +327,17 @@ class UniversalStartTests(TestCase):
         self.assertNotContains(response, 'data-start-install-option="native"')
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"')
+
+    def test_android_does_not_see_excavator_apk_for_invalid_update_manifest(self):
+        self.add_apk('apk/excavator-23.apk')
+        manifest_path = Path(self.media_directory.name) / 'apk/excavator-update.json'
+        manifest_path.write_text('{"versionCode": 23}', encoding='utf-8')
+        self.add_access('excavator_operator', 'Машинист экскаватора')
+
+        response = self.post(user_agent=ANDROID_USER_AGENT)
+
+        self.assertIsNone(response.context['apps'][0]['apk'])
+        self.assertNotContains(response, 'data-start-install-option="native"')
 
     def test_android_does_not_see_apk_button_for_unsupported_role(self):
         self.add_access('mining_master', 'Горный мастер')
@@ -396,13 +421,13 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'is-start-keyboard-active')
 
     def test_desktop_does_not_see_apk_button(self):
-        self.add_apk('apk/excavator-15.apk')
+        self.add_excavator_release()
         self.add_access('excavator_operator', 'Машинист экскаватора')
 
         response = self.post(user_agent=DESKTOP_USER_AGENT)
 
         self.assertIsNone(response.context['apps'][0]['apk'])
-        self.assertNotContains(response, 'href="/media/apk/excavator-15.apk"')
+        self.assertNotContains(response, 'href="/media/apk/excavator-23.apk"')
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"')
         self.assertContains(response, 'install=1', count=1)
