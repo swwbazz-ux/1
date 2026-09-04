@@ -176,7 +176,7 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'start-hero-v1.webp')
         self.assertContains(response, 'start-hero-v1.jpg')
         self.assertContains(response, 'fetchpriority="high"')
-        self.assertContains(response, 'start-page-v1.css?v=20260904-15')
+        self.assertContains(response, 'start-page-v1.css?v=20260904-16')
         self.assertContains(response, 'start-page-v1.js?v=20260904-8')
         self.assertNotContains(response, 'data-connection-indicator')
         self.assertNotContains(response, 'data-app-realtime-status')
@@ -595,7 +595,7 @@ class UniversalStartTests(TestCase):
         stylesheet = (backend_root / 'static' / 'css' / 'start-page-v1.css').read_text(encoding='utf-8')
 
         self.assertContains(response, 'start-page-v1.js?v=20260904-8')
-        self.assertContains(response, 'start-page-v1.css?v=20260904-15')
+        self.assertContains(response, 'start-page-v1.css?v=20260904-16')
         self.assertIn('window.visualViewport || null', script)
         self.assertIn('Math.max(120, baselineHeight * 0.22)', script)
         self.assertIn('viewport.addEventListener("resize"', script)
@@ -688,6 +688,25 @@ class UniversalStartTests(TestCase):
             stylesheet,
             r'(?s)\.start-screen--result \.start-screen__opt-note--ios\s*\{'
             r'[^}]*grid-template-columns: minmax\(0, 1fr\);',
+        )
+        self.assertRegex(
+            stylesheet,
+            r'(?s)@media \(max-width: 760px\) and \(max-height: 900px\)\s*\{'
+            r'[^}]*\.start-screen--result \.start-screen__opt-note:not'
+            r'\(\.start-screen__opt-note--ios\)\s*\{[^}]*display: none;',
+        )
+        self.assertRegex(
+            stylesheet,
+            r'(?s)@media \(max-width: 760px\) and \(max-height: 900px\)\s*\{'
+            r'.*?\.start-screen--result \.start-result-card__lead,'
+            r'.*?\{'
+            r'[^}]*display: none;',
+        )
+        self.assertRegex(
+            stylesheet,
+            r'(?s)@media \(max-width: 360px\) and \(max-height: 620px\)\s*\{'
+            r'.*?\.start-screen--result \.start-screen__opt-text b i\s*\{'
+            r'[^}]*display: none;',
         )
 
     def test_android_browser_option_keeps_chrome_badge(self):

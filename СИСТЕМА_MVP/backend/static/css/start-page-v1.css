@@ -1270,6 +1270,66 @@ body.start-page *::after {
     }
 }
 
+/*
+ * The Android result includes an APK warning that is useful on roomy screens,
+ * but it must not push the two actual launch actions or MAX below the browser
+ * viewport.  Compact layers progressively remove explanation, never actions.
+ */
+@media (max-width: 760px) and (max-height: 900px) {
+    .start-screen--result .start-screen__opt-note:not(.start-screen__opt-note--ios) {
+        display: none;
+    }
+
+    .start-screen--result .start-result-card__lead,
+    .start-screen--result .start-screen__opt--browser .start-screen__opt-text em span:last-child {
+        display: none;
+    }
+}
+
+@media (max-width: 760px) and (max-height: 740px) {
+    .start-screen--result .start-hero {
+        flex-basis: clamp(96px, 18svh, 124px);
+        height: clamp(96px, 18svh, 124px);
+    }
+
+    .start-screen--result .start-result-card {
+        gap: 6px;
+    }
+
+}
+
+@media (max-width: 760px) and (max-height: 620px) {
+    .start-screen--result .start-hero {
+        flex-basis: clamp(82px, 16svh, 96px);
+        height: clamp(82px, 16svh, 96px);
+    }
+
+    .start-screen--result .start-result-card__lead {
+        display: none;
+    }
+
+    .start-screen--result .start-screen__person {
+        min-height: 58px;
+        padding-block: 7px;
+    }
+
+    .start-screen--result .start-screen__app-main {
+        min-height: 48px;
+        padding-block: 7px;
+    }
+
+    .start-screen--result .start-screen__install-options {
+        gap: 7px;
+        padding: 8px;
+    }
+
+    .start-screen--result .start-screen__opt,
+    .start-screen--result .start-screen__opt--native {
+        min-height: 88px;
+        padding-block: 7px;
+    }
+}
+
 @media (max-width: 360px) {
     .start-screen--entry .start-screen__inner {
         padding-inline: 12px;
@@ -1374,6 +1434,37 @@ body.start-page *::after {
         padding: 8px 9px;
     }
 
+}
+
+@media (max-width: 360px) and (max-height: 620px) {
+    .start-screen--result .start-screen__person {
+        min-height: 58px;
+        padding-block: 7px;
+    }
+
+    .start-screen--result .start-screen__app-main {
+        min-height: 48px;
+        padding-block: 7px;
+    }
+
+    .start-screen--result .start-screen__install-options {
+        gap: 7px;
+        padding: 8px;
+    }
+
+    .start-screen--result .start-screen__opt,
+    .start-screen--result .start-screen__opt--native {
+        min-height: 88px;
+        padding-block: 7px;
+    }
+
+    .start-screen--result .start-screen__opt-text b {
+        font-size: 16.5px;
+    }
+
+    .start-screen--result .start-screen__opt-text b i {
+        display: none;
+    }
 }
 
 @media (min-width: 761px) and (max-width: 1023px) {
