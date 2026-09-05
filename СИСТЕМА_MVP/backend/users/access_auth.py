@@ -24,13 +24,23 @@ def find_employee_access_by_credentials(
     elif role_codes:
         access_candidates = access_candidates.filter(role__code__in=tuple(role_codes))
 
-    for candidate in access_candidates:
+    matches = []
+    for candidate in access_candidates.order_by('employee_id', 'id'):
         employee_phone = normalize_phone(candidate.employee.phone)
         if employee_phone and is_valid_russian_mobile_phone(phone) and len(access_code) == 6 and normalized_phone == employee_phone:
-            return candidate
-        if not employee_phone and not normalized_phone:
-            return candidate
-    return None
+            matches.append(candidate)
+        elif not employee_phone and not normalized_phone:
+            matches.append(candidate)
+
+    # Several roles of one employee may intentionally share one PIN. But the
+    # same normalized phone/PIN across different employees is ambiguous and
+    # must never authenticate whichever row the database happened to return.
+    employee_ids = {candidate.employee_id for candidate in matches}
+    if len(employee_ids) != 1:
+        return None
+    if role_code and len(matches) != 1:
+        return None
+    return matches[0] if matches else None
 
 
 def find_unactivated_accesses_by_phone(phone, role_codes=None):

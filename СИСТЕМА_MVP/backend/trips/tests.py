@@ -89,15 +89,87 @@ class DispatcherSharedShiftStartTests(TestCase):
 
         self.assertEqual(progress['date'], datetime(2026, 7, 23).date())
 
-    def test_dispatcher_control_uses_reauth_popup_even_if_session_was_personal(self):
+    def test_personal_dispatcher_session_starts_without_reauth_popup(self):
         session = self.client.session
         session['device_kind'] = 'personal'
         session.save()
 
         response = self.client.get(reverse('dispatcher_control'))
 
-        self.assertContains(response, 'data-shared-shift-login-open')
-        self.assertNotContains(response, 'data-confirm="Начать смену горного диспетчера?"')
+        self.assertNotContains(response, 'data-shared-shift-login-open')
+        self.assertContains(response, 'data-confirm="Начать смену горного диспетчера?"')
+
+        start_response = self.client.post(
+            reverse('dispatcher_toggle_shift'),
+            {'shift_action': 'start'},
+        )
+        self.assertEqual(start_response.status_code, 302)
+        shift = EmployeeShift.objects.get(
+            employee=self.current_dispatcher,
+            closed_at__isnull=True,
+        )
+        self.assertEqual(shift.workplace_code, 'dispatcher')
+        self.assertEqual(shift.opened_by, self.current_dispatcher)
+
+    def test_personal_admin_uses_own_dispatcher_access_without_second_pin(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_access = EmployeeAccess.objects.create(
+            employee=self.current_dispatcher,
+            role=admin_role,
+            access_code='500000',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        Employee.objects.filter(pk=self.current_dispatcher.pk).update(is_protected=True)
+        self.current_dispatcher.refresh_from_db()
+        session = self.client.session
+        session['employee_access_id'] = admin_access.id
+        session['device_kind'] = 'personal'
+        session.save()
+
+        response = self.client.get(reverse('dispatcher_control'))
+        self.assertContains(response, 'data-confirm="Начать смену горного диспетчера?"')
+        self.assertNotContains(response, 'data-shared-shift-login-open')
+
+        start_response = self.client.post(
+            reverse('dispatcher_toggle_shift'),
+            {'shift_action': 'start'},
+        )
+        self.assertEqual(start_response.status_code, 302)
+        shift = EmployeeShift.objects.get(
+            employee=self.current_dispatcher,
+            closed_at__isnull=True,
+        )
+        self.assertEqual(shift.workplace_code, 'dispatcher')
+        self.assertEqual(shift.opened_by, self.current_dispatcher)
+
+    def test_personal_dispatcher_gets_clear_error_for_another_open_role_shift(self):
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+        EmployeeShift.objects.create(
+            employee=self.current_dispatcher,
+            shift_type='day',
+            workplace_code='mining_master',
+            opened_at=timezone.now(),
+            opened_by=self.current_dispatcher,
+        )
+
+        response = self.client.post(
+            reverse('dispatcher_toggle_shift'),
+            {'shift_action': 'start'},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'У вас уже открыта смена')
+        self.assertFalse(
+            EmployeeShift.objects.filter(
+                employee=self.current_dispatcher,
+                workplace_code='dispatcher',
+                closed_at__isnull=True,
+            ).exists()
+        )
 
     def test_dispatcher_truck_actions_use_local_dom_update_hook(self):
         response = self.client.get(reverse('dispatcher_control'))
