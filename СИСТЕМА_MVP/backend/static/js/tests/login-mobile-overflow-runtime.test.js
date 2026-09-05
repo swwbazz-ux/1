@@ -131,6 +131,8 @@ function createInput(id, attributeName) {
 
 function createLoginRuntime(options) {
     const runtimeOptions = options || {};
+    const includePin = runtimeOptions.includePin !== false;
+    const includeRegister = runtimeOptions.includeRegister !== false;
     const viewportHeight = Number(runtimeOptions.viewportHeight || 844);
     const storageValues = new Map();
     if (typeof runtimeOptions.rememberedCredentials === "string") {
@@ -141,7 +143,7 @@ function createLoginRuntime(options) {
     const pinInput = createInput("login-pin", "data-pin-input");
     const submitButton = {
         disabled: false,
-        value: "login",
+        value: runtimeOptions.submitValue || "login",
         classList: new FakeClassList(),
         firstChild: {textContent: "Войти"},
     };
@@ -191,21 +193,25 @@ function createLoginRuntime(options) {
             if (selector === 'button[type="submit"]' || selector === ".unified-login-submit") {
                 return submitButton;
             }
-            if (selector === ".unified-login-register") return registerButton;
+            if (selector === ".unified-login-register") return includeRegister ? registerButton : null;
             if (selector === "[data-phone-input]") return phoneInput;
-            if (selector === "[data-pin-input]") return pinInput;
+            if (selector === "[data-pin-input]") return includePin ? pinInput : null;
             if (selector === "[data-privacy-consent]") return consentField;
             return null;
         },
         querySelectorAll(selector) {
             if (selector === "[data-phone-input], [data-pin-input]") {
-                return [phoneInput, pinInput];
+                return includePin ? [phoneInput, pinInput] : [phoneInput];
             }
-            if (selector === 'button[type="submit"]') return [submitButton, registerButton];
+            if (selector === 'button[type="submit"]') {
+                return includeRegister ? [submitButton, registerButton] : [submitButton];
+            }
             return [];
         },
         contains(element) {
-            return element === phoneInput || element === pinInput || element === consentField;
+            return element === phoneInput
+                || (includePin && element === pinInput)
+                || element === consentField;
         },
         requestSubmit() {
             this.requestSubmitCalls += 1;
@@ -228,7 +234,7 @@ function createLoginRuntime(options) {
         },
         querySelectorAll(selector) {
             if (selector === "[data-phone-input], [data-pin-input]") {
-                return [phoneInput, pinInput];
+                return includePin ? [phoneInput, pinInput] : [phoneInput];
             }
             return [];
         },
@@ -459,31 +465,28 @@ test("malformed remembered credentials are removed instead of retained", () => {
     assert.equal(runtime.rememberedCredentials(), null);
 });
 
-test("combined login keeps login and register disabled until active consent", () => {
-    const runtime = createLoginRuntime();
+test("phone-first login enables Continue only after a valid phone and active consent", () => {
+    const runtime = createLoginRuntime({
+        includePin: false,
+        includeRegister: false,
+        submitValue: "continue",
+    });
 
     assert.equal(runtime.submitButton.disabled, true);
-    assert.equal(runtime.registerButton.disabled, true);
+    assert.equal(runtime.form.querySelector(".unified-login-register"), null);
 
     runtime.phoneInput.value = "9990000001";
     runtime.phoneInput.dispatchEvent({type: "input"});
     assert.equal(runtime.submitButton.disabled, true);
-    assert.equal(runtime.registerButton.disabled, true);
 
     runtime.consentField.checked = true;
     runtime.consentField.dispatchEvent({type: "change"});
-    assert.equal(runtime.submitButton.disabled, true, "PIN is still required for login");
-    assert.equal(runtime.registerButton.disabled, false, "registration only needs a valid phone and consent");
-    assert.equal(runtime.consentField.getAttribute("aria-invalid"), "false");
-
-    runtime.pinInput.value = "123456";
-    runtime.pinInput.dispatchEvent({type: "input"});
     assert.equal(runtime.submitButton.disabled, false);
+    assert.equal(runtime.consentField.getAttribute("aria-invalid"), "false");
 
     runtime.consentField.checked = false;
     runtime.consentField.dispatchEvent({type: "change"});
     assert.equal(runtime.submitButton.disabled, true);
-    assert.equal(runtime.registerButton.disabled, true);
     assert.equal(runtime.consentField.getAttribute("aria-invalid"), "true");
     assert.equal(runtime.consentLabel.classList.contains("is-invalid"), true);
 });

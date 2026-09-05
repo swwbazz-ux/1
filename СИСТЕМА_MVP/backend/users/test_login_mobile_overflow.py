@@ -166,7 +166,7 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         ).read_text(encoding='utf-8')
 
         self.assertIn(
-            "{% if login_step == 'pin' and not combined_mobile_login %} is-pin-step{% endif %}",
+            "{% if login_step == 'pin' %} is-pin-step{% elif combined_mobile_login %} is-phone-step{% endif %}",
             template,
         )
         self.assertIn(
@@ -210,10 +210,10 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         self.assertIn('value="{{ privacy_policy_version }}"', template)
         self.assertIn("{% url 'portal:public_privacy' %}", template)
         self.assertIn('var consentField = form.querySelector("[data-privacy-consent]")', template)
-        self.assertIn('var consentMissing = combinedLogin && (!consentField || !consentField.checked)', template)
-        self.assertIn('registerButton.disabled = pending', template)
+        self.assertIn('var consentMissing = Boolean(consentField && !consentField.checked)', template)
+        self.assertNotIn('registerButton', template)
         self.assertIn('consentField.focus({preventScroll: true})', template)
-        self.assertIn('enterkeyhint="next"', template)
+        self.assertIn("enterkeyhint=\"{% if login_step == 'pin' %}done{% else %}next{% endif %}\"", template)
         self.assertIn('enterkeyhint="go"', template)
         self.assertIn('visualViewport.addEventListener(', template)
         self.assertIn('"scroll",', template)
@@ -291,6 +291,31 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         self.assertIn('JSON.stringify({phone: phoneDigits || ""})', template)
         self.assertIn('Object.prototype.hasOwnProperty.call(remembered, "pin")', template)
         self.assertIn('window.localStorage.removeItem(LOGIN_MEMORY_KEY)', template)
-        self.assertIn('requestedAction === "register" && pinField', template)
+        self.assertIn('requestedAction === "continue"', template)
+        self.assertNotIn('unified-login-register', template)
         self.assertNotIn('pin: pinDigits', template)
         self.assertNotIn('memory.pin', template)
+
+    def test_mobile_first_entry_uses_the_same_role_style_without_autofocus(self):
+        backend_root = Path(settings.BASE_DIR)
+        template = (
+            backend_root / 'templates' / 'users' / 'activate_access.html'
+        ).read_text(encoding='utf-8')
+        stylesheet = (
+            backend_root / 'static' / 'css' / 'mobile-role-activation-v1.css'
+        ).read_text(encoding='utf-8')
+        login_stylesheet = (
+            backend_root / 'static' / 'css' / 'mobile-role-login-v1.css'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('data-mobile-role-activation', template)
+        self.assertIn('mobile-role-login-v1.css', template)
+        self.assertIn('mobile-role-activation-v1.css', template)
+        self.assertIn('<h1>Придумайте PIN</h1>', template)
+        self.assertIn('Создать PIN и войти', template)
+        self.assertIn('Это не я — ввести другой номер', template)
+        self.assertNotIn(' autofocus', template)
+        self.assertIn('overflow-y: auto', stylesheet)
+        self.assertIn('overflow: visible', stylesheet)
+        self.assertIn('max(12px, env(safe-area-inset-bottom, 0px))', stylesheet)
+        self.assertIn('min-height: clamp(52px, 7.2dvh, 64px)', login_stylesheet)

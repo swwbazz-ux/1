@@ -942,9 +942,8 @@ class AccessActivationForm(forms.Form):
             'maxlength': '6',
             'pattern': '[0-9]{6}',
             'data-pin-input': '1',
-            'data-hint': 'Введите ровно 6 цифр. Придумайте свой — его будете вводить при каждом входе.',
+            'data-hint': 'Введите 6 цифр — этот PIN понадобится при следующих входах.',
             'aria-describedby': 'activation-new-pin-hint',
-            'autofocus': 'autofocus',
         }),
     )
     confirm_access_code = forms.CharField(
@@ -958,7 +957,7 @@ class AccessActivationForm(forms.Form):
             'maxlength': '6',
             'pattern': '[0-9]{6}',
             'data-pin-input': '1',
-            'data-hint': 'Введите тот же новый PIN еще раз.',
+            'data-hint': 'Повторите те же 6 цифр.',
             'aria-describedby': 'activation-confirm-pin-hint',
         }),
     )
