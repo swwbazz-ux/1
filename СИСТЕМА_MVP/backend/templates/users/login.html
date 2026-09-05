@@ -3,6 +3,8 @@
 
 {% block title %}{% if login_role_app %}Вход · {{ login_role_app.short_name }}{% else %}Вход в систему{% endif %}{% endblock %}
 {% block extra_head %}
+    <link rel="stylesheet" href="{% static 'css/max-support-link-v1.css' %}?v=6">
+    <link rel="stylesheet" href="{% static 'vendor/bulma/button-1.0.4.min.css' %}">
     {% if login_role_app %}
     <link rel="manifest" href="{{ login_role_app.manifest_url }}">
     <meta name="theme-color" content="{{ entry_screen_browser_bar }}">
@@ -33,9 +35,14 @@
     {% endwith %}
     {% if role_app %}
     <link rel="stylesheet" href="{% static 'css/role-app-install-v1.css' %}?v=4">
-    <script src="{% static 'js/role-app-install-v1.js' %}?v=4" defer></script>
+    <script src="{% static 'js/role-app-install-v1.js' %}?v=5" defer></script>
+    {% endif %}
+    {% if combined_mobile_login %}
+    <link rel="preload" as="image" href="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
+    <link rel="stylesheet" href="{% static 'css/mobile-role-login-v1.css' %}?v={{ login_role_app.shell_version }}">
     {% endif %}
     {% endif %}
+    <link rel="stylesheet" href="{% static 'css/entry-action-button-v2.css' %}">
 {% endblock %}
 {% comment %}
 is-app-installed внутри нативного приложения: экран «Установите приложение»
@@ -45,7 +52,7 @@ is-app-installed внутри нативного приложения: экра�
 display-mode: browser, поэтому нужна серверная проверка (см.
 _is_native_app в users/context_processors.py — метка в User-Agent).
 {% endcomment %}
-{% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% if request.GET.form %} is-login-form-forced{% endif %}{% if is_native_app %} is-app-installed{% endif %}{% if request.GET.install and not is_ios %} is-pwa-install-intent{% endif %}{% if login_role_app %} login-role-{{ login_role_app.role_code }}{% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %} login-fullscreen{% endif %}{% endif %}{% endblock %}
+{% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% if request.GET.form %} is-login-form-forced{% endif %}{% if is_native_app %} is-app-installed{% endif %}{% if request.GET.install and not is_ios %} is-pwa-install-intent{% endif %}{% if login_role_app %} login-role-{{ login_role_app.role_code }}{% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %} login-fullscreen{% endif %}{% endif %}{% if combined_mobile_login %} login-combined{% endif %}{% endblock %}
 
 {% block body %}
 {% if role_app and login_role_app %}
@@ -167,10 +174,30 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         --login-glow: color-mix(in srgb, var(--login-accent) 18%, transparent);
         --login-ink: #04161A;
         --login-ink: color-mix(in srgb, var(--login-accent) 22%, #02080b);
+        /* Телефон и ПИН — один тип контрола. Высота меняется одним токеном,
+           чтобы при появлении клавиатуры оба поля сжимались синхронно. */
+        --login-control-height: 58px;
+        --login-reveal-size: 44px;
     }
 
     body.login-page.login-fullscreen {
-        min-height: 100dvh;
+        /* Полноэкранный вход сам владеет высотой WebView. Общий мобильный
+           login-слой добавляет body внешние отступы и vertical overflow —
+           вместе с внутренними 100dvh это создавало пустой диапазон
+           прокрутки, хотя всё содержимое уже помещалось на экране. */
+        height: 100dvh;
+        min-height: 0;
+        width: 100%;
+        padding: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
+        /* body исторически носит dispatcher-shell. Его общий landscape-режим
+           строит виртуальный пульт 1400x800 и уменьшает transform-ом; экрану
+           входа этот механизм не принадлежит и после запрета прокрутки он
+           обрезал нижний док. Полноэкранный login всегда работает в реальном
+           viewport без масштабирования диспетчерского интерфейса. */
+        transform: none;
+        transform-origin: initial;
         background:
             radial-gradient(120% 62% at 50% -8%, var(--login-glow), rgba(2, 8, 11, 0) 68%),
             #02080b;
@@ -183,7 +210,8 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         gap: 0;
         width: 100%;
         max-width: none;
-        min-height: 100dvh;
+        height: 100%;
+        min-height: 0;
         margin: 0;
         padding:
             calc(env(safe-area-inset-top, 0px) + clamp(24px, 7vh, 56px))
@@ -272,24 +300,6 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         margin-top: 0;
     }
 
-    body.login-page.login-fullscreen .role-app-install__button {
-        width: 100%;
-        min-height: 58px;
-        border: 0;
-        border-radius: 14px;
-        background: var(--login-accent);
-        color: var(--login-ink);
-        font-size: clamp(16px, 4.6vw, 19px);
-        font-weight: 800;
-        letter-spacing: .01em;
-        box-shadow: 0 14px 34px var(--login-glow);
-    }
-
-    body.login-page.login-fullscreen .role-app-install__button[disabled] {
-        opacity: .55;
-        box-shadow: none;
-    }
-
     body.login-page.login-fullscreen .role-app-install__status {
         margin: 0;
         color: #8296a0;
@@ -298,43 +308,10 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         text-align: center;
     }
 
-    body.login-page.login-fullscreen .start-screen__support {
-        display: inline-grid;
-        grid-template-columns: auto auto;
-        align-items: center;
-        justify-content: center;
-        justify-self: center;
-        gap: 7px;
-        padding: 8px 14px;
-        border: 1px solid rgba(255, 255, 255, .14);
-        border-radius: 999px;
-        color: #9fb2ba;
-        font-size: 13px;
-        font-weight: 700;
-        text-decoration: none;
-    }
-
-    body.login-page.login-fullscreen .start-screen__support svg {
-        width: 15px;
-        height: 15px;
-    }
-
     body.login-page.login-fullscreen .login-install-gate__skip {
         margin-top: 0;
         color: #8296a0;
         font-size: 15px;
-    }
-
-    body.login-page.login-fullscreen .unified-login-submit {
-        width: 100%;
-        min-height: 58px;
-        border: 0;
-        border-radius: 14px;
-        background: var(--login-accent);
-        color: var(--login-ink);
-        font-size: clamp(16px, 4.6vw, 19px);
-        font-weight: 800;
-        box-shadow: 0 14px 34px var(--login-glow);
     }
 
     body.login-page.login-fullscreen .shared-shift-login-field {
@@ -347,7 +324,7 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
        кнопкой в 58 точек выглядели чужой деталью. */
     body.login-page.login-fullscreen .shared-shift-phone-shell {
         grid-template-columns: auto minmax(0, 1fr);
-        min-height: 58px;
+        min-height: var(--login-control-height);
         border: 1px solid rgba(255, 255, 255, .16);
         border-radius: 14px;
         background: rgba(255, 255, 255, .04);
@@ -362,6 +339,56 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         border-color: var(--login-accent);
     }
 
+    /* На шаге ПИН номер уже подтверждён и доступен только для чтения. Он не
+       должен выглядеть активным полем: визуальный акцент переходит на ПИН. */
+    body.login-page.login-fullscreen .unified-login-form.is-pin-step .shared-shift-phone-shell,
+    body.login-page.login-fullscreen .unified-login-form.is-pin-step .shared-shift-phone-shell:has(input.is-valid) {
+        border-color: rgba(255, 255, 255, .16);
+        box-shadow: none;
+    }
+
+    body.login-page.login-fullscreen .unified-login-form.is-pin-step .shared-shift-phone-shell input.is-valid,
+    body.login-page.login-fullscreen .login-pin-shell input.is-valid,
+    body.login-page.login-fullscreen .login-pin-shell input.is-invalid {
+        box-shadow: none;
+    }
+
+    body.login-page.login-fullscreen .login-pin-shell {
+        min-height: var(--login-control-height);
+        border: 1px solid rgba(255, 255, 255, .22);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, .04);
+        transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    }
+
+    body.login-page.login-fullscreen .login-pin-shell:focus-within {
+        border-color: var(--login-accent);
+        background: rgba(255, 255, 255, .06);
+        box-shadow: 0 0 0 2px var(--login-glow);
+    }
+
+    body.login-page.login-fullscreen .login-pin-shell:has(input.is-valid) {
+        border-color: var(--login-accent);
+    }
+
+    body.login-page.login-fullscreen .login-pin-shell:has(input.is-invalid) {
+        border-color: #FF8B7C;
+        box-shadow: 0 0 0 2px rgba(232, 75, 75, .18);
+    }
+
+    body.login-page.login-fullscreen .login-pin-reveal {
+        width: var(--login-reveal-size);
+        height: var(--login-reveal-size);
+        border-color: color-mix(in srgb, var(--login-accent) 34%, transparent);
+        background: color-mix(in srgb, var(--login-accent) 10%, transparent);
+        color: var(--login-accent);
+    }
+
+    body.login-page.login-fullscreen .login-pin-reveal.is-revealing {
+        background: color-mix(in srgb, var(--login-accent) 24%, transparent);
+        color: #F4FAFC;
+    }
+
     body.login-page.login-fullscreen .shared-shift-country-code {
         padding: 0 14px;
         border-right: 1px solid rgba(255, 255, 255, .14);
@@ -371,7 +398,7 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     }
 
     body.login-page.login-fullscreen .shared-shift-login-field input {
-        min-height: 58px;
+        min-height: var(--login-control-height);
         padding: 0 14px;
         border: 0;
         border-radius: 0;
@@ -418,6 +445,59 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         padding-right: calc(env(safe-area-inset-right, 0px) + clamp(20px, 6vw, 34px));
     }
 
+    @media (max-width: 700px) {
+        body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog {
+            padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
+        }
+    }
+
+    /* Полноэкранная форма не должна наследовать виртуальный landscape-пульт
+       dispatcher-shell. На низком широком экране располагаем фирменный знак
+       слева, рабочие поля справа, а связь с администратором оставляем отдельной
+       нижней строкой. Размеры остаются долевыми — без подгонки под один телефон. */
+    @media (orientation: landscape) and (max-height: 500px) {
+        body.login-page.login-fullscreen {
+            --login-control-height: 48px;
+            --login-reveal-size: 40px;
+        }
+
+        body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog {
+            align-content: stretch;
+            grid-template-rows: minmax(0, 1fr) auto;
+            row-gap: 8px;
+            padding: 10px 20px;
+        }
+
+        body.login-page.login-fullscreen .unified-login-form {
+            width: 100% !important;
+            max-width: 700px !important;
+            height: 100%;
+            grid-template-columns: minmax(132px, .75fr) minmax(0, 1.25fr);
+            grid-template-rows: none;
+            grid-auto-rows: max-content;
+            column-gap: 20px;
+            row-gap: 6px;
+            align-content: center;
+        }
+
+        body.login-page.login-fullscreen .unified-login-role-identity {
+            grid-column: 1;
+            grid-row: 1 / span 4;
+            align-self: center;
+        }
+
+        body.login-page.login-fullscreen .unified-login-form > h2,
+        body.login-page.login-fullscreen .unified-login-form > .shared-shift-login-field,
+        body.login-page.login-fullscreen .unified-login-form > .unified-login-actions,
+        body.login-page.login-fullscreen .unified-login-form > .unified-login-register {
+            grid-column: 2;
+        }
+
+        body.login-page.login-fullscreen .unified-login-actions button {
+            min-height: 48px;
+        }
+    }
+
     /* Пока открыта клавиатура, она закрывает нижнюю половину экрана. Содержимое
        больше не центрируем по всей высоте — иначе поля и кнопка «Войти»
        оказываются под клавиатурой. Прижимаем к верху и убираем крупную шапку:
@@ -427,6 +507,11 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         min-height: 0;
         padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
         padding-bottom: 16px;
+    }
+
+    body.login-page.login-fullscreen.is-login-keyboard-active {
+        --login-control-height: 42px;
+        --login-reveal-size: 40px;
     }
 
     body.login-page.login-fullscreen.is-login-keyboard-active .unified-login-role-identity {
@@ -450,9 +535,26 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     }
 </style>
 {% endif %}
-<main class="shared-shift-dialog unified-login-dialog">
+<main class="shared-shift-dialog unified-login-dialog{% if combined_mobile_login %} mobile-role-login{% endif %}"{% if combined_mobile_login %} data-mobile-role-login{% endif %}>
     <div class="shared-shift-accent" aria-hidden="true"></div>
-    <form method="post" data-validated-login{% if phone_is_prefill_only %} data-phone-prefill-only{% endif %} class="app-confirm-content unified-login-form">
+    {% if combined_mobile_login %}
+    <section class="mobile-role-login__hero" aria-label="Коппер Рисорсез — горнотранспортная компания">
+        <div class="mobile-role-login__hero-backdrop" aria-hidden="true"></div>
+        <picture class="mobile-role-login__hero-picture">
+            <source srcset="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
+            <img class="mobile-role-login__hero-image"
+                 src="{% static 'img/start/start-hero-v1.jpg' %}"
+                 width="853" height="373"
+                 alt="Карьер, экскаватор и карьерный самосвал Коппер Рисорсез"
+                 fetchpriority="high" decoding="async">
+        </picture>
+        <svg class="mobile-role-login__hero-lines" viewBox="0 0 390 430" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M0 10 58 52 14 116 70 165 22 226 72 292 20 352 62 430M0 74 58 52 70 165 14 116 22 226 72 292 20 352M0 298 72 292 62 430" />
+        </svg>
+        <div class="mobile-role-login__hero-shade" aria-hidden="true"></div>
+    </section>
+    {% endif %}
+    <form method="post" data-validated-login{% if combined_mobile_login %} data-login-combined="true"{% endif %}{% if phone_is_prefill_only %} data-phone-prefill-only{% endif %} class="app-confirm-content unified-login-form{% if login_step == 'pin' and not combined_mobile_login %} is-pin-step{% endif %}{% if combined_mobile_login %} is-combined-login{% endif %}">
         {% csrf_token %}
         {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
         {% if login_role_app %}
@@ -461,21 +563,26 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
             <span>Коппер Рисорсез</span>
         </div>
         {% endif %}
+        {% if combined_mobile_login %}
+        <h1>{% if login_role_app %}{{ login_role_app.name }}{% else %}Единый вход{% endif %}</h1>
+        <p class="mobile-role-login__lead">Войдите в своё рабочее приложение</p>
+        {% else %}
         <h2>{% if login_role_app %}{{ login_role_app.name }}{% else %}Единый вход{% endif %}</h2>
+        {% endif %}
         <label class="shared-shift-login-field" for="login-phone">
             <span>Телефон</span>
             <span class="shared-shift-phone-shell">
-                <span class="shared-shift-country-code">+7 <span aria-hidden="true">⌄</span></span>
+                <span class="shared-shift-country-code">+7</span>
                 
-                <input id="login-phone" name="phone" type="text" inputmode="numeric" autocomplete="tel" placeholder="999-000-00-00" maxlength="13" pattern="[0-9]{3}-[0-9]{3}-[0-9]{2}-[0-9]{2}" data-phone-input data-hint="10 цифр номера" value="{{ submitted_phone }}"{% if login_step != 'pin' %} autofocus{% endif %}{% if login_step == 'pin' %} readonly{% endif %}>
+                <input id="login-phone" name="phone" type="{% if combined_mobile_login %}tel{% else %}text{% endif %}" inputmode="numeric" autocomplete="{% if combined_mobile_login %}tel-national{% else %}tel{% endif %}"{% if combined_mobile_login %} enterkeyhint="next" required{% endif %} placeholder="999-000-00-00" maxlength="13" pattern="[0-9]{3}-[0-9]{3}-[0-9]{2}-[0-9]{2}" data-phone-input data-hint="Введите 10 цифр номера" aria-describedby="login-phone-hint{% if combined_mobile_login %} login-auth-feedback{% endif %}" value="{{ submitted_phone }}"{% if login_step == 'pin' and not combined_mobile_login %} readonly{% endif %}>
             </span>
-            <small class="input-hint" data-input-hint-for="login-phone">10 цифр номера</small>
+            <small id="login-phone-hint" class="input-hint" data-input-hint-for="login-phone">Введите 10 цифр номера</small>
         </label>
-        {% if login_step == 'pin' %}
+        {% if combined_mobile_login or login_step == 'pin' %}
         <label class="shared-shift-login-field" for="login-pin">
             <span>Пинкод</span>
             <span class="login-pin-shell">
-                <input id="login-pin" name="access_code" type="password" inputmode="numeric" autocomplete="off" placeholder="00-00-00" maxlength="8" pattern="[0-9]{2}-[0-9]{2}-[0-9]{2}" data-pin-input data-hint="6 цифр, которые вы придумали"{% if submitted_phone %} autofocus{% endif %}>
+                <input id="login-pin" name="access_code" type="password" inputmode="numeric" autocomplete="off"{% if combined_mobile_login %} enterkeyhint="go" required{% endif %} placeholder="••••••" maxlength="{% if combined_mobile_login %}6{% else %}8{% endif %}" pattern="{% if combined_mobile_login %}[0-9]{6}{% else %}[0-9]{2}-[0-9]{2}-[0-9]{2}{% endif %}" data-pin-input data-hint="Введите 6 цифр пин-кода" aria-describedby="login-pin-hint{% if combined_mobile_login %} login-auth-feedback{% endif %}">
                 <button class="login-pin-reveal" type="button" data-pin-reveal aria-label="Показать пинкод, пока нажато">
                     <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
                         <path d="M1.8 12S5.4 5.4 12 5.4 22.2 12 22.2 12 18.6 18.6 12 18.6 1.8 12 1.8 12Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
@@ -483,16 +590,38 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
                     </svg>
                 </button>
             </span>
-            <small class="input-hint" data-input-hint-for="login-pin">6 цифр, которые вы придумали при первом входе</small>
+            <small id="login-pin-hint" class="input-hint" data-input-hint-for="login-pin">Введите 6 цифр пин-кода</small>
         </label>
+        {% endif %}
+
+        {% if combined_mobile_login %}
+        <label class="mobile-role-login__consent{% if privacy_consent_error %} is-invalid{% endif %}" for="login-privacy-consent">
+            <input id="login-privacy-consent"
+                   name="privacy_consent"
+                   type="checkbox"
+                   value="{{ privacy_policy_version }}"
+                   data-privacy-consent
+                   required
+                   aria-invalid="{% if privacy_consent_error %}true{% else %}false{% endif %}"
+                   {% if privacy_consent_is_current %}checked{% endif %}>
+            <span class="mobile-role-login__consent-box" aria-hidden="true"></span>
+            <span class="mobile-role-login__consent-copy">Соглашаюсь на обработку персональных данных по <a href="{% url 'portal:public_privacy' %}" data-login-privacy-link>Политике</a>.</span>
+        </label>
+        <div id="login-auth-feedback" class="mobile-role-login__feedback" data-login-feedback role="status" aria-live="assertive">
+            {% for message in messages %}<span class="message error">{{ message }}</span>{% endfor %}
+        </div>
         {% endif %}
 
         <input type="hidden" name="device_kind" value="{{ selected_device_kind }}">
         <div class="unified-login-actions">
-            <button class="unified-login-submit" type="submit" name="action" value="{% if login_step == 'pin' %}login{% else %}continue{% endif %}">{% if login_step == 'pin' %}Войти{% else %}Далее{% endif %}</button>
+            <button class="cr-button cr-is-medium cr-is-rounded cr-is-fullwidth entry-action unified-login-submit" type="submit" name="action" value="{% if combined_mobile_login or login_step == 'pin' %}login{% else %}continue{% endif %}">{% if combined_mobile_login or login_step == 'pin' %}Войти{% else %}Далее{% endif %}{% if combined_mobile_login %}<span class="mobile-role-login__submit-arrow" aria-hidden="true">→</span>{% endif %}</button>
         </div>
+        {% if combined_mobile_login %}
+        <button class="unified-login-register" type="submit" name="action" value="register" formnovalidate>Первый вход — создать пинкод</button>
+        {% endif %}
     </form>
     {% if role_app and login_role_app %}
+    {% if not combined_mobile_login %}
     
     <section class="login-install-gate" data-login-install-gate>
         <div class="unified-login-role-identity">
@@ -516,23 +645,21 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         </section>
         {% else %}
         <section class="role-app-install" data-role-app-install data-app-name="{{ login_role_app.name }}" aria-label="Установка приложения">
-            <button class="role-app-install__button" type="button" data-install-button>
-                <span aria-hidden="true">↓</span>
-                Установить приложение
-            </button>
+            <button class="cr-button cr-is-medium cr-is-rounded cr-is-fullwidth entry-action role-app-install__button" type="button" data-install-button>Установить приложение</button>
             <div class="role-app-install__spinner" data-install-spinner hidden aria-hidden="true"></div>
             <p class="role-app-install__status" data-install-status aria-live="polite">
-                Приложение можно добавить на главный экран телефона.
+                {% if request.GET.install %}Нажмите кнопку, чтобы продолжить установку.{% else %}Приложение можно добавить на главный экран телефона.{% endif %}
             </p>
         </section>
         {% endif %}
         <button class="login-install-gate__skip" type="button" data-login-show-form>Войти без установки</button>
-        {% comment %}
-        Тот же выход, что и на /start/. Здесь он нужнее: сюда попадает как раз
-        тот, у кого установка не пошла, — а написать было некому.
-        {% endcomment %}
-        {% include "users/_start_support_link.html" %}
     </section>
+    {% endif %}
+    {% comment %}
+    Общий нижний док вынесен из блока установки: он остаётся доступен и после
+    перехода к форме номера или PIN, а не исчезает вместе с install-gate.
+    {% endcomment %}
+    {% include "users/_start_support_link.html" %}
     <script>
     (function (window, document) {
         "use strict";
@@ -573,261 +700,595 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     })(window, document);
     </script>
     {% endif %}
-    {% for message in messages %}
-        <div class="message error">{{ message }}</div>
-    {% endfor %}
+    {% if not combined_mobile_login %}
+        {% for message in messages %}<div class="message error">{{ message }}</div>{% endfor %}
+    {% endif %}
 </main>
 <script>
-document.addEventListener('DOMContentLoaded', function () {
-    var form = document.querySelector('[data-validated-login]');
-    var submitButton = form ? form.querySelector('button[type="submit"]') : null;
-    var loginPage = document.body;
-    var loginDialog = document.querySelector('.unified-login-dialog');
-
-    function resetLoginHorizontalScroll() {
-        if (loginDialog) {
-            loginDialog.scrollLeft = 0;
-        }
-        if (document.scrollingElement) {
-            document.scrollingElement.scrollLeft = 0;
-        }
-    }
-
-    function scheduleLoginHorizontalReset() {
-        resetLoginHorizontalScroll();
-        window.setTimeout(resetLoginHorizontalScroll, 350);
-    }
-
-    function setLoginKeyboardMode(isActive) {
-        if (!loginPage || !loginPage.classList.contains('unified-login-screen')) return;
-        loginPage.classList.toggle('is-login-keyboard-active', Boolean(isActive));
-        scheduleLoginHorizontalReset();
-    }
-
-    function keepLoginFieldVisible(input) {
-        window.setTimeout(function () {
-            if (!input || document.activeElement !== input) return;
-            var viewport = window.visualViewport;
-            var viewportTop = viewport ? Number(viewport.offsetTop || 0) : 0;
-            var viewportHeight = viewport ? Number(viewport.height || window.innerHeight) : window.innerHeight;
-            var viewportBottom = viewportTop + viewportHeight;
-            var rect = input.getBoundingClientRect();
-            var safeEdge = 12;
-            var verticalDelta = 0;
-
-            if (rect.bottom > viewportBottom - safeEdge) {
-                verticalDelta = rect.bottom - (viewportBottom - safeEdge);
-            } else if (rect.top < viewportTop + safeEdge) {
-                verticalDelta = rect.top - (viewportTop + safeEdge);
-            }
-            if (verticalDelta && typeof window.scrollTo === 'function') {
-                window.scrollTo({
-                    top: Math.max(0, Number(window.scrollY || 0) + verticalDelta),
-                    left: 0,
-                    behavior: 'smooth'
-                });
-            }
-            scheduleLoginHorizontalReset();
-        }, 90);
-    }
-
-    function refreshSubmitState() {
-        if (!form || !submitButton) return;
-        var inputs = Array.from(form.querySelectorAll('[data-phone-input], [data-pin-input]'));
-        submitButton.disabled = inputs.some(function (input) { return !input.classList.contains('is-valid'); });
-    }
-
-    document.querySelectorAll('[data-phone-input], [data-pin-input]').forEach(function (input) {
-        var hint = document.querySelector('[data-input-hint-for="' + input.id + '"]');
-        var isPhone = input.hasAttribute('data-phone-input');
-        var isPin = input.hasAttribute('data-pin-input');
-
-        function formatPhone(value) {
-            var digits = String(value || '').replace(/\D/g, '');
-            if (digits.charAt(0) === '8') {
-                digits = '7' + digits.slice(1);
-            }
-            if (digits.charAt(0) === '7') {
-                digits = digits.slice(1);
-            }
-            digits = digits.slice(0, 10);
-            var result = digits.slice(0, 3);
-            if (digits.length > 3) result += '-' + digits.slice(3, 6);
-            if (digits.length > 6) result += '-' + digits.slice(6, 8);
-            if (digits.length > 8) result += '-' + digits.slice(8, 10);
-            return result;
-        }
-
-        function formatPin(value) {
-            var digits = String(value || '').replace(/\D/g, '').slice(0, 6);
-            var result = digits.slice(0, 2);
-            if (digits.length > 2) result += '-' + digits.slice(2, 4);
-            if (digits.length > 4) result += '-' + digits.slice(4, 6);
-            return result;
-        }
-
-        function validate() {
-            var digits = input.value.replace(/\D/g, '');
-            if (isPhone) {
-                input.value = formatPhone(input.value);
-                digits = input.value.replace(/\D/g, '');
-            }
-            if (isPin) {
-                input.value = formatPin(input.value);
-                digits = input.value.replace(/\D/g, '');
-            }
-
-            var valid = false;
-            var message = input.dataset.hint || '';
-            if (isPhone) {
-                valid = digits.length === 10 && digits.charAt(0) === '9';
-                if (digits && digits.length < 10) message = 'Нужно 10 цифр после +7. Сейчас введено: ' + digits.length + '.';
-                if (digits.length === 10 && !valid) message = 'Мобильный номер после +7 должен начинаться с 9.';
-            }
-            if (isPin) {
-                valid = digits.length === 6;
-                if (digits && digits.length < 6) message = 'Нужно ровно 6 цифр. Сейчас введено: ' + digits.length + '.';
-            }
-
-            input.classList.toggle('is-invalid', Boolean(digits) && !valid);
-            input.classList.toggle('is-valid', valid);
-            if (hint) {
-                hint.textContent = valid ? 'Введено правильно.' : message;
-                hint.classList.toggle('is-invalid', Boolean(digits) && !valid);
-                hint.classList.toggle('is-valid', valid);
-            }
-            refreshSubmitState();
-        }
-
-        input.addEventListener('input', validate);
-        input.addEventListener('focus', function () {
-            setLoginKeyboardMode(true);
-            keepLoginFieldVisible(input);
-        });
-        input.addEventListener('blur', function () {
-            validate();
-            window.setTimeout(function () {
-                if (!form || form.contains(document.activeElement)) return;
-                setLoginKeyboardMode(false);
-            }, 120);
-        });
-        validate();
-    });
-    var initiallyFocusedField = document.activeElement;
-    if (
-        form &&
-        form.contains(initiallyFocusedField) &&
-        (
-            initiallyFocusedField.hasAttribute('data-phone-input') ||
-            initiallyFocusedField.hasAttribute('data-pin-input')
-        )
-    ) {
-        setLoginKeyboardMode(true);
-        keepLoginFieldVisible(initiallyFocusedField);
-    } else {
-        scheduleLoginHorizontalReset();
-    }
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', function () {
-            var keyboardLikelyOpen = window.visualViewport.height < window.innerHeight - 120;
-            setLoginKeyboardMode(keyboardLikelyOpen && form && form.contains(document.activeElement));
-        });
-    }
-    /* Телефон и пинкод запоминаются на этом устройстве, чтобы при следующем
-       входе ничего не набирать. Пинкод показывается звёздочками, посмотреть его
-       можно кнопкой рядом. Хранится он открыто в памяти браузера, поэтому
-       доступ к разблокированному телефону даёт доступ и к коду. */
-    var LOGIN_MEMORY_KEY = 'login-remembered-credentials';
+(function (window, document) {
+    "use strict";
+    var LOGIN_MEMORY_KEY = "login-remembered-credentials";
+    var loginViewportBaselineWidth = 0;
+    var loginViewportBaselineHeight = 0;
 
     function readLoginMemory() {
         try {
-            return JSON.parse(window.localStorage.getItem(LOGIN_MEMORY_KEY) || '{}') || {};
+            var remembered = JSON.parse(window.localStorage.getItem(LOGIN_MEMORY_KEY) || "{}") || {};
+            var phone = String(remembered.phone || "").replace(/\D/g, "").slice(-10);
+            /* Старые версии сохраняли PIN вместе с телефоном. При первом же
+               чтении мигрируем запись: секрет больше не остаётся в storage. */
+            if (Object.prototype.hasOwnProperty.call(remembered, "pin")) {
+                if (phone) {
+                    window.localStorage.setItem(LOGIN_MEMORY_KEY, JSON.stringify({phone: phone}));
+                } else {
+                    window.localStorage.removeItem(LOGIN_MEMORY_KEY);
+                }
+            }
+            return {phone: phone};
         } catch (error) {
+            try {
+                window.localStorage.removeItem(LOGIN_MEMORY_KEY);
+            } catch (cleanupError) {}
             return {};
         }
     }
 
-    function writeLoginMemory(phoneDigits, pinDigits) {
+    function writeLoginMemory(phoneDigits) {
         try {
-            if (!phoneDigits && !pinDigits) {
+            if (!phoneDigits) {
                 window.localStorage.removeItem(LOGIN_MEMORY_KEY);
                 return;
             }
-            window.localStorage.setItem(LOGIN_MEMORY_KEY, JSON.stringify({
-                phone: phoneDigits || '',
-                pin: pinDigits || ''
-            }));
+            window.localStorage.setItem(
+                LOGIN_MEMORY_KEY,
+                JSON.stringify({phone: phoneDigits || ""})
+            );
         } catch (error) {}
     }
 
-    if (form) {
-        var phoneField = form.querySelector('[data-phone-input]');
-        var pinField = form.querySelector('[data-pin-input]');
-        var revealButton = form.querySelector('[data-pin-reveal]');
-        var loginFailed = !!document.querySelector('.message.error');
+    function resetLoginHorizontalScroll() {
+        var dialog = document.querySelector(".unified-login-dialog");
+        if (dialog) dialog.scrollLeft = 0;
+        if (document.scrollingElement) document.scrollingElement.scrollLeft = 0;
+    }
 
-        /* Неверный код не запоминаем — иначе он подставлялся бы снова и снова. */
+    function setLoginKeyboardMode(isActive) {
+        var page = document.body;
+        if (!page || !page.classList.contains("unified-login-screen")) return;
+        page.classList.toggle("is-login-keyboard-active", Boolean(isActive));
+        window.requestAnimationFrame(resetLoginHorizontalScroll);
+    }
+
+    function getLoginViewportSize() {
+        var viewport = window.visualViewport;
+        return {
+            width: Math.round(viewport ? viewport.width : window.innerWidth || 0),
+            height: Math.round(viewport ? viewport.height : window.innerHeight || 0),
+            offsetTop: Math.round(viewport ? viewport.offsetTop : 0),
+            scale: Number(viewport && viewport.scale ? viewport.scale : 1)
+        };
+    }
+
+    function applyLoginViewportSize(viewportSize) {
+        var page = document.body;
+        if (!page || !page.style || !viewportSize) return;
+        page.style.setProperty("--login-vv-height", viewportSize.height + "px");
+        page.style.setProperty("--login-vv-top", viewportSize.offsetTop + "px");
+    }
+
+    function syncLoginAccessibilityOverflow(viewportSize) {
+        var page = document.body;
+        var form = document.querySelector('[data-login-combined="true"]');
+        if (!page || !form || !viewportSize || !window.getComputedStyle) return;
+        var rootFontSize = parseFloat(window.getComputedStyle(document.documentElement).fontSize || "16");
+        var accessibilityScale = viewportSize.scale > 1.05 || rootFontSize > 18;
+        page.classList.toggle(
+            "is-login-a11y-overflow",
+            accessibilityScale && form.scrollHeight + 12 > viewportSize.height
+        );
+    }
+
+    function hasFocusedLoginInput() {
+        var form = document.querySelector("[data-validated-login]");
+        var active = document.activeElement;
+        return Boolean(
+            form
+            && active
+            && form.contains(active)
+            && active.matches("[data-phone-input], [data-pin-input]")
+        );
+    }
+
+    function syncLoginKeyboardModeFromViewport() {
+        var viewportSize = getLoginViewportSize();
+        applyLoginViewportSize(viewportSize);
+        if (!viewportSize.width || !viewportSize.height) {
+            setLoginKeyboardMode(false);
+            return;
+        }
+
+        /* При повороте телефона прежняя высота уже не является базовой. На
+           обычном открытии/закрытии клавиатуры ширина не меняется. */
+        if (!loginViewportBaselineWidth
+                || Math.abs(viewportSize.width - loginViewportBaselineWidth) > 80) {
+            loginViewportBaselineWidth = viewportSize.width;
+            loginViewportBaselineHeight = viewportSize.height;
+        }
+
+        /* Запоминаем наибольшую видимую высоту. Поэтому после ручного скрытия
+           клавиатуры поле может остаться в фокусе, но компактный режим снимется. */
+        loginViewportBaselineHeight = Math.max(
+            loginViewportBaselineHeight,
+            viewportSize.height
+        );
+        var keyboardShrink = loginViewportBaselineHeight - viewportSize.height;
+        /* В landscape клавиатура может занимать всего 50–90 CSS px: там
+           используем меньший порог, иначе WebView оставляет декор поверх
+           и прячет кнопку при фактически открытой IME. */
+        var isLandscapeViewport = viewportSize.width > viewportSize.height;
+        var keyboardThreshold = isLandscapeViewport
+            ? Math.max(48, loginViewportBaselineHeight * 0.12)
+            : Math.max(120, loginViewportBaselineHeight * 0.22);
+        setLoginKeyboardMode(
+            viewportSize.scale <= 1.05
+                && hasFocusedLoginInput()
+                && keyboardShrink >= keyboardThreshold
+        );
+        window.requestAnimationFrame(function () {
+            syncLoginAccessibilityOverflow(viewportSize);
+        });
+    }
+
+    function scheduleLoginViewportSync() {
+        syncLoginKeyboardModeFromViewport();
+        window.requestAnimationFrame(syncLoginKeyboardModeFromViewport);
+        window.setTimeout(syncLoginKeyboardModeFromViewport, 80);
+        window.setTimeout(syncLoginKeyboardModeFromViewport, 180);
+        window.setTimeout(syncLoginKeyboardModeFromViewport, 320);
+    }
+
+    function dispatchLoginInput(input) {
+        if (!input || !input.dispatchEvent) return;
+        var inputEvent = typeof window.Event === "function"
+            ? new window.Event("input", {bubbles: true})
+            : {type: "input"};
+        input.dispatchEvent(inputEvent);
+    }
+
+    function formatPhone(value) {
+        var digits = String(value || "").replace(/\D/g, "");
+        if (digits.charAt(0) === "8") digits = "7" + digits.slice(1);
+        if (digits.charAt(0) === "7") digits = digits.slice(1);
+        digits = digits.slice(0, 10);
+        var result = digits.slice(0, 3);
+        if (digits.length > 3) result += "-" + digits.slice(3, 6);
+        if (digits.length > 6) result += "-" + digits.slice(6, 8);
+        if (digits.length > 8) result += "-" + digits.slice(8, 10);
+        return result;
+    }
+
+    function formatPin(value) {
+        var digits = String(value || "").replace(/\D/g, "").slice(0, 6);
+        var result = digits.slice(0, 2);
+        if (digits.length > 2) result += "-" + digits.slice(2, 4);
+        if (digits.length > 4) result += "-" + digits.slice(4, 6);
+        return result;
+    }
+
+    function syncBodyClasses(parsedDocument) {
+        var preserved = Array.from(document.body.classList).filter(function (className) {
+            return className.indexOf("app-contract") >= 0
+                || className.indexOf("realtime") >= 0;
+        });
+        document.body.className = parsedDocument.body.className;
+        preserved.forEach(function (className) {
+            document.body.classList.add(className);
+        });
+        document.body.classList.remove("is-login-keyboard-active");
+    }
+
+    function copyPhoneNotFoundStyles(parsedDocument) {
+        var source = parsedDocument.querySelector("[data-login-phone-not-found-styles]");
+        if (!source || document.querySelector("[data-login-phone-not-found-styles]")) return;
+        document.head.appendChild(source.cloneNode(true));
+    }
+
+    function replaceLoginMain(html, focusPin) {
+        var parsed = new DOMParser().parseFromString(String(html || ""), "text/html");
+        var freshMain = parsed.querySelector("main");
+        var currentMain = document.querySelector("main");
+        if (!freshMain || !currentMain) throw new Error("login fragment missing");
+        copyPhoneNotFoundStyles(parsed);
+        syncBodyClasses(parsed);
+        if (parsed.title) document.title = parsed.title;
+        currentMain.replaceWith(document.importNode(freshMain, true));
+
+        var freshForm = document.querySelector("[data-validated-login]");
+        var isPrefillOnly = freshForm && freshForm.hasAttribute("data-phone-prefill-only");
+        var freshPhone = freshForm && freshForm.querySelector("[data-phone-input]");
+        if (freshForm && freshPhone && freshPhone.value && !isPrefillOnly) {
+            document.body.classList.add("is-login-form-forced");
+        }
+        bindLoginForm();
+        if (focusPin) {
+            window.requestAnimationFrame(function () {
+                var pin = document.querySelector("[data-pin-input]");
+                if (pin && pin.focus) pin.focus({preventScroll: true});
+            });
+        }
+    }
+
+    function bindLoginRetry() {
+        if (document.documentElement.dataset.loginRetryBound === "true") return;
+        document.documentElement.dataset.loginRetryBound = "true";
+        document.addEventListener("click", function (event) {
+            var target = event.target;
+            var link = target && target.closest ? target.closest("[data-login-retry]") : null;
+            if (
+                !link
+                || event.defaultPrevented
+                || event.button !== 0
+                || event.metaKey
+                || event.ctrlKey
+                || event.shiftKey
+                || event.altKey
+                || !window.fetch
+                || !window.DOMParser
+            ) return;
+
+            event.preventDefault();
+            var targetUrl = new URL(link.href, window.location.href);
+            window.fetch(targetUrl.href, {
+                method: "GET",
+                credentials: "same-origin",
+                cache: "no-store",
+                headers: {
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Accept": "text/html"
+                }
+            }).then(function (response) {
+                if (!response.ok) throw new Error("login retry rejected");
+                return response.text();
+            }).then(function (html) {
+                replaceLoginMain(html, false);
+                window.history.replaceState(
+                    null,
+                    "",
+                    targetUrl.pathname + targetUrl.search + targetUrl.hash
+                );
+            }).catch(function () {
+                window.location.assign(link.href);
+            });
+        });
+    }
+
+    function normalizeLoginForm(form, submitter) {
+        var phoneInput = form.querySelector("[data-phone-input]");
+        var pinInput = form.querySelector("[data-pin-input]");
+        var phoneDigits = phoneInput
+            ? phoneInput.value.replace(/\D/g, "").slice(-10)
+            : "";
+        var pinDigits = pinInput
+            ? pinInput.value.replace(/\D/g, "").slice(0, 6)
+            : "";
+        writeLoginMemory(phoneDigits);
+        if (phoneInput) phoneInput.value = phoneDigits ? "7" + phoneDigits : "";
+        if (pinInput) pinInput.value = pinDigits;
+
+        var actionField = form.querySelector("[data-login-action-fallback]");
+        if (!actionField) {
+            actionField = document.createElement("input");
+            actionField.type = "hidden";
+            actionField.name = "action";
+            actionField.setAttribute("data-login-action-fallback", "");
+            form.appendChild(actionField);
+        }
+        actionField.value = submitter && submitter.value ? submitter.value : "login";
+        return {
+            phoneDigits: phoneDigits,
+            pinDigits: pinDigits,
+            action: actionField.value
+        };
+    }
+
+    function submitLoginInPlace(event, form, submitButton) {
+        var normalized = normalizeLoginForm(form, event.submitter || submitButton);
+        /* Частичный ответ нужен только между номером и PIN. Сам PIN отправляем
+           обычной навигацией: WebView применяет Set-Cookie в штатной цепочке
+           POST -> final screen, а MainActivity затем явно flush-ит cookie. */
+        if (normalized.action !== "continue") return;
+        if (!window.fetch || !window.FormData || !window.DOMParser) return;
+        event.preventDefault();
+        if (form.dataset.loginPending === "true") return;
+        form.dataset.loginPending = "true";
+        submitButton.disabled = true;
+        submitButton.textContent = normalized.action === "continue" ? "Проверяем" : "Входим";
+
+        /* Элемент name="action" перекрывает DOM-свойство form.action и
+           превращает его в RadioNodeList. URL берём только из атрибута. */
+        window.fetch(form.getAttribute("action") || window.location.href, {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            redirect: "follow",
+            headers: {
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "application/json, text/html"
+            },
+            body: new window.FormData(form)
+        }).then(function (response) {
+            var contentType = String(response.headers.get("Content-Type") || "");
+            if (contentType.indexOf("application/json") >= 0) {
+                return response.json().then(function (payload) {
+                    if (!response.ok || !payload.redirect_url) {
+                        throw new Error(payload.error || "login redirect missing");
+                    }
+                    window.location.assign(payload.redirect_url);
+                    return null;
+                });
+            }
+            if (!response.ok) throw new Error("login request rejected");
+            return response.text().then(function (html) {
+                replaceLoginMain(html, true);
+            });
+        }).catch(function () {
+            form.submit();
+        });
+    }
+
+    function bindLoginForm() {
+        var form = document.querySelector("[data-validated-login]");
+        if (!form || form.dataset.loginBound === "true") return;
+        form.dataset.loginBound = "true";
+        var submitButton = form.querySelector('.unified-login-submit');
+        var registerButton = form.querySelector('.unified-login-register');
+        var phoneField = form.querySelector("[data-phone-input]");
+        var pinField = form.querySelector("[data-pin-input]");
+        var consentField = form.querySelector("[data-privacy-consent]");
+        var revealButton = form.querySelector("[data-pin-reveal]");
+        var combinedLogin = form.dataset.loginCombined === "true";
+        var loginFailed = !!document.querySelector("[data-login-feedback] .message.error, main > .message.error");
+
         if (loginFailed) {
             var kept = readLoginMemory();
-            writeLoginMemory(kept.phone, '');
+            writeLoginMemory(kept.phone);
+        }
+        var memory = readLoginMemory();
+        if (phoneField && !phoneField.value && memory.phone) phoneField.value = memory.phone;
+        if (pinField && loginFailed) pinField.value = "";
+
+        function refreshSubmitState() {
+            var inputs = Array.from(form.querySelectorAll("[data-phone-input], [data-pin-input]"));
+            var pending = form.dataset.loginPending === "true";
+            var consentMissing = combinedLogin && (!consentField || !consentField.checked);
+            if (submitButton) {
+                submitButton.disabled = pending
+                    || consentMissing
+                    || inputs.some(function (input) {
+                        return !input.classList.contains("is-valid");
+                    });
+            }
+            if (registerButton) {
+                registerButton.disabled = pending
+                    || consentMissing
+                    || !phoneField
+                    || !phoneField.classList.contains("is-valid");
+            }
         }
 
-        var memory = readLoginMemory();
-        if (phoneField && !phoneField.value && memory.phone) {
-            phoneField.value = memory.phone;
-            phoneField.dispatchEvent(new Event('input', {bubbles: true}));
+        form.querySelectorAll("[data-phone-input], [data-pin-input]").forEach(function (input) {
+            var hint = form.querySelector('[data-input-hint-for="' + input.id + '"]');
+            var isPhone = input.hasAttribute("data-phone-input");
+            var isPin = input.hasAttribute("data-pin-input");
+
+            function validate() {
+                var digits = input.value.replace(/\D/g, "");
+                if (isPhone) {
+                    input.value = formatPhone(input.value);
+                    digits = input.value.replace(/\D/g, "");
+                }
+                if (isPin) {
+                    input.value = combinedLogin
+                        ? String(input.value || "").replace(/\D/g, "").slice(0, 6)
+                        : formatPin(input.value);
+                    digits = input.value.replace(/\D/g, "");
+                }
+                var valid = false;
+                var message = input.dataset.hint || "";
+                if (isPhone) {
+                    valid = digits.length === 10 && digits.charAt(0) === "9";
+                    if (digits && digits.length < 10) {
+                        message = "Нужно 10 цифр после +7. Сейчас введено: " + digits.length + ".";
+                    }
+                    if (digits.length === 10 && !valid) {
+                        message = "Мобильный номер после +7 должен начинаться с 9.";
+                    }
+                }
+                if (isPin) {
+                    valid = digits.length === 6;
+                    if (digits && digits.length < 6) {
+                        message = "Нужно ровно 6 цифр. Сейчас введено: " + digits.length + ".";
+                    }
+                }
+                input.classList.toggle("is-invalid", Boolean(digits) && !valid);
+                input.classList.toggle("is-valid", valid);
+                if (input.setAttribute) {
+                    input.setAttribute("aria-invalid", valid || !digits ? "false" : "true");
+                }
+                if (hint) {
+                    hint.textContent = valid
+                        ? (isPhone ? "Формат номера заполнен." : "Шесть цифр введены.")
+                        : message;
+                    hint.classList.toggle("is-invalid", Boolean(digits) && !valid);
+                    hint.classList.toggle("is-valid", valid);
+                }
+                refreshSubmitState();
+            }
+
+            input.addEventListener("input", validate);
+            input.addEventListener("focus", function () {
+                scheduleLoginViewportSync();
+            });
+            input.addEventListener("blur", function () {
+                validate();
+                window.setTimeout(syncLoginKeyboardModeFromViewport, 120);
+            });
+            validate();
+        });
+
+        if (consentField) {
+            consentField.addEventListener("change", function () {
+                if (consentField.setAttribute) {
+                    consentField.setAttribute("aria-invalid", consentField.checked ? "false" : "true");
+                }
+                var consentLabel = consentField.closest
+                    ? consentField.closest(".mobile-role-login__consent")
+                    : null;
+                if (consentLabel && consentLabel.classList) {
+                    consentLabel.classList.toggle("is-invalid", !consentField.checked);
+                }
+                refreshSubmitState();
+            });
+            refreshSubmitState();
         }
-        if (pinField && !pinField.value && memory.pin) {
-            pinField.value = memory.pin;
-            pinField.dispatchEvent(new Event('input', {bubbles: true}));
+
+        if (combinedLogin && phoneField && pinField) {
+            phoneField.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter" || event.isComposing) return;
+                event.preventDefault();
+                dispatchLoginInput(phoneField);
+                if (phoneField.classList.contains("is-valid")) {
+                    pinField.focus({preventScroll: true});
+                }
+            });
+            pinField.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter" || event.isComposing) return;
+                event.preventDefault();
+                if (submitButton && !submitButton.disabled && form.dataset.loginPending !== "true") {
+                    form.requestSubmit(submitButton);
+                } else if (consentField && !consentField.checked) {
+                    if (pinField.blur) pinField.blur();
+                    if (consentField.focus) consentField.focus({preventScroll: true});
+                }
+            });
         }
 
         if (revealButton && pinField) {
             var showPin = function (event) {
                 if (event && event.cancelable) event.preventDefault();
-                pinField.type = 'text';
-                revealButton.classList.add('is-revealing');
+                pinField.type = "text";
+                revealButton.classList.add("is-revealing");
             };
             var hidePin = function () {
-                pinField.type = 'password';
-                revealButton.classList.remove('is-revealing');
+                pinField.type = "password";
+                revealButton.classList.remove("is-revealing");
             };
-            ['pointerdown', 'touchstart'].forEach(function (name) {
+            ["pointerdown", "touchstart"].forEach(function (name) {
                 revealButton.addEventListener(name, showPin, {passive: false});
             });
-            ['pointerup', 'pointercancel', 'pointerleave', 'touchend', 'touchcancel', 'blur'].forEach(function (name) {
+            ["pointerup", "pointercancel", "pointerleave", "touchend", "touchcancel", "blur"].forEach(function (name) {
                 revealButton.addEventListener(name, hidePin);
             });
-            /* Клавиатура: показываем, пока удерживается пробел или Enter. */
-            revealButton.addEventListener('keydown', function (event) {
-                if (event.key === ' ' || event.key === 'Enter') showPin(event);
+            revealButton.addEventListener("keydown", function (event) {
+                if (event.key === " " || event.key === "Enter") showPin(event);
             });
-            revealButton.addEventListener('keyup', hidePin);
-            window.addEventListener('pointerup', hidePin);
+            revealButton.addEventListener("keyup", hidePin);
         }
 
-        form.addEventListener('submit', function () {
-            var phoneInput = form.querySelector('[data-phone-input]');
-            var pinInput = form.querySelector('[data-pin-input]');
-            var phoneDigits = phoneInput
-                ? phoneInput.value.replace(/\D/g, '').slice(0, 10)
-                : '';
-            var pinDigits = pinInput
-                ? pinInput.value.replace(/\D/g, '').slice(0, 6)
-                : '';
-            writeLoginMemory(phoneDigits, pinDigits);
-            if (phoneInput) {
-                phoneInput.value = phoneDigits ? '7' + phoneDigits : '';
+        form.addEventListener("submit", function (event) {
+            if (combinedLogin) {
+                var submitter = event.submitter || submitButton;
+                var requestedAction = submitter && submitter.value ? submitter.value : "login";
+                if (document.activeElement === phoneField && requestedAction === "login") {
+                    event.preventDefault();
+                    dispatchLoginInput(phoneField);
+                    if (phoneField.classList.contains("is-valid") && pinField) {
+                        pinField.focus({preventScroll: true});
+                    }
+                    return;
+                }
+                if (form.dataset.loginPending === "true") {
+                    event.preventDefault();
+                    return;
+                }
+                if (!consentField || !consentField.checked) {
+                    event.preventDefault();
+                    if (consentField) {
+                        consentField.setAttribute("aria-invalid", "true");
+                        var consentLabel = consentField.closest(".mobile-role-login__consent");
+                        if (consentLabel) consentLabel.classList.add("is-invalid");
+                        consentField.focus({preventScroll: true});
+                    }
+                    return;
+                }
+                if (requestedAction === "login" && submitButton.disabled) {
+                    event.preventDefault();
+                    return;
+                }
+                if (requestedAction === "register" && registerButton && registerButton.disabled) {
+                    event.preventDefault();
+                    return;
+                }
+                if (requestedAction === "register" && pinField) {
+                    pinField.value = "";
+                }
+                normalizeLoginForm(form, submitter);
+                form.dataset.loginPending = "true";
+                form.querySelectorAll('button[type="submit"]').forEach(function (button) {
+                    button.disabled = true;
+                });
+                if (requestedAction === "login" && submitButton) {
+                    submitButton.classList.add("is-pending");
+                    submitButton.firstChild.textContent = "Входим";
+                }
+                return;
             }
-            if (pinInput) {
-                pinInput.value = pinDigits;
+            submitLoginInPlace(event, form, submitButton);
+        });
+        /* На части Android WebView автофокус срабатывает до привязки обработчика
+           focus. Синхронизируемся также по текущей высоте видимого окна. */
+        syncLoginKeyboardModeFromViewport();
+        window.requestAnimationFrame(function () {
+            resetLoginHorizontalScroll();
+            syncLoginKeyboardModeFromViewport();
+            if (combinedLogin && loginFailed && pinField && pinField.focus) {
+                pinField.setAttribute("aria-invalid", "true");
+                pinField.focus({preventScroll: true});
             }
         });
     }
+
+    if (!window.__copperUnifiedLoginViewportBound) {
+        window.__copperUnifiedLoginViewportBound = true;
+        window.addEventListener("resize", syncLoginKeyboardModeFromViewport);
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener(
+                "resize",
+                syncLoginKeyboardModeFromViewport
+            );
+            window.visualViewport.addEventListener(
+                "scroll",
+                syncLoginKeyboardModeFromViewport
+            );
+        }
+        window.addEventListener("orientationchange", function () {
+            loginViewportBaselineWidth = 0;
+            loginViewportBaselineHeight = 0;
+            window.setTimeout(syncLoginKeyboardModeFromViewport, 150);
+            window.setTimeout(syncLoginKeyboardModeFromViewport, 320);
+        });
+    }
+
+    bindLoginRetry();
+    window.CopperUnifiedLogin = {bind: bindLoginForm, bindRetry: bindLoginRetry};
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", bindLoginForm);
+    } else {
+        bindLoginForm();
+    }
+
+    {% if not role_app %}
     if ("serviceWorker" in navigator) {
-        {% if role_app %}
-        navigator.serviceWorker.register("{{ role_app.service_worker_url }}", { scope: "{{ app_service_worker_scope }}" }).catch(function () {});
-        {% else %}
         navigator.serviceWorker.getRegistrations().then(function (registrations) {
             registrations.forEach(function (registration) {
                 var worker = registration.active || registration.waiting || registration.installing;
@@ -836,8 +1297,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             });
         }).catch(function () {});
-        {% endif %}
     }
-});
+    {% endif %}
+})(window, document);
 </script>
 {% endblock %}

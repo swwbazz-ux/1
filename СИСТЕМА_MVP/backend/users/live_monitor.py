@@ -287,6 +287,68 @@ def recent_application_sessions(*, now=None):
     )
 
 
+def presence_by_employee_id(employee_ids, *, now=None):
+    """Return one operational connection state for each employee.
+
+    The state deliberately distinguishes a person who has never completed a
+    sign-in from an activated colleague who is simply offline.  Session rows
+    are reused as the source of truth: heartbeats must not create audit-log
+    noise every thirty seconds.
+    """
+    employee_ids = {employee_id for employee_id in employee_ids if employee_id}
+    if not employee_ids:
+        return {}
+
+    now = now or timezone.now()
+    accesses_by_employee = {}
+    access_to_employee = {}
+    for access in (
+        EmployeeAccess.objects
+        .filter(employee_id__in=employee_ids, is_active=True)
+        .order_by('employee_id', '-last_login_at', '-pk')
+    ):
+        accesses_by_employee.setdefault(access.employee_id, []).append(access)
+        access_to_employee[access.pk] = access.employee_id
+
+    latest_session_by_access = {}
+    for session in (
+        ActiveApplicationSession.objects
+        .filter(access_id__in=access_to_employee)
+        .order_by('access_id', '-last_seen_at', '-pk')
+    ):
+        latest_session_by_access.setdefault(session.access_id, session)
+
+    result = {}
+    for employee_id in employee_ids:
+        accesses = accesses_by_employee.get(employee_id, [])
+        logged_in = any(access.last_login_at for access in accesses)
+        sessions = [
+            latest_session_by_access[access.pk]
+            for access in accesses
+            if access.pk in latest_session_by_access
+        ]
+        latest_session = max(sessions, key=lambda session: session.last_seen_at) if sessions else None
+        if not logged_in:
+            status = 'not_registered'
+            label = 'Не зарегистрирован'
+        elif latest_session and latest_session.last_seen_at >= now - ONLINE_WINDOW:
+            status = 'online'
+            label = 'Онлайн'
+        elif latest_session and latest_session.last_seen_at >= now - RECENT_WINDOW:
+            status = 'recent'
+            label = 'Недавно в сети'
+        else:
+            status = 'offline'
+            label = 'Не в сети'
+        result[employee_id] = {
+            'status': status,
+            'label': label,
+            'last_seen_at': latest_session.last_seen_at if latest_session else None,
+            'app_code': latest_session.app_code if latest_session else '',
+        }
+    return result
+
+
 def force_end_access_sessions(*, access):
     now = timezone.now()
     session_keys = set(

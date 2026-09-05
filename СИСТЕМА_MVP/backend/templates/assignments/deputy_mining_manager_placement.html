@@ -5,7 +5,7 @@
 {% block body_class %}deputy-mining-manager-screen deputy-placement-screen{% endblock %}
 {% block extra_head %}
 {% include "includes/deputy_mining_manager_pwa_head.html" %}
-<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20260718-2">
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20260905-1">
 {% endblock %}
 
 {% block body %}
@@ -127,7 +127,29 @@
         </div>
         <button type="button" class="deputy-dialog-close" data-dialog-close aria-label="Закрыть">×</button>
     </div>
-    <div class="deputy-candidate-list" data-candidate-list></div>
+    <div class="deputy-candidate-tools">
+        <div class="deputy-search-field deputy-candidate-search">
+            <span id="deputy-candidate-search-label">Поиск сотрудника</span>
+            <div class="deputy-candidate-search-control">
+                <input id="deputy-candidate-search"
+                       type="search"
+                       autocomplete="off"
+                       spellcheck="false"
+                       placeholder="Поиск по ФИО, должности или телефону"
+                       aria-labelledby="deputy-candidate-search-label"
+                       aria-controls="deputy-candidate-list"
+                       data-candidate-search>
+                <button type="button"
+                        class="deputy-candidate-search-clear"
+                        data-candidate-search-clear
+                        aria-label="Очистить поиск"
+                        title="Очистить поиск"
+                        hidden>×</button>
+            </div>
+        </div>
+        <span class="deputy-candidate-count" data-candidate-count role="status" aria-live="polite"></span>
+    </div>
+    <div class="deputy-candidate-list" id="deputy-candidate-list" data-candidate-list></div>
     <div class="deputy-dialog-actions">
         <button type="button" class="admin-button admin-button-secondary" data-clear-slot hidden>Снять назначение</button>
         <button type="button" class="admin-button admin-button-secondary" data-dialog-close>Отмена</button>
@@ -232,6 +254,6 @@
 {% else %}
     {{ planning_payload|json_script:"deputy-planning-data" }}
 {% endif %}
-<script src="{% static 'js/deputy-mining-manager-v3.js' %}" defer></script>
+<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20260905-1" defer></script>
 <script src="{% static 'js/deputy-mining-manager-pwa-v1.js' %}" defer></script>
 {% endblock %}

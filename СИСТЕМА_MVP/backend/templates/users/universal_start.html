@@ -1,595 +1,173 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}Вход в рабочее приложение · Коппер Рисорсез{% endblock %}
+{% block title %}Вход в рабочие приложения — Коппер Рисорсез{% endblock %}
 {% block extra_head %}
     <meta name="theme-color" content="{{ entry_screen_browser_bar }}">
-    {# Без этих тегов мессенджер скребёт текст со страницы: в превью попадали #}
-    {# подписи полей — «Телефон +7 Далее» — и вместо картинки пустое место. #}
-    <meta name="description" content="Введите номер телефона — система подскажет, какое приложение вам нужно.">
+    <meta name="description" content="Введите номер телефона — система покажет нужное приложение.">
+    <link rel="canonical" href="https://driverform.ru/start/">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Коппер Рисорсез">
     <meta property="og:locale" content="ru_RU">
-    <meta property="og:title" content="Рабочее приложение · Коппер Рисорсез">
-    <meta property="og:description" content="Введите номер телефона — система подскажет, какое приложение вам нужно.">
-    <meta property="og:url" content="{{ request.scheme }}://{{ request.get_host }}{% url 'universal_start' %}">
-    <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'img/share/start-share.png' %}?v=2">
-    <meta property="og:image:type" content="image/png">
+    <meta property="og:title" content="Вход в рабочие приложения">
+    <meta property="og:description" content="Введите номер телефона — система покажет нужное приложение.">
+    <meta property="og:url" content="https://driverform.ru/start/">
+    <meta property="og:image" content="https://driverform.ru{% static 'img/share/og-start-v4.jpg' %}">
+    <meta property="og:image:secure_url" content="https://driverform.ru{% static 'img/share/og-start-v4.jpg' %}">
+    <meta property="og:image:type" content="image/jpeg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
-    <meta property="og:image:alt" content="Рабочее приложение · Коппер Рисорсез">
+    <meta property="og:image:alt" content="Рабочие приложения Коппер Рисорсез">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Рабочее приложение · Коппер Рисорсез">
-    <meta name="twitter:description" content="Введите номер телефона — система подскажет, какое приложение вам нужно.">
-    <meta name="twitter:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'img/share/start-share.png' %}?v=2">
-<style>
-    /* Одна ссылка на всех: человек вводит номер, система сама показывает, какое
-       приложение ему ставить. Оформление нейтральное — роль здесь ещё неизвестна. */
-    body.start-page {
-        /* Общий отступ тела в шесть точек здесь лишний: у экрана свои поля,
-           а вместе они делали страницу выше окна — и она прокручивалась
-           ровно на эти шесть точек на любом телефоне. */
-        padding: 0;
-        --start-accent: #2FBF71;
-        --start-glow: rgba(47, 191, 113, .20);
-        --start-ink: #04161A;
-        min-height: 100dvh;
-        background:
-            radial-gradient(120% 62% at 50% -8%, var(--start-glow), rgba(2, 8, 11, 0) 68%),
-            #02080b;
-    }
-
-    .start-screen {
-        display: grid;
-        /* safe center, а не просто center: при переполнении обычное
-           центрирование срезает верх содержимого и до него не доскроллить. */
-        align-content: safe center;
-        justify-items: center;
-        width: 100%;
-        min-height: 100dvh;
-        max-height: 100dvh;
-        padding:
-            calc(env(safe-area-inset-top, 0px) + clamp(24px, 7vh, 56px))
-            clamp(20px, 6vw, 34px)
-            calc(env(safe-area-inset-bottom, 0px) + clamp(20px, 4vh, 36px));
-        text-align: center;
-        /* Класс dispatcher-shell на body запрещает прокрутку всей страницы.
-           Экран рассчитан так, чтобы помещаться целиком, но у совмещающего
-           роли карточек несколько, и на низком окне они перестают влезать —
-           без своей прокрутки нижняя оказывалась недосягаемой. Прокрутка
-           работает только вместе с max-height выше: без него экран просто
-           вырастал за пределы окна, а обрезал его уже body. */
-        overflow-y: auto;
-    }
-
-    .start-screen__inner {
-        display: grid;
-        justify-items: center;
-        gap: clamp(10px, 3.4vh, 32px);
-        width: 100%;
-        max-width: 440px;
-    }
-
-    .start-screen__brand {
-        margin-bottom: 0;
-        color: #7f929a;
-        font-size: clamp(11px, 3vw, 13px);
-        font-weight: 700;
-        letter-spacing: .18em;
-        text-transform: uppercase;
-    }
-
-    .start-screen h1 {
-        margin: 0;
-        color: #F2F8FA;
-        font-size: clamp(22px, 6.4vw, 32px);
-        font-weight: 800;
-        line-height: 1.15;
-    }
-
-    .start-screen p {
-        margin: 0;
-        color: #9fb2ba;
-        font-size: clamp(14px, 4vw, 17px);
-        line-height: 1.45;
-    }
-
-    .start-screen form {
-        display: grid;
-        width: 100%;
-        gap: 6px;
-    }
-
-    .start-screen label {
-        color: #8fa3ab;
-        font-size: clamp(11px, 3vw, 13px);
-        font-weight: 700;
-        letter-spacing: .1em;
-        text-align: left;
-        text-transform: uppercase;
-    }
-
-    .start-screen__phone {
-        display: grid;
-        grid-template-columns: auto minmax(0, 1fr);
-        align-items: center;
-        border: 1px solid rgba(255, 255, 255, .16);
-        border-radius: 14px;
-        background: rgba(255, 255, 255, .04);
-        overflow: hidden;
-    }
-
-    .start-screen__phone:focus-within {
-        border-color: var(--start-accent);
-        box-shadow: 0 0 0 2px var(--start-glow);
-    }
-
-    .start-screen__code {
-        padding: 0 14px;
-        border-right: 1px solid rgba(255, 255, 255, .14);
-        color: #E8F1F4;
-        font-size: clamp(17px, 5vw, 21px);
-        font-weight: 800;
-    }
-
-    .start-screen__phone input {
-        min-height: 58px;
-        padding: 0 14px;
-        border: 0;
-        background: transparent;
-        color: #F2F8FA;
-        font: 800 clamp(18px, 5.2vw, 22px)/1 inherit;
-        letter-spacing: .02em;
-        caret-color: var(--start-accent);
-    }
-
-    .start-screen__phone input:focus {
-        outline: none;
-    }
-
-    .start-screen__hint {
-    display: block;
-    margin: 6px 0 0;
-    color: #8296a0;
-    font-size: 13px;
-    line-height: 1.3;
-}
-
-.start-screen__hint.is-invalid { color: #ff8f8a; }
-
-.start-screen__phone:has(input.is-valid) { border-color: rgba(47, 191, 113, .8); }
-.start-screen__phone:has(input.is-invalid) { border-color: rgba(255, 143, 138, .8); }
-
-.start-screen__submit {
-        width: 100%;
-        min-height: 58px;
-        margin-top: 14px;
-        border: 0;
-        border-radius: 14px;
-        background: var(--start-accent);
-        color: var(--start-ink);
-        font-size: clamp(16px, 4.6vw, 19px);
-        font-weight: 800;
-        box-shadow: 0 14px 34px var(--start-glow);
-        cursor: pointer;
-    }
-
-    /* Карточка с фамилией нужна, чтобы человек убедился, что нашли его.
-       Но она не главная на экране — главное ниже, приложения. */
-    .start-screen__person {
-        width: 100%;
-        padding: clamp(9px, 1.6vh, 14px) 14px;
-        border: 1px solid rgba(255, 255, 255, .12);
-        border-radius: 14px;
-        background: rgba(255, 255, 255, .04);
-    }
-
-    .start-screen__person strong {
-        display: block;
-        color: #F2F8FA;
-        font-size: clamp(16px, 4.6vw, 20px);
-        font-weight: 800;
-        line-height: 1.2;
-    }
-
-    .start-screen__person span {
-        color: #8fa3ab;
-        font-size: clamp(12px, 3.4vw, 14px);
-    }
-
-    /* Один столбец, а не два. Внутри карточки теперь не только значок роли,
-       но и две строки установки с подписями — в половине ширины телефона
-       «скачать и установить» разъезжается на четыре строки. */
-    .start-screen__apps {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        gap: 8px;
-        width: 100%;
-    }
-
-    /* Цвет роли задаётся на самой карточке инлайном из каталога приложений
-       (accent_color в users/role_apps.py) — оттуда же его берёт экран входа.
-       Запасные строки без color-mix нужны старым браузерам. */
-    .start-screen__app {
-        display: grid;
-        align-content: start;
-        border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, .16);
-        border-color: color-mix(in srgb, var(--app-accent) 30%, transparent);
-        background: rgba(255, 255, 255, .05);
-        background: color-mix(in srgb, var(--app-accent) 8%, transparent);
-        overflow: hidden;
-    }
-
-    /* Шапка карточки той же горизонтальной строкой, что и варианты ниже:
-       значок слева, название справа. Вертикальный вариант забирал вдвое
-       больше высоты, а её на этом экране не хватает. */
-    .start-screen__app-main {
-        display: grid;
-        grid-template-columns: auto minmax(0, 1fr);
-        align-items: center;
-        gap: 10px;
-        width: 100%;
-        padding: clamp(8px, 1.4vh, 13px) 12px;
-        color: #eaf6ee;
-        text-decoration: none;
-        border-bottom: 1px solid rgba(255, 255, 255, .12);
-        border-bottom-color: color-mix(in srgb, var(--app-accent) 20%, transparent);
-    }
-
-    /* Горизонтальные строки: значок слева, подпись справа. Вдвое ниже
-       вертикальных плиток — это принципиально, потому что страница не
-       прокручивается и всё обязано поместиться в один экран. */
-    .start-screen__install-options {
-        display: grid;
-        gap: clamp(6px, 1.2vh, 12px);
-        margin: clamp(8px, 1.4vh, 12px) 10px 0;
-    }
-
-    .start-screen__opt {
-        display: grid;
-        grid-template-columns: 52px minmax(0, 1fr);
-        align-items: center;
-        gap: 12px;
-        padding: clamp(9px, 1.5vh, 14px) 12px;
-        border: 1px solid rgba(255, 255, 255, .14);
-        border-radius: 12px;
-        background: rgba(255, 255, 255, .04);
-        color: #eaf6ee;
-        text-align: left;
-        text-decoration: none;
-    }
-
-    .start-screen__opt--native {
-        border-color: rgba(255, 255, 255, .3);
-        border-color: color-mix(in srgb, var(--app-accent) 60%, transparent);
-        background: rgba(255, 255, 255, .07);
-        background: color-mix(in srgb, var(--app-accent) 13%, transparent);
-    }
-
-    /* На обеих строках стоит значок самого приложения — человек ставит одно
-       и то же, разными способами. Способ показывает кружок в углу: APK или
-       Chrome. Прежде у браузерного варианта была серая картинка окна, и она
-       читалась как не подгрузившийся значок. */
-    .start-screen__opt-icon {
-        position: relative;
-        display: grid;
-        place-items: center;
-        width: 52px;
-        height: 52px;
-    }
-
-    .start-screen__opt-icon img {
-        width: 100%;
-        height: 100%;
-        border-radius: 11px;
-        object-fit: cover;
-    }
-
-    .start-screen__opt-badge {
-        position: absolute;
-        right: -5px;
-        bottom: -5px;
-        display: grid;
-        place-items: center;
-        box-sizing: border-box;
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        /* Обводка цветом строки, а не белым: кружок должен отделяться от
-           значка, но не выглядеть наклейкой поверх него. */
-        box-shadow: 0 0 0 2px #0b1a12;
-    }
-
-    .start-screen__opt-badge--apk {
-        background: var(--app-accent, #2FBF71);
-        color: #04161A;
-        font-size: 8px;
-        font-weight: 900;
-        letter-spacing: -.01em;
-    }
-
-    /* Кружок Chrome собран из секторов, а не нарисован файлом: на 22 точках
-       мелкие детали всё равно не читаются, а лишней картинки не нужно. */
-    .start-screen__opt-badge--chrome {
-        background: conic-gradient(
-            from -60deg,
-            #EA4335 0deg 120deg,
-            #FBBC05 120deg 240deg,
-            #34A853 240deg 360deg);
-    }
-
-    .start-screen__opt-badge--chrome::after {
-        content: "";
-        box-sizing: content-box;
-        width: 8px;
-        height: 8px;
-        border: 2px solid #fff;
-        border-radius: 50%;
-        background: #4285F4;
-    }
-
-    .start-screen__opt-text {
-        display: grid;
-        gap: 2px;
-        min-width: 0;
-    }
-
-    /* Выравнивание по левому краю приходится задавать явно: у экрана общее
-       text-align: center, а у .start-screen__app b — своё центрирование для
-       подписи под значком роли, и оно достаёт до этих строк тоже. */
-    .start-screen__opt-text b {
-        font-size: 15px;
-        font-weight: 800;
-        line-height: 1.15;
-    }
-
-    /* Пометка стабильности рядом с названием, а не отдельной строкой —
-       экономит высоту и сразу отвечает на вопрос «а какая разница». */
-    .start-screen__opt-text b i {
-        font-style: normal;
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: .02em;
-        text-transform: uppercase;
-        opacity: .75;
-    }
-
-    .start-screen__opt--native .start-screen__opt-text b i {
-        color: #7ee2a8;
-        color: color-mix(in srgb, var(--app-accent) 75%, #ffffff);
-    }
-    .start-screen__opt--browser .start-screen__opt-text b i { color: #e0b877; }
-
-    .start-screen__opt-text em {
-        color: #93a7ae;
-        font-style: normal;
-        font-size: 12px;
-        line-height: 1.25;
-    }
-
-    .start-screen .start-screen__opt-note {
-        margin: clamp(7px, 1.3vh, 12px) 12px clamp(9px, 1.5vh, 14px);
-        color: #7d919a;
-        text-align: left;
-        font-size: 11px;
-        line-height: 1.3;
-    }
-
-    /* Только название роли в шапке карточки. Раньше селектор был шире —
-       .start-screen__app b — и цеплял заодно названия вариантов установки. */
-    .start-screen__app-main b {
-        font-size: 14px;
-        font-weight: 800;
-        line-height: 1.2;
-        text-align: left;
-    }
-
-    /* Тише, чем основные действия: это выход для застрявшего, а не то,
-       куда нужно вести всех. Поэтому строкой, а не кнопкой. */
-    .start-screen__support {
-        display: inline-grid;
-        grid-template-columns: auto auto;
-        align-items: center;
-        justify-content: center;
-        gap: 7px;
-        padding: 8px 14px;
-        border: 1px solid rgba(255, 255, 255, .14);
-        border-radius: 999px;
-        color: #9fb2ba;
-        font-size: 13px;
-        font-weight: 700;
-        text-decoration: none;
-    }
-
-    .start-screen__support svg {
-        width: 15px;
-        height: 15px;
-    }
-
-    .start-screen__back {
-        margin-top: clamp(8px, 1.6vh, 14px);
-        color: #8296a0;
-        font-size: 15px;
-        text-decoration: underline;
-    }
-
-    /* Низкий экран: всё должно помещаться без прокрутки.
-
-       До приложения внизу списка большим пальцем не дотянуться, а листать
-       экран выбора — лишнее движение каждый раз. Ужимаем оформление, а не
-       сами плитки: убираем марку сверху и уменьшаем значки. */
-    @media (max-height: 730px) {
-        .start-screen__brand {
-            display: none;
-        }
-
-        .start-screen__inner h1 {
-            font-size: clamp(19px, 5.4vw, 24px);
-        }
-
-        .start-screen__app-main {
-            padding: 6px 10px;
-        }
-    }
-
-    @media (max-height: 660px) {
-        .start-screen__person {
-            padding: 7px 12px;
-        }
-
-        .start-screen__inner p {
-            margin-block: 6px;
-        }
-
-        .start-screen__apps {
-            gap: 6px;
-        }
-    }
-</style>
+    <meta name="twitter:title" content="Вход в рабочие приложения">
+    <meta name="twitter:description" content="Введите номер телефона — система покажет нужное приложение.">
+    <meta name="twitter:image" content="https://driverform.ru{% static 'img/share/og-start-v4.jpg' %}">
+    <link rel="preload" as="image" href="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
+    <link rel="stylesheet" href="{% static 'css/max-support-link-v1.css' %}?v=6">
+    <link rel="stylesheet" href="{% static 'css/start-page-v1.css' %}?v=20260904-16">
+    <script src="{% static 'js/start-page-v1.js' %}?v=20260904-8" defer></script>
 {% endblock %}
-{% block body_class %}start-page dispatcher-shell dispatcher-night{% endblock %}
+{% block viewport_extra %}, viewport-fit=cover{% endblock %}
+{% block body_class %}start-page{% if found %} start-page--result{% endif %}{% endblock %}
+{% block global_realtime_ui %}{% endblock %}
 
 {% block body %}
-<main class="start-screen">
+<main class="start-screen{% if found %} start-screen--result{% else %} start-screen--entry{% endif %}"
+      data-start-screen{% if found %} data-app-theme="{{ apps.0.app.role_code|default:'neutral' }}"{% endif %}>
+    <section class="start-hero" aria-label="Коппер Рисорсез — горнотранспортная компания">
+        <div class="start-hero__backdrop" aria-hidden="true"></div>
+        <picture class="start-hero__picture">
+            <source srcset="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
+            <img class="start-hero__image"
+                 src="{% static 'img/start/start-hero-v1.jpg' %}"
+                 width="853" height="373"
+                 alt="Коппер Рисорсез: карьер, экскаватор и карьерный самосвал"
+                 fetchpriority="high" decoding="async">
+        </picture>
+        <svg class="start-hero__lines" viewBox="0 0 390 430" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M0 10 58 52 14 116 70 165 22 226 72 292 20 352 62 430M0 74 58 52 70 165 14 116 22 226 72 292 20 352M0 298 72 292 62 430" />
+        </svg>
+        <div class="start-hero__shade" aria-hidden="true"></div>
+    </section>
+
     <div class="start-screen__inner">
-        <div class="start-screen__brand">Коппер Рисорсез</div>
         {% if found %}
-            <h1>Ваше приложение</h1>
-            <div class="start-screen__person">
-                <strong>{{ employee.full_name }}</strong>
-                <span>{{ submitted_phone }}</span>
-            </div>
-            {% if has_working_code %}
-                <p>Установите на телефон и войдите своим пинкодом.</p>
-            {% else %}
-                <p>Установите на телефон. Пинкод придумаете при первом входе.</p>
-            {% endif %}
-            <div class="start-screen__apps">
-                {% for item in apps %}
-                    <div class="start-screen__app" style="--app-accent: {{ item.app.accent_color }}">
-                        {% comment %}
-                        Шапка без значка: тот же значок стоит на обеих строках
-                        установки ниже, и третья его копия читалась как ошибка
-                        вёрстки — «зачем оно тут три раза». Название роли нужно,
-                        когда приложений несколько.
-                        {% endcomment %}
-                        <div class="start-screen__app-main">
-                            <b>{{ item.app.name }}</b>
-                        </div>
-                        {% comment %}
-                        Горизонтальные строки, а не вертикальные плитки: экран этой
-                        страницы не прокручивается (класс dispatcher-shell на body
-                        задаёт overflow: hidden), и развёрнутые карточки в него не
-                        помещались — до второго варианта было не добраться. Строка
-                        со значком слева занимает вдвое меньше высоты.
-                        {% endcomment %}
-                        <div class="start-screen__install-options">
-                            {% if item.apk %}
-                                {# Без download: с ним Chrome включает проверку и пугает «файл может быть опасным». #}
-                                <a class="start-screen__opt start-screen__opt--native"
-                                   data-start-install-option="native"
-                                   href="{{ item.apk.url }}"
-                                   aria-label="Скачать приложение {{ item.app.name }} для Android, версия {{ item.apk.version }}">
+            <section class="start-result-card" aria-labelledby="start-result-title" data-start-result>
+                <h1 id="start-result-title">Ваше приложение</h1>
+                <div class="start-screen__person" aria-label="Сотрудник">
+                    <span class="start-screen__person-icon" aria-hidden="true">
+                        <svg viewBox="0 0 48 48" fill="none">
+                            <circle cx="24" cy="17" r="8" />
+                            <path d="M10 40c1.8-8 6.5-12 14-12s12.2 4 14 12" />
+                        </svg>
+                    </span>
+                    <span class="start-screen__person-copy">
+                        <strong>{{ employee.full_name }}</strong>
+                        <span>{{ submitted_phone }}</span>
+                    </span>
+                </div>
+                <p class="start-result-card__lead">
+                    <span>Выберите способ запуска приложения</span>
+                </p>
+                <div class="start-screen__apps">
+                    {% for item in apps %}
+                        <section class="start-screen__app"
+                                 data-app-theme="{{ item.app.role_code }}"
+                                 aria-labelledby="start-app-title-{{ forloop.counter }}">
+                            <h2 class="start-screen__app-main" id="start-app-title-{{ forloop.counter }}">
+                                <span class="start-screen__role-accent" aria-hidden="true"></span>
+                                <span>{{ item.app.name }}</span>
+                            </h2>
+                            <div class="start-screen__install-options">
+                                {% if item.apk %}
+                                    <a class="start-screen__opt start-screen__opt--native"
+                                       data-start-install-option="native"
+                                       href="{{ item.apk.url }}"
+                                       aria-label="Установить приложение {{ item.app.name }}. Рекомендуется. APK версии {{ item.apk.version }}. Скачать и установить.">
+                                        <span class="start-screen__opt-icon" aria-hidden="true">
+                                            <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
+                                            <span class="start-screen__opt-badge start-screen__opt-badge--apk">APK</span>
+                                        </span>
+                                        <span class="start-screen__opt-text">
+                                            <b><span>Установить приложение</span> <i>Рекомендуется</i></b>
+                                            <em><span>APK · версия {{ item.apk.version }}</span><span>Скачать и установить</span></em>
+                                        </span>
+                                        <svg class="start-screen__opt-arrow" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                                            <path d="M2 12h25M18 3l9 9-9 9" />
+                                        </svg>
+                                    </a>
+                                {% endif %}
+                                <a class="start-screen__opt start-screen__opt--browser"
+                                   data-start-install-option="browser"
+                                   href="{{ item.url }}{% if '?' in item.url %}&amp;{% else %}?{% endif %}install=1"
+                                   aria-label="Открыть приложение {{ item.app.name }} в браузере. Веб-версия, PWA без установки. Может терять связь при свёрнутом окне.">
                                     <span class="start-screen__opt-icon" aria-hidden="true">
                                         <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
-                                        <span class="start-screen__opt-badge start-screen__opt-badge--apk">APK</span>
+                                        {% if is_ios %}
+                                            <span class="start-screen__opt-badge start-screen__opt-badge--safari">
+                                                <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+                                                    <circle cx="16" cy="16" r="13" />
+                                                    <path d="m19.5 12.5-2.2 4.8-4.8 2.2 2.2-4.8 4.8-2.2Z" />
+                                                    <path d="M16 5.5v2M16 24.5v2M5.5 16h2M24.5 16h2" />
+                                                </svg>
+                                            </span>
+                                        {% else %}
+                                            <span class="start-screen__opt-badge start-screen__opt-badge--chrome"></span>
+                                        {% endif %}
                                     </span>
                                     <span class="start-screen__opt-text">
-                                        <b>Приложение <i>стабильное</i></b>
-                                        <em>APK · версия {{ item.apk.version }} · скачать и установить →</em>
+                                        <b><span>Открыть в браузере</span> <i>ВЕБ-ВЕРСИЯ</i></b>
+                                        <em><span>PWA · без установки</span><span>Может терять связь при свёрнутом окне</span></em>
                                     </span>
+                                    <svg class="start-screen__opt-arrow" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                                        <path d="M2 12h25M18 3l9 9-9 9" />
+                                    </svg>
                                 </a>
+                            </div>
+                            {% if item.apk %}
+                                <p class="start-screen__opt-note">
+                                    <svg viewBox="0 0 32 36" fill="none" aria-hidden="true">
+                                        <path d="M16 2 29 7v10c0 8-5.2 13.8-13 17C8.2 30.8 3 25 3 17V7l13-5Z" />
+                                        <path d="M16 10v9M16 25h.01" />
+                                    </svg>
+                                    <span>APK работает в фоне. Если Android предупредит о риске, выберите «Всё равно скачать».</span>
+                                </p>
+                            {% elif is_ios %}
+                                <p class="start-screen__opt-note start-screen__opt-note--ios">После перехода добавьте значок на экран — покажем, как.</p>
                             {% endif %}
-                            {% comment %}
-                            install=1 в адресе: установить PWA можно только с
-                            собственного адреса приложения, поэтому переход туда
-                            неизбежен. Метка говорит скрипту сразу вызвать окно
-                            установки, чтобы не заставлять жать кнопку второй раз.
-                            {% endcomment %}
-                            <a class="start-screen__opt start-screen__opt--browser"
-                               data-start-install-option="browser"
-                               href="{{ item.url }}{% if '?' in item.url %}&amp;{% else %}?{% endif %}install=1"
-                               aria-label="Установить {{ item.app.name }} как браузерное приложение">
-                                <span class="start-screen__opt-icon" aria-hidden="true">
-                                    <img src="{{ item.app.icon_192_url }}" alt="" loading="lazy" decoding="async" onerror="this.remove();">
-                                    <span class="start-screen__opt-badge start-screen__opt-badge--chrome"></span>
-                                </span>
-                                <span class="start-screen__opt-text">
-                                    <b>Браузер <i>нестабильно</i></b>
-                                    <em>PWA · ярлык на экран · открыть →</em>
-                                </span>
-                            </a>
-                        </div>
-                        <p class="start-screen__opt-note">
-                            {% if item.apk %}Приложение держит связь при свёрнутом окне. Телефон предупредит «файл может быть опасным» — нажмите «Всё равно скачать».{% elif is_ios %}После перехода добавьте значок на экран — покажем, как.{% endif %}
-                        </p>
-                    </div>
-                {% endfor %}
-            </div>
-            <a class="start-screen__back" href="{% url 'universal_start' %}">Это не я — ввести другой номер</a>
+                        </section>
+                    {% endfor %}
+                </div>
+                <a class="start-screen__back" href="{% url 'universal_start' %}">Это не я — ввести другой номер</a>
+            </section>
             {% include "users/_start_support_link.html" %}
         {% else %}
-            <h1>Вход в рабочее приложение</h1>
-            <p>Введите свой номер телефона — система подскажет, какое приложение вам нужно.</p>
-            <form method="post">
-                {% csrf_token %}
-                <label for="start-phone">Телефон</label>
-                <span class="start-screen__phone">
-                    <span class="start-screen__code">+7</span>
-                    <input id="start-phone" name="phone" type="text" inputmode="numeric" autocomplete="tel" placeholder="999-000-00-00" maxlength="13" data-start-phone required autofocus>
-                </span>
-                <small class="start-screen__hint" data-start-hint>10 цифр номера</small>
-                <button class="start-screen__submit" type="submit">Далее</button>
-            </form>
+            <section class="start-entry-card" aria-labelledby="start-entry-title" data-start-card>
+                <header class="start-entry-card__header">
+                    <span class="start-kicker">ДОСТУП К РАБОЧИМ ПРИЛОЖЕНИЯМ</span>
+                    <h1 id="start-entry-title">Вход в рабочее приложение</h1>
+                    <p class="start-description">Введите свой номер телефона — система подскажет, какое приложение вам нужно.</p>
+                </header>
+                <form method="post" data-start-form>
+                    {% csrf_token %}
+                    <label for="start-phone">ТЕЛЕФОН</label>
+                    <span class="start-screen__phone" data-start-phone-shell>
+                        <span class="start-screen__code" aria-hidden="true">+7</span>
+                        <input id="start-phone" name="phone" type="text"
+                               inputmode="numeric" autocomplete="tel-national" enterkeyhint="go"
+                               placeholder="900-000-00-00" data-start-phone required
+                               aria-describedby="start-phone-hint" aria-invalid="false">
+                    </span>
+                    <small id="start-phone-hint" class="start-screen__hint" data-start-hint>10 цифр номера</small>
+                    <button class="start-screen__submit" type="submit" data-start-submit>
+                        <span data-start-submit-label>Далее</span>
+                        <svg viewBox="0 0 32 24" fill="none" aria-hidden="true">
+                            <path d="M2 12h25M18 3l9 9-9 9" />
+                        </svg>
+                    </button>
+                </form>
+            </section>
             {% include "users/_start_support_link.html" %}
-            <script>
-            (function (document) {
-                "use strict";
-                /* Та же маска, что и на входе в приложение: человек набирает
-                   подряд, а номер сам раскладывается на 000-000-00-00. Без неё
-                   в поле оказывалась сплошная строка цифр. */
-                var input = document.querySelector("[data-start-phone]");
-                var hint = document.querySelector("[data-start-hint]");
-                if (!input) return;
-
-                function format(value) {
-                    var digits = String(value || "").replace(/\D/g, "");
-                    if (digits.charAt(0) === "8") digits = "7" + digits.slice(1);
-                    if (digits.charAt(0) === "7") digits = digits.slice(1);
-                    digits = digits.slice(0, 10);
-                    var result = digits.slice(0, 3);
-                    if (digits.length > 3) result += "-" + digits.slice(3, 6);
-                    if (digits.length > 6) result += "-" + digits.slice(6, 8);
-                    if (digits.length > 8) result += "-" + digits.slice(8, 10);
-                    return result;
-                }
-
-                function check() {
-                    input.value = format(input.value);
-                    var digits = input.value.replace(/\D/g, "");
-                    var valid = digits.length === 10 && digits.charAt(0) === "9";
-                    var message = "10 цифр номера";
-                    if (digits && digits.length < 10) {
-                        message = "Нужно 10 цифр после +7. Сейчас введено: " + digits.length + ".";
-                    } else if (digits.length === 10 && !valid) {
-                        message = "Мобильный номер после +7 должен начинаться с 9.";
-                    } else if (valid) {
-                        message = "Введено правильно.";
-                    }
-                    input.classList.toggle("is-invalid", Boolean(digits) && !valid);
-                    input.classList.toggle("is-valid", valid);
-                    if (hint) {
-                        hint.textContent = message;
-                        hint.classList.toggle("is-invalid", Boolean(digits) && !valid);
-                    }
-                }
-
-                input.addEventListener("input", check);
-                input.addEventListener("blur", check);
-                check();
-            })(document);
-            </script>
         {% endif %}
     </div>
 </main>

@@ -1,0 +1,890 @@
+/*
+ * Единый экран «Смена» Водителя и Машиниста экскаватора.
+ * Разметка общая; единственное структурное отличие — строка «Одометр» у
+ * Водителя. Компонент не зависит от модели телефона и не прокручивается.
+ */
+
+:root {
+    --mobile-shift-accent: #67e854;
+    --mobile-shift-accent-soft: rgba(103, 232, 84, .12);
+    --mobile-shift-danger: #ff737a;
+    --mobile-shift-danger-soft: rgba(255, 74, 84, .14);
+    --mobile-shift-bg: #02090d;
+    --mobile-shift-panel: rgba(4, 16, 20, .92);
+    --mobile-shift-card: rgba(7, 18, 23, .96);
+    --mobile-shift-border: rgba(102, 224, 139, .34);
+    --mobile-shift-card-border: rgba(142, 169, 181, .26);
+    --mobile-shift-text: #f3f7f8;
+    --mobile-shift-muted: #9baab1;
+    --mobile-shift-role-header-h: clamp(52px, 14vw, 60px);
+    --mobile-shift-role-nav-h: clamp(68px, 19vw, 78px);
+}
+
+html:has(.mobile-shift),
+body:has(.mobile-shift) {
+    inline-size: 100%;
+    block-size: 100%;
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen:has(.mobile-shift) {
+    --mobile-shift-role-header-h: var(--driver-header-h);
+    position: relative !important;
+    block-size: var(--driver-viewport-h, 100dvh) !important;
+    min-block-size: var(--driver-viewport-h, 100dvh) !important;
+    max-block-size: var(--driver-viewport-h, 100dvh) !important;
+}
+
+body.excavator-operator-screen:has(.mobile-shift) {
+    --mobile-shift-role-header-h: var(--eo-fixed-header-h);
+    block-size: var(--eo-app-height, 100dvh) !important;
+    min-block-size: var(--eo-app-height, 100dvh) !important;
+    max-block-size: var(--eo-app-height, 100dvh) !important;
+}
+
+body.driver-mobile-screen .driver-shell:has(.mobile-shift) {
+    block-size: var(--driver-viewport-h, 100dvh) !important;
+    min-block-size: var(--driver-viewport-h, 100dvh) !important;
+    max-block-size: var(--driver-viewport-h, 100dvh) !important;
+}
+
+body.excavator-operator-screen .eo-shell:has(.mobile-shift) {
+    inline-size: 100% !important;
+    max-inline-size: 100% !important;
+    block-size: var(--eo-app-height, 100dvh) !important;
+    min-block-size: var(--eo-app-height, 100dvh) !important;
+    max-block-size: var(--eo-app-height, 100dvh) !important;
+}
+
+.mobile-shift,
+.mobile-shift *,
+.mobile-shift *::before,
+.mobile-shift *::after {
+    box-sizing: border-box;
+}
+
+.mobile-shift-host,
+body.driver-mobile-screen [data-driver-tab-panel="shift"],
+body.excavator-operator-screen [data-eo-screen="shift"] {
+    inline-size: 100%;
+    block-size: 100%;
+    min-inline-size: 0;
+    min-block-size: 0;
+    margin: 0;
+    overflow: hidden !important;
+}
+
+.mobile-shift-host {
+    display: block;
+}
+
+.mobile-shift,
+.mobile-work-controls {
+    --ms-gap: clamp(6px, 1.2vw, 10px);
+    --ms-edge: clamp(8px, 2.8vw, 14px);
+    --ms-section-pad: clamp(7px, 1.6vw, 12px);
+    --ms-card-pad-x: clamp(9px, 2.7vw, 14px);
+    --ms-card-pad-y: clamp(5px, 1.2vw, 9px);
+    --ms-title-size: clamp(28px, 7.2vw, 38px);
+    --ms-section-size: clamp(12px, 3.45vw, 15px);
+    --ms-label-size: clamp(12px, 3.6vw, 16px);
+    --ms-value-size: clamp(21px, 6.4vw, 30px);
+    --ms-unit-size: clamp(11px, 3vw, 13px);
+    --ms-summary-size: clamp(19px, 5.7vw, 26px);
+    --ms-action-size: clamp(16px, 4.9vw, 22px);
+    /* В дочернем контенте cqh считается от внутренней высоты экрана. Поправка
+       на треть edge возвращает размер к полной высоте контейнера и повторяет
+       фактическую строку показаний «Смены» с погрешностью менее пикселя. */
+    --ms-standard-field-h: clamp(48px, calc(16.6667cqh + clamp(2.6667px, .9333vw, 4.6667px) - 22.7px), 116px);
+    --ms-screen-rows: minmax(38px, .12fr) minmax(0, 1fr) minmax(48px, .12fr);
+    --ms-screen-rows-landscape: minmax(30px, .12fr) minmax(0, 1fr) minmax(44px, .16fr);
+}
+
+.mobile-shift {
+    container: mobile-shift / size;
+    position: absolute !important;
+    inset: calc(env(safe-area-inset-top, 0px) + var(--mobile-shift-role-header-h)) 0 calc(env(safe-area-inset-bottom, 0px) + var(--mobile-shift-role-nav-h)) !important;
+    z-index: 8 !important;
+    inline-size: auto !important;
+    block-size: auto !important;
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    margin: 0 !important;
+    padding: var(--ms-edge) !important;
+    /* Экран по умолчанию закрыт. Показываем его только когда родительская
+       вкладка явно активна: fixed-позиционирование не должно позволять
+       «Смене» накрывать соседние экраны. */
+    display: none !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: var(--ms-screen-rows) !important;
+    gap: var(--ms-gap) !important;
+    overflow: hidden !important;
+    color: var(--mobile-shift-text);
+    background: var(--mobile-shift-bg);
+    font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+}
+
+.mobile-shift__titlebar {
+    min-inline-size: 0;
+    min-block-size: 0;
+    block-size: 100%;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-gap);
+    overflow: hidden;
+}
+
+/* Одна шкала текста для постоянной шапки Экскаваторщика. Все рабочие вкладки
+   используют тот же DOM, поэтому размер больше не меняется от активного экрана
+   и не подгоняется отдельным JavaScript. */
+body.excavator-operator-screen .eo-topbar {
+    --eo-topbar-text-size: clamp(11px, 2.8vw, 14px);
+}
+
+body.excavator-operator-screen .eo-topbar .eo-topbar-cell strong,
+body.excavator-operator-screen .eo-topbar .eo-shift-status-text,
+body.excavator-operator-screen .eo-topbar .eo-face-coordinates,
+body.excavator-operator-screen .eo-topbar .eo-face-rock {
+    font-size: var(--eo-topbar-text-size) !important;
+    line-height: 1.04 !important;
+    letter-spacing: 0 !important;
+}
+
+body.excavator-operator-screen .eo-topbar .eo-topbar-cell strong,
+body.excavator-operator-screen .eo-topbar .eo-shift-status-text,
+body.excavator-operator-screen .eo-topbar .eo-face-coordinates {
+    font-weight: 700 !important;
+}
+
+.mobile-shift__title {
+    min-inline-size: 0;
+    margin: 0;
+    color: var(--mobile-shift-text);
+    font-size: var(--ms-title-size);
+    font-weight: 700;
+    line-height: 1;
+}
+
+/* Current Excavator tabs share one title contract. The explicit owner selector
+   replaces legacy role-screen h1 rules without leaking into other screens. */
+body.excavator-operator-screen .eo-screen.mobile-work-screen .mobile-shift__title {
+    margin: 0 !important;
+    color: var(--mobile-shift-text) !important;
+    font-size: var(--ms-title-size) !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+}
+
+.mobile-shift__update-group {
+    min-inline-size: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: clamp(4px, 1vw, 7px);
+    overflow: hidden;
+}
+
+.mobile-shift__version,
+.mobile-shift__update-group .native-app-version,
+.mobile-shift__update-group .eo-current-app-version {
+    flex: 0 0 auto;
+    color: rgba(178, 192, 198, .78);
+    font-size: clamp(11px, 3.2vw, 14px);
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+body.excavator-operator-screen .eo-screen.mobile-work-screen .mobile-shift__update-group .mobile-shift__version,
+body.excavator-operator-screen .eo-screen.mobile-work-screen .mobile-shift__update-group .native-app-version,
+body.excavator-operator-screen .eo-screen.mobile-work-screen .mobile-shift__update-group .eo-current-app-version {
+    color: rgba(178, 192, 198, .78) !important;
+    font-size: clamp(11px, 3.2vw, 14px) !important;
+    font-weight: 600 !important;
+    line-height: 1 !important;
+    letter-spacing: 0 !important;
+    white-space: nowrap !important;
+}
+
+.mobile-shift__content {
+    min-inline-size: 0;
+    min-block-size: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1.24fr) minmax(0, .76fr);
+    gap: var(--ms-gap);
+    overflow: hidden !important;
+    overscroll-behavior: none;
+}
+
+.mobile-shift__section {
+    position: relative;
+    min-inline-size: 0;
+    min-block-size: 0;
+    margin: 0;
+    padding: var(--ms-section-pad);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: var(--ms-gap);
+    overflow: hidden;
+    border: 1px solid var(--mobile-shift-border);
+    border-radius: clamp(8px, 2.5vw, 12px);
+    background: var(--mobile-shift-panel);
+    box-shadow: inset 0 0 18px rgba(70, 196, 107, .05);
+}
+
+.mobile-shift__section-head {
+    min-inline-size: 0;
+    min-block-size: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-gap);
+    color: #dce5e8;
+    font-size: var(--ms-section-size);
+    font-weight: 650;
+    line-height: 1;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.mobile-shift__section-head b {
+    min-inline-size: 0;
+    overflow: hidden;
+    color: var(--mobile-shift-muted);
+    font-size: clamp(10px, 2.9vw, 13px);
+    font-weight: 550;
+    letter-spacing: 0;
+    text-overflow: ellipsis;
+    text-transform: none;
+}
+
+.mobile-shift__metrics {
+    min-inline-size: 0;
+    min-block-size: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    gap: var(--ms-gap);
+    overflow: hidden;
+}
+
+.mobile-shift[data-mobile-shift-role="excavator"] [data-mobile-shift-field="fuel"] {
+    grid-row: 1;
+}
+
+.mobile-shift[data-mobile-shift-role="excavator"] [data-mobile-shift-field="fuel_limit"] {
+    grid-row: 2;
+}
+
+.mobile-shift[data-mobile-shift-role="excavator"] [data-mobile-shift-field="engine_hours"] {
+    grid-row: 3;
+}
+
+.mobile-shift__field {
+    position: relative;
+    min-inline-size: 0;
+    min-block-size: 0;
+    inline-size: 100%;
+    block-size: 100%;
+    margin: 0 !important;
+    padding: var(--ms-card-pad-y) var(--ms-card-pad-x);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(88px, 44%);
+    grid-template-rows: minmax(0, 1fr);
+    align-items: center;
+    gap: var(--ms-gap);
+    overflow: hidden;
+    border: 1px solid var(--mobile-shift-card-border);
+    border-radius: clamp(7px, 2vw, 10px);
+    background: var(--mobile-shift-card);
+    color: var(--mobile-shift-text);
+    transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+
+.mobile-shift__field:focus-within {
+    border-color: var(--mobile-shift-accent);
+    background: var(--mobile-shift-accent-soft);
+    box-shadow: 0 0 0 2px rgba(103, 232, 84, .16), inset 0 0 16px rgba(103, 232, 84, .06);
+}
+
+.mobile-shift__field:has(.errorlist),
+.mobile-shift__field.has-error,
+.mobile-shift__field:has(.errorlist):focus-within,
+.mobile-shift__field.has-error:focus-within {
+    border-color: var(--mobile-shift-danger);
+    box-shadow: 0 0 0 2px rgba(255, 115, 122, .16), inset 0 0 16px rgba(255, 115, 122, .08);
+}
+
+.mobile-shift__field:has(input:disabled) {
+    opacity: .5;
+    background: rgba(12, 20, 24, .7);
+}
+
+.mobile-shift__field--reference {
+    border-style: dashed;
+    background: rgba(7, 18, 23, .72);
+    pointer-events: none;
+}
+
+.mobile-shift__field--reference .mobile-shift__field-label,
+.mobile-shift__field--reference .mobile-shift__metric-value {
+    opacity: .72;
+}
+
+.mobile-shift__field-label,
+.mobile-shift__field > span:first-child {
+    min-inline-size: 0;
+    display: grid;
+    align-content: center;
+    gap: clamp(2px, .7vw, 5px);
+    overflow: hidden;
+    color: #aab7bd;
+    font-size: var(--ms-label-size);
+    font-weight: 650;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.mobile-shift__field-label small {
+    overflow: hidden;
+    color: #829199;
+    font-size: clamp(9px, 2.65vw, 12px);
+    font-weight: 550;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mobile-shift__field-label small strong {
+    color: #cbd6da;
+    font: inherit;
+}
+
+.mobile-shift__metric-value {
+    min-inline-size: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: clamp(4px, 1.4vw, 8px);
+    overflow: hidden;
+}
+
+.mobile-shift__metric-value input,
+.mobile-shift__metric-value strong {
+    min-inline-size: 0;
+    inline-size: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--mobile-shift-text);
+    font-size: var(--ms-value-size) !important;
+    font-weight: 650 !important;
+    line-height: 1 !important;
+    text-align: right !important;
+    text-overflow: ellipsis;
+}
+
+.mobile-shift__metric-value input {
+    user-select: text;
+    caret-color: var(--mobile-shift-accent);
+}
+
+.mobile-shift__metric-value em {
+    color: #aab7bd;
+    font-size: var(--ms-unit-size) !important;
+    font-style: normal;
+    font-weight: 650;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.mobile-shift__field .errorlist,
+.mobile-shift__field-error {
+    position: absolute;
+    inset: auto var(--ms-card-pad-x) 2px var(--ms-card-pad-x);
+    z-index: 2;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    color: var(--mobile-shift-danger);
+    font-size: clamp(8px, 2.35vw, 10px);
+    line-height: 1;
+    list-style: none;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mobile-shift__form-error,
+.mobile-shift__notice,
+.mobile-shift__section > .errorlist {
+    position: absolute;
+    inset: calc(var(--ms-section-pad) + var(--ms-section-size) + var(--ms-gap)) var(--ms-section-pad) auto;
+    z-index: 3;
+    margin: 0;
+    padding: 3px 6px;
+    overflow: hidden;
+    border-radius: 5px;
+    background: rgba(45, 14, 17, .92);
+    color: #ffb0b4;
+    font-size: clamp(8px, 2.45vw, 11px);
+    line-height: 1.1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mobile-shift__grid {
+    min-inline-size: 0;
+    min-block-size: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: var(--ms-gap);
+    overflow: hidden;
+}
+
+.mobile-shift__cell {
+    min-inline-size: 0;
+    min-block-size: 0;
+    margin: 0;
+    padding: var(--ms-card-pad-y) var(--ms-card-pad-x);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    align-content: center;
+    gap: 2px;
+    overflow: hidden;
+    border: 1px solid var(--mobile-shift-card-border);
+    border-radius: clamp(7px, 2vw, 10px);
+    background: var(--mobile-shift-card);
+}
+
+.mobile-shift__cell > span,
+.mobile-shift__cell > strong,
+.mobile-shift__cell > em {
+    min-inline-size: 0;
+    inline-size: 100%;
+    margin: 0;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mobile-shift__cell > span {
+    color: var(--mobile-shift-muted);
+    font-size: var(--ms-label-size);
+    font-weight: 600;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.mobile-shift__cell > strong {
+    align-self: center;
+    color: var(--mobile-shift-text);
+    font-size: var(--ms-summary-size);
+    font-weight: 650;
+    line-height: 1;
+}
+
+.mobile-shift__cell > em {
+    color: #87969d;
+    font-size: clamp(8px, 2.5vw, 11px);
+    font-style: normal;
+    font-weight: 550;
+    line-height: 1;
+}
+
+.mobile-shift__actions {
+    min-inline-size: 0;
+    min-block-size: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(92px, 31%);
+    grid-template-rows: minmax(0, 1fr);
+    gap: var(--ms-gap);
+    overflow: hidden;
+}
+
+.mobile-shift__action {
+    --mobile-shift-hold: 0%;
+    position: relative;
+    isolation: isolate;
+    min-inline-size: 0;
+    min-block-size: 0;
+    inline-size: 100%;
+    block-size: 100%;
+    margin: 0;
+    padding: 6px clamp(8px, 2.8vw, 16px);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border: 1px solid;
+    border-radius: clamp(7px, 2vw, 10px);
+    font-family: inherit;
+    font-size: var(--ms-action-size) !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+    text-transform: uppercase;
+    touch-action: none;
+    user-select: none;
+}
+
+.mobile-shift__action::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    inline-size: var(--mobile-shift-hold);
+    z-index: 0;
+    background: rgba(255, 255, 255, .16);
+    pointer-events: none;
+}
+
+.mobile-shift__action > [data-mobile-shift-label] {
+    position: relative;
+    z-index: 1;
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mobile-shift__action--primary {
+    border-color: var(--mobile-shift-accent);
+    background: rgba(17, 62, 24, .52);
+    color: #7df06c;
+}
+
+.mobile-shift__action--danger {
+    border-color: var(--mobile-shift-danger);
+    background: var(--mobile-shift-danger-soft);
+    color: #ff8b91;
+}
+
+.mobile-shift__action--secondary {
+    border-color: rgba(152, 176, 186, .42);
+    background: rgba(23, 31, 36, .9);
+    color: #e0e8eb;
+}
+
+.mobile-shift__action:focus-visible {
+    outline: 2px solid #f3f7f8;
+    outline-offset: -4px;
+    box-shadow: 0 0 0 2px rgba(103, 232, 84, .24);
+}
+
+.mobile-shift__action.is-keyboard-target {
+    outline: 2px solid #f3f7f8;
+    outline-offset: -4px;
+    box-shadow: 0 0 0 2px rgba(103, 232, 84, .24);
+}
+
+.mobile-shift__action:disabled {
+    opacity: .38;
+    filter: saturate(.55);
+}
+
+.mobile-shift__action[aria-disabled="true"]:not(:disabled) {
+    opacity: .72;
+    filter: saturate(.8);
+}
+
+.mobile-shift__action.is-pending {
+    opacity: .7;
+}
+
+.mobile-shift [data-push-invite] {
+    position: absolute;
+    inset: auto var(--ms-edge) calc(var(--ms-edge) + 12% + var(--ms-gap));
+    z-index: 6;
+    min-inline-size: 0;
+    margin: 0;
+    padding: clamp(7px, 1.6vw, 11px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "title actions" "text actions";
+    align-items: center;
+    gap: 2px var(--ms-gap);
+    overflow: hidden;
+    border: 1px solid var(--mobile-shift-accent);
+    border-radius: clamp(7px, 2vw, 10px);
+    background: rgba(4, 20, 12, .98);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .42);
+}
+
+.mobile-shift [data-push-title] {
+    grid-area: title;
+    color: var(--mobile-shift-accent);
+    font-size: clamp(12px, 3.2vw, 14px);
+    line-height: 1;
+}
+
+.mobile-shift [data-push-text] {
+    grid-area: text;
+    min-inline-size: 0;
+    overflow: hidden;
+    color: #bdcbd0;
+    font-size: clamp(9px, 2.6vw, 12px);
+    line-height: 1.1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mobile-shift [data-push-actions] {
+    grid-area: actions;
+    display: flex;
+    gap: 5px;
+}
+
+.mobile-shift [data-push-actions] button {
+    min-block-size: 32px;
+    margin: 0;
+    padding: 0 9px;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: clamp(10px, 2.8vw, 12px);
+    font-weight: 700;
+    line-height: 1;
+}
+
+.mobile-shift [hidden] {
+    display: none !important;
+}
+
+/* Единое ненавязчивое уведомление рабочих мобильных экранов. Оно живёт
+   поверх оболочки и не участвует в её сетке, поэтому сообщение никогда не
+   увеличивает страницу и не сдвигает нижнюю навигацию. */
+.mobile-shift-toast[hidden] {
+    display: none !important;
+}
+
+.mobile-shift-toast {
+    position: fixed;
+    inset: calc(env(safe-area-inset-top, 0px) + var(--mobile-shift-role-header-h, 56px) + clamp(8px, 2dvh, 14px)) clamp(10px, 3vw, 16px) auto;
+    z-index: 140;
+    box-sizing: border-box;
+    min-inline-size: 0;
+    max-block-size: min(96px, 22dvh);
+    margin: 0;
+    padding: clamp(10px, 2.8vw, 14px) clamp(12px, 3.4vw, 16px);
+    overflow: hidden;
+    border: 1px solid rgba(88, 223, 82, .7);
+    border-radius: clamp(7px, 2vw, 10px);
+    color: #eef7f3;
+    background: linear-gradient(145deg, rgba(7, 35, 22, .98), rgba(3, 16, 15, .98));
+    box-shadow: 0 10px 32px rgba(0, 0, 0, .48), 0 0 18px rgba(88, 223, 82, .14);
+    font-family: "Roboto Condensed", "Arial Narrow", system-ui, sans-serif;
+    font-size: clamp(14px, 3.8vw, 17px);
+    font-weight: 650;
+    line-height: 1.16;
+    text-align: center;
+    text-wrap: balance;
+    pointer-events: none;
+}
+
+/* Один и тот же компактный ответ на попытку изменить данные без открытой
+   смены. Заблокированные элементы не поглощают касание: его принимает экран
+   роли и показывает toast без модального фона. */
+body.excavator-operator-screen .eo-screen.is-shift-inactive input:disabled,
+body.excavator-operator-screen .eo-screen.is-shift-inactive select:disabled,
+body.excavator-operator-screen .eo-screen.is-shift-inactive button:disabled {
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.mobile-shift-toast.is-shift-lock {
+    inset: 50% auto auto 50%;
+    inline-size: min(280px, calc(100vw - clamp(24px, 8vw, 40px)));
+    transform: translate(-50%, -50%);
+    border: 1px solid rgba(255, 212, 91, .72);
+    border-radius: clamp(8px, 2.2vw, 11px);
+    background: rgba(27, 23, 10, .96);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .46), 0 0 18px rgba(255, 212, 91, .12);
+    color: #ffd45b;
+    font-size: clamp(15px, 4vw, 18px);
+    font-weight: 700;
+    line-height: 1.18;
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="events"].is-shift-inactive > .eo-reason-grid,
+body.excavator-operator-screen .eo-screen[data-eo-screen="events"].is-shift-inactive > .mobile-downtime__actions {
+    opacity: .32;
+    filter: saturate(.35);
+}
+
+body.excavator-operator-screen .eo-screen[data-eo-screen="trucks"].is-shift-inactive .eo-dashboard-truck-grid,
+body.excavator-operator-screen .eo-screen[data-eo-screen="trucks"].is-shift-inactive .eo-dashboard-unload-grid {
+    opacity: .32;
+    filter: saturate(.35);
+}
+
+.mobile-shift-nav-item .mobile-shift-nav-icon {
+    flex: 0 0 26px !important;
+    inline-size: 26px !important;
+    block-size: 26px !important;
+    min-inline-size: 26px !important;
+    display: grid !important;
+    place-items: center !important;
+}
+
+.mobile-shift-nav-item {
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    inline-size: 100% !important;
+    block-size: 100% !important;
+    margin: 0 !important;
+    padding: 7px 2px 6px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 5px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: #8e9da4 !important;
+    appearance: none !important;
+    align-self: stretch !important;
+    justify-self: stretch !important;
+    font-family: inherit !important;
+}
+
+.mobile-shift-nav-item.is-active {
+    color: #58df52 !important;
+    background: rgba(88, 223, 82, .055) !important;
+    box-shadow: none !important;
+}
+
+.mobile-shift-nav-item .driver-nav-label,
+.mobile-shift-nav-item .mm-mobile-nav-label {
+    color: currentColor !important;
+    display: block !important;
+    min-inline-size: 0 !important;
+    max-inline-size: 100% !important;
+    overflow: hidden !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    line-height: 16px !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+.mobile-shift-nav-item .mobile-shift-nav-icon svg {
+    inline-size: 100% !important;
+    block-size: 100% !important;
+    fill: none !important;
+    stroke: currentColor !important;
+    stroke-width: 2 !important;
+}
+
+body.driver-mobile-screen .driver-shell[data-active-tab="shift"],
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] {
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen:has(.mobile-shift) .mm-mobile-bottom-nav,
+body.excavator-operator-screen:has(.mobile-shift) .mm-mobile-bottom-nav {
+    box-sizing: border-box !important;
+    position: absolute !important;
+    inset: auto 0 0 !important;
+    z-index: 20 !important;
+    inline-size: 100% !important;
+    margin: 0 !important;
+    padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px) !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 0 !important;
+    border: 0 !important;
+    inset-block: auto 0 !important;
+    block-size: calc(env(safe-area-inset-bottom, 0px) + var(--mobile-shift-role-nav-h)) !important;
+    min-block-size: calc(env(safe-area-inset-bottom, 0px) + var(--mobile-shift-role-nav-h)) !important;
+    max-block-size: calc(env(safe-area-inset-bottom, 0px) + var(--mobile-shift-role-nav-h)) !important;
+}
+
+/* Пункты навигации занимают ровно высоту общей нижней панели. Старые
+   ролевые стили задавали им собственные 76/78px и создавали скрытый
+   вертикальный диапазон на узких экранах. */
+body.driver-mobile-screen:has(.mobile-shift) .mm-mobile-bottom-nav > .mm-mobile-nav-item,
+body.excavator-operator-screen:has(.mobile-shift) .mm-mobile-bottom-nav > .mm-mobile-nav-item {
+    block-size: 100% !important;
+    height: 100% !important;
+    min-block-size: 0 !important;
+    min-height: 0 !important;
+}
+
+body.driver-mobile-screen [data-driver-tab-panel="shift"] {
+    padding: 0 !important;
+}
+
+/* Оба компонента позиционируются от стабильной оболочки роли. Промежуточная
+   панель Водителя не должна становиться containing block: её старые правила
+   плотности зависят от visualViewport и раньше двигали экран при клавиатуре. */
+body.driver-mobile-screen .driver-shell[data-active-tab="shift"] [data-driver-tab-panel="shift"].is-active,
+body.driver-mobile-screen .driver-shell[data-active-tab="shift"] .mobile-shift-host {
+    position: static !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] > .eo-form {
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-shell[data-active-tab="shift"] [data-driver-tab-panel="shift"].is-active .mobile-shift,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] .mobile-shift:not([hidden]) {
+    display: grid !important;
+}
+
+html[data-mobile-shift-orientation="landscape"] .mobile-shift {
+    grid-template-rows: var(--ms-screen-rows-landscape) !important;
+}
+
+html[data-mobile-shift-orientation="landscape"] .mobile-shift__content {
+    grid-template-columns: minmax(0, 1.24fr) minmax(0, .76fr);
+    grid-template-rows: minmax(0, 1fr);
+}
+
+/* На низком горизонтальном экране обе роли используют одну компактную
+   типографику карточек. Размеры зависят от доступной области, а не от
+   конкретной модели телефона: так три показателя Водителя и сводка
+   Экскаваторщика остаются читаемыми без внутренней прокрутки. */
+@media (max-height: 500px) {
+    html[data-mobile-shift-orientation="landscape"] .mobile-shift {
+        --ms-gap: 4px;
+        --ms-section-pad: 5px;
+        --ms-card-pad-x: 6px;
+        --ms-card-pad-y: 1px;
+        --ms-section-size: 11px;
+        --ms-label-size: 9px;
+        --ms-value-size: 18px;
+        --ms-unit-size: 9px;
+        --ms-summary-size: 15px;
+    }
+
+    html[data-mobile-shift-orientation="landscape"] .mobile-shift__cell {
+        gap: 1px;
+    }
+
+    html[data-mobile-shift-orientation="landscape"] .mobile-shift__field-label {
+        gap: 1px;
+    }
+
+    html[data-mobile-shift-orientation="landscape"] .mobile-shift__field-label small {
+        font-size: 8px;
+    }
+
+    html[data-mobile-shift-orientation="landscape"] .mobile-shift__cell > em {
+        font-size: 8px;
+    }
+}

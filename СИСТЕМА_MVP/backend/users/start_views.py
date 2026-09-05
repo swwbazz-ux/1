@@ -11,12 +11,22 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
+import re
+import secrets
+import time
 from pathlib import Path
 from urllib.parse import urlencode
 
 from django.conf import settings
+from django.core.cache import cache
+from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
+from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_http_methods
 
 from .access_auth import find_unactivated_accesses_by_phone, format_phone_for_display
 from .forms import normalize_phone
@@ -26,19 +36,28 @@ from .models import EmployeeAccess
 from .work_profiles import employee_has_effective_access_role
 
 
-# Единственный реестр Android-сборок для универсального входа. При выпуске
-# новой версии меняются только URL и подпись версии здесь; шаблон о конкретных
-# ролях и именах APK ничего не знает.
+# Единственный реестр Android-сборок для универсального входа. Имя APK и
+# отображаемая версия каждой роли берутся из того же manifest, по которому
+# нативное приложение проверяет обновления: второго ручного номера нет.
 ANDROID_APK_BY_ROLE = {
     'excavator_operator': {
-        'path': 'apk/excavator-7.apk',
-        'version': '0.1.4',
+        'manifest_path': 'apk/excavator-update.json',
+        'profile': 'excavator',
     },
     'driver': {
-        'path': 'apk/driver-5.apk',
-        'version': '0.1.3',
+        'manifest_path': 'apk/driver-update.json',
+        'profile': 'driver',
     },
 }
+
+
+START_RESULT_TTL_SECONDS = 30 * 60
+_START_RESULT_TOKEN_RE = re.compile(r'^[A-Za-z0-9_-]{43}$')
+_START_RESULT_CACHE_PREFIX = 'universal-start-result:v1:'
+logger = logging.getLogger(__name__)
+_ANDROID_PUBLIC_VERSION_RE = re.compile(
+    r'^\d+(?:\.\d+){2}(?:-[A-Za-z0-9][A-Za-z0-9._-]*)?$'
+)
 
 
 # Раньше здесь стоял предел на число показанных кнопок: восемь штук подряд
@@ -58,6 +77,67 @@ def with_country_code(value):
     return digits
 
 
+def _start_result_cache_key(token):
+    digest = hashlib.sha256(token.encode('ascii')).hexdigest()
+    return f'{_START_RESULT_CACHE_PREFIX}{digest}'
+
+
+def _issue_start_result(phone):
+    """Сохранить номер для безопасного POST/Redirect/GET без PII в URL."""
+
+    payload = {
+        'phone': str(phone),
+        'issued_at': time.time(),
+    }
+    try:
+        for _attempt in range(4):
+            token = secrets.token_urlsafe(32)
+            if cache.add(
+                _start_result_cache_key(token),
+                payload,
+                START_RESULT_TTL_SECONDS,
+            ):
+                return token
+    except Exception:
+        logger.exception('Universal start result cache write failed')
+        return ''
+    logger.warning('Universal start result token allocation failed')
+    return ''
+
+
+def _read_start_result(token):
+    if not isinstance(token, str) or not _START_RESULT_TOKEN_RE.fullmatch(token):
+        return None
+    key = _start_result_cache_key(token)
+    try:
+        payload = cache.get(key)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    phone = payload.get('phone')
+    issued_at = payload.get('issued_at')
+    if (
+        not isinstance(phone, str)
+        or len(phone) > 32
+        or (phone and not phone.isdigit())
+        or not isinstance(issued_at, (int, float))
+    ):
+        try:
+            cache.delete(key)
+        except Exception:
+            pass
+        return None
+    age = time.time() - float(issued_at)
+    if age < -60 or age > START_RESULT_TTL_SECONDS:
+        try:
+            cache.delete(key)
+        except Exception:
+            pass
+        return None
+    return phone
+
+
 def is_android_request(request):
     return 'android' in request.META.get('HTTP_USER_AGENT', '').lower()
 
@@ -71,21 +151,66 @@ def android_apk_for_role(role_code):
     release = ANDROID_APK_BY_ROLE.get(role_code)
     if release is None:
         return None
-    relative_path = Path(release['path'])
+
+    try:
+        manifest_path = Path(settings.MEDIA_ROOT) / release['manifest_path']
+        payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+    except (KeyError, OSError, UnicodeError, json.JSONDecodeError):
+        logger.exception('Android update manifest is unavailable for %s', role_code)
+        return None
+    profile = release.get('profile', '')
+    version_code = payload.get('versionCode')
+    version_name = payload.get('versionName')
+    if (
+        payload.get('schemaVersion') != 1
+        or payload.get('profile') != profile
+        or not isinstance(version_code, int)
+        or version_code < 1
+        or not isinstance(version_name, str)
+        or not version_name.strip()
+        or len(version_name) > 64
+        or not _ANDROID_PUBLIC_VERSION_RE.fullmatch(version_name.strip())
+    ):
+        logger.error('Android update manifest is invalid for %s', role_code)
+        return None
+    version = version_name.strip()
+    relative_path = Path('apk') / f'{profile}-{version}.apk'
+
     if not (Path(settings.MEDIA_ROOT) / relative_path).is_file():
         return None
     media_url = f"/{settings.MEDIA_URL.strip('/')}"
     return {
         'url': f"{media_url}/{relative_path.as_posix()}",
-        'version': release['version'],
+        'version': version,
     }
 
 
-def universal_start_view(request):
-    if request.method != 'POST':
-        return render(request, 'users/universal_start.html', {})
+def _render_universal_start(
+    request,
+    template_name,
+    context,
+    *,
+    referrer_policy='same-origin',
+):
+    """Не кешировать персональный результат поиска приложения."""
 
-    phone = with_country_code(request.POST.get('phone', ''))
+    response = render(request, template_name, context)
+    response['Referrer-Policy'] = referrer_policy
+    response['X-Robots-Tag'] = 'noindex, nofollow'
+    return response
+
+
+def _see_other(location):
+    response = HttpResponseRedirect(location)
+    response.status_code = 303
+    response['Cache-Control'] = 'private, no-store, max-age=0'
+    response['Pragma'] = 'no-cache'
+    response['Referrer-Policy'] = 'no-referrer'
+    response['X-Robots-Tag'] = 'noindex, nofollow'
+    return response
+
+
+def _render_start_result(request, phone):
     matches = [
         candidate
         for candidate in find_unactivated_accesses_by_phone(phone)
@@ -132,7 +257,7 @@ def universal_start_view(request):
     ))
 
     if not apps:
-        return render(
+        return _render_universal_start(
             request,
             'users/login_phone_not_found.html',
             {
@@ -140,6 +265,7 @@ def universal_start_view(request):
                 'submitted_phone': format_phone_for_display(phone),
                 'back_url': reverse('universal_start'),
             },
+            referrer_policy='no-referrer',
         )
 
     # Пинкод уже заведён — значит придумывать его не надо, и обещать обратное
@@ -151,7 +277,7 @@ def universal_start_view(request):
         for candidate in matches
     )
 
-    return render(
+    return _render_universal_start(
         request,
         'users/universal_start.html',
         {
@@ -162,4 +288,35 @@ def universal_start_view(request):
             'has_working_code': has_working_code,
             'is_ios': is_ios_request(request),
         },
+        referrer_policy='no-referrer',
+    )
+
+
+@never_cache
+@require_http_methods(['GET', 'POST'])
+def universal_start_view(request):
+    if request.method == 'POST':
+        phone = with_country_code(request.POST.get('phone', ''))
+        result_token = _issue_start_result(phone)
+        if not result_token:
+            # Даже при сбое Redis POST не должен становиться history entry:
+            # возврат из установщика иначе снова отправит форму.
+            return _see_other(reverse('universal_start'))
+        result_url = f'{reverse("universal_start")}?{urlencode({"result": result_token})}'
+        return _see_other(result_url)
+
+    result_token = request.GET.get('result', '')
+    if result_token:
+        phone = _read_start_result(result_token)
+        if phone is None:
+            return _see_other(reverse('universal_start'))
+        return _render_start_result(request, phone)
+
+    # На единственной странице с POST-формой нужен same-origin referrer:
+    # Android Chrome иначе отправляет Origin:null, и Django отклоняет CSRF.
+    return _render_universal_start(
+        request,
+        'users/universal_start.html',
+        {},
+        referrer_policy='same-origin',
     )

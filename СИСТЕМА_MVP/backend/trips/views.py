@@ -4,8 +4,10 @@ import math
 import re
 import secrets
 from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -78,6 +80,76 @@ from .trip_creation import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+TRUCK_WAITING_LOADING_REASON = 'Ожидание погрузки'
+TRUCK_WAITING_UNLOADING_REASON = 'Ожидание разгрузки'
+TRUCK_POST_UNLOAD_COOLDOWN = timedelta(
+    seconds=getattr(settings, 'TRUCK_POST_UNLOAD_COOLDOWN_SECONDS', 600)
+)
+
+
+def downtime_event_has_reason(event, reason_name):
+    reason = getattr(event, 'reason', None)
+    actual_name = getattr(reason, 'name', '') if reason else ''
+    return str(actual_name or '').strip().casefold() == str(reason_name or '').strip().casefold()
+
+
+def truck_waiting_loading_downtime(event):
+    return downtime_event_has_reason(event, TRUCK_WAITING_LOADING_REASON)
+
+
+def close_truck_downtime_for_reason(truck, reason_name):
+    if not truck:
+        return 0
+    events = list(
+        DowntimeEvent.objects
+        .select_for_update()
+        .filter(
+            equipment=truck,
+            reason__name__iexact=reason_name,
+            ended_at__isnull=True,
+        )
+        .order_by('id')
+    )
+    if not events:
+        return 0
+    ended_at = timezone.now()
+    for event in events:
+        event.ended_at = ended_at
+        event.save(update_fields=['ended_at'])
+    return len(events)
+
+
+def truck_post_unload_cooldown(truck, *, completed_at=None, now=None):
+    if not truck:
+        return None
+    if completed_at is None:
+        completed_at = (
+            Trip.objects
+            .filter(
+                truck=truck,
+                status=TripStatus.COMPLETED,
+                completed_at__isnull=False,
+            )
+            .order_by('-completed_at')
+            .values_list('completed_at', flat=True)
+            .first()
+        )
+    if not completed_at:
+        return None
+    now = now or timezone.now()
+    remaining_seconds = int(
+        (completed_at + TRUCK_POST_UNLOAD_COOLDOWN - now).total_seconds()
+    )
+    if remaining_seconds <= 0:
+        return None
+    remaining_minutes = max(1, math.ceil(remaining_seconds / 60))
+    return {
+        'code': 'post_unload_cooldown',
+        'label': f'Возвращается к экскаватору · {remaining_minutes} мин.',
+        'remaining_seconds': remaining_seconds,
+    }
 
 
 DISPATCHER_FILTER_KEYS = (
@@ -358,25 +430,64 @@ def downtime_event_payload(event, *, action='', closed=False):
     }
 
 
-def equipment_shift_downtime_seconds(equipment, shift, *, until=None):
+def equipment_shift_downtime_seconds_by_reason(equipment, shift, *, until=None):
     if not equipment or not shift or not shift.opened_at:
-        return 0
+        return {}
     calculation_end = until or timezone.now()
     source_period_end = shift.closed_at or calculation_end
-    events = DowntimeEvent.objects.filter(
-        equipment=equipment,
-        started_at__gte=shift.opened_at,
-        started_at__lt=source_period_end,
+    if source_period_end <= shift.opened_at:
+        return {}
+    events = (
+        DowntimeEvent.objects
+        .filter(
+            equipment=equipment,
+            started_at__gte=shift.opened_at,
+            started_at__lt=source_period_end,
+        )
     )
-    total_seconds = 0
-    for event in events.only('started_at', 'ended_at'):
+    totals = {}
+    for event in events.only('reason_id', 'started_at', 'ended_at'):
         event_end = min(event.ended_at or calculation_end, calculation_end)
-        total_seconds += max(0, int((event_end - event.started_at).total_seconds()))
-    return total_seconds
+        elapsed_seconds = max(0, int((event_end - event.started_at).total_seconds()))
+        totals[event.reason_id] = totals.get(event.reason_id, 0) + elapsed_seconds
+    return totals
+
+
+def equipment_shift_downtime_seconds(equipment, shift, *, until=None):
+    return sum(equipment_shift_downtime_seconds_by_reason(equipment, shift, until=until).values())
+
+
+def downtime_event_counts_towards_shift(event, shift):
+    if not event or not shift or not shift.opened_at or not event.started_at:
+        return False
+    return event.started_at >= shift.opened_at and (
+        not shift.closed_at or event.started_at < shift.closed_at
+    )
+
+
+def excavator_downtime_totals_payload(excavator, shift, *, calculated_at=None):
+    calculated_at = calculated_at or timezone.now()
+    reason_totals = equipment_shift_downtime_seconds_by_reason(
+        excavator,
+        shift,
+        until=calculated_at,
+    )
+    shift_total_seconds = sum(reason_totals.values())
+    return {
+        'calculated_at': calculated_at.isoformat(),
+        'shift_total_seconds': shift_total_seconds,
+        'shift_total_label': format_duration_label(shift_total_seconds),
+        'reason_totals': reason_totals,
+    }
 
 
 def excavator_downtime_status_payload(excavator, shift):
-    shift_total_seconds = equipment_shift_downtime_seconds(excavator, shift)
+    calculated_at = timezone.now()
+    totals_payload = excavator_downtime_totals_payload(
+        excavator,
+        shift,
+        calculated_at=calculated_at,
+    )
     active_event = (
         DowntimeEvent.objects
         .filter(equipment=excavator, ended_at__isnull=True)
@@ -386,6 +497,10 @@ def excavator_downtime_status_payload(excavator, shift):
     ) if excavator else None
     if active_event:
         payload = downtime_event_payload(active_event)
+        payload['active_counts_towards_shift'] = downtime_event_counts_towards_shift(
+            active_event,
+            shift,
+        )
     else:
         payload = {
             'ok': True,
@@ -401,11 +516,9 @@ def excavator_downtime_status_payload(excavator, shift):
             'equipment_state_code': '',
             'status_key': 'gray',
             'status_label': '',
+            'active_counts_towards_shift': False,
         }
-    payload.update({
-        'shift_total_seconds': shift_total_seconds,
-        'shift_total_label': format_duration_label(shift_total_seconds),
-    })
+    payload.update(totals_payload)
     return payload
 
 
@@ -644,23 +757,35 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v162";
+const CACHE_NAME = "excavator-mobile-shell-v203";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const CORE_ASSETS = [
   APP_SHELL_URL,
   MANIFEST_URL,
+  "/company/privacy/",
+  "/static/portal/css/portal-shell-v5.css?v=6",
+  "/static/portal/js/portal-shell-v5.js",
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
   "/static/css/app.css",
   "/static/css/excavator-work-v55.css",
   "/static/css/excavator-work-v55-final.css",
   "/static/css/excavator-work-v55-shift.css",
+  "/static/css/mobile-shift-unified-v1.css",
+  "/static/css/mobile-face-unified-v1.css",
+  "/static/css/mobile-downtime-unified-v1.css",
+  "/static/css/mobile-role-login-v1.css",
+  "/static/js/mobile-shift-unified-v1.js",
+  "/static/js/mobile-operational-sounds-v1.js",
+  "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
   "/static/img/pwa/excavator-180.png",
   "/static/img/pwa/excavator-192.png",
   "/static/img/pwa/excavator-512.png",
   "/static/img/pwa/excavator-maskable-512.png",
+  "/static/img/start/start-hero-v1.webp",
+  "/static/img/start/start-hero-v1.jpg",
   "/static/img/equipment/excavator-gray.png",
   "/static/img/equipment/excavator-green.png",
   "/static/img/equipment/excavator-yellow.png",
@@ -668,7 +793,14 @@ const CORE_ASSETS = [
   "/static/img/equipment/truck-gray.png",
   "/static/img/equipment/truck-green.png",
   "/static/img/equipment/truck-yellow.png",
-  "/static/img/equipment/truck-red.png"
+  "/static/img/equipment/truck-red.png",
+  "/static/audio/excavator/excavator_truck_assigned.wav",
+  "/static/audio/excavator/excavator_action_ok.wav",
+  "/static/audio/excavator/excavator_action_error.wav",
+  "/static/audio/excavator/excavator_connection_lost.wav",
+  "/static/audio/excavator/excavator_connection_restored.wav",
+  "/static/audio/excavator/excavator_shift_start.wav",
+  "/static/audio/excavator/excavator_shift_end.wav"
 ];
 
 self.addEventListener("install", event => {
@@ -908,14 +1040,14 @@ def format_whole_number(value):
     return f'{rounded:,}'.replace(',', ' ')
 
 
-def format_decimal_input_value(value):
+def format_whole_input_value(value):
     if value in {None, ''}:
         return ''
     try:
         parsed = Decimal(value)
     except (InvalidOperation, TypeError, ValueError):
         return str(value)
-    return format(parsed, 'f').rstrip('0').rstrip('.') or '0'
+    return str(int(parsed.to_integral_value(rounding=ROUND_HALF_UP)))
 
 
 def format_whole_value_with_unit(value, unit):
@@ -1483,7 +1615,8 @@ def build_dispatcher_dashboard_context(
             return equipment_state_for('inactive')
         downtime_state_code = downtime_state_code_for(truck.id)
         if downtime_state_code:
-            return equipment_state_for(downtime_state_code)
+            status, label, state_code = equipment_state_for(downtime_state_code)
+            return status, downtime_reason_label_for(truck.id) or label, state_code
         active_trip = active_trip_by_truck_id.get(truck.id)
         if active_trip:
             if active_trip.status in OPEN_TRIP_STATUSES:
@@ -2701,6 +2834,7 @@ def excavator_truck_load_block(
     current_excavator=None,
     active_trip=None,
     active_downtime=None,
+    post_unload_cooldown=None,
     has_open_truck_shift=None,
     has_driver_assignment=None,
 ):
@@ -2727,8 +2861,12 @@ def excavator_truck_load_block(
             .order_by('-started_at', '-id')
             .first()
         )
-    if active_downtime:
+    if active_downtime and not truck_waiting_loading_downtime(active_downtime):
         return excavator_truck_load_block_payload('active_downtime')
+    if post_unload_cooldown is None:
+        post_unload_cooldown = truck_post_unload_cooldown(truck)
+    if post_unload_cooldown:
+        return post_unload_cooldown
     if has_open_truck_shift is None:
         has_open_truck_shift = EmployeeShift.objects.filter(
             equipment=truck,
@@ -2749,6 +2887,7 @@ def excavator_truck_load_block_reason(
     current_excavator=None,
     active_trip=None,
     active_downtime=None,
+    post_unload_cooldown=None,
     has_open_truck_shift=None,
     has_driver_assignment=None,
 ):
@@ -2757,6 +2896,7 @@ def excavator_truck_load_block_reason(
         current_excavator=current_excavator,
         active_trip=active_trip,
         active_downtime=active_downtime,
+        post_unload_cooldown=post_unload_cooldown,
         has_open_truck_shift=has_open_truck_shift,
         has_driver_assignment=has_driver_assignment,
     )
@@ -2925,7 +3065,7 @@ def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_wh
 
 
 def excavator_work_context_changed(
-    current_excavator,
+    placement,
     previous_session_settings,
     *,
     rock_type,
@@ -2933,7 +3073,6 @@ def excavator_work_context_changed(
     loading_horizon,
     loading_block,
 ):
-    placement = get_excavator_work_placement(current_excavator)
     previous_session_settings = previous_session_settings or {}
     previous_dump_ids = previous_session_settings.get('dump_point_ids')
     if not isinstance(previous_dump_ids, list):
@@ -2941,17 +3080,18 @@ def excavator_work_context_changed(
     previous_rock_id = previous_session_settings.get('rock_type_id')
     if previous_rock_id is None and placement:
         previous_rock_id = placement.work_rock_type_id
-    previous_horizon = previous_session_settings.get('loading_horizon')
-    if previous_horizon is None and placement:
-        previous_horizon = placement.loading_horizon
-    previous_block = previous_session_settings.get('loading_block')
-    if previous_block is None and placement:
-        previous_block = placement.loading_block
+    # Координаты забоя принадлежат постоянному размещению экскаватора. Данные
+    # вкладки в session могут устареть, поэтому для горизонта и блока источником
+    # истины остаётся ExcavatorPlacement.
+    previous_horizon = placement.loading_horizon if placement else ''
+    previous_block = placement.loading_block if placement else ''
     return any((
         str(previous_rock_id or '') != str(rock_type.id),
         [str(value) for value in previous_dump_ids] != [str(point.id) for point in dump_points],
-        normalize_excavator_numeric_setting(previous_horizon) != loading_horizon,
-        normalize_excavator_numeric_setting(previous_block) != loading_block,
+        canonical_excavator_face_position(previous_horizon)
+        != canonical_excavator_face_position(loading_horizon),
+        canonical_excavator_face_position(previous_block)
+        != canonical_excavator_face_position(loading_block),
     ))
 
 
@@ -2981,6 +3121,28 @@ def normalize_excavator_numeric_setting(value, *, max_length=16):
     return re.sub(r'\D+', '', str(value or ''))[:max_length]
 
 
+def canonical_excavator_face_position(value):
+    normalized = normalize_excavator_numeric_setting(value)
+    if not normalized:
+        return ''
+    return normalized.lstrip('0') or '0'
+
+
+def excavator_face_position_changed(placement, *, loading_horizon, loading_block):
+    """Фиксирует только подтверждённый переезд между двумя известными забоями."""
+    if not placement:
+        return False
+
+    previous_horizon = canonical_excavator_face_position(placement.loading_horizon)
+    previous_block = canonical_excavator_face_position(placement.loading_block)
+    next_horizon = canonical_excavator_face_position(loading_horizon)
+    next_block = canonical_excavator_face_position(loading_block)
+    return any((
+        bool(previous_horizon and next_horizon and previous_horizon != next_horizon),
+        bool(previous_block and next_block and previous_block != next_block),
+    ))
+
+
 def excavator_work_settings_from_session(request, current_excavator, form):
     session_settings = request.session.get(EXCAVATOR_WORK_SETTINGS_SESSION_KEY, {})
     raw_settings = session_settings.get(excavator_work_settings_key(current_excavator), {})
@@ -2991,10 +3153,16 @@ def excavator_work_settings_from_session(request, current_excavator, form):
     rock_by_id = {str(rock.id): rock for rock in rock_choices}
     dump_by_id = {str(point.id): point for point in dump_point_choices}
 
+    raw_rock_id = str(raw_settings.get('rock_type_id') or '')
     default_rock_id = str(form['rock_type'].value() or '')
     placement_rock_id = str(getattr(placement, 'work_rock_type_id', '') or '')
-    rock_id = str(raw_settings.get('rock_type_id') or placement_rock_id or default_rock_id or (rock_choices[0].id if rock_choices else ''))
-    current_rock = rock_by_id.get(rock_id) or (rock_choices[0] if rock_choices else None)
+    persisted_rock_id = raw_rock_id or placement_rock_id
+    persisted_rock = rock_by_id.get(persisted_rock_id)
+    current_rock = (
+        persisted_rock
+        or rock_by_id.get(default_rock_id)
+        or (rock_choices[0] if rock_choices else None)
+    )
 
     raw_dump_ids = raw_settings.get('dump_point_ids')
     if not isinstance(raw_dump_ids, list):
@@ -3008,6 +3176,8 @@ def excavator_work_settings_from_session(request, current_excavator, form):
         if dump_id in dump_by_id and dump_id not in seen_dump_ids:
             selected_dump_points.append(dump_by_id[dump_id])
             seen_dump_ids.add(dump_id)
+
+    persisted_dump_point_ids = [point.id for point in selected_dump_points]
 
     form_dump_id = str(form['dump_point'].value() or '')
     if not selected_dump_points and form_dump_id in dump_by_id:
@@ -3027,26 +3197,45 @@ def excavator_work_settings_from_session(request, current_excavator, form):
     )
 
     selected_dump_ids = [point.id for point in selected_dump_points]
+    has_placement_settings = bool(
+        placement
+        and (
+            placement.work_context_updated_at
+            or placement.work_rock_type_id
+            or placement.work_dump_point_id
+            or placement.loading_horizon
+            or placement.loading_block
+        )
+    )
     return {
-        'has_applied_settings': bool(raw_settings or placement),
+        # Настройки считаются применёнными только вместе с действующими породой
+        # и точкой разгрузки. Если сохранённый справочник изменился, резервные
+        # значения остаются черновиком и кнопку можно нажать снова.
+        'has_applied_settings': bool(
+            persisted_rock
+            and persisted_dump_point_ids
+            and (raw_settings or has_placement_settings)
+        ),
         'rock_choices': rock_choices,
         'dump_point_choices': dump_point_choices,
         'current_rock': current_rock,
         'default_rock': current_rock.id if current_rock else '',
         'selected_dump_points': selected_dump_points,
         'selected_dump_point_ids': selected_dump_ids,
+        'persisted_dump_point_ids': persisted_dump_point_ids,
         'default_dump_point': selected_dump_ids[0] if selected_dump_ids else '',
         'face_horizon': face_horizon,
         'face_block': face_block,
     }
 
 
-def build_excavator_dump_cards(points, *, selected_ids=None, include_all=False):
+def build_excavator_dump_cards(points, *, selected_ids=None, persisted_ids=None, include_all=False):
     selected_ids = {str(point_id) for point_id in (selected_ids or [])}
+    persisted_ids = {str(point_id) for point_id in (persisted_ids or [])}
     cards = []
     for index, point in enumerate(points):
         is_selected = str(point.id) in selected_ids if include_all else True
-        if include_all and not is_selected:
+        if include_all:
             status_key = 'gray'
         elif index == 0:
             status_key = 'yellow'
@@ -3058,6 +3247,7 @@ def build_excavator_dump_cards(points, *, selected_ids=None, include_all=False):
             'status_key': status_key,
             'is_default': index == 0 and is_selected,
             'is_selected': is_selected,
+            'is_persisted': include_all and str(point.id) in persisted_ids,
         })
     return cards
 
@@ -3111,6 +3301,10 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift):
         'actual_dump_point',
         'is_carryover',
     ])
+    close_truck_downtime_for_reason(
+        trip.truck,
+        TRUCK_WAITING_UNLOADING_REASON,
+    )
     reconcile_excavator_waiting_for_trucks(trip.excavator)
     return True
 
@@ -3342,6 +3536,10 @@ def excavator_truck_loaded_view(request):
             trip=trip,
             actor=access.employee,
         )
+        close_truck_downtime_for_reason(
+            assignment.truck,
+            TRUCK_WAITING_LOADING_REASON,
+        )
         close_excavator_open_downtimes(current_excavator)
         reconcile_excavator_waiting_for_trucks(
             current_excavator,
@@ -3562,11 +3760,17 @@ def excavator_work_settings_view(request):
     loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
     session_settings = request.session.get(EXCAVATOR_WORK_SETTINGS_SESSION_KEY, {})
     setting_key = excavator_work_settings_key(current_excavator)
+    placement = get_excavator_work_placement(current_excavator)
     work_context_changed = excavator_work_context_changed(
-        current_excavator,
+        placement,
         session_settings.get(setting_key),
         rock_type=rock_type,
         dump_points=dump_points,
+        loading_horizon=loading_horizon,
+        loading_block=loading_block,
+    )
+    face_position_changed = excavator_face_position_changed(
+        placement,
         loading_horizon=loading_horizon,
         loading_block=loading_block,
     )
@@ -3590,7 +3794,7 @@ def excavator_work_settings_view(request):
             loading_block=loading_block,
         )
         active_downtime = None
-        if work_context_changed:
+        if face_position_changed:
             active_downtime = start_excavator_auto_downtime(
                 current_excavator,
                 access.employee,
@@ -3610,6 +3814,7 @@ def excavator_work_settings_view(request):
             'dump_point_ids': [point.id for point in dump_points],
             'loading_horizon': loading_horizon,
             'loading_block': loading_block,
+            'face_position_changed': face_position_changed,
         },
     )
     return JsonResponse({
@@ -3623,6 +3828,7 @@ def excavator_work_settings_view(request):
         'loading_horizon': loading_horizon,
         'loading_block': loading_block,
         'work_context_changed': work_context_changed,
+        'face_position_changed': face_position_changed,
         'active_downtime_reason': str(active_downtime.reason) if active_downtime else '',
         'version': state.version,
     })
@@ -3784,6 +3990,19 @@ def excavator_work_view(request):
             .order_by('-opened_at')
             .first()
         )
+    shift_fuel_limit = getattr(
+        getattr(shift_start_excavator, 'model', None),
+        'fuel_capacity_limit_l',
+        None,
+    )
+    shift_action_block_message = ''
+    if not open_shift:
+        if assignment_state != 'assigned':
+            shift_action_block_message = work_assignment_error_message(assignment_state)
+        elif equipment_open_shift:
+            shift_action_block_message = 'Техника занята в другой смене.'
+        elif not shift_fuel_limit:
+            shift_action_block_message = 'Для модели не настроен допустимый объём топлива.'
     previous_equipment_shift = None if open_shift or equipment_open_shift else get_previous_closed_equipment_shift(shift_start_excavator)
 
     legacy_trip_client_action_id = (
@@ -3902,6 +4121,10 @@ def excavator_work_view(request):
                             trip=trip,
                             actor=access.employee,
                         )
+                        close_truck_downtime_for_reason(
+                            locked_assignment.truck,
+                            TRUCK_WAITING_LOADING_REASON,
+                        )
                         close_excavator_open_downtimes(locked_excavator)
                         reconcile_excavator_waiting_for_trucks(
                             locked_excavator,
@@ -3961,6 +4184,19 @@ def excavator_work_view(request):
     else:
         active_trips_queryset = active_trips_queryset.filter(excavator_operator=access.employee)
     active_trips = list(active_trips_queryset[:20])
+    last_sent_trip = None
+    if open_shift:
+        last_sent_trip = (
+            Trip.objects
+            .filter(loading_shift=open_shift)
+            .only('assigned_dump_point_id', 'dump_point_id', 'created_at')
+            .order_by('-created_at', '-id')
+            .first()
+        )
+    last_sent_dump_point_id = (
+        (last_sent_trip.assigned_dump_point_id or last_sent_trip.dump_point_id)
+        if last_sent_trip else None
+    )
     blocking_trips = []
     if assignment_truck_ids:
         blocking_trips = list(
@@ -3971,6 +4207,26 @@ def excavator_work_view(request):
         )
     active_truck_ids = {trip.truck_id for trip in blocking_trips}
     active_trip_by_truck_id = {trip.truck_id: trip for trip in blocking_trips}
+    post_unload_cooldown_by_truck_id = {}
+    if assignment_truck_ids:
+        cooldown_cutoff = timezone.now() - TRUCK_POST_UNLOAD_COOLDOWN
+        for completed_trip in (
+            Trip.objects
+            .filter(
+                truck_id__in=assignment_truck_ids,
+                status=TripStatus.COMPLETED,
+                completed_at__gt=cooldown_cutoff,
+            )
+            .only('truck_id', 'completed_at')
+            .order_by('truck_id', '-completed_at')
+        ):
+            post_unload_cooldown_by_truck_id.setdefault(
+                completed_trip.truck_id,
+                truck_post_unload_cooldown(
+                    completed_trip.truck_id,
+                    completed_at=completed_trip.completed_at,
+                ),
+            )
 
     def equipment_number(equipment):
         return str(getattr(equipment, 'garage_number', '') or equipment or '-')
@@ -4040,6 +4296,7 @@ def excavator_work_view(request):
             current_excavator=current_excavator,
             active_trip=known_active_trip,
             active_downtime=truck_downtime_by_equipment_id.get(assignment.truck_id),
+            post_unload_cooldown=post_unload_cooldown_by_truck_id.get(assignment.truck_id) or False,
             has_open_truck_shift=assignment.truck_id in open_truck_shift_equipment_ids,
             has_driver_assignment=assignment.truck_id in driver_assignment_truck_ids,
         )
@@ -4096,6 +4353,8 @@ def excavator_work_view(request):
             return downtime_equipment_state_code(downtime)
         if active_trip:
             return 'loaded_waiting_unload'
+        if post_unload_cooldown_by_truck_id.get(assignment.truck_id):
+            return 'waiting'
         if assignment.truck_id not in open_truck_shift_equipment_ids:
             if assignment.truck_id in driver_assignment_truck_ids:
                 return 'waiting_for_shift'
@@ -4114,7 +4373,12 @@ def excavator_work_view(request):
         block_reason = load_block['label'] if load_block else ''
         load_block_reason_code = load_block['code'] if load_block else ''
         soft_driver_block = load_block_reason_code in {'no_driver', 'driver_shift_not_started'}
-        state_allows_load = bool(state_ui['allows_drag'] and not state_ui['blocks_operation'])
+        active_truck_downtime = truck_downtime_by_equipment_id.get(assignment.truck_id)
+        is_waiting_for_loading = truck_waiting_loading_downtime(active_truck_downtime)
+        state_allows_load = bool(
+            is_waiting_for_loading
+            or (state_ui['allows_drag'] and not state_ui['blocks_operation'])
+        )
         can_load = bool(not load_block and state_allows_load)
         is_locked = not can_load
         is_inactive = bool((load_block and not soft_driver_block) or (not load_block and not state_allows_load))
@@ -4124,7 +4388,15 @@ def excavator_work_view(request):
             'number': equipment_number(assignment.truck),
             'equipment_state_code': equipment_state_code,
             'status_key': status_key,
-            'status_label': state_ui['label'],
+            'status_label': (
+                active_truck_downtime.reason.button_label
+                if active_truck_downtime
+                else (
+                    block_reason
+                    if load_block_reason_code == 'post_unload_cooldown'
+                    else state_ui['label']
+                )
+            ),
             'target_label': target_label,
             'is_selected': assignment.id == first_ready_assignment_id,
             'is_locked': is_locked,
@@ -4132,6 +4404,7 @@ def excavator_work_view(request):
             'is_load_blocked': bool(load_block and soft_driver_block),
             'can_drag': can_load,
             'can_load': can_load,
+            'is_waiting_for_loading': is_waiting_for_loading,
             'driver_shift_started': assignment.truck_id in open_truck_shift_equipment_ids,
             'block_reason': block_reason,
             'load_block_reason_code': load_block_reason_code,
@@ -4145,6 +4418,7 @@ def excavator_work_view(request):
     dump_choice_cards = build_excavator_dump_cards(
         work_settings['dump_point_choices'],
         selected_ids=work_settings['selected_dump_point_ids'],
+        persisted_ids=work_settings['persisted_dump_point_ids'],
         include_all=True,
     )
     rock_choices = work_settings['rock_choices']
@@ -4160,11 +4434,19 @@ def excavator_work_view(request):
             .first()
         )
 
+    downtime_calculated_at = timezone.now()
+    downtime_reason_totals = equipment_shift_downtime_seconds_by_reason(
+        current_excavator,
+        open_shift,
+        until=downtime_calculated_at,
+    )
+
     def downtime_reason_card(reason):
         label = reason.button_label
         full_name = str(reason)
         reason_state_code = downtime_reason_equipment_state_code(reason)
         reason_state_ui = downtime_reason_state_ui(equipment_state_map, reason)
+        total_seconds = downtime_reason_totals.get(reason.id, 0)
         return {
             'reason': reason,
             'name': label,
@@ -4172,13 +4454,16 @@ def excavator_work_view(request):
             'equipment_state_code': reason_state_code,
             'status_key': reason_state_ui['color_group'],
             'is_selected': bool(active_downtime and active_downtime.reason_id == reason.id),
+            'total_seconds': total_seconds,
+            'total_label': format_duration_label(total_seconds),
+            'is_used': bool(total_seconds or (active_downtime and active_downtime.reason_id == reason.id)),
         }
 
     downtime_reason_cards = [downtime_reason_card(reason) for reason in downtime_reasons]
 
     active_downtime_elapsed_seconds = 0
     active_downtime_elapsed_label = '00:00:00'
-    shift_downtime_total_seconds = equipment_shift_downtime_seconds(current_excavator, open_shift)
+    shift_downtime_total_seconds = sum(downtime_reason_totals.values())
     shift_downtime_total_label = format_duration_label(shift_downtime_total_seconds)
     active_downtime_state = equipment_state_ui(equipment_state_map, 'waiting')
     active_downtime_started_at = ''
@@ -4187,6 +4472,10 @@ def excavator_work_view(request):
         active_downtime_elapsed_label = format_duration_label(active_downtime_elapsed_seconds)
         active_downtime_state = downtime_reason_state_ui(equipment_state_map, active_downtime.reason)
         active_downtime_started_at = active_downtime.started_at.isoformat()
+    active_downtime_counts_towards_shift = downtime_event_counts_towards_shift(
+        active_downtime,
+        open_shift,
+    )
 
     default_rock = work_settings['default_rock']
     default_dump_point = work_settings['default_dump_point']
@@ -4345,6 +4634,7 @@ def excavator_work_view(request):
     for card in dump_cards:
         point_id = card['point'].id
         card['completed_count'] = completed_by_dump_id[point_id]
+        card['is_last_sent'] = point_id == last_sent_dump_point_id
         card['pending_trucks'] = [
             {
                 'truck_id': trip.truck_id,
@@ -4403,10 +4693,11 @@ def excavator_work_view(request):
             'work_assignment_error': work_assignment_error_message(assignment_state),
             'work_assignment_shift_label': work_assignment.work_shift_label if work_assignment else '',
             'equipment_open_shift': equipment_open_shift,
-            'shift_fuel_limit': getattr(getattr(shift_start_excavator, 'model', None), 'fuel_capacity_limit_l', None),
+            'shift_fuel_limit': shift_fuel_limit,
+            'shift_action_block_message': shift_action_block_message,
             'shift_previous_readings': bool(previous_equipment_shift),
-            'shift_start_fuel_display': format_decimal_input_value(open_shift.start_fuel if open_shift else None),
-            'shift_start_engine_hours_display': format_decimal_input_value(open_shift.start_engine_hours if open_shift else None),
+            'shift_start_fuel_display': format_whole_input_value(open_shift.start_fuel if open_shift else None),
+            'shift_start_engine_hours_display': format_whole_input_value(open_shift.start_engine_hours if open_shift else None),
             'shift_plan_percent': shift_plan_percent,
             'shift_plan_visual': shift_plan_visual,
             'shift_plan_status': shift_plan['status'],
@@ -4419,18 +4710,20 @@ def excavator_work_view(request):
             'shift_fact_label': shift_fact_label,
             'shift_fact_value': shift_fact_value,
             'shift_fact_meta': shift_fact_meta,
-            'shift_fuel_display': format_decimal_input_value(
+            'shift_fuel_display': format_whole_input_value(
                 open_shift.end_fuel if open_shift else getattr(previous_equipment_shift, 'end_fuel', None)
             ),
-            'shift_engine_hours_display': format_decimal_input_value(
+            'shift_engine_hours_display': format_whole_input_value(
                 open_shift.end_engine_hours if open_shift else getattr(previous_equipment_shift, 'end_engine_hours', None)
             ),
             'active_downtime': active_downtime,
             'active_downtime_started_at': active_downtime_started_at,
             'active_downtime_elapsed_seconds': active_downtime_elapsed_seconds,
             'active_downtime_elapsed_label': active_downtime_elapsed_label,
+            'active_downtime_counts_towards_shift': active_downtime_counts_towards_shift,
             'shift_downtime_total_seconds': shift_downtime_total_seconds,
             'shift_downtime_total_label': shift_downtime_total_label,
+            'downtime_calculated_at': downtime_calculated_at.isoformat(),
             'active_downtime_state': active_downtime_state,
             'downtime_reason_cards': downtime_reason_cards,
             'operational_state_version': operational_state_version,
@@ -4507,25 +4800,22 @@ def excavator_downtime_action_view(request):
 
     if action == 'close':
         if not active_event:
-            shift_total_seconds = equipment_shift_downtime_seconds(current_excavator, open_shift)
-            return JsonResponse({
+            response_payload = {
                 'ok': True,
                 'active': False,
                 'closed': False,
                 'elapsed_seconds': 0,
                 'elapsed_label': '00:00:00',
-                'shift_total_seconds': shift_total_seconds,
-                'shift_total_label': format_duration_label(shift_total_seconds),
                 'version': get_operational_state_version(),
-            })
+                'active_counts_towards_shift': False,
+            }
+            response_payload.update(excavator_downtime_totals_payload(current_excavator, open_shift))
+            return JsonResponse(response_payload)
         active_event.ended_at = timezone.now()
         active_event.save(update_fields=['ended_at'])
         response_payload = downtime_event_payload(active_event, action='downtime_closed', closed=True)
-        shift_total_seconds = equipment_shift_downtime_seconds(current_excavator, open_shift)
-        response_payload.update({
-            'shift_total_seconds': shift_total_seconds,
-            'shift_total_label': format_duration_label(shift_total_seconds),
-        })
+        response_payload['active_counts_towards_shift'] = False
+        response_payload.update(excavator_downtime_totals_payload(current_excavator, open_shift))
         return JsonResponse(response_payload)
 
     if action != 'start':
@@ -4538,6 +4828,7 @@ def excavator_downtime_action_view(request):
     )
     if not reason:
         return JsonResponse({'ok': False, 'error': 'Причина простоя недоступна для экскаваторщика.'}, status=400)
+    action_label = 'downtime_started'
     if active_event:
         if active_event.employee_id != access.employee_id:
             return JsonResponse(
@@ -4551,10 +4842,23 @@ def excavator_downtime_action_view(request):
                 },
                 status=409,
             )
-        active_event.reason = reason
-        active_event.comment = (payload.get('comment') or '')[:255]
-        active_event.save(update_fields=['reason', 'comment'])
-        event = active_event
+        if active_event.reason_id == reason.id:
+            active_event.comment = (payload.get('comment') or '')[:255]
+            active_event.save(update_fields=['comment'])
+            event = active_event
+            action_label = 'downtime_updated'
+        else:
+            switched_at = timezone.now()
+            active_event.ended_at = switched_at
+            active_event.save(update_fields=['ended_at'])
+            event = DowntimeEvent.objects.create(
+                equipment=current_excavator,
+                employee=access.employee,
+                reason=reason,
+                started_at=switched_at,
+                comment=(payload.get('comment') or '')[:255],
+            )
+            action_label = 'downtime_switched'
     else:
         event = DowntimeEvent.objects.create(
             equipment=current_excavator,
@@ -4563,8 +4867,13 @@ def excavator_downtime_action_view(request):
             started_at=timezone.now(),
             comment=(payload.get('comment') or '')[:255],
         )
-    action_label = 'downtime_updated' if active_event else 'downtime_started'
-    return JsonResponse(downtime_event_payload(event, action=action_label))
+    response_payload = downtime_event_payload(event, action=action_label)
+    response_payload['active_counts_towards_shift'] = downtime_event_counts_towards_shift(
+        event,
+        open_shift,
+    )
+    response_payload.update(excavator_downtime_totals_payload(current_excavator, open_shift))
+    return JsonResponse(response_payload)
 
 def protect_dispatcher_equipment_detail_response(response):
     response['Cache-Control'] = 'private, no-store, max-age=0'

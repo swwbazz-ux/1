@@ -1,5 +1,5 @@
 from collections import defaultdict
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, OperationalError, connection, transaction
@@ -96,11 +96,23 @@ def open_shift_conflict_message(shift, *, equipment=None):
     return f'Смена на технике {equipment} уже открыта другим сотрудником.'
 
 
+def shift_reading_is_whole(value):
+    if value is None:
+        return True
+    try:
+        parsed = Decimal(value)
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    return parsed.is_finite() and parsed == parsed.to_integral_value()
+
+
 def validate_driver_fuel_reading(equipment, value):
     if value is None:
         raise ValidationError('Укажите остаток топлива.')
     if value < 0:
         raise ValidationError('Остаток топлива не может быть отрицательным.')
+    if not shift_reading_is_whole(value):
+        raise ValidationError('Укажите целый остаток топлива без точки и запятой.')
     limit = getattr(getattr(equipment, 'model', None), 'fuel_capacity_limit_l', None)
     if limit is None:
         raise ValidationError('Для модели этого самосвала не настроен максимальный остаток топлива.')
@@ -109,23 +121,48 @@ def validate_driver_fuel_reading(equipment, value):
 
 
 def validate_driver_close_readings(shift, *, end_fuel, end_mileage, end_engine_hours):
-    validate_driver_fuel_reading(shift.equipment, end_fuel)
     errors = {}
+    for field_name, value in (
+        ('end_fuel', end_fuel),
+        ('end_mileage', end_mileage),
+        ('end_engine_hours', end_engine_hours),
+    ):
+        if not shift_reading_is_whole(value):
+            errors[field_name] = 'Укажите целое число без точки и запятой.'
+    if 'end_fuel' not in errors:
+        try:
+            validate_driver_fuel_reading(shift.equipment, end_fuel)
+        except ValidationError as error:
+            errors['end_fuel'] = error.messages[0]
+    start_mileage = (
+        shift.start_mileage.to_integral_value(rounding=ROUND_HALF_UP)
+        if shift.start_mileage is not None
+        else None
+    )
+    start_engine_hours = (
+        shift.start_engine_hours.to_integral_value(rounding=ROUND_HALF_UP)
+        if shift.start_engine_hours is not None
+        else None
+    )
     if shift.start_mileage is None:
         errors['end_mileage'] = 'В открытой смене отсутствует начальное показание одометра. Обратитесь к диспетчеру.'
     elif end_mileage is None:
         errors['end_mileage'] = 'Укажите одометр на конец смены.'
-    elif end_mileage < shift.start_mileage:
-        errors['end_mileage'] = f'Одометр не может быть меньше начального показания {shift.start_mileage:g} км.'
-    elif end_mileage - shift.start_mileage > Decimal('250'):
+    elif 'end_mileage' in errors:
+        pass
+    elif end_mileage < start_mileage:
+        errors['end_mileage'] = f'Одометр не может быть меньше начального показания {start_mileage:g} км.'
+    elif end_mileage - start_mileage > Decimal('250'):
         errors['end_mileage'] = 'Пробег за смену не может превышать 250 км. Проверьте показания.'
     if shift.start_engine_hours is None:
         errors['end_engine_hours'] = 'В открытой смене отсутствует начальное показание моточасов. Обратитесь к диспетчеру.'
     elif end_engine_hours is None:
         errors['end_engine_hours'] = 'Укажите моточасы на конец смены.'
-    elif end_engine_hours < shift.start_engine_hours:
-        errors['end_engine_hours'] = f'Моточасы не могут быть меньше начального показания {shift.start_engine_hours:g} м/ч.'
-    elif end_engine_hours - shift.start_engine_hours > Decimal('12'):
+    elif 'end_engine_hours' in errors:
+        pass
+    elif end_engine_hours < start_engine_hours:
+        errors['end_engine_hours'] = f'Моточасы не могут быть меньше начального показания {start_engine_hours:g} м/ч.'
+    elif end_engine_hours - start_engine_hours > Decimal('12'):
         errors['end_engine_hours'] = 'Моточасы за смену не могут увеличиться более чем на 12. Проверьте показания.'
     if errors:
         raise ValidationError(errors)
@@ -286,6 +323,13 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id):
             )
             if equipment_open_shift:
                 raise ValidationError(open_shift_conflict_message(equipment_open_shift))
+            reading_errors = {}
+            for field_name in ('start_fuel', 'start_mileage', 'start_engine_hours'):
+                value = readings.get(field_name)
+                if not shift_reading_is_whole(value):
+                    reading_errors[field_name] = 'Укажите целое число без точки и запятой.'
+            if reading_errors:
+                raise ValidationError(reading_errors)
             validate_driver_fuel_reading(equipment, readings['start_fuel'])
             previous_shift = EmployeeShift.objects.filter(
                 equipment=equipment, closed_at__isnull=False,
@@ -927,7 +971,7 @@ class ExcavatorShiftError(Exception):
         self.code = code
 
 
-def parse_required_shift_decimal(value, label, field_name):
+def parse_required_shift_integer(value, label, field_name):
     raw = str(value if value is not None else '').strip().replace('\u00a0', '').replace(' ', '').replace(',', '.')
     if not raw:
         raise ExcavatorShiftError(
@@ -948,12 +992,17 @@ def parse_required_shift_decimal(value, label, field_name):
             f'{label}: значение не может быть меньше нуля.',
             field_errors={field_name: 'Значение не может быть меньше нуля.'},
         )
+    if parsed != parsed.to_integral_value():
+        raise ExcavatorShiftError(
+            f'{label}: нужно указать целое число.',
+            field_errors={field_name: 'Укажите целое число без точки и запятой.'},
+        )
     try:
-        return parsed.quantize(Decimal('0.01'))
+        return parsed.quantize(Decimal('1'))
     except InvalidOperation:
         raise ExcavatorShiftError(
             f'{label}: значение имеет недопустимый формат.',
-            field_errors={field_name: 'Допустимо не более двух знаков после запятой.'},
+            field_errors={field_name: 'Введите корректное целое число.'},
         )
 
 
@@ -971,8 +1020,8 @@ def excavator_fuel_limit(equipment):
 
 
 def validate_excavator_shift_readings(equipment, fuel_value, engine_hours_value, *, opening_shift=None):
-    fuel = parse_required_shift_decimal(fuel_value, 'Топливо', 'fuel')
-    engine_hours = parse_required_shift_decimal(engine_hours_value, 'Моточасы', 'engine_hours')
+    fuel = parse_required_shift_integer(fuel_value, 'Топливо', 'fuel')
+    engine_hours = parse_required_shift_integer(engine_hours_value, 'Моточасы', 'engine_hours')
     fuel_limit = excavator_fuel_limit(equipment)
     if fuel > fuel_limit:
         raise ExcavatorShiftError(
@@ -980,7 +1029,11 @@ def validate_excavator_shift_readings(equipment, fuel_value, engine_hours_value,
             field_errors={'fuel': f'Максимум для этой модели: {int(fuel_limit)} л.'},
         )
     if opening_shift is not None:
-        start_hours = opening_shift.start_engine_hours
+        start_hours = (
+            opening_shift.start_engine_hours.to_integral_value(rounding=ROUND_HALF_UP)
+            if opening_shift.start_engine_hours is not None
+            else None
+        )
         if start_hours is None:
             raise ExcavatorShiftError('В открытой смене отсутствуют начальные моточасы.', status=409)
         if engine_hours < start_hours:

@@ -85,6 +85,13 @@ from .protected_cards import (
     PROTECTED_WRITE_CODE,
     allow_protected_card_write,
 )
+from .privacy_consent import (
+    PRIVACY_CONSENT_FIELD,
+    PRIVACY_CONSENT_REQUIRED_MESSAGE,
+    accept_current_privacy_policy,
+    privacy_consent_matches_access,
+    privacy_consent_submission_is_current,
+)
 from .forms import (
     AdminAccessBlockForm,
     AccessActivationForm,
@@ -224,7 +231,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v166'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v189'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -276,14 +283,31 @@ const CORE_ASSETS = [
     APP_SHELL_URL,
     LEGACY_SHELL_URL,
     MANIFEST_URL,
+    "/company/privacy/",
+    "/static/portal/css/portal-shell-v5.css?v=6",
+    "/static/portal/js/portal-shell-v5.js",
     "/static/css/app.css",
+    "/static/css/mobile-role-login-v1.css",
+    "/static/css/mobile-shift-unified-v1.css",
+    "/static/js/mobile-shift-unified-v1.js",
+    "/static/js/mobile-operational-sounds-v1.js",
+    "/static/css/native-app-update-v1.css",
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
     "/static/favicon.ico",
     "/static/img/pwa/driver-180.png",
     "/static/img/pwa/driver-192.png",
     "/static/img/pwa/driver-512.png",
-    "/static/img/pwa/driver-maskable-512.png"
+    "/static/img/pwa/driver-maskable-512.png",
+    "/static/img/start/start-hero-v1.webp",
+    "/static/img/start/start-hero-v1.jpg",
+    "/static/audio/driver/driver_truck_assigned.wav",
+    "/static/audio/driver/driver_action_ok.wav",
+    "/static/audio/driver/driver_action_error.wav",
+    "/static/audio/driver/driver_connection_lost.wav",
+    "/static/audio/driver/driver_connection_restored.wav",
+    "/static/audio/driver/driver_shift_start.wav",
+    "/static/audio/driver/driver_shift_end.wav"
 ];
 
 self.addEventListener("install", (event) => {{
@@ -457,6 +481,19 @@ def _validated_next_url(request, value):
     return ''
 
 
+def _role_landing_url(access):
+    """Return the role's real workplace instead of the redirect-only /home/."""
+    app = get_role_app(access.role.code) if access else None
+    return app.start_url if app else reverse('role_home')
+
+
+def _login_redirect_response(request, target_url):
+    """Let the fetch-driven login perform exactly one final navigation."""
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({'ok': True, 'redirect_url': target_url})
+    return redirect(target_url)
+
+
 def _active_role_session_matches_access(request, access):
     state = role_session_state(request, access)
     active_access = state.get('active_access')
@@ -556,6 +593,11 @@ def login_view(
 ):
     role_app = get_role_app_for_request(request)
     login_role_app = target_role_app or role_app
+    combined_mobile_login = bool(
+        role_app
+        and role_app.role_code in {'driver', 'excavator_operator'}
+        and target_role_app is None
+    )
     allowed_role_codes = tuple(allowed_role_codes or ())
     next_url = forced_next_url or _validated_next_url(
         request,
@@ -585,7 +627,7 @@ def login_view(
         and not rating_tv_reauthentication_required
         and not targeted_role_reauthentication_required
     ):
-        return redirect(next_url or 'role_home')
+        return redirect(next_url or _role_landing_url(current_access))
     if (
         request.method == 'GET'
         and role_app
@@ -606,7 +648,35 @@ def login_view(
     prefilled_phone = (
         request.GET.get('phone', '').strip() if request.method == 'GET' else ''
     )
-    if request.method == 'POST' and request.POST.get('action') in {'register', 'continue'}:
+    submitted_action = request.POST.get('action', '') if request.method == 'POST' else ''
+    login_action = submitted_action if submitted_action in {'register', 'continue'} else 'login'
+    submitted_privacy_consent = (
+        request.POST.get(PRIVACY_CONSENT_FIELD, '')
+        if request.method == 'POST'
+        else ''
+    )
+    if (
+        request.method == 'POST'
+        and combined_mobile_login
+        and login_action in {'login', 'register', 'continue'}
+        and not privacy_consent_submission_is_current(submitted_privacy_consent)
+    ):
+        messages.error(request, PRIVACY_CONSENT_REQUIRED_MESSAGE)
+        return render(
+            request,
+            'users/login.html',
+            {
+                'selected_device_kind': selected_device_kind,
+                'next_url': next_url,
+                'login_role_app': login_role_app,
+                'combined_mobile_login': True,
+                'submitted_phone': submitted_phone or prefilled_phone,
+                'login_step': 'pin' if submitted_phone else '',
+                'privacy_consent_error': True,
+            },
+        )
+
+    if request.method == 'POST' and login_action in {'register', 'continue'}:
         # Первый вход. Раньше сюда пускал только выданный вручную временный код,
         # и раздавать его приходилось каждому — при текучке в двадцать человек за
         # вахту это неподъёмно. Теперь ключ — номер телефона из карточки, а ФИО
@@ -641,6 +711,11 @@ def login_view(
         if pending and not already_registered:
             access = pending[0]
             request.session.cycle_key()
+            accept_current_privacy_policy(
+                request,
+                submitted_privacy_consent,
+                access=access,
+            )
             request.session['pending_activation_access_id'] = access.id
             request.session['pending_activation_role_code'] = access.role.code
             if target_role_app:
@@ -650,7 +725,7 @@ def login_view(
             if next_url:
                 request.session['post_activation_next'] = next_url
             set_session_device_kind(request, selected_device_kind)
-            return redirect('activate_access')
+            return _login_redirect_response(request, reverse('activate_access'))
         if matches:
             # Пинкод у человека уже есть — просим именно его, вторым шагом.
             return render(
@@ -660,6 +735,10 @@ def login_view(
                     'selected_device_kind': selected_device_kind,
                     'next_url': next_url,
                     'login_role_app': login_role_app,
+                    # Старый cached-клиент action=continue заменяет только
+                    # <main>, но не может подхватить новый CSS из <head>.
+                    # Возвращаем ему прежний самостоятельный PIN-шаг.
+                    'combined_mobile_login': False,
                     'submitted_phone': phone,
                     'login_step': 'pin',
                 },
@@ -704,7 +783,7 @@ def login_view(
                 },
             )
 
-    if request.method == 'POST' and request.POST.get('action') not in {'register', 'continue'}:
+    if request.method == 'POST' and login_action == 'login':
         phone = request.POST.get('phone', '').strip()
         access_code = request.POST.get('access_code', '').strip()
         access = find_employee_access_by_credentials(
@@ -727,6 +806,11 @@ def login_view(
             if access.status == EmployeeAccess.Status.NOT_ACTIVATED:
                 if access.primary_code_issued_at:
                     request.session.cycle_key()
+                    accept_current_privacy_policy(
+                        request,
+                        submitted_privacy_consent,
+                        access=access,
+                    )
                     request.session['pending_activation_access_id'] = access.id
                     request.session['pending_activation_role_code'] = access.role.code
                     if target_role_app:
@@ -741,7 +825,7 @@ def login_view(
                     if next_url:
                         request.session['post_activation_next'] = next_url
                     set_session_device_kind(request, selected_device_kind)
-                    return redirect('activate_access')
+                    return _login_redirect_response(request, reverse('activate_access'))
             try:
                 with transaction.atomic():
                     locked_employee = Employee.objects.select_for_update().get(pk=access.employee_id)
@@ -769,13 +853,22 @@ def login_view(
                         'selected_device_kind': selected_device_kind,
                         'next_url': next_url,
                         'login_role_app': login_role_app,
+                        'combined_mobile_login': combined_mobile_login,
                         'submitted_phone': submitted_phone,
                         'login_step': 'pin' if submitted_phone else '',
                     },
                 )
             request.session.cycle_key()
             set_session_device_kind(request, selected_device_kind)
-            return redirect(next_url or 'role_home')
+            accept_current_privacy_policy(
+                request,
+                submitted_privacy_consent,
+                access=locked_access,
+            )
+            return _login_redirect_response(
+                request,
+                next_url or _role_landing_url(access),
+            )
         # Пинкода у номера ещё нет — человек первый раз в приложении. Отбивать
         # его «неверный пинкод» бессмысленно: вводить ему нечего. Ведём на экран,
         # где он увидит своё ФИО и придумает пинкод.
@@ -804,6 +897,11 @@ def login_view(
         if first_time:
             pending_access = first_time[0]
             request.session.cycle_key()
+            accept_current_privacy_policy(
+                request,
+                submitted_privacy_consent,
+                access=pending_access,
+            )
             request.session['pending_activation_access_id'] = pending_access.id
             request.session['pending_activation_role_code'] = pending_access.role.code
             if target_role_app:
@@ -813,7 +911,7 @@ def login_view(
             if next_url:
                 request.session['post_activation_next'] = next_url
             set_session_device_kind(request, selected_device_kind)
-            return redirect('activate_access')
+            return _login_redirect_response(request, reverse('activate_access'))
 
         other_access = None
         if allowed_role_codes:
@@ -837,6 +935,7 @@ def login_view(
             'selected_device_kind': selected_device_kind,
             'next_url': next_url,
             'login_role_app': login_role_app,
+            'combined_mobile_login': combined_mobile_login,
             'submitted_phone': submitted_phone or prefilled_phone,
             'login_step': 'pin' if submitted_phone else '',
             # Отличаем «номер пришёл в ссылке со /start/» от «человек уже
@@ -930,6 +1029,20 @@ def activate_access_view(request):
         return redirect('login')
 
     activation_role_app = target_app or host_role_app
+    if (
+        activation_role_app
+        and activation_role_app.role_code in {'driver', 'excavator_operator'}
+        and not privacy_consent_matches_access(request.session, access)
+    ):
+        for key in (
+            'pending_activation_access_id',
+            'pending_activation_role_code',
+            'pending_activation_target_app_code',
+            'post_activation_next',
+        ):
+            request.session.pop(key, None)
+        messages.error(request, PRIVACY_CONSENT_REQUIRED_MESSAGE)
+        return redirect('login')
 
     if request.method == 'POST':
         form = AccessActivationForm(request.POST, access=access)
@@ -982,7 +1095,7 @@ def activate_access_view(request):
                     'Постоянный пинкод создан. Первичный пинкод больше не действует.',
                 )
             next_url = _validated_next_url(request, request.session.pop('post_activation_next', ''))
-            return redirect(next_url or 'role_home')
+            return redirect(next_url or _role_landing_url(access))
     else:
         form = AccessActivationForm(access=access)
 
@@ -3264,6 +3377,19 @@ def driver_shift_view(request):
         return redirect('driver_work')
 
     open_shift = driver_open_shift_queryset(access.employee).order_by('-opened_at').first()
+    last_closed_shift = (
+        EmployeeShift.objects
+        .select_related('equipment', 'equipment__equipment_type')
+        .filter(employee=access.employee, closed_at__isnull=False)
+        .filter(
+            Q(workplace_code='driver')
+            | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
+        )
+        .order_by('-closed_at')
+        .first()
+    )
+    report_shift = open_shift or last_closed_shift
+    report_truck = report_shift.equipment if report_shift else None
     work_assignment = get_active_equipment_assignment(access.employee, 'driver')
     assignment_state = work_assignment_state(access.employee, work_assignment)
     shift_start_conflict_message = ''
@@ -3337,10 +3463,22 @@ def driver_shift_view(request):
             .order_by('-started_at')
             .first()
         )
+
+    if report_shift and report_truck:
+        legacy_driver_trip_filter = Q(
+            driver=access.employee,
+            completed_at__gte=report_shift.opened_at,
+        )
+        if report_shift.closed_at:
+            legacy_driver_trip_filter &= Q(completed_at__lte=report_shift.closed_at)
         shift_trips = list(
             Trip.objects
             .select_related('excavator', 'rock_type', 'dump_point', 'assigned_dump_point', 'actual_dump_point')
-            .filter(Q(unloading_shift=open_shift) | Q(loading_shift=open_shift) | Q(driver=access.employee, completed_at__gte=open_shift.opened_at))
+            .filter(
+                Q(unloading_shift=report_shift)
+                | Q(loading_shift=report_shift)
+                | legacy_driver_trip_filter
+            )
             .distinct()
             .order_by('created_at')[:30]
         )
@@ -3348,7 +3486,8 @@ def driver_shift_view(request):
     for trip in shift_trips:
         started_at = timezone.localtime(trip.created_at) if trip.created_at else None
         completed_at = timezone.localtime(trip.completed_at) if trip.completed_at else None
-        finish_for_duration = completed_at or timezone.localtime(timezone.now())
+        duration_end = report_shift.closed_at if report_shift and report_shift.closed_at else timezone.now()
+        finish_for_duration = completed_at or timezone.localtime(duration_end)
         duration_seconds = 0
         if started_at:
             duration_seconds = max(0, int((finish_for_duration - started_at).total_seconds()))
@@ -3376,22 +3515,22 @@ def driver_shift_view(request):
     driver_shift_downtime_events = []
     driver_shift_downtime_rows = []
     driver_shift_timeline = []
-    if current_truck and open_shift:
-        shift_period_end = timezone.now()
+    if report_truck and report_shift:
+        shift_period_end = report_shift.closed_at or timezone.now()
         driver_shift_downtime_events = list(
             DowntimeEvent.objects
             .select_related('reason')
             .filter(
-                equipment=current_truck,
+                equipment=report_truck,
                 employee=access.employee,
                 started_at__lt=shift_period_end,
             )
-            .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=open_shift.opened_at))
+            .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=report_shift.opened_at))
             .order_by('started_at')
         )
         downtime_totals = {}
         for event in driver_shift_downtime_events:
-            overlap_start = max(event.started_at, open_shift.opened_at)
+            overlap_start = max(event.started_at, report_shift.opened_at)
             overlap_end = min(event.ended_at or shift_period_end, shift_period_end)
             duration_seconds = max(0, int((overlap_end - overlap_start).total_seconds()))
             reason_label = event.reason.button_label
@@ -3445,8 +3584,15 @@ def driver_shift_view(request):
         driver_status_class = 'is-loaded'
         driver_target_label = active_trip.actual_dump_point or active_trip.dump_point
     elif active_downtime:
-        driver_status = 'ПРОСТОЙ'
+        driver_status = active_downtime.reason.button_label
         driver_status_class = 'is-downtime'
+
+    driver_waiting_unload = bool(
+        active_trip
+        and active_downtime
+        and str(active_downtime.reason.name or '').strip().casefold()
+        == 'Ожидание разгрузки'.casefold()
+    )
 
     driver_work_excavator = active_trip.excavator if active_trip else (current_assignment.excavator if current_assignment else None)
     driver_work_context_placement = None
@@ -3495,8 +3641,15 @@ def driver_shift_view(request):
     ]
     driver_context_parts = [driver_complex_label, *driver_geology_parts]
     driver_context_label = ' · '.join(driver_context_parts)
-    driver_dial_label = str(driver_target_label) if active_trip else driver_excavator_short_label(driver_work_excavator)
-    driver_dial_note = 'ТОЧКА РАЗГРУЗКИ' if active_trip else 'НА ЗАГРУЗКУ'
+    if active_trip:
+        driver_dial_label = str(driver_target_label)
+        driver_dial_note = 'ОЖИДАНИЕ РАЗГРУЗКИ' if driver_waiting_unload else 'ТОЧКА РАЗГРУЗКИ'
+    elif active_downtime:
+        driver_dial_label = active_downtime.reason.button_label
+        driver_dial_note = 'ПРИЧИНА ПРОСТОЯ'
+    else:
+        driver_dial_label = driver_excavator_short_label(driver_work_excavator)
+        driver_dial_note = 'НА ЗАГРУЗКУ'
     driver_new_assignment_label = ''
     driver_assignment_action_label = ''
     driver_assignment_effective_at = ''
@@ -3529,7 +3682,13 @@ def driver_shift_view(request):
         open_shift,
     )
     shift_downtime_total_label = driver_format_duration_label(shift_downtime_total_seconds)
-    shift_downtime_report_total_label = driver_report_duration_label(shift_downtime_total_seconds, total=True)
+    shift_downtime_report_total_seconds = sum(
+        row['seconds'] for row in driver_shift_downtime_rows
+    )
+    shift_downtime_report_total_label = driver_report_duration_label(
+        shift_downtime_report_total_seconds,
+        total=True,
+    )
     active_downtime_started_at = ''
     active_downtime_status_key = 'yellow'
     if active_downtime and active_downtime.started_at:
@@ -3537,13 +3696,6 @@ def driver_shift_view(request):
         active_downtime_elapsed_label = driver_format_duration_label(active_downtime_elapsed_seconds)
         active_downtime_started_at = active_downtime.started_at.isoformat()
         active_downtime_status_key = driver_downtime_reason_status_key(active_downtime.reason)
-
-    last_closed_shift = None
-    if assigned_truck:
-        last_closed_shift = EmployeeShift.objects.filter(
-            equipment=assigned_truck,
-            closed_at__isnull=False,
-        ).order_by('-closed_at').first()
 
     if request.method == 'POST' and not open_shift:
         form = DriverOpenShiftForm(request.POST, employee=access.employee, work_assignment=work_assignment) if assignment_state == 'assigned' else None
@@ -3636,10 +3788,13 @@ def driver_shift_view(request):
             'driver_shift_report_trip_rows': driver_shift_report_trip_rows,
             'driver_shift_downtime_rows': driver_shift_downtime_rows,
             'driver_shift_timeline': driver_shift_timeline,
-            'driver_shift_report_date': timezone.localtime(open_shift.opened_at).strftime('%d.%m.%Y') if open_shift else '—',
-            'driver_shift_report_shift': open_shift.get_shift_type_display() if open_shift else 'Смена не открыта',
+            'driver_shift_report_date': timezone.localtime(report_shift.opened_at).strftime('%d.%m.%Y') if report_shift else '—',
+            'driver_shift_report_shift': report_shift.get_shift_type_display() if report_shift else 'Смена не открыта',
             'driver_shift_report_driver': driver_employee_short_name(access.employee),
-            'driver_shift_report_truck': driver_equipment_number(current_truck) if current_truck else '—',
+            'driver_shift_report_truck': driver_equipment_number(report_truck) if report_truck else '—',
+            'driver_shift_report_end_fuel': report_shift.end_fuel if report_shift and report_shift.closed_at else None,
+            'driver_shift_report_end_mileage': report_shift.end_mileage if report_shift and report_shift.closed_at else None,
+            'driver_shift_report_end_engine_hours': report_shift.end_engine_hours if report_shift and report_shift.closed_at else None,
             'shift_plan_percent': shift_plan_percent,
             'shift_plan_status': shift_plan['status'],
             'shift_plan_status_label': shift_plan['status_label'],
@@ -3651,6 +3806,7 @@ def driver_shift_view(request):
             'shift_plan_visual': shift_plan['visual'],
             'driver_status': driver_status,
             'driver_status_class': driver_status_class,
+            'driver_waiting_unload': driver_waiting_unload,
             'driver_target_label': driver_target_label,
             'driver_header_label': driver_header_label,
             'driver_header_truck_label': driver_header_truck_label,
@@ -3745,60 +3901,40 @@ def driver_close_shift_view(request):
     ).exists()
     if client_action_id and completed_action():
         messages.success(request, 'Смена закрыта.')
-        return redirect('driver_work')
+        return redirect(f"{reverse('driver_work')}?tab=manifest")
 
     open_shift = driver_open_shift_queryset(access.employee).order_by('-opened_at').first()
     if not open_shift:
         if client_action_id and completed_action():
             messages.success(request, 'Смена закрыта.')
-            return redirect('driver_work')
+            return redirect(f"{reverse('driver_work')}?tab=manifest")
         messages.error(request, 'Открытая смена не найдена.')
         return redirect('driver_work')
 
     form = DriverCloseShiftForm(request.POST, instance=open_shift)
     request._driver_close_form = form
-    request._driver_close_review = None
-    action = request.POST.get('shift_action', 'review')
     if form.is_valid():
         readings = {
             'end_fuel': form.cleaned_data['end_fuel'],
             'end_mileage': form.cleaned_data['end_mileage'],
             'end_engine_hours': form.cleaned_data['end_engine_hours'],
         }
-        review_key = f'driver_shift_close_review_{open_shift.pk}'
-        normalized = {field: str(value) for field, value in readings.items()}
-        if action == 'review':
-            request.session[review_key] = normalized
-            request._driver_close_review = {
-                'start_fuel': open_shift.start_fuel,
-                'end_fuel': readings['end_fuel'],
-                'start_mileage': open_shift.start_mileage,
-                'end_mileage': readings['end_mileage'],
-                'mileage_delta': readings['end_mileage'] - open_shift.start_mileage,
-                'start_engine_hours': open_shift.start_engine_hours,
-                'end_engine_hours': readings['end_engine_hours'],
-                'engine_hours_delta': readings['end_engine_hours'] - open_shift.start_engine_hours,
-            }
-        elif request.session.get(review_key) != normalized:
-            form.add_error(None, 'Показания изменились после проверки. Проверьте их повторно.')
+        try:
+            with transaction.atomic():
+                Employee.objects.select_for_update().get(pk=access.employee_id)
+                if not role_session_state(request, access)['is_active']:
+                    raise ValidationError('Роль неактивна — доступен только просмотр.')
+                close_driver_shift(
+                    shift=open_shift,
+                    employee=access.employee,
+                    readings=readings,
+                    client_action_id=form.cleaned_data.get('client_action_id') or secrets.token_urlsafe(24),
+                )
+        except ValidationError as error:
+            form.add_error(None, error)
         else:
-            try:
-                with transaction.atomic():
-                    Employee.objects.select_for_update().get(pk=access.employee_id)
-                    if not role_session_state(request, access)['is_active']:
-                        raise ValidationError('Роль неактивна — доступен только просмотр.')
-                    close_driver_shift(
-                        shift=open_shift,
-                        employee=access.employee,
-                        readings=readings,
-                        client_action_id=form.cleaned_data.get('client_action_id') or secrets.token_urlsafe(24),
-                    )
-            except ValidationError as error:
-                form.add_error(None, error)
-            else:
-                request.session.pop(review_key, None)
-                messages.success(request, 'Смена закрыта.')
-                return redirect('driver_work')
+            messages.success(request, 'Смена закрыта.')
+            return redirect(f"{reverse('driver_work')}?tab=manifest")
     request.GET = request.GET.copy()
     request.GET['tab'] = 'shift'
     return driver_shift_view(request)

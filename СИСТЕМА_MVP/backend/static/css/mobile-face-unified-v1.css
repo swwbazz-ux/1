@@ -1,0 +1,247 @@
+/*
+ * Единая вкладка «Забой» Машиниста экскаватора.
+ * Заголовок, поля настроек и основное действие используют тот же визуальный
+ * контракт, что и общий экран «Смена». Центральная сетка всегда получает
+ * только оставшееся место и не создаёт прокрутку страницы.
+ */
+
+.mobile-face,
+.mobile-face *,
+.mobile-face *::before,
+.mobile-face *::after {
+    box-sizing: border-box;
+}
+
+.mobile-face {
+    container-name: mobile-face;
+    --mobile-face-settings-pad: clamp(3px, .9vw, 6px);
+}
+
+.mobile-face__titlebar,
+.mobile-face__content,
+.mobile-face__settings,
+.mobile-face__destinations,
+.mobile-face__actions {
+    min-inline-size: 0;
+    min-block-size: 0;
+}
+
+.mobile-face__content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: calc(var(--ms-standard-field-h) + var(--ms-standard-field-h) + var(--ms-gap) + var(--mobile-face-settings-pad) + var(--mobile-face-settings-pad) + 2px) minmax(0, 1fr);
+    gap: var(--ms-gap);
+    overflow: hidden;
+}
+
+.mobile-face__content.is-shift-inactive > .mobile-face__settings,
+.mobile-face__content.is-shift-inactive > .mobile-face__destinations {
+    opacity: .32;
+    filter: saturate(.35);
+}
+
+.mobile-face__settings {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: var(--ms-gap);
+    padding: var(--mobile-face-settings-pad);
+    overflow: hidden;
+    border: 1px solid var(--mobile-shift-border);
+    border-radius: clamp(8px, 2.2vw, 11px);
+    background: var(--mobile-shift-panel);
+    box-shadow: inset 0 0 16px rgba(70, 196, 107, .04);
+}
+
+.mobile-face .mobile-face__setting--rock {
+    grid-column: 1 / -1;
+}
+
+.mobile-face .mobile-face__setting.mobile-shift__field {
+    block-size: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    align-content: center;
+    align-items: stretch;
+    gap: clamp(3px, .8vw, 6px);
+}
+
+.mobile-face__setting .mobile-shift__field-label {
+    align-content: end;
+}
+
+.mobile-face__setting .mobile-shift__metric-value {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: center;
+}
+
+.mobile-face .mobile-face__setting--rock .mobile-shift__metric-value {
+    position: relative;
+}
+
+.mobile-face__setting .mobile-shift__metric-value input,
+.mobile-face__setting .mobile-shift__metric-value select {
+    min-inline-size: 0;
+    inline-size: 100%;
+    block-size: auto;
+    min-block-size: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--mobile-shift-text);
+    font-family: inherit;
+    font-size: var(--ms-value-size) !important;
+    font-weight: 650 !important;
+    line-height: 1 !important;
+    text-align: right !important;
+    text-overflow: ellipsis;
+}
+
+.mobile-face__setting .mobile-shift__metric-value select {
+    appearance: none;
+    padding-inline: clamp(24px, 6vw, 34px);
+    text-align: center !important;
+    text-align-last: center;
+    white-space: nowrap;
+}
+
+.mobile-face .mobile-face__setting--rock .mobile-shift__metric-value::after {
+    content: "";
+    position: absolute;
+    inset-inline-end: clamp(9px, 2.5vw, 14px);
+    top: 50%;
+    inline-size: 7px;
+    block-size: 7px;
+    border-inline-end: 1.5px solid var(--mobile-shift-muted);
+    border-block-end: 1.5px solid var(--mobile-shift-muted);
+    pointer-events: none;
+    transform: translateY(-70%) rotate(45deg);
+}
+
+.mobile-face__destinations {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: minmax(0, 1fr);
+    align-content: stretch;
+    align-items: stretch;
+    gap: var(--ms-gap);
+    overflow: hidden;
+}
+
+.mobile-face .mobile-face__destination.eo-unload-card {
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    inline-size: 100% !important;
+    block-size: auto !important;
+    margin: 0 !important;
+    padding: clamp(5px, 1.5vw, 10px) !important;
+    display: grid !important;
+    place-items: center !important;
+    overflow: hidden !important;
+    border-radius: clamp(7px, 2vw, 10px) !important;
+    font-family: inherit !important;
+    border-color: rgba(142, 169, 181, .26) !important;
+    background: rgba(7, 18, 23, .96) !important;
+    color: #aab7bd !important;
+    box-shadow: none !important;
+    transition: border-color .15s ease, background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+
+/* Applied server state is green; unsaved additions are yellow. Removing an
+   applied point immediately returns it to the neutral state until Apply. */
+.mobile-face .mobile-face__destination.eo-unload-card.is-dump-applied {
+    border-style: solid !important;
+    border-color: #67e854 !important;
+    background: rgba(17, 62, 24, .52) !important;
+    color: #7df06c !important;
+    box-shadow: inset 0 0 18px rgba(103, 232, 84, .08) !important;
+}
+
+.mobile-face .mobile-face__destination.eo-unload-card.is-dump-pending {
+    border-style: dashed !important;
+    border-color: #ffd52a !important;
+    background: rgba(72, 55, 2, .56) !important;
+    color: #ffe063 !important;
+    box-shadow: inset 0 0 18px rgba(255, 213, 42, .09) !important;
+}
+
+.mobile-face .mobile-face__destination.eo-unload-card.is-dump-pending-remove {
+    border-style: solid !important;
+    border-color: rgba(142, 169, 181, .26) !important;
+    background: rgba(7, 18, 23, .96) !important;
+    color: #aab7bd !important;
+    box-shadow: none !important;
+}
+
+.mobile-face .mobile-face__destination.eo-unload-card:focus-visible {
+    outline: 2px solid currentColor !important;
+    outline-offset: -4px;
+}
+
+.mobile-face .mobile-face__destination.eo-unload-card strong {
+    display: -webkit-box !important;
+    max-inline-size: 100% !important;
+    overflow: hidden !important;
+    font-size: clamp(14px, min(4vw, 3.4cqh), 19px) !important;
+    font-weight: 650 !important;
+    line-height: 1.06 !important;
+    text-align: center !important;
+    text-overflow: ellipsis !important;
+    overflow-wrap: anywhere;
+    hyphens: auto;
+    white-space: normal !important;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.mobile-face__empty {
+    grid-column: 1 / -1;
+    grid-row: 1 / -1;
+    min-inline-size: 0;
+    min-block-size: 0;
+    block-size: 100%;
+    place-self: stretch;
+}
+
+.mobile-face__actions.mobile-shift__actions {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.mobile-face__apply.mobile-shift__action {
+    touch-action: manipulation;
+}
+
+html[data-mobile-shift-orientation="landscape"] body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"] {
+    grid-template-rows: var(--ms-screen-rows-landscape) !important;
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+    body.excavator-operator-screen .eo-screen.mobile-face[data-eo-screen="face"] {
+        grid-template-rows: var(--ms-screen-rows-landscape) !important;
+    }
+
+    .mobile-face__content {
+        grid-template-columns: minmax(0, .42fr) minmax(0, .58fr);
+        grid-template-rows: minmax(0, 1fr);
+    }
+
+    .mobile-face {
+        --mobile-face-settings-pad: 3px;
+    }
+
+    .mobile-face__destinations {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .mobile-face .mobile-face__setting.mobile-shift__field {
+        padding-block: clamp(3px, 1.1dvh, 5px);
+    }
+
+    .mobile-face .mobile-face__destination.eo-unload-card strong {
+        font-size: 11px !important;
+        white-space: normal !important;
+    }
+}

@@ -219,7 +219,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v166',
+        shell_version='driver-mobile-shell-v189',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -236,7 +236,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v162',
+        shell_version='excavator-mobile-shell-v203',
     ),
     RoleApp(
         role_code='mining_master',
@@ -253,7 +253,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v138',
+        shell_version='mining-master-mobile-shell-v139',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
@@ -273,7 +273,7 @@ ROLE_APPS = (
         icon_slug='deputy-mining-manager',
         manifest_url='/deputy-mining-manager.webmanifest',
         service_worker_url='/deputy-mining-manager-sw.js',
-        shell_version='deputy-mining-manager-desktop-shell-v14',
+        shell_version='deputy-mining-manager-desktop-shell-v15',
     ),
     RoleApp(
         role_code='dispatcher',
@@ -444,6 +444,9 @@ def get_role_app(role_code):
 
 def get_role_app_for_host(host):
     host = _normalized_host(host)
+    alias_role_code = getattr(settings, 'ROLE_APP_HOST_ALIASES', {}).get(host)
+    if alias_role_code:
+        return ROLE_APPS_BY_CODE.get(alias_role_code)
     for base_domain in _base_domains():
         suffix = f'.{base_domain}'
         if not host.endswith(suffix):

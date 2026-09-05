@@ -15,6 +15,7 @@ urlpatterns = [
     path('company/people/', views.public_people, name='public_people'),
     path('company/vacancies/', views.public_vacancies, name='public_vacancies'),
     path('company/contacts/', views.public_contacts, name='public_contacts'),
+    path('company/privacy/', views.public_privacy, name='public_privacy'),
     path('company/media/publication/<int:pk>/', views.publication_cover, name='publication_cover'),
     path('company/media/image/<int:pk>/', views.publication_image, name='publication_image'),
 

@@ -1,0 +1,307 @@
+/*
+ * Общий каркас трёх рабочих вкладок машиниста и содержимое «Простоев».
+ * Источником геометрии заголовка, рабочей зоны и нижнего действия является
+ * один mobile-work-screen; ролевые файлы описывают только своё содержимое.
+ */
+
+.mobile-work-screen,
+.mobile-work-screen *,
+.mobile-work-screen *::before,
+.mobile-work-screen *::after {
+    box-sizing: border-box;
+}
+
+body.excavator-operator-screen .eo-shell .eo-screen.mobile-work-screen[data-eo-screen] {
+    container-type: size;
+    position: absolute !important;
+    inset: calc(env(safe-area-inset-top, 0px) + var(--mobile-shift-role-header-h)) 0 calc(env(safe-area-inset-bottom, 0px) + var(--mobile-shift-role-nav-h)) !important;
+    z-index: 8 !important;
+    inline-size: auto !important;
+    block-size: auto !important;
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    max-inline-size: none !important;
+    max-block-size: none !important;
+    margin: 0 !important;
+    padding: var(--ms-edge) !important;
+    display: none !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: var(--ms-screen-rows) !important;
+    gap: var(--ms-gap) !important;
+    overflow: hidden !important;
+    overscroll-behavior: none !important;
+    color: var(--mobile-shift-text);
+    background: var(--mobile-shift-bg);
+    font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="shift"] .mobile-work-screen[data-eo-screen="shift"]:not([hidden]),
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="face"] .mobile-work-screen[data-eo-screen="face"]:not([hidden]),
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="events"] .mobile-work-screen[data-eo-screen="events"]:not([hidden]) {
+    display: grid !important;
+}
+
+body.excavator-operator-screen .eo-shell .mobile-work-screen[hidden] {
+    display: none !important;
+}
+
+.mobile-shift__action--instant {
+    touch-action: manipulation;
+}
+
+.mobile-shift__action--instant::before {
+    display: none !important;
+}
+
+body.excavator-operator-screen .mobile-downtime.is-shift-inactive .mobile-downtime__reasons,
+body.excavator-operator-screen .mobile-downtime.is-shift-inactive .mobile-downtime__actions {
+    opacity: .32;
+    filter: saturate(.35);
+}
+
+.mobile-downtime {
+    container-name: mobile-downtime;
+}
+
+body.excavator-operator-screen .eo-screen.mobile-work-screen.mobile-downtime[data-eo-screen="events"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: var(--ms-screen-rows) !important;
+    gap: var(--ms-gap) !important;
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    padding: var(--ms-edge) !important;
+    overflow: hidden !important;
+    overscroll-behavior: none !important;
+}
+
+.mobile-downtime__titlebar,
+.mobile-downtime__content,
+.mobile-downtime__total,
+.mobile-downtime__reasons,
+.mobile-downtime__actions {
+    min-inline-size: 0;
+    min-block-size: 0;
+}
+
+.mobile-downtime__content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: var(--ms-standard-field-h) minmax(0, 1fr);
+    gap: var(--ms-gap);
+    overflow: hidden;
+}
+
+body.excavator-operator-screen .mobile-downtime__total.eo-downtime-card {
+    inline-size: 100% !important;
+    block-size: 100% !important;
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    margin: 0 !important;
+    padding: var(--ms-card-pad-y) var(--ms-card-pad-x) !important;
+    display: grid !important;
+    grid-template-columns: clamp(30px, 8vw, 42px) minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: var(--ms-gap) !important;
+    overflow: hidden !important;
+    border-width: 1px !important;
+    border-radius: clamp(7px, 2vw, 10px) !important;
+}
+
+body.excavator-operator-screen .mobile-downtime__total .eo-downtime-state-dot {
+    inline-size: clamp(28px, 7.2vw, 38px) !important;
+    block-size: clamp(28px, 7.2vw, 38px) !important;
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    margin: 0 !important;
+}
+
+body.excavator-operator-screen .mobile-downtime__total b[data-eo-active-duration] {
+    min-inline-size: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    font-size: clamp(24px, 7vw, 34px) !important;
+    font-weight: 750 !important;
+    line-height: 1 !important;
+    text-align: left !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .mobile-downtime__reasons.eo-reason-grid {
+    inline-size: 100% !important;
+    block-size: 100% !important;
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-rows: none !important;
+    grid-auto-flow: row !important;
+    grid-auto-rows: minmax(0, 1fr) !important;
+    align-content: stretch !important;
+    align-items: stretch !important;
+    gap: var(--ms-gap) !important;
+    overflow: hidden !important;
+}
+
+body.excavator-operator-screen .mobile-downtime__reason.eo-reason-action {
+    inline-size: 100% !important;
+    block-size: 100% !important;
+    min-inline-size: 0 !important;
+    min-block-size: 0 !important;
+    margin: 0 !important;
+    padding: clamp(3px, .9vw, 6px) clamp(5px, 1.6vw, 10px) !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) auto !important;
+    place-items: center !important;
+    align-content: center !important;
+    gap: clamp(1px, .45vw, 3px) !important;
+    overflow: hidden !important;
+    border-width: 1px !important;
+    border-radius: clamp(7px, 2vw, 10px) !important;
+    font-family: inherit !important;
+    font-size: clamp(14px, min(4.4vw, 3cqh), 18px) !important;
+    font-weight: 700 !important;
+    line-height: 1.18 !important;
+    touch-action: manipulation !important;
+    user-select: none !important;
+}
+
+body.excavator-operator-screen .mobile-downtime__reason .eo-reason-label {
+    display: -webkit-box !important;
+    min-inline-size: 0 !important;
+    max-inline-size: 100% !important;
+    overflow: hidden !important;
+    line-height: 1.18 !important;
+    text-align: center !important;
+    overflow-wrap: anywhere !important;
+    white-space: normal !important;
+    -webkit-box-orient: vertical !important;
+    -webkit-line-clamp: 2 !important;
+}
+
+body.excavator-operator-screen .mobile-downtime__reason .eo-reason-duration {
+    min-inline-size: max-content !important;
+    max-inline-size: 100% !important;
+    overflow: hidden !important;
+    padding: 1px clamp(4px, 1.2vw, 7px) !important;
+    border: 1px solid rgba(255, 102, 88, .58) !important;
+    border-radius: 999px !important;
+    background: rgba(54, 10, 10, .88) !important;
+    color: #ff6658 !important;
+    box-shadow: inset 0 0 8px rgba(255, 102, 88, .14), 0 0 9px rgba(255, 102, 88, .18) !important;
+    font-size: clamp(12px, min(3.55vw, 2.35cqh), 15px) !important;
+    font-weight: 900 !important;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.08 !important;
+    letter-spacing: .055em !important;
+    text-align: center !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+body.excavator-operator-screen .mobile-downtime__reason.eo-reason-action.is-used:not(.is-selected) {
+    filter: brightness(1.08) saturate(1.04) !important;
+    box-shadow:
+        inset 0 -3px 0 rgba(255, 102, 88, .82),
+        inset 0 0 0 1px color-mix(in srgb, var(--eo-reason-accent) 18%, transparent),
+        0 0 12px rgba(255, 102, 88, .1) !important;
+}
+
+.mobile-downtime__empty {
+    grid-column: 1 / -1;
+    min-inline-size: 0;
+    min-block-size: 0;
+    place-self: stretch;
+}
+
+body.excavator-operator-screen .mobile-downtime__actions.mobile-shift__actions {
+    grid-template-columns: minmax(0, 1fr) !important;
+    block-size: auto !important;
+    min-block-size: 0 !important;
+    margin: 0 !important;
+}
+
+/* A short portrait gives the summary enough intrinsic height for the optional
+   third line in the Fact cell while the two reading cards keep equal rows. */
+@media (orientation: portrait) and (max-height: 620px) {
+    body.excavator-operator-screen .mobile-shift .mobile-shift__content {
+        grid-template-rows: minmax(0, 1.08fr) minmax(0, .92fr) !important;
+    }
+
+    body.excavator-operator-screen .mobile-downtime__reason.eo-reason-action {
+        padding-block: 3px !important;
+    }
+
+    body.excavator-operator-screen .mobile-downtime__reasons.eo-reason-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+    html[data-mobile-shift-orientation="landscape"] body.excavator-operator-screen .mobile-work-controls {
+        --ms-gap: 4px;
+        --ms-section-pad: 5px;
+        --ms-card-pad-x: 6px;
+        --ms-card-pad-y: 1px;
+        --ms-section-size: 11px;
+        --ms-label-size: 9px;
+        --ms-value-size: 18px;
+        --ms-unit-size: 9px;
+        --ms-summary-size: 15px;
+    }
+
+    body.excavator-operator-screen .eo-shell .eo-screen.mobile-work-screen[data-eo-screen] {
+        grid-template-rows: var(--ms-screen-rows-landscape) !important;
+    }
+
+    .mobile-downtime__content {
+        grid-template-columns: minmax(112px, .28fr) minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+    }
+
+    body.excavator-operator-screen .eo-screen.mobile-downtime[data-eo-screen="events"] .mobile-downtime__total.eo-downtime-card {
+        padding: 2px 6px !important;
+        gap: 4px !important;
+    }
+
+    body.excavator-operator-screen .eo-screen.mobile-downtime[data-eo-screen="events"] .mobile-downtime__total b[data-eo-active-duration] {
+        font-size: 26px !important;
+    }
+
+    body.excavator-operator-screen .mobile-downtime__reasons.eo-reason-grid {
+        grid-template-columns: repeat(auto-fit, minmax(min(84px, 100%), 1fr)) !important;
+    }
+
+    body.excavator-operator-screen .mobile-downtime__reason.eo-reason-action {
+        grid-template-rows: minmax(0, 1fr) auto !important;
+        padding: 2px 4px !important;
+        font-size: clamp(11px, min(1.65vw, 5.4cqh), 12px) !important;
+        line-height: 1.03 !important;
+        gap: 1px !important;
+    }
+
+    body.excavator-operator-screen .mobile-downtime__reason .eo-reason-label {
+        -webkit-line-clamp: 2 !important;
+    }
+
+    body.excavator-operator-screen .mobile-downtime__reason .eo-reason-duration {
+        padding: 1px 4px !important;
+        font-size: clamp(10px, min(1.65vw, 5.2cqh), 12px) !important;
+        letter-spacing: .035em !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.excavator-operator-screen .mobile-downtime .mobile-downtime__total.eo-downtime-card.is-active,
+    body.excavator-operator-screen .mobile-downtime .mobile-downtime__reason.eo-reason-action.is-selected,
+    body.excavator-operator-screen .mobile-downtime .mobile-downtime__total.eo-downtime-card.is-active::after,
+    body.excavator-operator-screen .mobile-downtime .mobile-downtime__reason.eo-reason-action.is-selected::after,
+    body.excavator-operator-screen .mobile-downtime .mobile-downtime__total.eo-downtime-card.is-active b[data-eo-active-duration],
+    body.excavator-operator-screen .mobile-downtime .mobile-downtime__total.eo-downtime-card.is-active .eo-downtime-state-icon-pause {
+        animation: none !important;
+    }
+}

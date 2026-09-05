@@ -1,0 +1,102 @@
+/* Цвет и размеры Copper Resources поверх готового компонента Bulma Button
+   1.0.4. Поведение hover/focus/active/disabled остаётся библиотечным; здесь
+   только профильный акцент и геометрия большого мобильного действия. */
+.entry-action.cr-button {
+    --bulma-control-radius: 12px;
+    --bulma-control-border-width: 1px;
+    --bulma-control-height: 58px;
+    --bulma-control-line-height: 1.2;
+    --bulma-control-size: clamp(16px, 4.6vw, 19px);
+    --bulma-control-padding-vertical: .75em;
+    --bulma-control-padding-horizontal: 1.25em;
+    --bulma-duration: 140ms;
+    --bulma-button-weight: 800;
+    --bulma-button-border-width: 1px;
+    --bulma-button-padding-vertical: .75em;
+    --bulma-button-padding-horizontal: 1.25em;
+    --bulma-button-disabled-background-color: var(--entry-action-accent);
+    --bulma-button-disabled-border-color: transparent;
+    --bulma-button-disabled-shadow: none;
+    --bulma-button-disabled-opacity: .55;
+
+    width: 100%;
+    min-height: 58px;
+    box-sizing: border-box;
+    border-radius: var(--bulma-control-radius);
+    border-color: rgba(255, 255, 255, .24);
+    border-color: color-mix(in srgb, var(--entry-action-accent) 72%, white);
+    background-color: var(--entry-action-accent);
+    color: var(--entry-action-ink);
+    font-family: inherit;
+    font-weight: 800;
+    letter-spacing: .005em;
+    text-decoration: none;
+    box-shadow: 0 10px 26px var(--entry-action-glow);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition-property: background-color, border-color, box-shadow, filter, transform;
+}
+
+body.start-page .entry-action {
+    --entry-action-accent: var(--start-accent);
+    --entry-action-glow: var(--start-glow);
+    --entry-action-ink: var(--start-ink);
+}
+
+body.login-page .entry-action {
+    --entry-action-accent: var(--login-accent);
+    --entry-action-glow: var(--login-glow);
+    --entry-action-ink: var(--login-ink);
+}
+
+.start-screen__submit.entry-action {
+    margin-top: 14px;
+}
+
+body.login-page.login-fullscreen .role-app-install__button.entry-action {
+    letter-spacing: .01em;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .entry-action.cr-button:hover {
+        border-color: rgba(255, 255, 255, .42);
+        border-color: color-mix(in srgb, var(--entry-action-accent) 58%, white);
+        background-color: color-mix(in srgb, var(--entry-action-accent) 92%, white);
+        box-shadow: 0 12px 30px var(--entry-action-glow);
+        transform: translateY(-1px);
+    }
+}
+
+.entry-action.cr-button:focus-visible {
+    border-color: #f2f8fa;
+    box-shadow:
+        0 0 0 3px color-mix(in srgb, var(--entry-action-accent) 36%, transparent),
+        0 10px 26px var(--entry-action-glow);
+    outline: none;
+}
+
+.entry-action.cr-button:active,
+.entry-action.cr-button.cr-is-active {
+    border-color: color-mix(in srgb, var(--entry-action-accent) 76%, #02080b);
+    background-color: color-mix(in srgb, var(--entry-action-accent) 91%, #02080b);
+    box-shadow: 0 4px 12px var(--entry-action-glow);
+    filter: none;
+    transform: translateY(1px);
+}
+
+.entry-action.cr-button[disabled],
+fieldset[disabled] .entry-action.cr-button {
+    border-color: transparent;
+    background-color: var(--entry-action-accent);
+    box-shadow: none;
+    cursor: not-allowed;
+    filter: saturate(.65);
+    opacity: .55;
+    transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .entry-action.cr-button {
+        transition: none;
+    }
+}

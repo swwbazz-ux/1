@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from io import BytesIO
 from pathlib import Path
 
@@ -33,6 +34,41 @@ from .models import (
     WorkSchedule,
 )
 from .work_profiles import legacy_work_category_for_specialization, validate_base_specialization
+
+
+DRIVER_SHIFT_READING_NAMES = (
+    'start_fuel',
+    'start_mileage',
+    'start_engine_hours',
+    'end_fuel',
+    'end_mileage',
+    'end_engine_hours',
+)
+
+
+def whole_shift_reading_value(value):
+    if value in {None, ''}:
+        return value
+    try:
+        parsed = Decimal(value)
+    except (InvalidOperation, TypeError, ValueError):
+        return value
+    return str(int(parsed.to_integral_value(rounding=ROUND_HALF_UP)))
+
+
+def normalize_whole_shift_initial(form):
+    if form.is_bound:
+        return
+    for field_name in DRIVER_SHIFT_READING_NAMES:
+        if field_name in form.fields and field_name in form.initial:
+            form.initial[field_name] = whole_shift_reading_value(form.initial[field_name])
+
+
+def reject_fractional_shift_readings(form, cleaned_data, field_names):
+    for field_name in field_names:
+        value = cleaned_data.get(field_name)
+        if value is not None and value != value.to_integral_value():
+            form.add_error(field_name, 'Укажите целое число без точки и запятой.')
 
 
 MAX_EMPLOYEE_PHOTO_UPLOAD_SIZE = 5 * 1024 * 1024
@@ -992,9 +1028,9 @@ class DriverOpenShiftForm(forms.ModelForm):
             'start_engine_hours': 'Моточасы на начало смены',
         }
         widgets = {
-            'start_fuel': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
-            'start_mileage': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
-            'start_engine_hours': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
+            'start_fuel': forms.NumberInput(attrs={'step': '1', 'min': '0', 'inputmode': 'numeric', 'pattern': '[0-9]*'}),
+            'start_mileage': forms.NumberInput(attrs={'step': '1', 'min': '0', 'inputmode': 'numeric', 'pattern': '[0-9]*'}),
+            'start_engine_hours': forms.NumberInput(attrs={'step': '1', 'min': '0', 'inputmode': 'numeric', 'pattern': '[0-9]*'}),
         }
 
     def __init__(self, *args, employee=None, work_assignment=None, **kwargs):
@@ -1006,12 +1042,18 @@ class DriverOpenShiftForm(forms.ModelForm):
         self.fields['start_fuel'].required = True
         self.fields['start_mileage'].required = True
         self.fields['start_engine_hours'].required = True
+        normalize_whole_shift_initial(self)
         if work_assignment:
             self.fields.pop('shift_type')
             self.fields.pop('truck')
 
     def clean(self):
         cleaned_data = super().clean()
+        reject_fractional_shift_readings(
+            self,
+            cleaned_data,
+            ('start_fuel', 'start_mileage', 'start_engine_hours'),
+        )
         if self.work_assignment:
             shift_type = self.work_assignment.shift_type
             truck = self.work_assignment.equipment
@@ -1035,11 +1077,12 @@ class DriverOpenShiftForm(forms.ModelForm):
 
             raise ValidationError(open_shift_conflict_message(truck_busy_shift))
 
-        from shifts.services import validate_driver_fuel_reading
-        try:
-            validate_driver_fuel_reading(truck, cleaned_data.get('start_fuel'))
-        except ValidationError as error:
-            self.add_error('start_fuel', error)
+        if 'start_fuel' not in self.errors:
+            from shifts.services import validate_driver_fuel_reading
+            try:
+                validate_driver_fuel_reading(truck, cleaned_data.get('start_fuel'))
+            except ValidationError as error:
+                self.add_error('start_fuel', error)
 
         return cleaned_data
 
@@ -1056,18 +1099,24 @@ class DriverCloseShiftForm(forms.ModelForm):
             'end_engine_hours': 'Моточасы на конец смены',
         }
         widgets = {
-            'end_fuel': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
-            'end_mileage': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
-            'end_engine_hours': forms.NumberInput(attrs={'step': '0.01', 'min': '0'}),
+            'end_fuel': forms.NumberInput(attrs={'step': '1', 'min': '0', 'inputmode': 'numeric', 'pattern': '[0-9]*'}),
+            'end_mileage': forms.NumberInput(attrs={'step': '1', 'min': '0', 'inputmode': 'numeric', 'pattern': '[0-9]*'}),
+            'end_engine_hours': forms.NumberInput(attrs={'step': '1', 'min': '0', 'inputmode': 'numeric', 'pattern': '[0-9]*'}),
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for field_name in ('end_fuel', 'end_mileage', 'end_engine_hours'):
             self.fields[field_name].required = True
+        normalize_whole_shift_initial(self)
 
     def clean(self):
         cleaned_data = super().clean()
+        reject_fractional_shift_readings(
+            self,
+            cleaned_data,
+            ('end_fuel', 'end_mileage', 'end_engine_hours'),
+        )
         if self.instance and self.instance.pk and not self.errors:
             from shifts.services import validate_driver_close_readings
             try:

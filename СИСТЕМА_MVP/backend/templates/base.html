@@ -296,6 +296,8 @@
             align-items: center;
             gap: 8px;
             box-sizing: border-box;
+            width: max-content;
+            max-width: min(420px, calc(100vw - 32px));
             padding: 6px 13px 6px 10px;
             border: 1px solid rgba(251, 191, 36, .5);
             border-radius: 999px;
@@ -305,8 +307,9 @@
             font: 700 12.5px/1 system-ui, sans-serif;
             letter-spacing: .01em;
         }
-        .app-contract-banner i {
+        .app-contract-banner [data-app-contract-spinner] {
             display: block;
+            flex: 0 0 auto;
             width: 13px;
             height: 13px;
             border: 2px solid rgba(253, 230, 138, .28);
@@ -314,9 +317,62 @@
             border-radius: 50%;
             animation: app-contract-spin 720ms linear infinite;
         }
+        .app-contract-banner [data-app-contract-message] {
+            min-width: 0;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+        .app-contract-banner [data-app-contract-retry] {
+            min-height: 28px;
+            padding: 4px 10px;
+            border: 1px solid rgba(253, 230, 138, .72);
+            border-radius: 999px;
+            background: #fbbf24;
+            color: #2b1c04;
+            font: 800 12px/1 system-ui, sans-serif;
+            pointer-events: auto;
+            cursor: pointer;
+        }
+        .app-contract-banner [data-app-contract-retry][hidden],
+        .app-contract-banner [data-app-contract-spinner][hidden] {
+            display: none;
+        }
+        /* На узком экране и при увеличенном шрифте сообщение не должно
+           выходить за край. Все три роли используют этот общий баннер. */
+        @media (max-width: 520px), (max-height: 520px) {
+            .app-contract-banner {
+                left: max(8px, env(safe-area-inset-left, 0px));
+                right: max(8px, env(safe-area-inset-right, 0px));
+                transform: none;
+                width: auto;
+                max-width: none;
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr);
+                grid-template-rows: auto auto;
+                column-gap: 8px;
+                row-gap: 6px;
+                align-items: center;
+                border-radius: 14px;
+            }
+            .app-contract-banner [data-app-contract-spinner] {
+                grid-column: 1;
+                grid-row: 1;
+            }
+            .app-contract-banner [data-app-contract-message] {
+                grid-column: 2;
+                grid-row: 1;
+                white-space: normal;
+                overflow-wrap: anywhere;
+            }
+            .app-contract-banner [data-app-contract-retry] {
+                grid-column: 2;
+                grid-row: 2;
+                justify-self: end;
+            }
+        }
         @keyframes app-contract-spin { to { transform: rotate(360deg); } }
         @media (prefers-reduced-motion: reduce) {
-            .app-contract-banner i { animation-duration: 2.4s; }
+            .app-contract-banner [data-app-contract-spinner] { animation-duration: 2.4s; }
         }
         .app-inactive-role-banner {
             top: 50%;
@@ -382,6 +438,13 @@
     (function (window, document) {
         "use strict";
 
+        /* /start/ is a neutral application selector, not a role PWA shell.
+           A previously installed root-scope worker on an Android phone can
+           emit controllerchange while this page is open. The role contract
+           guard must not react here: otherwise the result screen is reloaded
+           repeatedly before the user can open the selected application. */
+        if (/^\/start\/?$/.test(window.location.pathname || "")) return;
+
         var state = {
             javascriptVersion: "",
             serviceWorker: null,
@@ -390,20 +453,40 @@
             serviceWorkerUnavailable: false,
             ready: false,
             locked: true,
-            reloadCount: 0
+            reloadCount: 0,
+            expected: null,
+            javascriptMatches: false,
+            serviceWorkerMatches: false,
+            serverMatches: false,
+            lockReason: "initializing"
         };
         /* A phone where the service worker never registers — private mode, full
            storage, an old browser, aggressive battery saving — would otherwise
            stay locked out of every action forever, with no way to recover. The
            server side already degrades this way; the worker side must too. */
         var SERVICE_WORKER_GRACE_MS = 12000;
+        var CONTRACT_BANNER_DELAY_MS = 700;
+        var REGISTRATION_UPDATE_TIMEOUT_MS = 8000;
+        var REGISTRATION_UPDATE_SETTLE_MS = 4000;
+        var REGISTRATION_UPDATE_RETRY_DELAYS_MS = [700, 1800];
+        var REGISTRATION_UPDATE_MAX_ATTEMPTS = REGISTRATION_UPDATE_RETRY_DELAYS_MS.length + 1;
         var serviceWorkerGraceTimer = null;
         var serverGraceTimer = null;
+        var contractBannerDelayTimer = null;
+        var roleDialogObserver = null;
         var registration = null;
         var registrationPromise = null;
         var automaticUpdateKey = "";
         var automaticUpdatePromise = null;
         var automaticUpdateFailed = false;
+        var automaticUpdateAttempt = 0;
+        var automaticUpdateExhausted = false;
+        var automaticUpdateRetryTimer = null;
+        var automaticUpdateSettleTimer = null;
+        var automaticUpdateTarget = null;
+        var automaticUpdateSequence = 0;
+        var automaticUpdateState = "idle";
+        var automaticUpdateFailure = "";
         var manualUpdatePromise = null;
         var updateFlightRegistration = null;
         var updateFlightKey = "";
@@ -413,6 +496,13 @@
         var controllerReloadPending = false;
         var controllerVersionPending = false;
         var unsafeWorkChecks = [];
+
+        /* APK has its own startup gate and signed-update path. An old browser
+           worker must not outlive an APK update and lock a usable work screen. */
+        function isNativeApp() {
+            return !!document.body
+                && document.body.dataset.nativeApp === "true";
+        }
 
         function expectedContract() {
             var body = document.body;
@@ -448,37 +538,232 @@
                 && candidate.roleCode === expected.roleCode;
         }
 
-        /* Driver, excavator and mining master each ship their own update dialog
-           that names the current and the new version and offers to install it.
-           For them this generic banner is a second, cruder notice on top of a
-           better one, so let the app's own dialog do the talking. */
-        function hasOwnUpdateDialog() {
-            return !!document.querySelector(
-                "[data-driver-pwa-update-modal], [data-eo-pwa-update-modal], [data-mm-pwa-update-modal]"
+        function diagnosticContract(contract, unavailable) {
+            if (unavailable) return "unavailable";
+            return contractKey(contract) || "pending";
+        }
+
+        function syncDiagnostics() {
+            if (!document.body) return;
+            document.body.dataset.appContractExpected = diagnosticContract(state.expected, false);
+            document.body.dataset.appContractJavascript = state.javascriptVersion || "pending";
+            document.body.dataset.appContractServiceWorker = diagnosticContract(
+                state.serviceWorker,
+                state.serviceWorkerUnavailable
             );
+            document.body.dataset.appContractServer = diagnosticContract(
+                state.server,
+                state.serverUnavailable
+            );
+            document.body.dataset.appContractLockReason = state.lockReason || "unknown";
+            document.body.dataset.appContractUpdateState = automaticUpdateState;
+            document.body.dataset.appContractUpdateAttempt = String(automaticUpdateAttempt);
+            document.body.dataset.appContractUpdateMaxAttempts = String(
+                REGISTRATION_UPDATE_MAX_ATTEMPTS
+            );
+            document.body.dataset.appContractUpdateFailure = automaticUpdateFailure || "none";
+        }
+
+        var roleUpdateDialogSelectors = [
+            "[data-driver-pwa-update-modal]",
+            "[data-eo-pwa-update-modal]",
+            "[data-mm-pwa-update-modal]"
+        ];
+
+        function isRoleUpdateDialog(node) {
+            if (!node) return false;
+            for (var index = 0; index < roleUpdateDialogSelectors.length; index += 1) {
+                var selector = roleUpdateDialogSelectors[index];
+                if (node.matches && node.matches(selector)) return true;
+                if (
+                    node.hasAttribute
+                    && node.hasAttribute(selector.slice(1, -1))
+                ) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function nodeContainsRoleUpdateDialog(node) {
+            if (isRoleUpdateDialog(node)) return true;
+            if (!node || !node.querySelector) return false;
+            for (var index = 0; index < roleUpdateDialogSelectors.length; index += 1) {
+                if (node.querySelector(roleUpdateDialogSelectors[index])) return true;
+            }
+            return false;
+        }
+
+        function isVisibleRoleUpdateDialog(node) {
+            return !!node
+                && !node.hidden
+                && !(node.hasAttribute && node.hasAttribute("hidden"));
+        }
+
+        /* Driver, excavator and mining master each ship their own update dialog.
+           Suppress the generic notice only while that richer recovery UI is
+           actually visible. A hidden modal must not make a locked page look
+           usable while the mutation guard is still active. */
+        function hasOwnUpdateDialog() {
+            for (var index = 0; index < roleUpdateDialogSelectors.length; index += 1) {
+                var modal = document.querySelector(roleUpdateDialogSelectors[index]);
+                if (isVisibleRoleUpdateDialog(modal)) return true;
+            }
+            return false;
+        }
+
+        function isEntryScreen() {
+            return !!document.body && document.body.classList.contains("login-page");
+        }
+
+        function removeGenericBanner() {
+            var banner = document.querySelector("[data-app-contract-banner]");
+            if (banner && banner.remove) banner.remove();
+        }
+
+        function cancelBannerDelay() {
+            if (contractBannerDelayTimer === null) return;
+            window.clearTimeout(contractBannerDelayTimer);
+            contractBannerDelayTimer = null;
+        }
+
+        function updateBannerPresentation(banner) {
+            if (!banner) return;
+            var recoveryRequired = automaticUpdateExhausted;
+            var spinner = banner.querySelector
+                ? banner.querySelector("[data-app-contract-spinner]")
+                : null;
+            var message = banner.querySelector
+                ? banner.querySelector("[data-app-contract-message]")
+                : null;
+            var retry = banner.querySelector
+                ? banner.querySelector("[data-app-contract-retry]")
+                : null;
+            banner.dataset.appContractState = recoveryRequired
+                ? "recovery-required"
+                : automaticUpdateState;
+            banner.setAttribute("aria-live", recoveryRequired ? "assertive" : "polite");
+            banner.setAttribute(
+                "aria-label",
+                recoveryRequired
+                    ? "Обновление приложения не удалось. Доступна повторная попытка."
+                    : "Проверяем рабочий экран, изменения временно недоступны"
+            );
+            if (spinner) spinner.hidden = recoveryRequired;
+            if (message) {
+                message.textContent = recoveryRequired
+                    ? "Обновление не удалось."
+                    : automaticUpdateState === "retry-wait"
+                        ? "Повторная проверка обновления…"
+                        : "Проверяем рабочий экран…";
+            }
+            if (retry) {
+                retry.hidden = !recoveryRequired;
+                retry.disabled = !recoveryRequired;
+            }
+        }
+
+        function createGenericBanner() {
+            var banner = document.createElement("div");
+            banner.className = "app-contract-banner";
+            banner.setAttribute("data-app-contract-banner", "");
+            banner.setAttribute("role", "status");
+
+            var spinner = document.createElement("i");
+            spinner.setAttribute("data-app-contract-spinner", "");
+            spinner.setAttribute("aria-hidden", "true");
+            banner.appendChild(spinner);
+
+            var message = document.createElement("span");
+            message.setAttribute("data-app-contract-message", "");
+            banner.appendChild(message);
+
+            var retry = document.createElement("button");
+            retry.setAttribute("type", "button");
+            retry.setAttribute("data-app-contract-retry", "");
+            retry.textContent = "Повторить";
+            retry.hidden = true;
+            retry.addEventListener("click", function () {
+                retryContractRecovery();
+            });
+            banner.appendChild(retry);
+            updateBannerPresentation(banner);
+            return banner;
         }
 
         function ensureBanner(locked) {
             if (!document.body || !document.createElement) return;
             if (hasOwnUpdateDialog()) {
-                var own = document.querySelector("[data-app-contract-banner]");
-                if (own && own.remove) own.remove();
+                cancelBannerDelay();
+                removeGenericBanner();
                 return;
             }
             var banner = document.querySelector("[data-app-contract-banner]");
             if (!locked) {
-                if (banner && banner.remove) banner.remove();
+                cancelBannerDelay();
+                removeGenericBanner();
                 return;
             }
-            if (banner) return;
-            banner = document.createElement("div");
-            banner.className = "app-contract-banner";
-            banner.setAttribute("data-app-contract-banner", "");
-            banner.setAttribute("role", "status");
-            banner.setAttribute("aria-live", "assertive");
-            banner.innerHTML = '<i aria-hidden="true"></i><span>Обновление</span>';
-            banner.setAttribute("aria-label", "Приложение обновляется, изменения временно недоступны");
-            document.body.prepend(banner);
+            if (banner) {
+                updateBannerPresentation(banner);
+                return;
+            }
+            if (contractBannerDelayTimer !== null) return;
+            contractBannerDelayTimer = window.setTimeout(function () {
+                contractBannerDelayTimer = null;
+                if (!state.locked || hasOwnUpdateDialog() || !document.body) return;
+                var delayedBanner = document.querySelector("[data-app-contract-banner]");
+                if (!delayedBanner) {
+                    delayedBanner = createGenericBanner();
+                    document.body.prepend(delayedBanner);
+                }
+                updateBannerPresentation(delayedBanner);
+            }, CONTRACT_BANNER_DELAY_MS);
+        }
+
+        function roleDialogMutationAffectsBanner(mutations) {
+            for (var index = 0; index < mutations.length; index += 1) {
+                var mutation = mutations[index];
+                if (
+                    mutation.type === "attributes"
+                    && mutation.attributeName === "hidden"
+                    && isRoleUpdateDialog(mutation.target)
+                ) {
+                    return true;
+                }
+                if (mutation.type !== "childList") continue;
+                var nodes = [];
+                if (mutation.addedNodes) {
+                    nodes = nodes.concat(Array.prototype.slice.call(mutation.addedNodes));
+                }
+                if (mutation.removedNodes) {
+                    nodes = nodes.concat(Array.prototype.slice.call(mutation.removedNodes));
+                }
+                for (var nodeIndex = 0; nodeIndex < nodes.length; nodeIndex += 1) {
+                    if (nodeContainsRoleUpdateDialog(nodes[nodeIndex])) return true;
+                }
+            }
+            return false;
+        }
+
+        function observeRoleUpdateDialogs() {
+            if (
+                roleDialogObserver
+                || !window.MutationObserver
+                || !document.body
+            ) {
+                return;
+            }
+            roleDialogObserver = new window.MutationObserver(function (mutations) {
+                if (!roleDialogMutationAffectsBanner(mutations || [])) return;
+                ensureBanner(state.locked);
+            });
+            roleDialogObserver.observe(document.body, {
+                attributes: true,
+                attributeFilter: ["hidden"],
+                childList: true,
+                subtree: true
+            });
         }
 
         function contractKey(contract) {
@@ -507,6 +792,7 @@
         }
 
         function configuredRegistration() {
+            if (isNativeApp()) return Promise.resolve(null);
             if (registration) return Promise.resolve(registration);
             if (registrationPromise) return registrationPromise;
             var serviceWorker = window.navigator && window.navigator.serviceWorker;
@@ -552,6 +838,134 @@
             return registrationPromise;
         }
 
+        function unregisterNativeAppServiceWorkers() {
+            if (!isNativeApp()) return;
+            var serviceWorker = window.navigator && window.navigator.serviceWorker;
+            if (!serviceWorker || !serviceWorker.getRegistrations) return;
+            Promise.resolve(serviceWorker.getRegistrations()).then(function (registrations) {
+                return Promise.all((registrations || []).map(function (currentRegistration) {
+                    if (!currentRegistration || !currentRegistration.unregister) {
+                        return null;
+                    }
+                    return Promise.resolve(currentRegistration.unregister()).catch(function () {
+                        return false;
+                    });
+                }));
+            }).catch(function () {
+                /* Native traffic stays usable even if WebView storage refuses cleanup. */
+            });
+        }
+
+        function updateError(code) {
+            var error = new Error(code);
+            error.code = code;
+            return error;
+        }
+
+        function withTimeout(promise, timeoutMs) {
+            return new Promise(function (resolve, reject) {
+                var settled = false;
+                var timeout = window.setTimeout(function () {
+                    if (settled) return;
+                    settled = true;
+                    reject(updateError("update-timeout"));
+                }, timeoutMs);
+                Promise.resolve(promise).then(function (value) {
+                    if (settled) return;
+                    settled = true;
+                    window.clearTimeout(timeout);
+                    resolve(value);
+                }, function (error) {
+                    if (settled) return;
+                    settled = true;
+                    window.clearTimeout(timeout);
+                    reject(error || updateError("update-error"));
+                });
+            });
+        }
+
+        function clearAutomaticUpdateTimers() {
+            if (automaticUpdateRetryTimer !== null) {
+                window.clearTimeout(automaticUpdateRetryTimer);
+                automaticUpdateRetryTimer = null;
+            }
+            if (automaticUpdateSettleTimer !== null) {
+                window.clearTimeout(automaticUpdateSettleTimer);
+                automaticUpdateSettleTimer = null;
+            }
+        }
+
+        function finishAutomaticUpdateSequence() {
+            automaticUpdateSequence += 1;
+            clearAutomaticUpdateTimers();
+            automaticUpdateKey = "";
+            automaticUpdateTarget = null;
+            automaticUpdatePromise = null;
+            automaticUpdateFailed = false;
+            automaticUpdateAttempt = 0;
+            automaticUpdateExhausted = false;
+            automaticUpdateState = "ready";
+            automaticUpdateFailure = "";
+            updateFlightRegistration = null;
+            updateFlightKey = "";
+            updateFlightPromise = null;
+        }
+
+        function setAutomaticUpdateState(nextState, failureCode) {
+            automaticUpdateState = nextState;
+            automaticUpdateFailure = failureCode || "";
+            syncDiagnostics();
+            updateBannerPresentation(
+                document.querySelector("[data-app-contract-banner]")
+            );
+        }
+
+        function resetAutomaticUpdateSequence(targetContract) {
+            automaticUpdateSequence += 1;
+            clearAutomaticUpdateTimers();
+            automaticUpdateKey = contractKey(targetContract);
+            automaticUpdateTarget = targetContract;
+            automaticUpdatePromise = null;
+            automaticUpdateFailed = false;
+            automaticUpdateAttempt = 0;
+            automaticUpdateExhausted = false;
+            setAutomaticUpdateState("verifying", "");
+        }
+
+        function automaticUpdateFailureCode(error) {
+            if (error && error.code === "update-timeout") return "update-timeout";
+            if (error && error.code === "registration-unavailable") {
+                return "registration-unavailable";
+            }
+            return "update-error";
+        }
+
+        function markAutomaticUpdateExhausted(failureCode) {
+            clearAutomaticUpdateTimers();
+            automaticUpdateFailed = true;
+            automaticUpdateExhausted = true;
+            automaticUpdatePromise = null;
+            setAutomaticUpdateState("recovery-required", failureCode || "update-error");
+            ensureBanner(state.locked);
+        }
+
+        function scheduleAutomaticUpdateSettle(targetKey, sequence) {
+            if (automaticUpdateSettleTimer !== null) {
+                window.clearTimeout(automaticUpdateSettleTimer);
+            }
+            automaticUpdateSettleTimer = window.setTimeout(function () {
+                automaticUpdateSettleTimer = null;
+                if (
+                    sequence !== automaticUpdateSequence
+                    || targetKey !== automaticUpdateKey
+                    || !state.locked
+                ) {
+                    return;
+                }
+                markAutomaticUpdateExhausted("verification-timeout");
+            }, REGISTRATION_UPDATE_SETTLE_MS);
+        }
+
         function requestRegistrationUpdate(currentRegistration, targetContract) {
             if (!currentRegistration || !currentRegistration.update) {
                 return Promise.resolve(currentRegistration || null);
@@ -568,8 +982,15 @@
             }
             updateFlightRegistration = currentRegistration;
             updateFlightKey = targetKey;
-            updateFlightPromise = Promise.resolve(
-                currentRegistration.update()
+            var updateRequest;
+            try {
+                updateRequest = currentRegistration.update();
+            } catch (error) {
+                updateRequest = Promise.reject(error);
+            }
+            updateFlightPromise = withTimeout(
+                updateRequest,
+                REGISTRATION_UPDATE_TIMEOUT_MS
             ).then(function () {
                 return currentRegistration;
             });
@@ -584,39 +1005,101 @@
             return currentFlight;
         }
 
-        function requestControlledUpdate(targetContract) {
+        function requestControlledUpdate(targetContract, options) {
+            options = options || {};
             var nextKey = contractKey(targetContract);
-            if (!nextKey || automaticUpdateKey === nextKey) {
-                return automaticUpdatePromise || Promise.resolve(null);
+            if (!nextKey) return Promise.resolve(null);
+            if (options.reset || automaticUpdateKey !== nextKey) {
+                resetAutomaticUpdateSequence(targetContract);
             }
-            automaticUpdateKey = nextKey;
+            if (automaticUpdateExhausted) return Promise.resolve(null);
+            if (automaticUpdateRetryTimer !== null) return Promise.resolve(null);
+            if (automaticUpdatePromise) return automaticUpdatePromise;
+
+            automaticUpdateAttempt += 1;
             automaticUpdateFailed = false;
-            automaticUpdatePromise = configuredRegistration().then(function (currentRegistration) {
+            setAutomaticUpdateState("updating", "");
+            var sequence = automaticUpdateSequence;
+            var attemptPromise = configuredRegistration().then(function (currentRegistration) {
                 if (!currentRegistration || !currentRegistration.update) {
-                    automaticUpdateFailed = true;
-                    return null;
+                    throw updateError("registration-unavailable");
                 }
                 return requestRegistrationUpdate(
                     currentRegistration,
                     targetContract
-                ).then(function () {
-                    automaticUpdateFailed = false;
-                    return currentRegistration;
-                });
-            }).catch(function () {
-                automaticUpdateFailed = true;
-                return null;
+                );
             });
-            return automaticUpdatePromise;
+            automaticUpdatePromise = attemptPromise;
+            attemptPromise.then(function (currentRegistration) {
+                if (
+                    sequence !== automaticUpdateSequence
+                    || nextKey !== automaticUpdateKey
+                ) {
+                    return;
+                }
+                automaticUpdateFailed = false;
+                setAutomaticUpdateState("verifying", "");
+                requestWorkerVersion(registrationWorker(currentRegistration));
+                scheduleAutomaticUpdateSettle(nextKey, sequence);
+            }, function (error) {
+                if (
+                    sequence !== automaticUpdateSequence
+                    || nextKey !== automaticUpdateKey
+                ) {
+                    return;
+                }
+                automaticUpdatePromise = null;
+                automaticUpdateFailed = true;
+                var failureCode = automaticUpdateFailureCode(error);
+                if (automaticUpdateAttempt >= REGISTRATION_UPDATE_MAX_ATTEMPTS) {
+                    markAutomaticUpdateExhausted(failureCode);
+                    return;
+                }
+                var delay = REGISTRATION_UPDATE_RETRY_DELAYS_MS[
+                    Math.max(0, automaticUpdateAttempt - 1)
+                ];
+                setAutomaticUpdateState("retry-wait", failureCode);
+                automaticUpdateRetryTimer = window.setTimeout(function () {
+                    automaticUpdateRetryTimer = null;
+                    if (
+                        sequence !== automaticUpdateSequence
+                        || nextKey !== automaticUpdateKey
+                        || !state.locked
+                    ) {
+                        return;
+                    }
+                    requestControlledUpdate(automaticUpdateTarget);
+                }, delay);
+            });
+            return attemptPromise;
+        }
+
+        function retryContractRecovery() {
+            if (!state.locked) return Promise.resolve(null);
+            var target = state.server && !state.serverUnavailable
+                ? state.server
+                : expectedContract();
+            return requestControlledUpdate(target, {reset: true});
         }
 
         function requestManualUpdate() {
+            if (isNativeApp()) {
+                return Promise.resolve({status: "native-app", registration: null});
+            }
             if (manualUpdatePromise) return manualUpdatePromise;
             if (registrationNeedsRecovery) {
                 registrationPromise = null;
             }
+            var manualTarget = state.server && !state.serverUnavailable
+                ? state.server
+                : expectedContract();
+            if (automaticUpdateExhausted || automaticUpdateRetryTimer !== null) {
+                resetAutomaticUpdateSequence(manualTarget);
+            }
+            setAutomaticUpdateState("updating", "");
             manualUpdatePromise = configuredRegistration().then(function (currentRegistration) {
                 if (!currentRegistration) {
+                    markAutomaticUpdateExhausted("registration-unavailable");
                     return {status: "unavailable", registration: null};
                 }
                 if (!currentRegistration.update) {
@@ -627,16 +1110,23 @@
                 }
                 return requestRegistrationUpdate(
                     currentRegistration,
-                    state.server || expectedContract()
+                    manualTarget
                 ).then(function () {
                     automaticUpdateFailed = false;
+                    automaticUpdateExhausted = false;
+                    setAutomaticUpdateState("verifying", "");
+                    scheduleAutomaticUpdateSettle(
+                        contractKey(manualTarget),
+                        automaticUpdateSequence
+                    );
                     return {
                         status: currentRegistration.waiting ? "update-ready" : "current",
                         registration: currentRegistration
                     };
                 });
-            }).catch(function () {
+            }).catch(function (error) {
                 registrationNeedsRecovery = true;
+                markAutomaticUpdateExhausted(automaticUpdateFailureCode(error));
                 return {status: "error", registration: null};
             }).finally(function () {
                 manualUpdatePromise = null;
@@ -657,19 +1147,69 @@
                 || sameContract(state.serviceWorker, expected);
             var serverMatches = state.serverUnavailable || sameContract(state.server, expected);
             state.ready = hasContract && javascriptMatches && workerMatches && serverMatches;
-            state.locked = hasContract && !state.ready;
+            /* На экране входа service worker нужен для установки PWA,
+               но его короткая проверка не должна блокировать PIN, показывать
+               плашку «Обновление» или перезагружать ввод. Рабочие экраны
+               сохраняют строгую проверку контракта. */
+            state.locked = hasContract
+                && !state.ready
+                && !isEntryScreen()
+                && !isNativeApp();
+            state.expected = expected;
+            state.javascriptMatches = javascriptMatches;
+            state.serviceWorkerMatches = workerMatches;
+            state.serverMatches = serverMatches;
+            var lockReasons = [];
+            if (!hasContract) {
+                lockReasons.push("metadata-missing");
+            } else if (state.ready) {
+                lockReasons.push("ready");
+            } else if (isEntryScreen()) {
+                lockReasons.push("entry-screen-bypass");
+            } else {
+                if (!state.javascriptVersion) {
+                    lockReasons.push("javascript-pending");
+                } else if (!javascriptMatches) {
+                    lockReasons.push("javascript-mismatch");
+                }
+                if (!state.serviceWorkerUnavailable) {
+                    if (!state.serviceWorker) {
+                        lockReasons.push("service-worker-pending");
+                    } else if (!workerMatches) {
+                        lockReasons.push("service-worker-mismatch");
+                    }
+                }
+                if (!state.serverUnavailable) {
+                    if (!state.server) {
+                        lockReasons.push("server-pending");
+                    } else if (!serverMatches) {
+                        lockReasons.push("server-mismatch");
+                    }
+                }
+            }
+            state.lockReason = lockReasons.join(",") || "verifying";
             document.body.dataset.appContractReady = state.ready ? "true" : "false";
             document.body.dataset.appContractLocked = state.locked ? "true" : "false";
             document.body.classList.toggle("is-app-contract-locked", state.locked);
+            if (state.ready) {
+                finishAutomaticUpdateSequence();
+            }
+            syncDiagnostics();
             ensureBanner(state.locked);
             if (
                 state.locked
                 && state.javascriptVersion
                 && state.serviceWorker
-                && state.server
-                && !state.serverUnavailable
+                && (
+                    (state.server && !state.serverUnavailable)
+                    || (javascriptMatches && !workerMatches)
+                )
             ) {
-                requestControlledUpdate(state.server);
+                requestControlledUpdate(
+                    state.server && !state.serverUnavailable
+                        ? state.server
+                        : expected
+                );
             }
             if (controllerReloadPending) {
                 reloadOnceForExpectedContract();
@@ -868,11 +1408,23 @@
                 javascriptVersion: state.javascriptVersion,
                 serviceWorker: state.serviceWorker,
                 server: state.server,
+                expected: state.expected,
                 serverUnavailable: state.serverUnavailable,
                 serviceWorkerUnavailable: state.serviceWorkerUnavailable,
+                javascriptMatches: state.javascriptMatches,
+                serviceWorkerMatches: state.serviceWorkerMatches,
+                serverMatches: state.serverMatches,
                 ready: state.ready,
                 locked: state.locked,
-                reloadCount: state.reloadCount
+                lockReason: state.lockReason,
+                reloadCount: state.reloadCount,
+                update: {
+                    state: automaticUpdateState,
+                    attempt: automaticUpdateAttempt,
+                    maxAttempts: REGISTRATION_UPDATE_MAX_ATTEMPTS,
+                    exhausted: automaticUpdateExhausted,
+                    failure: automaticUpdateFailure
+                }
             };
         }
 
@@ -880,6 +1432,7 @@
             var node = target;
             var recoveryAttributes = [
                 "data-validated-login",
+                "data-app-contract-retry",
                 "data-driver-shift-update",
                 "data-driver-pwa-update-nav-target",
                 "data-driver-pwa-update-apply",
@@ -953,12 +1506,18 @@
             getState: getState,
             getRegistration: configuredRegistration,
             requestManualUpdate: requestManualUpdate,
+            retryRecovery: retryContractRecovery,
             hasUnsafeWorkInProgress: hasUnsafeWorkInProgress,
             registerUnsafeCheck: registerUnsafeCheck
         };
 
         function initialize() {
             evaluate();
+            if (isNativeApp()) {
+                unregisterNativeAppServiceWorkers();
+                return;
+            }
+            observeRoleUpdateDialogs();
             startServerGrace();
             if (!(window.navigator && window.navigator.serviceWorker)) {
                 markServiceWorkerUnavailable();
@@ -975,6 +1534,7 @@
         }
         if (window.navigator && window.navigator.serviceWorker) {
             window.navigator.serviceWorker.addEventListener("controllerchange", function () {
+                if (isNativeApp()) return;
                 workerVersionGeneration += 1;
                 controllerReloadPending = true;
                 controllerVersionPending = true;
@@ -988,21 +1548,19 @@
             });
         }
         window.addEventListener("online", function () {
+            if (isNativeApp()) return;
             state.serverUnavailable = false;
             if (!registration && registrationPromise) {
                 return;
             }
             if (
-                registrationNeedsRecovery
-                || automaticUpdateFailed
-                || !registration
+                (registrationNeedsRecovery || !registration)
+                && !automaticUpdateExhausted
+                && automaticUpdateRetryTimer === null
             ) {
                 if (!registration) {
                     registrationPromise = null;
                 }
-                automaticUpdateKey = "";
-                automaticUpdatePromise = null;
-                automaticUpdateFailed = false;
                 registerConfiguredWorker().then(function () {
                     evaluate();
                 });
@@ -1020,7 +1578,7 @@
     {% if role_session_authenticated and not observer_mode and role_app %}<script src="{% static 'js/push-notifications.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% block extra_head %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
+<body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-native-app="{{ is_native_app|yesno:'true,false' }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
 {% if is_yandex_android and not observer_mode %}
 <div class="app-yandex-warning-banner" data-yandex-warning role="status" aria-live="polite">
     <span><strong>Это Яндекс Браузер.</strong> Приложение может установиться неправильно — со своей строкой снизу. Нажмите «Скопировать ссылку», откройте Google Chrome и вставьте её в адресную строку.</span>
@@ -1054,6 +1612,7 @@
     </div>
 </div>
 
+{% block global_realtime_ui %}
 <!-- Плашка «Связь потеряна» закрывала собой нижнюю панель вкладок и говорила
    ровно то же, что цветная точка в углу. Оставляем её в разметке только как
    запасной путь: realtime-client прячет её, если на экране есть индикатор
@@ -1099,6 +1658,7 @@
     <span data-app-realtime-update-text>На сервере появились новые данные.</span>
     <button class="app-realtime-update__button" type="button" data-app-realtime-update-button>Обновить</button>
 </div>
+{% endblock %}
 
 <div class="app-confirm-modal" id="app-confirm-modal" hidden>
     <div class="app-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="app-confirm-title">
@@ -1747,15 +2307,36 @@ window.AppOperationalFragment = (function () {
     "use strict";
 
     var contract = "operational-fragment-v1";
+    var defaultRequestTimeoutMs = 15000;
 
-    function request(screen, version) {
+    function request(screen, version, options) {
+        options = options || {};
         var url = new URL(window.location.href);
         ["_driver_refresh", "_eo_refresh", "_mm_refresh"].forEach(function (name) {
             url.searchParams.delete(name);
         });
         url.searchParams.set("_operational_fragment", String(screen || ""));
         url.searchParams.set("_operational_version", String(Number(version || 0)));
-        return window.fetch(url.toString(), {
+        var controller = window.AbortController ? new window.AbortController() : null;
+        var timeoutMs = Number(options.timeoutMs) > 0
+            ? Number(options.timeoutMs)
+            : defaultRequestTimeoutMs;
+        var timeoutId = null;
+        var timedOut = false;
+        var timeoutPromise = new Promise(function (resolve, reject) {
+            timeoutId = window.setTimeout(function () {
+                timedOut = true;
+                if (controller) {
+                    try {
+                        controller.abort();
+                    } catch (error) {}
+                }
+                var timeoutError = new Error("operational fragment timeout");
+                timeoutError.code = "OPERATIONAL_FRAGMENT_TIMEOUT";
+                reject(timeoutError);
+            }, timeoutMs);
+        });
+        var fetchOptions = {
             method: "GET",
             credentials: "same-origin",
             cache: "no-store",
@@ -1763,7 +2344,11 @@ window.AppOperationalFragment = (function () {
                 "Accept": "application/json",
                 "X-Requested-With": "XMLHttpRequest"
             }
-        }).then(function (response) {
+        };
+        if (controller) {
+            fetchOptions.signal = controller.signal;
+        }
+        var requestPromise = window.fetch(url.toString(), fetchOptions).then(function (response) {
             if (!response.ok) {
                 var error = new Error("operational fragment " + response.status);
                 error.status = response.status;
@@ -1781,6 +2366,18 @@ window.AppOperationalFragment = (function () {
                 throw new Error("operational fragment contract mismatch");
             }
             return payload;
+        });
+        return Promise.race([requestPromise, timeoutPromise]).catch(function (error) {
+            if (timedOut && (!error || error.code !== "OPERATIONAL_FRAGMENT_TIMEOUT")) {
+                var timeoutError = new Error("operational fragment timeout");
+                timeoutError.code = "OPERATIONAL_FRAGMENT_TIMEOUT";
+                throw timeoutError;
+            }
+            throw error;
+        }).finally(function () {
+            if (timeoutId !== null) {
+                window.clearTimeout(timeoutId);
+            }
         });
     }
 
