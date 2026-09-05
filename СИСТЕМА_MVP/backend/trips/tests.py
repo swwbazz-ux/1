@@ -89,59 +89,149 @@ class DispatcherSharedShiftStartTests(TestCase):
 
         self.assertEqual(progress['date'], datetime(2026, 7, 23).date())
 
-    def test_dispatcher_control_uses_reauth_popup_even_if_session_was_personal(self):
+    def test_personal_dispatcher_session_starts_without_reauth_popup(self):
         session = self.client.session
         session['device_kind'] = 'personal'
         session.save()
 
         response = self.client.get(reverse('dispatcher_control'))
 
-        self.assertContains(response, 'data-shared-shift-login-open')
-        self.assertNotContains(response, 'data-confirm="Начать смену горного диспетчера?"')
+        self.assertNotContains(response, 'data-shared-shift-login-open')
+        self.assertContains(response, 'data-confirm="Начать смену горного диспетчера?"')
+
+        start_response = self.client.post(
+            reverse('dispatcher_toggle_shift'),
+            {'shift_action': 'start'},
+        )
+        self.assertEqual(start_response.status_code, 302)
+        shift = EmployeeShift.objects.get(
+            employee=self.current_dispatcher,
+            closed_at__isnull=True,
+        )
+        self.assertEqual(shift.workplace_code, 'dispatcher')
+        self.assertEqual(shift.opened_by, self.current_dispatcher)
+
+    def test_personal_admin_uses_own_dispatcher_access_without_second_pin(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_access = EmployeeAccess.objects.create(
+            employee=self.current_dispatcher,
+            role=admin_role,
+            access_code='500000',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        Employee.objects.filter(pk=self.current_dispatcher.pk).update(is_protected=True)
+        self.current_dispatcher.refresh_from_db()
+        session = self.client.session
+        session['employee_access_id'] = admin_access.id
+        session['device_kind'] = 'personal'
+        session.save()
+
+        response = self.client.get(reverse('dispatcher_control'))
+        self.assertContains(response, 'data-confirm="Начать смену горного диспетчера?"')
+        self.assertNotContains(response, 'data-shared-shift-login-open')
+
+        start_response = self.client.post(
+            reverse('dispatcher_toggle_shift'),
+            {'shift_action': 'start'},
+        )
+        self.assertEqual(start_response.status_code, 302)
+        shift = EmployeeShift.objects.get(
+            employee=self.current_dispatcher,
+            closed_at__isnull=True,
+        )
+        self.assertEqual(shift.workplace_code, 'dispatcher')
+        self.assertEqual(shift.opened_by, self.current_dispatcher)
+
+    def test_personal_dispatcher_gets_clear_error_for_another_open_role_shift(self):
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+        EmployeeShift.objects.create(
+            employee=self.current_dispatcher,
+            shift_type='day',
+            workplace_code='mining_master',
+            opened_at=timezone.now(),
+            opened_by=self.current_dispatcher,
+        )
+
+        response = self.client.post(
+            reverse('dispatcher_toggle_shift'),
+            {'shift_action': 'start'},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'У вас уже открыта смена')
+        self.assertFalse(
+            EmployeeShift.objects.filter(
+                employee=self.current_dispatcher,
+                workplace_code='dispatcher',
+                closed_at__isnull=True,
+            ).exists()
+        )
 
     def test_dispatcher_truck_actions_use_local_dom_update_hook(self):
         response = self.client.get(reverse('dispatcher_control'))
+        dispatcher_script_path = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'js'
+            / 'dispatcher-control-v1.js'
+        )
+        dispatcher_script = dispatcher_script_path.read_text(encoding='utf-8')
 
-        self.assertContains(response, 'function applyDesktopTruckAction')
-        self.assertContains(response, 'function sortDesktopEquipmentList')
-        self.assertContains(response, 'function compareDesktopEquipmentTiles')
-        self.assertContains(response, 'function removeDuplicateDesktopTruckTiles')
-        self.assertContains(response, 'function reconcileDesktopTruckUniqueness')
-        self.assertContains(response, 'function refreshDesktopBoardIntegrity')
-        self.assertContains(response, 'function refreshDesktopBoardAfterStructuralAction')
-        self.assertContains(response, 'moveDesktopTruckToComplex')
-        self.assertContains(response, 'releaseDesktopComplexTrucks')
-        self.assertContains(response, 'activateDesktopComplexFromExcavatorTile')
-        self.assertContains(response, 'moveDesktopComplexToExcavatorGarage')
-        self.assertContains(response, 'confirmDesktopOptimisticBoardAction')
-        self.assertContains(response, 'function applyDispatcherOperationalStateRefresh')
-        self.assertContains(response, 'function refreshDispatcherDesktopBoardFromServer')
-        self.assertContains(response, 'bindDispatcherDesktopInteractions')
-        self.assertContains(response, 'window.initAppConfirmForms')
-        self.assertContains(response, 'window.initDispatcherThemeControls')
-        self.assertContains(response, 'window.initDispatcherRadialClocks')
-        self.assertContains(response, 'eventsTruncated')
-        self.assertContains(response, 'function hasDispatcherRelevantEvents')
-        self.assertContains(response, 'return Array.isArray(events) && events.length > 0;')
-        self.assertContains(response, 'markDispatcherLocalAssignmentApplied')
-        self.assertContains(response, 'dispatcherIncomingRefreshQueueGraceMs')
-        self.assertContains(response, 'dispatcherMobileSyncFlushDelayMs = 300')
-        self.assertContains(response, 'isDispatcherSyncQueueBlockingRefresh')
-        self.assertContains(response, 'type: "assign"')
-        self.assertContains(response, 'type: "release"')
-        self.assertContains(response, 'type: "release_complex"')
+        self.assertContains(response, 'js/dispatcher-control-v1.js')
+        for marker in (
+            'function applyDesktopTruckAction',
+            'function sortDesktopEquipmentList',
+            'function compareDesktopEquipmentTiles',
+            'function removeDuplicateDesktopTruckTiles',
+            'function reconcileDesktopTruckUniqueness',
+            'function refreshDesktopBoardIntegrity',
+            'function refreshDesktopBoardAfterStructuralAction',
+            'moveDesktopTruckToComplex',
+            'releaseDesktopComplexTrucks',
+            'activateDesktopComplexFromExcavatorTile',
+            'moveDesktopComplexToExcavatorGarage',
+            'confirmDesktopOptimisticBoardAction',
+            'function applyDispatcherOperationalStateRefresh',
+            'function refreshDispatcherDesktopBoardFromServer',
+            'bindDispatcherDesktopInteractions',
+            'window.initAppConfirmForms',
+            'window.initDispatcherThemeControls',
+            'window.initDispatcherRadialClocks',
+            'eventsTruncated',
+            'function hasDispatcherRelevantEvents',
+            'return Array.isArray(events) && events.length > 0;',
+            'markDispatcherLocalAssignmentApplied',
+            'dispatcherIncomingRefreshQueueGraceMs',
+            'dispatcherMobileSyncFlushDelayMs = 300',
+            'isDispatcherSyncQueueBlockingRefresh',
+            'type: "assign"',
+            'type: "release"',
+            'type: "release_complex"',
+        ):
+            self.assertIn(marker, dispatcher_script)
 
     def test_dispatcher_screen_has_own_pwa_and_sync_overlay(self):
         response = self.client.get(reverse('dispatcher_control'))
+        dispatcher_script_path = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'js'
+            / 'dispatcher-control-v1.js'
+        )
+        dispatcher_script = dispatcher_script_path.read_text(encoding='utf-8')
 
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'scope: "/dispatcher/"')
-        self.assertContains(response, 'registration.update()')
-        self.assertContains(response, 'SKIP_WAITING')
+        self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
+        self.assertIn('registration.update()', dispatcher_script)
+        self.assertIn('SKIP_WAITING', dispatcher_script)
         self.assertContains(response, 'data-app-sync-overlay')
-        self.assertContains(response, 'showAppSyncOverlay')
+        self.assertIn('showAppSyncOverlay', dispatcher_script)
         self.assertContains(response, 'data-app-realtime-status')
         self.assertContains(response, 'data-app-realtime-update')
         self.assertContains(response, 'data-realtime-screen')
@@ -159,7 +249,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertNotContains(response, 'mechanic-downtimes')
         self.assertContains(response, '{name: "excavator", role: "excavator_operator", mode: "custom"')
         self.assertContains(response, '{name: "driver", role: "driver", mode: "custom"')
-        self.assertContains(response, 'is-realtime-stale')
+        self.assertIn('is-realtime-stale', dispatcher_script)
         self.assertContains(response, 'Связь с сервером потеряна. Экран может отставать.')
         self.assertNotContains(response, '/mining-master-sw.js')
 
@@ -179,9 +269,9 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertIn('include_events", "1"', script)
         self.assertIn('operational-state-refresh-deferred', script)
         self.assertIn('pending_mobile_queue', script)
-        self.assertIn('refreshMobileBoard: true', response.content.decode('utf-8'))
-        self.assertIn('request.refreshMobileBoard && !freshQueue.length', response.content.decode('utf-8'))
-        self.assertIn('dispatcherMobileSyncFlushDelayMs', response.content.decode('utf-8'))
+        self.assertIn('refreshMobileBoard: true', dispatcher_script)
+        self.assertIn('request.refreshMobileBoard && !freshQueue.length', dispatcher_script)
+        self.assertIn('dispatcherMobileSyncFlushDelayMs', dispatcher_script)
         self.assertNotIn('delayMs : 5000', response.content.decode('utf-8'))
         self.assertIn('operational-state-update-available', script)
         self.assertIn('has-realtime-update', script)
@@ -859,11 +949,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v203')
+        self.assertContains(response, 'excavator-mobile-shell-v204')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 203')
+        self.assertContains(response, 'Версия 204')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
@@ -2557,9 +2647,23 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v203', script)
-        self.assertIn('"/company/privacy/"', script)
-        self.assertIn('"/static/portal/css/portal-shell-v5.css?v=6"', script)
+        self.assertIn('excavator-mobile-shell-v204', script)
+        self.assertIn(
+            'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
+            script,
+        )
+        self.assertRegex(
+            script,
+            r'const CORE_ASSETS = \[[\s\S]*?PRIVACY_POLICY_URL,',
+        )
+        privacy_branch = script.index('if (url.pathname === PRIVACY_POLICY_PATH)')
+        generic_navigation_branch = script.index('if (request.mode === "navigate"')
+        self.assertLess(privacy_branch, generic_navigation_branch)
+        self.assertIn(
+            'networkFirst(request, PRIVACY_POLICY_URL)',
+            script[privacy_branch:generic_navigation_branch],
+        )
+        self.assertIn('"/static/portal/css/portal-shell-v5.css?v=7"', script)
         self.assertIn(reverse('excavator_work'), script)
         self.assertIn(reverse('excavator_manifest'), script)
         self.assertIn('/static/js/realtime-client.js', script)

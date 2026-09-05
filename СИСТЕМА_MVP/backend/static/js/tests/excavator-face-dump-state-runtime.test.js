@@ -23,7 +23,7 @@ const FACE_CSS_PATH = path.resolve(
     "css",
     "mobile-face-unified-v1.css"
 );
-const TEMPLATE_SOURCE = fs.readFileSync(TEMPLATE_PATH, "utf8");
+const TEMPLATE_SOURCE = fs.readFileSync(TEMPLATE_PATH, "utf8").replace(/\r\n?/g, "\n");
 const FACE_CSS_SOURCE = fs.readFileSync(FACE_CSS_PATH, "utf8");
 
 

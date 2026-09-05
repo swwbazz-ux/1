@@ -3,7 +3,6 @@ from pathlib import Path
 from django.conf import settings
 from django.test import Client, SimpleTestCase, override_settings
 
-from .privacy_consent import PRIVACY_POLICY_VERSION
 from .role_apps import ENTRY_SCREEN_BROWSER_BAR, ROLE_APPS
 
 
@@ -33,26 +32,21 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
                     count=1,
                 )
 
-    def test_combined_driver_and_excavator_login_render_one_active_consent_contract(self):
+    def test_combined_driver_and_excavator_phone_step_has_no_consent_control(self):
         for host in ('driver.localhost', 'excavator.localhost'):
             with self.subTest(host=host):
                 response = Client().get('/', HTTP_HOST=host)
 
                 self.assertEqual(response.status_code, 200)
                 self.assertContains(response, 'data-login-combined="true"')
-                self.assertContains(response, 'data-privacy-consent')
-                self.assertContains(response, 'name="privacy_consent"', count=1)
-                self.assertContains(
+                self.assertContains(response, 'data-login-step="phone"', count=1)
+                self.assertContains(response, 'name="action" value="continue"', count=1)
+                self.assertNotContains(response, 'id="login-privacy-consent"')
+                self.assertNotContains(response, 'name="privacy_consent"')
+                self.assertNotContains(response, 'class="mobile-role-login__consent-panel"')
+                self.assertNotContains(
                     response,
-                    f'value="{PRIVACY_POLICY_VERSION}"',
-                    count=1,
-                )
-                self.assertContains(response, 'data-login-privacy-link', count=1)
-                self.assertContains(response, 'href="/company/privacy/"', count=1)
-                self.assertContains(
-                    response,
-                    'Соглашаюсь на обработку персональных данных',
-                    count=1,
+                    '<dialog class="mobile-role-login__privacy-dialog"',
                 )
 
     def test_login_assets_keep_focus_scrolling_vertical_only(self):
@@ -166,7 +160,7 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         ).read_text(encoding='utf-8')
 
         self.assertIn(
-            "{% if login_step == 'pin' and not combined_mobile_login %} is-pin-step{% endif %}",
+            "{% if login_step == 'pin' %} is-pin-step{% elif login_step == 'consent' %} is-consent-step{% elif combined_mobile_login %} is-phone-step{% endif %}",
             template,
         )
         self.assertIn(
@@ -205,15 +199,8 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         ).read_text(encoding='utf-8')
 
         self.assertIn('data-login-combined="true"', template)
-        self.assertIn('data-privacy-consent', template)
-        self.assertIn('name="privacy_consent"', template)
-        self.assertIn('value="{{ privacy_policy_version }}"', template)
-        self.assertIn("{% url 'portal:public_privacy' %}", template)
-        self.assertIn('var consentField = form.querySelector("[data-privacy-consent]")', template)
-        self.assertIn('var consentMissing = combinedLogin && (!consentField || !consentField.checked)', template)
-        self.assertIn('registerButton.disabled = pending', template)
-        self.assertIn('consentField.focus({preventScroll: true})', template)
-        self.assertIn('enterkeyhint="next"', template)
+        self.assertNotIn('registerButton', template)
+        self.assertIn("enterkeyhint=\"{% if login_step == 'pin' %}done{% else %}next{% endif %}\"", template)
         self.assertIn('enterkeyhint="go"', template)
         self.assertIn('visualViewport.addEventListener(', template)
         self.assertIn('"scroll",', template)
@@ -224,12 +211,6 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         self.assertIn('.is-login-keyboard-active .mobile-role-login__hero', stylesheet)
         self.assertIn('.is-login-keyboard-active .max-support-link', stylesheet)
         self.assertIn('overflow: hidden', stylesheet)
-        self.assertIn('.mobile-role-login__consent {', stylesheet)
-        self.assertIn('grid-template-columns: 22px minmax(0, 1fr)', stylesheet)
-        self.assertIn('min-height: 36px', stylesheet)
-        self.assertIn('.mobile-role-login__consent-box {', stylesheet)
-        self.assertIn('width: 22px', stylesheet)
-        self.assertIn('height: 22px', stylesheet)
         self.assertIn(
             '@media (orientation: landscape) and (max-width: 1023px)',
             stylesheet,
@@ -283,6 +264,77 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         self.assertNotIn('minmax(320px, 1.28fr)', stylesheet)
         self.assertNotIn('excavator-login', stylesheet)
 
+    def test_consent_step_separates_controls_and_opens_a_returnable_dialog(self):
+        backend_root = Path(settings.BASE_DIR)
+        template = (
+            backend_root / 'templates' / 'users' / 'login.html'
+        ).read_text(encoding='utf-8')
+        stylesheet = (
+            backend_root / 'static' / 'css' / 'mobile-role-login-v1.css'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn("{% if combined_mobile_login and login_step == 'consent' %}", template)
+        self.assertIn('class="mobile-role-login__consent-panel"', template)
+        self.assertIn('name="privacy_consent"', template)
+        self.assertIn('value="{{ privacy_policy_version }}"', template)
+        self.assertIn('data-privacy-consent', template)
+        self.assertIn(
+            '</label>\n            <a class="mobile-role-login__privacy-link"',
+            template,
+        )
+        self.assertIn("{% url 'portal:public_privacy' %}?from=role-login", template)
+        self.assertIn('data-login-privacy-dialog', template)
+        self.assertIn('data-login-privacy-close', template)
+        self.assertIn('dialog.showModal()', template)
+        self.assertIn('dialog.addEventListener("cancel"', template)
+        self.assertIn('closeDialog()', template)
+        self.assertIn('consentField.focus({preventScroll: true})', template)
+
+        self.assertIn(
+            'body.login-page.login-fullscreen.login-combined.login-step-consent .mobile-role-login__consent {\n'
+            '    min-height: 48px;',
+            stylesheet,
+        )
+        self.assertIn(
+            'body.login-page.login-fullscreen.login-combined.login-step-consent .mobile-role-login__privacy-link {\n'
+            '    min-height: 44px;',
+            stylesheet,
+        )
+        self.assertIn(
+            '.mobile-role-login__privacy-dialog {\n'
+            '    inset: 0;\n'
+            '    width: 100%;\n'
+            '    max-width: none;\n'
+            '    height: 100dvh;',
+            stylesheet,
+        )
+        self.assertIn(
+            '.mobile-role-login__privacy-toolbar button,\n'
+            '.mobile-role-login__privacy-return {\n'
+            '    min-height: 44px;',
+            stylesheet,
+        )
+        self.assertIn('.mobile-role-login__privacy-document {', stylesheet)
+        self.assertIn('overflow-y: auto', stylesheet)
+
+    def test_phone_and_consent_steps_use_distinct_continue_actions(self):
+        template = (
+            Path(settings.BASE_DIR) / 'templates' / 'users' / 'login.html'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn(
+            "value=\"{% if login_step == 'pin' %}login{% elif login_step == 'consent' %}consent{% else %}continue{% endif %}\"",
+            template,
+        )
+        self.assertIn(
+            'if (normalized.action !== "continue" && normalized.action !== "consent") return;',
+            template,
+        )
+        self.assertIn(
+            'if (requestedAction === "continue" || requestedAction === "consent")',
+            template,
+        )
+
     def test_combined_mobile_login_never_persists_pin(self):
         template = (
             Path(settings.BASE_DIR) / 'templates' / 'users' / 'login.html'
@@ -291,6 +343,95 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
         self.assertIn('JSON.stringify({phone: phoneDigits || ""})', template)
         self.assertIn('Object.prototype.hasOwnProperty.call(remembered, "pin")', template)
         self.assertIn('window.localStorage.removeItem(LOGIN_MEMORY_KEY)', template)
-        self.assertIn('requestedAction === "register" && pinField', template)
+        self.assertIn('requestedAction === "continue"', template)
+        self.assertNotIn('unified-login-register', template)
         self.assertNotIn('pin: pinDigits', template)
         self.assertNotIn('memory.pin', template)
+
+    def test_mobile_first_entry_fits_standard_viewport_without_clipping_contract(self):
+        backend_root = Path(settings.BASE_DIR)
+        template = (
+            backend_root / 'templates' / 'users' / 'activate_access.html'
+        ).read_text(encoding='utf-8')
+        stylesheet = (
+            backend_root / 'static' / 'css' / 'mobile-role-activation-v1.css'
+        ).read_text(encoding='utf-8')
+        login_stylesheet = (
+            backend_root / 'static' / 'css' / 'mobile-role-login-v1.css'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('data-mobile-role-activation', template)
+        self.assertIn('mobile-role-login-v1.css', template)
+        self.assertIn('mobile-role-activation-v1.css', template)
+        self.assertIn('<h1>Придумайте PIN</h1>', template)
+        self.assertIn('Создать PIN и войти', template)
+        self.assertIn('Это не я — ввести другой номер', template)
+        self.assertNotIn(' autofocus', template)
+
+        self.assertIn(
+            'body.login-page.login-fullscreen.login-combined.login-activation {\n'
+            '    height: var(--login-vv-height, 100svh);\n'
+            '    min-height: 0;\n'
+            '    overflow-x: hidden;\n'
+            '    overflow-y: auto;',
+            stylesheet,
+        )
+        self.assertIn(
+            'body.login-page.login-fullscreen.login-combined.login-activation .unified-login-dialog.mobile-role-activation {\n'
+            '    position: relative;',
+            stylesheet,
+        )
+        self.assertIn(
+            'grid-template-rows: clamp(112px, 16svh, 145px) minmax(max-content, 1fr) 48px;\n'
+            '    width: 100%;\n'
+            '    min-height: 0;\n'
+            '    height: var(--login-vv-height, 100svh);\n'
+            '    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));\n'
+            '    overflow: visible;',
+            stylesheet,
+        )
+        self.assertNotIn('height: auto', stylesheet)
+        self.assertNotIn('overflow-y: hidden', stylesheet)
+
+        self.assertIn(
+            '.shared-shift-login-field input {\n'
+            '    min-height: 50px;',
+            stylesheet,
+        )
+        self.assertIn(
+            '.activation-pin-toggle {\n'
+            '    display: inline-grid;',
+            stylesheet,
+        )
+        self.assertIn('    min-height: 44px;', stylesheet)
+        self.assertIn(
+            '.unified-login-submit {\n'
+            '    min-height: 52px;',
+            stylesheet,
+        )
+        self.assertIn(
+            '.unified-login-change-phone {\n'
+            '    min-height: 44px;',
+            stylesheet,
+        )
+        self.assertIn(
+            '.max-support-link {\n'
+            '    height: 48px;\n'
+            '    min-height: 48px;',
+            stylesheet,
+        )
+
+        self.assertIn('@media (max-width: 360px) and (max-height: 640px)', stylesheet)
+        self.assertIn('grid-template-rows: 84px minmax(max-content, 1fr) 48px;', stylesheet)
+        self.assertIn('padding: 7px 10px;', stylesheet)
+        self.assertIn(
+            '.shared-shift-login-field input {\n'
+            '        min-height: 44px;',
+            stylesheet,
+        )
+        self.assertIn(
+            '.unified-login-submit {\n'
+            '        min-height: 48px;',
+            stylesheet,
+        )
+        self.assertIn('min-height: clamp(52px, 7.2dvh, 64px)', login_stylesheet)

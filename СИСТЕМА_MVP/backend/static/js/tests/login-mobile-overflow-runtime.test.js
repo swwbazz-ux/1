@@ -131,6 +131,9 @@ function createInput(id, attributeName) {
 
 function createLoginRuntime(options) {
     const runtimeOptions = options || {};
+    const includePin = runtimeOptions.includePin !== false;
+    const includeConsent = runtimeOptions.includeConsent === true;
+    const includeRegister = runtimeOptions.includeRegister !== false;
     const viewportHeight = Number(runtimeOptions.viewportHeight || 844);
     const storageValues = new Map();
     if (typeof runtimeOptions.rememberedCredentials === "string") {
@@ -141,7 +144,7 @@ function createLoginRuntime(options) {
     const pinInput = createInput("login-pin", "data-pin-input");
     const submitButton = {
         disabled: false,
-        value: "login",
+        value: runtimeOptions.submitValue || "login",
         classList: new FakeClassList(),
         firstChild: {textContent: "Войти"},
     };
@@ -157,7 +160,7 @@ function createLoginRuntime(options) {
     const consentAttributes = new Map();
     const consentField = Object.assign(createEventTarget(), {
         checked: false,
-        value: "2026-09-04",
+        value: "2026-09-05",
         setAttribute(name, value) {
             consentAttributes.set(name, String(value));
         },
@@ -191,21 +194,27 @@ function createLoginRuntime(options) {
             if (selector === 'button[type="submit"]' || selector === ".unified-login-submit") {
                 return submitButton;
             }
-            if (selector === ".unified-login-register") return registerButton;
+            if (selector === ".unified-login-register") return includeRegister ? registerButton : null;
             if (selector === "[data-phone-input]") return phoneInput;
-            if (selector === "[data-pin-input]") return pinInput;
-            if (selector === "[data-privacy-consent]") return consentField;
+            if (selector === "[data-pin-input]") return includePin ? pinInput : null;
+            if (selector === "[data-privacy-consent]") {
+                return includeConsent ? consentField : null;
+            }
             return null;
         },
         querySelectorAll(selector) {
             if (selector === "[data-phone-input], [data-pin-input]") {
-                return [phoneInput, pinInput];
+                return includePin ? [phoneInput, pinInput] : [phoneInput];
             }
-            if (selector === 'button[type="submit"]') return [submitButton, registerButton];
+            if (selector === 'button[type="submit"]') {
+                return includeRegister ? [submitButton, registerButton] : [submitButton];
+            }
             return [];
         },
         contains(element) {
-            return element === phoneInput || element === pinInput || element === consentField;
+            return element === phoneInput
+                || (includePin && element === pinInput)
+                || (includeConsent && element === consentField);
         },
         requestSubmit() {
             this.requestSubmitCalls += 1;
@@ -228,7 +237,7 @@ function createLoginRuntime(options) {
         },
         querySelectorAll(selector) {
             if (selector === "[data-phone-input], [data-pin-input]") {
-                return [phoneInput, pinInput];
+                return includePin ? [phoneInput, pinInput] : [phoneInput];
             }
             return [];
         },
@@ -413,15 +422,19 @@ test("shared combined login keeps one geometry and role-specific accent tokens",
     );
     assert.match(
         MOBILE_ROLE_LOGIN_CSS,
-        /\.mobile-role-login__consent\s*\{[^}]*grid-template-columns:\s*22px minmax\(0, 1fr\);[^}]*min-height:\s*36px;[^}]*font:\s*500 clamp\(10px, 2\.75vw, 12px\)\/1\.25/s
+        /\.mobile-role-login__consent\s*\{[^}]*grid-template-columns:\s*26px minmax\(0, 1fr\);[^}]*min-height:\s*48px;[^}]*font:\s*600 clamp\(12px, 3\.25vw, 14px\)\/1\.3/s
     );
     assert.match(
         MOBILE_ROLE_LOGIN_CSS,
-        /\.mobile-role-login__consent-box\s*\{[^}]*width:\s*22px;[^}]*height:\s*22px;[^}]*border-radius:\s*6px;/s
+        /\.mobile-role-login__consent-box\s*\{[^}]*width:\s*26px;[^}]*height:\s*26px;[^}]*border-radius:\s*6px;/s
     );
     assert.match(
         MOBILE_ROLE_LOGIN_CSS,
         /\.mobile-role-login__consent > input:checked \+ \.mobile-role-login__consent-box\s*\{[^}]*background:\s*var\(--mobile-login-accent\);/s
+    );
+    assert.match(
+        MOBILE_ROLE_LOGIN_CSS,
+        /\.mobile-role-login__privacy-link\s*\{[^}]*min-height:\s*44px;/s
     );
     assert.match(
         MOBILE_ROLE_LOGIN_CSS,
@@ -459,37 +472,48 @@ test("malformed remembered credentials are removed instead of retained", () => {
     assert.equal(runtime.rememberedCredentials(), null);
 });
 
-test("combined login keeps login and register disabled until active consent", () => {
-    const runtime = createLoginRuntime();
+test("phone-first login enables Continue after a valid phone without consent", () => {
+    const runtime = createLoginRuntime({
+        includePin: false,
+        includeConsent: false,
+        includeRegister: false,
+        submitValue: "continue",
+    });
 
     assert.equal(runtime.submitButton.disabled, true);
-    assert.equal(runtime.registerButton.disabled, true);
+    assert.equal(runtime.form.querySelector(".unified-login-register"), null);
+
+    runtime.phoneInput.value = "9990000001";
+    runtime.phoneInput.dispatchEvent({type: "input"});
+    assert.equal(runtime.submitButton.disabled, false);
+});
+
+test("consent step requires its standalone checkbox", () => {
+    const runtime = createLoginRuntime({
+        includePin: false,
+        includeConsent: true,
+        includeRegister: false,
+        submitValue: "consent",
+    });
 
     runtime.phoneInput.value = "9990000001";
     runtime.phoneInput.dispatchEvent({type: "input"});
     assert.equal(runtime.submitButton.disabled, true);
-    assert.equal(runtime.registerButton.disabled, true);
 
     runtime.consentField.checked = true;
     runtime.consentField.dispatchEvent({type: "change"});
-    assert.equal(runtime.submitButton.disabled, true, "PIN is still required for login");
-    assert.equal(runtime.registerButton.disabled, false, "registration only needs a valid phone and consent");
-    assert.equal(runtime.consentField.getAttribute("aria-invalid"), "false");
-
-    runtime.pinInput.value = "123456";
-    runtime.pinInput.dispatchEvent({type: "input"});
     assert.equal(runtime.submitButton.disabled, false);
+    assert.equal(runtime.consentField.getAttribute("aria-invalid"), "false");
 
     runtime.consentField.checked = false;
     runtime.consentField.dispatchEvent({type: "change"});
     assert.equal(runtime.submitButton.disabled, true);
-    assert.equal(runtime.registerButton.disabled, true);
     assert.equal(runtime.consentField.getAttribute("aria-invalid"), "true");
     assert.equal(runtime.consentLabel.classList.contains("is-invalid"), true);
 });
 
-test("combined login Enter moves phone to PIN, then requires consent before submit", () => {
-    const runtime = createLoginRuntime();
+test("combined login Enter moves phone to PIN and submits without repeated consent", () => {
+    const runtime = createLoginRuntime({includeConsent: false});
     let phonePrevented = false;
     let pinPrevented = false;
 
@@ -515,18 +539,5 @@ test("combined login Enter moves phone to PIN, then requires consent before subm
     });
 
     assert.equal(pinPrevented, true);
-    assert.equal(runtime.form.requestSubmitCalls, 0);
-    assert.equal(runtime.document.activeElement, runtime.consentField);
-
-    runtime.consentField.checked = true;
-    runtime.consentField.dispatchEvent({type: "change"});
-    runtime.pinInput.focus();
-    runtime.pinInput.dispatchEvent({
-        type: "keydown",
-        key: "Enter",
-        isComposing: false,
-        preventDefault() {},
-    });
-
     assert.equal(runtime.form.requestSubmitCalls, 1);
 });

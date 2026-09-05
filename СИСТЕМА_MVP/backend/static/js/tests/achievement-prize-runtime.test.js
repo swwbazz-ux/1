@@ -528,6 +528,7 @@ function installDriverFragmentHandler(runtime, nextTruckId = 17) {
     vm.runInContext(
         [
             "function isDriverOperationalRefreshUnsafe() { return false; }",
+            "function syncDriverTabMarkup(shell, tab) { shell.dataset.activeTab = tab; }",
             functionSource
         ].join("\n"),
         runtime.context,

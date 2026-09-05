@@ -19,7 +19,7 @@ const DRIVER_TEMPLATE_SOURCE = fs.readFileSync(
 const EXCAVATOR_TEMPLATE_SOURCE = fs.readFileSync(
     path.join(TEMPLATE_ROOT, "trips", "excavator_work.html"),
     "utf8"
-);
+).replace(/\r\n?/g, "\n");
 const DISPATCHER_TEMPLATE_SOURCE = fs.readFileSync(
     path.join(TEMPLATE_ROOT, "trips", "dispatcher_control.html"),
     "utf8"

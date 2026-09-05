@@ -5,10 +5,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import subprocess
 import sys
+from unittest.mock import MagicMock, patch
 
 from django.conf import settings
 from django.contrib.sessions.models import Session
 from django.db import connection
+from django.http import HttpResponse
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
@@ -16,6 +18,9 @@ from PIL import Image
 
 from .models import Employee, EmployeeAccess, Role
 from .privacy_consent import (
+    PRIVACY_CONSENT_COOKIE_MAX_AGE,
+    PRIVACY_CONSENT_COOKIE_NAME,
+    PRIVACY_CONSENT_COOKIE_SALT,
     PRIVACY_CONSENT_REQUIRED_MESSAGE,
     PRIVACY_CONSENT_SESSION_KEY,
     PRIVACY_POLICY_VERSION,
@@ -278,25 +283,50 @@ class RoleAppLoginTests(TestCase):
             'privacy_consent': PRIVACY_POLICY_VERSION,
         }
 
+    def _set_signed_privacy_cookie(self, client, payload):
+        response = HttpResponse()
+        response.set_signed_cookie(
+            PRIVACY_CONSENT_COOKIE_NAME,
+            payload,
+            salt=PRIVACY_CONSENT_COOKIE_SALT,
+            max_age=PRIVACY_CONSENT_COOKIE_MAX_AGE,
+            httponly=True,
+            samesite='Lax',
+            path='/',
+        )
+        client.cookies[PRIVACY_CONSENT_COOKIE_NAME] = (
+            response.cookies[PRIVACY_CONSENT_COOKIE_NAME].value
+        )
+
     def test_role_host_accepts_only_its_own_role(self):
         rejected = self.client.post(
             '/',
-            self._credentials(self.excavator_access),
+            {
+                'phone': self.excavator_access.employee.phone,
+                'action': 'continue',
+                'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
+            },
             HTTP_HOST='driver.localhost',
         )
         self.assertEqual(rejected.status_code, 200)
-        self.assertContains(rejected, 'для приложения «Водитель»')
+        self.assertContains(rejected, 'Вам нужно другое приложение')
+        self.assertContains(rejected, 'Машинист экскаватора')
         self.assertNotIn('employee_access_id', self.client.session)
 
         rejected = self.client.post(
             '/',
-            {**self._credentials(self.driver_access), 'action': 'login'},
+            {
+                'phone': self.driver_access.employee.phone,
+                'action': 'continue',
+                'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
+            },
             HTTP_HOST='excavator.localhost',
         )
         self.assertEqual(rejected.status_code, 200)
-        self.assertContains(rejected, 'Телефон или пинкод указаны неверно')
-        self.assertNotIn('employee_access_id', self.client.session)
-        self.assertContains(rejected, 'для приложения «Экскаватор»')
+        self.assertContains(rejected, 'Вам нужно другое приложение')
+        self.assertContains(rejected, 'Водитель самосвала')
         self.assertNotIn('employee_access_id', self.client.session)
 
         accepted = self.client.post(
@@ -325,6 +355,7 @@ class RoleAppLoginTests(TestCase):
                 'phone': self.driver_access.employee.phone,
                 'action': 'continue',
                 'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
             },
             HTTP_HOST='driver.localhost',
             HTTP_X_REQUESTED_WITH='XMLHttpRequest',
@@ -388,7 +419,7 @@ class RoleAppLoginTests(TestCase):
     def test_driver_and_excavator_hosts_render_the_same_combined_login_structure(self):
         cases = (
             ('driver.localhost', 'Водитель самосвала', 'driver-180.png', 'driver-mobile-shell-v191'),
-            ('excavator.localhost', 'Машинист экскаватора', 'excavator-180.png', 'excavator-mobile-shell-v203'),
+            ('excavator.localhost', 'Машинист экскаватора', 'excavator-180.png', 'excavator-mobile-shell-v204'),
         )
 
         for host, role_name, icon_name, shell_version in cases:
@@ -399,20 +430,88 @@ class RoleAppLoginTests(TestCase):
                     response,
                     '<form method="post" data-validated-login data-login-combined="true"',
                 )
-                self.assertContains(response, f'<h1>{role_name}</h1>')
+                self.assertContains(response, '<h1>Вход в приложение</h1>')
+                self.assertContains(response, role_name)
                 self.assertContains(response, icon_name)
                 self.assertContains(response, 'name="phone"', count=1)
-                self.assertContains(response, 'name="access_code"', count=1)
-                self.assertContains(response, 'name="privacy_consent"', count=1)
-                self.assertContains(response, f'value="{PRIVACY_POLICY_VERSION}"')
-                self.assertContains(response, 'href="/company/privacy/"')
-                self.assertNotContains(response, 'name="privacy_consent" checked')
-                self.assertContains(response, 'value="login">Войти')
-                self.assertContains(response, 'Первый вход — создать пинкод')
-                self.assertNotContains(response, 'value="continue">Далее')
-                self.assertContains(response, f'mobile-role-login-v1.css?v={shell_version}')
+                self.assertNotContains(response, 'name="access_code"')
+                self.assertNotContains(response, 'name="privacy_consent"')
+                self.assertNotContains(
+                    response,
+                    '<a class="mobile-role-login__privacy-link"',
+                )
+                self.assertNotContains(
+                    response,
+                    '<dialog class="mobile-role-login__privacy-dialog"',
+                )
+                self.assertContains(response, 'value="continue">Продолжить')
+                self.assertNotContains(response, 'Первый вход — создать пинкод')
+                self.assertNotContains(response, 'value="login">Войти')
+                self.assertContains(response, f'mobile-role-login-v1.css?v={shell_version}-consent1')
                 self.assertContains(response, 'start-hero-v1.webp')
                 self.assertNotContains(response, 'data-login-install-gate')
+
+    def test_identified_access_gets_a_separate_consent_step_before_pin(self):
+        cases = (
+            ('driver.localhost', self.driver_access),
+            ('excavator.localhost', self.excavator_access),
+        )
+
+        for host, access in cases:
+            with self.subTest(host=host):
+                client = Client()
+                response = client.post(
+                    '/',
+                    {
+                        'phone': access.employee.phone,
+                        'action': 'continue',
+                        'device_kind': 'personal',
+                    },
+                    HTTP_HOST=host,
+                )
+                content = response.content.decode('utf-8')
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'data-login-step="consent"', count=1)
+                self.assertContains(response, '<h1>Подтвердите согласие</h1>')
+                self.assertContains(response, 'name="phone"', count=1)
+                self.assertContains(response, ' readonly')
+                self.assertNotContains(response, 'name="access_code"')
+                self.assertContains(response, 'name="privacy_consent"', count=1)
+                self.assertContains(
+                    response,
+                    f'value="{PRIVACY_POLICY_VERSION}"',
+                    count=1,
+                )
+                self.assertContains(response, 'name="action" value="consent"', count=1)
+                self.assertContains(
+                    response,
+                    'href="/company/privacy/?from=role-login"',
+                    count=1,
+                )
+                self.assertContains(
+                    response,
+                    '<button type="button" data-login-privacy-close '
+                    'aria-label="Закрыть Политику и вернуться ко входу">'
+                    'Закрыть</button>',
+                    count=1,
+                )
+                self.assertContains(
+                    response,
+                    '<button class="mobile-role-login__privacy-return" '
+                    'type="button" data-login-privacy-close>'
+                    'Вернуться ко входу</button>',
+                    count=1,
+                )
+                consent_start = content.index(
+                    '<label class="mobile-role-login__consent'
+                )
+                consent_end = content.index('</label>', consent_start)
+                policy_link = content.index('data-login-privacy-link')
+                self.assertNotIn('href=', content[consent_start:consent_end])
+                self.assertGreater(policy_link, consent_end)
+                self.assertNotIn(PRIVACY_CONSENT_SESSION_KEY, client.session)
+                self.assertNotIn(PRIVACY_CONSENT_COOKIE_NAME, client.cookies)
 
     def test_driver_combined_post_keeps_existing_session_and_redirect(self):
         response = self.client.post(
@@ -432,42 +531,184 @@ class RoleAppLoginTests(TestCase):
         accepted_at = datetime.fromisoformat(consent['accepted_at'].replace('Z', '+00:00'))
         self.assertEqual(accepted_at.utcoffset(), timedelta(0))
 
-    def test_combined_login_rejects_missing_or_stale_privacy_consent(self):
+    def test_consent_step_rejects_missing_or_stale_privacy_version(self):
         for submitted_consent in ('', '2026-01-01'):
             with self.subTest(submitted_consent=submitted_consent):
                 client = Client()
-                payload = self._credentials(self.driver_access)
-                payload['privacy_consent'] = submitted_consent
-
                 response = client.post(
                     '/',
-                    payload,
+                    {
+                        'phone': self.driver_access.employee.phone,
+                        'action': 'consent',
+                        'device_kind': 'personal',
+                        'privacy_consent': submitted_consent,
+                    },
                     HTTP_HOST='driver.localhost',
                 )
 
                 self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'data-login-step="consent"', count=1)
                 self.assertContains(response, PRIVACY_CONSENT_REQUIRED_MESSAGE)
                 self.assertContains(response, 'aria-invalid="true"')
                 self.assertNotIn('employee_access_id', client.session)
                 self.assertNotIn(PRIVACY_CONSENT_SESSION_KEY, client.session)
+                self.assertNotIn(PRIVACY_CONSENT_COOKIE_NAME, client.cookies)
 
-    def test_current_session_consent_is_reflected_by_combined_form(self):
-        self.client.post(
+    def test_current_consent_sets_a_secure_signed_access_cookie_and_reaches_pin(self):
+        response = self.client.post(
             '/',
-            self._credentials(self.driver_access),
+            {
+                'phone': self.driver_access.employee.phone,
+                'action': 'consent',
+                'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
+            },
+            HTTP_HOST='driver.localhost',
+            secure=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-login-step="pin"', count=1)
+        self.assertNotContains(response, 'name="privacy_consent"')
+        consent = self.client.session[PRIVACY_CONSENT_SESSION_KEY]
+        self.assertEqual(consent['version'], PRIVACY_POLICY_VERSION)
+        self.assertEqual(consent['access_id'], self.driver_access.id)
+        self.assertEqual(consent['role_code'], 'driver')
+        cookie = response.cookies[PRIVACY_CONSENT_COOKIE_NAME]
+        self.assertTrue(cookie['httponly'])
+        self.assertTrue(cookie['secure'])
+        self.assertEqual(cookie['samesite'], 'Lax')
+        self.assertEqual(cookie['path'], '/')
+        self.assertEqual(
+            int(cookie['max-age']),
+            PRIVACY_CONSENT_COOKIE_MAX_AGE,
+        )
+        self.assertNotEqual(
+            cookie.value,
+            f'{PRIVACY_POLICY_VERSION}:{self.driver_access.id}:driver',
+        )
+
+    def test_signed_consent_cookie_survives_logout_and_restores_fresh_session(self):
+        consent_response = self.client.post(
+            '/',
+            {
+                'phone': self.driver_access.employee.phone,
+                'action': 'consent',
+                'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
+            },
             HTTP_HOST='driver.localhost',
         )
-        session = self.client.session
-        session.pop('employee_access_id', None)
-        session.pop('active_role_access_id', None)
-        session.pop('active_role_code', None)
-        session.save()
+        cookie_value = consent_response.cookies[PRIVACY_CONSENT_COOKIE_NAME].value
 
-        response = self.client.get('/?form=1', HTTP_HOST='driver.localhost')
+        logout = self.client.get('/logout/', HTTP_HOST='driver.localhost')
 
-        self.assertContains(response, 'name="privacy_consent"')
-        self.assertContains(response, 'data-privacy-consent')
-        self.assertContains(response, 'checked')
+        self.assertRedirects(logout, '/', fetch_redirect_response=False)
+        self.assertNotIn(PRIVACY_CONSENT_SESSION_KEY, self.client.session)
+        self.assertEqual(
+            self.client.cookies[PRIVACY_CONSENT_COOKIE_NAME].value,
+            cookie_value,
+        )
+
+        pin_step = self.client.post(
+            '/',
+            {
+                'phone': self.driver_access.employee.phone,
+                'action': 'continue',
+                'device_kind': 'personal',
+            },
+            HTTP_HOST='driver.localhost',
+        )
+
+        self.assertEqual(pin_step.status_code, 200)
+        self.assertContains(pin_step, 'data-login-step="pin"', count=1)
+        self.assertNotContains(pin_step, 'name="privacy_consent"')
+        restored = self.client.session[PRIVACY_CONSENT_SESSION_KEY]
+        self.assertEqual(restored['access_id'], self.driver_access.id)
+        self.assertEqual(restored['role_code'], 'driver')
+
+    def test_signed_consent_cookie_does_not_transfer_to_another_access_or_role(self):
+        client = Client()
+        consent_response = client.post(
+            '/',
+            {
+                'phone': self.driver_access.employee.phone,
+                'action': 'consent',
+                'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
+            },
+            HTTP_HOST='driver.localhost',
+        )
+        self.assertIn(PRIVACY_CONSENT_COOKIE_NAME, consent_response.cookies)
+        client.get('/logout/', HTTP_HOST='driver.localhost')
+        second_driver = self._create_access(
+            role_code='driver',
+            role_name='Водитель самосвала',
+            full_name='Другой водитель',
+            phone='+79990000991',
+            access_code='190991',
+        )
+
+        for host, access in (
+            ('driver.localhost', second_driver),
+            ('excavator.localhost', self.excavator_access),
+        ):
+            with self.subTest(host=host, access_id=access.id):
+                response = client.post(
+                    '/',
+                    {
+                        'phone': access.employee.phone,
+                        'action': 'continue',
+                        'device_kind': 'personal',
+                    },
+                    HTTP_HOST=host,
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'data-login-step="consent"', count=1)
+                self.assertNotContains(response, 'data-login-step="pin"')
+                self.assertNotIn(PRIVACY_CONSENT_SESSION_KEY, client.session)
+
+    def test_tampered_stale_or_wrongly_bound_signed_cookie_fails_closed(self):
+        correct_payload = ':'.join((
+            PRIVACY_POLICY_VERSION,
+            str(self.driver_access.id),
+            'driver',
+        ))
+        cases = (
+            ('stale-version', f'2026-01-01:{self.driver_access.id}:driver', False),
+            ('wrong-access', f'{PRIVACY_POLICY_VERSION}:999999:driver', False),
+            (
+                'wrong-role',
+                f'{PRIVACY_POLICY_VERSION}:{self.driver_access.id}:excavator_operator',
+                False,
+            ),
+            ('tampered-signature', correct_payload, True),
+        )
+
+        for label, payload, tamper in cases:
+            with self.subTest(case=label):
+                client = Client()
+                self._set_signed_privacy_cookie(client, payload)
+                if tamper:
+                    client.cookies[PRIVACY_CONSENT_COOKIE_NAME] = (
+                        f'{client.cookies[PRIVACY_CONSENT_COOKIE_NAME].value}x'
+                    )
+
+                response = client.post(
+                    '/',
+                    {
+                        'phone': self.driver_access.employee.phone,
+                        'action': 'continue',
+                        'device_kind': 'personal',
+                    },
+                    HTTP_HOST='driver.localhost',
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'data-login-step="consent"', count=1)
+                self.assertNotContains(response, 'data-login-step="pin"')
+                self.assertNotIn(PRIVACY_CONSENT_SESSION_KEY, client.session)
 
     def test_driver_combined_error_keeps_phone_and_never_reflects_pin(self):
         response = self.client.post(
@@ -485,7 +726,7 @@ class RoleAppLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.driver_access.employee.phone)
         self.assertContains(response, 'data-login-feedback')
-        self.assertContains(response, 'Телефон или пинкод указаны неверно')
+        self.assertContains(response, 'PIN не подошёл. Проверьте 6 цифр и попробуйте ещё раз.')
         self.assertNotContains(response, 'value="999999"')
         self.assertNotIn('employee_access_id', self.client.session)
         self.assertNotIn(PRIVACY_CONSENT_SESSION_KEY, self.client.session)
@@ -518,12 +759,12 @@ class RoleAppLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.excavator_access.employee.phone)
         self.assertContains(response, 'data-login-feedback')
-        self.assertContains(response, 'Телефон или пинкод указаны неверно')
+        self.assertContains(response, 'PIN не подошёл. Проверьте 6 цифр и попробуйте ещё раз.')
         self.assertNotContains(response, 'value="999999"')
         self.assertNotIn('employee_access_id', self.client.session)
         self.assertNotIn(PRIVACY_CONSENT_SESSION_KEY, self.client.session)
 
-    def test_old_excavator_continue_post_remains_compatible(self):
+    def test_excavator_continue_returns_the_combined_pin_step(self):
         response = self.client.post(
             '/',
             {
@@ -537,18 +778,22 @@ class RoleAppLoginTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(
+        self.assertContains(
             response,
-            '<form method="post" data-validated-login data-login-combined="true"',
+            '<form method="post" data-validated-login data-login-combined="true" data-login-step="pin"',
         )
-        self.assertContains(response, 'class="app-confirm-content unified-login-form is-pin-step"')
+        self.assertContains(response, 'is-pin-step is-combined-login')
+        self.assertContains(response, '<h1>Введите PIN</h1>')
         self.assertContains(response, 'data-phone-input')
         self.assertContains(response, ' readonly')
         self.assertContains(response, 'data-pin-input')
         self.assertNotIn('employee_access_id', self.client.session)
-        self.assertNotIn(PRIVACY_CONSENT_SESSION_KEY, self.client.session)
+        self.assertEqual(
+            self.client.session[PRIVACY_CONSENT_SESSION_KEY]['access_id'],
+            self.excavator_access.id,
+        )
 
-    def test_old_continue_cannot_start_pending_activation_without_consent(self):
+    def test_old_continue_stops_at_consent_before_pending_activation(self):
         pending = self._create_access(
             role_code='excavator_operator',
             role_name='Машинист экскаватора',
@@ -572,8 +817,10 @@ class RoleAppLoginTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, PRIVACY_CONSENT_REQUIRED_MESSAGE)
+        self.assertContains(response, 'data-login-step="consent"', count=1)
         self.assertContains(response, 'name="privacy_consent"')
+        self.assertContains(response, 'aria-invalid="false"')
+        self.assertNotContains(response, PRIVACY_CONSENT_REQUIRED_MESSAGE)
         self.assertNotIn('pending_activation_access_id', self.client.session)
         self.assertNotIn(PRIVACY_CONSENT_SESSION_KEY, self.client.session)
 
@@ -606,7 +853,7 @@ class RoleAppLoginTests(TestCase):
         pending.refresh_from_db()
         self.assertEqual(pending.status, EmployeeAccess.Status.NOT_ACTIVATED)
 
-    def test_excavator_first_entry_still_reaches_activation_without_pin(self):
+    def test_excavator_first_entry_reaches_activation_automatically(self):
         pending = self._create_access(
             role_code='excavator_operator',
             role_name='Машинист экскаватора',
@@ -622,7 +869,7 @@ class RoleAppLoginTests(TestCase):
             '/',
             {
                 'phone': pending.employee.phone,
-                'action': 'register',
+                'action': 'continue',
                 'device_kind': 'personal',
                 'privacy_consent': PRIVACY_POLICY_VERSION,
             },
@@ -640,9 +887,12 @@ class RoleAppLoginTests(TestCase):
             HTTP_HOST='excavator.localhost',
         )
         self.assertEqual(activation_page.status_code, 200)
-        self.assertContains(activation_page, 'Это вы?')
+        self.assertContains(activation_page, '<h1>Придумайте PIN</h1>')
+        self.assertContains(activation_page, 'data-mobile-role-activation')
+        self.assertContains(activation_page, 'mobile-role-activation-v1.css')
+        self.assertNotContains(activation_page, ' autofocus')
 
-    def test_combined_registration_rejects_missing_privacy_consent(self):
+    def test_legacy_register_action_stops_at_the_consent_step(self):
         pending = self._create_access(
             role_code='driver',
             role_name='Водитель самосвала',
@@ -665,11 +915,14 @@ class RoleAppLoginTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, PRIVACY_CONSENT_REQUIRED_MESSAGE)
+        self.assertContains(response, 'data-login-step="consent"', count=1)
+        self.assertContains(response, 'name="privacy_consent"')
+        self.assertContains(response, 'aria-invalid="false"')
+        self.assertNotContains(response, PRIVACY_CONSENT_REQUIRED_MESSAGE)
         self.assertNotIn('pending_activation_access_id', self.client.session)
         self.assertNotIn(PRIVACY_CONSENT_SESSION_KEY, self.client.session)
 
-    def test_driver_first_entry_reaches_activation_without_pin(self):
+    def test_driver_first_entry_reaches_activation_automatically(self):
         pending = self._create_access(
             role_code='driver',
             role_name='Водитель самосвала',
@@ -685,7 +938,7 @@ class RoleAppLoginTests(TestCase):
             '/',
             {
                 'phone': pending.employee.phone,
-                'action': 'register',
+                'action': 'continue',
                 'device_kind': 'personal',
                 'privacy_consent': PRIVACY_POLICY_VERSION,
             },
@@ -703,7 +956,327 @@ class RoleAppLoginTests(TestCase):
             HTTP_HOST='driver.localhost',
         )
         self.assertEqual(activation_page.status_code, 200)
-        self.assertContains(activation_page, 'Это вы?')
+        self.assertContains(activation_page, '<h1>Придумайте PIN</h1>')
+        self.assertContains(activation_page, 'data-mobile-role-activation')
+        self.assertContains(activation_page, 'mobile-role-activation-v1.css')
+        self.assertNotContains(activation_page, ' autofocus')
+
+    def test_first_entry_creates_a_permanent_pin_and_enters_each_role_app(self):
+        cases = (
+            (
+                'driver.localhost',
+                'driver',
+                'Водитель самосвала',
+                '+79990000131',
+                '/driver/',
+            ),
+            (
+                'excavator.localhost',
+                'excavator_operator',
+                'Машинист экскаватора',
+                '+79990000132',
+                '/excavator/work/',
+            ),
+        )
+
+        for host, role_code, role_name, phone, landing_url in cases:
+            with self.subTest(host=host):
+                client = Client()
+                pending = self._create_access(
+                    role_code=role_code,
+                    role_name=role_name,
+                    full_name=f'Новый сотрудник {role_code}',
+                    phone=phone,
+                    access_code='684219',
+                )
+                pending.status = EmployeeAccess.Status.NOT_ACTIVATED
+                pending.activated_at = None
+                pending.primary_code_issued_at = timezone.now()
+                pending.save(update_fields=[
+                    'status',
+                    'activated_at',
+                    'primary_code_issued_at',
+                ])
+
+                start = client.post(
+                    '/',
+                    {
+                        'phone': phone,
+                        'action': 'continue',
+                        'device_kind': 'personal',
+                        'privacy_consent': PRIVACY_POLICY_VERSION,
+                    },
+                    HTTP_HOST=host,
+                )
+                self.assertRedirects(
+                    start,
+                    '/activate-access/',
+                    fetch_redirect_response=False,
+                )
+
+                activation = client.post(
+                    '/activate-access/',
+                    {
+                        'new_access_code': '482619',
+                        'confirm_access_code': '482619',
+                    },
+                    HTTP_HOST=host,
+                )
+
+                self.assertRedirects(
+                    activation,
+                    landing_url,
+                    fetch_redirect_response=False,
+                )
+                pending.refresh_from_db()
+                self.assertEqual(pending.status, EmployeeAccess.Status.ACTIVATED)
+                self.assertEqual(pending.access_code, '482619')
+                self.assertEqual(client.session['employee_access_id'], pending.id)
+                self.assertNotIn('pending_activation_access_id', client.session)
+
+    def test_temporary_pin_cannot_bypass_first_entry_activation(self):
+        pending = self._create_access(
+            role_code='driver',
+            role_name='Водитель самосвала',
+            full_name='Новый водитель с временным PIN',
+            phone='+79990000133',
+            access_code='684219',
+        )
+        pending.status = EmployeeAccess.Status.NOT_ACTIVATED
+        pending.activated_at = None
+        pending.primary_code_issued_at = timezone.now()
+        pending.save(update_fields=[
+            'status',
+            'activated_at',
+            'primary_code_issued_at',
+        ])
+
+        response = self.client.post(
+            '/',
+            {
+                'phone': pending.employee.phone,
+                'access_code': pending.access_code,
+                'action': 'login',
+                'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
+            },
+            HTTP_HOST='driver.localhost',
+        )
+
+        self.assertRedirects(
+            response,
+            '/activate-access/',
+            fetch_redirect_response=False,
+        )
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, EmployeeAccess.Status.NOT_ACTIVATED)
+        self.assertNotIn('employee_access_id', self.client.session)
+        self.assertEqual(
+            self.client.session['pending_activation_access_id'],
+            pending.id,
+        )
+
+    def test_pending_duplicate_cannot_replace_an_existing_permanent_pin(self):
+        pending = EmployeeAccess.objects.create(
+            employee=self.driver_access.employee,
+            role=self.driver_access.role,
+            access_code='684219',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            primary_code_issued_at=timezone.now(),
+            is_active=True,
+        )
+
+        response = self.client.post(
+            '/',
+            {
+                'phone': self.driver_access.employee.phone,
+                'access_code': pending.access_code,
+                'action': 'login',
+                'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
+            },
+            HTTP_HOST='driver.localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            'PIN не подошёл. Проверьте 6 цифр и попробуйте ещё раз.',
+        )
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, EmployeeAccess.Status.NOT_ACTIVATED)
+        self.assertNotIn('employee_access_id', self.client.session)
+        self.assertNotIn('pending_activation_access_id', self.client.session)
+
+    def test_multiple_activated_accesses_are_never_chosen_implicitly(self):
+        EmployeeAccess.objects.create(
+            employee=self.driver_access.employee,
+            role=self.driver_access.role,
+            access_code='482619',
+            status=EmployeeAccess.Status.ACTIVATED,
+            activated_at=timezone.now(),
+            is_active=True,
+        )
+
+        for action, extra in (
+            ('continue', {}),
+            ('login', {'access_code': self.driver_access.access_code}),
+        ):
+            with self.subTest(action=action):
+                client = Client()
+                response = client.post(
+                    '/',
+                    {
+                        'phone': self.driver_access.employee.phone,
+                        'action': action,
+                        'device_kind': 'personal',
+                        'privacy_consent': PRIVACY_POLICY_VERSION,
+                        **extra,
+                    },
+                    HTTP_HOST='driver.localhost',
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'Нужна помощь администратора')
+                self.assertNotIn('employee_access_id', client.session)
+                self.assertNotIn('pending_activation_access_id', client.session)
+
+    def test_change_phone_clears_pre_auth_consent_from_the_previous_employee(self):
+        pin_step = self.client.post(
+            '/',
+            {
+                'phone': self.driver_access.employee.phone,
+                'action': 'continue',
+                'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
+            },
+            HTTP_HOST='driver.localhost',
+        )
+        self.assertEqual(pin_step.status_code, 200)
+        self.assertIn(PRIVACY_CONSENT_SESSION_KEY, self.client.session)
+
+        fresh_phone_step = self.client.get(
+            '/?form=1&reset=1',
+            HTTP_HOST='driver.localhost',
+        )
+
+        self.assertEqual(fresh_phone_step.status_code, 200)
+        self.assertContains(fresh_phone_step, 'data-login-step="phone"')
+        self.assertNotContains(
+            fresh_phone_step,
+            'name="privacy_consent" checked',
+        )
+        self.assertNotIn(PRIVACY_CONSENT_SESSION_KEY, self.client.session)
+
+    def test_activation_race_returns_to_login_instead_of_server_error(self):
+        pending = self._create_access(
+            role_code='driver',
+            role_name='Водитель самосвала',
+            full_name='Новый водитель с параллельной активацией',
+            phone='+79990000135',
+            access_code='684219',
+        )
+        pending.status = EmployeeAccess.Status.NOT_ACTIVATED
+        pending.activated_at = None
+        pending.save(update_fields=['status', 'activated_at'])
+        self.client.post(
+            '/',
+            {
+                'phone': pending.employee.phone,
+                'action': 'continue',
+                'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
+            },
+            HTTP_HOST='driver.localhost',
+        )
+        locked_queryset = MagicMock()
+        locked_queryset.select_related.return_value.get.side_effect = (
+            EmployeeAccess.DoesNotExist
+        )
+
+        with patch(
+            'users.views.EmployeeAccess.objects.select_for_update',
+            return_value=locked_queryset,
+        ):
+            response = self.client.post(
+                '/activate-access/',
+                {
+                    'new_access_code': '482619',
+                    'confirm_access_code': '482619',
+                },
+                HTTP_HOST='driver.localhost',
+            )
+
+        self.assertRedirects(response, '/', fetch_redirect_response=False)
+        self.assertNotIn('pending_activation_access_id', self.client.session)
+        self.assertNotIn('employee_access_id', self.client.session)
+
+    def test_pending_activation_session_cannot_cross_role_hosts(self):
+        pending = self._create_access(
+            role_code='driver',
+            role_name='Водитель самосвала',
+            full_name='Новый водитель на чужом домене',
+            phone='+79990000136',
+            access_code='684219',
+        )
+        pending.status = EmployeeAccess.Status.NOT_ACTIVATED
+        pending.activated_at = None
+        pending.save(update_fields=['status', 'activated_at'])
+        session = self.client.session
+        session['pending_activation_access_id'] = pending.id
+        session['pending_activation_role_code'] = 'driver'
+        session.save()
+
+        response = self.client.get(
+            '/activate-access/',
+            HTTP_HOST='excavator.localhost',
+        )
+
+        self.assertRedirects(response, '/', fetch_redirect_response=False)
+        self.assertNotIn('pending_activation_access_id', self.client.session)
+        self.assertNotIn('pending_activation_role_code', self.client.session)
+        self.assertNotIn('employee_access_id', self.client.session)
+
+    def test_multiple_pending_accesses_stop_for_administrator_resolution(self):
+        employee = Employee.objects.create(
+            full_name='Сотрудник с двумя доступами',
+            phone='+79990000134',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        EmployeeAccess.objects.bulk_create([
+            EmployeeAccess(
+                employee=employee,
+                role=self.driver_access.role,
+                access_code='684219',
+                status=EmployeeAccess.Status.NOT_ACTIVATED,
+                is_active=True,
+            ),
+            EmployeeAccess(
+                employee=employee,
+                role=self.driver_access.role,
+                access_code='482619',
+                status=EmployeeAccess.Status.NOT_ACTIVATED,
+                is_active=True,
+            ),
+        ])
+
+        response = self.client.post(
+            '/',
+            {
+                'phone': employee.phone,
+                'action': 'continue',
+                'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
+            },
+            HTTP_HOST='driver.localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Нужна помощь администратора')
+        self.assertContains(response, 'Напишите администратору')
+        self.assertNotIn('employee_access_id', self.client.session)
+        self.assertNotIn('pending_activation_access_id', self.client.session)
 
     def test_combined_mobile_logins_remain_csrf_protected(self):
         cases = (

@@ -71,7 +71,7 @@ from shifts.services import (
     validate_excavator_shift_readings,
 )
 from users.access_auth import find_employee_access_by_credentials
-from users.active_role import activate_role_session
+from users.active_role import activate_role_session, active_access_for_employee_role
 from users.models import Employee, EmployeeAccess
 from users.active_role import role_session_state
 from users.role_apps import role_app_manifest_response, role_app_service_worker_response
@@ -735,14 +735,16 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v203";
+const CACHE_NAME = "excavator-mobile-shell-v204";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
+const PRIVACY_POLICY_PATH = "/company/privacy/";
+const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";
 const CORE_ASSETS = [
   APP_SHELL_URL,
   MANIFEST_URL,
-  "/company/privacy/",
-  "/static/portal/css/portal-shell-v5.css?v=6",
+  PRIVACY_POLICY_URL,
+  "/static/portal/css/portal-shell-v5.css?v=7",
   "/static/portal/js/portal-shell-v5.js",
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
@@ -856,6 +858,10 @@ self.addEventListener("fetch", event => {
   if (url.origin !== self.location.origin) return;
   if (request.headers.get("X-Requested-With") === "XMLHttpRequest") {
     event.respondWith(networkOnly(request));
+    return;
+  }
+  if (url.pathname === PRIVACY_POLICY_PATH) {
+    event.respondWith(networkFirst(request, PRIVACY_POLICY_URL));
     return;
   }
   if (request.mode === "navigate" || url.pathname === APP_SHELL_URL) {
@@ -5227,6 +5233,7 @@ def dispatcher_toggle_shift_view(request):
     access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     if not access or access.role.code not in {'dispatcher', 'admin'}:
         return redirect('role_home')
+    session_access = access
 
     redirect_url = request.POST.get('next') or request.META.get('HTTP_REFERER') or reverse('dispatcher_control')
     if request.method != 'POST':
@@ -5234,15 +5241,19 @@ def dispatcher_toggle_shift_view(request):
 
     action = request.POST.get('shift_action')
     if action == 'start':
-        has_reauth_credentials = bool(request.POST.get('reauth_phone') and request.POST.get('reauth_access_code'))
-        if get_session_device_kind(request) == 'shared' or not has_reauth_credentials:
+        if get_session_device_kind(request) == 'shared':
             reauth_access, reauth_error = authenticate_dispatcher_shared_shift_start(request)
             if reauth_error:
                 messages.error(request, reauth_error)
                 return redirect(redirect_url)
             access = reauth_access
+        else:
+            access = active_access_for_employee_role(access.employee, 'dispatcher')
+            if not access:
+                messages.error(request, 'Активированный доступ Горного диспетчера не найден.')
+                return redirect(redirect_url)
         Employee.objects.select_for_update().get(pk=access.employee_id)
-        if not role_session_state(request, access)['is_active']:
+        if not role_session_state(request, session_access)['is_active']:
             messages.error(request, 'Роль неактивна — доступен только просмотр.')
             return redirect(redirect_url)
         if get_active_dispatcher_shift(access):
@@ -5260,8 +5271,11 @@ def dispatcher_toggle_shift_view(request):
         return redirect(redirect_url)
 
     if action == 'end':
+        dispatcher_access = active_access_for_employee_role(access.employee, 'dispatcher')
+        if dispatcher_access:
+            access = dispatcher_access
         Employee.objects.select_for_update().get(pk=access.employee_id)
-        if not role_session_state(request, access)['is_active']:
+        if not role_session_state(request, session_access)['is_active']:
             messages.error(request, 'Роль неактивна — доступен только просмотр.')
             return redirect(redirect_url)
         shift = close_dispatcher_shift(access)

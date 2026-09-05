@@ -96,9 +96,13 @@ from .protected_cards import (
 from .privacy_consent import (
     PRIVACY_CONSENT_FIELD,
     PRIVACY_CONSENT_REQUIRED_MESSAGE,
+    PRIVACY_CONSENT_SESSION_KEY,
+    PRIVACY_POLICY_VERSION,
     accept_current_privacy_policy,
+    privacy_consent_cookie_matches_access,
     privacy_consent_matches_access,
     privacy_consent_submission_is_current,
+    set_current_privacy_consent_cookie,
 )
 from .forms import (
     AdminAccessBlockForm,
@@ -287,12 +291,14 @@ const CACHE_PREFIX = "driver-mobile-shell-";
 const APP_SHELL_URL = "/driver/";
 const LEGACY_SHELL_URL = "/driver/shift/";
 const MANIFEST_URL = "/driver.webmanifest";
+const PRIVACY_POLICY_PATH = "/company/privacy/";
+const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";
 const CORE_ASSETS = [
     APP_SHELL_URL,
     LEGACY_SHELL_URL,
     MANIFEST_URL,
-    "/company/privacy/",
-    "/static/portal/css/portal-shell-v5.css?v=6",
+    PRIVACY_POLICY_URL,
+    "/static/portal/css/portal-shell-v5.css?v=7",
     "/static/portal/js/portal-shell-v5.js",
     "/static/css/app.css",
     "/static/css/mobile-role-login-v1.css",
@@ -377,6 +383,10 @@ self.addEventListener("fetch", (event) => {{
     }}
     if (request.headers.get("x-requested-with") === "XMLHttpRequest") {{
         event.respondWith(fetch(request));
+        return;
+    }}
+    if (url.pathname === PRIVACY_POLICY_PATH) {{
+        event.respondWith(networkFirst(request, PRIVACY_POLICY_URL));
         return;
     }}
     if (request.mode === "navigate" || url.pathname === APP_SHELL_URL || url.pathname === LEGACY_SHELL_URL) {{
@@ -592,6 +602,85 @@ def _masked_activation_phone(value):
     return 'Телефон подтвержден'
 
 
+PENDING_ACTIVATION_SESSION_KEYS = (
+    'pending_activation_access_id',
+    'pending_activation_role_code',
+    'pending_activation_target_app_code',
+    'post_activation_next',
+)
+
+
+def _clear_pending_activation_session(request):
+    for key in PENDING_ACTIVATION_SESSION_KEYS:
+        request.session.pop(key, None)
+
+
+def _mobile_privacy_consent_matches(request, access):
+    """Restore a current, access-bound consent into a fresh login session."""
+    if privacy_consent_matches_access(request.session, access):
+        return True
+    if privacy_consent_cookie_matches_access(request, access):
+        accept_current_privacy_policy(
+            request,
+            PRIVACY_POLICY_VERSION,
+            access=access,
+        )
+        return True
+    return False
+
+
+def _mobile_privacy_consent_gate(request, access, submitted_version):
+    """Return whether login may continue and whether a cookie must be issued."""
+    if _mobile_privacy_consent_matches(request, access):
+        return True, False
+    if privacy_consent_submission_is_current(submitted_version):
+        accept_current_privacy_policy(
+            request,
+            submitted_version,
+            access=access,
+        )
+        return True, True
+    return False, False
+
+
+def _render_mobile_privacy_consent_step(
+    request,
+    *,
+    selected_device_kind,
+    next_url,
+    login_role_app,
+    submitted_phone,
+    invalid=False,
+):
+    if invalid:
+        messages.error(request, PRIVACY_CONSENT_REQUIRED_MESSAGE)
+    return render(
+        request,
+        'users/login.html',
+        {
+            'selected_device_kind': selected_device_kind,
+            'next_url': next_url,
+            'login_role_app': login_role_app,
+            'combined_mobile_login': True,
+            'submitted_phone': submitted_phone,
+            'login_step': 'consent',
+            'privacy_consent_error': invalid,
+        },
+    )
+
+
+def _attach_mobile_privacy_consent_cookie(
+    response,
+    request,
+    access,
+    *,
+    accepted_now,
+):
+    if accepted_now:
+        set_current_privacy_consent_cookie(response, request, access)
+    return response
+
+
 def login_view(
     request,
     *,
@@ -606,6 +695,17 @@ def login_view(
         and role_app.role_code in {'driver', 'excavator_operator'}
         and target_role_app is None
     )
+    if (
+        request.method == 'GET'
+        and combined_mobile_login
+        and request.GET.get('reset') == '1'
+    ):
+        # «Ввести другой номер» начинает новую предавторизационную попытку.
+        # Согласие и выбранный доступ прошлого сотрудника нельзя переносить на
+        # следующий номер, особенно на общем телефоне.
+        _clear_pending_activation_session(request)
+        request.session.pop(PRIVACY_CONSENT_SESSION_KEY, None)
+        request.session.cycle_key()
     allowed_role_codes = tuple(allowed_role_codes or ())
     next_url = forced_next_url or _validated_next_url(
         request,
@@ -657,34 +757,17 @@ def login_view(
         request.GET.get('phone', '').strip() if request.method == 'GET' else ''
     )
     submitted_action = request.POST.get('action', '') if request.method == 'POST' else ''
-    login_action = submitted_action if submitted_action in {'register', 'continue'} else 'login'
+    login_action = (
+        submitted_action
+        if submitted_action in {'register', 'continue', 'consent'}
+        else 'login'
+    )
     submitted_privacy_consent = (
         request.POST.get(PRIVACY_CONSENT_FIELD, '')
         if request.method == 'POST'
         else ''
     )
-    if (
-        request.method == 'POST'
-        and combined_mobile_login
-        and login_action in {'login', 'register', 'continue'}
-        and not privacy_consent_submission_is_current(submitted_privacy_consent)
-    ):
-        messages.error(request, PRIVACY_CONSENT_REQUIRED_MESSAGE)
-        return render(
-            request,
-            'users/login.html',
-            {
-                'selected_device_kind': selected_device_kind,
-                'next_url': next_url,
-                'login_role_app': login_role_app,
-                'combined_mobile_login': True,
-                'submitted_phone': submitted_phone or prefilled_phone,
-                'login_step': 'pin' if submitted_phone else '',
-                'privacy_consent_error': True,
-            },
-        )
-
-    if request.method == 'POST' and login_action in {'register', 'continue'}:
+    if request.method == 'POST' and login_action in {'register', 'continue', 'consent'}:
         # Первый вход. Раньше сюда пускал только выданный вручную временный код,
         # и раздавать его приходилось каждому — при текучке в двадцать человек за
         # вахту это неподъёмно. Теперь ключ — номер телефона из карточки, а ФИО
@@ -707,23 +790,67 @@ def login_view(
         # например, доступ переоформляли. Если хоть одна уже активирована, у
         # человека есть рабочий пинкод, и вести его на регистрацию нельзя:
         # заведёт второй и запутается, каким входить.
-        already_registered = any(
-            candidate.status == EmployeeAccess.Status.ACTIVATED
+        activated = [
+            candidate
             for candidate in matches
-        )
+            if candidate.status == EmployeeAccess.Status.ACTIVATED
+        ]
+        if len(activated) > 1:
+            return render(
+                request,
+                'users/login_phone_not_found.html',
+                {
+                    'login_role_app': login_role_app,
+                    'submitted_phone': format_phone_for_display(phone),
+                    'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
+                    'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
+                    'access_conflict': True,
+                },
+            )
+        already_registered = bool(activated)
         pending = [
             candidate
             for candidate in matches
             if candidate.status == EmployeeAccess.Status.NOT_ACTIVATED
         ]
+        if len(pending) > 1 and not already_registered:
+            return render(
+                request,
+                'users/login_phone_not_found.html',
+                {
+                    'login_role_app': login_role_app,
+                    'submitted_phone': format_phone_for_display(phone),
+                    'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
+                    'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
+                    'access_conflict': True,
+                },
+            )
+        privacy_consent_accepted_now = False
+        consent_access = (
+            pending[0]
+            if pending and not already_registered
+            else (activated[0] if activated else None)
+        )
+        if combined_mobile_login and consent_access:
+            consent_ready, privacy_consent_accepted_now = (
+                _mobile_privacy_consent_gate(
+                    request,
+                    consent_access,
+                    submitted_privacy_consent,
+                )
+            )
+            if not consent_ready:
+                return _render_mobile_privacy_consent_step(
+                    request,
+                    selected_device_kind=selected_device_kind,
+                    next_url=next_url,
+                    login_role_app=login_role_app,
+                    submitted_phone=phone,
+                    invalid=(login_action == 'consent'),
+                )
         if pending and not already_registered:
             access = pending[0]
             request.session.cycle_key()
-            accept_current_privacy_policy(
-                request,
-                submitted_privacy_consent,
-                access=access,
-            )
             request.session['pending_activation_access_id'] = access.id
             request.session['pending_activation_role_code'] = access.role.code
             if target_role_app:
@@ -733,23 +860,34 @@ def login_view(
             if next_url:
                 request.session['post_activation_next'] = next_url
             set_session_device_kind(request, selected_device_kind)
-            return _login_redirect_response(request, reverse('activate_access'))
-        if matches:
-            # Пинкод у человека уже есть — просим именно его, вторым шагом.
-            return render(
+            response = _login_redirect_response(request, reverse('activate_access'))
+            return _attach_mobile_privacy_consent_cookie(
+                response,
+                request,
+                access,
+                accepted_now=privacy_consent_accepted_now,
+            )
+        if activated:
+            # Пинкод у человека уже есть — система сама открывает второй шаг.
+            # Согласие принято на шаге телефона и привязано к конкретному
+            # доступу, поэтому повторять чекбокс рядом с PIN не нужно.
+            response = render(
                 request,
                 'users/login.html',
                 {
                     'selected_device_kind': selected_device_kind,
                     'next_url': next_url,
                     'login_role_app': login_role_app,
-                    # Старый cached-клиент action=continue заменяет только
-                    # <main>, но не может подхватить новый CSS из <head>.
-                    # Возвращаем ему прежний самостоятельный PIN-шаг.
-                    'combined_mobile_login': False,
+                    'combined_mobile_login': combined_mobile_login,
                     'submitted_phone': phone,
                     'login_step': 'pin',
                 },
+            )
+            return _attach_mobile_privacy_consent_cookie(
+                response,
+                request,
+                activated[0],
+                accepted_now=privacy_consent_accepted_now,
             )
         else:
             # Номер может быть в базе, но за другой должностью: человек открыл
@@ -810,6 +948,59 @@ def login_view(
             allow_pending_access=True,
         ):
             access = None
+        # Мобильный двухшаговый вход никогда не авторизует NOT_ACTIVATED по
+        # старому временному коду. Состояние такого доступа определяется ниже
+        # только по телефону и ведёт на обязательное создание постоянного PIN.
+        if (
+            combined_mobile_login
+            and access
+            and access.status != EmployeeAccess.Status.ACTIVATED
+        ):
+            access = None
+        if combined_mobile_login and access:
+            activated_for_phone = [
+                candidate
+                for candidate in find_unactivated_accesses_by_phone(
+                    phone,
+                    role_codes=([role_app.role_code] if role_app else None),
+                )
+                if candidate.status == EmployeeAccess.Status.ACTIVATED
+                and employee_has_effective_access_role(
+                    candidate.employee,
+                    candidate.role.code,
+                    allow_pending_access=True,
+                )
+            ]
+            if len(activated_for_phone) > 1:
+                return render(
+                    request,
+                    'users/login_phone_not_found.html',
+                    {
+                        'login_role_app': login_role_app,
+                        'submitted_phone': format_phone_for_display(phone),
+                        'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
+                        'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
+                        'access_conflict': True,
+                    },
+                )
+        privacy_consent_accepted_now = False
+        if combined_mobile_login and access:
+            consent_ready, privacy_consent_accepted_now = (
+                _mobile_privacy_consent_gate(
+                    request,
+                    access,
+                    submitted_privacy_consent,
+                )
+            )
+            if not consent_ready:
+                return _render_mobile_privacy_consent_step(
+                    request,
+                    selected_device_kind=selected_device_kind,
+                    next_url=next_url,
+                    login_role_app=login_role_app,
+                    submitted_phone=phone,
+                    invalid=False,
+                )
         if access:
             if access.status == EmployeeAccess.Status.NOT_ACTIVATED:
                 if access.primary_code_issued_at:
@@ -868,14 +1059,15 @@ def login_view(
                 )
             request.session.cycle_key()
             set_session_device_kind(request, selected_device_kind)
-            accept_current_privacy_policy(
-                request,
-                submitted_privacy_consent,
-                access=locked_access,
-            )
-            return _login_redirect_response(
+            response = _login_redirect_response(
                 request,
                 next_url or _role_landing_url(access),
+            )
+            return _attach_mobile_privacy_consent_cookie(
+                response,
+                request,
+                locked_access,
+                accepted_now=privacy_consent_accepted_now,
             )
         # Пинкода у номера ещё нет — человек первый раз в приложении. Отбивать
         # его «неверный пинкод» бессмысленно: вводить ему нечего. Ведём на экран,
@@ -902,14 +1094,39 @@ def login_view(
             for candidate in phone_accesses
             if candidate.status == EmployeeAccess.Status.NOT_ACTIVATED
         ]
+        if combined_mobile_login and len(first_time) > 1:
+            return render(
+                request,
+                'users/login_phone_not_found.html',
+                {
+                    'login_role_app': login_role_app,
+                    'submitted_phone': format_phone_for_display(phone),
+                    'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
+                    'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
+                    'access_conflict': True,
+                },
+            )
         if first_time:
             pending_access = first_time[0]
+            privacy_consent_accepted_now = False
+            if combined_mobile_login:
+                consent_ready, privacy_consent_accepted_now = (
+                    _mobile_privacy_consent_gate(
+                        request,
+                        pending_access,
+                        submitted_privacy_consent,
+                    )
+                )
+                if not consent_ready:
+                    return _render_mobile_privacy_consent_step(
+                        request,
+                        selected_device_kind=selected_device_kind,
+                        next_url=next_url,
+                        login_role_app=login_role_app,
+                        submitted_phone=phone,
+                        invalid=False,
+                    )
             request.session.cycle_key()
-            accept_current_privacy_policy(
-                request,
-                submitted_privacy_consent,
-                access=pending_access,
-            )
             request.session['pending_activation_access_id'] = pending_access.id
             request.session['pending_activation_role_code'] = pending_access.role.code
             if target_role_app:
@@ -919,7 +1136,13 @@ def login_view(
             if next_url:
                 request.session['post_activation_next'] = next_url
             set_session_device_kind(request, selected_device_kind)
-            return _login_redirect_response(request, reverse('activate_access'))
+            response = _login_redirect_response(request, reverse('activate_access'))
+            return _attach_mobile_privacy_consent_cookie(
+                response,
+                request,
+                pending_access,
+                accepted_now=privacy_consent_accepted_now,
+            )
 
         other_access = None
         if allowed_role_codes:
@@ -928,6 +1151,11 @@ def login_view(
             messages.error(
                 request,
                 f'У этой учетной записи нет доступа к приложению «{login_role_app.short_name}».',
+            )
+        elif login_role_app and combined_mobile_login and submitted_phone:
+            messages.error(
+                request,
+                'PIN не подошёл. Проверьте 6 цифр и попробуйте ещё раз.',
             )
         elif login_role_app:
             messages.error(
@@ -945,7 +1173,13 @@ def login_view(
             'login_role_app': login_role_app,
             'combined_mobile_login': combined_mobile_login,
             'submitted_phone': submitted_phone or prefilled_phone,
-            'login_step': 'pin' if submitted_phone else '',
+            'login_step': (
+                'pin'
+                if request.method == 'POST'
+                and login_action == 'login'
+                and submitted_phone
+                else 'phone'
+            ),
             # Отличаем «номер пришёл в ссылке со /start/» от «человек уже
             # пробовал войти»: в первом случае экран установки должен
             # показаться как обычно, во втором — форма уже открыта на JS,
@@ -1009,12 +1243,23 @@ def activate_access_view(request):
     target_app = get_role_app(
         request.session.get('pending_activation_target_app_code', '')
     )
+    host_role_app = get_role_app_for_request(request)
+    if (
+        host_role_app
+        and target_app is None
+        and pending_role_code
+        and pending_role_code != host_role_app.role_code
+    ):
+        # Предактивационная сессия одного приложения не переносится в другое.
+        # Cookie сейчас host-only, но эта проверка оставляет изоляцию корректной
+        # и при будущих изменениях домена cookie или прокси.
+        _clear_pending_activation_session(request)
+        return redirect('login')
     access_queryset = (
         EmployeeAccess.objects
         .select_related('employee', 'role')
         .filter(id=access_id, is_active=True, status=EmployeeAccess.Status.NOT_ACTIVATED)
     )
-    host_role_app = get_role_app_for_request(request)
     if pending_role_code:
         access_queryset = access_queryset.filter(role__code=pending_role_code)
     elif host_role_app:
@@ -1027,28 +1272,16 @@ def activate_access_view(request):
     ):
         access = None
     if not access:
-        for key in (
-            'pending_activation_access_id',
-            'pending_activation_role_code',
-            'pending_activation_target_app_code',
-            'post_activation_next',
-        ):
-            request.session.pop(key, None)
+        _clear_pending_activation_session(request)
         return redirect('login')
 
     activation_role_app = target_app or host_role_app
     if (
         activation_role_app
         and activation_role_app.role_code in {'driver', 'excavator_operator'}
-        and not privacy_consent_matches_access(request.session, access)
+        and not _mobile_privacy_consent_matches(request, access)
     ):
-        for key in (
-            'pending_activation_access_id',
-            'pending_activation_role_code',
-            'pending_activation_target_app_code',
-            'post_activation_next',
-        ):
-            request.session.pop(key, None)
+        _clear_pending_activation_session(request)
         messages.error(request, PRIVACY_CONSENT_REQUIRED_MESSAGE)
         return redirect('login')
 
@@ -1077,6 +1310,13 @@ def activate_access_view(request):
                         locked_employee.is_active = True
                         locked_employee.save(update_fields=['status', 'is_active', 'updated_at'])
                     access = activate_role_session(request, locked_access)
+            except (Employee.DoesNotExist, EmployeeAccess.DoesNotExist):
+                _clear_pending_activation_session(request)
+                messages.error(
+                    request,
+                    'Доступ уже изменился. Введите номер ещё раз.',
+                )
+                return redirect('login')
             except ValidationError as error:
                 form.add_error(None, '; '.join(error.messages))
                 return render(
@@ -1089,11 +1329,7 @@ def activate_access_view(request):
                         'activation_role_app': activation_role_app,
                     },
                 )
-            for key in (
-                'pending_activation_access_id',
-                'pending_activation_role_code',
-                'pending_activation_target_app_code',
-            ):
+            for key in PENDING_ACTIVATION_SESSION_KEYS[:3]:
                 request.session.pop(key, None)
             request.session.cycle_key()
             set_session_device_kind(request, get_session_device_kind(request))

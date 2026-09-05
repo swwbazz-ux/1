@@ -2,6 +2,7 @@
 {% load static %}
 
 {% block title %}{% if login_role_app %}Вход · {{ login_role_app.short_name }}{% else %}Вход в систему{% endif %}{% endblock %}
+{% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
     <link rel="stylesheet" href="{% static 'css/max-support-link-v1.css' %}?v=6">
     <link rel="stylesheet" href="{% static 'vendor/bulma/button-1.0.4.min.css' %}">
@@ -39,7 +40,7 @@
     {% endif %}
     {% if combined_mobile_login %}
     <link rel="preload" as="image" href="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
-    <link rel="stylesheet" href="{% static 'css/mobile-role-login-v1.css' %}?v={{ login_role_app.shell_version }}">
+    <link rel="stylesheet" href="{% static 'css/mobile-role-login-v1.css' %}?v={{ login_role_app.shell_version }}-consent1">
     {% endif %}
     {% endif %}
     <link rel="stylesheet" href="{% static 'css/entry-action-button-v2.css' %}">
@@ -52,7 +53,7 @@ is-app-installed внутри нативного приложения: экра�
 display-mode: browser, поэтому нужна серверная проверка (см.
 _is_native_app в users/context_processors.py — метка в User-Agent).
 {% endcomment %}
-{% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% if request.GET.form %} is-login-form-forced{% endif %}{% if is_native_app %} is-app-installed{% endif %}{% if request.GET.install and not is_ios %} is-pwa-install-intent{% endif %}{% if login_role_app %} login-role-{{ login_role_app.role_code }}{% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %} login-fullscreen{% endif %}{% endif %}{% if combined_mobile_login %} login-combined{% endif %}{% endblock %}
+{% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen{% if request.GET.form %} is-login-form-forced{% endif %}{% if is_native_app %} is-app-installed{% endif %}{% if request.GET.install and not is_ios %} is-pwa-install-intent{% endif %}{% if login_role_app %} login-role-{{ login_role_app.role_code }}{% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %} login-fullscreen{% endif %}{% endif %}{% if combined_mobile_login %} login-combined login-step-{{ login_step|default:'phone' }}{% endif %}{% endblock %}
 
 {% block body %}
 {% if role_app and login_role_app %}
@@ -413,21 +414,6 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         outline: none;
     }
 
-    /* Первый вход отдельной кнопкой: человек приходит без пинкода, и заставлять
-       его гадать, что вводить в это поле, незачем. */
-    body.login-page.login-fullscreen .unified-login-register {
-        justify-self: center;
-        width: 100%;
-        min-height: 48px;
-        margin-top: 12px;
-        border: 1px solid rgba(255, 255, 255, .22);
-        border-radius: 14px;
-        background: transparent;
-        color: #C7D7DE;
-        font: 600 clamp(14px, 4vw, 16px)/1.2 inherit;
-        cursor: pointer;
-    }
-
     /* У формы в общих стилях отступ 32 точки стоял только справа, слева нулевой —
        из-за этого всё содержимое было смещено влево на половину этого отступа.
        Обнуляем и центруем явно; заодно учитываем вырез экрана, на телефонах с
@@ -489,7 +475,7 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         body.login-page.login-fullscreen .unified-login-form > h2,
         body.login-page.login-fullscreen .unified-login-form > .shared-shift-login-field,
         body.login-page.login-fullscreen .unified-login-form > .unified-login-actions,
-        body.login-page.login-fullscreen .unified-login-form > .unified-login-register {
+        body.login-page.login-fullscreen .unified-login-form > .unified-login-change-phone {
             grid-column: 2;
         }
 
@@ -554,35 +540,35 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         <div class="mobile-role-login__hero-shade" aria-hidden="true"></div>
     </section>
     {% endif %}
-    <form method="post" data-validated-login{% if combined_mobile_login %} data-login-combined="true"{% endif %}{% if phone_is_prefill_only %} data-phone-prefill-only{% endif %} class="app-confirm-content unified-login-form{% if login_step == 'pin' and not combined_mobile_login %} is-pin-step{% endif %}{% if combined_mobile_login %} is-combined-login{% endif %}">
+    <form method="post" data-validated-login{% if combined_mobile_login %} data-login-combined="true" data-login-step="{{ login_step|default:'phone' }}"{% endif %}{% if phone_is_prefill_only %} data-phone-prefill-only{% endif %} class="app-confirm-content unified-login-form{% if login_step == 'pin' %} is-pin-step{% elif login_step == 'consent' %} is-consent-step{% elif combined_mobile_login %} is-phone-step{% endif %}{% if combined_mobile_login %} is-combined-login{% endif %}">
         {% csrf_token %}
         {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
         {% if login_role_app %}
         <div class="unified-login-role-identity">
             <img src="{{ login_role_app.icon_180_url }}" width="72" height="72" alt="">
-            <span>Коппер Рисорсез</span>
+            <span>{% if combined_mobile_login %}{{ login_role_app.name }}{% else %}Коппер Рисорсез{% endif %}</span>
         </div>
         {% endif %}
         {% if combined_mobile_login %}
-        <h1>{% if login_role_app %}{{ login_role_app.name }}{% else %}Единый вход{% endif %}</h1>
-        <p class="mobile-role-login__lead">Войдите в своё рабочее приложение</p>
+        <h1>{% if login_step == 'pin' %}Введите PIN{% elif login_step == 'consent' %}Подтвердите согласие{% else %}Вход в приложение{% endif %}</h1>
+        <p class="mobile-role-login__lead">{% if login_step == 'pin' %}Для этого номера PIN уже создан{% elif login_step == 'consent' %}Только один раз для текущей редакции Политики{% else %}Введите номер — система сама определит следующий шаг{% endif %}</p>
         {% else %}
         <h2>{% if login_role_app %}{{ login_role_app.name }}{% else %}Единый вход{% endif %}</h2>
         {% endif %}
         <label class="shared-shift-login-field" for="login-phone">
-            <span>Телефон</span>
+            <span>Номер телефона</span>
             <span class="shared-shift-phone-shell">
                 <span class="shared-shift-country-code">+7</span>
                 
-                <input id="login-phone" name="phone" type="{% if combined_mobile_login %}tel{% else %}text{% endif %}" inputmode="numeric" autocomplete="{% if combined_mobile_login %}tel-national{% else %}tel{% endif %}"{% if combined_mobile_login %} enterkeyhint="next" required{% endif %} placeholder="999-000-00-00" maxlength="13" pattern="[0-9]{3}-[0-9]{3}-[0-9]{2}-[0-9]{2}" data-phone-input data-hint="Введите 10 цифр номера" aria-describedby="login-phone-hint{% if combined_mobile_login %} login-auth-feedback{% endif %}" value="{{ submitted_phone }}"{% if login_step == 'pin' and not combined_mobile_login %} readonly{% endif %}>
+                <input id="login-phone" name="phone" type="{% if combined_mobile_login %}tel{% else %}text{% endif %}" inputmode="numeric" autocomplete="{% if combined_mobile_login %}tel-national{% else %}tel{% endif %}"{% if combined_mobile_login %} enterkeyhint="{% if login_step == 'pin' %}done{% else %}next{% endif %}" required{% endif %} placeholder="999-000-00-00" maxlength="13" pattern="[0-9]{3}-[0-9]{3}-[0-9]{2}-[0-9]{2}" data-phone-input data-hint="Введите 10 цифр номера" aria-describedby="login-phone-hint{% if combined_mobile_login %} login-auth-feedback{% endif %}" value="{{ submitted_phone }}"{% if login_step == 'pin' or login_step == 'consent' %} readonly{% endif %}>
             </span>
-            <small id="login-phone-hint" class="input-hint" data-input-hint-for="login-phone">Введите 10 цифр номера</small>
+            <small id="login-phone-hint" class="input-hint" data-input-hint-for="login-phone">{% if login_step == 'pin' or login_step == 'consent' %}Номер найден{% else %}Введите 10 цифр номера{% endif %}</small>
         </label>
-        {% if combined_mobile_login or login_step == 'pin' %}
+        {% if login_step == 'pin' %}
         <label class="shared-shift-login-field" for="login-pin">
-            <span>Пинкод</span>
+            <span>PIN</span>
             <span class="login-pin-shell">
-                <input id="login-pin" name="access_code" type="password" inputmode="numeric" autocomplete="off"{% if combined_mobile_login %} enterkeyhint="go" required{% endif %} placeholder="••••••" maxlength="{% if combined_mobile_login %}6{% else %}8{% endif %}" pattern="{% if combined_mobile_login %}[0-9]{6}{% else %}[0-9]{2}-[0-9]{2}-[0-9]{2}{% endif %}" data-pin-input data-hint="Введите 6 цифр пин-кода" aria-describedby="login-pin-hint{% if combined_mobile_login %} login-auth-feedback{% endif %}">
+                <input id="login-pin" name="access_code" type="password" inputmode="numeric" autocomplete="off"{% if combined_mobile_login %} enterkeyhint="go" required{% endif %} placeholder="••••••" maxlength="{% if combined_mobile_login %}6{% else %}8{% endif %}" pattern="{% if combined_mobile_login %}[0-9]{6}{% else %}[0-9]{2}-[0-9]{2}-[0-9]{2}{% endif %}" data-pin-input data-hint="Введите PIN из 6 цифр" aria-describedby="login-pin-hint{% if combined_mobile_login %} login-auth-feedback{% endif %}">
                 <button class="login-pin-reveal" type="button" data-pin-reveal aria-label="Показать пинкод, пока нажато">
                     <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
                         <path d="M1.8 12S5.4 5.4 12 5.4 22.2 12 22.2 12 18.6 18.6 12 18.6 1.8 12 1.8 12Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
@@ -590,23 +576,27 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
                     </svg>
                 </button>
             </span>
-            <small id="login-pin-hint" class="input-hint" data-input-hint-for="login-pin">Введите 6 цифр пин-кода</small>
+            <small id="login-pin-hint" class="input-hint" data-input-hint-for="login-pin">Введите 6 цифр, которые вы придумали при первом входе</small>
         </label>
         {% endif %}
 
+        {% if combined_mobile_login and login_step == 'consent' %}
+        <div class="mobile-role-login__consent-panel">
+            <label class="mobile-role-login__consent{% if privacy_consent_error %} is-invalid{% endif %}" for="login-privacy-consent">
+                <input id="login-privacy-consent"
+                       name="privacy_consent"
+                       type="checkbox"
+                       value="{{ privacy_policy_version }}"
+                       data-privacy-consent
+                       required
+                       aria-invalid="{% if privacy_consent_error %}true{% else %}false{% endif %}">
+                <span class="mobile-role-login__consent-box" aria-hidden="true"></span>
+                <span class="mobile-role-login__consent-copy">Согласен на обработку персональных данных</span>
+            </label>
+            <a class="mobile-role-login__privacy-link" href="{% url 'portal:public_privacy' %}?from=role-login" data-login-privacy-link>Открыть Политику</a>
+        </div>
+        {% endif %}
         {% if combined_mobile_login %}
-        <label class="mobile-role-login__consent{% if privacy_consent_error %} is-invalid{% endif %}" for="login-privacy-consent">
-            <input id="login-privacy-consent"
-                   name="privacy_consent"
-                   type="checkbox"
-                   value="{{ privacy_policy_version }}"
-                   data-privacy-consent
-                   required
-                   aria-invalid="{% if privacy_consent_error %}true{% else %}false{% endif %}"
-                   {% if privacy_consent_is_current %}checked{% endif %}>
-            <span class="mobile-role-login__consent-box" aria-hidden="true"></span>
-            <span class="mobile-role-login__consent-copy">Соглашаюсь на обработку персональных данных по <a href="{% url 'portal:public_privacy' %}" data-login-privacy-link>Политике</a>.</span>
-        </label>
         <div id="login-auth-feedback" class="mobile-role-login__feedback" data-login-feedback role="status" aria-live="assertive">
             {% for message in messages %}<span class="message error">{{ message }}</span>{% endfor %}
         </div>
@@ -614,10 +604,10 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
 
         <input type="hidden" name="device_kind" value="{{ selected_device_kind }}">
         <div class="unified-login-actions">
-            <button class="cr-button cr-is-medium cr-is-rounded cr-is-fullwidth entry-action unified-login-submit" type="submit" name="action" value="{% if combined_mobile_login or login_step == 'pin' %}login{% else %}continue{% endif %}">{% if combined_mobile_login or login_step == 'pin' %}Войти{% else %}Далее{% endif %}{% if combined_mobile_login %}<span class="mobile-role-login__submit-arrow" aria-hidden="true">→</span>{% endif %}</button>
+            <button class="cr-button cr-is-medium cr-is-rounded cr-is-fullwidth entry-action unified-login-submit" type="submit" name="action" value="{% if login_step == 'pin' %}login{% elif login_step == 'consent' %}consent{% else %}continue{% endif %}">{% if login_step == 'pin' %}Войти{% elif login_step == 'consent' %}Согласиться и продолжить{% elif combined_mobile_login %}Продолжить{% else %}Далее{% endif %}{% if combined_mobile_login %}<span class="mobile-role-login__submit-arrow" aria-hidden="true">→</span>{% endif %}</button>
         </div>
-        {% if combined_mobile_login %}
-        <button class="unified-login-register" type="submit" name="action" value="register" formnovalidate>Первый вход — создать пинкод</button>
+        {% if combined_mobile_login and login_step != 'phone' %}
+        <a class="unified-login-change-phone" href="/?form=1&amp;reset=1" data-login-retry data-login-clear-phone>Ввести другой номер</a>
         {% endif %}
     </form>
     {% if role_app and login_role_app %}
@@ -702,6 +692,20 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     {% endif %}
     {% if not combined_mobile_login %}
         {% for message in messages %}<div class="message error">{{ message }}</div>{% endfor %}
+    {% endif %}
+    {% if combined_mobile_login and login_step == 'consent' %}
+    <dialog class="mobile-role-login__privacy-dialog" data-login-privacy-dialog aria-labelledby="login-privacy-title">
+        <div class="mobile-role-login__privacy-sheet">
+            <header class="mobile-role-login__privacy-toolbar">
+                <h2 id="login-privacy-title">Политика обработки данных</h2>
+                <button type="button" data-login-privacy-close aria-label="Закрыть Политику и вернуться ко входу">Закрыть</button>
+            </header>
+            <div class="mobile-role-login__privacy-document" tabindex="0">
+                {% include "portal/_privacy_policy_content.html" with privacy_policy_embedded=True %}
+                <button class="mobile-role-login__privacy-return" type="button" data-login-privacy-close>Вернуться ко входу</button>
+            </div>
+        </div>
+    </dialog>
     {% endif %}
 </main>
 <script>
@@ -893,12 +897,16 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         document.head.appendChild(source.cloneNode(true));
     }
 
-    function replaceLoginMain(html, focusPin) {
+    function replaceLoginMain(html, focusNextControl) {
         var parsed = new DOMParser().parseFromString(String(html || ""), "text/html");
         var freshMain = parsed.querySelector("main");
         var currentMain = document.querySelector("main");
         if (!freshMain || !currentMain) throw new Error("login fragment missing");
         copyPhoneNotFoundStyles(parsed);
+        if (window.__copperLoginPrivacyCleanup) {
+            window.__copperLoginPrivacyCleanup();
+            window.__copperLoginPrivacyCleanup = null;
+        }
         syncBodyClasses(parsed);
         if (parsed.title) document.title = parsed.title;
         currentMain.replaceWith(document.importNode(freshMain, true));
@@ -910,10 +918,11 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
             document.body.classList.add("is-login-form-forced");
         }
         bindLoginForm();
-        if (focusPin) {
+        if (focusNextControl) {
             window.requestAnimationFrame(function () {
-                var pin = document.querySelector("[data-pin-input]");
-                if (pin && pin.focus) pin.focus({preventScroll: true});
+                var nextControl = document.querySelector("[data-pin-input]")
+                    || document.querySelector("[data-privacy-consent]");
+                if (nextControl && nextControl.focus) nextControl.focus({preventScroll: true});
             });
         }
     }
@@ -937,6 +946,7 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
             ) return;
 
             event.preventDefault();
+            if (link.hasAttribute("data-login-clear-phone")) writeLoginMemory("");
             var targetUrl = new URL(link.href, window.location.href);
             window.fetch(targetUrl.href, {
                 method: "GET",
@@ -996,13 +1006,13 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         /* Частичный ответ нужен только между номером и PIN. Сам PIN отправляем
            обычной навигацией: WebView применяет Set-Cookie в штатной цепочке
            POST -> final screen, а MainActivity затем явно flush-ит cookie. */
-        if (normalized.action !== "continue") return;
+        if (normalized.action !== "continue" && normalized.action !== "consent") return;
         if (!window.fetch || !window.FormData || !window.DOMParser) return;
         event.preventDefault();
         if (form.dataset.loginPending === "true") return;
         form.dataset.loginPending = "true";
         submitButton.disabled = true;
-        submitButton.textContent = normalized.action === "continue" ? "Проверяем" : "Входим";
+        submitButton.textContent = normalized.action === "consent" ? "Сохраняем" : "Проверяем";
 
         /* Элемент name="action" перекрывает DOM-свойство form.action и
            превращает его в RadioNodeList. URL берём только из атрибута. */
@@ -1036,12 +1046,138 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         });
     }
 
+    function bindLoginPrivacyDialog() {
+        var dialog = document.querySelector("[data-login-privacy-dialog]");
+        var trigger = document.querySelector("[data-login-privacy-link]");
+        var historyKey = "copperLoginPrivacy";
+
+        function hasDialogHistoryState() {
+            return Boolean(
+                window.history
+                && window.history.state
+                && window.history.state[historyKey] === true
+            );
+        }
+
+        /* Reloading a consent view returns to the phone GET. Clear the modal
+           marker there too, otherwise the first Back would appear to do
+           nothing before leaving the login page. */
+        if (!dialog || !trigger) {
+            if (hasDialogHistoryState()) {
+                var stateWithoutDialog = Object.assign({}, window.history.state || {});
+                delete stateWithoutDialog[historyKey];
+                window.history.replaceState(stateWithoutDialog, "", window.location.href);
+            }
+            document.body.classList.remove("is-login-privacy-open");
+            return;
+        }
+        if (dialog.dataset.privacyBound === "true") return;
+        dialog.dataset.privacyBound = "true";
+        var returnFocus = trigger;
+        var closingViaHistory = false;
+        var closeFallbackTimer = 0;
+
+        /* A full document restore can preserve the modal marker or the native
+           dialog state. Normalise it while binding this newly parsed document;
+           same-document Back/Forward remains handled by popstate below. */
+        function normaliseRestoredDialogState() {
+            if (hasDialogHistoryState()) {
+                var restoredState = Object.assign({}, window.history.state || {});
+                delete restoredState[historyKey];
+                window.history.replaceState(restoredState, "", window.location.href);
+            }
+            if (dialog.open && dialog.close) dialog.close();
+            document.body.classList.remove("is-login-privacy-open");
+        }
+        normaliseRestoredDialogState();
+
+        function hideDialog() {
+            if (dialog.open && dialog.close) dialog.close();
+            closingViaHistory = false;
+            if (closeFallbackTimer) window.clearTimeout(closeFallbackTimer);
+            closeFallbackTimer = 0;
+            document.body.classList.remove("is-login-privacy-open");
+            window.requestAnimationFrame(function () {
+                if (returnFocus && returnFocus.focus) returnFocus.focus({preventScroll: true});
+            });
+        }
+
+        function showDialog(pushHistory) {
+            if (!dialog.open) dialog.showModal();
+            if (pushHistory) {
+                var nextState = Object.assign({}, window.history.state || {});
+                nextState[historyKey] = true;
+                window.history.pushState(nextState, "", window.location.href);
+            }
+            document.body.classList.add("is-login-privacy-open");
+            var documentPane = dialog.querySelector(".mobile-role-login__privacy-document");
+            if (documentPane) documentPane.scrollTop = 0;
+            window.requestAnimationFrame(function () {
+                var closeButton = dialog.querySelector("[data-login-privacy-close]");
+                if (closeButton && closeButton.focus) closeButton.focus({preventScroll: true});
+            });
+        }
+
+        function handlePopState() {
+            if (hasDialogHistoryState()) {
+                showDialog(false);
+            } else if (dialog.open) {
+                hideDialog();
+            }
+        }
+
+        function closeDialog() {
+            if (hasDialogHistoryState()) {
+                if (closingViaHistory) return;
+                closingViaHistory = true;
+                window.history.back();
+                closeFallbackTimer = window.setTimeout(function () {
+                    if (!dialog.open) return;
+                    var fallbackState = Object.assign({}, window.history.state || {});
+                    delete fallbackState[historyKey];
+                    window.history.replaceState(fallbackState, "", window.location.href);
+                    hideDialog();
+                }, 400);
+                return;
+            }
+            hideDialog();
+        }
+
+        trigger.addEventListener("click", function (event) {
+            if (!dialog.showModal) return;
+            event.preventDefault();
+            returnFocus = document.activeElement || trigger;
+            showDialog(true);
+        });
+        dialog.querySelectorAll("[data-login-privacy-close]").forEach(function (button) {
+            button.addEventListener("click", closeDialog);
+        });
+        dialog.addEventListener("cancel", function (event) {
+            event.preventDefault();
+            closeDialog();
+        });
+        dialog.addEventListener("click", function (event) {
+            if (event.target === dialog) closeDialog();
+        });
+        dialog.addEventListener("close", function () {
+            document.body.classList.remove("is-login-privacy-open");
+        });
+        window.addEventListener("popstate", handlePopState);
+        window.__copperLoginPrivacyCleanup = function () {
+            window.removeEventListener("popstate", handlePopState);
+            if (closeFallbackTimer) window.clearTimeout(closeFallbackTimer);
+            closeFallbackTimer = 0;
+            if (dialog.open && dialog.close) dialog.close();
+            document.body.classList.remove("is-login-privacy-open");
+        };
+    }
+
     function bindLoginForm() {
         var form = document.querySelector("[data-validated-login]");
         if (!form || form.dataset.loginBound === "true") return;
         form.dataset.loginBound = "true";
+        bindLoginPrivacyDialog();
         var submitButton = form.querySelector('.unified-login-submit');
-        var registerButton = form.querySelector('.unified-login-register');
         var phoneField = form.querySelector("[data-phone-input]");
         var pinField = form.querySelector("[data-pin-input]");
         var consentField = form.querySelector("[data-privacy-consent]");
@@ -1060,19 +1196,13 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         function refreshSubmitState() {
             var inputs = Array.from(form.querySelectorAll("[data-phone-input], [data-pin-input]"));
             var pending = form.dataset.loginPending === "true";
-            var consentMissing = combinedLogin && (!consentField || !consentField.checked);
+            var consentMissing = Boolean(consentField && !consentField.checked);
             if (submitButton) {
                 submitButton.disabled = pending
                     || consentMissing
                     || inputs.some(function (input) {
                         return !input.classList.contains("is-valid");
                     });
-            }
-            if (registerButton) {
-                registerButton.disabled = pending
-                    || consentMissing
-                    || !phoneField
-                    || !phoneField.classList.contains("is-valid");
             }
         }
 
@@ -1152,15 +1282,19 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
             refreshSubmitState();
         }
 
-        if (combinedLogin && phoneField && pinField) {
+        if (combinedLogin && phoneField) {
             phoneField.addEventListener("keydown", function (event) {
                 if (event.key !== "Enter" || event.isComposing) return;
                 event.preventDefault();
                 dispatchLoginInput(phoneField);
-                if (phoneField.classList.contains("is-valid")) {
+                if (phoneField.classList.contains("is-valid") && pinField) {
                     pinField.focus({preventScroll: true});
+                } else if (submitButton && !submitButton.disabled) {
+                    form.requestSubmit(submitButton);
                 }
             });
+        }
+        if (combinedLogin && pinField) {
             pinField.addEventListener("keydown", function (event) {
                 if (event.key !== "Enter" || event.isComposing) return;
                 event.preventDefault();
@@ -1211,26 +1345,21 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
                     event.preventDefault();
                     return;
                 }
-                if (!consentField || !consentField.checked) {
+                if (consentField && !consentField.checked) {
                     event.preventDefault();
-                    if (consentField) {
-                        consentField.setAttribute("aria-invalid", "true");
-                        var consentLabel = consentField.closest(".mobile-role-login__consent");
-                        if (consentLabel) consentLabel.classList.add("is-invalid");
-                        consentField.focus({preventScroll: true});
-                    }
+                    consentField.setAttribute("aria-invalid", "true");
+                    var consentLabel = consentField.closest(".mobile-role-login__consent");
+                    if (consentLabel) consentLabel.classList.add("is-invalid");
+                    consentField.focus({preventScroll: true});
                     return;
                 }
-                if (requestedAction === "login" && submitButton.disabled) {
+                if (submitButton.disabled) {
                     event.preventDefault();
                     return;
                 }
-                if (requestedAction === "register" && registerButton && registerButton.disabled) {
-                    event.preventDefault();
+                if (requestedAction === "continue" || requestedAction === "consent") {
+                    submitLoginInPlace(event, form, submitButton);
                     return;
-                }
-                if (requestedAction === "register" && pinField) {
-                    pinField.value = "";
                 }
                 normalizeLoginForm(form, submitter);
                 form.dataset.loginPending = "true";

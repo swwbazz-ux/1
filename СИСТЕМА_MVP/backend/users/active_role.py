@@ -33,6 +33,16 @@ def active_access_queryset(employee):
     )
 
 
+def active_access_for_employee_role(employee, role_code):
+    """Return the employee's unambiguous activated access for one workplace."""
+    accesses = list(
+        active_access_queryset(employee)
+        .filter(role__code=role_code)
+        .order_by('id')[:2]
+    )
+    return accesses[0] if len(accesses) == 1 else None
+
+
 def latest_active_role_access(employee):
     return (
         active_access_queryset(employee)
@@ -99,16 +109,18 @@ def role_session_state(request, access=None):
             'observer_mode': True,
         }
 
-    active_access = latest_active_role_access(access.employee)
-    is_active = active_access is None or active_access.id == access.id
+    # Role applications have isolated sessions. A login to another role must not
+    # turn an already open workplace into read-only mode. The generation still
+    # invalidates an older session of this same access.
+    active_access = access
+    is_active = True
     session_generation = request.session.get(ACTIVE_ROLE_GENERATION_SESSION_KEY)
     session_role_code = request.session.get(ACTIVE_ROLE_CODE_SESSION_KEY, '')
-    if is_active and active_access and session_generation:
+    if access.last_login_at and session_generation:
         parsed_generation = parse_datetime(str(session_generation))
         is_active = bool(
             parsed_generation
-            and active_access.last_login_at
-            and parsed_generation == active_access.last_login_at
+            and parsed_generation == access.last_login_at
         )
     if is_active and session_role_code:
         is_active = session_role_code == access.role.code
@@ -118,7 +130,7 @@ def role_session_state(request, access=None):
         'access': access,
         'active_access': active_access,
         'active_role_code': active_access.role.code if active_access else access.role.code,
-        'active_role_changed_at': active_access.last_login_at if active_access else None,
+        'active_role_changed_at': access.last_login_at,
         'session_role_code': session_role_code or access.role.code,
         'session_revision': str(session_generation or ''),
     }
@@ -244,26 +256,6 @@ def activate_role_session(request, access):
     target_access = next((item for item in accesses if item.id == access.id), None)
     if target_access is None:
         raise ValidationError('Активированный доступ сотрудника не найден.')
-
-    current_access = max(
-        (item for item in accesses if item.last_login_at),
-        key=lambda item: (item.last_login_at, item.id),
-        default=None,
-    )
-    if current_access and current_access.id != target_access.id:
-        shifts = list(
-            EmployeeShift.objects
-            .select_for_update(of=('self',))
-            .select_related('equipment__equipment_type')
-            .filter(employee=employee, closed_at__isnull=True)
-            .order_by('id')
-        )
-        blockers = _role_switch_blockers(employee, current_access, shifts)
-        if blockers:
-            raise ValidationError(
-                ['Переключение роли заблокировано: ' + '; '.join(blockers) + '.']
-            )
-        _close_previous_role_shifts(employee, current_access, shifts)
 
     activated_at = _next_role_timestamp(accesses)
     target_access.last_login_at = activated_at

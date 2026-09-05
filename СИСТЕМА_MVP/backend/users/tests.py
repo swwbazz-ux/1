@@ -472,8 +472,22 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
         self.assertIn('driver-mobile-shell-v191', script)
-        self.assertIn('"/company/privacy/"', script)
-        self.assertIn('"/static/portal/css/portal-shell-v5.css?v=6"', script)
+        self.assertIn(
+            'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
+            script,
+        )
+        self.assertRegex(
+            script,
+            r'const CORE_ASSETS = \[[\s\S]*?PRIVACY_POLICY_URL,',
+        )
+        privacy_branch = script.index('if (url.pathname === PRIVACY_POLICY_PATH)')
+        generic_navigation_branch = script.index('if (request.mode === "navigate"')
+        self.assertLess(privacy_branch, generic_navigation_branch)
+        self.assertIn(
+            'networkFirst(request, PRIVACY_POLICY_URL)',
+            script[privacy_branch:generic_navigation_branch],
+        )
+        self.assertIn('"/static/portal/css/portal-shell-v5.css?v=7"', script)
         self.assertIn('/static/css/mobile-role-login-v1.css', script)
         self.assertIn('/static/img/start/start-hero-v1.webp', script)
         self.assertIn('/static/img/start/start-hero-v1.jpg', script)

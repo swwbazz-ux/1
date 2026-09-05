@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
@@ -6,6 +7,7 @@ from core.models import lock_production_state
 from core.production_time import production_shift_context, production_shift_type
 from shifts.models import EmployeeShift, ShiftType
 from shifts.services import lock_active_employee_for_shift
+from users.active_role import active_access_for_employee_role
 from users.models import EmployeeAccess
 from users.session_device import get_session_device_kind
 
@@ -20,6 +22,13 @@ WORKPLACE_ROLE_CODES = {
     'dispatcher',
     'mining_master',
     'oup',
+}
+WORKPLACE_ROLE_LABELS = {
+    'driver': 'Водитель',
+    'excavator_operator': 'Машинист экскаватора',
+    'dispatcher': 'Горный диспетчер',
+    'mining_master': 'Горный мастер',
+    'oup': 'ОУП',
 }
 
 
@@ -72,13 +81,20 @@ def get_active_dispatcher_shift(access=None):
 
 def build_dispatcher_header_context(access, request=None):
     production_context = production_shift_context()
-    active_shift = get_active_dispatcher_shift(access)
+    dispatcher_access = None
+    if access:
+        dispatcher_access = (
+            access
+            if access.role.code == 'dispatcher'
+            else active_access_for_employee_role(access.employee, 'dispatcher')
+        )
+    active_shift = get_active_dispatcher_shift(dispatcher_access)
     own_shift = (
         dispatcher_shift_queryset()
-        .filter(employee=access.employee)
+        .filter(employee=dispatcher_access.employee)
         .order_by('-opened_at')
         .first()
-        if access and access.role.code in {'dispatcher', 'admin'}
+        if dispatcher_access
         else None
     )
     blocking_shift = (
@@ -87,7 +103,7 @@ def build_dispatcher_header_context(access, request=None):
         else None
     )
     session_device_kind = get_session_device_kind(request) if request else 'shared'
-    can_start_shift = bool(access and access.role.code == 'dispatcher' and not own_shift and not active_shift)
+    can_start_shift = bool(dispatcher_access and not own_shift and not active_shift)
     dispatcher = active_shift.employee if active_shift else None
     dispatcher_photo = ''
     if dispatcher and getattr(dispatcher, 'photo', None):
@@ -115,7 +131,7 @@ def build_dispatcher_header_context(access, request=None):
             blocking_shift and access and access.role.code in {'dispatcher', 'admin'}
         ),
         'shift_is_open': bool(own_shift),
-        'requires_shift_reauth': bool(can_start_shift),
+        'requires_shift_reauth': bool(can_start_shift and session_device_kind == 'shared'),
         'session_device_kind': session_device_kind,
         'shift_reauth_title': 'Вход Горного диспетчера',
         'shift_reauth_description': 'Введите телефон и код диспетчера, который начинает смену на этом устройстве.',
@@ -142,6 +158,22 @@ def open_dispatcher_shift(access):
     lock_production_state()
     if get_active_dispatcher_shift(access):
         return None
+    other_shift = (
+        EmployeeShift.objects
+        .select_for_update()
+        .filter(employee=employee, closed_at__isnull=True)
+        .order_by('-opened_at')
+        .first()
+    )
+    if other_shift:
+        workplace_label = WORKPLACE_ROLE_LABELS.get(
+            other_shift.workplace_code,
+            'другая роль',
+        )
+        raise ValidationError(
+            f'У вас уже открыта смена «{workplace_label}». '
+            'Завершите её перед началом смены Горного диспетчера.'
+        )
     now = timezone.now()
     return EmployeeShift.objects.create(
         employee=employee,
