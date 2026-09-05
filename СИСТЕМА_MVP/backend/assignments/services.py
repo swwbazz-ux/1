@@ -439,7 +439,7 @@ def update_crew_draft_slot(
     source_position = None
     if employee:
         source_slots = list(
-            CrewPlanSlot.objects.select_for_update()
+            CrewPlanSlot.objects.select_for_update(of=('self',))
             .select_related('employee', 'secondary_employee')
             .filter(
                 Q(employee=employee) | Q(secondary_employee=employee),

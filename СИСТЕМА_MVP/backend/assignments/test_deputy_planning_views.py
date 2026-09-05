@@ -1037,22 +1037,42 @@ class DeputyPlanningViewTests(TestCase):
             self.truck_1,
         )
 
-    def test_autosave_locks_only_slot_table_with_nullable_employee_join(self):
+    def test_autosave_assignment_locks_only_slot_table_with_nullable_employee_joins(self):
         plan = self.create_draft()
+        second_driver, _second_access = self.create_employee_with_access(
+            'Соловьев Алексей Алексеевич',
+            self.driver_role,
+            phone='+79000000032',
+            access_code='210032',
+        )
+        trainee, _trainee_access = self.create_employee_with_access(
+            'Петров Алексей Стажёр',
+            self.driver_role,
+            phone='+79000000033',
+            access_code='210033',
+        )
 
         with patch.object(
             CrewPlanSlot.objects,
             'select_for_update',
             wraps=CrewPlanSlot.objects.select_for_update,
         ) as slot_lock:
+            _response, plan = self.autosave_slot(
+                plan,
+                equipment=self.truck_2,
+                shift_type=WorkShiftType.SHIFT_1,
+                employee=second_driver,
+            )
             self.autosave_slot(
                 plan,
-                equipment=self.truck_1,
+                equipment=self.truck_2,
                 shift_type=WorkShiftType.SHIFT_1,
-                employee=None,
+                employee=trainee,
+                position='secondary',
             )
 
-        self.assertTrue(any(
+        self.assertGreaterEqual(slot_lock.call_count, 4)
+        self.assertTrue(all(
             call.kwargs.get('of') == ('self',)
             for call in slot_lock.call_args_list
         ))
