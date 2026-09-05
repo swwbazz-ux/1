@@ -7,24 +7,6 @@
         {{ block.super }}
     {% else %}
         <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}">
-        <style>
-            /* Flash messages live over the non-interactive title area instead of
-               covering the truck garage. The whole region stays click-through. */
-            body.dispatcher-control-screen .dispatcher-messages {
-                top: 12px;
-                right: auto;
-                bottom: auto;
-                left: 50%;
-                width: min(420px, calc(100vw - 36px));
-                transform: translateX(-50%);
-                pointer-events: none;
-            }
-
-            body.dispatcher-control-screen .dispatcher-messages .message {
-                margin-bottom: 0;
-                box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
-            }
-        </style>
     {% endif %}
 {% endblock %}
 {% block viewport_extra %}{% if mining_master_mobile_enabled %}, viewport-fit=cover{% endif %}{% endblock %}
