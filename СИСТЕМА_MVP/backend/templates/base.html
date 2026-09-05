@@ -666,10 +666,16 @@
                 state.locked
                 && state.javascriptVersion
                 && state.serviceWorker
-                && state.server
-                && !state.serverUnavailable
+                && (
+                    (state.server && !state.serverUnavailable)
+                    || (javascriptMatches && !workerMatches)
+                )
             ) {
-                requestControlledUpdate(state.server);
+                requestControlledUpdate(
+                    state.server && !state.serverUnavailable
+                        ? state.server
+                        : expected
+                );
             }
             if (controllerReloadPending) {
                 reloadOnceForExpectedContract();

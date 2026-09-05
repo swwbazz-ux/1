@@ -1,5 +1,6 @@
 import json
 import re
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -30,7 +31,7 @@ from users.models import (
     TemporaryWorkTransfer,
     WorkSchedule,
 )
-from users.role_apps import get_role_app
+from users.role_apps import APP_CONTRACT_VERSION, ROLE_APPS_BY_CODE, get_role_app
 
 from .models import AssignmentStatus, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment, WorkShiftType
 from .services import get_active_equipment_assignment, get_or_create_crew_draft, set_active_equipment_assignment
@@ -397,12 +398,13 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['Cache-Control'], 'no-cache')
         self.assertEqual(response['Service-Worker-Allowed'], '/deputy-mining-manager/')
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
+        deputy_app = get_role_app('deputy_mining_manager')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
-        self.assertIn('deputy-mining-manager-desktop-shell-v15', script)
-        self.assertEqual(
-            get_role_app('deputy_mining_manager').shell_version,
-            'deputy-mining-manager-desktop-shell-v15',
+        self.assertIn(
+            f'const CACHE_NAME = {json.dumps(deputy_app.shell_version)};',
+            script,
         )
+        self.assertEqual(response['X-App-Shell-Version'], deputy_app.shell_version)
         self.assertIn('/static/js/role-readonly.js', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
         self.assertIn('removeCachedPlanningDocuments()', script)
@@ -435,6 +437,35 @@ class DeputyPlanningViewTests(TestCase):
         for static_url in re.findall(r'"(/static/[^"?]+)"', core_assets):
             with self.subTest(core_asset=static_url):
                 self.assertIsNotNone(finders.find(static_url.removeprefix('/static/')))
+
+    def test_deputy_service_worker_contract_is_rendered_from_role_registry(self):
+        role_code = 'deputy_mining_manager'
+        original_app = get_role_app(role_code)
+        sentinel_app = replace(
+            original_app,
+            shell_version='deputy-mining-manager-desktop-shell-v999-test',
+        )
+
+        with patch.dict(ROLE_APPS_BY_CODE, {role_code: sentinel_app}):
+            response = Client().get(
+                reverse('deputy_mining_manager_service_worker'),
+                HTTP_HOST='localhost',
+            )
+
+        script = response.content.decode('utf-8')
+        self.assertEqual(response['X-App-Shell-Version'], sentinel_app.shell_version)
+        self.assertIn(
+            f'const APP_CONTRACT_VERSION = {json.dumps(APP_CONTRACT_VERSION)};',
+            script,
+        )
+        self.assertIn(f'const ROLE_CODE = {json.dumps(role_code)};', script)
+        self.assertIn(
+            f'const CACHE_NAME = {json.dumps(sentinel_app.shell_version)};',
+            script,
+        )
+        self.assertNotIn('__APP_CONTRACT_VERSION__', script)
+        self.assertNotIn('__ROLE_CODE__', script)
+        self.assertNotIn('__CACHE_NAME__', script)
 
     def test_deputy_pwa_registration_updates_without_forced_page_reload(self):
         registration_script = (

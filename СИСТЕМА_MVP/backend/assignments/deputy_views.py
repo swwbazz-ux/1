@@ -18,7 +18,12 @@ from openpyxl.worksheet.page import PageMargins
 from references.models import Equipment
 from shifts.models import WatchPeriod
 from users.models import AdminActionLog, Employee, EmployeeAccess, ProductionSpecialization, Role, TemporaryWorkTransfer
-from users.role_apps import role_app_manifest_response, role_app_service_worker_response
+from users.role_apps import (
+    APP_CONTRACT_VERSION,
+    get_role_app,
+    role_app_manifest_response,
+    role_app_service_worker_response,
+)
 from users.live_monitor import presence_by_employee_id
 from users.work_profiles import (
     effective_specialization,
@@ -103,11 +108,11 @@ DEPUTY_MANIFEST = {
     ],
 }
 
-DEPUTY_SERVICE_WORKER_JS = r"""
-const APP_CONTRACT_VERSION = "pwa-contract-v1";
-const ROLE_CODE = "deputy_mining_manager";
+DEPUTY_SERVICE_WORKER_JS_TEMPLATE = r"""
+const APP_CONTRACT_VERSION = __APP_CONTRACT_VERSION__;
+const ROLE_CODE = __ROLE_CODE__;
 const CACHE_PREFIX = "deputy-mining-manager-desktop-shell-";
-const CACHE_NAME = "deputy-mining-manager-desktop-shell-v15";
+const CACHE_NAME = __CACHE_NAME__;
 const APP_SCOPE = "/deputy-mining-manager/";
 const MANIFEST_URL = "/deputy-mining-manager.webmanifest";
 const LEGACY_ROOT_FALLBACK_URL = "/mining-master/assignments/";
@@ -299,6 +304,19 @@ self.addEventListener("message", event => {
   }
 });
 """
+
+
+def _deputy_service_worker_script():
+    app = get_role_app(DEPUTY_ROLE_CODE)
+    replacements = {
+        '__APP_CONTRACT_VERSION__': json.dumps(APP_CONTRACT_VERSION),
+        '__ROLE_CODE__': json.dumps(app.role_code),
+        '__CACHE_NAME__': json.dumps(app.shell_version),
+    }
+    script = DEPUTY_SERVICE_WORKER_JS_TEMPLATE
+    for placeholder, value in replacements.items():
+        script = script.replace(placeholder, value)
+    return script
 
 
 def deputy_access_from_request(request):
@@ -1189,8 +1207,8 @@ def deputy_mining_manager_manifest_view(request):
 def deputy_mining_manager_service_worker_view(request):
     return role_app_service_worker_response(
         request,
-        'deputy_mining_manager',
-        DEPUTY_SERVICE_WORKER_JS,
+        DEPUTY_ROLE_CODE,
+        _deputy_service_worker_script(),
     )
 
 

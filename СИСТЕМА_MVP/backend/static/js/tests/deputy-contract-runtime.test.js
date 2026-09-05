@@ -623,7 +623,12 @@ function extractReleaseStaticWorkerHelper() {
         /RELEASE_STATIC_SERVICE_WORKER_JS = r"""([\s\S]*?)"""/
     );
     assert.ok(match, "RELEASE_STATIC_SERVICE_WORKER_JS was not found");
-    return match[1].replaceAll("__STATIC_ASSET_RELEASE__", "ready-core-traffic-v7");
+    return match[1]
+        .replaceAll("__STATIC_ASSET_RELEASE__", "ready-core-traffic-v7")
+        .replaceAll(
+            "__RELEASE_STATIC_PATHS__",
+            JSON.stringify(["/static/js/realtime-client.js"])
+        );
 }
 
 test("same release static request is fetched once and then served cache-first", async () => {
@@ -672,10 +677,21 @@ test("same release static request is fetched once and then served cache-first", 
 
 function extractDeputyWorker() {
     const match = deputyWorkerModule.match(
-        /DEPUTY_SERVICE_WORKER_JS = r"""([\s\S]*?)"""/
+        /DEPUTY_SERVICE_WORKER_JS_TEMPLATE = r"""([\s\S]*?)"""/
     );
-    assert.ok(match, "DEPUTY_SERVICE_WORKER_JS was not found");
-    return match[1];
+    assert.ok(match, "DEPUTY_SERVICE_WORKER_JS_TEMPLATE was not found");
+    const appContractMatch = ROLE_APPS_MODULE_SOURCE.match(
+        /APP_CONTRACT_VERSION = '([^']+)'/
+    );
+    const shellVersionMatch = ROLE_APPS_MODULE_SOURCE.match(
+        /role_code='deputy_mining_manager'[\s\S]*?shell_version='([^']+)'/
+    );
+    assert.ok(appContractMatch, "APP_CONTRACT_VERSION was not found");
+    assert.ok(shellVersionMatch, "deputy shell_version was not found");
+    return match[1]
+        .replaceAll("__APP_CONTRACT_VERSION__", JSON.stringify(appContractMatch[1]))
+        .replaceAll("__ROLE_CODE__", JSON.stringify("deputy_mining_manager"))
+        .replaceAll("__CACHE_NAME__", JSON.stringify(shellVersionMatch[1]));
 }
 
 test(
@@ -727,7 +743,7 @@ test(
             console,
         };
         vm.runInNewContext(workerSource, context, {
-            filename: "assignments/deputy_views.py::DEPUTY_SERVICE_WORKER_JS",
+            filename: "assignments/deputy_views.py::DEPUTY_SERVICE_WORKER_JS_TEMPLATE",
         });
 
         const oldUrl = (

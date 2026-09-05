@@ -1215,6 +1215,32 @@ test(
 );
 
 test(
+    "known worker mismatch requests a controlled update without a server contract",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            htmlContractVersion: "contract-v3",
+            htmlShellVersion: "deputy-shell-v15",
+            workerContractVersion: "contract-v3",
+            workerShellVersion: "deputy-shell-v14",
+            roleCode: "deputy_mining_manager",
+            hasWaitingWorker: false,
+        });
+
+        runtime.guard.registerJavaScript("contract-v3");
+        runtime.guard.markServerUnavailable();
+        await flushRuntime(runtime);
+
+        assertContractState(runtime, {ready: false, locked: true});
+        assert.equal(
+            runtime.updateCalls,
+            1,
+            "a known stale worker must update even when realtime is unavailable"
+        );
+    }
+);
+
+test(
     "each new role_shell_version causes exactly one controlled update",
     {skip: guardUnavailable},
     async () => {
