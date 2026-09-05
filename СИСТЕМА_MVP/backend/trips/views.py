@@ -42,6 +42,12 @@ from core.production_time import (
     production_shift_type,
     production_work_date,
 )
+from downtimes.driver_workflow import (
+    DRIVER_DOWNTIME_FLOW_WAITING_LOADING,
+    close_truck_unloading_wait_downtimes,
+    close_truck_waiting_loading_downtimes,
+    driver_downtime_flow,
+)
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import DEFAULT_EQUIPMENT_STATES
 from references.models import DumpPoint, Equipment, EquipmentState, RockType
@@ -77,48 +83,20 @@ from .models import DispatcherActionLog, DispatcherActionType, OPEN_TRIP_STATUSE
 from .trip_creation import (
     calculate_trip_volume_and_tonnage,
     create_loaded_waiting_unload_trip,
+    lock_trip_participant_equipment,
 )
 
 logger = logging.getLogger(__name__)
 
 
-TRUCK_WAITING_LOADING_REASON = 'Ожидание погрузки'
-TRUCK_WAITING_UNLOADING_REASON = 'Ожидание разгрузки'
 TRUCK_POST_UNLOAD_COOLDOWN = timedelta(
     seconds=getattr(settings, 'TRUCK_POST_UNLOAD_COOLDOWN_SECONDS', 600)
 )
 
 
-def downtime_event_has_reason(event, reason_name):
-    reason = getattr(event, 'reason', None)
-    actual_name = getattr(reason, 'name', '') if reason else ''
-    return str(actual_name or '').strip().casefold() == str(reason_name or '').strip().casefold()
-
-
 def truck_waiting_loading_downtime(event):
-    return downtime_event_has_reason(event, TRUCK_WAITING_LOADING_REASON)
-
-
-def close_truck_downtime_for_reason(truck, reason_name):
-    if not truck:
-        return 0
-    events = list(
-        DowntimeEvent.objects
-        .select_for_update()
-        .filter(
-            equipment=truck,
-            reason__name__iexact=reason_name,
-            ended_at__isnull=True,
-        )
-        .order_by('id')
-    )
-    if not events:
-        return 0
-    ended_at = timezone.now()
-    for event in events:
-        event.ended_at = ended_at
-        event.save(update_fields=['ended_at'])
-    return len(events)
+    reason = getattr(event, 'reason', None)
+    return driver_downtime_flow(reason) == DRIVER_DOWNTIME_FLOW_WAITING_LOADING
 
 
 def truck_post_unload_cooldown(truck, *, completed_at=None, now=None):
@@ -3301,9 +3279,9 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift):
         'actual_dump_point',
         'is_carryover',
     ])
-    close_truck_downtime_for_reason(
+    close_truck_unloading_wait_downtimes(
         trip.truck,
-        TRUCK_WAITING_UNLOADING_REASON,
+        ended_at=trip.completed_at,
     )
     reconcile_excavator_waiting_for_trucks(trip.excavator)
     return True
@@ -3451,6 +3429,22 @@ def excavator_truck_loaded_view(request):
         if not assignment_reference:
             return JsonResponse({'ok': False, 'error': 'Самосвал не назначен текущему экскаватору.'}, status=409)
 
+        try:
+            current_excavator, locked_truck = lock_trip_participant_equipment(
+                excavator_id=current_excavator.pk,
+                truck_id=assignment_reference.truck_id,
+            )
+        except ValidationError as error:
+            return JsonResponse(
+                {
+                    'ok': False,
+                    'error': '; '.join(error.messages),
+                    'code': 'trip_equipment_unavailable',
+                },
+                status=409,
+            )
+        open_shift.equipment = current_excavator
+        assignment_reference.truck = locked_truck
         open_trip = (
             Trip.objects
             .select_for_update()
@@ -3460,13 +3454,6 @@ def excavator_truck_loaded_view(request):
         if open_trip:
             return JsonResponse({'ok': False, 'error': 'Самосвал уже находится в незакрытом рейсе.', 'trip_id': open_trip.id}, status=409)
 
-        current_excavator = (
-            Equipment.objects
-            .select_for_update()
-            .select_related('equipment_type')
-            .get(pk=current_excavator.pk)
-        )
-        open_shift.equipment = current_excavator
         assignment = (
             HaulAssignment.objects
             .select_for_update(of=('self',))
@@ -3482,6 +3469,8 @@ def excavator_truck_loaded_view(request):
         )
         if not assignment:
             return JsonResponse({'ok': False, 'error': 'Назначение самосвала уже изменилось.'}, status=409)
+        assignment.truck = locked_truck
+        assignment.excavator = current_excavator
         load_block = excavator_truck_load_block(
             assignment,
             current_excavator=current_excavator,
@@ -3536,10 +3525,7 @@ def excavator_truck_loaded_view(request):
             trip=trip,
             actor=access.employee,
         )
-        close_truck_downtime_for_reason(
-            assignment.truck,
-            TRUCK_WAITING_LOADING_REASON,
-        )
+        close_truck_waiting_loading_downtimes(assignment.truck)
         close_excavator_open_downtimes(current_excavator)
         reconcile_excavator_waiting_for_trucks(
             current_excavator,
@@ -3633,7 +3619,7 @@ def excavator_truck_loaded_cancel_view(request):
 
         trip = (
             Trip.objects
-            .select_for_update()
+            .select_for_update(of=('self',))
             .select_related('truck', 'dump_point', 'excavator')
             .filter(
                 id=trip_id,
@@ -4072,6 +4058,12 @@ def excavator_work_view(request):
                         )
                         if not assignment_reference:
                             raise ValidationError('Самосвал не назначен текущему экскаватору.')
+                        locked_excavator, locked_truck = lock_trip_participant_equipment(
+                            excavator_id=locked_shift.equipment_id,
+                            truck_id=assignment_reference.truck_id,
+                        )
+                        locked_shift.equipment = locked_excavator
+                        assignment_reference.truck = locked_truck
                         open_trip = (
                             Trip.objects
                             .select_for_update()
@@ -4081,13 +4073,6 @@ def excavator_work_view(request):
                             )
                             .first()
                         )
-                        locked_excavator = (
-                            Equipment.objects
-                            .select_for_update()
-                            .select_related('equipment_type')
-                            .get(pk=locked_shift.equipment_id)
-                        )
-                        locked_shift.equipment = locked_excavator
                         locked_assignment = (
                             HaulAssignment.objects
                             .select_for_update(of=('self',))
@@ -4103,6 +4088,8 @@ def excavator_work_view(request):
                         )
                         if not locked_assignment:
                             raise ValidationError('Назначение самосвала уже изменилось.')
+                        locked_assignment.truck = locked_truck
+                        locked_assignment.excavator = locked_excavator
                         block_reason = excavator_truck_load_block_reason(
                             locked_assignment,
                             current_excavator=locked_excavator,
@@ -4121,10 +4108,7 @@ def excavator_work_view(request):
                             trip=trip,
                             actor=access.employee,
                         )
-                        close_truck_downtime_for_reason(
-                            locked_assignment.truck,
-                            TRUCK_WAITING_LOADING_REASON,
-                        )
+                        close_truck_waiting_loading_downtimes(locked_assignment.truck)
                         close_excavator_open_downtimes(locked_excavator)
                         reconcile_excavator_waiting_for_trucks(
                             locked_excavator,
@@ -5460,7 +5444,7 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
 
     assignment = (
         HaulAssignment.objects
-        .select_for_update()
+        .select_for_update(of=('self',))
         .select_related('truck', 'excavator')
         .filter(id=assignment_id, ended_at__isnull=True, status__in={AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED})
         .first()
@@ -5518,7 +5502,7 @@ def dispatcher_cancel_trip_view(request, trip_id):
         return redirect(redirect_url)
     trip = (
         Trip.objects
-        .select_for_update()
+        .select_for_update(of=('self',))
         .select_related('truck', 'excavator')
         .filter(id=trip_id, status__in=OPEN_TRIP_STATUSES)
         .first()

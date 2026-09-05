@@ -924,7 +924,7 @@ def schedule_haul_assignment(*, truck, excavator, assigned_by=None, now=None):
 def schedule_haul_release(*, truck, assigned_by=None, now=None):
     now = now or timezone.now()
     open_assignments = list(
-        HaulAssignment.objects.select_for_update()
+        HaulAssignment.objects.select_for_update(of=('self',))
         .filter(truck=truck, ended_at__isnull=True)
         .exclude(status=AssignmentStatus.CANCELLED)
         .select_related('excavator')

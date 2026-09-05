@@ -1188,6 +1188,33 @@ body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload .driver-wor
     font-weight: 800;
 }
 
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload .driver-work-progress {
+    filter: drop-shadow(0 0 18px rgba(250, 204, 21, .88));
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload .driver-work-dial-core {
+    border-color: rgba(250, 204, 21, .82);
+    box-shadow:
+        inset 0 12px 22px rgba(254, 249, 195, .1),
+        inset 0 -26px 36px rgba(0, 0, 0, .5),
+        inset 0 0 44px rgba(250, 204, 21, .18),
+        0 10px 28px rgba(0, 0, 0, .42),
+        0 0 48px rgba(250, 204, 21, .42);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload .driver-work-label-line {
+    background: linear-gradient(180deg, #fff7b2 0%, #fde047 34%, #facc15 66%, #ca8a04 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow:
+        0 -1px 0 rgba(255, 251, 235, .5),
+        0 2px 0 rgba(113, 63, 18, .78);
+    filter:
+        drop-shadow(0 3px 2px rgba(0, 0, 0, .46))
+        drop-shadow(0 0 10px rgba(250, 204, 21, .3));
+}
+
 @keyframes driver-waiting-unload-pulse {
     0%, 100% { filter: drop-shadow(0 0 8px rgba(250, 204, 21, .24)); }
     50% { filter: drop-shadow(0 0 26px rgba(250, 204, 21, .78)); }
@@ -2285,6 +2312,29 @@ body.driver-mobile-screen .driver-downtime-list button.is-selected {
     background: radial-gradient(circle at 50% 48%, var(--driver-reason-glow), transparent 68%), linear-gradient(180deg, var(--driver-reason-fill), rgba(8, 14, 17, .96));
     box-shadow: inset 0 0 26px var(--driver-reason-glow), 0 0 0 2px var(--driver-reason-accent), 0 0 22px var(--driver-reason-glow);
     text-shadow: 0 0 9px var(--driver-reason-accent);
+}
+
+body.driver-mobile-screen .driver-downtime-list button.is-unavailable,
+body.driver-mobile-screen .driver-downtime-list button[aria-disabled="true"] {
+    --driver-reason-accent: rgba(148, 163, 184, .48);
+    --driver-reason-fill: rgba(71, 85, 105, .08);
+    --driver-reason-glow: transparent;
+    color: rgba(203, 213, 225, .48);
+    border-color: rgba(148, 163, 184, .28);
+    background: linear-gradient(180deg, rgba(71, 85, 105, .08), rgba(8, 14, 17, .98));
+    box-shadow: none;
+    text-shadow: none;
+    opacity: .58;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.driver-mobile-screen .driver-work-dial.is-waiting-unload::before,
+    body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload .driver-work-dial-core,
+    body.driver-mobile-screen .driver-downtime-card.is-active,
+    body.driver-mobile-screen .driver-downtime-card.is-active .driver-downtime-state-icon-pause,
+    body.driver-mobile-screen .driver-downtime-card.is-active b[data-driver-active-duration] {
+        animation: none;
+    }
 }
 
 body.driver-mobile-screen .driver-downtime-close {
@@ -3868,7 +3918,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-has-open-trip="{% if driver_has_open_trip %}true{% else %}false{% endif %}" data-driver-has-loaded-trip="{% if driver_has_loaded_trip %}true{% else %}false{% endif %}" data-driver-pwa-version="{{ driver_shell_version }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3917,12 +3967,12 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         </section>
 
         <div class="driver-work-dial-zone">
-            <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_waiting_unload %} is-waiting-unload{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}{% if shift_plan_visual.is_overrun %} is-over-plan{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-progress-capped: {% if shift_plan_visual.is_overrun %}100{% else %}{{ shift_plan_visual.loop_progress }}{% endif %}; --driver-over-progress: {% if shift_plan_visual.is_overrun %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}; --driver-hold: 0;" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-driver-loop-progress="{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}" data-driver-completed-loops="{{ shift_plan_visual.completed_loops|default:0 }}" data-driver-has-plan="{% if shift_plan_has_plan %}1{% else %}0{% endif %}" data-plan-progress-phase="{% if shift_plan_has_plan %}{{ shift_plan_visual.phase }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
+            <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}{% if shift_plan_visual.is_overrun %} is-over-plan{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-progress-capped: {% if shift_plan_visual.is_overrun %}100{% else %}{{ shift_plan_visual.loop_progress }}{% endif %}; --driver-over-progress: {% if shift_plan_visual.is_overrun %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}; --driver-hold: 0;" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-driver-loop-progress="{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}" data-driver-completed-loops="{{ shift_plan_visual.completed_loops|default:0 }}" data-driver-has-plan="{% if shift_plan_has_plan %}1{% else %}0{% endif %}" data-plan-progress-phase="{% if shift_plan_has_plan %}{{ shift_plan_visual.phase }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
                 {% if active_trip %}
-                    <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-work-dial-form" data-driver-hold-form data-driver-trip-id="{{ active_trip.id }}" data-driver-unload-one-tap="{% if driver_waiting_unload %}true{% else %}false{% endif %}">
+                    <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-work-dial-form" data-driver-hold-form data-driver-trip-id="{{ active_trip.id }}" data-driver-unload-one-tap="{% if driver_unloading_wait_active %}true{% else %}false{% endif %}">
                         {% csrf_token %}
                         <input type="hidden" name="client_action_id" value="" data-driver-client-action>
-                        <button class="driver-work-dial-button is-loaded{% if driver_waiting_unload %} is-waiting-unload{% endif %}" type="submit" data-driver-hold-button data-driver-pending-label="ОТПРАВКА">
+                        <button class="driver-work-dial-button is-loaded{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}" type="submit" data-driver-hold-button data-driver-pending-label="ОТПРАВКА">
                             <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
                                 <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                                 <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
@@ -4023,7 +4073,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
             <h2>Простои</h2>
             <button class="driver-downtime-refresh" type="button" aria-label="Обновить" data-driver-downtime-refresh>↻</button>
         </div>
-        <div class="driver-downtime-card status-{{ active_downtime_status_key }}{% if active_downtime %} is-active{% endif %}" data-driver-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-driver-active-started-at="{{ active_downtime_started_at }}" data-driver-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-driver-shift-downtime-seconds="{{ shift_downtime_total_seconds }}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Простои за смену: {{ shift_downtime_total_label }}{% endif %}">
+        <div class="driver-downtime-card status-{{ active_downtime_status_key }}{% if active_downtime %} is-active{% endif %}" data-driver-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-driver-active-downtime-flow="{{ active_downtime_flow }}" data-driver-active-started-at="{{ active_downtime_started_at }}" data-driver-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-driver-shift-downtime-seconds="{{ shift_downtime_total_seconds }}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Простои за смену: {{ shift_downtime_total_label }}{% endif %}">
             <span class="driver-downtime-state-dot" data-driver-downtime-indicator aria-hidden="true">
                 <svg class="driver-downtime-state-icon driver-downtime-state-icon-play" viewBox="0 0 24 24" focusable="false"><path d="M7 4.8v14.4L19 12 7 4.8Z"></path></svg>
                 <svg class="driver-downtime-state-icon driver-downtime-state-icon-pause" viewBox="0 0 24 24" focusable="false"><path d="M6.5 5h4v14h-4V5Zm7 0h4v14h-4V5Z"></path></svg>
@@ -4035,7 +4085,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                 <form method="post" action="{% url 'driver_downtime_action' %}" data-driver-downtime-reason-id="{{ reason.id }}">
                     {% csrf_token %}
                     <input type="hidden" name="reason_id" value="{{ reason.id }}">
-                    <button class="driver-downtime-hold status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}" type="button" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-reason="{{ reason }}" data-driver-status-key="{{ reason.effective_color_group }}" aria-label="Начать простой: {{ reason.button_label }}">
+                    <button class="driver-downtime-hold status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-downtime-flow="{{ reason.driver_workflow }}" data-driver-reason="{{ reason }}" data-driver-status-key="{{ reason.effective_color_group }}"{% if reason.driver_unavailable_message %} aria-disabled="true" data-driver-unavailable-message="{{ reason.driver_unavailable_message }}" aria-label="{{ reason.button_label }}. {{ reason.driver_unavailable_message }}"{% else %} aria-label="Начать простой: {{ reason.button_label }}"{% endif %}>
                         {{ reason.button_label }}
                     </button>
                 </form>
@@ -4459,6 +4509,17 @@ function driverAppliedActionSound(actionKind, freshShell) {
     return "action_ok";
 }
 
+function syncDriverTabMarkup(shell, tab) {
+    if (!shell) return;
+    shell.dataset.activeTab = tab;
+    shell.querySelectorAll("[data-driver-tab-panel]").forEach(function (panel) {
+        panel.classList.toggle("is-active", panel.dataset.driverTabPanel === tab);
+    });
+    document.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
+        button.classList.toggle("is-active", button.dataset.driverTabOpen === tab);
+    });
+}
+
 window.applyOperationalStateRefresh = function (context) {
     var currentShell = document.querySelector("[data-driver-shell]");
     if (!currentShell || !window.AppOperationalFragment || isDriverOperationalRefreshUnsafe(currentShell)) {
@@ -4476,6 +4537,10 @@ window.applyOperationalStateRefresh = function (context) {
             "[data-driver-shell]"
         );
         if (!freshShell) return false;
+        var previousDowntimeCard = oldShell.querySelector("[data-driver-active-downtime-flow]");
+        var previousDowntimeFlow = previousDowntimeCard
+            ? String(previousDowntimeCard.dataset.driverActiveDowntimeFlow || "")
+            : "";
         var previousAssignmentForm = oldShell.querySelector("#driver-assignment-action");
         var nextAssignmentForm = freshShell.querySelector("#driver-assignment-action");
         var previousAssignmentKey = previousAssignmentForm
@@ -4484,7 +4549,19 @@ window.applyOperationalStateRefresh = function (context) {
         var nextAssignmentKey = nextAssignmentForm
             ? String(nextAssignmentForm.getAttribute("action") || "")
             : "";
-        freshShell.dataset.activeTab = activeTab;
+        var movedFromLoadingWaitToWork = (
+            previousDowntimeFlow === "waiting_loading"
+            && freshShell.dataset.driverHasLoadedTrip === "true"
+        );
+        if (movedFromLoadingWaitToWork) {
+            activeTab = "work";
+        }
+        syncDriverTabMarkup(freshShell, activeTab);
+        if (movedFromLoadingWaitToWork && window.history && window.history.replaceState) {
+            var refreshedUrl = new URL(window.location.href);
+            refreshedUrl.searchParams.set("tab", activeTab);
+            window.history.replaceState({}, "", refreshedUrl.toString());
+        }
         oldShell.replaceWith(freshShell);
 
         if (targetVersion) {
@@ -5398,18 +5475,12 @@ window.bindDriverMobileShell = function () {
         }, 3600);
     }
     function openDriverTab(tab) {
-        shell.dataset.activeTab = tab;
         /* Новая панель должна получить базовую плотность до первого paint:
            иначе она на кадр наследует tight/compact от предыдущей вкладки. */
         shell.dataset.driverDensity = shell.dataset.driverViewportDensity
             || shell.dataset.driverDensity
             || "normal";
-        shell.querySelectorAll("[data-driver-tab-panel]").forEach(function (panel) {
-            panel.classList.toggle("is-active", panel.dataset.driverTabPanel === tab);
-        });
-        document.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
-            button.classList.toggle("is-active", button.dataset.driverTabOpen === tab);
-        });
+        syncDriverTabMarkup(shell, tab);
         if (window.history && window.history.replaceState) {
             var url = new URL(window.location.href);
             url.searchParams.set("tab", tab);
@@ -5541,6 +5612,8 @@ window.bindDriverMobileShell = function () {
     var downtimeUrl = downtimePanel ? downtimePanel.dataset.driverDowntimeUrl : "";
     var downtimeCsrfInput = downtimePanel ? downtimePanel.querySelector("input[name='csrfmiddlewaretoken']") : null;
     var downtimeCsrfToken = downtimeCsrfInput ? downtimeCsrfInput.value : "";
+    var holdForm = shell.querySelector("[data-driver-hold-form]");
+    var holdButton = shell.querySelector("[data-driver-hold-button]");
 
     function formatDriverDowntimeDuration(seconds) {
         seconds = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -5584,11 +5657,30 @@ window.bindDriverMobileShell = function () {
         downtimeCard.classList.add("status-" + (statusKey || "yellow"));
     }
 
+    function applyDriverUnloadingWaitMode(payload) {
+        var isWaiting = Boolean(payload && payload.workflow === "waiting_unload");
+        if (!holdForm || !holdButton) {
+            return isWaiting;
+        }
+        holdForm.dataset.driverUnloadOneTap = isWaiting ? "true" : "false";
+        holdButton.classList.toggle("is-waiting-unload", isWaiting);
+        var dial = holdButton.closest(".driver-work-dial");
+        if (dial) dial.classList.toggle("is-waiting-unload", isWaiting);
+        var note = holdButton.querySelector(".driver-work-note");
+        if (note) {
+            note.textContent = isWaiting
+                ? String(payload.reason_label || payload.reason || "Ожидание разгрузки").toLocaleUpperCase("ru-RU")
+                : "ТОЧКА РАЗГРУЗКИ";
+        }
+        return isWaiting;
+    }
+
     function applyDriverActiveDowntime(payload) {
         if (!downtimeCard || !payload || !payload.event_id) {
-            return;
+            return false;
         }
         downtimeCard.dataset.driverActiveDowntimeId = payload.event_id;
+        downtimeCard.dataset.driverActiveDowntimeFlow = payload.workflow || "";
         downtimeCard.dataset.driverActiveStartedAt = payload.started_at || "";
         downtimeCard.dataset.driverActiveElapsedSeconds = String(payload.elapsed_seconds || 0);
         downtimeCard.classList.add("is-active");
@@ -5601,6 +5693,7 @@ window.bindDriverMobileShell = function () {
             downtimeClose.classList.remove("is-disabled");
             downtimeClose.removeAttribute("aria-disabled");
         }
+        return applyDriverUnloadingWaitMode(payload);
     }
 
     function clearDriverActiveDowntime(payload) {
@@ -5611,6 +5704,7 @@ window.bindDriverMobileShell = function () {
         if (downtimeDuration) downtimeDuration.textContent = (payload && payload.shift_total_label) || formatDriverDowntimeDuration(shiftTotalSeconds);
         if (downtimeCard) {
             downtimeCard.dataset.driverActiveDowntimeId = "";
+            downtimeCard.dataset.driverActiveDowntimeFlow = "";
             downtimeCard.dataset.driverActiveStartedAt = "";
             downtimeCard.dataset.driverActiveElapsedSeconds = String((payload && payload.elapsed_seconds) || 0);
             downtimeCard.dataset.driverShiftDowntimeSeconds = String(shiftTotalSeconds);
@@ -5625,6 +5719,7 @@ window.bindDriverMobileShell = function () {
         shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (button) {
             button.classList.remove("is-selected");
         });
+        applyDriverUnloadingWaitMode({ workflow: "" });
     }
 
     function postDriverDowntimeAction(payload) {
@@ -5656,9 +5751,12 @@ window.bindDriverMobileShell = function () {
         var pending = false;
         button.addEventListener("click", function (event) {
             event.preventDefault();
+            if (button.getAttribute("aria-disabled") === "true") {
+                showDriverToast(button.dataset.driverUnavailableMessage || "Действие недоступно");
+                return;
+            }
             if (
                 button.disabled
-                || button.getAttribute("aria-disabled") === "true"
                 || pending
                 || driverRoleIsReadonly()
             ) return;
@@ -5698,18 +5796,7 @@ window.bindDriverMobileShell = function () {
                 client_action_id: generateClientActionId("driver-downtime")
             }).then(function (payload) {
                 playDriverSound("action_ok");
-                applyDriverActiveDowntime(payload);
-                if (
-                    String(payload.reason || "").trim().toLocaleLowerCase("ru-RU") === "ожидание разгрузки"
-                    && holdForm
-                    && holdButton
-                ) {
-                    holdForm.dataset.driverUnloadOneTap = "true";
-                    holdButton.classList.add("is-waiting-unload");
-                    var waitingDial = holdButton.closest(".driver-work-dial");
-                    if (waitingDial) waitingDial.classList.add("is-waiting-unload");
-                    var waitingNote = holdButton.querySelector(".driver-work-note");
-                    if (waitingNote) waitingNote.textContent = "ОЖИДАНИЕ РАЗГРУЗКИ";
+                if (applyDriverActiveDowntime(payload)) {
                     openDriverTab("work");
                 }
                 if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
@@ -5764,8 +5851,6 @@ window.bindDriverMobileShell = function () {
         clearDriverDowntimeTimer();
     }
 
-    var holdForm = shell.querySelector("[data-driver-hold-form]");
-    var holdButton = shell.querySelector("[data-driver-hold-button]");
     var unloadHoldGuard = null;
     var unloadRecoveryStorage = null;
     try {

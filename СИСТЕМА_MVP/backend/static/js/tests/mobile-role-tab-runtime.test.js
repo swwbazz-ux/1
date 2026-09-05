@@ -641,13 +641,13 @@ test("Driver applies viewport density and schedules Work dial fit before its fir
         /shell\.dataset\.driverDensity\s*=\s*shell\.dataset\.driverViewportDensity/
     );
     const panelToggleIndex = openDriverTab.search(
-        /panel\.classList\.toggle\s*\(\s*["']is-active["']/
+        /syncDriverTabMarkup\s*\(\s*shell\s*,\s*tab\s*\)/
     );
     const dialFitIndex = openDriverTab.indexOf("scheduleDriverDialLabelFit", panelToggleIndex);
     const tabSettleIndex = openDriverTab.indexOf("scheduleDriverTabSettle", panelToggleIndex);
 
     assert.notEqual(baselineIndex, -1, "Every tab click must restore the viewport density baseline.");
-    assert.notEqual(panelToggleIndex, -1, "The active panel toggle was not found.");
+    assert.notEqual(panelToggleIndex, -1, "The shared active-tab markup sync was not found.");
     assert.ok(
         baselineIndex < panelToggleIndex,
         "Density must be stable before the newly selected panel becomes visible."

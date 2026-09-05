@@ -34,6 +34,12 @@ from assignments.services import (
 )
 from core.models import OperationalStateEvent, OperationalStateVersion, bump_operational_state
 from core.operational_fragments import operational_fragment_response
+from downtimes.driver_workflow import (
+    DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD,
+    driver_downtime_flow,
+    driver_downtime_requires_empty_truck,
+    driver_downtime_requires_loaded_trip,
+)
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
 from reports.forms import RatingPeriodReferenceForm
@@ -231,7 +237,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v189'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v190'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -3221,6 +3227,7 @@ def driver_downtime_event_payload(event, *, action='', closed=False, shift=None)
     elapsed_until = ended_at or now
     elapsed_seconds = max(0, int((elapsed_until - started_at).total_seconds()))
     reason = event.reason if event.reason_id else None
+    workflow = driver_downtime_flow(reason)
     shift_total_seconds = driver_shift_downtime_seconds(event.equipment, shift)
     return {
         'ok': True,
@@ -3230,6 +3237,10 @@ def driver_downtime_event_payload(event, *, action='', closed=False, shift=None)
         'event_id': event.id,
         'reason_id': event.reason_id,
         'reason': str(reason) if reason else '',
+        'reason_label': reason.button_label if reason else '',
+        'workflow': workflow,
+        'requires_loaded_trip': workflow == DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD,
+        'requires_empty_truck': driver_downtime_requires_empty_truck(reason),
         'started_at': started_at.isoformat(),
         'ended_at': ended_at.isoformat() if ended_at else '',
         'elapsed_seconds': elapsed_seconds,
@@ -3587,11 +3598,17 @@ def driver_shift_view(request):
         driver_status = active_downtime.reason.button_label
         driver_status_class = 'is-downtime'
 
-    driver_waiting_unload = bool(
+    driver_has_open_trip = bool(active_trip)
+    driver_has_loaded_trip = bool(
         active_trip
-        and active_downtime
-        and str(active_downtime.reason.name or '').strip().casefold()
-        == 'Ожидание разгрузки'.casefold()
+        and active_trip.status == TripStatus.LOADED_WAITING_UNLOAD
+    )
+    active_downtime_flow = driver_downtime_flow(
+        active_downtime.reason if active_downtime else None
+    )
+    driver_unloading_wait_active = bool(
+        driver_has_loaded_trip
+        and active_downtime_flow == DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD
     )
 
     driver_work_excavator = active_trip.excavator if active_trip else (current_assignment.excavator if current_assignment else None)
@@ -3643,7 +3660,11 @@ def driver_shift_view(request):
     driver_context_label = ' · '.join(driver_context_parts)
     if active_trip:
         driver_dial_label = str(driver_target_label)
-        driver_dial_note = 'ОЖИДАНИЕ РАЗГРУЗКИ' if driver_waiting_unload else 'ТОЧКА РАЗГРУЗКИ'
+        driver_dial_note = (
+            active_downtime.reason.button_label.upper()
+            if driver_unloading_wait_active
+            else 'ТОЧКА РАЗГРУЗКИ'
+        )
     elif active_downtime:
         driver_dial_label = active_downtime.reason.button_label
         driver_dial_note = 'ПРИЧИНА ПРОСТОЯ'
@@ -3668,7 +3689,18 @@ def driver_shift_view(request):
             driver_assignment_effective_at = pending_assignment_action.effective_at.isoformat()
 
     downtime_equipment_type = current_truck.equipment_type if current_truck else None
-    downtime_reasons = DowntimeReason.for_workplace('truck_driver', downtime_equipment_type)
+    downtime_reasons = list(
+        DowntimeReason.for_workplace('truck_driver', downtime_equipment_type)
+    )
+    for reason in downtime_reasons:
+        reason.driver_workflow = driver_downtime_flow(reason)
+        reason.driver_requires_loaded_trip = driver_downtime_requires_loaded_trip(reason)
+        reason.driver_requires_empty_truck = driver_downtime_requires_empty_truck(reason)
+        reason.driver_unavailable_message = ''
+        if reason.driver_requires_loaded_trip and not driver_has_loaded_trip:
+            reason.driver_unavailable_message = 'Доступно только после погрузки'
+        elif reason.driver_requires_empty_truck and driver_has_open_trip:
+            reason.driver_unavailable_message = 'Самосвал уже загружен'
     unload_points = DumpPoint.objects.filter(is_active=True).order_by('name')[:10]
     active_trip_assigned_dump_point = None
     active_trip_actual_dump_point_id = None
@@ -3806,7 +3838,10 @@ def driver_shift_view(request):
             'shift_plan_visual': shift_plan['visual'],
             'driver_status': driver_status,
             'driver_status_class': driver_status_class,
-            'driver_waiting_unload': driver_waiting_unload,
+            'driver_has_open_trip': driver_has_open_trip,
+            'driver_has_loaded_trip': driver_has_loaded_trip,
+            'driver_unloading_wait_active': driver_unloading_wait_active,
+            'active_downtime_flow': active_downtime_flow,
             'driver_target_label': driver_target_label,
             'driver_header_label': driver_header_label,
             'driver_header_truck_label': driver_header_truck_label,
@@ -3991,14 +4026,15 @@ def driver_downtime_action_view(request):
     action = (payload.get('action') or '').strip()
     locked_equipment = Equipment.objects.select_for_update().get(pk=open_shift.equipment_id)
     open_shift.equipment = locked_equipment
-    active_event = (
-        DowntimeEvent.objects
-        .select_related('reason', 'reason__equipment_state')
-        .filter(equipment=open_shift.equipment, ended_at__isnull=True)
-        .order_by('-started_at')
-        .first()
-    )
     if action == 'close':
+        active_event = (
+            DowntimeEvent.objects
+            .select_for_update(of=('self',))
+            .select_related('reason', 'reason__equipment_state')
+            .filter(equipment=open_shift.equipment, ended_at__isnull=True)
+            .order_by('-started_at')
+            .first()
+        )
         if active_event:
             active_event.ended_at = timezone.now()
             active_event.save(update_fields=['ended_at'])
@@ -4025,6 +4061,65 @@ def driver_downtime_action_view(request):
             return JsonResponse({'ok': False, 'error': 'Причина простоя не найдена.'}, status=400)
         messages.error(request, 'Причина простоя не найдена.')
         return redirect(f'{reverse("driver_work")}?tab=downtimes')
+    workflow = driver_downtime_flow(reason)
+    if driver_downtime_requires_empty_truck(reason):
+        open_trip = (
+            Trip.objects
+            .select_for_update()
+            .filter(
+                truck=open_shift.equipment,
+                status__in=OPEN_TRIP_STATUSES,
+            )
+            .order_by('-created_at')
+            .first()
+        )
+        if open_trip:
+            error = 'Ожидание погрузки нельзя начать: самосвал уже загружен.'
+            if wants_json:
+                return JsonResponse(
+                    {
+                        'ok': False,
+                        'error': error,
+                        'code': 'empty_truck_required',
+                        'workflow': workflow,
+                    },
+                    status=409,
+                )
+            messages.error(request, error)
+            return redirect(f'{reverse("driver_work")}?tab=downtimes')
+    if driver_downtime_requires_loaded_trip(reason):
+        loaded_trip = (
+            Trip.objects
+            .select_for_update()
+            .filter(
+                truck=open_shift.equipment,
+                status=TripStatus.LOADED_WAITING_UNLOAD,
+            )
+            .order_by('-created_at')
+            .first()
+        )
+        if not loaded_trip:
+            error = 'Этот простой доступен только после погрузки самосвала.'
+            if wants_json:
+                return JsonResponse(
+                    {
+                        'ok': False,
+                        'error': error,
+                        'code': 'loaded_trip_required',
+                        'workflow': workflow,
+                    },
+                    status=409,
+                )
+            messages.error(request, error)
+            return redirect(f'{reverse("driver_work")}?tab=downtimes')
+    active_event = (
+        DowntimeEvent.objects
+        .select_for_update(of=('self',))
+        .select_related('reason', 'reason__equipment_state')
+        .filter(equipment=open_shift.equipment, ended_at__isnull=True)
+        .order_by('-started_at')
+        .first()
+    )
     if active_event:
         if active_event.employee_id != access.employee_id:
             error = (
@@ -4053,6 +4148,8 @@ def driver_downtime_action_view(request):
         action_label = 'downtime_started'
     if wants_json:
         return JsonResponse(driver_downtime_event_payload(event, action=action_label, shift=open_shift))
+    if workflow == DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD:
+        return redirect(f'{reverse("driver_work")}?tab=work')
     return redirect(f'{reverse("driver_work")}?tab=downtimes')
 
 # Create your views here.

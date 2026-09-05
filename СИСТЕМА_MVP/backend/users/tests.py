@@ -112,6 +112,26 @@ class AccessLoginTests(TestCase):
         session.save()
         return truck
 
+    def create_driver_trip(self, truck, *, status=TripStatus.LOADED_WAITING_UNLOAD):
+        excavator_type, _ = EquipmentType.objects.get_or_create(name='Экскаватор')
+        excavator, _ = Equipment.objects.get_or_create(
+            equipment_type=excavator_type,
+            garage_number='ЭКС-DW',
+        )
+        rock, _ = RockType.objects.get_or_create(name='Руда DW')
+        dump_point, _ = DumpPoint.objects.get_or_create(name='ККД DW')
+        shift = EmployeeShift.objects.get(employee=self.employee, closed_at__isnull=True)
+        return Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            driver=self.employee,
+            loading_shift=shift,
+            rock_type=rock,
+            dump_point=dump_point,
+            assigned_dump_point=dump_point,
+            status=status,
+        )
+
     def test_registered_driver_opens_shift_screen(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
@@ -239,7 +259,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v189')
+        self.assertContains(response, 'driver-mobile-shell-v190')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertContains(response, 'playDriverSound("truck_assigned")')
@@ -451,7 +471,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v189', script)
+        self.assertIn('driver-mobile-shell-v190', script)
         self.assertIn('"/company/privacy/"', script)
         self.assertIn('"/static/portal/css/portal-shell-v5.css?v=6"', script)
         self.assertIn('/static/css/mobile-role-login-v1.css', script)
@@ -2820,7 +2840,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v189')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v190')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
@@ -2942,6 +2962,195 @@ class AccessLoginTests(TestCase):
         self.assertEqual(event.reason, allowed_reason)
         self.assertEqual(event.equipment, truck)
         self.assertEqual(event.employee, self.employee)
+
+    def test_driver_unloading_wait_buttons_are_unavailable_until_truck_is_loaded(self):
+        self.create_registered_driver_shift()
+
+        response = self.client.get('/driver/?tab=downtimes', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context['driver_has_loaded_trip'])
+        self.assertContains(response, 'data-driver-has-loaded-trip="false"')
+        self.assertContains(response, 'data-driver-downtime-flow="waiting_unload"', count=3)
+        self.assertContains(response, 'data-driver-unavailable-message="Доступно только после погрузки"', count=3)
+        waiting_loading = next(
+            reason
+            for reason in response.context['downtime_reasons']
+            if reason.name == 'Ожидание погрузки'
+        )
+        self.assertEqual(waiting_loading.driver_workflow, 'waiting_loading')
+        self.assertFalse(waiting_loading.driver_requires_loaded_trip)
+
+    def test_driver_unloading_wait_is_rejected_without_loaded_trip(self):
+        truck = self.create_registered_driver_shift()
+        unloading_wait_names = (
+            'Ожидание разгрузки',
+            'Ожидание разгрузки ККД',
+            'Ожидание разгрузки СКДР',
+        )
+
+        for reason in DowntimeReason.objects.filter(name__in=unloading_wait_names).order_by('name'):
+            with self.subTest(reason=reason.name):
+                response = self.client.post(
+                    reverse('driver_downtime_action'),
+                    data=json.dumps({
+                        'action': 'start',
+                        'reason_id': reason.id,
+                        'client_action_id': f'empty-{reason.id}',
+                    }),
+                    content_type='application/json',
+                    HTTP_HOST='localhost',
+                    HTTP_ACCEPT='application/json',
+                    HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                )
+
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.json()['code'], 'loaded_trip_required')
+                self.assertEqual(response.json()['workflow'], 'waiting_unload')
+                self.assertFalse(DowntimeEvent.objects.filter(equipment=truck).exists())
+
+    def test_driver_waiting_loading_is_rejected_after_trip_is_loaded(self):
+        truck = self.create_registered_driver_shift()
+        self.create_driver_trip(truck)
+        reason = DowntimeReason.objects.get(name='Ожидание погрузки')
+
+        screen_response = self.client.get(
+            '/driver/?tab=downtimes',
+            HTTP_HOST='localhost',
+        )
+        action_response = self.client.post(
+            reverse('driver_downtime_action'),
+            data=json.dumps({'action': 'start', 'reason_id': reason.id}),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(screen_response.status_code, 200)
+        self.assertContains(
+            screen_response,
+            'data-driver-unavailable-message="Самосвал уже загружен"',
+            count=1,
+        )
+        self.assertEqual(action_response.status_code, 409)
+        self.assertEqual(action_response.json()['code'], 'empty_truck_required')
+        self.assertEqual(action_response.json()['workflow'], 'waiting_loading')
+        self.assertFalse(DowntimeEvent.objects.filter(equipment=truck).exists())
+
+    def test_driver_legacy_active_trip_blocks_waiting_loading_in_ui_and_endpoint(self):
+        truck = self.create_registered_driver_shift()
+        self.create_driver_trip(truck, status=TripStatus.ACTIVE)
+        reason = DowntimeReason.objects.get(name='Ожидание погрузки')
+
+        screen_response = self.client.get(
+            '/driver/?tab=downtimes',
+            HTTP_HOST='localhost',
+        )
+        action_response = self.client.post(
+            reverse('driver_downtime_action'),
+            data=json.dumps({'action': 'start', 'reason_id': reason.id}),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(screen_response.status_code, 200)
+        self.assertTrue(screen_response.context['driver_has_open_trip'])
+        self.assertFalse(screen_response.context['driver_has_loaded_trip'])
+        self.assertContains(screen_response, 'data-driver-has-open-trip="true"')
+        self.assertContains(
+            screen_response,
+            'data-driver-unavailable-message="Самосвал уже загружен"',
+            count=1,
+        )
+        self.assertEqual(action_response.status_code, 409)
+        self.assertEqual(action_response.json()['code'], 'empty_truck_required')
+        self.assertFalse(DowntimeEvent.objects.filter(equipment=truck).exists())
+
+    def test_driver_unloading_wait_rejects_legacy_active_trip(self):
+        truck = self.create_registered_driver_shift()
+        self.create_driver_trip(truck, status=TripStatus.ACTIVE)
+        reason = DowntimeReason.objects.get(name='Ожидание разгрузки ККД')
+
+        response = self.client.post(
+            reverse('driver_downtime_action'),
+            data=json.dumps({'action': 'start', 'reason_id': reason.id}),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'loaded_trip_required')
+        self.assertFalse(DowntimeEvent.objects.filter(equipment=truck).exists())
+
+    def test_driver_loaded_truck_can_start_each_unloading_wait_flow(self):
+        truck = self.create_registered_driver_shift()
+        self.create_driver_trip(truck)
+        unloading_wait_names = (
+            'Ожидание разгрузки',
+            'Ожидание разгрузки ККД',
+            'Ожидание разгрузки СКДР',
+        )
+
+        for reason in DowntimeReason.objects.filter(name__in=unloading_wait_names).order_by('name'):
+            with self.subTest(reason=reason.name):
+                response = self.client.post(
+                    reverse('driver_downtime_action'),
+                    data=json.dumps({
+                        'action': 'start',
+                        'reason_id': reason.id,
+                        'client_action_id': f'loaded-{reason.id}',
+                    }),
+                    content_type='application/json',
+                    HTTP_HOST='localhost',
+                    HTTP_ACCEPT='application/json',
+                    HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()['workflow'], 'waiting_unload')
+                self.assertTrue(response.json()['requires_loaded_trip'])
+                self.assertEqual(response.json()['reason_label'], reason.button_label)
+
+        html_response = self.client.post(
+            reverse('driver_downtime_action'),
+            {'reason_id': DowntimeReason.objects.get(name='Ожидание разгрузки').id},
+            HTTP_HOST='localhost',
+        )
+        self.assertRedirects(
+            html_response,
+            f'{reverse("driver_work")}?tab=work',
+            fetch_redirect_response=False,
+        )
+
+    def test_invalid_unloading_wait_switch_keeps_waiting_loading_event(self):
+        truck = self.create_registered_driver_shift()
+        waiting_loading = DowntimeReason.objects.get(name='Ожидание погрузки')
+        event = DowntimeEvent.objects.create(
+            equipment=truck,
+            employee=self.employee,
+            reason=waiting_loading,
+            started_at=timezone.now() - timedelta(minutes=2),
+        )
+        unloading_wait = DowntimeReason.objects.get(name='Ожидание разгрузки СКДР')
+
+        response = self.client.post(
+            reverse('driver_downtime_action'),
+            data=json.dumps({'action': 'start', 'reason_id': unloading_wait.id}),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        event.refresh_from_db()
+        self.assertEqual(event.reason, waiting_loading)
+        self.assertIsNone(event.ended_at)
 
     def test_driver_downtime_reference_change_is_visible_after_server_refresh(self):
         self.create_registered_driver_shift()

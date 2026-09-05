@@ -9,6 +9,16 @@ from references.equipment_states import upsert_default_equipment_states
 from references.models import Equipment, EquipmentState, EquipmentType
 from users.models import Employee, EmployeeAccess, Role
 
+from .driver_workflow import (
+    DRIVER_DOWNTIME_FLOW_WAITING_LOADING,
+    DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD,
+    TRUCK_UNLOADING_WAIT_REASON_NAMES,
+    close_truck_unloading_wait_downtimes,
+    close_truck_waiting_loading_downtimes,
+    driver_downtime_flow,
+    driver_downtime_requires_empty_truck,
+    driver_downtime_requires_loaded_trip,
+)
 from .models import DowntimeEvent, DowntimeReason
 
 
@@ -44,6 +54,97 @@ class DowntimeReasonStateSemanticsTests(TestCase):
 
         self.assertEqual(reason.effective_equipment_state_code, 'breakdown')
         self.assertEqual(reason.effective_color_group, 'red')
+
+
+class DriverDowntimeWorkflowTests(TestCase):
+    def setUp(self):
+        truck_type = EquipmentType.objects.create(
+            name='Самосвал тестов сценария простоя водителя',
+        )
+        self.truck = Equipment.objects.create(
+            equipment_type=truck_type,
+            garage_number='DRIVER-DOWNTIME-FLOW',
+        )
+
+    def test_classifies_loading_unloading_and_ordinary_driver_reasons(self):
+        waiting_loading = DowntimeReason.objects.get(name='Ожидание погрузки')
+        self.assertEqual(
+            driver_downtime_flow(waiting_loading),
+            DRIVER_DOWNTIME_FLOW_WAITING_LOADING,
+        )
+        self.assertTrue(driver_downtime_requires_empty_truck(waiting_loading))
+        self.assertFalse(driver_downtime_requires_loaded_trip(waiting_loading))
+
+        for reason_name in TRUCK_UNLOADING_WAIT_REASON_NAMES:
+            with self.subTest(reason_name=reason_name):
+                reason = DowntimeReason.objects.get(name=reason_name)
+                self.assertEqual(
+                    driver_downtime_flow(reason),
+                    DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD,
+                )
+                self.assertFalse(driver_downtime_requires_empty_truck(reason))
+                self.assertTrue(driver_downtime_requires_loaded_trip(reason))
+
+        ordinary_reason = DowntimeReason.objects.get(name='Заправка')
+        self.assertEqual(driver_downtime_flow(ordinary_reason), '')
+        self.assertFalse(driver_downtime_requires_empty_truck(ordinary_reason))
+        self.assertFalse(driver_downtime_requires_loaded_trip(ordinary_reason))
+
+    def test_close_helpers_only_close_their_driver_workflow_group(self):
+        waiting_loading_reason = DowntimeReason.objects.get(
+            name='Ожидание погрузки',
+        )
+        waiting_loading_event = DowntimeEvent.objects.create(
+            equipment=self.truck,
+            reason=waiting_loading_reason,
+            started_at=timezone.now() - timedelta(minutes=12),
+        )
+        unloading_events = []
+        for index, reason_name in enumerate(TRUCK_UNLOADING_WAIT_REASON_NAMES):
+            reason = DowntimeReason.objects.get(name=reason_name)
+            unloading_events.append(
+                DowntimeEvent.objects.create(
+                    equipment=self.truck,
+                    reason=reason,
+                    started_at=timezone.now() - timedelta(minutes=9 - index),
+                )
+            )
+        ordinary_reason = DowntimeReason.objects.get(name='Ремонт')
+        ordinary_event = DowntimeEvent.objects.create(
+            equipment=self.truck,
+            reason=ordinary_reason,
+            started_at=timezone.now() - timedelta(minutes=5),
+        )
+        unloading_ended_at = timezone.now()
+
+        closed_unloading_count = close_truck_unloading_wait_downtimes(
+            self.truck,
+            ended_at=unloading_ended_at,
+        )
+
+        self.assertEqual(
+            closed_unloading_count,
+            len(TRUCK_UNLOADING_WAIT_REASON_NAMES),
+        )
+        for event in unloading_events:
+            event.refresh_from_db()
+            self.assertEqual(event.ended_at, unloading_ended_at)
+        waiting_loading_event.refresh_from_db()
+        ordinary_event.refresh_from_db()
+        self.assertIsNone(waiting_loading_event.ended_at)
+        self.assertIsNone(ordinary_event.ended_at)
+
+        loading_ended_at = unloading_ended_at + timedelta(seconds=1)
+        closed_loading_count = close_truck_waiting_loading_downtimes(
+            self.truck,
+            ended_at=loading_ended_at,
+        )
+
+        self.assertEqual(closed_loading_count, 1)
+        waiting_loading_event.refresh_from_db()
+        ordinary_event.refresh_from_db()
+        self.assertEqual(waiting_loading_event.ended_at, loading_ended_at)
+        self.assertIsNone(ordinary_event.ended_at)
 
 
 class MechanicDowntimeCloseRegressionTests(TestCase):

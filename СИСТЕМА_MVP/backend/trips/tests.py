@@ -3438,19 +3438,66 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertTrue(returned_cards['21']['can_load'])
 
     def test_waiting_for_unloading_uses_one_tap_and_closes_with_trip(self):
-        load_response = self.post_truck_loaded(client_action_id='waiting-unload-one-tap')
-        trip = Trip.objects.get(id=load_response.json()['trip_id'])
-        waiting_reason, _ = DowntimeReason.objects.get_or_create(
-            name='Ожидание разгрузки',
-            defaults={
-                'short_label': 'Ожидание разгрузки',
-                'show_for_truck_driver': True,
-            },
+        driver_client = self.client_class()
+        session = driver_client.session
+        session['employee_access_id'] = self.driver_access.id
+        session.save()
+        reason_names = (
+            'Ожидание разгрузки',
+            'Ожидание разгрузки ККД',
+            'Ожидание разгрузки СКДР',
         )
-        waiting = DowntimeEvent.objects.create(
+
+        for index, reason_name in enumerate(reason_names, start=1):
+            with self.subTest(reason=reason_name):
+                load_response = self.post_truck_loaded(
+                    client_action_id=f'waiting-unload-one-tap-{index}',
+                )
+                self.assertEqual(load_response.status_code, 200)
+                trip = Trip.objects.get(id=load_response.json()['trip_id'])
+                waiting_reason = DowntimeReason.objects.get(name=reason_name)
+                waiting = DowntimeEvent.objects.create(
+                    equipment=self.truck,
+                    employee=self.driver,
+                    reason=waiting_reason,
+                    started_at=timezone.now() - timedelta(minutes=2),
+                )
+
+                work_response = driver_client.get(reverse('driver_work'))
+
+                self.assertTrue(work_response.context['driver_unloading_wait_active'])
+                self.assertEqual(
+                    work_response.context['driver_dial_note'],
+                    waiting_reason.button_label.upper(),
+                )
+                self.assertContains(work_response, 'data-driver-unload-one-tap="true"')
+                self.assertContains(work_response, 'is-waiting-unload')
+
+                complete_response = driver_client.post(
+                    reverse('driver_complete_trip', args=[trip.id]),
+                    data={'client_action_id': f'waiting-unload-complete-{index}'},
+                )
+
+                self.assertEqual(complete_response.status_code, 302)
+                waiting.refresh_from_db()
+                trip.refresh_from_db()
+                self.assertIsNotNone(waiting.ended_at)
+                self.assertEqual(waiting.ended_at, trip.completed_at)
+                self.assertEqual(trip.status, TripStatus.COMPLETED)
+                trip.completed_at = timezone.now() - timedelta(minutes=11)
+                trip.save(update_fields=['completed_at'])
+
+    def test_unloading_trip_keeps_unrelated_truck_downtime_open(self):
+        load_response = self.post_truck_loaded(client_action_id='unrelated-downtime-load')
+        trip = Trip.objects.get(id=load_response.json()['trip_id'])
+        refuel_reason, _ = DowntimeReason.objects.get_or_create(
+            name='Заправка',
+            defaults={'show_for_truck_driver': True},
+        )
+        refuel = DowntimeEvent.objects.create(
             equipment=self.truck,
             employee=self.driver,
-            reason=waiting_reason,
+            reason=refuel_reason,
             started_at=timezone.now() - timedelta(minutes=2),
         )
         driver_client = self.client_class()
@@ -3458,23 +3505,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         session['employee_access_id'] = self.driver_access.id
         session.save()
 
-        work_response = driver_client.get(reverse('driver_work'))
-
-        self.assertTrue(work_response.context['driver_waiting_unload'])
-        self.assertEqual(work_response.context['driver_dial_note'], 'ОЖИДАНИЕ РАЗГРУЗКИ')
-        self.assertContains(work_response, 'data-driver-unload-one-tap="true"')
-        self.assertContains(work_response, 'is-waiting-unload')
-
-        complete_response = driver_client.post(
+        response = driver_client.post(
             reverse('driver_complete_trip', args=[trip.id]),
-            data={'client_action_id': 'waiting-unload-complete'},
+            data={'client_action_id': 'unrelated-downtime-complete'},
         )
 
-        self.assertEqual(complete_response.status_code, 302)
-        waiting.refresh_from_db()
-        trip.refresh_from_db()
-        self.assertIsNotNone(waiting.ended_at)
-        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(response.status_code, 302)
+        refuel.refresh_from_db()
+        self.assertIsNone(refuel.ended_at)
 
     def test_truck_loaded_cancel_returns_truck_to_assigned_state(self):
         no_access_response = Client().post(

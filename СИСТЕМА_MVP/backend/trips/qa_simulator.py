@@ -38,7 +38,10 @@ from users.forms import normalize_phone
 from users.models import Employee, EmployeeAccess, Role
 
 from .models import OPEN_TRIP_STATUSES, Trip, TripStatus
-from .trip_creation import create_loaded_waiting_unload_trip
+from .trip_creation import (
+    create_loaded_waiting_unload_trip,
+    lock_trip_participant_equipment,
+)
 
 
 QA_PREFIX = 'RUSTORE-QA'
@@ -634,10 +637,9 @@ def _load_human_driver_truck(
     now,
 ) -> tuple[Trip | None, str]:
     """Let the QA bot excavator load, but never unload, the human truck."""
+    from downtimes.driver_workflow import close_truck_waiting_loading_downtimes
     from trips.views import (
-        TRUCK_WAITING_LOADING_REASON,
         close_excavator_open_downtimes,
-        close_truck_downtime_for_reason,
         excavator_truck_load_block,
         notify_driver_truck_loaded,
         reconcile_excavator_waiting_for_trucks,
@@ -668,27 +670,18 @@ def _load_human_driver_truck(
             .order_by('-opened_at')
             .first()
         )
-        locked_assignment = (
-            HaulAssignment.objects
-            .select_for_update(of=('self',))
-            .select_related('truck', 'truck__model', 'excavator')
-            .filter(
-                pk=assignment.pk,
-                truck=scenario.human_driver_truck,
-                excavator=scenario.driver_bot_excavator,
-                status=AssignmentStatus.ACCEPTED,
-                ended_at__isnull=True,
-            )
-            .first()
-        )
-        if not driver_shift or not bot_shift or not locked_assignment:
+        if not driver_shift or not bot_shift:
             return None, 'waiting_for_assignment'
 
+        locked_excavator, locked_truck = lock_trip_participant_equipment(
+            excavator_id=scenario.driver_bot_excavator.pk,
+            truck_id=scenario.human_driver_truck.pk,
+        )
         active_trip = (
             Trip.objects
             .select_for_update(of=('self',))
             .filter(
-                truck=scenario.human_driver_truck,
+                truck=locked_truck,
                 status__in=OPEN_TRIP_STATUSES,
             )
             .order_by('-created_at')
@@ -697,13 +690,31 @@ def _load_human_driver_truck(
         if active_trip:
             return active_trip, 'loaded_waiting_unload'
 
+        locked_assignment = (
+            HaulAssignment.objects
+            .select_for_update(of=('self',))
+            .select_related('truck', 'truck__model', 'excavator')
+            .filter(
+                pk=assignment.pk,
+                truck=locked_truck,
+                excavator=locked_excavator,
+                status=AssignmentStatus.ACCEPTED,
+                ended_at__isnull=True,
+            )
+            .first()
+        )
+        if not locked_assignment:
+            return None, 'waiting_for_assignment'
+        locked_assignment.truck = locked_truck
+        locked_assignment.excavator = locked_excavator
+
         cooldown = truck_post_unload_cooldown(
-            scenario.human_driver_truck,
+            locked_truck,
             now=now,
         )
         load_block = excavator_truck_load_block(
             locked_assignment,
-            current_excavator=scenario.driver_bot_excavator,
+            current_excavator=locked_excavator,
             active_trip=False,
             post_unload_cooldown=cooldown or False,
             has_open_truck_shift=True,
@@ -715,7 +726,7 @@ def _load_human_driver_truck(
         placement = ExcavatorPlacement.objects.select_related(
             'work_rock_type',
             'work_dump_point',
-        ).get(excavator=scenario.driver_bot_excavator)
+        ).get(excavator=locked_excavator)
         if not placement.work_rock_type_id or not placement.work_dump_point_id:
             return None, 'work_context_missing'
 
@@ -729,13 +740,10 @@ def _load_human_driver_truck(
             loading_block=placement.loading_block,
             note='Погрузка создана изолированным RuStore QA-симулятором.',
         )
-        close_truck_downtime_for_reason(
-            scenario.human_driver_truck,
-            TRUCK_WAITING_LOADING_REASON,
-        )
-        close_excavator_open_downtimes(scenario.driver_bot_excavator)
+        close_truck_waiting_loading_downtimes(locked_truck)
+        close_excavator_open_downtimes(locked_excavator)
         reconcile_excavator_waiting_for_trucks(
-            scenario.driver_bot_excavator,
+            locked_excavator,
             scenario.driver_bot_operator,
             start_when_empty=True,
         )

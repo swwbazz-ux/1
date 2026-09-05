@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 
-from references.models import TruckCapacityRule
+from references.models import Equipment, TruckCapacityRule
 
 from .models import Trip, TripStatus
 
@@ -13,6 +13,30 @@ TRIP_CAPACITY_UNRESOLVED_MESSAGE = (
 TRIP_DENSITY_UNRESOLVED_MESSAGE = (
     'Для выбранной породы не настроена плотность.'
 )
+
+
+def lock_trip_participant_equipment(*, excavator_id, truck_id):
+    """Lock both trip participants in one deterministic order.
+
+    Callers must already be inside ``transaction.atomic()``. The truck row is
+    the shared serialization point with driver downtime actions, so a loaded
+    trip and an incompatible waiting-for-loading event cannot be committed in
+    opposite transactions.
+    """
+    participant_ids = tuple(sorted({excavator_id, truck_id}))
+    locked_by_id = {
+        equipment.pk: equipment
+        for equipment in (
+            Equipment.objects
+            .select_for_update(of=('self',))
+            .select_related('equipment_type', 'model')
+            .filter(pk__in=participant_ids)
+            .order_by('pk')
+        )
+    }
+    if any(participant_id not in locked_by_id for participant_id in participant_ids):
+        raise ValidationError('Техника для рейса больше недоступна.')
+    return locked_by_id[excavator_id], locked_by_id[truck_id]
 
 
 def calculate_trip_volume_and_tonnage(truck, rock_type):
