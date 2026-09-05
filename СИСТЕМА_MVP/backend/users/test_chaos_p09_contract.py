@@ -7,7 +7,7 @@ from django.utils import timezone
 from shifts.models import EmployeeShift
 from users import active_role, role_apps
 from users.models import Employee, EmployeeAccess, Role
-from users.privacy_consent import PRIVACY_POLICY_VERSION
+from users.privacy_consent import PRIVACY_CONSENT_FIELD, PRIVACY_POLICY_VERSION
 from users.role_apps import ROLE_APPS
 
 
@@ -171,7 +171,7 @@ class PwaContractVersionMatrixRegressionTests(TestCase):
                         'phone': access.employee.phone,
                         'access_code': access.access_code,
                         'device_kind': 'personal',
-                        'privacy_consent': PRIVACY_POLICY_VERSION,
+                        PRIVACY_CONSENT_FIELD: PRIVACY_POLICY_VERSION,
                     },
                     HTTP_HOST=host,
                 )

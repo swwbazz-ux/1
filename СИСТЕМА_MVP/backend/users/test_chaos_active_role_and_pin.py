@@ -36,7 +36,7 @@ from users.models import (
     Role,
 )
 from users.oup_undo import OUP_ACTION_ACCESS_REISSUED
-from users.privacy_consent import PRIVACY_POLICY_VERSION
+from users.privacy_consent import PRIVACY_CONSENT_FIELD, PRIVACY_POLICY_VERSION
 
 
 ROLE_HOST_SETTINGS = override_settings(
@@ -196,7 +196,7 @@ class RoleRegressionFixtureMixin:
                 'phone': employee.phone,
                 'access_code': access.access_code,
                 'device_kind': device_kind,
-                'privacy_consent': PRIVACY_POLICY_VERSION,
+                PRIVACY_CONSENT_FIELD: PRIVACY_POLICY_VERSION,
             },
             follow=follow,
             HTTP_HOST=host,
@@ -320,7 +320,7 @@ class ActiveRoleSwitchRegressionTests(RoleRegressionFixtureMixin, TestCase):
         )
         return dispatcher_login
 
-    def assert_dispatcher_switch_blocked(self):
+    def assert_dispatcher_login_allowed(self):
         driver_client = Client()
         dispatcher_client = Client()
         driver_login = self.login(
@@ -340,14 +340,17 @@ class ActiveRoleSwitchRegressionTests(RoleRegressionFixtureMixin, TestCase):
             follow=True,
         )
 
-        self.assertNotIn('employee_access_id', dispatcher_client.session)
+        self.assertEqual(
+            dispatcher_client.session.get('employee_access_id'),
+            self.dispatcher_access.id,
+        )
         self.assertEqual(
             driver_client.session.get('employee_access_id'),
             self.driver_access.id,
         )
         return response
 
-    def test_second_host_switches_role_and_old_host_is_read_only(self):
+    def test_second_role_host_keeps_old_role_fully_active(self):
         driver_client = Client()
         dispatcher_client = Client()
 
@@ -376,22 +379,14 @@ class ActiveRoleSwitchRegressionTests(RoleRegressionFixtureMixin, TestCase):
                 driver_client.cookies['sessionid'].value,
                 dispatcher_client.cookies['sessionid'].value,
             )
-        with self.subTest('old realtime GET remains readable'):
+        with self.subTest('old role GET remains active'):
             self.assertEqual(old_driver_get.status_code, 200)
             old_driver_html = old_driver_get.content.decode('utf-8')
-            self.assertIn(
-                'доступен только просмотр',
-                old_driver_html,
-                'Старая PWA не перешла в явно обозначенный read-only.',
-            )
-            self.assertIn(
-                'data-inactive-role-reclaim',
-                old_driver_html,
-                'Старой PWA не предложен возврат сессии на это устройство.',
-            )
-        with self.subTest('old working POST is rejected server-side'):
-            self.assertIn(old_driver_post.status_code, {403, 409})
-            self.assertFalse(
+            self.assertNotIn('доступен только просмотр', old_driver_html)
+            self.assertNotIn('data-inactive-role-reclaim', old_driver_html)
+        with self.subTest('old role POST remains operational'):
+            self.assertEqual(old_driver_post.status_code, 302)
+            self.assertTrue(
                 EmployeeShift.objects.filter(
                     employee=self.employee,
                     workplace_code='driver',
@@ -424,7 +419,7 @@ class ActiveRoleSwitchRegressionTests(RoleRegressionFixtureMixin, TestCase):
             self.dispatcher_access.id,
         )
 
-    def test_driver_switches_to_mining_master_and_only_driver_shift_closes(self):
+    def test_driver_and_mining_master_role_sessions_stay_independent(self):
         driver_client = Client()
         mining_master_client = Client()
         driver_login = self.login(
@@ -453,8 +448,8 @@ class ActiveRoleSwitchRegressionTests(RoleRegressionFixtureMixin, TestCase):
             mining_master_client.session.get('employee_access_id'),
             self.mining_master_access.id,
         )
-        self.assertIsNotNone(driver_shift.closed_at)
-        self.assertEqual(driver_shift.closed_by_id, self.employee.id)
+        self.assertIsNone(driver_shift.closed_at)
+        self.assertIsNone(driver_shift.closed_by_id)
         self.assertEqual(driver_shift.workplace_code, 'driver')
         self.assertFalse(
             EmployeeShift.objects.filter(
@@ -464,7 +459,7 @@ class ActiveRoleSwitchRegressionTests(RoleRegressionFixtureMixin, TestCase):
             ).exists()
         )
 
-    def test_old_host_realtime_get_reports_inactive_role(self):
+    def test_each_role_realtime_get_reports_its_session_active(self):
         driver_client = Client()
         dispatcher_client = Client()
         dispatcher_login = self.switch_from_driver_to_dispatcher(
@@ -488,14 +483,14 @@ class ActiveRoleSwitchRegressionTests(RoleRegressionFixtureMixin, TestCase):
         active_role_payload = active_role_response.json()
         self.assertEqual(old_role_response.status_code, 200)
         self.assertTrue(old_role_payload['authenticated'])
-        self.assertFalse(old_role_payload['role_active'])
-        self.assertEqual(old_role_payload['active_role_code'], 'dispatcher')
+        self.assertTrue(old_role_payload['role_active'])
+        self.assertEqual(old_role_payload['active_role_code'], 'driver')
         self.assertEqual(active_role_response.status_code, 200)
         self.assertTrue(active_role_payload['authenticated'])
         self.assertTrue(active_role_payload['role_active'])
         self.assertEqual(active_role_payload['active_role_code'], 'dispatcher')
 
-    def test_switch_is_blocked_by_open_trip(self):
+    def test_other_role_login_does_not_close_open_trip(self):
         shift = self.create_driver_shift(
             employee=self.employee,
             truck=self.truck,
@@ -518,18 +513,15 @@ class ActiveRoleSwitchRegressionTests(RoleRegressionFixtureMixin, TestCase):
             status=TripStatus.LOADED_WAITING_UNLOAD,
         )
 
-        response = self.assert_dispatcher_switch_blocked()
+        response = self.assert_dispatcher_login_allowed()
 
         shift.refresh_from_db()
         trip.refresh_from_db()
         self.assertIsNone(shift.closed_at)
         self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
-        self.assertTrue(
-            'рейс' in response.content.decode('utf-8').lower(),
-            'Ответ не перечисляет открытый рейс как блокировщик.',
-        )
+        self.assertEqual(response.status_code, 200)
 
-    def test_switch_is_blocked_by_open_downtime(self):
+    def test_other_role_login_does_not_close_open_downtime(self):
         shift = self.create_driver_shift(
             employee=self.employee,
             truck=self.truck,
@@ -547,37 +539,31 @@ class ActiveRoleSwitchRegressionTests(RoleRegressionFixtureMixin, TestCase):
             started_at=timezone.now() - timedelta(minutes=30),
         )
 
-        response = self.assert_dispatcher_switch_blocked()
+        response = self.assert_dispatcher_login_allowed()
 
         shift.refresh_from_db()
         downtime.refresh_from_db()
         self.assertIsNone(shift.closed_at)
         self.assertIsNone(downtime.ended_at)
-        self.assertTrue(
-            'простой' in response.content.decode('utf-8').lower(),
-            'Ответ не перечисляет открытый простой как блокировщик.',
-        )
+        self.assertEqual(response.status_code, 200)
 
-    def test_switch_is_blocked_by_missing_end_readings(self):
+    def test_other_role_login_does_not_close_shift_with_missing_readings(self):
         shift = self.create_driver_shift(
             employee=self.employee,
             truck=self.truck,
             readings_complete=False,
         )
 
-        response = self.assert_dispatcher_switch_blocked()
+        response = self.assert_dispatcher_login_allowed()
 
         shift.refresh_from_db()
         self.assertIsNone(shift.closed_at)
         self.assertIsNone(shift.end_fuel)
         self.assertIsNone(shift.end_mileage)
         self.assertIsNone(shift.end_engine_hours)
-        self.assertTrue(
-            'показан' in response.content.decode('utf-8').lower(),
-            'Ответ не перечисляет незаполненные показания как блокировщик.',
-        )
+        self.assertEqual(response.status_code, 200)
 
-    def test_blocked_first_pin_activation_rolls_back_access_and_session(self):
+    def test_first_pin_activation_is_not_blocked_by_another_role_shift(self):
         self.dispatcher_access.status = EmployeeAccess.Status.NOT_ACTIVATED
         self.dispatcher_access.access_code = '440004'
         self.dispatcher_access.primary_code_issued_at = timezone.now()
@@ -635,25 +621,21 @@ class ActiveRoleSwitchRegressionTests(RoleRegressionFixtureMixin, TestCase):
         self.dispatcher_access.refresh_from_db()
         self.driver_access.refresh_from_db()
         shift.refresh_from_db()
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(
-            'переключение роли заблокировано',
-            response.content.decode('utf-8').lower(),
-        )
+        self.assertEqual(response.status_code, 302)
         self.assertEqual(
             self.dispatcher_access.status,
-            EmployeeAccess.Status.NOT_ACTIVATED,
+            EmployeeAccess.Status.ACTIVATED,
         )
-        self.assertEqual(self.dispatcher_access.access_code, '440004')
-        self.assertIsNone(self.dispatcher_access.activated_at)
-        self.assertIsNone(self.dispatcher_access.last_login_at)
+        self.assertEqual(self.dispatcher_access.access_code, '482619')
+        self.assertIsNotNone(self.dispatcher_access.activated_at)
+        self.assertIsNotNone(self.dispatcher_access.last_login_at)
         self.assertEqual(self.driver_access.last_login_at, driver_generation_before)
         self.assertIsNone(shift.closed_at)
-        self.assertNotIn('employee_access_id', dispatcher_client.session)
         self.assertEqual(
-            dispatcher_client.session.get('pending_activation_access_id'),
+            dispatcher_client.session.get('employee_access_id'),
             self.dispatcher_access.id,
         )
+        self.assertNotIn('pending_activation_access_id', dispatcher_client.session)
 
 
 @ROLE_HOST_SETTINGS
@@ -661,7 +643,7 @@ class OupToDispatcherSwitchRegressionTests(
     RoleRegressionFixtureMixin,
     TestCase,
 ):
-    """QA-CHAOS-P1-001: OUP period closes before dispatcher role activates."""
+    """OUP and dispatcher sessions are independent on their role hosts."""
 
     def setUp(self):
         self.oup_role = self.create_role('oup', 'Специалист ОУП')
@@ -681,7 +663,7 @@ class OupToDispatcherSwitchRegressionTests(
             code='115002',
         )
 
-    def test_oup_to_dispatcher_closes_only_current_oup_period(self):
+    def test_oup_to_dispatcher_keeps_current_oup_period_open(self):
         oup_client = Client()
         dispatcher_client = Client()
         oup_login = self.login(
@@ -737,8 +719,8 @@ class OupToDispatcherSwitchRegressionTests(
             dispatcher_client.session.get('employee_access_id'),
             self.dispatcher_access.id,
         )
-        self.assertIsNotNone(oup_shift.closed_at)
-        self.assertEqual(oup_shift.closed_by_id, self.employee.id)
+        self.assertIsNone(oup_shift.closed_at)
+        self.assertIsNone(oup_shift.closed_by_id)
         self.assertEqual(oup_shift.workplace_code, 'oup')
         self.assertEqual(
             historical_driver_shift.closed_at,
