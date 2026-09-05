@@ -36,6 +36,24 @@ function extractMarkedSource(source, startMarker, endMarker, label) {
 }
 
 
+function extractBraceBlock(source, signature, label) {
+    const start = source.indexOf(signature);
+    assert.notEqual(start, -1, `${label} signature was not found.`);
+    const openBrace = source.indexOf("{", start + signature.length);
+    assert.notEqual(openBrace, -1, `${label} opening brace was not found.`);
+
+    let depth = 0;
+    for (let index = openBrace; index < source.length; index += 1) {
+        if (source[index] === "{") depth += 1;
+        if (source[index] === "}") depth -= 1;
+        if (depth === 0) {
+            return source.slice(start, index + 1);
+        }
+    }
+    assert.fail(`${label} closing brace was not found.`);
+}
+
+
 class MemoryStorage {
     constructor() {
         this.values = new Map();
@@ -105,11 +123,78 @@ function loadDriverUnloadRecoveryRuntime() {
 }
 
 
-test("production Driver unload recovery keeps one action id across lost response, reload, BFCache and realtime shell replacement", () => {
+function executeDriverSharedUnloadSubmit(template, recovery, pathLabel, submissions) {
+    const submitSource = extractBraceBlock(
+        template,
+        "function submitDriverUnloadOnce()",
+        "Driver shared unload submit"
+    );
+    const classNames = new Set(["is-loaded"]);
+    const holdForm = {dataset: {}};
+    const holdButton = {
+        classList: {
+            add(...names) {
+                names.forEach((name) => classNames.add(name));
+            },
+            remove(...names) {
+                names.forEach((name) => classNames.delete(name));
+            },
+        },
+        dataset: {},
+        disabled: false,
+    };
+    const executable = {};
+
+    vm.runInNewContext(
+        `
+        (function () {
+            var unloadSubmissionPending = false;
+            var unloadRecovery = context.recovery;
+            var holdForm = context.holdForm;
+            var holdButton = context.holdButton;
+            var dialLabel = null;
+            function driverRoleIsReadonly() { return false; }
+            function showDriverToast() {}
+            function renderDriverDialLabel() {}
+            function scheduleDriverDialLabelFit() {}
+            ${submitSource}
+            context.executable.submit = submitDriverUnloadOnce;
+        })();
+        `,
+        {
+            context: {
+                executable,
+                holdButton,
+                holdForm,
+                recovery,
+            },
+            window: {
+                submitDriverFormInPlace(form) {
+                    submissions.push({
+                        actionId: recovery.ensureActionId(),
+                        form,
+                        path: pathLabel,
+                    });
+                },
+            },
+        },
+        {filename: "templates/users/driver_shift.html#shared-unload-submit"}
+    );
+
+    assert.equal(executable.submit(), true);
+    assert.equal(holdForm.dataset.driverUnloadSubmitting, "true");
+    assert.equal(holdForm.dataset.holdComplete, "true");
+    assert.equal(holdButton.disabled, true);
+    assert.equal(classNames.has("is-pending"), true);
+}
+
+
+test("production Driver unload recovery keeps one action id across hold, one-tap, lost response, reload, BFCache and realtime shell replacement", () => {
     const {template, runtimeWindow} = loadDriverUnloadRecoveryRuntime();
     const storage = new MemoryStorage();
     let generated = 0;
     let recovered = 0;
+    const submissions = [];
     const generateActionId = () => {
         generated += 1;
         return "trip-unloaded-stable-action";
@@ -126,6 +211,13 @@ test("production Driver unload recovery keeps one action id across lost response
     const firstActionId = firstRuntime.ensureActionId();
     assert.equal(firstActionId, "trip-unloaded-stable-action");
     assert.equal(storage.getItem("driver-trip-unloaded:42"), firstActionId);
+
+    executeDriverSharedUnloadSubmit(
+        template,
+        firstRuntime,
+        "one-tap-before-lost-response",
+        submissions
+    );
 
     // The server may have committed while the HTTP response was lost.
     // A reload creates a new input and a new production recovery instance.
@@ -149,6 +241,13 @@ test("production Driver unload recovery keeps one action id across lost response
     assert.equal(recovered, 1);
     assert.equal(reloadRuntime.ensureActionId(), firstActionId);
 
+    executeDriverSharedUnloadSubmit(
+        template,
+        reloadRuntime,
+        "hold-after-reload-and-bfcache",
+        submissions
+    );
+
     // Realtime replaces the Driver shell without reloading the JavaScript file.
     reloadRuntime.destroy();
     const realtimeInput = {value: ""};
@@ -160,6 +259,22 @@ test("production Driver unload recovery keeps one action id across lost response
         generateActionId,
     });
     assert.equal(realtimeRuntime.ensureActionId(), firstActionId);
+    assert.equal(generated, 1);
+
+    executeDriverSharedUnloadSubmit(
+        template,
+        realtimeRuntime,
+        "one-tap-after-realtime-rebind",
+        submissions
+    );
+    assert.deepEqual(
+        submissions.map(({actionId, path}) => ({actionId, path})),
+        [
+            {actionId: firstActionId, path: "one-tap-before-lost-response"},
+            {actionId: firstActionId, path: "hold-after-reload-and-bfcache"},
+            {actionId: firstActionId, path: "one-tap-after-realtime-rebind"},
+        ]
+    );
     assert.equal(generated, 1);
 
     // A server-confirmed shell without an open trip is authoritative and clears
@@ -177,8 +292,18 @@ test("production Driver unload recovery keeps one action id across lost response
     assert.match(template, /data-driver-trip-id="\{\{ active_trip\.id \}\}"/);
     assert.equal(
         (template.match(/unloadRecovery\.ensureActionId\(\)/g) || []).length,
-        2,
-        "Both production unload submission paths must prepare the retained ID."
+        1,
+        "The shared production submit must prepare the retained ID exactly once."
+    );
+    assert.match(
+        template,
+        /onComplete:\s*function\s*\(\)\s*\{\s*if\s*\(!submitDriverUnloadOnce\(\)\)/,
+        "The normal hold completion must route through the shared unload submit."
+    );
+    assert.match(
+        template,
+        /onOneTap:\s*function\s*\(\)\s*\{\s*return submitDriverUnloadOnce\(\);\s*\}/,
+        "The waiting-unload one-tap path must route through the same submit."
     );
 });
 

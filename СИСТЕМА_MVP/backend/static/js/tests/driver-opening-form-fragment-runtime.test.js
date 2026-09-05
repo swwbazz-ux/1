@@ -194,6 +194,9 @@ function createRuntime(options = {}) {
         querySelector() {
             return null;
         },
+        querySelectorAll() {
+            return [];
+        },
         contains() {
             return false;
         },
@@ -225,6 +228,9 @@ function createRuntime(options = {}) {
         querySelector(selector) {
             if (selector === "[data-driver-shell]") return currentShell;
             return null;
+        },
+        querySelectorAll() {
+            return [];
         },
     };
     const runtimeWindow = {
@@ -280,13 +286,18 @@ function createRuntime(options = {}) {
         "function isDriverOperationalRefreshUnsafe(shell)",
         "Driver operational refresh guard"
     );
+    const tabSyncSource = extractBraceBlock(
+        DRIVER_TEMPLATE_SOURCE,
+        "function syncDriverTabMarkup(shell, tab)",
+        "Driver tab markup synchronizer"
+    );
     const refreshSource = extractBraceBlock(
         DRIVER_TEMPLATE_SOURCE,
         "window.applyOperationalStateRefresh = function (context)",
         "Driver operational refresh"
     );
     vm.runInNewContext(
-        `${MOBILE_SHIFT_HOLD_SOURCE}\n${guardSource}\n${refreshSource};\n${holdSource}\n${bindSource}`,
+        `${MOBILE_SHIFT_HOLD_SOURCE}\n${guardSource}\n${tabSyncSource}\n${refreshSource};\n${holdSource}\n${bindSource}`,
         context,
         {filename: "templates/users/driver_shift.html#opening-form-refresh"}
     );

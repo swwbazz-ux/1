@@ -106,20 +106,17 @@ function createClassList(initial = []) {
 }
 
 
-function loadUnloadingWaitModeRuntime() {
+function loadWaitingModeRuntime({hasTrip = true} = {}) {
     const source = extractBraceBlock(
         DRIVER_TEMPLATE_SOURCE,
-        "function applyDriverUnloadingWaitMode(payload)",
-        "Driver unloading-wait UI helper"
+        "function applyDriverWaitingMode(payload)",
+        "Driver waiting-operation UI helper"
     );
     const dial = {classList: createClassList()};
-    const note = {textContent: "ТОЧКА РАЗГРУЗКИ"};
-    const holdForm = {dataset: {driverUnloadOneTap: "false"}};
-    const holdButton = {
-        classList: createClassList(["is-loaded"]),
-        closest(selector) {
-            return selector === ".driver-work-dial" ? dial : null;
-        },
+    const note = {textContent: hasTrip ? "ТОЧКА РАЗГРУЗКИ" : "НА ЗАГРУЗКУ"};
+    const holdForm = hasTrip ? {dataset: {driverUnloadOneTap: "false"}} : null;
+    const workDialControl = {
+        classList: createClassList([hasTrip ? "is-loaded" : "is-empty"]),
         querySelector(selector) {
             return selector === ".driver-work-note" ? note : null;
         },
@@ -127,12 +124,63 @@ function loadUnloadingWaitModeRuntime() {
     const context = {apply: null};
 
     vm.runInNewContext(
-        `${source}\ncontext.apply = applyDriverUnloadingWaitMode;`,
-        {Boolean, String, context, holdButton, holdForm},
-        {filename: "templates/users/driver_shift.html#unloading-wait-mode"}
+        `${source}\ncontext.apply = applyDriverWaitingMode;`,
+        {String, context, holdForm, workDial: dial, workDialControl},
+        {filename: "templates/users/driver_shift.html#waiting-operation-mode"}
     );
     assert.equal(typeof context.apply, "function");
-    return {apply: context.apply, dial, holdButton, holdForm, note};
+    return {apply: context.apply, dial, holdForm, note, workDialControl};
+}
+
+
+function createEventTarget(properties = {}) {
+    const listeners = new Map();
+    return Object.assign({
+        classList: createClassList(),
+        addEventListener(type, listener) {
+            if (!listeners.has(type)) listeners.set(type, []);
+            listeners.get(type).push(listener);
+        },
+        removeEventListener(type, listener) {
+            const entries = listeners.get(type) || [];
+            listeners.set(type, entries.filter((entry) => entry !== listener));
+        },
+        dispatch(type, properties = {}) {
+            const event = Object.assign({
+                type,
+                defaultPrevented: false,
+                preventDefault() {
+                    this.defaultPrevented = true;
+                },
+            }, properties);
+            for (const listener of [...(listeners.get(type) || [])]) {
+                listener(event);
+            }
+            return event;
+        },
+        listenerCount(type) {
+            return (listeners.get(type) || []).length;
+        },
+    }, properties);
+}
+
+
+function loadUnloadGestureBinder() {
+    const source = extractBraceBlock(
+        DRIVER_TEMPLATE_SOURCE,
+        "window.bindDriverUnloadGesture = function (options)",
+        "Driver unload gesture binder"
+    );
+    const context = {bind: null};
+    const runtimeWindow = {};
+
+    vm.runInNewContext(
+        `${source};\ncontext.bind = window.bindDriverUnloadGesture;`,
+        {context, window: runtimeWindow},
+        {filename: "templates/users/driver_shift.html#unload-gesture"}
+    );
+    assert.equal(typeof context.bind, "function");
+    return context.bind;
 }
 
 
@@ -153,6 +201,14 @@ test("all three unloading waits use one semantic workflow and template availabil
     assert.match(
         DRIVER_WORKFLOW_SOURCE,
         /DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD\s*=\s*["']waiting_unload["']/
+    );
+    assert.match(
+        DRIVER_WORKFLOW_SOURCE,
+        /DRIVER_DOWNTIME_FLOW_WAITING_LOADING\s*=\s*["']waiting_loading["']/
+    );
+    assert.match(
+        DRIVER_WORKFLOW_SOURCE,
+        /DRIVER_DOWNTIME_WORK_FLOWS\s*=\s*frozenset\([\s\S]*DRIVER_DOWNTIME_FLOW_WAITING_LOADING[\s\S]*DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD/
     );
     assert.match(
         DRIVER_VIEWS_SOURCE,
@@ -181,28 +237,271 @@ test("all three unloading waits use one semantic workflow and template availabil
 });
 
 
-test("waiting_unload enables one-tap yellow mode and clearing removes it", () => {
-    const runtime = loadUnloadingWaitModeRuntime();
+test("waiting_unload enables one-tap generic yellow mode and clearing removes it", () => {
+    const runtime = loadWaitingModeRuntime({hasTrip: true});
 
     assert.equal(runtime.apply({
         workflow: "waiting_unload",
         reason_label: "Ожидание ККД",
     }), true);
     assert.equal(runtime.holdForm.dataset.driverUnloadOneTap, "true");
-    assert.equal(runtime.holdButton.classList.contains("is-waiting-unload"), true);
+    assert.equal(runtime.workDialControl.classList.contains("is-waiting-operation"), true);
+    assert.equal(runtime.workDialControl.classList.contains("is-waiting-unload"), true);
+    assert.equal(runtime.workDialControl.classList.contains("is-waiting-loading"), false);
+    assert.equal(runtime.dial.classList.contains("is-waiting-operation"), true);
     assert.equal(runtime.dial.classList.contains("is-waiting-unload"), true);
     assert.equal(runtime.note.textContent, "ОЖИДАНИЕ ККД");
 
     assert.equal(runtime.apply({workflow: ""}), false);
     assert.equal(runtime.holdForm.dataset.driverUnloadOneTap, "false");
-    assert.equal(runtime.holdButton.classList.contains("is-waiting-unload"), false);
+    assert.equal(runtime.workDialControl.classList.contains("is-waiting-operation"), false);
+    assert.equal(runtime.workDialControl.classList.contains("is-waiting-unload"), false);
+    assert.equal(runtime.workDialControl.classList.contains("is-waiting-loading"), false);
+    assert.equal(runtime.dial.classList.contains("is-waiting-operation"), false);
     assert.equal(runtime.dial.classList.contains("is-waiting-unload"), false);
     assert.equal(runtime.note.textContent, "ТОЧКА РАЗГРУЗКИ");
 
     assert.match(
         DRIVER_TEMPLATE_SOURCE,
-        /\.driver-work-dial(?:-button)?\.is-waiting-unload[\s\S]*--driver-green:\s*#facc15/
+        /\.driver-work-dial\.is-waiting-operation,[\s\S]*\.driver-work-dial-button\.is-waiting-operation\s*\{[\s\S]*?--driver-green:\s*#facc15/
     );
+});
+
+
+test("waiting_loading turns the empty Work dial yellow but keeps it inert", () => {
+    const runtime = loadWaitingModeRuntime({hasTrip: false});
+
+    assert.equal(runtime.apply({
+        workflow: "waiting_loading",
+        reason: "Ожидание погрузки",
+    }), true);
+    assert.equal(runtime.holdForm, null);
+    assert.equal(runtime.dial.classList.contains("is-waiting-operation"), true);
+    assert.equal(runtime.dial.classList.contains("is-waiting-loading"), true);
+    assert.equal(runtime.dial.classList.contains("is-waiting-unload"), false);
+    assert.equal(runtime.workDialControl.classList.contains("is-waiting-operation"), true);
+    assert.equal(runtime.workDialControl.classList.contains("is-waiting-loading"), true);
+    assert.equal(runtime.workDialControl.classList.contains("is-waiting-unload"), false);
+    assert.equal(runtime.workDialControl.classList.contains("is-empty"), true);
+    assert.equal(runtime.note.textContent, "ОЖИДАНИЕ ПОГРУЗКИ");
+
+    assert.equal(runtime.apply({workflow: ""}), false);
+    assert.equal(runtime.dial.classList.contains("is-waiting-operation"), false);
+    assert.equal(runtime.workDialControl.classList.contains("is-waiting-operation"), false);
+    assert.equal(runtime.note.textContent, "НА ЗАГРУЗКУ");
+});
+
+
+test("one-tap pointerup submits once without relying on a synthetic click", () => {
+    const bind = loadUnloadGestureBinder();
+    const form = createEventTarget({
+        dataset: {driverUnloadOneTap: "true", holdComplete: "false"},
+    });
+    const captured = [];
+    const button = createEventTarget({
+        disabled: false,
+        setPointerCapture(pointerId) {
+            captured.push(pointerId);
+        },
+    });
+    const holdCalls = {start: 0, reset: 0, cancel: 0};
+    const holdGuard = {
+        start() { holdCalls.start += 1; },
+        reset() { holdCalls.reset += 1; },
+        cancel() { holdCalls.cancel += 1; },
+    };
+    let submissions = 0;
+
+    bind({
+        form,
+        button,
+        holdGuard,
+        canTrigger() { return true; },
+        onOneTap() {
+            submissions += 1;
+            button.disabled = true;
+            return true;
+        },
+    });
+
+    const pointerDown = button.dispatch("pointerdown", {pointerId: 41});
+    assert.equal(button.classList.contains("is-touch-armed"), true);
+    button.dispatch("pointerleave", {pointerId: 41});
+    assert.equal(
+        button.classList.contains("is-touch-armed"),
+        true,
+        "a slight move outside the captured control must not disarm one-tap unload"
+    );
+    const pointerUp = button.dispatch("pointerup", {pointerId: 41});
+    assert.equal(pointerDown.defaultPrevented, true);
+    assert.equal(pointerUp.defaultPrevented, true);
+    assert.deepEqual(captured, [41]);
+    assert.equal(submissions, 1, "pointerup must submit even when no click event follows");
+    assert.equal(button.classList.contains("is-touch-armed"), false);
+    assert.equal(holdCalls.start, 0, "one-tap unload must not start the hold timer");
+
+    const lateSyntheticClick = button.dispatch("click");
+    assert.equal(lateSyntheticClick.defaultPrevented, true);
+    assert.equal(submissions, 1, "the click fallback must not duplicate the pointerup request");
+});
+
+
+test("pointercancel disarms one-tap unload without submitting", () => {
+    const bind = loadUnloadGestureBinder();
+    const form = createEventTarget({
+        dataset: {driverUnloadOneTap: "true", holdComplete: "false"},
+    });
+    const button = createEventTarget({disabled: false, setPointerCapture() {}});
+    let submissions = 0;
+
+    bind({
+        form,
+        button,
+        holdGuard: {start() {}, reset() {}, cancel() {}},
+        onOneTap() {
+            submissions += 1;
+            return true;
+        },
+    });
+
+    button.dispatch("pointerdown", {pointerId: 51});
+    assert.equal(button.classList.contains("is-touch-armed"), true);
+    button.dispatch("pointercancel", {pointerId: 51});
+    assert.equal(button.classList.contains("is-touch-armed"), false);
+    button.dispatch("pointerup", {pointerId: 51});
+    assert.equal(submissions, 0);
+});
+
+
+test("keyboard click remains a one-tap fallback", () => {
+    const bind = loadUnloadGestureBinder();
+    const form = createEventTarget({
+        dataset: {driverUnloadOneTap: "true", holdComplete: "false"},
+    });
+    const button = createEventTarget({disabled: false});
+    const holdGuard = {start() {}, reset() {}, cancel() {}};
+    let submissions = 0;
+
+    bind({
+        form,
+        button,
+        holdGuard,
+        onOneTap() {
+            submissions += 1;
+            button.disabled = true;
+            return true;
+        },
+    });
+
+    const click = button.dispatch("click", {detail: 0});
+    assert.equal(click.defaultPrevented, true);
+    assert.equal(submissions, 1);
+});
+
+
+test("normal unload still uses the hold guard", () => {
+    const bind = loadUnloadGestureBinder();
+    const form = createEventTarget({
+        dataset: {driverUnloadOneTap: "false", holdComplete: "false"},
+    });
+    const button = createEventTarget({disabled: false, setPointerCapture() {}});
+    const holdCalls = {start: 0, reset: 0, cancel: 0};
+    const holdGuard = {
+        start() { holdCalls.start += 1; },
+        reset() { holdCalls.reset += 1; },
+        cancel() { holdCalls.cancel += 1; },
+    };
+    let submissions = 0;
+
+    bind({
+        form,
+        button,
+        holdGuard,
+        onOneTap() { submissions += 1; },
+    });
+
+    button.dispatch("pointerdown", {pointerId: 7});
+    button.dispatch("pointerup", {pointerId: 7});
+    assert.equal(holdCalls.start, 1);
+    assert.equal(holdCalls.reset, 1);
+    assert.equal(submissions, 0);
+});
+
+
+test("fragment-style destroy and rebind leaves exactly one gesture listener", () => {
+    const bind = loadUnloadGestureBinder();
+    const form = createEventTarget({
+        dataset: {driverUnloadOneTap: "true", holdComplete: "false"},
+    });
+    const button = createEventTarget({disabled: false, setPointerCapture() {}});
+    const holdGuard = {start() {}, reset() {}, cancel() {}};
+    let submissions = 0;
+    const options = {
+        form,
+        button,
+        holdGuard,
+        onOneTap() {
+            submissions += 1;
+            button.disabled = true;
+            return true;
+        },
+    };
+
+    const initialBinding = bind(options);
+    assert.equal(button.listenerCount("pointerup"), 1);
+    button.dispatch("pointerdown", {pointerId: 8});
+    assert.equal(button.classList.contains("is-touch-armed"), true);
+    initialBinding.destroy();
+    assert.equal(button.classList.contains("is-touch-armed"), false);
+    button.disabled = false;
+    const rebound = bind(options);
+    assert.ok(rebound);
+    assert.equal(button.listenerCount("pointerup"), 1);
+
+    button.dispatch("pointerdown", {pointerId: 9});
+    button.dispatch("pointerup", {pointerId: 9});
+    assert.equal(submissions, 1);
+});
+
+
+test("an armed one-tap gesture blocks operational fragment replacement", () => {
+    const unsafeSource = extractBraceBlock(
+        DRIVER_TEMPLATE_SOURCE,
+        "function isDriverOperationalRefreshUnsafe(shell)",
+        "Driver unsafe-refresh guard"
+    );
+    const context = {isUnsafe: null};
+    let touchArmed = true;
+    const unsafeSelector = (
+        ".is-touch-armed, .is-holding, .is-pending, .is-dragging, "
+        + "[data-driver-point-sheet]:not([hidden])"
+    );
+    const shell = {
+        contains() { return false; },
+        querySelector(selector) {
+            if (selector === unsafeSelector) return touchArmed ? {} : null;
+            return null;
+        },
+    };
+    const document = {
+        activeElement: null,
+        querySelector() { return null; },
+    };
+
+    vm.runInNewContext(
+        `${unsafeSource}\ncontext.isUnsafe = isDriverOperationalRefreshUnsafe;`,
+        {context, document},
+        {filename: "templates/users/driver_shift.html#unsafe-refresh-guard"}
+    );
+
+    assert.match(
+        unsafeSource,
+        /shell\.querySelector\(["']\.is-touch-armed,\s*\.is-holding,\s*\.is-pending,\s*\.is-dragging,\s*\[data-driver-point-sheet\]:not\(\[hidden\]\)["']\)/,
+        "The static refresh guard must include the armed touch state."
+    );
+    assert.equal(context.isUnsafe(shell), true);
+    touchArmed = false;
+    assert.equal(context.isUnsafe(shell), false);
 });
 
 
@@ -321,7 +620,7 @@ test("realtime waiting_loading to loaded-trip transition opens Work from server 
 });
 
 
-test("reduced motion keeps unloading-wait state but disables its pulse", () => {
+test("reduced motion keeps both waiting states but disables their pulse", () => {
     const reducedMotionBlocks = [];
     let offset = 0;
     while (true) {
@@ -342,31 +641,40 @@ test("reduced motion keeps unloading-wait state but disables its pulse", () => {
     assert.ok(reducedMotionBlocks.length >= 1);
     assert.ok(
         reducedMotionBlocks.some((block) => (
-            block.includes(".driver-work-dial.is-waiting-unload::before")
-            && block.includes(".driver-work-dial-button.is-waiting-unload .driver-work-dial-core")
+            block.includes(".driver-work-dial.is-waiting-operation::before")
+            && block.includes(".driver-work-dial-button.is-waiting-operation .driver-work-dial-core")
             && /animation:\s*none/.test(block)
         )),
-        "The unloading-wait pulse must stop when reduced motion is requested."
+        "The waiting-operation pulse must stop when reduced motion is requested."
     );
     assert.match(
         DRIVER_TEMPLATE_SOURCE,
-        /\.driver-work-dial(?:-button)?\.is-waiting-unload[\s\S]*--driver-green:\s*#facc15/,
+        /\.driver-work-dial\.is-waiting-operation,[\s\S]*\.driver-work-dial-button\.is-waiting-operation\s*\{[\s\S]*?--driver-green:\s*#facc15/,
         "Reduced motion must not remove the static yellow waiting state."
     );
 });
 
 
 test("Driver JavaScript branches on workflow instead of an exact Russian reason label", () => {
-    assert.match(
+    const waitingModeSource = extractBraceBlock(
         DRIVER_TEMPLATE_SOURCE,
-        /payload\s*&&\s*payload\.workflow\s*===\s*["']waiting_unload["']/
+        "function applyDriverWaitingMode(payload)",
+        "Driver waiting-operation UI helper"
+    );
+    assert.match(
+        waitingModeSource,
+        /flow\s*===\s*["']waiting_loading["']/
+    );
+    assert.match(
+        waitingModeSource,
+        /flow\s*===\s*["']waiting_unload["']/
     );
     assert.doesNotMatch(
-        DRIVER_TEMPLATE_SOURCE,
+        waitingModeSource,
         /String\s*\(\s*payload\.reason[\s\S]{0,160}(?:===|==)[\s\S]{0,80}["']ожидание разгрузки["']/i
     );
     assert.doesNotMatch(
-        DRIVER_TEMPLATE_SOURCE,
+        waitingModeSource,
         /["']ожидание разгрузки["'][\s\S]{0,80}(?:===|==)[\s\S]{0,160}payload\.reason/i
     );
 });

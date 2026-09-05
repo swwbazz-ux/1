@@ -6,6 +6,10 @@ from .models import DowntimeEvent
 
 DRIVER_DOWNTIME_FLOW_WAITING_LOADING = 'waiting_loading'
 DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD = 'waiting_unload'
+DRIVER_DOWNTIME_WORK_FLOWS = frozenset({
+    DRIVER_DOWNTIME_FLOW_WAITING_LOADING,
+    DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD,
+})
 
 TRUCK_WAITING_LOADING_REASON_NAME = 'Ожидание погрузки'
 TRUCK_UNLOADING_WAIT_REASON_NAMES = (
@@ -43,6 +47,10 @@ def driver_downtime_requires_loaded_trip(reason):
 
 def driver_downtime_requires_empty_truck(reason):
     return driver_downtime_flow(reason) == DRIVER_DOWNTIME_FLOW_WAITING_LOADING
+
+
+def driver_downtime_opens_work(reason):
+    return driver_downtime_flow(reason) in DRIVER_DOWNTIME_WORK_FLOWS
 
 
 def close_open_truck_downtimes_for_reasons(truck, reason_names, *, ended_at=None):

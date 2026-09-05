@@ -259,7 +259,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v190')
+        self.assertContains(response, 'driver-mobile-shell-v191')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertContains(response, 'playDriverSound("truck_assigned")')
@@ -471,7 +471,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v190', script)
+        self.assertIn('driver-mobile-shell-v191', script)
         self.assertIn('"/company/privacy/"', script)
         self.assertIn('"/static/portal/css/portal-shell-v5.css?v=6"', script)
         self.assertIn('/static/css/mobile-role-login-v1.css', script)
@@ -2840,7 +2840,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v190')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v191')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
@@ -3008,6 +3008,84 @@ class AccessLoginTests(TestCase):
                 self.assertEqual(response.json()['code'], 'loaded_trip_required')
                 self.assertEqual(response.json()['workflow'], 'waiting_unload')
                 self.assertFalse(DowntimeEvent.objects.filter(equipment=truck).exists())
+
+    def test_driver_waiting_loading_html_start_redirects_to_work(self):
+        truck = self.create_registered_driver_shift()
+        reason = DowntimeReason.objects.get(name='Ожидание погрузки')
+
+        response = self.client.post(
+            reverse('driver_downtime_action'),
+            {'reason_id': reason.id},
+            HTTP_HOST='localhost',
+        )
+
+        self.assertRedirects(
+            response,
+            f'{reverse("driver_work")}?tab=work',
+            fetch_redirect_response=False,
+        )
+        event = DowntimeEvent.objects.get(equipment=truck, ended_at__isnull=True)
+        self.assertEqual(event.employee, self.employee)
+        self.assertEqual(event.reason, reason)
+
+    def test_driver_waiting_loading_renders_yellow_inactive_work_dial(self):
+        truck = self.create_registered_driver_shift()
+        reason = DowntimeReason.objects.get(name='Ожидание погрузки')
+        DowntimeEvent.objects.create(
+            equipment=truck,
+            employee=self.employee,
+            reason=reason,
+            started_at=timezone.now() - timedelta(minutes=2),
+        )
+
+        response = self.client.get('/driver/?tab=work', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context['active_trip'])
+        self.assertTrue(response.context['driver_waiting_operation_active'])
+        self.assertTrue(response.context['driver_loading_wait_active'])
+        self.assertFalse(response.context['driver_unloading_wait_active'])
+        self.assertContains(
+            response,
+            'driver-work-dial is-empty is-waiting-operation is-waiting-loading',
+        )
+        self.assertContains(
+            response,
+            'driver-work-dial-button is-empty is-waiting-operation is-waiting-loading" '
+            'data-driver-work-dial-control aria-disabled="true"',
+        )
+        self.assertContains(response, '>ОЖИДАНИЕ ПОГРУЗКИ</em>')
+        self.assertNotContains(response, '>ПРИЧИНА ПРОСТОЯ</em>')
+        self.assertNotContains(response, 'data-driver-unload-one-tap="true"')
+
+    def test_driver_unloading_wait_renders_yellow_one_tap_work_dial(self):
+        truck = self.create_registered_driver_shift()
+        trip = self.create_driver_trip(truck)
+        reason = DowntimeReason.objects.get(name='Ожидание разгрузки ККД')
+        DowntimeEvent.objects.create(
+            equipment=truck,
+            employee=self.employee,
+            reason=reason,
+            started_at=timezone.now() - timedelta(minutes=2),
+        )
+
+        response = self.client.get('/driver/?tab=work', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['active_trip'], trip)
+        self.assertTrue(response.context['driver_waiting_operation_active'])
+        self.assertFalse(response.context['driver_loading_wait_active'])
+        self.assertTrue(response.context['driver_unloading_wait_active'])
+        self.assertContains(
+            response,
+            'driver-work-dial is-loaded is-waiting-operation is-waiting-unload',
+        )
+        self.assertContains(
+            response,
+            'driver-work-dial-button is-loaded is-waiting-operation is-waiting-unload',
+        )
+        self.assertContains(response, 'data-driver-unload-one-tap="true"')
+        self.assertContains(response, '>ОЖИДАНИЕ ККД</em>')
 
     def test_driver_waiting_loading_is_rejected_after_trip_is_loaded(self):
         truck = self.create_registered_driver_shift()

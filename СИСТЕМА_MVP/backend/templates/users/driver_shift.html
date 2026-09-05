@@ -1173,53 +1173,6 @@ body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-percen
         0 1px 0 rgba(0,0,0,0.78);
 }
 
-body.driver-mobile-screen .driver-work-dial.is-waiting-unload,
-body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload {
-    --driver-green: #facc15;
-}
-
-body.driver-mobile-screen .driver-work-dial.is-waiting-unload::before,
-body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload .driver-work-dial-core {
-    animation: driver-waiting-unload-pulse 1.05s ease-in-out infinite;
-}
-
-body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload .driver-work-note {
-    color: #fde68a;
-    font-weight: 800;
-}
-
-body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload .driver-work-progress {
-    filter: drop-shadow(0 0 18px rgba(250, 204, 21, .88));
-}
-
-body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload .driver-work-dial-core {
-    border-color: rgba(250, 204, 21, .82);
-    box-shadow:
-        inset 0 12px 22px rgba(254, 249, 195, .1),
-        inset 0 -26px 36px rgba(0, 0, 0, .5),
-        inset 0 0 44px rgba(250, 204, 21, .18),
-        0 10px 28px rgba(0, 0, 0, .42),
-        0 0 48px rgba(250, 204, 21, .42);
-}
-
-body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload .driver-work-label-line {
-    background: linear-gradient(180deg, #fff7b2 0%, #fde047 34%, #facc15 66%, #ca8a04 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    text-shadow:
-        0 -1px 0 rgba(255, 251, 235, .5),
-        0 2px 0 rgba(113, 63, 18, .78);
-    filter:
-        drop-shadow(0 3px 2px rgba(0, 0, 0, .46))
-        drop-shadow(0 0 10px rgba(250, 204, 21, .3));
-}
-
-@keyframes driver-waiting-unload-pulse {
-    0%, 100% { filter: drop-shadow(0 0 8px rgba(250, 204, 21, .24)); }
-    50% { filter: drop-shadow(0 0 26px rgba(250, 204, 21, .78)); }
-}
-
 body.driver-mobile-screen .driver-work-dial-button.is-empty {
     color: rgba(198, 213, 217, 0.76);
 }
@@ -1251,6 +1204,54 @@ body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-dial-co
         inset 0 0 46px rgba(255,255,255,0.05),
         0 9px 24px rgba(0,0,0,0.38),
         0 0 38px rgba(190,210,220,0.10);
+}
+
+body.driver-mobile-screen .driver-work-dial.is-waiting-operation,
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation {
+    --driver-green: #facc15;
+}
+
+body.driver-mobile-screen .driver-work-dial.is-waiting-operation::before,
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-dial-core {
+    animation: driver-waiting-operation-pulse 1.05s ease-in-out infinite;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-note {
+    color: #fde68a;
+    font-weight: 800;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-progress {
+    stroke: #facc15;
+    filter: drop-shadow(0 0 18px rgba(250, 204, 21, .88));
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-dial-core {
+    border-color: rgba(250, 204, 21, .82);
+    box-shadow:
+        inset 0 12px 22px rgba(254, 249, 195, .1),
+        inset 0 -26px 36px rgba(0, 0, 0, .5),
+        inset 0 0 44px rgba(250, 204, 21, .18),
+        0 10px 28px rgba(0, 0, 0, .42),
+        0 0 48px rgba(250, 204, 21, .42);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-label-line {
+    background: linear-gradient(180deg, #fff7b2 0%, #fde047 34%, #facc15 66%, #ca8a04 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow:
+        0 -1px 0 rgba(255, 251, 235, .5),
+        0 2px 0 rgba(113, 63, 18, .78);
+    filter:
+        drop-shadow(0 3px 2px rgba(0, 0, 0, .46))
+        drop-shadow(0 0 10px rgba(250, 204, 21, .3));
+}
+
+@keyframes driver-waiting-operation-pulse {
+    0%, 100% { filter: drop-shadow(0 0 8px rgba(250, 204, 21, .24)); }
+    50% { filter: drop-shadow(0 0 26px rgba(250, 204, 21, .78)); }
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-pending {
@@ -2328,8 +2329,8 @@ body.driver-mobile-screen .driver-downtime-list button[aria-disabled="true"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    body.driver-mobile-screen .driver-work-dial.is-waiting-unload::before,
-    body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload .driver-work-dial-core,
+    body.driver-mobile-screen .driver-work-dial.is-waiting-operation::before,
+    body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-dial-core,
     body.driver-mobile-screen .driver-downtime-card.is-active,
     body.driver-mobile-screen .driver-downtime-card.is-active .driver-downtime-state-icon-pause,
     body.driver-mobile-screen .driver-downtime-card.is-active b[data-driver-active-duration] {
@@ -3967,12 +3968,12 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         </section>
 
         <div class="driver-work-dial-zone">
-            <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}{% if shift_plan_visual.is_overrun %} is-over-plan{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-progress-capped: {% if shift_plan_visual.is_overrun %}100{% else %}{{ shift_plan_visual.loop_progress }}{% endif %}; --driver-over-progress: {% if shift_plan_visual.is_overrun %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}; --driver-hold: 0;" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-driver-loop-progress="{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}" data-driver-completed-loops="{{ shift_plan_visual.completed_loops|default:0 }}" data-driver-has-plan="{% if shift_plan_has_plan %}1{% else %}0{% endif %}" data-plan-progress-phase="{% if shift_plan_has_plan %}{{ shift_plan_visual.phase }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
+            <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_loading_wait_active %} is-waiting-loading{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}{% if shift_plan_visual.is_overrun %} is-over-plan{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-progress-capped: {% if shift_plan_visual.is_overrun %}100{% else %}{{ shift_plan_visual.loop_progress }}{% endif %}; --driver-over-progress: {% if shift_plan_visual.is_overrun %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}; --driver-hold: 0;" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-driver-loop-progress="{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}" data-driver-completed-loops="{{ shift_plan_visual.completed_loops|default:0 }}" data-driver-has-plan="{% if shift_plan_has_plan %}1{% else %}0{% endif %}" data-plan-progress-phase="{% if shift_plan_has_plan %}{{ shift_plan_visual.phase }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
                 {% if active_trip %}
                     <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-work-dial-form" data-driver-hold-form data-driver-trip-id="{{ active_trip.id }}" data-driver-unload-one-tap="{% if driver_unloading_wait_active %}true{% else %}false{% endif %}">
                         {% csrf_token %}
                         <input type="hidden" name="client_action_id" value="" data-driver-client-action>
-                        <button class="driver-work-dial-button is-loaded{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}" type="submit" data-driver-hold-button data-driver-pending-label="ОТПРАВКА">
+                        <button class="driver-work-dial-button is-loaded{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}" type="submit" data-driver-work-dial-control data-driver-hold-button data-driver-pending-label="ОТПРАВКА">
                             <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
                                 <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                                 <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
@@ -3990,7 +3991,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                         </button>
                     </form>
                 {% else %}
-                    <div class="driver-work-dial-button is-empty" aria-disabled="true">
+                    <div class="driver-work-dial-button is-empty{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_loading_wait_active %} is-waiting-loading{% endif %}" data-driver-work-dial-control aria-disabled="true">
                         <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
                             <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                             <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
@@ -4437,6 +4438,126 @@ window.createDriverUnloadRecovery = function (options) {
 };
 /* DRIVER_UNLOAD_RECOVERY_END */
 
+/* DRIVER_UNLOAD_GESTURE_START */
+window.bindDriverUnloadGesture = function (options) {
+    options = options || {};
+    var form = options.form;
+    var button = options.button;
+    var holdGuard = options.holdGuard;
+    if (!form || !button || !holdGuard) {
+        return null;
+    }
+    var oneTapPointerId = null;
+
+    function isOneTap() {
+        return form.dataset.driverUnloadOneTap === "true";
+    }
+
+    function canTrigger() {
+        return (
+            !button.disabled
+            && (!options.canTrigger || options.canTrigger())
+        );
+    }
+
+    function triggerOneTap(event) {
+        if (event && typeof event.preventDefault === "function") {
+            event.preventDefault();
+        }
+        if (!isOneTap() || !canTrigger()) {
+            return false;
+        }
+        oneTapPointerId = null;
+        button.classList.remove("is-touch-armed");
+        return options.onOneTap() !== false;
+    }
+
+    function onPointerDown(event) {
+        if (!canTrigger()) {
+            return;
+        }
+        if (isOneTap()) {
+            event.preventDefault();
+            oneTapPointerId = event.pointerId;
+            button.classList.add("is-touch-armed");
+            button.setPointerCapture?.(event.pointerId);
+            return;
+        }
+        button.setPointerCapture?.(event.pointerId);
+        holdGuard.start();
+    }
+
+    function onPointerUp(event) {
+        if (isOneTap() && oneTapPointerId === event.pointerId) {
+            triggerOneTap(event);
+            return;
+        }
+        oneTapPointerId = null;
+        button.classList.remove("is-touch-armed");
+        if (form.dataset.holdComplete !== "true") {
+            holdGuard.reset();
+        }
+    }
+
+    function onPointerCancel() {
+        oneTapPointerId = null;
+        button.classList.remove("is-touch-armed");
+        if (form.dataset.holdComplete !== "true") {
+            holdGuard.reset();
+        }
+    }
+
+    function onPointerLeave() {
+        /* Pointer capture keeps a short tap reliable even when a finger moves
+           a few pixels outside the round button. A real pointercancel still
+           aborts the action, while the normal hold keeps its old reset rule. */
+        if (!isOneTap() && form.dataset.holdComplete !== "true") {
+            holdGuard.reset();
+        }
+    }
+
+    function onClick(event) {
+        event.preventDefault();
+        /* Keyboard activation and old WebView engines may emit click without
+           Pointer Events. The pending/disabled guard keeps this fallback from
+           duplicating a request already sent on pointerup. */
+        triggerOneTap();
+    }
+
+    function onSubmit(event) {
+        if (options.canTrigger && !options.canTrigger()) {
+            event.preventDefault();
+            holdGuard.cancel();
+            return;
+        }
+        if (!isOneTap() && form.dataset.holdComplete !== "true") {
+            event.preventDefault();
+            holdGuard.reset();
+        }
+    }
+
+    button.addEventListener("pointerdown", onPointerDown);
+    button.addEventListener("pointerup", onPointerUp);
+    button.addEventListener("pointercancel", onPointerCancel);
+    button.addEventListener("pointerleave", onPointerLeave);
+    button.addEventListener("click", onClick);
+    form.addEventListener("submit", onSubmit);
+
+    return {
+        triggerOneTap: triggerOneTap,
+        destroy: function () {
+            button.removeEventListener("pointerdown", onPointerDown);
+            button.removeEventListener("pointerup", onPointerUp);
+            button.removeEventListener("pointercancel", onPointerCancel);
+            button.removeEventListener("pointerleave", onPointerLeave);
+            button.removeEventListener("click", onClick);
+            form.removeEventListener("submit", onSubmit);
+            button.classList.remove("is-touch-armed");
+        }
+    };
+};
+/* DRIVER_UNLOAD_GESTURE_END */
+
 if (typeof window.bindAchievementPrizeUnlock === "function") {
     window.bindAchievementPrizeUnlock();
 }
@@ -4469,7 +4590,7 @@ function isDriverOperationalRefreshUnsafe(shell) {
         return true;
     }
     return !!(
-        shell.querySelector(".is-holding, .is-pending, .is-dragging, [data-driver-point-sheet]:not([hidden])") ||
+        shell.querySelector(".is-touch-armed, .is-holding, .is-pending, .is-dragging, [data-driver-point-sheet]:not([hidden])") ||
         document.querySelector("[data-driver-pwa-update-modal]:not([hidden]), .app-confirm-modal:not([hidden])")
     );
 }
@@ -5060,6 +5181,10 @@ window.bindDriverMobileShell = function () {
         window.driverUnloadRecovery.destroy();
         window.driverUnloadRecovery = null;
     }
+    if (window.driverUnloadGesture && typeof window.driverUnloadGesture.destroy === "function") {
+        window.driverUnloadGesture.destroy();
+        window.driverUnloadGesture = null;
+    }
     function driverRoleIsReadonly() {
         return (
             typeof window.isAppRoleReadonly === "function"
@@ -5614,6 +5739,8 @@ window.bindDriverMobileShell = function () {
     var downtimeCsrfToken = downtimeCsrfInput ? downtimeCsrfInput.value : "";
     var holdForm = shell.querySelector("[data-driver-hold-form]");
     var holdButton = shell.querySelector("[data-driver-hold-button]");
+    var workDial = shell.querySelector(".driver-work-dial");
+    var workDialControl = shell.querySelector("[data-driver-work-dial-control]");
 
     function formatDriverDowntimeDuration(seconds) {
         seconds = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -5657,20 +5784,29 @@ window.bindDriverMobileShell = function () {
         downtimeCard.classList.add("status-" + (statusKey || "yellow"));
     }
 
-    function applyDriverUnloadingWaitMode(payload) {
-        var isWaiting = Boolean(payload && payload.workflow === "waiting_unload");
-        if (!holdForm || !holdButton) {
-            return isWaiting;
+    function applyDriverWaitingMode(payload) {
+        var flow = String((payload && payload.workflow) || "");
+        var isLoadingWait = flow === "waiting_loading";
+        var isUnloadingWait = flow === "waiting_unload";
+        var isWaiting = isLoadingWait || isUnloadingWait;
+        if (holdForm) {
+            holdForm.dataset.driverUnloadOneTap = isUnloadingWait ? "true" : "false";
         }
-        holdForm.dataset.driverUnloadOneTap = isWaiting ? "true" : "false";
-        holdButton.classList.toggle("is-waiting-unload", isWaiting);
-        var dial = holdButton.closest(".driver-work-dial");
-        if (dial) dial.classList.toggle("is-waiting-unload", isWaiting);
-        var note = holdButton.querySelector(".driver-work-note");
+        if (workDial) {
+            workDial.classList.toggle("is-waiting-operation", isWaiting);
+            workDial.classList.toggle("is-waiting-loading", isLoadingWait);
+            workDial.classList.toggle("is-waiting-unload", isUnloadingWait);
+        }
+        if (workDialControl) {
+            workDialControl.classList.toggle("is-waiting-operation", isWaiting);
+            workDialControl.classList.toggle("is-waiting-loading", isLoadingWait);
+            workDialControl.classList.toggle("is-waiting-unload", isUnloadingWait);
+        }
+        var note = workDialControl ? workDialControl.querySelector(".driver-work-note") : null;
         if (note) {
             note.textContent = isWaiting
-                ? String(payload.reason_label || payload.reason || "Ожидание разгрузки").toLocaleUpperCase("ru-RU")
-                : "ТОЧКА РАЗГРУЗКИ";
+                ? String(payload.reason_label || payload.reason || "Ожидание").toLocaleUpperCase("ru-RU")
+                : (holdForm ? "ТОЧКА РАЗГРУЗКИ" : "НА ЗАГРУЗКУ");
         }
         return isWaiting;
     }
@@ -5693,7 +5829,7 @@ window.bindDriverMobileShell = function () {
             downtimeClose.classList.remove("is-disabled");
             downtimeClose.removeAttribute("aria-disabled");
         }
-        return applyDriverUnloadingWaitMode(payload);
+        return applyDriverWaitingMode(payload);
     }
 
     function clearDriverActiveDowntime(payload) {
@@ -5719,7 +5855,7 @@ window.bindDriverMobileShell = function () {
         shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (button) {
             button.classList.remove("is-selected");
         });
-        applyDriverUnloadingWaitMode({ workflow: "" });
+        applyDriverWaitingMode({ workflow: "" });
     }
 
     function postDriverDowntimeAction(payload) {
@@ -5852,6 +5988,7 @@ window.bindDriverMobileShell = function () {
     }
 
     var unloadHoldGuard = null;
+    var unloadSubmissionPending = false;
     var unloadRecoveryStorage = null;
     try {
         unloadRecoveryStorage = window.sessionStorage;
@@ -5864,6 +6001,10 @@ window.bindDriverMobileShell = function () {
             return generateClientActionId("trip-unloaded");
         },
         onRecover: function () {
+            unloadSubmissionPending = false;
+            if (holdForm) {
+                delete holdForm.dataset.driverUnloadSubmitting;
+            }
             if (unloadHoldGuard) {
                 unloadHoldGuard.cancel();
             }
@@ -5878,9 +6019,38 @@ window.bindDriverMobileShell = function () {
         var readyDialLabel = dialLabel
             ? (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " "))
             : "";
+        function submitDriverUnloadOnce() {
+            if (
+                unloadSubmissionPending
+                || holdForm.dataset.driverUnloadSubmitting === "true"
+                || holdButton.disabled
+                || driverRoleIsReadonly()
+            ) {
+                return false;
+            }
+            if (!unloadRecovery.ensureActionId()) {
+                showDriverToast("Не удалось подготовить разгрузку. Повторите нажатие");
+                return false;
+            }
+            unloadSubmissionPending = true;
+            holdForm.dataset.driverUnloadSubmitting = "true";
+            holdForm.dataset.holdComplete = "true";
+            holdButton.classList.remove("is-loaded", "is-holding");
+            holdButton.classList.add("is-pending");
+            if (dialLabel) {
+                renderDriverDialLabel(
+                    dialLabel,
+                    holdButton.dataset.driverPendingLabel || "ОТПРАВКА"
+                );
+                scheduleDriverDialLabelFit();
+            }
+            holdButton.disabled = true;
+            window.submitDriverFormInPlace(holdForm);
+            return true;
+        }
         unloadHoldGuard = window.createDriverRoleHoldGuard({
-            /* Разгрузка повторяется десятки раз за смену — держать две секунды
-               на каждом рейсе слишком долго. */
+            /* Разгрузка повторяется десятки раз за смену — удерживать кнопку
+               дольше одной секунды на каждом рейсе слишком долго. */
             holdMs: 1000,
             onStart: function () {
                 holdButton.classList.add("is-holding");
@@ -5904,81 +6074,21 @@ window.bindDriverMobileShell = function () {
                 }
             },
             onComplete: function () {
-                if (driverRoleIsReadonly()) {
+                if (!submitDriverUnloadOnce()) {
                     unloadHoldGuard.cancel();
-                    return;
                 }
-                unloadRecovery.ensureActionId();
-                holdForm.dataset.holdComplete = "true";
-                holdButton.classList.remove("is-loaded", "is-holding");
-                holdButton.classList.add("is-pending");
-                if (dialLabel) {
-                    renderDriverDialLabel(
-                        dialLabel,
-                        holdButton.dataset.driverPendingLabel || "ОТПРАВКА"
-                    );
-                    scheduleDriverDialLabelFit();
-                }
-                if (driverRoleIsReadonly()) {
-                    unloadHoldGuard.cancel();
-                    return;
-                }
-                holdButton.disabled = true;
-                window.submitDriverFormInPlace(holdForm);
             }
         });
         window.driverUnloadHoldGuard = unloadHoldGuard;
-        holdButton.addEventListener("pointerdown", function (event) {
-            if (holdButton.disabled || driverRoleIsReadonly()) {
-                return;
-            }
-            if (holdForm.dataset.driverUnloadOneTap === "true") {
-                return;
-            }
-            holdButton.setPointerCapture?.(event.pointerId);
-            unloadHoldGuard.start();
-        });
-        holdButton.addEventListener("click", function (event) {
-            event.preventDefault();
-            if (
-                holdForm.dataset.driverUnloadOneTap === "true"
-                && !holdButton.disabled
-                && !driverRoleIsReadonly()
-            ) {
-                unloadRecovery.ensureActionId();
-                holdForm.dataset.holdComplete = "true";
-                holdButton.classList.remove("is-loaded", "is-holding");
-                holdButton.classList.add("is-pending");
-                if (dialLabel) {
-                    renderDriverDialLabel(
-                        dialLabel,
-                        holdButton.dataset.driverPendingLabel || "ОТПРАВКА"
-                    );
-                    scheduleDriverDialLabelFit();
-                }
-                holdButton.disabled = true;
-                window.submitDriverFormInPlace(holdForm);
-            }
-        });
-        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
-            holdButton.addEventListener(eventName, function () {
-                if (holdForm.dataset.holdComplete !== "true") {
-                    unloadHoldGuard.reset();
-                }
-            });
-        });
-        holdForm.addEventListener("submit", function (event) {
-            if (driverRoleIsReadonly()) {
-                event.preventDefault();
-                unloadHoldGuard.cancel();
-                return;
-            }
-            if (
-                holdForm.dataset.driverUnloadOneTap !== "true"
-                && holdForm.dataset.holdComplete !== "true"
-            ) {
-                event.preventDefault();
-                unloadHoldGuard.reset();
+        window.driverUnloadGesture = window.bindDriverUnloadGesture({
+            form: holdForm,
+            button: holdButton,
+            holdGuard: unloadHoldGuard,
+            canTrigger: function () {
+                return !unloadSubmissionPending && !driverRoleIsReadonly();
+            },
+            onOneTap: function () {
+                return submitDriverUnloadOnce();
             }
         });
     }

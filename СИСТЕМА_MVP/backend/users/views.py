@@ -35,8 +35,10 @@ from assignments.services import (
 from core.models import OperationalStateEvent, OperationalStateVersion, bump_operational_state
 from core.operational_fragments import operational_fragment_response
 from downtimes.driver_workflow import (
+    DRIVER_DOWNTIME_FLOW_WAITING_LOADING,
     DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD,
     driver_downtime_flow,
+    driver_downtime_opens_work,
     driver_downtime_requires_empty_truck,
     driver_downtime_requires_loaded_trip,
 )
@@ -237,7 +239,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v190'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v191'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -3606,6 +3608,13 @@ def driver_shift_view(request):
     active_downtime_flow = driver_downtime_flow(
         active_downtime.reason if active_downtime else None
     )
+    driver_waiting_operation_active = driver_downtime_opens_work(
+        active_downtime.reason if active_downtime else None
+    )
+    driver_loading_wait_active = bool(
+        not driver_has_open_trip
+        and active_downtime_flow == DRIVER_DOWNTIME_FLOW_WAITING_LOADING
+    )
     driver_unloading_wait_active = bool(
         driver_has_loaded_trip
         and active_downtime_flow == DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD
@@ -3665,6 +3674,12 @@ def driver_shift_view(request):
             if driver_unloading_wait_active
             else 'ТОЧКА РАЗГРУЗКИ'
         )
+    elif driver_loading_wait_active:
+        # Во время ожидания сохраняем полезный ориентир погрузки в крупной
+        # строке, а само состояние показываем в подписи. Так server render и
+        # мгновенное AJAX-состояние выглядят одинаково.
+        driver_dial_label = driver_excavator_short_label(driver_work_excavator)
+        driver_dial_note = active_downtime.reason.button_label.upper()
     elif active_downtime:
         driver_dial_label = active_downtime.reason.button_label
         driver_dial_note = 'ПРИЧИНА ПРОСТОЯ'
@@ -3840,6 +3855,8 @@ def driver_shift_view(request):
             'driver_status_class': driver_status_class,
             'driver_has_open_trip': driver_has_open_trip,
             'driver_has_loaded_trip': driver_has_loaded_trip,
+            'driver_waiting_operation_active': driver_waiting_operation_active,
+            'driver_loading_wait_active': driver_loading_wait_active,
             'driver_unloading_wait_active': driver_unloading_wait_active,
             'active_downtime_flow': active_downtime_flow,
             'driver_target_label': driver_target_label,
@@ -4148,7 +4165,7 @@ def driver_downtime_action_view(request):
         action_label = 'downtime_started'
     if wants_json:
         return JsonResponse(driver_downtime_event_payload(event, action=action_label, shift=open_shift))
-    if workflow == DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD:
+    if driver_downtime_opens_work(reason):
         return redirect(f'{reverse("driver_work")}?tab=work')
     return redirect(f'{reverse("driver_work")}?tab=downtimes')
 

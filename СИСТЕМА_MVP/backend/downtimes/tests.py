@@ -16,6 +16,7 @@ from .driver_workflow import (
     close_truck_unloading_wait_downtimes,
     close_truck_waiting_loading_downtimes,
     driver_downtime_flow,
+    driver_downtime_opens_work,
     driver_downtime_requires_empty_truck,
     driver_downtime_requires_loaded_trip,
 )
@@ -74,6 +75,7 @@ class DriverDowntimeWorkflowTests(TestCase):
         )
         self.assertTrue(driver_downtime_requires_empty_truck(waiting_loading))
         self.assertFalse(driver_downtime_requires_loaded_trip(waiting_loading))
+        self.assertTrue(driver_downtime_opens_work(waiting_loading))
 
         for reason_name in TRUCK_UNLOADING_WAIT_REASON_NAMES:
             with self.subTest(reason_name=reason_name):
@@ -84,11 +86,13 @@ class DriverDowntimeWorkflowTests(TestCase):
                 )
                 self.assertFalse(driver_downtime_requires_empty_truck(reason))
                 self.assertTrue(driver_downtime_requires_loaded_trip(reason))
+                self.assertTrue(driver_downtime_opens_work(reason))
 
         ordinary_reason = DowntimeReason.objects.get(name='Заправка')
         self.assertEqual(driver_downtime_flow(ordinary_reason), '')
         self.assertFalse(driver_downtime_requires_empty_truck(ordinary_reason))
         self.assertFalse(driver_downtime_requires_loaded_trip(ordinary_reason))
+        self.assertFalse(driver_downtime_opens_work(ordinary_reason))
 
     def test_close_helpers_only_close_their_driver_workflow_group(self):
         waiting_loading_reason = DowntimeReason.objects.get(
