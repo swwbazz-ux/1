@@ -949,11 +949,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v204')
+        self.assertContains(response, 'excavator-mobile-shell-v205')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 204')
+        self.assertContains(response, 'Версия 205')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
@@ -1055,6 +1055,49 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, '<button class="eo-shift-update-button"')
         self.assertNotContains(response, 'runManualUpdateCheck')
         self.assertNotContains(response, 'data-eo-refresh-work')
+
+    def test_excavator_work_renders_twelve_assigned_trucks_without_hidden_overflow(self):
+        for index in range(11):
+            truck = Equipment.objects.create(
+                equipment_type=self.truck_type,
+                model=self.truck_model,
+                garage_number=str(30 + index),
+            )
+            HaulAssignment.objects.create(
+                truck=truck,
+                excavator=self.excavator,
+                status=AssignmentStatus.ACCEPTED,
+            )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context['truck_cards']), 12)
+        self.assertContains(
+            response,
+            'class="eo-truck-grid eo-dashboard-truck-grid is-many is-rows-4"',
+        )
+        self.assertContains(response, 'data-eo-dashboard-truck', count=12)
+        self.assertNotContains(response, 'eo-dashboard-truck-overflow')
+        self.assertContains(response, '<strong>40</strong>', html=True)
+        shift_css = (
+            Path(__file__).resolve().parents[1]
+            / 'static'
+            / 'css'
+            / 'excavator-work-v55-shift.css'
+        ).read_text(encoding='utf-8')
+        self.assertIn(
+            '.eo-dashboard-truck-grid.is-rows-4 {\n'
+            '        grid-template-columns: repeat(6, minmax(0, 1fr)) !important;\n'
+            '        grid-template-rows: repeat(2, minmax(0, 1fr)) !important;',
+            shift_css,
+        )
+        self.assertIn(
+            '.eo-dashboard-truck-grid.is-rows-4 .eo-dashboard-truck-card em {\n'
+            '        display: block !important;',
+            shift_css,
+        )
+        self.assertIn('white-space: normal !important;', shift_css)
 
     def test_native_excavator_hides_pwa_update_ui_without_manual_refresh(self):
         response = self.client.get(
@@ -2647,7 +2690,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v204', script)
+        self.assertIn('excavator-mobile-shell-v205', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,

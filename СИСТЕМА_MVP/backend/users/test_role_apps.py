@@ -418,8 +418,8 @@ class RoleAppLoginTests(TestCase):
 
     def test_driver_and_excavator_hosts_render_the_same_combined_login_structure(self):
         cases = (
-            ('driver.localhost', 'Водитель самосвала', 'driver-180.png', 'driver-mobile-shell-v191'),
-            ('excavator.localhost', 'Машинист экскаватора', 'excavator-180.png', 'excavator-mobile-shell-v204'),
+            ('driver.localhost', 'Водитель самосвала', 'driver-180.png', 'driver-mobile-shell-v192'),
+            ('excavator.localhost', 'Машинист экскаватора', 'excavator-180.png', 'excavator-mobile-shell-v205'),
         )
 
         for host, role_name, icon_name, shell_version in cases:

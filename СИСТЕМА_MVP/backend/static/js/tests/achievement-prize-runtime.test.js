@@ -798,14 +798,14 @@ test("Driver real fragment handler forwards context and checks only its complete
     };
 
     const irrelevant = completedContext({truckId: 999, excavatorId: 31});
-    await runtime.window.applyOperationalStateRefresh(irrelevant);
+    assert.equal((await runtime.window.applyOperationalStateRefresh(irrelevant)).applied, true);
     runtime.timers.advance(1000);
     await flushAsync();
     assert.strictEqual(capturedContexts[0], irrelevant);
     assert.equal(runtime.fetchCalls.length, 0);
 
     const relevant = completedContext({truckId: 17, excavatorId: 31});
-    await runtime.window.applyOperationalStateRefresh(relevant);
+    assert.equal((await runtime.window.applyOperationalStateRefresh(relevant)).applied, true);
     runtime.timers.advance(1000);
     await flushAsync();
     assert.strictEqual(capturedContexts[1], relevant);
@@ -842,6 +842,34 @@ test("Excavator real fragment handler forwards context and checks only its compl
     await flushAsync();
     assert.strictEqual(capturedContexts[1], relevant);
     assert.equal(runtime.fetchCalls.length, 1);
+});
+
+
+test("Excavator foreground reconciliation replaces a stale shell without delta events", async () => {
+    const runtime = createRuntime({role: "excavator", equipmentId: 31});
+    await bindAndRunInitial(runtime);
+    runtime.clearFetchCalls();
+    installExcavatorFragmentHandler(runtime, 31);
+    const staleShell = runtime.document.excavatorShell;
+    const context = {
+        version: 204,
+        previousVersion: 204,
+        events: [],
+        eventsTruncated: false,
+        foregroundReconcile: true,
+        reconcileReason: "visibility_hidden"
+    };
+
+    const result = await runtime.window.applyOperationalStateRefresh(context);
+    await flushAsync();
+
+    assert.equal(result.applied, true);
+    assert.notStrictEqual(
+        runtime.document.excavatorShell,
+        staleShell,
+        "foreground recovery must fetch and replace the Excavator shell even with no delta events"
+    );
+    assert.equal(runtime.document.body.dataset.operationalStateVersion, "204");
 });
 
 
