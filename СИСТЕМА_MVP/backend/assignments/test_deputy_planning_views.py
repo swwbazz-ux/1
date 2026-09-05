@@ -573,6 +573,10 @@ class DeputyPlanningViewTests(TestCase):
             reverse('deputy_mining_manager_export', args=[payload['plan']['id']]),
         )
         self.assertContains(response, 'data-export-excel', count=1)
+        self.assertContains(response, 'id="deputy-candidate-search"', count=1)
+        self.assertContains(response, 'Поиск по ФИО, должности или телефону', count=1)
+        self.assertContains(response, 'aria-controls="deputy-candidate-list"', count=1)
+        self.assertContains(response, 'id="deputy-candidate-list"', count=1)
 
     def test_driver_plan_accepts_distinct_day_and_night_trainees(self):
         day_trainee, _day_access = self.create_employee_with_access(

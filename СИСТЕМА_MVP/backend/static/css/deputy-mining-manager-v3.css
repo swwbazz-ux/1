@@ -1089,6 +1089,11 @@ button.deputy-avatar {
     backdrop-filter: blur(2px);
 }
 
+.deputy-candidate-dialog[open] {
+    display: flex;
+    flex-direction: column;
+}
+
 .deputy-dialog-head {
     display: flex;
     gap: 16px;
@@ -1136,12 +1141,94 @@ button.deputy-avatar {
     cursor: pointer;
 }
 
+.deputy-candidate-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: end;
+    padding: 10px 10px 0;
+}
+
+.deputy-candidate-search {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+}
+
+.deputy-candidate-search > span {
+    letter-spacing: .04em;
+}
+
+.deputy-candidate-search input {
+    min-height: 40px;
+    padding-right: 42px;
+}
+
+.deputy-candidate-search input::placeholder {
+    color: var(--admin-muted);
+    opacity: .86;
+}
+
+.deputy-candidate-search input::-webkit-search-cancel-button {
+    appearance: none;
+}
+
+.deputy-candidate-search-control {
+    position: relative;
+    min-width: 0;
+}
+
+.deputy-candidate-search-clear {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--admin-muted);
+    font: inherit;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.deputy-candidate-search-clear:hover,
+.deputy-candidate-search-clear:focus-visible {
+    outline: 0;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+}
+
+.deputy-candidate-search-clear[hidden] {
+    display: none;
+}
+
+.deputy-candidate-count {
+    min-width: 98px;
+    padding-bottom: 11px;
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 900;
+    text-align: right;
+    white-space: nowrap;
+}
+
 .deputy-candidate-list {
     display: grid;
+    flex: 1 1 auto;
     gap: 6px;
+    min-height: 0;
     max-height: min(480px, 58dvh);
     padding: 10px;
     overflow-y: auto;
+}
+
+.deputy-candidate-dialog .deputy-candidate-list {
+    max-height: none;
 }
 
 .deputy-candidate {
@@ -1868,6 +1955,29 @@ button.deputy-avatar {
     .deputy-dialog-actions [data-clear-slot] {
         flex-basis: 100%;
         margin-right: 0;
+    }
+
+    .deputy-candidate-tools {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 6px;
+    }
+
+    .deputy-candidate-search input {
+        min-height: 44px;
+        padding-right: 48px;
+    }
+
+    .deputy-candidate-search-clear {
+        top: 0;
+        right: 0;
+        width: 44px;
+        height: 44px;
+    }
+
+    .deputy-candidate-count {
+        min-width: 0;
+        padding-bottom: 0;
+        text-align: left;
     }
 
     .deputy-record-head {

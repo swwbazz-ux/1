@@ -90,6 +90,9 @@
     var temporaryTransferOpenButton = root.querySelector("[data-temporary-transfer-open]");
     var candidateDialog = document.querySelector("[data-candidate-dialog]");
     var candidateContext = document.querySelector("[data-candidate-context]");
+    var candidateSearchInput = document.querySelector("[data-candidate-search]");
+    var candidateSearchClear = document.querySelector("[data-candidate-search-clear]");
+    var candidateCount = document.querySelector("[data-candidate-count]");
     var candidateList = document.querySelector("[data-candidate-list]");
     var clearSlotButton = document.querySelector("[data-clear-slot]");
     var photoDialog = document.querySelector("[data-photo-dialog]");
@@ -120,6 +123,7 @@
     var currentFilter = "all";
     var currentBrigade = "all";
     var currentSlot = null;
+    var candidateEmployees = [];
     var saving = false;
     var toastTimer = null;
     var dragPayload = null;
@@ -876,6 +880,69 @@
         return wrapper;
     }
 
+    function renderCandidatePicker() {
+        if (!candidateList || !currentSlot) return;
+        var query = normalizeSearch(candidateSearchInput && candidateSearchInput.value);
+        var candidates = rankedEmployeeMatches(candidateEmployees, query).map(function (match) {
+            return match.employee;
+        });
+        candidateList.replaceChildren();
+        if (candidateCount) {
+            candidateCount.textContent = query
+                ? "Найдено: " + candidates.length + " из " + candidateEmployees.length
+                : "Кандидатов: " + candidateEmployees.length;
+        }
+        if (candidateSearchClear) candidateSearchClear.hidden = !query;
+        candidates.forEach(function (employee) {
+            var button = createElement("button", "deputy-candidate");
+            button.type = "button";
+            button.disabled = Boolean(employee.disabled || employee.busy);
+            button.appendChild(createAvatar(employee, false));
+            var main = createElement("span", "deputy-employee-main");
+            main.appendChild(createElement("strong", "", employeeName(employee)));
+            main.appendChild(createElement("small", "", employee.busy_reason || employee.assigned_label || employeeMeta(employee) || "Сотрудник"));
+            button.appendChild(main);
+            button.appendChild(createPresenceBadge(employee));
+            button.addEventListener("click", function () {
+                var source = sourceForEmployee(employee);
+                var target = currentSlot;
+                closeDialog(candidateDialog);
+                saveSlot(target.row, target.slot, employee.id, source, target.position);
+            });
+            candidateList.appendChild(button);
+        });
+        if (!candidates.length) {
+            var emptyMessage;
+            if (query) {
+                emptyMessage = "По вашему запросу сотрудники не найдены.";
+            } else {
+                emptyMessage = currentBrigade === "all"
+                    ? "Свободных сотрудников нет."
+                    : "В бригаде " + currentBrigade + " подходящих сотрудников нет.";
+            }
+            candidateList.appendChild(createElement("p", "deputy-empty-state", emptyMessage));
+        }
+        candidateList.scrollTop = 0;
+    }
+
+    function clearCandidateSearch(restoreFocus) {
+        if (!candidateSearchInput) return;
+        candidateSearchInput.value = "";
+        renderCandidatePicker();
+        if (restoreFocus && typeof candidateSearchInput.focus === "function") {
+            candidateSearchInput.focus({ preventScroll: true });
+        }
+    }
+
+    function focusFirstCandidate() {
+        if (!candidateList) return false;
+        var candidate = Array.prototype.slice.call(candidateList.querySelectorAll(".deputy-candidate"))
+            .find(function (item) { return !item.disabled; });
+        if (!candidate || typeof candidate.focus !== "function") return false;
+        candidate.focus({ preventScroll: true });
+        return true;
+    }
+
     function openCandidatePicker(row, slot, position) {
         if (!planEditable() || saving || !candidateDialog || !candidateList) return;
         position = position === "secondary" ? "secondary" : "primary";
@@ -888,7 +955,6 @@
             candidateContext.textContent = [row.equipment && row.equipment.label, slot.label, positionLabel]
                 .filter(Boolean).join(" · ");
         }
-        candidateList.replaceChildren();
         var candidatesById = new Map();
         state.employees.filter(function (employee) {
             return employeeCanFillPosition(employee, position);
@@ -914,35 +980,16 @@
                 });
             });
         });
-        var candidates = Array.from(candidatesById.values()).filter(employeeMatchesBrigade).sort(function (left, right) {
-            return employeeName(left).localeCompare(employeeName(right), "ru");
-        });
-        candidates.forEach(function (employee) {
-            var button = createElement("button", "deputy-candidate");
-            button.type = "button";
-            button.disabled = Boolean(employee.disabled || employee.busy);
-            button.appendChild(createAvatar(employee, false));
-            var main = createElement("span", "deputy-employee-main");
-            main.appendChild(createElement("strong", "", employeeName(employee)));
-            main.appendChild(createElement("small", "", employee.busy_reason || employee.assigned_label || employeeMeta(employee) || "Сотрудник"));
-            button.appendChild(main);
-            button.appendChild(createPresenceBadge(employee));
-            button.addEventListener("click", function () {
-                var source = sourceForEmployee(employee);
-                closeDialog(candidateDialog);
-                saveSlot(row, slot, employee.id, source, position);
-            });
-            candidateList.appendChild(button);
-        });
-        if (!candidates.length) {
-            candidateList.appendChild(createElement(
-                "p",
-                "deputy-empty-state",
-                currentBrigade === "all" ? "Свободных сотрудников нет." : "В бригаде " + currentBrigade + " подходящих сотрудников нет."
-            ));
-        }
+        candidateEmployees = Array.from(candidatesById.values()).filter(employeeMatchesBrigade);
+        if (candidateSearchInput) candidateSearchInput.value = "";
+        renderCandidatePicker();
         if (clearSlotButton) clearSlotButton.hidden = !slot[employeeKey];
         openDialog(candidateDialog);
+        var coarseMobilePointer = window.matchMedia
+            && window.matchMedia("(max-width: 720px) and (pointer: coarse)").matches;
+        if (candidateSearchInput && !coarseMobilePointer && typeof candidateSearchInput.focus === "function") {
+            candidateSearchInput.focus({ preventScroll: true });
+        }
     }
 
     function dropPayloadFromEvent(event) {
@@ -1395,6 +1442,24 @@
         searchInput.addEventListener("input", function () {
             renderEmployees();
             renderBoard();
+        });
+    }
+    if (candidateSearchInput) {
+        candidateSearchInput.addEventListener("input", renderCandidatePicker);
+        candidateSearchInput.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && normalizeSearch(candidateSearchInput.value)) {
+                event.preventDefault();
+                event.stopPropagation();
+                clearCandidateSearch(true);
+                return;
+            }
+            if (event.key !== "Enter" && event.key !== "ArrowDown") return;
+            if (focusFirstCandidate()) event.preventDefault();
+        });
+    }
+    if (candidateSearchClear) {
+        candidateSearchClear.addEventListener("click", function () {
+            clearCandidateSearch(true);
         });
     }
 

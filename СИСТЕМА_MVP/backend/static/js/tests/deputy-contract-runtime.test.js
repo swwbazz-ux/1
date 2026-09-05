@@ -141,6 +141,7 @@ class ElementStub extends EventTargetStub {
         this.value = "";
         this.textContent = "";
         this.tabIndex = 0;
+        this.focused = false;
         this.style = {
             setProperty() {},
             removeProperty() {},
@@ -196,6 +197,10 @@ class ElementStub extends EventTargetStub {
             (child) => child !== this
         );
         this.parentNode = null;
+    }
+
+    focus() {
+        this.focused = true;
     }
 
     contains(candidate) {
@@ -271,7 +276,7 @@ class StorageStub {
     }
 }
 
-function planningPayload({assigned = false, version = 1} = {}) {
+function planningPayload({assigned = false, version = 1, employees = null} = {}) {
     const employee = {
         id: 101,
         full_name: "Иванов Иван",
@@ -308,7 +313,7 @@ function planningPayload({assigned = false, version = 1} = {}) {
             watch_periods: [],
         },
         categories: [],
-        employees: assigned ? [] : [employee],
+        employees: assigned ? [] : (employees || [employee]),
         rows: [{
             equipment: {
                 id: 501,
@@ -350,7 +355,7 @@ function createDeputyRuntime(options = {}) {
     const window = new EventTargetStub();
     const shell = appendRootNode(document, "data-admin-theme");
     const root = appendRootNode(document, "data-deputy-planning-root", "main");
-    appendDataNode(document, planningPayload());
+    appendDataNode(document, options.payload || planningPayload());
 
     const searchInput = new ElementStub("input", {"data-planning-search": ""});
     const employeePool = new ElementStub("section", {"data-employee-pool-drop": ""});
@@ -362,6 +367,13 @@ function createDeputyRuntime(options = {}) {
     const autosaveText = new ElementStub("span", {"data-autosave-text": ""});
     const publishButton = new ElementStub("button", {"data-publish-button": ""});
     const exportButton = new ElementStub("a", {"data-export-excel": ""});
+    const candidateDialog = new ElementStub("dialog", {"data-candidate-dialog": ""});
+    const candidateContext = new ElementStub("p", {"data-candidate-context": ""});
+    const candidateSearchInput = new ElementStub("input", {"data-candidate-search": ""});
+    const candidateSearchClear = new ElementStub("button", {"data-candidate-search-clear": ""});
+    const candidateCount = new ElementStub("span", {"data-candidate-count": ""});
+    const candidateList = new ElementStub("div", {"data-candidate-list": ""});
+    const clearSlotButton = new ElementStub("button", {"data-clear-slot": ""});
 
     [
         searchInput,
@@ -375,6 +387,16 @@ function createDeputyRuntime(options = {}) {
         publishButton,
         exportButton,
     ].forEach((node) => root.appendChild(node));
+
+    [
+        candidateContext,
+        candidateSearchInput,
+        candidateSearchClear,
+        candidateCount,
+        candidateList,
+        clearSlotButton,
+    ].forEach((node) => candidateDialog.appendChild(node));
+    document.body.appendChild(candidateDialog);
 
     const fetchCalls = [];
     let locked = options.locked !== false;
@@ -468,6 +490,11 @@ function createDeputyRuntime(options = {}) {
         employeeEmpty,
         board,
         autosaveText,
+        candidateDialog,
+        candidateSearchInput,
+        candidateSearchClear,
+        candidateCount,
+        candidateList,
         fetchCalls,
         setLocked(value) {
             locked = Boolean(value);
@@ -589,6 +616,106 @@ test("unlocked deputy drag-and-drop persists exactly once", async () => {
         runtime.board.querySelector(".deputy-slot-person"),
         "server payload was not applied after the single unlocked POST"
     );
+});
+
+test("candidate picker filters eligible employees live and resets on reopen", async () => {
+    const employees = [
+        {
+            id: 101,
+            full_name: "Сахаров Виталий Владимирович",
+            position_label: "Водитель",
+            phone: "+79000000001",
+        },
+        {
+            id: 102,
+            full_name: "Соловьёв Алексей Алексеевич",
+            position_label: "Водитель автомобиля",
+            phone: "+79000000002",
+        },
+        {
+            id: 103,
+            full_name: "Сергеев Василий Владимирович",
+            position_label: "Водитель",
+            phone: "+79000000003",
+        },
+    ];
+    const runtime = createDeputyRuntime({
+        locked: false,
+        payload: planningPayload({employees}),
+    });
+    const assignButton = runtime.board.querySelector(".deputy-slot-empty");
+
+    assert.ok(assignButton, "empty slot action was not rendered");
+    assignButton.dispatchEvent({type: "click"});
+
+    assert.equal(runtime.candidateDialog.hasAttribute("open"), true);
+    assert.equal(runtime.candidateSearchInput.focused, true);
+    assert.equal(
+        runtime.candidateList.querySelectorAll(".deputy-candidate").length,
+        3
+    );
+    assert.equal(runtime.candidateCount.textContent, "Кандидатов: 3");
+
+    runtime.candidateSearchInput.value = "соловьев алек";
+    runtime.candidateSearchInput.dispatchEvent({type: "input"});
+
+    const matches = runtime.candidateList.querySelectorAll(".deputy-candidate");
+    assert.equal(matches.length, 1);
+    assert.equal(matches[0].querySelector("strong").textContent, "Соловьёв Алексей Алексеевич");
+    assert.equal(runtime.candidateCount.textContent, "Найдено: 1 из 3");
+    assert.equal(runtime.candidateSearchClear.hidden, false);
+    assert.equal(runtime.fetchCalls.length, 0, "live search must not save or fetch");
+
+    runtime.candidateSearchInput.dispatchEvent({
+        type: "keydown",
+        key: "ArrowDown",
+        preventDefault() {},
+        stopPropagation() {},
+    });
+    assert.equal(matches[0].focused, true, "keyboard did not reach the first match");
+
+    runtime.candidateSearchInput.value = "нет совпадений";
+    runtime.candidateSearchInput.dispatchEvent({type: "input"});
+    assert.equal(
+        runtime.candidateList.querySelectorAll(".deputy-candidate").length,
+        0
+    );
+    assert.equal(
+        runtime.candidateList.querySelector(".deputy-empty-state").textContent,
+        "По вашему запросу сотрудники не найдены."
+    );
+
+    runtime.candidateSearchClear.dispatchEvent({type: "click"});
+    assert.equal(runtime.candidateSearchInput.value, "");
+    assert.equal(
+        runtime.candidateList.querySelectorAll(".deputy-candidate").length,
+        3
+    );
+
+    runtime.candidateSearchInput.value = "сахаров";
+    runtime.candidateSearchInput.dispatchEvent({type: "input"});
+    runtime.candidateDialog.removeAttribute("open");
+    assignButton.dispatchEvent({type: "click"});
+    assert.equal(runtime.candidateSearchInput.value, "");
+    assert.equal(
+        runtime.candidateList.querySelectorAll(".deputy-candidate").length,
+        3
+    );
+
+    runtime.candidateSearchInput.value = "+79000000002";
+    runtime.candidateSearchInput.dispatchEvent({type: "input"});
+    const phoneMatch = runtime.candidateList.querySelector(".deputy-candidate");
+    assert.ok(phoneMatch, "phone search did not find the employee");
+    phoneMatch.dispatchEvent({type: "click"});
+    await flushPromises();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(
+        JSON.parse(runtime.fetchCalls[0].init.body).employee_id,
+        102,
+        "filtered candidate selection saved another employee"
+    );
+    assert.equal(JSON.parse(runtime.fetchCalls[0].init.body).position, "primary");
 });
 
 class CacheStub {
