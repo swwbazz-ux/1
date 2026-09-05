@@ -7,6 +7,8 @@
 
 from io import StringIO
 
+from django.http import HttpResponseRedirect
+from django.test import RequestFactory
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -19,6 +21,7 @@ from .active_role import (
     latest_active_role_access,
 )
 from .live_monitor import OBSERVER_MODE_CONTROL, create_observer_token
+from .middleware import ObserverModeMiddleware
 from .models import AdminActionLog, Employee, EmployeeAccess, PersonnelPosition, Role
 
 
@@ -129,6 +132,21 @@ class ObserverTokenSurvivalTests(TestCase):
             self.assertIn('observe=', response['Location'])
         else:
             self.assertEqual(response.status_code, 200)
+
+    def test_redirect_helper_keeps_token_without_server_error(self):
+        request = RequestFactory().get('/driver/')
+        response = HttpResponseRedirect('/driver/shift/')
+
+        ObserverModeMiddleware._keep_token_on_redirect(
+            request,
+            response,
+            'control-token',
+        )
+
+        self.assertEqual(
+            response['Location'],
+            '/driver/shift/?observe=control-token',
+        )
 
     def test_watch_mode_still_blocks_changes(self):
         watch = create_observer_token(
