@@ -2,6 +2,7 @@
 {% load static %}
 
 {% block title %}{% if activation_role_app %}Первичный вход · {{ activation_role_app.short_name }}{% else %}Первичный вход{% endif %}{% endblock %}
+{% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
     <link rel="stylesheet" href="{% static 'css/max-support-link-v1.css' %}?v=6">
     <link rel="stylesheet" href="{% static 'css/entry-action-button-v2.css' %}">
@@ -15,82 +16,11 @@
     <link rel="apple-touch-icon" href="{{ activation_role_app.icon_180_url }}">
     {% if activation_role_app.role_code == 'driver' or activation_role_app.role_code == 'excavator_operator' %}
     <link rel="preload" as="image" href="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
-    <link rel="stylesheet" href="{% static 'css/mobile-role-login-v1.css' %}?v={{ activation_role_app.shell_version }}-pin1">
+    <link rel="stylesheet" href="{% static 'css/mobile-role-login-v1.css' %}?v={{ activation_role_app.shell_version }}-consent1">
     {% endif %}
     {% endif %}
-    <style>
-        .dispatcher-shell .unified-activation-dialog .activation-stage {
-            margin: 0 0 5px;
-            color: var(--gd-green);
-            font-size: 11px;
-            font-weight: 900;
-            letter-spacing: 0;
-            text-transform: uppercase;
-        }
-        .dispatcher-shell .unified-activation-dialog .activation-confirmed {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 3px 12px;
-            align-items: center;
-            margin: 1px 0 10px;
-            padding: 9px 11px;
-            border: 1px solid var(--gd-line);
-            border-radius: 6px;
-            background: var(--gd-panel-soft);
-        }
-        .dispatcher-shell .unified-activation-dialog .activation-confirmed strong {
-            min-width: 0;
-            overflow: hidden;
-            color: var(--gd-ink);
-            font-size: 14px;
-            font-weight: 900;
-            line-height: 1.15;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .dispatcher-shell .unified-activation-dialog .activation-confirmed span {
-            color: var(--gd-muted);
-            font-size: 11px;
-            font-weight: 700;
-            line-height: 1.2;
-        }
-        .dispatcher-shell .unified-activation-dialog .activation-confirmed .activation-phone {
-            grid-column: 2;
-            grid-row: 1 / span 2;
-            color: var(--gd-green);
-            font-size: 12px;
-            font-weight: 900;
-            white-space: nowrap;
-        }
-        .dispatcher-shell .unified-activation-dialog .activation-pin-toggle {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            width: fit-content;
-            margin: 0 0 9px;
-            color: var(--gd-muted);
-            font-size: 12px;
-            font-weight: 800;
-            cursor: pointer;
-        }
-        .dispatcher-shell .unified-activation-dialog .activation-pin-toggle input {
-            width: 17px;
-            height: 17px;
-            margin: 0;
-            accent-color: var(--gd-green);
-        }
-        @media (max-width: 430px) {
-            .dispatcher-shell .unified-activation-dialog .activation-confirmed {
-                grid-template-columns: 1fr;
-            }
-            .dispatcher-shell .unified-activation-dialog .activation-confirmed .activation-phone {
-                grid-column: 1;
-                grid-row: auto;
-            }
-        }
-    </style>
     {% if activation_role_app and activation_role_app.role_code == 'driver' or activation_role_app and activation_role_app.role_code == 'excavator_operator' %}
-    <link rel="stylesheet" href="{% static 'css/mobile-role-activation-v1.css' %}?v={{ activation_role_app.shell_version }}-pin1">
+    <link rel="stylesheet" href="{% static 'css/mobile-role-activation-v1.css' %}?v={{ activation_role_app.shell_version }}-pin2">
     {% endif %}
 {% endblock %}
 {% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen unified-activation-screen{% if activation_role_app %} login-role-{{ activation_role_app.role_code }}{% if activation_role_app.role_code == 'driver' or activation_role_app.role_code == 'excavator_operator' %} login-fullscreen login-combined login-activation is-app-installed{% endif %}{% endif %}{% endblock %}
@@ -123,7 +53,6 @@
             <span>{% if activation_role_app.role_code == 'driver' or activation_role_app.role_code == 'excavator_operator' %}{{ activation_role_app.name }}{% else %}Коппер Рисорсез{% endif %}</span>
         </div>
         {% endif %}
-        <div class="activation-stage">Первый вход · сотрудник найден</div>
         {% if activation_role_app.role_code == 'driver' or activation_role_app.role_code == 'excavator_operator' %}
         <h1>Придумайте PIN</h1>
         <p class="mobile-role-login__lead">Он понадобится для следующих входов</p>
@@ -132,7 +61,7 @@
         <p>Проверьте фамилию и должность. Если всё верно — придумайте пинкод, с ним будете заходить дальше.</p>
         {% endif %}
 
-        <div class="activation-confirmed" aria-label="Подтвержденные данные сотрудника">
+        <div class="activation-confirmed" aria-label="Подтверждённые данные сотрудника">
             <strong title="{{ access.employee.full_name }}">{{ access.employee.full_name }}</strong>
             <span>{{ access.role.name }}</span>
             <span class="activation-phone">{{ activation_phone }}</span>
@@ -146,14 +75,14 @@
             <span>{{ form.new_access_code.label }}</span>
             {{ form.new_access_code }}
             <small id="activation-new-pin-hint" class="input-hint{% if form.new_access_code.errors %} is-invalid{% endif %}" data-input-hint-for="{{ form.new_access_code.id_for_label }}"{% if form.new_access_code.errors %} data-server-error="1"{% endif %}>
-                {% if form.new_access_code.errors %}{{ form.new_access_code.errors.0 }}{% else %}Введите 6 цифр. Не используйте простую последовательность.{% endif %}
+                {% if form.new_access_code.errors %}{{ form.new_access_code.errors.0 }}{% else %}6 цифр, без простых последовательностей.{% endif %}
             </small>
         </label>
         <label class="shared-shift-login-field" for="{{ form.confirm_access_code.id_for_label }}">
             <span>{{ form.confirm_access_code.label }}</span>
             {{ form.confirm_access_code }}
             <small id="activation-confirm-pin-hint" class="input-hint{% if form.confirm_access_code.errors %} is-invalid{% endif %}" data-input-hint-for="{{ form.confirm_access_code.id_for_label }}"{% if form.confirm_access_code.errors %} data-server-error="1"{% endif %}>
-                {% if form.confirm_access_code.errors %}{{ form.confirm_access_code.errors.0 }}{% else %}Введите тот же PIN ещё раз.{% endif %}
+                {% if form.confirm_access_code.errors %}{{ form.confirm_access_code.errors.0 }}{% else %}Повторите тот же PIN.{% endif %}
             </small>
         </label>
 
@@ -274,7 +203,7 @@ document.addEventListener('DOMContentLoaded', function () {
         var secondValid = second.length === 6 && second === first && firstValid;
 
         if (pinInputs[0]) {
-            var firstMessage = 'Введите 6 цифр — этот PIN понадобится при следующих входах.';
+            var firstMessage = '6 цифр, без простых последовательностей.';
             if (first && first.length < 6) firstMessage = 'Нужно 6 цифр. Сейчас введено: ' + first.length + '.';
             if (isWeakPin(first)) firstMessage = 'Этот PIN слишком простой. Выберите другую комбинацию.';
             if (firstValid) firstMessage = 'PIN подходит.';
@@ -282,7 +211,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         if (pinInputs[1]) {
-            var secondMessage = 'Повторите те же 6 цифр.';
+            var secondMessage = 'Повторите тот же PIN.';
             if (second && second.length < 6) secondMessage = 'Нужно 6 цифр. Сейчас введено: ' + second.length + '.';
             if (second.length === 6 && second !== first) secondMessage = 'PIN-коды не совпадают.';
             if (secondValid) secondMessage = 'PIN-коды совпадают.';

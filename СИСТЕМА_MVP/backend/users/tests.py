@@ -239,7 +239,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v189')
+        self.assertContains(response, 'driver-mobile-shell-v190')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertContains(response, 'playDriverSound("truck_assigned")')
@@ -451,9 +451,23 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v189', script)
-        self.assertIn('"/company/privacy/"', script)
-        self.assertIn('"/static/portal/css/portal-shell-v5.css?v=6"', script)
+        self.assertIn('driver-mobile-shell-v190', script)
+        self.assertIn(
+            'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
+            script,
+        )
+        self.assertRegex(
+            script,
+            r'const CORE_ASSETS = \[[\s\S]*?PRIVACY_POLICY_URL,',
+        )
+        privacy_branch = script.index('if (url.pathname === PRIVACY_POLICY_PATH)')
+        generic_navigation_branch = script.index('if (request.mode === "navigate"')
+        self.assertLess(privacy_branch, generic_navigation_branch)
+        self.assertIn(
+            'networkFirst(request, PRIVACY_POLICY_URL)',
+            script[privacy_branch:generic_navigation_branch],
+        )
+        self.assertIn('"/static/portal/css/portal-shell-v5.css?v=7"', script)
         self.assertIn('/static/css/mobile-role-login-v1.css', script)
         self.assertIn('/static/img/start/start-hero-v1.webp', script)
         self.assertIn('/static/img/start/start-hero-v1.jpg', script)
@@ -2820,7 +2834,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v189')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v190')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

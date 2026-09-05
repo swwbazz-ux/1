@@ -942,7 +942,7 @@ class AccessActivationForm(forms.Form):
             'maxlength': '6',
             'pattern': '[0-9]{6}',
             'data-pin-input': '1',
-            'data-hint': 'Введите 6 цифр — этот PIN понадобится при следующих входах.',
+            'data-hint': '6 цифр, без простых последовательностей.',
             'aria-describedby': 'activation-new-pin-hint',
         }),
     )
@@ -957,7 +957,7 @@ class AccessActivationForm(forms.Form):
             'maxlength': '6',
             'pattern': '[0-9]{6}',
             'data-pin-input': '1',
-            'data-hint': 'Повторите те же 6 цифр.',
+            'data-hint': 'Повторите тот же PIN.',
             'aria-describedby': 'activation-confirm-pin-hint',
         }),
     )

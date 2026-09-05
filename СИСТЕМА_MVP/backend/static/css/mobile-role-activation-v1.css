@@ -1,10 +1,11 @@
 /* Первый вход водителя и машиниста экскаватора.
-   Это тот же role-aware экран, что и обычный вход, но с естественным
-   аварийным скроллом: крупный текст и низкий viewport не обрезаются. */
+   Стандартный телефон помещает весь обязательный путь в visual viewport.
+   При системном увеличении текста содержимое остаётся в естественном потоке
+   и может расширить документ — одноэкранность не достигается обрезанием. */
 
 body.login-page.login-fullscreen.login-combined.login-activation {
-    height: auto;
-    min-height: 100svh;
+    height: var(--login-vv-height, 100svh);
+    min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior-x: none;
@@ -15,41 +16,36 @@ body.login-page.login-fullscreen.login-combined.login-activation .unified-login-
     position: relative;
     inset: auto;
     top: auto;
-    /* На стандартном телефоне регистрация помещается целиком без прокрутки.
-       Hero остаётся фирменным, но не забирает высоту у двух обязательных PIN-полей. */
-    grid-template-rows: clamp(148px, 20.5svh, 200px) auto max-content;
+    grid-template-rows: clamp(112px, 16svh, 145px) minmax(max-content, 1fr) 48px;
     width: 100%;
-    min-height: var(--login-vv-height, 100svh);
-    height: auto;
+    min-height: 0;
+    height: var(--login-vv-height, 100svh);
     padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
     overflow: visible;
 }
 
 body.login-page.login-fullscreen.login-combined.login-activation .unified-login-form.is-activation {
-    align-self: start;
+    align-self: center;
     max-height: none;
-    margin-top: clamp(-24px, -2.5svh, -16px);
-    padding: clamp(12px, 1.8svh, 18px) clamp(14px, 4vw, 22px);
+    margin-top: -14px;
+    padding: 10px 14px;
+    gap: 6px;
     overflow: visible;
 }
 
+body.login-page.login-fullscreen.login-combined.login-activation .unified-login-role-identity,
 body.login-page.login-fullscreen.login-combined.login-activation .activation-stage {
-    margin: -1px 0 0;
-    color: var(--mobile-login-accent);
-    font: 800 clamp(10px, 2.8vw, 12px)/1.2 "Segoe UI", Arial, sans-serif;
-    letter-spacing: .05em;
-    text-align: center;
-    text-transform: uppercase;
+    display: none;
 }
 
 body.login-page.login-fullscreen.login-combined.login-activation .activation-confirmed {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 4px 12px;
+    gap: 2px 8px;
     align-items: center;
     min-width: 0;
-    margin: 1px 0 2px;
-    padding: 10px 12px;
+    margin: 0;
+    padding: 7px 10px;
     border: 1px solid var(--mobile-login-panel-border);
     border-radius: 14px;
     background: rgba(5, 13, 17, .72);
@@ -60,23 +56,42 @@ body.login-page.login-fullscreen.login-combined.login-activation .activation-con
     min-width: 0;
     overflow: visible;
     color: var(--mobile-login-text);
-    font: 800 clamp(14px, 3.9vw, 17px)/1.2 "Segoe UI", Arial, sans-serif;
+    grid-column: 1 / -1;
+    font: 800 clamp(14px, 3.8vw, 16px)/1.15 "Segoe UI", Arial, sans-serif;
     overflow-wrap: anywhere;
     text-overflow: clip;
     white-space: normal;
 }
 
 body.login-page.login-fullscreen.login-combined.login-activation .activation-confirmed span {
+    grid-column: 1;
+    grid-row: 2;
     color: var(--mobile-login-muted);
-    font: 600 clamp(11px, 3.1vw, 13px)/1.25 "Segoe UI", Arial, sans-serif;
+    font: 600 clamp(11px, 2.9vw, 12px)/1.2 "Segoe UI", Arial, sans-serif;
 }
 
 body.login-page.login-fullscreen.login-combined.login-activation .activation-confirmed .activation-phone {
     grid-column: 2;
-    grid-row: 1 / span 2;
+    grid-row: 2;
     color: var(--mobile-login-accent);
-    font: 800 clamp(11px, 3.1vw, 13px)/1.2 "Segoe UI", Arial, sans-serif;
+    font: 800 clamp(11px, 2.9vw, 12px)/1.2 "Segoe UI", Arial, sans-serif;
     white-space: nowrap;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .shared-shift-login-field {
+    gap: 2px;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .shared-shift-login-field input {
+    min-height: 50px;
+    padding-inline: 12px;
+    font-size: 20px;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .input-hint {
+    min-height: 11px;
+    font-size: 10px;
+    line-height: 1.1;
 }
 
 body.login-page.login-fullscreen.login-combined.login-activation .activation-pin-toggle {
@@ -86,7 +101,7 @@ body.login-page.login-fullscreen.login-combined.login-activation .activation-pin
     justify-self: start;
     gap: 8px;
     min-height: 44px;
-    margin: -2px 0;
+    margin: -3px 0;
     color: var(--mobile-login-muted);
     font: 600 clamp(12px, 3.3vw, 14px)/1.2 "Segoe UI", Arial, sans-serif;
     cursor: pointer;
@@ -109,6 +124,16 @@ body.login-page.login-fullscreen.login-combined.login-activation .app-confirm-ac
     margin: 0;
 }
 
+body.login-page.login-fullscreen.login-combined.login-activation .unified-login-submit {
+    min-height: 52px;
+    font-size: 19px;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .unified-login-change-phone {
+    min-height: 44px;
+    margin: 0;
+}
+
 body.login-page.login-fullscreen.login-combined.login-activation .message.error {
     margin: 0;
     padding: 7px 9px;
@@ -120,27 +145,51 @@ body.login-page.login-fullscreen.login-combined.login-activation .message.error 
 }
 
 body.login-page.login-fullscreen.login-combined.login-activation .max-support-link {
-    margin-top: 8px;
+    height: 48px;
+    min-height: 48px;
+    margin: 0;
 }
 
-@media (max-width: 430px) {
-    body.login-page.login-fullscreen.login-combined.login-activation .activation-confirmed {
-        grid-template-columns: minmax(0, 1fr);
-    }
-
-    body.login-page.login-fullscreen.login-combined.login-activation .activation-confirmed .activation-phone {
-        grid-column: 1;
-        grid-row: auto;
-    }
-}
-
-@media (max-width: 360px) and (max-height: 700px) {
+@media (max-width: 360px) and (max-height: 640px) {
     body.login-page.login-fullscreen.login-combined.login-activation .unified-login-dialog.mobile-role-activation {
-        grid-template-rows: 132px auto max-content;
+        grid-template-rows: 84px minmax(max-content, 1fr) 48px;
     }
 
     body.login-page.login-fullscreen.login-combined.login-activation .unified-login-form.is-activation {
-        margin-top: -16px;
+        margin-top: -8px;
+        padding: 7px 10px;
+        gap: 3px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .unified-login-dialog h1 {
+        font-size: 20px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .mobile-role-login__lead {
+        display: none;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .activation-confirmed {
+        padding: 5px 8px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .activation-confirmed strong {
+        font-size: 14px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .shared-shift-login-field input {
+        min-height: 44px;
+        font-size: 18px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .input-hint:not(.is-invalid) {
+        display: none;
+        min-height: 0;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .unified-login-submit {
+        min-height: 48px;
+        font-size: 17px;
     }
 }
 

@@ -755,6 +755,45 @@ class PortalPrivacyPolicyTests(PortalTestCase):
         self.assertContains(response, reverse('portal:public_privacy'))
         self.assertContains(response, 'Персональные данные')
 
+    @override_settings(ALLOWED_HOSTS=['testserver', '.localhost'])
+    def test_role_login_policy_fallback_has_explicit_top_and_bottom_returns(self):
+        url = f'{reverse("portal:public_privacy")}?from=role-login'
+
+        for host in ('driver.localhost', 'excavator.localhost'):
+            with self.subTest(host=host):
+                response = self.client.get(url, HTTP_HOST=host)
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'privacy-return-mode', count=1)
+                self.assertContains(response, 'class="privacy-return-bar"', count=1)
+                self.assertContains(response, 'class="privacy-return-footer"', count=1)
+                self.assertContains(response, 'href="/?form=1"', count=2)
+                self.assertContains(
+                    response,
+                    '<a href="/?form=1" data-privacy-return>'
+                    '← Вернуться ко входу</a>',
+                    count=1,
+                )
+                self.assertContains(
+                    response,
+                    '<a class="button button--secondary" href="/?form=1" '
+                    'data-privacy-return>Вернуться ко входу</a>',
+                    count=1,
+                )
+                self.assertContains(response, 'window.history.back()', count=1)
+
+    def test_ordinary_policy_page_keeps_the_public_shell_unchanged(self):
+        response = self.client.get(reverse('portal:public_privacy'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="public-header"', count=1)
+        self.assertContains(response, 'class="public-footer"', count=1)
+        self.assertNotContains(response, 'privacy-return-mode')
+        self.assertNotContains(response, 'privacy-return-bar')
+        self.assertNotContains(response, 'privacy-return-footer')
+        self.assertNotContains(response, 'data-privacy-return')
+        self.assertNotContains(response, 'window.history.back()')
+
 
 class PortalPageRenderTests(PortalTestCase):
     def setUp(self):
