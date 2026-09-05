@@ -124,6 +124,9 @@
     var currentBrigade = "all";
     var currentSlot = null;
     var candidateEmployees = [];
+    var activeEquipmentId = "";
+    var dragSourceEquipmentId = "";
+    var dragTargetEquipmentId = "";
     var saving = false;
     var toastTimer = null;
     var dragPayload = null;
@@ -314,13 +317,75 @@
         }
     }
 
-    function closeDialog(dialog) {
+    function closeDialog(dialog, options) {
         if (!dialog) return;
+        var preserveEquipmentActive = Boolean(options && options.preserveEquipmentActive);
+        var candidateWasOpen = dialog === candidateDialog && Boolean(dialog.open || dialog.hasAttribute("open"));
+        if (dialog === candidateDialog) {
+            if (preserveEquipmentActive) {
+                dialog.setAttribute("data-preserve-equipment-active", "true");
+            } else {
+                dialog.removeAttribute("data-preserve-equipment-active");
+            }
+        }
         if (typeof dialog.close === "function" && dialog.open) {
             dialog.close();
         } else {
             dialog.removeAttribute("open");
         }
+        if (candidateWasOpen && !preserveEquipmentActive) clearActiveEquipmentRow();
+    }
+
+    function equipmentRowId(row) {
+        return textValue(row && row.equipment && row.equipment.id);
+    }
+
+    function syncEquipmentRowStates() {
+        if (!board) return;
+        Array.prototype.slice.call(board.querySelectorAll(".deputy-equipment-row")).forEach(function (rowNode) {
+            var rowId = textValue(rowNode.getAttribute("data-equipment-id"));
+            var isActive = Boolean(activeEquipmentId) && rowId === activeEquipmentId;
+            var isDragSource = Boolean(dragSourceEquipmentId) && rowId === dragSourceEquipmentId;
+            var isDropTarget = Boolean(dragTargetEquipmentId) && rowId === dragTargetEquipmentId;
+            var interactionLabel = isDropTarget ? "Сюда" : (isDragSource ? "Отсюда" : (isActive ? "Выбрано" : ""));
+            var stateBadge = rowNode.querySelector(".deputy-equipment-state");
+            rowNode.classList.toggle("is-active-equipment", isActive);
+            rowNode.classList.toggle("is-drag-source", isDragSource);
+            rowNode.classList.toggle("is-drop-target", isDropTarget);
+            if (isActive) {
+                rowNode.setAttribute("aria-current", "true");
+            } else {
+                rowNode.removeAttribute("aria-current");
+            }
+            if (stateBadge) {
+                stateBadge.textContent = interactionLabel || "Выбрано";
+                stateBadge.classList.toggle("is-visible", Boolean(interactionLabel));
+            }
+        });
+    }
+
+    function setActiveEquipmentRow(row) {
+        activeEquipmentId = equipmentRowId(row);
+        syncEquipmentRowStates();
+    }
+
+    function clearActiveEquipmentRow() {
+        if (!activeEquipmentId) return;
+        activeEquipmentId = "";
+        syncEquipmentRowStates();
+    }
+
+    function setDragTargetEquipmentRow(row) {
+        var nextId = equipmentRowId(row);
+        if (dragTargetEquipmentId === nextId) return;
+        dragTargetEquipmentId = nextId;
+        syncEquipmentRowStates();
+    }
+
+    function clearDragTargetEquipmentRow(row) {
+        if (row && dragTargetEquipmentId !== equipmentRowId(row)) return;
+        dragTargetEquipmentId = "";
+        syncEquipmentRowStates();
     }
 
     function temporaryTransferData() {
@@ -689,6 +754,9 @@
             node.classList.remove("is-dragging");
         });
         clearDropHighlights();
+        dragSourceEquipmentId = "";
+        dragTargetEquipmentId = "";
+        syncEquipmentRowStates();
         removeDragPreview();
         dragPayload = null;
     }
@@ -735,6 +803,8 @@
                 sourceShiftType: source.source_shift_type,
                 sourcePosition: source.source_position
             };
+            dragSourceEquipmentId = textValue(source.source_equipment_id);
+            syncEquipmentRowStates();
             visual.classList.add("is-dragging");
             if (event.dataTransfer) {
                 event.dataTransfer.effectAllowed = "move";
@@ -860,6 +930,9 @@
         var main = createElement("span", "deputy-equipment-main");
         main.appendChild(createElement("strong", "", equipment.label || "Техника"));
         if (equipment.model_label) main.appendChild(createElement("small", "", equipment.model_label));
+        var stateBadge = createElement("span", "deputy-equipment-state", "Выбрано");
+        stateBadge.setAttribute("aria-hidden", "true");
+        main.appendChild(stateBadge);
         var issue = attentionLabel(row);
         var status = textValue(equipment.status_label);
         var note = issue || (!neutralStatus(status) ? status : "");
@@ -906,7 +979,8 @@
             button.addEventListener("click", function () {
                 var source = sourceForEmployee(employee);
                 var target = currentSlot;
-                closeDialog(candidateDialog);
+                closeDialog(candidateDialog, { preserveEquipmentActive: true });
+                setActiveEquipmentRow(target.row);
                 saveSlot(target.row, target.slot, employee.id, source, target.position);
             });
             candidateList.appendChild(button);
@@ -951,6 +1025,7 @@
             ? (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник")
             : (state.role.code === "driver" ? "Водитель" : "Машинист");
         currentSlot = { row: row, slot: slot, position: position };
+        setActiveEquipmentRow(row);
         if (candidateContext) {
             candidateContext.textContent = [row.equipment && row.equipment.label, slot.label, positionLabel]
                 .filter(Boolean).join(" · ");
@@ -1102,17 +1177,23 @@
             if (!planEditable() || saving) return;
             event.preventDefault();
             button.classList.add("is-drag-over");
+            setActiveEquipmentRow(row);
+            setDragTargetEquipmentRow(row);
             if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
         });
         button.addEventListener("dragleave", function () {
             button.classList.remove("is-drag-over");
+            clearDragTargetEquipmentRow(row);
         });
         button.addEventListener("drop", function (event) {
             if (!planEditable() || saving) return;
             event.preventDefault();
             button.classList.remove("is-drag-over");
             var payload = dropPayloadFromEvent(event);
-            if (!payload || !payload.employeeId) return;
+            if (!payload || !payload.employeeId) {
+                finishDrag();
+                return;
+            }
             var employee = state.employees.concat(
                 state.rows.reduce(function (items, candidateRow) {
                     (candidateRow.slots || []).forEach(function (candidateSlot) {
@@ -1124,14 +1205,19 @@
             ).find(function (candidate) {
                 return textValue(candidate.id) === textValue(payload.employeeId);
             });
-            if (employee && !employeeCanFillPosition(employee, position)) return;
+            if (employee && !employeeCanFillPosition(employee, position)) {
+                finishDrag();
+                return;
+            }
             if (
                 textValue(payload.sourceEquipmentId) === textValue(row.equipment && row.equipment.id)
                 && textValue(payload.sourceShiftType) === textValue(slot.shift_type)
                 && textValue(payload.sourcePosition || "primary") === textValue(position)
             ) {
+                finishDrag();
                 return;
             }
+            finishDrag();
             saveSlot(row, slot, payload.employeeId, {
                 source_equipment_id: payload.sourceEquipmentId,
                 source_shift_type: payload.sourceShiftType,
@@ -1175,8 +1261,12 @@
         var tbody = document.createElement("tbody");
         rows.forEach(function (row) {
             var tr = document.createElement("tr");
+            tr.classList.add("deputy-equipment-row");
+            tr.setAttribute("data-equipment-id", equipmentRowId(row));
             tr.classList.toggle("has-attention", Boolean(row.attention || row.issue));
             tr.classList.toggle("has-conflict", rowHasConflict(row));
+            tr.addEventListener("pointerdown", function () { setActiveEquipmentRow(row); });
+            tr.addEventListener("focusin", function () { setActiveEquipmentRow(row); });
             var equipmentCell = document.createElement("td");
             equipmentCell.appendChild(createEquipmentCell(row));
             tr.appendChild(equipmentCell);
@@ -1194,6 +1284,7 @@
         });
         table.appendChild(tbody);
         board.appendChild(table);
+        syncEquipmentRowStates();
     }
 
     function updatePublishButton() {
@@ -1521,8 +1612,10 @@
     if (clearSlotButton) {
         clearSlotButton.addEventListener("click", function () {
             if (!currentSlot) return;
-            closeDialog(candidateDialog);
-            saveSlot(currentSlot.row, currentSlot.slot, null, null, currentSlot.position);
+            var target = currentSlot;
+            closeDialog(candidateDialog, { preserveEquipmentActive: true });
+            setActiveEquipmentRow(target.row);
+            saveSlot(target.row, target.slot, null, null, target.position);
         });
     }
     if (publishButton) publishButton.addEventListener("click", openPublishConfirmation);
@@ -1560,6 +1653,13 @@
         });
     }
     if (candidateDialog) {
+        candidateDialog.addEventListener("close", function () {
+            if (candidateDialog.hasAttribute("data-preserve-equipment-active")) {
+                candidateDialog.removeAttribute("data-preserve-equipment-active");
+                return;
+            }
+            clearActiveEquipmentRow();
+        });
         candidateDialog.addEventListener("click", function (event) {
             if (event.target === candidateDialog) closeDialog(candidateDialog);
         });
@@ -1578,6 +1678,22 @@
         if (event.key === "Escape" && photoDialog && photoDialog.open) closeDialog(photoDialog);
         if (event.key === "Escape" && notice && !notice.hidden) hideNotice();
     });
+    document.addEventListener("pointerdown", function (event) {
+        if (!event.target || typeof event.target.closest !== "function") return;
+        if (event.target.closest(".deputy-equipment-row")) return;
+        if (candidateDialog && candidateDialog.contains(event.target)) return;
+        if (recordDialog && recordDialog.contains(event.target)) return;
+        if (photoDialog && photoDialog.contains(event.target)) return;
+        clearActiveEquipmentRow();
+    });
+    document.addEventListener("focusin", function (event) {
+        if (!event.target || typeof event.target.closest !== "function") return;
+        if (event.target.closest(".deputy-equipment-row")) return;
+        if (candidateDialog && candidateDialog.contains(event.target)) return;
+        if (recordDialog && recordDialog.contains(event.target)) return;
+        if (photoDialog && photoDialog.contains(event.target)) return;
+        clearActiveEquipmentRow();
+    });
     document.addEventListener("dragover", moveDragPreview);
     document.addEventListener("drop", finishDrag);
 
@@ -1586,6 +1702,7 @@
             finishDrag();
             currentSlot = null;
             closeDialog(candidateDialog);
+            clearActiveEquipmentRow();
             closeDialog(publishDialog);
             closeDialog(temporaryTransferDialog);
         }

@@ -714,8 +714,10 @@ button.deputy-avatar {
 .deputy-assignment-table {
     width: 100%;
     min-width: 760px;
+    padding: 0 6px 6px;
     border-collapse: separate;
-    border-spacing: 0;
+    border-spacing: 0 6px;
+    background: var(--admin-panel-soft);
     table-layout: fixed;
 }
 
@@ -750,29 +752,71 @@ button.deputy-avatar {
     width: 38%;
 }
 
-.deputy-assignment-table td {
-    height: auto;
-    padding: 5px 7px;
-    border-bottom: 1px solid var(--admin-line-soft);
-    background: var(--admin-panel);
-    vertical-align: middle;
+.deputy-assignment-table tbody tr {
+    --deputy-row-status-accent: transparent;
+    --deputy-row-border: var(--admin-line);
+    --deputy-row-fill: var(--admin-panel);
+    --deputy-row-equipment-fill: color-mix(in srgb, var(--admin-green) 4%, var(--admin-panel));
 }
 
-.deputy-assignment-table td + td,
+.deputy-assignment-table tbody td {
+    height: auto;
+    padding: 5px 7px;
+    border-top: 1px solid var(--deputy-row-border);
+    border-bottom: 1px solid var(--deputy-row-border);
+    background: var(--deputy-row-fill);
+    vertical-align: middle;
+    transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.deputy-assignment-table tbody td + td,
 .deputy-assignment-table th + th {
     border-left: 1px solid var(--admin-line-soft);
 }
 
-.deputy-assignment-table tr:last-child td {
-    border-bottom: 0;
+.deputy-assignment-table tbody td:first-child {
+    border-left: 1px solid var(--deputy-row-border);
+    border-radius: 8px 0 0 8px;
+    background: var(--deputy-row-equipment-fill);
+    box-shadow: inset 4px 0 0 var(--deputy-row-status-accent);
 }
 
-.deputy-assignment-table tr.has-attention td:first-child {
-    box-shadow: inset 3px 0 0 var(--admin-yellow);
+.deputy-assignment-table tbody td:last-child {
+    border-right: 1px solid var(--deputy-row-border);
+    border-radius: 0 8px 8px 0;
 }
 
-.deputy-assignment-table tr.has-conflict td:first-child {
-    box-shadow: inset 3px 0 0 var(--admin-red);
+.deputy-assignment-table tbody tr:hover,
+.deputy-assignment-table tbody tr:focus-within {
+    --deputy-row-fill: color-mix(in srgb, var(--admin-green) 4%, var(--admin-panel));
+    --deputy-row-equipment-fill: color-mix(in srgb, var(--admin-green) 9%, var(--admin-panel));
+}
+
+.deputy-assignment-table tbody tr.has-attention {
+    --deputy-row-status-accent: var(--admin-yellow);
+}
+
+.deputy-assignment-table tbody tr.has-conflict {
+    --deputy-row-status-accent: var(--admin-red);
+    --deputy-row-border: color-mix(in srgb, var(--admin-red) 60%, var(--admin-line));
+}
+
+.deputy-assignment-table tbody tr.is-active-equipment {
+    --deputy-row-border: color-mix(in srgb, var(--admin-green) 72%, var(--admin-line));
+    --deputy-row-fill: color-mix(in srgb, var(--admin-green) 7%, var(--admin-panel));
+    --deputy-row-equipment-fill: color-mix(in srgb, var(--admin-green) 13%, var(--admin-panel));
+}
+
+.deputy-assignment-table tbody tr.is-drag-source {
+    --deputy-row-border: color-mix(in srgb, var(--admin-cyan) 58%, var(--admin-line));
+    --deputy-row-fill: color-mix(in srgb, var(--admin-cyan-soft) 32%, var(--admin-panel));
+    --deputy-row-equipment-fill: color-mix(in srgb, var(--admin-cyan-soft) 62%, var(--admin-panel));
+}
+
+.deputy-assignment-table tbody tr.is-drop-target {
+    --deputy-row-border: var(--admin-green);
+    --deputy-row-fill: color-mix(in srgb, var(--admin-green) 10%, var(--admin-panel));
+    --deputy-row-equipment-fill: color-mix(in srgb, var(--admin-green) 16%, var(--admin-panel));
 }
 
 .deputy-equipment-cell {
@@ -797,7 +841,19 @@ button.deputy-avatar {
     display: grid;
     width: 46px;
     height: 46px;
+    box-sizing: border-box;
     place-items: center;
+    padding: 3px;
+    border: 1px solid color-mix(in srgb, var(--admin-green) 20%, var(--admin-line));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--admin-green) 7%, var(--admin-panel));
+    transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.deputy-equipment-row.is-active-equipment .deputy-equipment-icon,
+.deputy-equipment-row.is-drop-target .deputy-equipment-icon {
+    border-color: color-mix(in srgb, var(--admin-green) 64%, var(--admin-line));
+    background: color-mix(in srgb, var(--admin-green) 14%, var(--admin-panel));
 }
 
 .deputy-equipment-icon img {
@@ -819,7 +875,8 @@ button.deputy-avatar {
 }
 
 .deputy-equipment-main strong {
-    font-size: 14px;
+    color: var(--admin-ink);
+    font-size: 15px;
     font-weight: 900;
 }
 
@@ -828,6 +885,34 @@ button.deputy-avatar {
     color: var(--admin-muted);
     font-size: 11px;
     font-weight: 800;
+}
+
+.deputy-equipment-state {
+    display: inline-flex;
+    align-items: center;
+    min-height: 13px;
+    margin-top: 3px;
+    padding: 1px 5px;
+    border: 1px solid color-mix(in srgb, var(--admin-green) 44%, var(--admin-line));
+    border-radius: 999px;
+    background: var(--admin-green-soft);
+    color: var(--admin-green);
+    font-size: 8px;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    visibility: hidden;
+}
+
+.deputy-equipment-state.is-visible {
+    visibility: visible;
+}
+
+.deputy-equipment-row.is-drag-source .deputy-equipment-state {
+    border-color: color-mix(in srgb, var(--admin-cyan) 46%, var(--admin-line));
+    background: var(--admin-cyan-soft);
+    color: var(--admin-cyan);
 }
 
 .deputy-equipment-note {
@@ -1944,6 +2029,20 @@ button.deputy-avatar {
         min-height: 470px;
     }
 
+    .deputy-assignment-table th:first-child,
+    .deputy-assignment-table tbody td:first-child {
+        position: sticky;
+        left: 0;
+    }
+
+    .deputy-assignment-table th:first-child {
+        z-index: 6;
+    }
+
+    .deputy-assignment-table tbody td:first-child {
+        z-index: 2;
+    }
+
     .deputy-dialog-actions {
         flex-wrap: wrap;
     }
@@ -2033,5 +2132,10 @@ button.deputy-avatar {
 @media (prefers-reduced-motion: reduce) {
     .deputy-autosave-state.is-saving .deputy-autosave-dot {
         animation: none;
+    }
+
+    .deputy-assignment-table tbody td,
+    .deputy-equipment-icon {
+        transition: none;
     }
 }

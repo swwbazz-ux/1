@@ -547,7 +547,7 @@ test(
     async () => {
         const runtime = createDeputyRuntime({locked: true});
         const card = runtime.employeeList.querySelector(".deputy-employee-card");
-        const slot = runtime.board.querySelector(".deputy-slot");
+        const slot = runtime.board.querySelector(".deputy-crew-position");
         const savedLabelBefore = runtime.autosaveText.textContent;
 
         assert.ok(card, "employee card was not rendered");
@@ -604,14 +604,23 @@ test("unlocked deputy drag-and-drop persists exactly once", async () => {
     const runtime = createDeputyRuntime({locked: false});
     const card = runtime.employeeList.querySelector(".deputy-employee-card");
     const slot = runtime.board.querySelector(".deputy-crew-position");
+    const equipmentRow = runtime.board.querySelector(".deputy-equipment-row");
+    const equipmentState = equipmentRow.querySelector(".deputy-equipment-state");
 
     assert.equal(card.draggable, true);
     card.dispatchEvent(dragEvent("dragstart"));
+    slot.dispatchEvent(dragEvent("dragover"));
+    assert.equal(equipmentRow.classList.contains("is-drop-target"), true);
+    assert.equal(equipmentState.textContent, "Сюда");
     slot.dispatchEvent(dragEvent("drop"));
     await flushPromises();
 
     assert.equal(runtime.fetchCalls.length, 1);
     assert.equal(runtime.fetchCalls[0].init.method, "POST");
+    assert.equal(equipmentRow.classList.contains("is-drop-target"), false);
+    assert.equal(equipmentRow.classList.contains("is-active-equipment"), true);
+    assert.equal(equipmentRow.getAttribute("aria-current"), "true");
+    assert.equal(equipmentState.textContent, "Выбрано");
     assert.ok(
         runtime.board.querySelector(".deputy-slot-person"),
         "server payload was not applied after the single unlocked POST"
@@ -644,11 +653,20 @@ test("candidate picker filters eligible employees live and resets on reopen", as
         payload: planningPayload({employees}),
     });
     const assignButton = runtime.board.querySelector(".deputy-slot-empty");
+    const equipmentRow = runtime.board.querySelector(".deputy-equipment-row");
+    const equipmentState = equipmentRow.querySelector(".deputy-equipment-state");
 
     assert.ok(assignButton, "empty slot action was not rendered");
+    assert.ok(equipmentRow, "equipment row interaction hook was not rendered");
+    assert.equal(equipmentRow.getAttribute("data-equipment-id"), "501");
+    assert.equal(equipmentRow.classList.contains("is-active-equipment"), false);
     assignButton.dispatchEvent({type: "click"});
 
     assert.equal(runtime.candidateDialog.hasAttribute("open"), true);
+    assert.equal(equipmentRow.classList.contains("is-active-equipment"), true);
+    assert.equal(equipmentRow.getAttribute("aria-current"), "true");
+    assert.equal(equipmentState.classList.contains("is-visible"), true);
+    assert.equal(equipmentState.textContent, "Выбрано");
     assert.equal(runtime.candidateSearchInput.focused, true);
     assert.equal(
         runtime.candidateList.querySelectorAll(".deputy-candidate").length,
@@ -695,7 +713,10 @@ test("candidate picker filters eligible employees live and resets on reopen", as
     runtime.candidateSearchInput.value = "сахаров";
     runtime.candidateSearchInput.dispatchEvent({type: "input"});
     runtime.candidateDialog.removeAttribute("open");
+    runtime.candidateDialog.dispatchEvent({type: "close"});
+    assert.equal(equipmentRow.classList.contains("is-active-equipment"), false);
     assignButton.dispatchEvent({type: "click"});
+    assert.equal(equipmentRow.classList.contains("is-active-equipment"), true);
     assert.equal(runtime.candidateSearchInput.value, "");
     assert.equal(
         runtime.candidateList.querySelectorAll(".deputy-candidate").length,
@@ -716,6 +737,7 @@ test("candidate picker filters eligible employees live and resets on reopen", as
         "filtered candidate selection saved another employee"
     );
     assert.equal(JSON.parse(runtime.fetchCalls[0].init.body).position, "primary");
+    assert.equal(equipmentRow.classList.contains("is-active-equipment"), true);
 });
 
 class CacheStub {

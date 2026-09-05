@@ -552,6 +552,11 @@ class DeputyPlanningViewTests(TestCase):
             stylesheet,
             r'\.deputy-assignment-table th:not\(:first-child\)\s*\{\s*width:\s*38%;',
         )
+        self.assertIn('border-spacing: 0 6px;', stylesheet)
+        self.assertIn('.deputy-assignment-table tbody tr.is-active-equipment', stylesheet)
+        self.assertIn('.deputy-assignment-table tbody tr.is-drop-target', stylesheet)
+        self.assertIn('.deputy-equipment-state.is-visible', stylesheet)
+        self.assertIn('.deputy-assignment-table tbody td:first-child {', stylesheet)
 
     def test_get_board_builds_driver_plan_with_day_and_night_slots(self):
         response = self.client.get(
