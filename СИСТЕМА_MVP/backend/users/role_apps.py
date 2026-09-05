@@ -290,7 +290,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v55',
+        shell_version='dispatcher-desktop-shell-v56',
     ),
     RoleApp(
         role_code='settlement_clerk',
