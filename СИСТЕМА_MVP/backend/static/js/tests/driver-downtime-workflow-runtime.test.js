@@ -604,7 +604,7 @@ test("realtime waiting_loading to loaded-trip transition opens Work from server 
         {filename: "templates/users/driver_shift.html#operational-refresh"}
     );
 
-    assert.equal(await context.refresh({version: 81234}), true);
+    assert.equal((await context.refresh({version: 81234})).applied, true);
     assert.equal(replaced, true);
     assert.equal(freshShell.dataset.activeTab, "work");
     assert.equal(

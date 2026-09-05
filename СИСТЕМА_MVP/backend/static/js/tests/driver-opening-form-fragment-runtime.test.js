@@ -329,7 +329,8 @@ test("driver opening readings survive blur and realtime fragment event; reset ap
 
     const deferred = await runtime.refresh({version: 83519});
 
-    assert.equal(deferred, false);
+    assert.equal(deferred.deferred, true);
+    assert.equal(deferred.reason, "driver_busy");
     assert.deepEqual(
         runtime.inputs.map((input) => input.value),
         ["321", "654", "987"]
@@ -347,7 +348,7 @@ test("driver opening readings survive blur and realtime fragment event; reset ap
 
     const applied = await runtime.refresh({version: 83519});
 
-    assert.equal(applied, true);
+    assert.equal(applied.applied, true);
     assert.equal(runtime.counters.fragmentRequests, 1);
     assert.equal(runtime.counters.rootReplacements, 1);
     assert.equal(runtime.counters.shellRebinds, 1);
@@ -361,7 +362,7 @@ test("driver opening form errors and pending submit both block fragment replacem
     });
     errorRuntime.bind(errorRuntime.shell);
 
-    assert.equal(await errorRuntime.refresh({version: 83519}), false);
+    assert.equal((await errorRuntime.refresh({version: 83519})).deferred, true);
     assert.equal(errorRuntime.counters.fragmentRequests, 0);
 
     const pendingRuntime = createRuntime({
@@ -377,7 +378,7 @@ test("driver opening form errors and pending submit both block fragment replacem
 
     assert.equal(pendingRuntime.form.dataset.driverShiftOpeningPending, "true");
     assert.equal(pendingRuntime.button.classList.contains("is-pending"), true);
-    assert.equal(await pendingRuntime.refresh({version: 83519}), false);
+    assert.equal((await pendingRuntime.refresh({version: 83519})).deferred, true);
     assert.equal(pendingRuntime.counters.fragmentRequests, 0);
     assert.equal(pendingRuntime.counters.rootReplacements, 0);
 });

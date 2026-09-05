@@ -4644,20 +4644,20 @@ function syncDriverTabMarkup(shell, tab) {
 window.applyOperationalStateRefresh = function (context) {
     var currentShell = document.querySelector("[data-driver-shell]");
     if (!currentShell || !window.AppOperationalFragment || isDriverOperationalRefreshUnsafe(currentShell)) {
-        return Promise.resolve(false);
+        return Promise.resolve({deferred: true, reason: "driver_busy"});
     }
     var activeTab = currentShell.dataset.activeTab || "work";
     var targetVersion = Number(context && context.version || 0);
     return window.AppOperationalFragment.request("driver", targetVersion).then(function (payload) {
         var oldShell = document.querySelector("[data-driver-shell]");
         if (!oldShell || isDriverOperationalRefreshUnsafe(oldShell)) {
-            return false;
+            return {deferred: true, reason: "driver_busy"};
         }
         var freshShell = window.AppOperationalFragment.parseRoot(
             payload.html,
             "[data-driver-shell]"
         );
-        if (!freshShell) return false;
+        if (!freshShell) return {deferred: true, reason: "driver_fragment_invalid"};
         var previousDowntimeCard = oldShell.querySelector("[data-driver-active-downtime-flow]");
         var previousDowntimeFlow = previousDowntimeCard
             ? String(previousDowntimeCard.dataset.driverActiveDowntimeFlow || "")
@@ -4697,9 +4697,9 @@ window.applyOperationalStateRefresh = function (context) {
         if (nextAssignmentKey && nextAssignmentKey !== previousAssignmentKey) {
             playDriverAssignmentAlert();
         }
-        return true;
+        return {applied: true};
     }).catch(function () {
-        return false;
+        return {deferred: true, reason: "driver_refresh_failed"};
     });
 };
 
