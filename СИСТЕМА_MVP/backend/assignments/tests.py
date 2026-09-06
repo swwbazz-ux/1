@@ -517,6 +517,28 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertNotIn('101', garage_numbers)
         self.assertIn('102', garage_numbers)
 
+    def test_mining_master_garage_does_not_truncate_trucks_or_rename_test_number(self):
+        truck_type = self.free_truck.equipment_type
+        Equipment.objects.bulk_create([
+            Equipment(equipment_type=truck_type, garage_number=str(number))
+            for number in range(1, 64)
+        ])
+        Equipment.objects.create(equipment_type=truck_type, garage_number='ТЕСТ-1')
+
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        dashboard = response.context['dispatcher_dashboard']
+        desktop_names = [str(tile['name']) for tile in dashboard['truck_garage_tiles']]
+        mobile_names = [str(tile['name']) for tile in dashboard['mobile_truck_garage_tiles']]
+        self.assertEqual(len(desktop_names), 64)
+        self.assertEqual(len(mobile_names), 64)
+        self.assertIn('63', desktop_names)
+        self.assertIn('63', mobile_names)
+        self.assertIn('ТЕСТ-1', desktop_names)
+        self.assertIn('ТЕСТ-1', mobile_names)
+        self.assertNotIn('53', desktop_names)
+        self.assertNotIn('53', mobile_names)
+
     def test_active_trip_sets_truck_status_to_loaded_waiting_unload(self):
         rock_type = RockType.objects.create(name='Щебень')
         dump_point = DumpPoint.objects.create(name='Накопитель 1')

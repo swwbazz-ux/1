@@ -1,5 +1,6 @@
 import json
 import re
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -30,6 +31,7 @@ from users.models import (
     TemporaryWorkTransfer,
     WorkSchedule,
 )
+from users.role_apps import APP_CONTRACT_VERSION, ROLE_APPS_BY_CODE, get_role_app
 
 from .models import AssignmentStatus, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment, WorkShiftType
 from .services import get_active_equipment_assignment, get_or_create_crew_draft, set_active_equipment_assignment
@@ -136,7 +138,7 @@ class DeputyPlanningViewTests(TestCase):
         )
         return plan
 
-    def autosave_slot(self, plan, *, equipment, shift_type, employee):
+    def autosave_slot(self, plan, *, equipment, shift_type, employee, position='primary'):
         response = self.client.post(
             reverse('deputy_mining_manager_slot'),
             data=json.dumps({
@@ -145,6 +147,7 @@ class DeputyPlanningViewTests(TestCase):
                 'equipment_id': equipment.id,
                 'shift_type': shift_type,
                 'employee_id': employee.id if employee else None,
+                'position': position,
             }),
             content_type='application/json',
             HTTP_HOST='localhost',
@@ -395,8 +398,13 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['Cache-Control'], 'no-cache')
         self.assertEqual(response['Service-Worker-Allowed'], '/deputy-mining-manager/')
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
+        deputy_app = get_role_app('deputy_mining_manager')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
-        self.assertIn('deputy-mining-manager-desktop-shell-v14', script)
+        self.assertIn(
+            f'const CACHE_NAME = {json.dumps(deputy_app.shell_version)};',
+            script,
+        )
+        self.assertEqual(response['X-App-Shell-Version'], deputy_app.shell_version)
         self.assertIn('/static/js/role-readonly.js', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
         self.assertIn('removeCachedPlanningDocuments()', script)
@@ -429,6 +437,35 @@ class DeputyPlanningViewTests(TestCase):
         for static_url in re.findall(r'"(/static/[^"?]+)"', core_assets):
             with self.subTest(core_asset=static_url):
                 self.assertIsNotNone(finders.find(static_url.removeprefix('/static/')))
+
+    def test_deputy_service_worker_contract_is_rendered_from_role_registry(self):
+        role_code = 'deputy_mining_manager'
+        original_app = get_role_app(role_code)
+        sentinel_app = replace(
+            original_app,
+            shell_version='deputy-mining-manager-desktop-shell-v999-test',
+        )
+
+        with patch.dict(ROLE_APPS_BY_CODE, {role_code: sentinel_app}):
+            response = Client().get(
+                reverse('deputy_mining_manager_service_worker'),
+                HTTP_HOST='localhost',
+            )
+
+        script = response.content.decode('utf-8')
+        self.assertEqual(response['X-App-Shell-Version'], sentinel_app.shell_version)
+        self.assertIn(
+            f'const APP_CONTRACT_VERSION = {json.dumps(APP_CONTRACT_VERSION)};',
+            script,
+        )
+        self.assertIn(f'const ROLE_CODE = {json.dumps(role_code)};', script)
+        self.assertIn(
+            f'const CACHE_NAME = {json.dumps(sentinel_app.shell_version)};',
+            script,
+        )
+        self.assertNotIn('__APP_CONTRACT_VERSION__', script)
+        self.assertNotIn('__ROLE_CODE__', script)
+        self.assertNotIn('__CACHE_NAME__', script)
 
     def test_deputy_pwa_registration_updates_without_forced_page_reload(self):
         registration_script = (
@@ -515,6 +552,11 @@ class DeputyPlanningViewTests(TestCase):
             stylesheet,
             r'\.deputy-assignment-table th:not\(:first-child\)\s*\{\s*width:\s*38%;',
         )
+        self.assertIn('border-spacing: 0 6px;', stylesheet)
+        self.assertIn('.deputy-assignment-table tbody tr.is-active-equipment', stylesheet)
+        self.assertIn('.deputy-assignment-table tbody tr.is-drop-target', stylesheet)
+        self.assertIn('.deputy-equipment-state.is-visible', stylesheet)
+        self.assertIn('.deputy-assignment-table tbody td:first-child {', stylesheet)
 
     def test_get_board_builds_driver_plan_with_day_and_night_slots(self):
         response = self.client.get(
@@ -536,6 +578,221 @@ class DeputyPlanningViewTests(TestCase):
             reverse('deputy_mining_manager_export', args=[payload['plan']['id']]),
         )
         self.assertContains(response, 'data-export-excel', count=1)
+        self.assertContains(response, 'id="deputy-candidate-search"', count=1)
+        self.assertContains(response, 'Поиск по ФИО, должности или телефону', count=1)
+        self.assertContains(response, 'aria-controls="deputy-candidate-list"', count=1)
+        self.assertContains(response, 'id="deputy-candidate-list"', count=1)
+
+    def test_driver_plan_accepts_distinct_day_and_night_trainees(self):
+        day_trainee, _day_access = self.create_employee_with_access(
+            'Петров Дневной Стажёр',
+            self.driver_role,
+            phone='+79000000031',
+            access_code='210031',
+        )
+        night_trainee, _night_access = self.create_employee_with_access(
+            'Сидоров Ночной Стажёр',
+            self.driver_role,
+            phone='+79000000032',
+            access_code='210032',
+        )
+        plan = self.create_draft()
+
+        _response, plan = self.autosave_slot(
+            plan,
+            equipment=self.truck_1,
+            shift_type=WorkShiftType.SHIFT_1,
+            employee=day_trainee,
+            position='secondary',
+        )
+        response, plan = self.autosave_slot(
+            plan,
+            equipment=self.truck_2,
+            shift_type=WorkShiftType.SHIFT_2,
+            employee=night_trainee,
+            position='secondary',
+        )
+
+        self.assertEqual(
+            plan.slots.get(
+                equipment=self.truck_1,
+                shift_type=WorkShiftType.SHIFT_1,
+            ).secondary_employee,
+            day_trainee,
+        )
+        self.assertEqual(
+            plan.slots.get(
+                equipment=self.truck_2,
+                shift_type=WorkShiftType.SHIFT_2,
+            ).secondary_employee,
+            night_trainee,
+        )
+        payload = response.json()['payload']
+        self.assertEqual(payload['secondary_employee_label'], 'Стажёр')
+        self.assertEqual(payload['summary']['secondary_assigned_count'], 2)
+        self.original_assignment.refresh_from_db()
+        self.assertIsNone(self.original_assignment.ended_at)
+
+    def test_driver_can_move_between_primary_and_trainee_positions_without_duplicate(self):
+        plan = self.create_draft()
+
+        _response, plan = self.autosave_slot(
+            plan,
+            equipment=self.truck_1,
+            shift_type=WorkShiftType.SHIFT_1,
+            employee=self.driver,
+            position='secondary',
+        )
+
+        slot = plan.slots.get(
+            equipment=self.truck_1,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        self.assertIsNone(slot.employee)
+        self.assertEqual(slot.secondary_employee, self.driver)
+        self.assertEqual(
+            plan.slots.filter(employee=self.driver).count()
+            + plan.slots.filter(secondary_employee=self.driver).count(),
+            1,
+        )
+
+    def test_excavator_plan_accepts_assistant_but_rejects_driver_as_assistant(self):
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        excavator_model = EquipmentModel.objects.create(
+            equipment_type=excavator_type,
+            name='Экскаватор тестовый',
+            fuel_capacity_limit_l='3000',
+        )
+        excavator = Equipment.objects.create(
+            equipment_type=excavator_type,
+            model=excavator_model,
+            garage_number='ЭКС-01',
+        )
+        assistant_specialization = ProductionSpecialization.objects.get(
+            code='assistant_excavator_operator',
+        )
+        assistant_position = PersonnelPosition.objects.get(code='position_009')
+        assistant = Employee.objects.create(
+            full_name='Кузнецов Помощник Машиниста',
+            phone='+79000000041',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            personnel_position=assistant_position,
+            base_specialization=assistant_specialization,
+        )
+        plan, _created = get_or_create_crew_draft(
+            role=self.excavator_role,
+            actor=self.deputy,
+        )
+
+        response, plan = self.autosave_slot(
+            plan,
+            equipment=excavator,
+            shift_type=WorkShiftType.SHIFT_2,
+            employee=assistant,
+            position='secondary',
+        )
+
+        night_slot = plan.slots.get(
+            equipment=excavator,
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        self.assertEqual(night_slot.secondary_employee, assistant)
+        payload = response.json()['payload']
+        self.assertEqual(payload['secondary_employee_label'], 'Помощник машиниста')
+        self.assertEqual(
+            next(
+                slot for row in payload['rows']
+                for slot in row['slots']
+                if slot['shift_type'] == WorkShiftType.SHIFT_2
+            )['secondary_employee']['id'],
+            assistant.id,
+        )
+
+        forbidden = self.client.post(
+            reverse('deputy_mining_manager_slot'),
+            data=json.dumps({
+                'plan_id': plan.id,
+                'expected_version': plan.version,
+                'equipment_id': excavator.id,
+                'shift_type': WorkShiftType.SHIFT_1,
+                'employee_id': self.driver.id,
+                'position': 'secondary',
+            }),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+        )
+        self.assertEqual(forbidden.status_code, 400)
+        self.assertEqual(forbidden.json()['code'], 'invalid_work_category')
+
+    def test_publish_preserves_trainee_in_next_draft_without_operator_assignment(self):
+        trainee, _trainee_access = self.create_employee_with_access(
+            'Орлов Водитель Стажёр',
+            self.driver_role,
+            phone='+79000000051',
+            access_code='210051',
+        )
+        plan = self.create_draft()
+        _response, plan = self.autosave_slot(
+            plan,
+            equipment=self.truck_2,
+            shift_type=WorkShiftType.SHIFT_1,
+            employee=trainee,
+            position='secondary',
+        )
+
+        response = self.publish(plan)
+
+        self.assertTrue(response.json()['published'])
+        next_payload = response.json()['payload']
+        next_slot = next(
+            slot for row in next_payload['rows']
+            for slot in row['slots']
+            if row['equipment']['id'] == self.truck_2.id
+            and slot['shift_type'] == WorkShiftType.SHIFT_1
+        )
+        self.assertEqual(next_slot['secondary_employee']['id'], trainee.id)
+        self.assertFalse(
+            EquipmentAssignment.objects.filter(
+                employee=trainee,
+                status=AssignmentStatus.ACCEPTED,
+                ended_at__isnull=True,
+            ).exists()
+        )
+
+        exported_sheet = load_workbook(BytesIO(self.client.get(
+            response.json()['payload']['endpoints']['export'],
+            HTTP_HOST='localhost',
+        ).content))['Расстановка']
+        row_index = next(
+            index for index in range(8, exported_sheet.max_row + 1)
+            if exported_sheet.cell(index, 1).value == 'Т-02'
+        )
+        self.assertIn('Стажёр:', exported_sheet.cell(row_index, 3).value)
+        self.assertIn(trainee.full_name, exported_sheet.cell(row_index, 3).value)
+
+    def test_board_refresh_includes_eligible_employee_added_after_draft(self):
+        self.client.get(
+            reverse('deputy_mining_manager_placement'),
+            HTTP_HOST='localhost',
+        )
+        new_driver, _new_access = self.create_employee_with_access(
+            'Петров Новый Водитель',
+            self.driver_role,
+            phone='+79000000020',
+            access_code='210020',
+        )
+
+        response = self.client.get(
+            reverse('deputy_mining_manager_placement'),
+            HTTP_HOST='localhost',
+        )
+
+        employee_ids = {
+            employee['id']
+            for employee in response.context['planning_payload']['employees']
+        }
+        self.assertIn(new_driver.id, employee_ids)
 
     def test_board_and_excel_use_natural_equipment_number_order(self):
         self.truck_1.garage_number = '10'
@@ -789,22 +1046,106 @@ class DeputyPlanningViewTests(TestCase):
             self.truck_1,
         )
 
-    def test_autosave_locks_only_slot_table_with_nullable_employee_join(self):
+    def test_disabled_equipment_disappears_and_returns_full_crew_to_free_pool(self):
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        excavator = Equipment.objects.create(
+            equipment_type=excavator_type,
+            garage_number='ЭКС-ОТКЛ',
+        )
+        operator, _operator_access = self.create_employee_with_access(
+            'Иванов Тестовый Машинист',
+            self.excavator_role,
+            phone='+79000000031',
+            access_code='310031',
+        )
+        set_active_equipment_assignment(
+            employee=operator,
+            role=self.excavator_role,
+            equipment=excavator,
+            shift_type=WorkShiftType.SHIFT_1,
+            assigned_by=self.deputy,
+        )
+        assistant_specialization = ProductionSpecialization.objects.get(
+            code='assistant_excavator_operator',
+        )
+        assistant = Employee.objects.create(
+            full_name='Петров Тестовый Помощник',
+            phone='+79000000032',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            base_specialization=assistant_specialization,
+        )
+        plan, _created = get_or_create_crew_draft(
+            role=self.excavator_role,
+            actor=self.deputy,
+        )
+        night_slot = plan.slots.get(
+            equipment=excavator,
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        night_slot.secondary_employee = assistant
+        night_slot.baseline_secondary_employee = assistant
+        night_slot.save(update_fields=['secondary_employee', 'baseline_secondary_employee'])
+        original_version = plan.version
+        excavator.is_active = False
+        excavator.save(update_fields=['is_active'])
+
+        response = self.client.get(
+            reverse('deputy_mining_manager_placement'),
+            {'role': self.excavator_role.code},
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        plan.refresh_from_db()
+        payload = response.context['planning_payload']
+        self.assertEqual(plan.version, original_version + 1)
+        self.assertFalse(plan.slots.filter(equipment=excavator).exists())
+        self.assertNotIn(
+            excavator.id,
+            {row['equipment']['id'] for row in payload['rows']},
+        )
+        free_employee_ids = {item['id'] for item in payload['employees']}
+        self.assertIn(operator.id, free_employee_ids)
+        self.assertIn(assistant.id, free_employee_ids)
+        self.assertEqual(payload['summary']['conflict_count'], 0)
+
+    def test_autosave_assignment_locks_only_slot_table_with_nullable_employee_joins(self):
         plan = self.create_draft()
+        second_driver, _second_access = self.create_employee_with_access(
+            'Соловьев Алексей Алексеевич',
+            self.driver_role,
+            phone='+79000000032',
+            access_code='210032',
+        )
+        trainee, _trainee_access = self.create_employee_with_access(
+            'Петров Алексей Стажёр',
+            self.driver_role,
+            phone='+79000000033',
+            access_code='210033',
+        )
 
         with patch.object(
             CrewPlanSlot.objects,
             'select_for_update',
             wraps=CrewPlanSlot.objects.select_for_update,
         ) as slot_lock:
+            _response, plan = self.autosave_slot(
+                plan,
+                equipment=self.truck_2,
+                shift_type=WorkShiftType.SHIFT_1,
+                employee=second_driver,
+            )
             self.autosave_slot(
                 plan,
-                equipment=self.truck_1,
+                equipment=self.truck_2,
                 shift_type=WorkShiftType.SHIFT_1,
-                employee=None,
+                employee=trainee,
+                position='secondary',
             )
 
-        self.assertTrue(any(
+        self.assertGreaterEqual(slot_lock.call_count, 4)
+        self.assertTrue(all(
             call.kwargs.get('of') == ('self',)
             for call in slot_lock.call_args_list
         ))

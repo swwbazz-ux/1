@@ -141,6 +141,7 @@ class ElementStub extends EventTargetStub {
         this.value = "";
         this.textContent = "";
         this.tabIndex = 0;
+        this.focused = false;
         this.style = {
             setProperty() {},
             removeProperty() {},
@@ -196,6 +197,10 @@ class ElementStub extends EventTargetStub {
             (child) => child !== this
         );
         this.parentNode = null;
+    }
+
+    focus() {
+        this.focused = true;
     }
 
     contains(candidate) {
@@ -271,7 +276,7 @@ class StorageStub {
     }
 }
 
-function planningPayload({assigned = false, version = 1} = {}) {
+function planningPayload({assigned = false, version = 1, employees = null} = {}) {
     const employee = {
         id: 101,
         full_name: "Иванов Иван",
@@ -308,7 +313,7 @@ function planningPayload({assigned = false, version = 1} = {}) {
             watch_periods: [],
         },
         categories: [],
-        employees: assigned ? [] : [employee],
+        employees: assigned ? [] : (employees || [employee]),
         rows: [{
             equipment: {
                 id: 501,
@@ -350,7 +355,7 @@ function createDeputyRuntime(options = {}) {
     const window = new EventTargetStub();
     const shell = appendRootNode(document, "data-admin-theme");
     const root = appendRootNode(document, "data-deputy-planning-root", "main");
-    appendDataNode(document, planningPayload());
+    appendDataNode(document, options.payload || planningPayload());
 
     const searchInput = new ElementStub("input", {"data-planning-search": ""});
     const employeePool = new ElementStub("section", {"data-employee-pool-drop": ""});
@@ -362,6 +367,13 @@ function createDeputyRuntime(options = {}) {
     const autosaveText = new ElementStub("span", {"data-autosave-text": ""});
     const publishButton = new ElementStub("button", {"data-publish-button": ""});
     const exportButton = new ElementStub("a", {"data-export-excel": ""});
+    const candidateDialog = new ElementStub("dialog", {"data-candidate-dialog": ""});
+    const candidateContext = new ElementStub("p", {"data-candidate-context": ""});
+    const candidateSearchInput = new ElementStub("input", {"data-candidate-search": ""});
+    const candidateSearchClear = new ElementStub("button", {"data-candidate-search-clear": ""});
+    const candidateCount = new ElementStub("span", {"data-candidate-count": ""});
+    const candidateList = new ElementStub("div", {"data-candidate-list": ""});
+    const clearSlotButton = new ElementStub("button", {"data-clear-slot": ""});
 
     [
         searchInput,
@@ -375,6 +387,16 @@ function createDeputyRuntime(options = {}) {
         publishButton,
         exportButton,
     ].forEach((node) => root.appendChild(node));
+
+    [
+        candidateContext,
+        candidateSearchInput,
+        candidateSearchClear,
+        candidateCount,
+        candidateList,
+        clearSlotButton,
+    ].forEach((node) => candidateDialog.appendChild(node));
+    document.body.appendChild(candidateDialog);
 
     const fetchCalls = [];
     let locked = options.locked !== false;
@@ -468,6 +490,11 @@ function createDeputyRuntime(options = {}) {
         employeeEmpty,
         board,
         autosaveText,
+        candidateDialog,
+        candidateSearchInput,
+        candidateSearchClear,
+        candidateCount,
+        candidateList,
         fetchCalls,
         setLocked(value) {
             locked = Boolean(value);
@@ -520,7 +547,7 @@ test(
     async () => {
         const runtime = createDeputyRuntime({locked: true});
         const card = runtime.employeeList.querySelector(".deputy-employee-card");
-        const slot = runtime.board.querySelector(".deputy-slot");
+        const slot = runtime.board.querySelector(".deputy-crew-position");
         const savedLabelBefore = runtime.autosaveText.textContent;
 
         assert.ok(card, "employee card was not rendered");
@@ -576,19 +603,141 @@ test("saveSlot and postJson both recheck a locked contract", async () => {
 test("unlocked deputy drag-and-drop persists exactly once", async () => {
     const runtime = createDeputyRuntime({locked: false});
     const card = runtime.employeeList.querySelector(".deputy-employee-card");
-    const slot = runtime.board.querySelector(".deputy-slot");
+    const slot = runtime.board.querySelector(".deputy-crew-position");
+    const equipmentRow = runtime.board.querySelector(".deputy-equipment-row");
+    const equipmentState = equipmentRow.querySelector(".deputy-equipment-state");
 
     assert.equal(card.draggable, true);
     card.dispatchEvent(dragEvent("dragstart"));
+    slot.dispatchEvent(dragEvent("dragover"));
+    assert.equal(equipmentRow.classList.contains("is-drop-target"), true);
+    assert.equal(equipmentState.textContent, "Сюда");
     slot.dispatchEvent(dragEvent("drop"));
     await flushPromises();
 
     assert.equal(runtime.fetchCalls.length, 1);
     assert.equal(runtime.fetchCalls[0].init.method, "POST");
+    assert.equal(equipmentRow.classList.contains("is-drop-target"), false);
+    assert.equal(equipmentRow.classList.contains("is-active-equipment"), true);
+    assert.equal(equipmentRow.getAttribute("aria-current"), "true");
+    assert.equal(equipmentState.textContent, "Выбрано");
     assert.ok(
         runtime.board.querySelector(".deputy-slot-person"),
         "server payload was not applied after the single unlocked POST"
     );
+});
+
+test("candidate picker filters eligible employees live and resets on reopen", async () => {
+    const employees = [
+        {
+            id: 101,
+            full_name: "Сахаров Виталий Владимирович",
+            position_label: "Водитель",
+            phone: "+79000000001",
+        },
+        {
+            id: 102,
+            full_name: "Соловьёв Алексей Алексеевич",
+            position_label: "Водитель автомобиля",
+            phone: "+79000000002",
+        },
+        {
+            id: 103,
+            full_name: "Сергеев Василий Владимирович",
+            position_label: "Водитель",
+            phone: "+79000000003",
+        },
+    ];
+    const runtime = createDeputyRuntime({
+        locked: false,
+        payload: planningPayload({employees}),
+    });
+    const assignButton = runtime.board.querySelector(".deputy-slot-empty");
+    const equipmentRow = runtime.board.querySelector(".deputy-equipment-row");
+    const equipmentState = equipmentRow.querySelector(".deputy-equipment-state");
+
+    assert.ok(assignButton, "empty slot action was not rendered");
+    assert.ok(equipmentRow, "equipment row interaction hook was not rendered");
+    assert.equal(equipmentRow.getAttribute("data-equipment-id"), "501");
+    assert.equal(equipmentRow.classList.contains("is-active-equipment"), false);
+    assignButton.dispatchEvent({type: "click"});
+
+    assert.equal(runtime.candidateDialog.hasAttribute("open"), true);
+    assert.equal(equipmentRow.classList.contains("is-active-equipment"), true);
+    assert.equal(equipmentRow.getAttribute("aria-current"), "true");
+    assert.equal(equipmentState.classList.contains("is-visible"), true);
+    assert.equal(equipmentState.textContent, "Выбрано");
+    assert.equal(runtime.candidateSearchInput.focused, true);
+    assert.equal(
+        runtime.candidateList.querySelectorAll(".deputy-candidate").length,
+        3
+    );
+    assert.equal(runtime.candidateCount.textContent, "Кандидатов: 3");
+
+    runtime.candidateSearchInput.value = "соловьев алек";
+    runtime.candidateSearchInput.dispatchEvent({type: "input"});
+
+    const matches = runtime.candidateList.querySelectorAll(".deputy-candidate");
+    assert.equal(matches.length, 1);
+    assert.equal(matches[0].querySelector("strong").textContent, "Соловьёв Алексей Алексеевич");
+    assert.equal(runtime.candidateCount.textContent, "Найдено: 1 из 3");
+    assert.equal(runtime.candidateSearchClear.hidden, false);
+    assert.equal(runtime.fetchCalls.length, 0, "live search must not save or fetch");
+
+    runtime.candidateSearchInput.dispatchEvent({
+        type: "keydown",
+        key: "ArrowDown",
+        preventDefault() {},
+        stopPropagation() {},
+    });
+    assert.equal(matches[0].focused, true, "keyboard did not reach the first match");
+
+    runtime.candidateSearchInput.value = "нет совпадений";
+    runtime.candidateSearchInput.dispatchEvent({type: "input"});
+    assert.equal(
+        runtime.candidateList.querySelectorAll(".deputy-candidate").length,
+        0
+    );
+    assert.equal(
+        runtime.candidateList.querySelector(".deputy-empty-state").textContent,
+        "По вашему запросу сотрудники не найдены."
+    );
+
+    runtime.candidateSearchClear.dispatchEvent({type: "click"});
+    assert.equal(runtime.candidateSearchInput.value, "");
+    assert.equal(
+        runtime.candidateList.querySelectorAll(".deputy-candidate").length,
+        3
+    );
+
+    runtime.candidateSearchInput.value = "сахаров";
+    runtime.candidateSearchInput.dispatchEvent({type: "input"});
+    runtime.candidateDialog.removeAttribute("open");
+    runtime.candidateDialog.dispatchEvent({type: "close"});
+    assert.equal(equipmentRow.classList.contains("is-active-equipment"), false);
+    assignButton.dispatchEvent({type: "click"});
+    assert.equal(equipmentRow.classList.contains("is-active-equipment"), true);
+    assert.equal(runtime.candidateSearchInput.value, "");
+    assert.equal(
+        runtime.candidateList.querySelectorAll(".deputy-candidate").length,
+        3
+    );
+
+    runtime.candidateSearchInput.value = "+79000000002";
+    runtime.candidateSearchInput.dispatchEvent({type: "input"});
+    const phoneMatch = runtime.candidateList.querySelector(".deputy-candidate");
+    assert.ok(phoneMatch, "phone search did not find the employee");
+    phoneMatch.dispatchEvent({type: "click"});
+    await flushPromises();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(
+        JSON.parse(runtime.fetchCalls[0].init.body).employee_id,
+        102,
+        "filtered candidate selection saved another employee"
+    );
+    assert.equal(JSON.parse(runtime.fetchCalls[0].init.body).position, "primary");
+    assert.equal(equipmentRow.classList.contains("is-active-equipment"), true);
 });
 
 class CacheStub {
@@ -677,10 +826,21 @@ test("same release static request is fetched once and then served cache-first", 
 
 function extractDeputyWorker() {
     const match = deputyWorkerModule.match(
-        /DEPUTY_SERVICE_WORKER_JS = r"""([\s\S]*?)"""/
+        /DEPUTY_SERVICE_WORKER_JS_TEMPLATE = r"""([\s\S]*?)"""/
     );
-    assert.ok(match, "DEPUTY_SERVICE_WORKER_JS was not found");
-    return match[1];
+    assert.ok(match, "DEPUTY_SERVICE_WORKER_JS_TEMPLATE was not found");
+    const appContractMatch = ROLE_APPS_MODULE_SOURCE.match(
+        /APP_CONTRACT_VERSION = '([^']+)'/
+    );
+    const shellVersionMatch = ROLE_APPS_MODULE_SOURCE.match(
+        /role_code='deputy_mining_manager'[\s\S]*?shell_version='([^']+)'/
+    );
+    assert.ok(appContractMatch, "APP_CONTRACT_VERSION was not found");
+    assert.ok(shellVersionMatch, "deputy shell_version was not found");
+    return match[1]
+        .replaceAll("__APP_CONTRACT_VERSION__", JSON.stringify(appContractMatch[1]))
+        .replaceAll("__ROLE_CODE__", JSON.stringify("deputy_mining_manager"))
+        .replaceAll("__CACHE_NAME__", JSON.stringify(shellVersionMatch[1]));
 }
 
 test(
@@ -732,7 +892,7 @@ test(
             console,
         };
         vm.runInNewContext(workerSource, context, {
-            filename: "assignments/deputy_views.py::DEPUTY_SERVICE_WORKER_JS",
+            filename: "assignments/deputy_views.py::DEPUTY_SERVICE_WORKER_JS_TEMPLATE",
         });
 
         const oldUrl = (

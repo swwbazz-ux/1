@@ -322,11 +322,27 @@ class CrewPlanSlot(models.Model):
         null=True,
         blank=True,
     )
+    secondary_employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Дополнительный участник экипажа',
+        on_delete=models.SET_NULL,
+        related_name='secondary_crew_plan_slots',
+        null=True,
+        blank=True,
+    )
     baseline_employee = models.ForeignKey(
         'users.Employee',
         verbose_name='Сотрудник в базовой расстановке',
         on_delete=models.SET_NULL,
         related_name='baseline_crew_plan_slots',
+        null=True,
+        blank=True,
+    )
+    baseline_secondary_employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Дополнительный участник в базовой расстановке',
+        on_delete=models.SET_NULL,
+        related_name='baseline_secondary_crew_plan_slots',
         null=True,
         blank=True,
     )
@@ -344,6 +360,19 @@ class CrewPlanSlot(models.Model):
                 fields=['plan', 'employee'],
                 condition=models.Q(employee__isnull=False),
                 name='unique_crew_plan_employee',
+            ),
+            models.UniqueConstraint(
+                fields=['plan', 'secondary_employee'],
+                condition=models.Q(secondary_employee__isnull=False),
+                name='unique_crew_plan_secondary_employee',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(employee__isnull=True)
+                    | models.Q(secondary_employee__isnull=True)
+                    | ~models.Q(employee=models.F('secondary_employee'))
+                ),
+                name='crew_plan_slot_distinct_employees',
             ),
         ]
 

@@ -326,6 +326,53 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data['phone'], '+79005554433')
 
+    def test_admin_create_auto_selects_only_matching_production_specialization(self):
+        position = PersonnelPosition.objects.create(
+            code='test-single-driver-specialization',
+            name='ТЕСТ Должность с одной водительской специализацией',
+        )
+        position.allowed_specializations.add(self.truck_specialization)
+        form = AdminEmployeeForm(data={
+            'full_name': 'Новый Водитель',
+            'phone': '+79005554434',
+            'personnel_position': position.id,
+            'base_specialization': '',
+            'role': self.driver_role.id,
+        })
+
+        self.assertTrue(form.is_valid(), form.errors)
+        employee = form.save()
+        self.assertEqual(employee.base_specialization, self.truck_specialization)
+        self.assertEqual(employee.work_category, Employee.WorkCategory.DRIVER)
+
+    def test_admin_create_rejects_ambiguous_production_role_without_specialization(self):
+        second_specialization = ProductionSpecialization.objects.create(
+            code='test-second-haul-driver',
+            name='ТЕСТ Вторая водительская специализация',
+            access_role=self.driver_role,
+        )
+        position = PersonnelPosition.objects.create(
+            code='test-ambiguous-driver-specialization',
+            name='ТЕСТ Должность с двумя водительскими специализациями',
+        )
+        position.allowed_specializations.add(
+            self.truck_specialization,
+            second_specialization,
+        )
+        form = AdminEmployeeForm(data={
+            'full_name': 'Новый Универсальный Водитель',
+            'phone': '+79005554435',
+            'personnel_position': position.id,
+            'base_specialization': '',
+            'role': self.driver_role.id,
+        })
+
+        self.assertFalse(form.is_valid())
+        self.assertEqual(
+            form.errors['base_specialization'],
+            [f'Для доступа «{self.driver_role}» выберите подходящую производственную специализацию.'],
+        )
+
     def test_personnel_catalogue_is_available_from_admin_references(self):
         self.login_as(self.admin_access)
 

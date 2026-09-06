@@ -463,6 +463,9 @@ def oup_employee_detail_view(request, employee_id):
         .first()
         or employee_accesses.first()
     )
+    employee_presence = presence_by_employee_id([employee.id]).get(employee.id)
+    for employee_access in employee_accesses:
+        employee_access.presence = employee_presence
     work_assignment_role = (
         active_equipment_assignment.role
         if active_equipment_assignment
