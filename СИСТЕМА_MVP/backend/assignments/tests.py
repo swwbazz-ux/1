@@ -852,6 +852,54 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(applied, 1)
         self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
 
+    def test_test_one_truck_assignment_has_no_delay(self):
+        test_truck = Equipment.objects.create(
+            equipment_type=self.free_truck.equipment_type,
+            model=self.free_truck.model,
+            garage_number='ТЕСТ-1',
+            is_active=True,
+        )
+        start = timezone.now()
+
+        pending, _ = schedule_haul_assignment(
+            truck=test_truck,
+            excavator=self.excavator,
+            assigned_by=self.master,
+            now=start,
+        )
+
+        self.assertEqual(pending.effective_at, start)
+        self.assertEqual(reconcile_due_haul_assignments(now=start), 1)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+
+    def test_test_one_truck_release_has_no_delay(self):
+        test_truck = Equipment.objects.create(
+            equipment_type=self.free_truck.equipment_type,
+            model=self.free_truck.model,
+            garage_number='ТЕСТ-1',
+            is_active=True,
+        )
+        HaulAssignment.objects.create(
+            truck=test_truck,
+            excavator=self.excavator,
+            assigned_by=self.master,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+        start = timezone.now()
+
+        pending, _ = schedule_haul_release(
+            truck=test_truck,
+            assigned_by=self.master,
+            now=start,
+        )
+
+        self.assertEqual(pending.effective_at, start)
+        self.assertEqual(reconcile_due_haul_assignments(now=start), 1)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.CANCELLED)
+
     def test_pending_release_keeps_assignment_until_timeout_then_removes_it(self):
         HaulAssignment.objects.filter(truck=self.free_truck).delete()
         accepted = HaulAssignment.objects.create(

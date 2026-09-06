@@ -36,11 +36,23 @@ from .models import (
 
 
 HAUL_ASSIGNMENT_DELAY = timedelta(minutes=5)
+HAUL_ASSIGNMENT_ZERO_DELAY_TRUCKS = frozenset({'ТЕСТ-1'})
 WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES = {
     'driver': 'Самосвал',
     'excavator_operator': 'Экскаватор',
 }
 CREW_PLAN_ROLE_CODES = frozenset(WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES)
+
+
+def haul_assignment_effective_at(truck, now):
+    """Оставляет штатную паузу всем, кроме явно названной тестовой машины."""
+    garage_number = str(getattr(truck, 'garage_number', '') or '').strip().upper()
+    delay = (
+        timedelta(0)
+        if garage_number in HAUL_ASSIGNMENT_ZERO_DELAY_TRUCKS
+        else HAUL_ASSIGNMENT_DELAY
+    )
+    return now + delay
 
 
 def _bulk_create_published_plan_assignments(assignments):
@@ -910,7 +922,7 @@ def schedule_haul_assignment(*, truck, excavator, assigned_by=None, now=None):
         assigned_by=assigned_by,
         action=HaulAssignmentAction.ASSIGN,
         status=AssignmentStatus.PENDING,
-        effective_at=now + HAUL_ASSIGNMENT_DELAY,
+        effective_at=haul_assignment_effective_at(truck, now),
     )
     excavator_ids = [excavator.id, getattr(accepted, 'excavator_id', None)]
     _emit_assignment_changed(
@@ -946,7 +958,7 @@ def schedule_haul_release(*, truck, assigned_by=None, now=None):
         assigned_by=assigned_by,
         action=HaulAssignmentAction.RELEASE,
         status=AssignmentStatus.PENDING,
-        effective_at=now + HAUL_ASSIGNMENT_DELAY,
+        effective_at=haul_assignment_effective_at(truck, now),
     )
     _emit_assignment_changed(
         action='release_pending', truck_id=truck.id,
