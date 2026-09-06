@@ -43,7 +43,16 @@ from downtimes.driver_workflow import (
     driver_downtime_requires_loaded_trip,
 )
 from downtimes.models import DowntimeEvent, DowntimeReason
-from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
+from references.models import (
+    Dormitory,
+    DormitorySection,
+    DumpPoint,
+    Equipment,
+    EquipmentModel,
+    EquipmentState,
+    EquipmentType,
+    RockType,
+)
 from reports.forms import RatingPeriodReferenceForm
 from reports.models import RatingPeriod, ReportTemplate
 from reports.rating_period_generation import inspect_rating_period_calendar
@@ -1424,6 +1433,7 @@ def system_admin_dashboard_view(request):
         ('Кадровые должности', PersonnelPosition.objects.count(), '/system-admin/references/personnel-positions/'),
         ('Производственные специализации', ProductionSpecialization.objects.count(), '/system-admin/references/production-specializations/'),
         ('Виды техники', EquipmentType.objects.count(), '/admin/references/equipmenttype/'),
+        ('Модели техники', EquipmentModel.objects.count(), '/admin/references/equipmentmodel/'),
         ('Техника', Equipment.objects.count(), '/admin/references/equipment/'),
         ('Состояния техники', EquipmentState.objects.count(), '/admin/references/equipmentstate/'),
         ('Причины простоев', DowntimeReason.objects.count(), '/admin/downtimes/downtimereason/'),
@@ -1520,6 +1530,7 @@ def system_admin_references_view(request):
             'title': 'Техника',
             'items': [
                 {'name': 'Виды техники', 'count': EquipmentType.objects.count(), 'url': '', 'external_url': '/admin/references/equipmenttype/', 'detail_code': 'equipment-types'},
+                {'name': 'Модели техники', 'count': EquipmentModel.objects.count(), 'url': '', 'external_url': '/admin/references/equipmentmodel/', 'detail_code': 'equipment-models'},
                 {'name': 'Техника', 'count': Equipment.objects.count(), 'url': '', 'external_url': '/admin/references/equipment/', 'detail_code': 'equipment'},
                 {'name': 'Состояния техники', 'count': EquipmentState.objects.count(), 'url': '', 'external_url': '/admin/references/equipmentstate/', 'detail_code': 'equipment-states'},
             ],
@@ -1705,10 +1716,29 @@ def get_system_admin_reference_configs():
             'preview_fields': ['name', 'is_active'],
             'admin_url': '/admin/references/equipmenttype/',
         },
+        'equipment-models': {
+            'title': 'Модели техники',
+            'section': 'Техника',
+            'model': EquipmentModel,
+            'description': 'Марки и модели техники с их рабочими характеристиками. Для экскаватора укажите фактический объем ковша.',
+            'fields': ['equipment_type', 'name', 'body_volume_m3', 'payload_tons', 'fuel_capacity_limit_l', 'is_active'],
+            'search_fields': ['name', 'equipment_type__name'],
+            'preview_fields': ['equipment_type', 'body_volume_m3', 'payload_tons', 'fuel_capacity_limit_l', 'is_active'],
+            'select_related': ['equipment_type'],
+            'initial': {'is_active': True},
+            'help_texts': {
+                'body_volume_m3': 'Для экскаватора укажите фактический объем ковша в м3.',
+                'payload_tons': 'Для экскаватора это поле можно оставить пустым.',
+            },
+            'admin_url': '/admin/references/equipmentmodel/',
+        },
         'equipment': {
             'title': 'Техника',
             'section': 'Техника',
             'model': Equipment,
+            'description': 'Отдельные единицы техники. Сначала добавьте марку в справочник «Модели техники», затем выберите ее здесь. Для подрядной техники снимите флажок «Собственная техника».',
+            'labels': {'is_own': 'Собственная техника'},
+            'help_texts': {'is_own': 'Снимите флажок, если техника принадлежит подрядчику.'},
             'search_fields': ['garage_number', 'vin', 'equipment_type__name', 'model__name'],
             'preview_fields': ['equipment_type', 'garage_number', 'model', 'vin'],
             'select_related': ['equipment_type', 'model'],
@@ -1899,7 +1929,12 @@ def build_reference_form(model, config=None):
         for field in model._meta.fields
         if field.name != 'id' and getattr(field, 'editable', True)
     ]
-    form_class = modelform_factory(model, fields=editable_fields)
+    form_class = modelform_factory(
+        model,
+        fields=editable_fields,
+        labels=config.get('labels'),
+        help_texts=config.get('help_texts'),
+    )
     field_choices = config.get('field_choices') or {}
     if not field_choices:
         return form_class
