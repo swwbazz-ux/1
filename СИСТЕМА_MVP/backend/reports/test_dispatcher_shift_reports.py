@@ -1,0 +1,202 @@
+from datetime import datetime, time, timedelta
+from decimal import Decimal
+from io import BytesIO
+
+from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
+from openpyxl import load_workbook
+
+from downtimes.models import DowntimeEvent, DowntimeReason
+from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType
+from shifts.models import EmployeeShift
+from trips.models import DispatcherActionLog, Trip, TripStatus
+from users.models import Employee, EmployeeAccess, Role
+
+from .dispatcher_shift_forms import build_dispatcher_shift_report
+
+
+class DispatcherShiftReportTests(TestCase):
+    def setUp(self):
+        role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        self.dispatcher = Employee.objects.create(
+            full_name='Диспетчер отчётов',
+            status=Employee.Status.ACTIVE,
+        )
+        self.access = EmployeeAccess.objects.create(
+            employee=self.dispatcher,
+            role=role,
+            access_code='991100',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        session = self.client.session
+        session['employee_access_id'] = self.access.id
+        session.save()
+
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        belaz_model = EquipmentModel.objects.create(equipment_type=truck_type, name='БелАЗ 75131')
+        nhl_model = EquipmentModel.objects.create(equipment_type=truck_type, name='NHL TR100')
+        excavator_model = EquipmentModel.objects.create(equipment_type=excavator_type, name='Sany 8800')
+        self.belaz = Equipment.objects.create(equipment_type=truck_type, model=belaz_model, garage_number='10')
+        self.nhl = Equipment.objects.create(equipment_type=truck_type, model=nhl_model, garage_number='54')
+        self.idle_truck = Equipment.objects.create(equipment_type=truck_type, model=belaz_model, garage_number='14')
+        self.excavator = Equipment.objects.create(equipment_type=excavator_type, model=excavator_model, garage_number='1')
+        self.rock = RockType.objects.create(
+            name='Первичная сульфидная',
+            density=Decimal('2.5000'),
+        )
+        self.dump_point = DumpPoint.objects.create(name='ККД')
+        self.selected_date = timezone.localdate()
+        self.shift_at = timezone.make_aware(
+            datetime.combine(self.selected_date, time(10, 0)),
+            timezone.get_current_timezone(),
+        )
+        operator = Employee.objects.create(full_name='Машинист')
+        self.loading_shift = EmployeeShift.objects.create(
+            employee=operator,
+            shift_type='day',
+            equipment=self.excavator,
+            opened_at=self.shift_at,
+        )
+        self.trip = self.create_trip(self.belaz, '50.00', '3.00', completed_at=self.shift_at)
+        self.create_trip(self.belaz, '50.00', '5.00', completed_at=self.shift_at + timedelta(minutes=30))
+        self.create_trip(self.nhl, '40.00', '2.00', completed_at=self.shift_at + timedelta(hours=1))
+
+        reason = DowntimeReason.objects.create(name='Монтаж рамы', equipment_type=truck_type, is_critical=True)
+        DowntimeEvent.objects.create(
+            equipment=self.idle_truck,
+            reason=reason,
+            started_at=self.shift_at,
+            ended_at=self.shift_at + timedelta(hours=2),
+            comment='сварка рамы',
+        )
+
+    def create_trip(self, truck, volume, distance, *, completed_at):
+        return Trip.objects.create(
+            excavator=self.excavator,
+            truck=truck,
+            loading_shift=self.loading_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            planned_volume_m3=Decimal('10000.00'),
+            volume_m3=Decimal(volume),
+            transport_distance_km=Decimal(distance),
+            loading_horizon='90',
+            loading_block='192',
+            status=TripStatus.COMPLETED,
+            completed_at=completed_at,
+        )
+
+    def test_report_calculates_weighted_distance_and_m3km(self):
+        report = build_dispatcher_shift_report(self.selected_date, 'day')
+        belaz_row = next(row for row in report['truck_rows'] if row['equipment'].id == self.belaz.id)
+        idle_row = next(row for row in report['truck_rows'] if row['equipment'].id == self.idle_truck.id)
+
+        self.assertEqual(belaz_row['trip_count'], 2)
+        self.assertEqual(belaz_row['volume'], Decimal('100.00'))
+        self.assertEqual(belaz_row['m3km'], Decimal('400.0000'))
+        self.assertEqual(belaz_row['distance'], Decimal('4.0'))
+        self.assertEqual(report['truck_totals']['trip_count'], 3)
+        self.assertEqual(report['truck_totals']['volume'], Decimal('140.00'))
+        self.assertEqual(report['truck_totals']['m3km'], Decimal('480.0000'))
+        self.assertEqual(report['truck_totals']['distance'], Decimal('3.4'))
+        self.assertEqual(idle_row['trip_count'], 0)
+        self.assertIn('Монтаж рамы—2ч', idle_row['notes'])
+        self.assertEqual(next(row for row in report['truck_rows'] if row['equipment'].id == self.nhl.id)['fleet'], 'nhl')
+
+    def test_report_builds_excavation_customer_rows(self):
+        report = build_dispatcher_shift_report(self.selected_date, 'day')
+
+        self.assertEqual(len(report['excavation_rows']), 3)
+        self.assertEqual(report['excavation_totals']['volume'], Decimal('140.00'))
+        self.assertEqual(report['excavation_totals']['trip_count'], 3)
+        self.assertTrue(all(row['rock_type'] == 'Первичная сульфидная' for row in report['excavation_rows']))
+        self.assertTrue(all(row['horizon'] == '90' for row in report['excavation_rows']))
+
+    def test_reports_hub_and_both_forms_are_available(self):
+        params = {'date': self.selected_date.isoformat(), 'shift_type': 'day'}
+        hub = self.client.get(reverse('dispatcher_reports'), params)
+        trucks = self.client.get(reverse('dispatcher_shift_trucks'), params)
+        excavation = self.client.get(reverse('dispatcher_shift_excavation'), params)
+
+        self.assertEqual(hub.status_code, 200)
+        self.assertContains(hub, 'Итоги смены по самосвалам')
+        self.assertContains(hub, 'Работа выемочного оборудования')
+        self.assertEqual(trucks.status_code, 200)
+        self.assertContains(trucks, 'м³×км')
+        self.assertContains(trucks, 'Корректировать')
+        self.assertEqual(excavation.status_code, 200)
+        self.assertContains(excavation, 'Тип грунта')
+        self.assertContains(excavation, 'Место разгрузки')
+
+    def test_excel_exports_keep_numeric_values_and_familiar_sheets(self):
+        params = {'date': self.selected_date.isoformat(), 'shift_type': 'day'}
+        trucks_response = self.client.get(reverse('dispatcher_shift_trucks_export'), params)
+        excavation_response = self.client.get(reverse('dispatcher_shift_excavation_export'), params)
+
+        self.assertEqual(trucks_response.status_code, 200)
+        truck_book = load_workbook(BytesIO(trucks_response.content), data_only=False)
+        self.assertEqual(truck_book.sheetnames, ['Самосвалы'])
+        truck_sheet = truck_book['Самосвалы']
+        self.assertEqual(truck_sheet['A3'].value, '№ А/С')
+        total_row = truck_sheet.max_row
+        self.assertEqual(truck_sheet.cell(total_row, 2).value, 3)
+        self.assertEqual(truck_sheet.cell(total_row, 4).value, 140)
+        self.assertEqual(truck_sheet.cell(total_row, 5).value, 480)
+        self.assertIsInstance(truck_sheet.cell(total_row, 4).value, (int, float))
+
+        self.assertEqual(excavation_response.status_code, 200)
+        excavation_book = load_workbook(BytesIO(excavation_response.content), data_only=False)
+        self.assertEqual(excavation_book.sheetnames, ['Выемочное оборудование'])
+        self.assertEqual(excavation_book.active['A3'].value, 'Тип грунта')
+
+    def test_dispatcher_correction_updates_source_and_writes_audit_log(self):
+        response = self.client.post(reverse('dispatcher_shift_trucks'), {
+            'date': self.selected_date.isoformat(),
+            'shift_type': 'day',
+            'trip_id': self.trip.id,
+            'volume_m3': '55,5',
+            'transport_distance_km': '3,2',
+            'rock_type_id': self.rock.id,
+            'actual_dump_point_id': self.dump_point.id,
+            'loading_horizon': '95',
+            'loading_block': '193',
+            'downtime_text': 'ОП 20 мин',
+            'note': 'Уточнено диспетчером',
+            'correction_reason': 'Сверка со сводкой',
+        })
+
+        self.assertEqual(response.status_code, 302)
+        self.trip.refresh_from_db()
+        self.assertEqual(self.trip.volume_m3, Decimal('55.50'))
+        self.assertEqual(self.trip.tonnage, Decimal('138.75'))
+        self.assertEqual(self.trip.transport_distance_km, Decimal('3.20'))
+        self.assertEqual(self.trip.loading_horizon, '95')
+        action = DispatcherActionLog.objects.get(trip=self.trip, action_type='report_source_correction')
+        self.assertEqual(action.actor, self.dispatcher)
+        self.assertEqual(action.reason, 'Сверка со сводкой')
+        journal = self.client.get(reverse('dispatcher_shift_log'), {'date': self.selected_date.isoformat()})
+        self.assertContains(journal, 'Корректировка исходных данных отчёта')
+
+    def test_correction_rejects_trip_from_another_shift(self):
+        response = self.client.post(reverse('dispatcher_shift_trucks'), {
+            'date': self.selected_date.isoformat(),
+            'shift_type': 'night',
+            'trip_id': self.trip.id,
+            'volume_m3': '99',
+            'transport_distance_km': '3',
+            'rock_type_id': self.rock.id,
+            'actual_dump_point_id': '',
+            'loading_horizon': '90',
+            'loading_block': '192',
+            'downtime_text': '',
+            'note': '',
+            'correction_reason': 'Ошибочная смена',
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.trip.refresh_from_db()
+        self.assertEqual(self.trip.volume_m3, Decimal('50.00'))
+        self.assertFalse(DispatcherActionLog.objects.filter(trip=self.trip, action_type='report_source_correction').exists())

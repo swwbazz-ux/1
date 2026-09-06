@@ -1,14 +1,15 @@
 import mimetypes
 from collections import defaultdict
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Q, Sum
-from django.http import FileResponse, Http404, HttpResponse, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -75,6 +76,11 @@ from .driver_rating_scope_membership import (
     discover_driver_rating_current_scope,
 )
 from .forms import PilotFeedbackForm
+from .dispatcher_shift_forms import (
+    build_dispatcher_shift_report,
+    build_shift_report_workbook,
+    load_shift_trips,
+)
 from .models import PilotFeedback, RatingPeriod, ReportTemplate, ReportType
 from .rating_tv import (
     RATING_TV_QA_DAY_COUNT,
@@ -3013,6 +3019,12 @@ def dispatcher_trip_route(trip):
     return f'{loading} -> {trip.dump_point}'
 
 
+def dispatcher_action_title(action):
+    if action.action_type == 'report_source_correction':
+        return 'Корректировка исходных данных отчёта'
+    return action.get_action_type_display()
+
+
 def dispatcher_shift_action_rows(filters):
     production_start, production_end = production_day_bounds(filters['date'])
     actions = DispatcherActionLog.objects.select_related(
@@ -3030,7 +3042,7 @@ def dispatcher_shift_action_rows(filters):
             'type': 'dispatcher',
             'type_label': 'действие',
             'status': dispatcher_action_status(action),
-            'title': action.get_action_type_display(),
+            'title': dispatcher_action_title(action),
             'summary': action.target_summary,
             'reason': action.reason or '-',
             'equipment': str(action.trip.truck) if action.trip else '-',
@@ -3326,6 +3338,26 @@ def dispatcher_reports_context(request, access):
 
     report_tiles = [
         {
+            'title': 'Итоги смены по самосвалам',
+            'kind': 'shift-trucks',
+            'status': 'ok' if trips else 'risk',
+            'primary': f'{format_volume(volume_total)} м³',
+            'secondary': f'{len(trips)} рейс. / {len({trip.truck_id for trip in trips if trip.truck_id})} самосв.',
+            'readiness': 'Форма диспетчеров: рейсы, плечо, м³, м³×км, простои',
+            'view_url': reverse('dispatcher_shift_trucks'),
+            'export_url': reverse('dispatcher_shift_trucks_export'),
+        },
+        {
+            'title': 'Работа выемочного оборудования',
+            'kind': 'shift-excavation',
+            'status': 'ok' if trips else 'risk',
+            'primary': f'{len({trip.excavator_id for trip in trips if trip.excavator_id})} экск.',
+            'secondary': f'{format_volume(volume_total)} м³ / {len(trips)} рейс.',
+            'readiness': 'Форма заказчика: грунт, горизонт, блок, разгрузка, простои',
+            'view_url': reverse('dispatcher_shift_excavation'),
+            'export_url': reverse('dispatcher_shift_excavation_export'),
+        },
+        {
             'title': 'Сменные объемы',
             'kind': 'mining',
             'status': report_status('mining'),
@@ -3423,6 +3455,181 @@ def dispatcher_reports_view(request):
     if response:
         return response
     return render(request, 'reports/dispatcher_reports.html', dispatcher_reports_context(request, access))
+
+
+def parse_dispatcher_shift_report_filters(request):
+    current = production_shift_context()
+    selected_date = parse_filter_date(request.POST.get('date') or request.GET.get('date')) or current.production_date
+    shift_type = (request.POST.get('shift_type') or request.GET.get('shift_type') or current.shift_type).strip()
+    if shift_type not in {ShiftType.DAY, ShiftType.NIGHT}:
+        shift_type = current.shift_type
+    return selected_date, shift_type
+
+
+def parse_report_decimal(value, label, max_value):
+    normalized = (value or '').strip().replace(' ', '').replace(',', '.')
+    if not normalized:
+        return None
+    try:
+        parsed = Decimal(normalized)
+        if not parsed.is_finite():
+            raise InvalidOperation
+        parsed = parsed.quantize(Decimal('0.01'))
+    except InvalidOperation as exc:
+        raise ValueError(f'{label}: укажите число.') from exc
+    if parsed < 0:
+        raise ValueError(f'{label}: значение не может быть отрицательным.')
+    if parsed > max_value:
+        raise ValueError(f'{label}: значение слишком большое.')
+    return parsed
+
+
+def dispatcher_shift_report_url(report_kind, selected_date, shift_type):
+    route_name = 'dispatcher_shift_excavation' if report_kind == 'excavation' else 'dispatcher_shift_trucks'
+    return f'{reverse(route_name)}?{urlencode({"date": selected_date.isoformat(), "shift_type": shift_type})}'
+
+
+def update_shift_report_trip(request, access, selected_date, shift_type, report_kind):
+    if access.role.code not in {'dispatcher', 'admin'}:
+        return HttpResponseForbidden('Корректировка исходных данных доступна диспетчеру или администратору.')
+    reason = request.POST.get('correction_reason', '').strip()
+    if not reason:
+        messages.error(request, 'Укажите причину корректировки.')
+        return None
+    try:
+        trip_id = int(request.POST.get('trip_id', ''))
+    except (TypeError, ValueError):
+        messages.error(request, 'Рейс для корректировки не выбран.')
+        return None
+
+    permitted_trip_ids = {trip.id for trip in load_shift_trips(selected_date, shift_type)}
+    if trip_id not in permitted_trip_ids:
+        messages.error(request, 'Рейс не входит в выбранную смену или уже не завершён.')
+        return None
+
+    with transaction.atomic():
+        barrier_response = reports_mutation_role_barrier(request, access)
+        if barrier_response:
+            return barrier_response
+        trip = (
+            Trip.objects
+            .select_for_update()
+            .select_related('rock_type', 'actual_dump_point', 'dump_point', 'truck', 'excavator')
+            .get(pk=trip_id, status=TripStatus.COMPLETED)
+        )
+        before = {
+            'volume_m3': trip.volume_m3,
+            'tonnage': trip.tonnage,
+            'transport_distance_km': trip.transport_distance_km,
+            'loading_horizon': trip.loading_horizon,
+            'loading_block': trip.loading_block,
+            'rock_type_id': trip.rock_type_id,
+            'actual_dump_point_id': trip.actual_dump_point_id,
+            'downtime_text': trip.downtime_text,
+            'note': trip.note,
+        }
+        try:
+            trip.volume_m3 = parse_report_decimal(
+                request.POST.get('volume_m3'), 'Объём', Decimal('99999999.99'),
+            )
+            trip.transport_distance_km = parse_report_decimal(
+                request.POST.get('transport_distance_km'), 'Плечо', Decimal('999999.99'),
+            )
+            trip.loading_horizon = request.POST.get('loading_horizon', '').strip()[:64]
+            trip.loading_block = request.POST.get('loading_block', '').strip()[:64]
+            trip.downtime_text = request.POST.get('downtime_text', '').strip()[:255]
+            trip.note = request.POST.get('note', '').strip()
+            rock_type_id = request.POST.get('rock_type_id', '').strip()
+            dump_point_id = request.POST.get('actual_dump_point_id', '').strip()
+            if rock_type_id:
+                trip.rock_type = RockType.objects.get(pk=int(rock_type_id), is_active=True)
+            if dump_point_id:
+                trip.actual_dump_point = DumpPoint.objects.get(pk=int(dump_point_id), is_active=True)
+            else:
+                trip.actual_dump_point = None
+            trip.tonnage = (
+                (trip.volume_m3 * trip.rock_type.density).quantize(Decimal('0.01'))
+                if trip.volume_m3 is not None and trip.rock_type.density is not None
+                else None
+            )
+            trip.full_clean()
+        except (ValueError, RockType.DoesNotExist, DumpPoint.DoesNotExist) as exc:
+            messages.error(request, str(exc) if str(exc) else 'Не удалось проверить введённые данные.')
+            transaction.set_rollback(True)
+            return None
+        except ValidationError as exc:
+            messages.error(request, '; '.join(exc.messages))
+            transaction.set_rollback(True)
+            return None
+
+        trip.save(update_fields=[
+            'volume_m3', 'tonnage', 'transport_distance_km', 'loading_horizon', 'loading_block',
+            'rock_type', 'actual_dump_point', 'downtime_text', 'note',
+        ])
+        after = {
+            'volume_m3': trip.volume_m3,
+            'tonnage': trip.tonnage,
+            'transport_distance_km': trip.transport_distance_km,
+            'loading_horizon': trip.loading_horizon,
+            'loading_block': trip.loading_block,
+            'rock_type_id': trip.rock_type_id,
+            'actual_dump_point_id': trip.actual_dump_point_id,
+            'downtime_text': trip.downtime_text,
+            'note': trip.note,
+        }
+        changed = [field for field in before if before[field] != after[field]]
+        if changed:
+            DispatcherActionLog.objects.create(
+                actor=access.employee,
+                action_type='report_source_correction',
+                trip=trip,
+                shift=trip.loading_shift or trip.unloading_shift,
+                target_summary=f'Коррекция рейса №{trip.id}: {", ".join(changed)}'[:255],
+                reason=reason[:255],
+            )
+        messages.success(request, f'Данные рейса №{trip.id} обновлены. Отчёт пересчитан.')
+    return redirect(dispatcher_shift_report_url(report_kind, selected_date, shift_type))
+
+
+def dispatcher_shift_report_view(request, report_kind='trucks'):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    selected_date, shift_type = parse_dispatcher_shift_report_filters(request)
+    if request.method == 'POST':
+        correction_response = update_shift_report_trip(
+            request, access, selected_date, shift_type, report_kind,
+        )
+        if correction_response:
+            return correction_response
+    report = build_dispatcher_shift_report(selected_date, shift_type)
+    query_string = urlencode({'date': selected_date.isoformat(), 'shift_type': shift_type})
+    return render(request, 'reports/dispatcher_shift_report.html', {
+        'access': access,
+        'dispatcher_header': build_dispatcher_header_context(access),
+        'report': report,
+        'report_kind': report_kind,
+        'query_string': query_string,
+        'can_correct': access.role.code in {'dispatcher', 'admin'},
+        'rock_types': RockType.objects.filter(is_active=True).order_by('name'),
+        'dump_points': DumpPoint.objects.filter(is_active=True).order_by('name'),
+    })
+
+
+def dispatcher_shift_report_export_view(request, report_kind='trucks'):
+    access, response = require_dispatcher_report_access(request)
+    if response:
+        return response
+    selected_date, shift_type = parse_dispatcher_shift_report_filters(request)
+    report = build_dispatcher_shift_report(selected_date, shift_type)
+    workbook = build_shift_report_workbook(report, report_kind)
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    kind_name = 'excavation' if report_kind == 'excavation' else 'trucks'
+    response['Content-Disposition'] = (
+        f'attachment; filename="dispatcher_shift_{kind_name}_{selected_date:%Y-%m-%d}_{shift_type}.xlsx"'
+    )
+    workbook.save(response)
+    return response
 
 
 def write_dispatcher_reports_sheet(sheet, context):

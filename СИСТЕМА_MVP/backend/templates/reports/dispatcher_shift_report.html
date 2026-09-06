@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% load l10n %}
+
+{% block title %}{% if report_kind == 'excavation' %}Выемочное оборудование{% else %}Итоги смены по самосвалам{% endif %}{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
+
+{% block body %}
+<main class="dispatcher-shell dispatcher-analytics-shell dispatcher-shift-report-page" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board">
+        <header class="dispatcher-topbar dispatcher-unified-topbar no-print">
+            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="reports" dispatcher_header_screen="Сменные отчёты" %}
+        </header>
+
+        <div class="dispatcher-shift-report-toolbar no-print">
+            <a class="dispatcher-shift-report-back" href="{% url 'dispatcher_reports' %}?{{ query_string }}">← Все отчёты</a>
+            <nav class="dispatcher-shift-report-tabs" aria-label="Вид сменного отчёта">
+                <a class="{% if report_kind == 'trucks' %}is-active{% endif %}" href="{% url 'dispatcher_shift_trucks' %}?{{ query_string }}">Самосвалы</a>
+                <a class="{% if report_kind == 'excavation' %}is-active{% endif %}" href="{% url 'dispatcher_shift_excavation' %}?{{ query_string }}">Выемочное оборудование</a>
+            </nav>
+            <div class="dispatcher-report-actions">
+                {% if report_kind == 'excavation' %}
+                    <a href="{% url 'dispatcher_shift_excavation_export' %}?{{ query_string }}">Excel</a>
+                {% else %}
+                    <a href="{% url 'dispatcher_shift_trucks_export' %}?{{ query_string }}">Excel</a>
+                {% endif %}
+                <button type="button" onclick="window.print()">Печать</button>
+            </div>
+        </div>
+
+        <form class="dispatcher-report-filters no-print" method="get">
+            <label>
+                <span>Дата</span>
+                <input type="date" name="date" value="{{ report.date_value }}">
+            </label>
+            <label>
+                <span>Смена</span>
+                <select name="shift_type">
+                    <option value="day" {% if report.meta.shift_type == 'day' %}selected{% endif %}>Дневная</option>
+                    <option value="night" {% if report.meta.shift_type == 'night' %}selected{% endif %}>Ночная</option>
+                </select>
+            </label>
+            <button type="submit">Показать</button>
+            <p>Границы смены: <strong>{{ report.meta.time_range }}</strong>. Отчёт пересчитывается из данных пульта при каждом открытии.</p>
+        </form>
+
+        {% if messages %}
+            <div class="dispatcher-shift-report-messages no-print" aria-live="polite">
+                {% for message in messages %}<div class="is-{{ message.tags|default:'info' }}">{{ message }}</div>{% endfor %}
+            </div>
+        {% endif %}
+
+        {% if report.issues %}
+            <section class="dispatcher-shift-report-issues no-print" aria-label="Замечания перед выгрузкой">
+                <strong>Проверить перед выгрузкой:</strong>
+                {% for issue in report.issues %}<span class="is-{{ issue.level }}">{{ issue.label }} — {{ issue.count }}</span>{% endfor %}
+            </section>
+        {% else %}
+            <section class="dispatcher-shift-report-ready no-print">Данные смены заполнены. Отчёт готов к выгрузке или печати.</section>
+        {% endif %}
+
+        <section class="dispatcher-shift-report-paper" id="{% if report_kind == 'excavation' %}excavation{% else %}trucks{% endif %}">
+            {% if report_kind == 'excavation' %}
+                <header class="dispatcher-shift-report-paper-title is-blue">
+                    <h1>Отчёт о работе выемочного оборудования</h1>
+                    <p>{{ report.date|date:"d.m.Y" }} · {{ report.meta.label }} смена {{ report.meta.time_range }}</p>
+                </header>
+                <div class="dispatcher-shift-report-table-wrap">
+                    <table class="dispatcher-shift-report-table is-excavation">
+                        <thead><tr>
+                            <th>Тип грунта</th><th>Экскаватор</th><th>План, м³</th><th>Выполнено, м³</th>
+                            <th>Горизонт</th><th>Блок</th><th>Место разгрузки</th><th>Плечо, км</th><th>Простои</th><th>Примечание</th>
+                        </tr></thead>
+                        <tbody>
+                            {% for row in report.excavation_rows %}
+                                <tr>
+                                    <td><strong>{{ row.rock_type }}</strong></td><td>{{ row.excavator_label }}</td>
+                                    <td>{{ row.planned_volume|floatformat:"0g"|default:"—" }}</td><td><strong>{{ row.volume|floatformat:"0g" }}</strong><small>{{ row.trip_count }} рейс.</small></td>
+                                    <td>{{ row.horizon|default:"—" }}</td><td>{{ row.block|default:"—" }}</td><td>{{ row.dump_point|default:"—" }}</td>
+                                    <td>{{ row.distance|floatformat:"1g"|default:"—" }}</td><td>{{ row.downtime|default:"—" }}</td><td>{{ row.note|default:"—" }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr><td class="dispatcher-shift-report-empty" colspan="10">Завершённых рейсов за смену ещё нет.</td></tr>
+                            {% endfor %}
+                            {% for row in report.other_rows %}
+                                <tr class="is-other"><td><strong>Прочие работы</strong></td><td>{{ row.label }}</td><td colspan="7"></td><td>{{ row.note }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot><tr><th colspan="2">Итого</th><th>{{ report.excavation_totals.planned_volume|floatformat:"0g" }}</th><th>{{ report.excavation_totals.volume|floatformat:"0g" }}</th><th colspan="6">{{ report.excavation_totals.trip_count }} рейсов</th></tr></tfoot>
+                    </table>
+                </div>
+            {% else %}
+                <header class="dispatcher-shift-report-paper-title is-yellow">
+                    <h1>Итоги смены по самосвалам</h1>
+                    <p>{{ report.date|date:"d.m.Y" }} · {{ report.meta.short_label }} · {{ report.meta.time_range }}</p>
+                </header>
+                <div class="dispatcher-shift-report-table-wrap">
+                    <table class="dispatcher-shift-report-table is-trucks">
+                        <thead><tr><th>№ А/С</th><th>Рейсы</th><th>км</th><th>Итог, м³</th><th>м³×км</th><th>Примечание / простои</th></tr></thead>
+                        <tbody>
+                            {% for row in report.truck_rows %}
+                                <tr class="is-{{ row.fleet }} {% if row.idle and row.notes %}is-idle-note{% endif %}">
+                                    <td><strong>{{ row.label }}</strong></td><td>{{ row.trip_count|default:"—" }}</td><td>{{ row.distance|floatformat:"1g"|default:"—" }}</td>
+                                    <td>{% if row.volume %}{{ row.volume|floatformat:"0g" }}{% else %}—{% endif %}</td><td>{% if row.m3km %}{{ row.m3km|floatformat:"0g" }}{% else %}—{% endif %}</td><td>{{ row.notes|default:"—" }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr><td class="dispatcher-shift-report-empty" colspan="6">В справочнике нет активных самосвалов.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot><tr><th>Итого</th><th>{{ report.truck_totals.trip_count }}</th><th>{{ report.truck_totals.distance|floatformat:"1g"|default:"—" }}</th><th>{{ report.truck_totals.volume|floatformat:"0g" }}</th><th>{{ report.truck_totals.m3km|floatformat:"0g" }}</th><th></th></tr></tfoot>
+                    </table>
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="dispatcher-shift-source no-print">
+            <div class="dispatcher-shift-source-head">
+                <div><span>Исходные данные</span><h2>Завершённые рейсы смены</h2></div>
+                <p>Корректировка меняет исходный рейс, поэтому оба отчёта пересчитаются одинаково.</p>
+            </div>
+            <div class="dispatcher-shift-source-list">
+                {% for trip in report.trips %}
+                    <details class="dispatcher-shift-source-row">
+                        <summary>
+                            <strong>Рейс №{{ trip.id }}</strong>
+                            <span>{{ trip.truck.garage_number }} → {{ trip.actual_dump_point|default:trip.assigned_dump_point|default:trip.dump_point }}</span>
+                            <span>{{ trip.rock_type }}</span>
+                            <span>{{ trip.volume_m3|floatformat:"2g"|default:"нет объёма" }} м³</span>
+                            <span>{{ trip.transport_distance_km|floatformat:"2g"|default:"нет плеча" }} км</span>
+                            {% if can_correct %}<b>Корректировать</b>{% endif %}
+                        </summary>
+                        {% if can_correct %}
+                            <form method="post" class="dispatcher-shift-correction-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="date" value="{{ report.date_value }}">
+                                <input type="hidden" name="shift_type" value="{{ report.meta.shift_type }}">
+                                <input type="hidden" name="trip_id" value="{{ trip.id }}">
+                                <label><span>Объём, м³</span><input name="volume_m3" inputmode="decimal" value="{{ trip.volume_m3|unlocalize }}"></label>
+                                <label><span>Плечо, км</span><input name="transport_distance_km" inputmode="decimal" value="{{ trip.transport_distance_km|unlocalize }}"></label>
+                                <label><span>Порода</span><select name="rock_type_id">{% for rock in rock_types %}<option value="{{ rock.id }}" {% if rock.id == trip.rock_type_id %}selected{% endif %}>{{ rock.name }}</option>{% endfor %}</select></label>
+                                <label><span>Факт. разгрузка</span><select name="actual_dump_point_id"><option value="">По назначению: {{ trip.assigned_dump_point|default:trip.dump_point }}</option>{% for point in dump_points %}<option value="{{ point.id }}" {% if point.id == trip.actual_dump_point_id %}selected{% endif %}>{{ point.name }}</option>{% endfor %}</select></label>
+                                <label><span>Горизонт</span><input name="loading_horizon" maxlength="64" value="{{ trip.loading_horizon }}"></label>
+                                <label><span>Блок</span><input name="loading_block" maxlength="64" value="{{ trip.loading_block }}"></label>
+                                <label class="is-wide"><span>Простои в рейсе</span><input name="downtime_text" maxlength="255" value="{{ trip.downtime_text }}"></label>
+                                <label class="is-wide"><span>Примечание</span><textarea name="note" rows="2">{{ trip.note }}</textarea></label>
+                                <label class="is-wide is-required"><span>Причина корректировки</span><input name="correction_reason" maxlength="255" required placeholder="Например: уточнено по сводке горного мастера"></label>
+                                <div class="dispatcher-shift-correction-actions"><button type="submit">Сохранить и пересчитать отчёт</button></div>
+                            </form>
+                        {% else %}
+                            <p class="dispatcher-shift-readonly-note">Для роли руководителя отчёт доступен только для просмотра, выгрузки и печати.</p>
+                        {% endif %}
+                    </details>
+                {% empty %}<p class="dispatcher-empty-note">В выбранной смене нет завершённых рейсов.</p>{% endfor %}
+            </div>
+        </section>
+    </section>
+</main>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var shell = document.querySelector("[data-dispatcher-theme]");
+    var saved = localStorage.getItem("dispatcher-theme") || "night";
+    if (shell) {
+        shell.classList.toggle("dispatcher-night", saved === "night");
+        shell.classList.toggle("dispatcher-day", saved !== "night");
+    }
+});
+</script>
+{% endblock %}
