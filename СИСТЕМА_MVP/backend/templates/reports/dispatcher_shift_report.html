@@ -51,6 +51,7 @@
             </div>
         {% endif %}
 
+        <div data-dispatcher-shift-report-live>
         {% if report.issues %}
             <section class="dispatcher-shift-report-issues no-print" aria-label="Замечания перед выгрузкой">
                 <strong>Проверить перед выгрузкой:</strong>
@@ -154,6 +155,7 @@
                 {% empty %}<p class="dispatcher-empty-note">В выбранной смене нет завершённых рейсов.</p>{% endfor %}
             </div>
         </section>
+        </div>
     </section>
 </main>
 
@@ -166,5 +168,52 @@ document.addEventListener("DOMContentLoaded", function () {
         shell.classList.toggle("dispatcher-day", saved !== "night");
     }
 });
+
+(function () {
+    "use strict";
+
+    var liveRootSelector = "[data-dispatcher-shift-report-live]";
+    var fragmentScreen = "dispatcher-shift-report";
+
+    function reportRefreshIsUnsafe(root) {
+        if (!root) return true;
+        if (root.querySelector(".dispatcher-shift-source-row[open]")) return true;
+        var active = document.activeElement;
+        return !!(
+            active
+            && root.contains(active)
+            && /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(active.tagName || "")
+        );
+    }
+
+    function refreshDispatcherShiftReport(context) {
+        var root = document.querySelector(liveRootSelector);
+        if (reportRefreshIsUnsafe(root)) {
+            return Promise.resolve({deferred: true, reason: "dispatcher_shift_report_editing"});
+        }
+        if (
+            !window.AppOperationalFragment
+            || typeof window.AppOperationalFragment.request !== "function"
+            || typeof window.AppOperationalFragment.parseRoot !== "function"
+        ) {
+            return Promise.resolve({deferred: true, reason: "dispatcher_shift_report_refresh_unavailable"});
+        }
+
+        return window.AppOperationalFragment.request(fragmentScreen, context && context.version).then(function (payload) {
+            var freshRoot = window.AppOperationalFragment.parseRoot(payload.html, liveRootSelector);
+            var currentRoot = document.querySelector(liveRootSelector);
+            if (!freshRoot || !currentRoot) {
+                return {deferred: true, reason: "dispatcher_shift_report_fragment_missing"};
+            }
+            currentRoot.replaceWith(freshRoot);
+            return {applied: true};
+        }).catch(function () {
+            return {deferred: true, reason: "dispatcher_shift_report_refresh_failed"};
+        });
+    }
+
+    window.refreshDispatcherShiftReport = refreshDispatcherShiftReport;
+    window.applyOperationalStateRefresh = refreshDispatcherShiftReport;
+})();
 </script>
 {% endblock %}

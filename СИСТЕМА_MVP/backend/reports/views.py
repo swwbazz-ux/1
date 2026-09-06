@@ -19,13 +19,15 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from downtimes.models import DowntimeEvent, DowntimeReason
+from core.models import OperationalStateVersion
+from core.operational_fragments import operational_fragment_response
 from core.production_time import (
     production_day_bounds,
     production_shift_bounds,
     production_shift_context,
     production_work_date,
 )
+from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, RockType
 from shifts.models import EmployeeShift, ShiftType, WatchPeriod
 from shifts.services import (
@@ -3604,7 +3606,14 @@ def dispatcher_shift_report_view(request, report_kind='trucks'):
             return correction_response
     report = build_dispatcher_shift_report(selected_date, shift_type)
     query_string = urlencode({'date': selected_date.isoformat(), 'shift_type': shift_type})
-    return render(request, 'reports/dispatcher_shift_report.html', {
+    operational_state = (
+        OperationalStateVersion.objects
+        .filter(key='production')
+        .only('version')
+        .first()
+    )
+    operational_state_version = operational_state.version if operational_state else 0
+    response = render(request, 'reports/dispatcher_shift_report.html', {
         'access': access,
         'dispatcher_header': build_dispatcher_header_context(access),
         'report': report,
@@ -3613,7 +3622,16 @@ def dispatcher_shift_report_view(request, report_kind='trucks'):
         'can_correct': access.role.code in {'dispatcher', 'admin'},
         'rock_types': RockType.objects.filter(is_active=True).order_by('name'),
         'dump_points': DumpPoint.objects.filter(is_active=True).order_by('name'),
+        'operational_state_version': operational_state_version,
     })
+    if request.GET.get('_operational_fragment', '').strip() == 'dispatcher-shift-report':
+        return operational_fragment_response(
+            response,
+            screen='dispatcher-shift-report',
+            selector='[data-dispatcher-shift-report-live]',
+            version=operational_state_version,
+        )
+    return response
 
 
 def dispatcher_shift_report_export_view(request, report_kind='trucks'):

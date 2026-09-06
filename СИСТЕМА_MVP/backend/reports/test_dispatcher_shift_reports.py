@@ -208,14 +208,47 @@ class DispatcherShiftReportTests(TestCase):
         self.assertContains(hub, 'Работа выемочного оборудования')
         self.assertEqual(trucks.status_code, 200)
         self.assertContains(trucks, 'dispatcher-shift-report-screen')
+        self.assertContains(trucks, 'data-dispatcher-shift-report-live')
+        self.assertContains(trucks, 'window.applyOperationalStateRefresh')
+        self.assertContains(trucks, 'refreshDispatcherShiftReport')
+        self.assertContains(trucks, 'name: "dispatcher-shift-report", role: "dispatcher", mode: "custom"')
         self.assertContains(trucks, 'this.form.requestSubmit()', count=2)
         self.assertNotContains(trucks, '>Показать</button>')
         self.assertContains(trucks, 'м³×км')
         self.assertContains(trucks, 'Корректировать')
         self.assertEqual(excavation.status_code, 200)
         self.assertContains(excavation, 'dispatcher-shift-report-screen')
+        self.assertContains(excavation, 'data-dispatcher-shift-report-live')
         self.assertContains(excavation, 'Тип грунта')
         self.assertContains(excavation, 'Место разгрузки')
+
+    def test_both_shift_reports_expose_live_operational_fragment(self):
+        params = {
+            'date': self.selected_date.isoformat(),
+            'shift_type': 'day',
+            '_operational_fragment': 'dispatcher-shift-report',
+            '_operational_version': '0',
+        }
+
+        for route_name in ('dispatcher_shift_trucks', 'dispatcher_shift_excavation'):
+            with self.subTest(route_name=route_name):
+                response = self.client.get(
+                    reverse(route_name),
+                    params,
+                    HTTP_ACCEPT='application/json',
+                    HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response['Cache-Control'], 'no-store')
+                self.assertEqual(response['X-Operational-Fragment'], 'operational-fragment-v1')
+                payload = response.json()
+                self.assertEqual(payload['contract'], 'operational-fragment-v1')
+                self.assertEqual(payload['screen'], 'dispatcher-shift-report')
+                self.assertIsInstance(payload['version'], int)
+                self.assertIn('data-dispatcher-shift-report-live', payload['html'])
+                self.assertNotIn('<script', payload['html'].lower())
+                self.assertNotIn('<main', payload['html'].lower())
 
     def test_excel_exports_keep_numeric_values_and_familiar_sheets(self):
         params = {'date': self.selected_date.isoformat(), 'shift_type': 'day'}
