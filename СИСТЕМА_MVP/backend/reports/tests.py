@@ -90,6 +90,86 @@ class ManagementDashboardPlanTests(TestCase):
         )
 
 
+class ManagementDashboardAccessContractTests(TestCase):
+    def setUp(self):
+        self.dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        self.manager_role = Role.objects.create(code='manager', name='Руководитель')
+        self.mechanic_role = Role.objects.create(code='mechanic', name='Механик')
+        self.dispatcher_access = EmployeeAccess.objects.create(
+            employee=Employee.objects.create(full_name='Диспетчер проверки доступа'),
+            role=self.dispatcher_role,
+            access_code='501001',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        self.manager_access = EmployeeAccess.objects.create(
+            employee=Employee.objects.create(full_name='Руководитель проверки доступа'),
+            role=self.manager_role,
+            access_code='601001',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        self.mechanic_access = EmployeeAccess.objects.create(
+            employee=Employee.objects.create(full_name='Механик проверки доступа'),
+            role=self.mechanic_role,
+            access_code='401001',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+
+    def activate(self, access):
+        session = self.client.session
+        session['employee_access_id'] = access.id
+        session.save()
+
+    def test_dispatcher_cannot_open_management_pages_or_export(self):
+        self.activate(self.dispatcher_access)
+
+        for route_name in ('management_dashboard', 'management_dynamics', 'management_dashboard_export'):
+            with self.subTest(route_name=route_name):
+                response = self.client.get(reverse(route_name))
+                self.assertRedirects(response, reverse('role_home'), fetch_redirect_response=False)
+
+    def test_dispatcher_shared_report_keeps_dispatcher_navigation_contract(self):
+        self.activate(self.dispatcher_access)
+
+        for route_name in ('customer_daily_report', 'volume_report', 'downtime_report', 'shift_analytics_report'):
+            with self.subTest(route_name=route_name):
+                response = self.client.get(reverse(route_name))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'Горный диспетчер')
+                self.assertContains(response, 'Разделы отчетов диспетчера')
+                self.assertContains(response, f'href="{reverse("dispatcher_reports")}">Все отчёты</a>')
+                self.assertContains(response, f'var linkedReportsHomePath = "{reverse("dispatcher_reports")}";')
+                self.assertNotContains(response, 'Руководство MVP')
+                self.assertNotContains(response, f'href="{reverse("management_dashboard")}"')
+
+    def test_mechanic_downtime_report_keeps_mechanic_navigation_contract(self):
+        self.activate(self.mechanic_access)
+
+        response = self.client.get(reverse('downtime_report'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Механическая служба')
+        self.assertContains(response, f'var linkedReportsHomePath = "{reverse("mechanic_dashboard")}";')
+        self.assertNotContains(response, 'Руководство MVP')
+        self.assertNotContains(response, f'href="{reverse("management_dashboard")}"')
+
+    def test_manager_keeps_management_pages_and_navigation(self):
+        self.activate(self.manager_access)
+
+        dashboard_response = self.client.get(reverse('management_dashboard'))
+        dynamics_response = self.client.get(reverse('management_dynamics'))
+        export_response = self.client.get(reverse('management_dashboard_export'))
+        daily_response = self.client.get(reverse('customer_daily_report'))
+
+        self.assertEqual(dashboard_response.status_code, 200)
+        self.assertEqual(dynamics_response.status_code, 200)
+        self.assertEqual(export_response.status_code, 200)
+        self.assertContains(daily_response, 'Руководство MVP')
+        self.assertContains(daily_response, f'href="{reverse("management_dashboard")}">Сводка</a>')
+
+
 class ProductionConsumerContractTests(TestCase):
     def setUp(self):
         self.factory = RequestFactory()

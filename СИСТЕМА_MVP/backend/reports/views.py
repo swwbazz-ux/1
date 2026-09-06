@@ -4414,8 +4414,11 @@ def management_dynamics_report_context(request):
     }
 
 
+MANAGEMENT_REPORT_ROLE_CODES = frozenset({'admin', 'manager'})
+
+
 def management_dynamics_view(request):
-    access = get_reports_access(request, {'dispatcher', 'admin', 'manager'})
+    access = get_reports_access(request, MANAGEMENT_REPORT_ROLE_CODES)
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
     return render(
@@ -6185,7 +6188,7 @@ def management_dashboard_context(request, access):
 
 
 def management_dashboard_view(request):
-    access = get_reports_access(request, {'manager', 'admin', 'dispatcher'})
+    access = get_reports_access(request, MANAGEMENT_REPORT_ROLE_CODES)
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
     return render(request, 'reports/management_dashboard.html', management_dashboard_context(request, access))
@@ -6218,7 +6221,7 @@ def style_management_export_sheet(sheet):
 
 
 def management_dashboard_export_view(request):
-    access = get_reports_access(request, {'manager', 'admin', 'dispatcher'})
+    access = get_reports_access(request, MANAGEMENT_REPORT_ROLE_CODES)
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
 

@@ -1,3 +1,79 @@
+{% if access.role.code == 'dispatcher' %}
+<header class="management-dashboard-header">
+    <div class="management-dashboard-header-title">
+        <span>Горный диспетчер</span>
+        <h1>{{ title }}</h1>
+        <p>{{ subtitle }}</p>
+    </div>
+    <div class="management-dashboard-header-meta" aria-label="Параметры раздела">
+        <div>
+            <span>Раздел</span>
+            <strong>Отчёты диспетчера</strong>
+        </div>
+        <div>
+            <span>Сформировано</span>
+            <strong>{% now "d.m.Y H:i" %}</strong>
+        </div>
+    </div>
+    <div class="management-dashboard-header-actions">
+        <button type="button" class="management-dashboard-theme" data-dispatcher-theme-toggle data-theme-icon="moon" aria-label="Включить дневную тему" title="Дневной режим"></button>
+        <a href="{% url 'dispatcher_control' %}">Пульт</a>
+        <a href="{% url 'logout' %}">Выйти</a>
+    </div>
+</header>
+
+<div class="dispatcher-analytics-toolbar">
+    <nav class="dispatcher-subnav" aria-label="Разделы отчетов диспетчера">
+        <a href="{% url 'dispatcher_reports' %}">Все отчёты</a>
+        <a class="{% if active == 'shift_analytics' %}is-active{% endif %}" href="{% url 'shift_analytics_report' %}">Смена</a>
+        <a class="{% if active == 'daily' %}is-active{% endif %}" href="{% url 'customer_daily_report' %}">Сутки</a>
+        <a class="{% if active == 'volume' %}is-active{% endif %}" href="{% url 'volume_report' %}">Объёмы</a>
+        <a class="{% if active == 'downtime' %}is-active{% endif %}" href="{% url 'downtime_report' %}">Простои</a>
+    </nav>
+    <div class="dispatcher-report-actions">
+        {% if export_url %}
+            <a href="{{ export_url }}">Excel</a>
+        {% endif %}
+        <button type="button" onclick="window.print()">Печать</button>
+    </div>
+</div>
+{% elif access.role.code == 'mechanic' %}
+<header class="management-dashboard-header">
+    <div class="management-dashboard-header-title">
+        <span>Механическая служба</span>
+        <h1>{{ title }}</h1>
+        <p>{{ subtitle }}</p>
+    </div>
+    <div class="management-dashboard-header-meta" aria-label="Параметры раздела">
+        <div>
+            <span>Раздел</span>
+            <strong>Контроль простоев</strong>
+        </div>
+        <div>
+            <span>Сформировано</span>
+            <strong>{% now "d.m.Y H:i" %}</strong>
+        </div>
+    </div>
+    <div class="management-dashboard-header-actions">
+        <button type="button" class="management-dashboard-theme" data-dispatcher-theme-toggle data-theme-icon="moon" aria-label="Включить дневную тему" title="Дневной режим"></button>
+        <a href="{% url 'mechanic_dashboard' %}">Главная</a>
+        <a href="{% url 'logout' %}">Выйти</a>
+    </div>
+</header>
+
+<div class="dispatcher-analytics-toolbar">
+    <nav class="dispatcher-subnav" aria-label="Разделы механической службы">
+        <a class="{% if active == 'downtime' %}is-active{% endif %}" href="{% url 'downtime_report' %}">Отчёт по простоям</a>
+        <a href="{% url 'mechanic_dashboard' %}">Экран механиков</a>
+    </nav>
+    <div class="dispatcher-report-actions">
+        {% if export_url %}
+            <a href="{{ export_url }}">Excel</a>
+        {% endif %}
+        <button type="button" onclick="window.print()">Печать</button>
+    </div>
+</div>
+{% else %}
 <header class="management-dashboard-header">
     <div class="management-dashboard-header-title">
         <span>Руководство MVP</span>
@@ -40,3 +116,4 @@
         <button type="button" onclick="window.print()">Печать</button>
     </div>
 </div>
+{% endif %}

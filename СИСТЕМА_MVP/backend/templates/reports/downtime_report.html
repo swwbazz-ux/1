@@ -41,8 +41,12 @@
         <div class="actions">
             <a class="button-link" href="{% url 'downtime_report_export' %}{% if filters.query_string %}?{{ filters.query_string }}{% endif %}">Выгрузить в Excel</a>
             <a class="button-link button-secondary" href="{% url 'mechanic_dashboard' %}">Экран механиков</a>
-            <a class="button-link button-secondary" href="{% url 'dispatcher_control' %}">Диспетчерский пульт</a>
-            <a class="button-link button-secondary" href="{% url 'management_dashboard' %}">Витрина руководства</a>
+            {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
+                <a class="button-link button-secondary" href="{% url 'dispatcher_control' %}">Диспетчерский пульт</a>
+            {% endif %}
+            {% if access.role.code == 'manager' or access.role.code == 'admin' %}
+                <a class="button-link button-secondary" href="{% url 'management_dashboard' %}">Витрина руководства</a>
+            {% endif %}
             {% if selected_single_date %}
                 <a class="button-link button-secondary" href="{% url 'customer_daily_report' %}?date={{ selected_single_date }}">Суточный отчет за дату</a>
             {% endif %}

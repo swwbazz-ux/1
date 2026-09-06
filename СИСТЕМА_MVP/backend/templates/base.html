@@ -1737,6 +1737,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     var logoutPath = "{% url 'logout' %}";
     var roleHomePath = "{% url 'role_home' %}";
+    var linkedReportsHomePath = "{% if access.role.code == 'dispatcher' %}{% url 'dispatcher_reports' %}{% elif access.role.code == 'mechanic' %}{% url 'mechanic_dashboard' %}{% else %}{% url 'management_dashboard' %}{% endif %}";
     var confirmModal = document.getElementById("app-confirm-modal");
     var confirmMessage = document.getElementById("app-confirm-message");
     var confirmAccept = confirmModal ? confirmModal.querySelector("[data-confirm-accept]") : null;
@@ -1767,9 +1768,9 @@ document.addEventListener("DOMContentLoaded", function () {
         {pattern: /^\/reports\/pilot-feedback\/?$/, target: "{% url 'pilot_launch_scenario' %}"},
         {pattern: /^\/reports\/pilot-checklist\/?$/, target: "{% url 'pilot_launch_scenario' %}"},
         {pattern: /^\/reports\/management\/?$/, target: roleHomePath},
-        {pattern: /^\/reports\/customer-daily\/?$/, target: "{% url 'management_dashboard' %}"},
-        {pattern: /^\/reports\/volume\/?$/, target: "{% url 'management_dashboard' %}"},
-        {pattern: /^\/reports\/downtimes\/?$/, target: "{% url 'management_dashboard' %}"},
+        {pattern: /^\/reports\/customer-daily\/?$/, target: linkedReportsHomePath},
+        {pattern: /^\/reports\/volume\/?$/, target: linkedReportsHomePath},
+        {pattern: /^\/reports\/downtimes\/?$/, target: linkedReportsHomePath},
         {pattern: /^\/driver\/registration\/?$/, target: roleHomePath},
         {pattern: /^\/driver\/shift\/?$/, target: roleHomePath},
         {pattern: /^\/dispatcher\/control\/?$/, target: roleHomePath},
