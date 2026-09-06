@@ -19834,6 +19834,10 @@ body.system-admin-reference-detail-screen .admin-page {
     grid-template-rows: auto auto auto minmax(0, 1fr);
 }
 
+.dispatcher-reports-home-board {
+    grid-template-rows: auto auto minmax(0, 1fr);
+}
+
 .dispatcher-report-filters {
     display: flex;
     align-items: end;
@@ -19878,6 +19882,19 @@ body.system-admin-reference-detail-screen .admin-page {
 
 .dispatcher-report-filters[data-auto-filter-form] button[type="submit"] {
     display: none;
+}
+
+.dispatcher-report-filter-actions {
+    align-self: end;
+    margin-left: auto;
+}
+
+.dispatcher-report-filters .dispatcher-report-filter-actions a,
+.dispatcher-report-filters .dispatcher-report-filter-actions button {
+    min-width: 82px;
+    min-height: 30px;
+    padding: 0 10px;
+    color: var(--gd-text);
 }
 
 .dispatcher-report-filters[data-auto-filter-form] label:has(input[type="date"]),
