@@ -8,6 +8,7 @@
     <title>{% block title %}MVP учетной системы{% endblock %}</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}?v={{ static_asset_release }}">
+    {% block app_stylesheets %}{% endblock %}
     <style>
         .app-sync-overlay {
             position: fixed;

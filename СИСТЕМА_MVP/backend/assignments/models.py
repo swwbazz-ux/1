@@ -455,4 +455,49 @@ class ExcavatorPlacement(models.Model):
         return f'{self.excavator} / {self.get_zone_display()}'
 
 
+class ExcavatorDumpPointSetting(models.Model):
+    placement = models.ForeignKey(
+        ExcavatorPlacement,
+        verbose_name='Размещение экскаватора',
+        on_delete=models.CASCADE,
+        related_name='dump_point_settings',
+    )
+    dump_point = models.ForeignKey(
+        'references.DumpPoint',
+        verbose_name='Точка разгрузки',
+        on_delete=models.CASCADE,
+        related_name='excavator_work_settings',
+    )
+    transport_distance_km = models.DecimalField(
+        'Плечо до точки разгрузки, км',
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    position = models.PositiveSmallIntegerField('Порядок', default=0)
+    changed_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кто изменил',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+    changed_at = models.DateTimeField('Изменено', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Рабочая точка разгрузки экскаватора'
+        verbose_name_plural = 'Рабочие точки разгрузки экскаваторов'
+        ordering = ['position', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['placement', 'dump_point'],
+                name='assignments_unique_excavator_dump_point',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.placement.excavator} → {self.dump_point}'
+
+
 # Create your models here.

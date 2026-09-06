@@ -838,7 +838,7 @@
                     </div>
                     <span class="gd-detail-settings-status" data-gd-detail-settings-status role="status" aria-live="polite"></span>
                 </div>
-                <div class="gd-detail-settings-grid">
+                <div class="gd-detail-settings-face">
                     <label>
                         <span>Горизонт</span>
                         <input type="text" inputmode="numeric" maxlength="16" data-gd-setting-horizon>
@@ -851,15 +851,19 @@
                         <span>Порода</span>
                         <select data-gd-setting-rock></select>
                     </label>
-                    <label>
-                        <span>Точка разгрузки</span>
-                        <select data-gd-setting-dump></select>
-                    </label>
-                    <label>
-                        <span>Плечо, км</span>
-                        <input type="text" inputmode="decimal" maxlength="12" placeholder="Например, 3,2" data-gd-setting-distance>
-                    </label>
-                    <button type="button" class="gd-detail-settings-save" data-gd-setting-save>Сохранить параметры</button>
+                </div>
+                <div class="gd-detail-destinations">
+                    <div class="gd-detail-destinations-head">
+                        <div>
+                            <strong>Точки разгрузки</strong>
+                            <span data-gd-destination-count></span>
+                        </div>
+                        <button type="button" class="gd-detail-destination-add" data-gd-destination-add>+ Добавить точку</button>
+                    </div>
+                    <div class="gd-detail-destination-list" data-gd-destination-list></div>
+                </div>
+                <div class="gd-detail-settings-actions">
+                    <button type="button" class="gd-detail-settings-save" data-gd-setting-save>Сохранить настройки</button>
                 </div>
             </section>
             <dl class="mm-detail-list" data-gd-detail-list></dl>
@@ -6085,6 +6089,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v59" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v60" defer></script>
 {% endif %}
 {% endblock %}

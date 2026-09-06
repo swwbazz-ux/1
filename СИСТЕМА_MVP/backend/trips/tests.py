@@ -9,7 +9,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
+from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorDumpPointSetting, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
 from core.models import OperationalStateEvent, OperationalStateVersion
 from users.role_apps import ROLE_APPS_BY_CODE
 from core.production_time import production_shift_type, production_work_date
@@ -1476,6 +1476,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
                 'client_action_id': 'settings-1',
                 'rock_type_id': second_rock.id,
                 'dump_point_ids': [second_dump.id, self.dump_point.id],
+                'destinations': [
+                    {'dump_point_id': second_dump.id, 'transport_distance_km': '3,2'},
+                    {'dump_point_id': self.dump_point.id, 'transport_distance_km': '5.75'},
+                ],
                 'loading_horizon': '75a',
                 'loading_block': '52-1',
             }),
@@ -1486,7 +1490,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         payload = json.loads(response.content.decode('utf-8'))
         self.assertTrue(payload['ok'])
         self.assertTrue(payload['work_context_changed'])
-        self.assertEqual(payload['active_downtime_reason'], 'Перегон экскаватора')
+        self.assertEqual(payload['active_downtime_reason'], '')
         self.assertEqual(payload['rock_type_id'], second_rock.id)
         self.assertEqual(payload['dump_point_ids'], [second_dump.id, self.dump_point.id])
         self.assertEqual(payload['loading_horizon'], '75')
@@ -1496,6 +1500,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(placement.work_dump_point, second_dump)
         self.assertEqual(placement.loading_horizon, '75')
         self.assertEqual(placement.loading_block, '521')
+        destination_rows = list(placement.dump_point_settings.order_by('position'))
+        self.assertEqual([row.dump_point_id for row in destination_rows], [second_dump.id, self.dump_point.id])
+        self.assertEqual([row.transport_distance_km for row in destination_rows], [Decimal('3.20'), Decimal('5.75')])
         self.assertTrue(
             OperationalStateEvent.objects.filter(
                 event_type='equipment_changed',
@@ -1508,6 +1515,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         screen = self.client.get(reverse('excavator_work'))
         self.assertEqual(screen.status_code, 200)
         self.assertEqual([card['point'].id for card in screen.context['dump_cards']], [second_dump.id, self.dump_point.id])
+        self.assertEqual(
+            [card['transport_distance_km'] for card in screen.context['dump_cards']],
+            ['3.20', '5.75'],
+        )
         self.assertEqual(screen.context['default_rock'], second_rock.id)
         self.assertEqual(screen.context['face_horizon'], '75')
         self.assertEqual(screen.context['face_block'], '521')
@@ -1515,9 +1526,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(screen, f'data-eo-dump-target="{self.dump_point.id}"')
         self.assertContains(screen, f'value="{second_rock.id}" selected')
 
-        transfer = DowntimeEvent.objects.get(equipment=self.excavator, ended_at__isnull=True)
-        self.assertEqual(transfer.reason.name, 'Перегон экскаватора')
-        self.assertEqual(transfer.employee, self.operator)
+        self.assertFalse(DowntimeEvent.objects.filter(equipment=self.excavator, ended_at__isnull=True).exists())
 
     def test_excavator_work_settings_same_context_does_not_restart_transfer(self):
         settings = {
@@ -1531,10 +1540,6 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             data=json.dumps({'client_action_id': 'settings-first', **settings}),
             content_type='application/json',
         )
-        transfer = DowntimeEvent.objects.get(equipment=self.excavator, ended_at__isnull=True)
-        transfer.ended_at = timezone.now()
-        transfer.save(update_fields=['ended_at'])
-
         second_response = self.client.post(
             reverse('excavator_work_settings'),
             data=json.dumps({'client_action_id': 'settings-same', **settings}),
@@ -2454,6 +2459,34 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             ).exists()
         )
 
+    def test_truck_loaded_uses_distance_of_selected_configured_dump_point(self):
+        second_dump = DumpPoint.objects.create(name='Отвал')
+        placement = ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            work_rock_type=self.rock,
+            work_dump_point=self.dump_point,
+        )
+        ExcavatorDumpPointSetting.objects.create(
+            placement=placement,
+            dump_point=self.dump_point,
+            transport_distance_km='2.50',
+            position=0,
+        )
+        ExcavatorDumpPointSetting.objects.create(
+            placement=placement,
+            dump_point=second_dump,
+            transport_distance_km='6.75',
+            position=1,
+        )
+
+        response = self.post_truck_loaded(dump_point=second_dump, client_action_id='load-distance')
+
+        self.assertEqual(response.status_code, 200)
+        trip = Trip.objects.get(id=response.json()['trip_id'])
+        self.assertEqual(trip.dump_point, second_dump)
+        self.assertEqual(trip.transport_distance_km, Decimal('6.75'))
+        self.assertEqual(placement.dump_point_settings.count(), 2)
+
     def test_truck_loaded_rejects_undefined_capacity_without_creating_trip(self):
         self.capacity_rule.delete()
 
@@ -3265,6 +3298,7 @@ class DispatcherEquipmentDetailTests(TestCase):
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
+
         self.driver = Employee.objects.create(
             full_name='Назначенный водитель',
             phone='79000000702',
@@ -3350,6 +3384,15 @@ class DispatcherEquipmentDetailTests(TestCase):
     def current_state_version(self):
         return OperationalStateVersion.objects.filter(key='production').values_list('version', flat=True).first() or 0
 
+    def test_dispatcher_control_loads_role_styles_and_compact_destination_editor(self):
+        response = self.client.get(reverse('dispatcher_control'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'static/css/dispatcher-control-v1.css')
+        self.assertContains(response, 'data-gd-destination-list')
+        self.assertContains(response, 'data-gd-destination-add')
+        self.assertContains(response, 'data-gd-setting-save')
+
     def test_detail_uses_current_work_assignments_and_hides_vin(self):
         truck_response = self.client.get(self.detail_url('equipment', self.truck))
         complex_response = self.client.get(self.detail_url('complex', self.excavator))
@@ -3364,7 +3407,7 @@ class DispatcherEquipmentDetailTests(TestCase):
         self.assertIn('Назначен на', complex_card['employee']['presence_label'])
         self.assertNotIn('VIN/серийный N', [row['label'] for row in truck_card['details']])
         self.assertNotIn('VIN/серийный N', [row['label'] for row in complex_card['details']])
-        self.assertEqual(complex_card['settings']['dump_point_id'], self.dump.id)
+        self.assertEqual(complex_card['settings']['destinations'][0]['dump_point_id'], self.dump.id)
         self.assertEqual(complex_card['settings']['rock_type_id'], self.rock.id)
 
     def test_open_shift_employee_has_priority_over_planned_assignment(self):
@@ -3409,12 +3452,43 @@ class DispatcherEquipmentDetailTests(TestCase):
         self.assertEqual(placement.loading_block, '8')
         self.assertEqual(placement.transport_distance_km, Decimal('3.25'))
         self.assertEqual(placement.changed_by, self.dispatcher)
-        self.assertEqual(response.json()['contract'], 'dispatcher-equipment-settings-v1')
+        self.assertEqual(response.json()['contract'], 'dispatcher-equipment-settings-v2')
         self.assertTrue(OperationalStateEvent.objects.filter(
             event_type='equipment_changed',
             object_id=str(self.excavator.id),
             payload__action='dispatcher_excavator_work_settings',
         ).exists())
+
+    def test_dispatcher_saves_multiple_destinations_with_individual_distances(self):
+        second_dump = DumpPoint.objects.create(name='СКДР тест', is_active=True)
+
+        response = self.client.post(
+            reverse('dispatcher_equipment_detail', args=['complex', self.excavator.id]),
+            data=json.dumps({
+                'state_version': self.current_state_version(),
+                'loading_horizon': '230',
+                'loading_block': '8',
+                'rock_type_id': self.rock.id,
+                'destinations': [
+                    {'dump_point_id': self.dump.id, 'transport_distance_km': '3,25'},
+                    {'dump_point_id': second_dump.id, 'transport_distance_km': '7.5'},
+                ],
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        placement = ExcavatorPlacement.objects.get(excavator=self.excavator)
+        rows = list(placement.dump_point_settings.order_by('position'))
+        self.assertEqual([row.dump_point_id for row in rows], [self.dump.id, second_dump.id])
+        self.assertEqual([row.transport_distance_km for row in rows], [Decimal('3.25'), Decimal('7.50')])
+        self.assertEqual(placement.work_dump_point_id, self.dump.id)
+        self.assertEqual(placement.transport_distance_km, Decimal('3.25'))
+        self.assertEqual(response.json()['contract'], 'dispatcher-equipment-settings-v2')
+        self.assertEqual(
+            [row['dump_point_id'] for row in response.json()['settings']['destinations']],
+            [self.dump.id, second_dump.id],
+        )
 
     def test_dispatcher_rejects_stale_settings_update(self):
         OperationalStateVersion.objects.update_or_create(key='production', defaults={'version': 4})

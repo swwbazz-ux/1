@@ -1,0 +1,74 @@
+body.excavator-operator-screen .mobile-face__destination-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 58px;
+    gap: 5px;
+    min-width: 0;
+}
+
+body.excavator-operator-screen .mobile-face__destination-row:not(.is-selected) .mobile-face__destination {
+    grid-column: 1 / -1;
+}
+
+body.excavator-operator-screen .mobile-face__destination-row:not(.is-selected) .mobile-face__destination-distance {
+    display: none;
+}
+
+body.excavator-operator-screen .mobile-face__destination-row .mobile-face__destination {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+    padding-inline: 7px;
+}
+
+body.excavator-operator-screen .mobile-face__destination-distance {
+    display: grid;
+    grid-template-rows: 13px minmax(0, 1fr);
+    min-width: 0;
+    padding: 3px;
+    border: 1px solid rgba(35, 185, 206, .48);
+    border-radius: 9px;
+    background: rgba(5, 20, 28, .9);
+}
+
+body.excavator-operator-screen .mobile-face__destination-distance > span {
+    color: #7f9aa5;
+    font-size: 8px;
+    font-weight: 900;
+    line-height: 11px;
+    text-align: center;
+    text-transform: uppercase;
+}
+
+body.excavator-operator-screen .mobile-face__destination-distance > input {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 25px;
+    padding: 2px 3px;
+    border: 0;
+    border-radius: 6px;
+    background: rgba(19, 44, 55, .95);
+    color: #eaf6f8;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1;
+    text-align: center;
+    outline: 0;
+}
+
+body.excavator-operator-screen .mobile-face__destination-distance > input:focus {
+    box-shadow: 0 0 0 2px rgba(35, 185, 206, .42);
+}
+
+body.excavator-operator-screen .mobile-face__destination-distance > input:disabled {
+    opacity: .5;
+}
+
+@media (max-width: 370px) {
+    body.excavator-operator-screen .mobile-face__destination-row {
+        grid-template-columns: minmax(0, 1fr) 52px;
+        gap: 4px;
+    }
+}
