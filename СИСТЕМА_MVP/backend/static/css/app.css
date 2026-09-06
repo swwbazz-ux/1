@@ -34028,6 +34028,46 @@ body.dispatcher-shift-report-screen {
     white-space: nowrap;
 }
 
+.dispatcher-shift-report-filter-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.dispatcher-shift-report-sync {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--gd-muted);
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: none;
+}
+
+.dispatcher-shift-report-sync i {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 7px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 3px rgba(154, 172, 184, .09);
+}
+
+.dispatcher-shift-report-sync.is-ok { color: var(--gd-green); }
+.dispatcher-shift-report-sync.is-updating { color: var(--gd-cyan); }
+.dispatcher-shift-report-sync.is-warning { color: var(--gd-yellow); }
+.dispatcher-shift-report-sync.is-paused { color: var(--gd-muted); }
+.dispatcher-shift-report-sync.is-updating i { animation: dispatcher-report-sync-pulse 1s ease-in-out infinite; }
+
+@keyframes dispatcher-report-sync-pulse {
+    50% { opacity: .35; transform: scale(.75); }
+}
+
+@media (max-width: 1450px) {
+    .dispatcher-shift-report-range-hint { display: none; }
+    .dispatcher-shift-report-filter-summary { margin-top: 0 !important; }
+}
+
 .dispatcher-shift-report-table.is-hourly thead th {
     position: sticky;
     top: 0;
@@ -34251,6 +34291,7 @@ body.dispatcher-shift-report-screen {
     .dispatcher-shift-report-filters { width: 100%; align-items: stretch; flex-wrap: wrap; margin-left: 0; padding: 8px 0 0; border-top: 1px solid var(--gd-line); border-left: 0; }
     .dispatcher-shift-report-filters label { flex: 1 1 130px; }
     .dispatcher-shift-report-filters p { width: 100%; margin: 0; }
+    .dispatcher-shift-report-filter-summary { align-items: flex-start; flex-direction: column; gap: 5px; white-space: normal; }
     .dispatcher-report-controlbar { align-items: stretch; flex-wrap: wrap; }
     .dispatcher-report-controlbar > .dispatcher-subnav { width: 100%; flex: 1 1 100%; }
     .dispatcher-report-controlbar-filters { width: 100%; flex: 1 1 100%; align-items: stretch; flex-wrap: wrap; padding: 8px 0 0; border-top: 1px solid var(--gd-line); border-left: 0; }

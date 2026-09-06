@@ -33,7 +33,13 @@
                         <option value="night" {% if report.meta.shift_type == 'night' %}selected{% endif %}>Ночная</option>
                     </select>
                 </label>
-                <p>Применяются сразу · <strong>{{ report.meta.time_range }}</strong></p>
+                <p class="dispatcher-shift-report-filter-summary">
+                    <span class="dispatcher-shift-report-range-hint">Применяются сразу · <strong>{{ report.meta.time_range }}</strong></span>
+                    <span class="dispatcher-shift-report-sync is-ok" data-dispatcher-shift-report-sync role="status" aria-live="polite">
+                        <i aria-hidden="true"></i>
+                        <span data-dispatcher-shift-report-sync-text>Обновлено при открытии</span>
+                    </span>
+                </p>
             </form>
 
             <div class="dispatcher-report-actions">
@@ -243,6 +249,42 @@ document.addEventListener("DOMContentLoaded", function () {
 
     var liveRootSelector = "[data-dispatcher-shift-report-live]";
     var fragmentScreen = "dispatcher-shift-report";
+    var fragmentTimeoutMs = 3000;
+    var fragmentRetryDelayMs = 500;
+    var reconcileIntervalMs = 10000;
+    var staleWarningMs = 15000;
+    var refreshInFlight = null;
+    var reconcileTimerId = null;
+    var statusTimerId = null;
+    var lastSuccessfulRefreshAt = Date.now();
+
+    function syncStatusElements() {
+        return {
+            root: document.querySelector("[data-dispatcher-shift-report-sync]"),
+            text: document.querySelector("[data-dispatcher-shift-report-sync-text]")
+        };
+    }
+
+    function formatRefreshTime(timestamp) {
+        return new Date(timestamp).toLocaleTimeString("ru-RU", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+        });
+    }
+
+    function setSyncStatus(state, text) {
+        var elements = syncStatusElements();
+        if (!elements.root || !elements.text) return;
+        elements.root.classList.remove("is-ok", "is-updating", "is-warning", "is-paused");
+        elements.root.classList.add("is-" + state);
+        elements.text.textContent = text;
+    }
+
+    function markRefreshSuccessful() {
+        lastSuccessfulRefreshAt = Date.now();
+        setSyncStatus("ok", "Обновлено в " + formatRefreshTime(lastSuccessfulRefreshAt));
+    }
 
     function reportRefreshIsUnsafe(root) {
         if (!root) return true;
@@ -255,9 +297,23 @@ document.addEventListener("DOMContentLoaded", function () {
         );
     }
 
+    function requestReportFragment(version, attempt) {
+        return window.AppOperationalFragment.request(fragmentScreen, version, {
+            timeoutMs: fragmentTimeoutMs
+        }).catch(function (error) {
+            if (attempt >= 2) throw error;
+            return new Promise(function (resolve) {
+                window.setTimeout(resolve, fragmentRetryDelayMs);
+            }).then(function () {
+                return requestReportFragment(version, attempt + 1);
+            });
+        });
+    }
+
     function refreshDispatcherShiftReport(context) {
         var root = document.querySelector(liveRootSelector);
         if (reportRefreshIsUnsafe(root)) {
+            setSyncStatus("paused", "Обновление ждёт завершения корректировки");
             return Promise.resolve({deferred: true, reason: "dispatcher_shift_report_editing"});
         }
         if (
@@ -265,10 +321,17 @@ document.addEventListener("DOMContentLoaded", function () {
             || typeof window.AppOperationalFragment.request !== "function"
             || typeof window.AppOperationalFragment.parseRoot !== "function"
         ) {
+            setSyncStatus("warning", "Автообновление недоступно");
             return Promise.resolve({deferred: true, reason: "dispatcher_shift_report_refresh_unavailable"});
         }
 
-        return window.AppOperationalFragment.request(fragmentScreen, context && context.version).then(function (payload) {
+        if (refreshInFlight) {
+            return refreshInFlight;
+        }
+
+        setSyncStatus("updating", "Обновляем отчёт…");
+
+        refreshInFlight = requestReportFragment(context && context.version, 1).then(function (payload) {
             var freshRoot = window.AppOperationalFragment.parseRoot(payload.html, liveRootSelector);
             var currentRoot = document.querySelector(liveRootSelector);
             if (!freshRoot || !currentRoot) {
@@ -287,14 +350,68 @@ document.addEventListener("DOMContentLoaded", function () {
                     freshHourlyScroll.scrollTop = hourlyScrollPosition.top;
                 }
             }
-            return {applied: true};
+            if (document.body && Number(payload.version || 0) > 0) {
+                document.body.dataset.operationalStateVersion = String(payload.version);
+            }
+            markRefreshSuccessful();
+            return {applied: true, version: Number(payload.version || 0)};
         }).catch(function () {
+            setSyncStatus("warning", "Обновление задерживается — повторяем");
             return {deferred: true, reason: "dispatcher_shift_report_refresh_failed"};
+        }).finally(function () {
+            refreshInFlight = null;
         });
+
+        return refreshInFlight;
+    }
+
+    function reportPageIsActive() {
+        return document.hidden !== true
+            && (typeof document.hasFocus !== "function" || document.hasFocus());
+    }
+
+    function runPeriodicReconcile() {
+        if (!reportPageIsActive()) return;
+        var root = document.querySelector(liveRootSelector);
+        if (reportRefreshIsUnsafe(root)) {
+            setSyncStatus("paused", "Обновление ждёт завершения корректировки");
+            return;
+        }
+        refreshDispatcherShiftReport({
+            version: Number(document.body && document.body.dataset.operationalStateVersion || 0),
+            reason: "periodic_reconcile"
+        });
+    }
+
+    function startReportReconcile() {
+        markRefreshSuccessful();
+        reconcileTimerId = window.setInterval(runPeriodicReconcile, reconcileIntervalMs);
+        statusTimerId = window.setInterval(function () {
+            if (!reportPageIsActive() || refreshInFlight) return;
+            var root = document.querySelector(liveRootSelector);
+            if (reportRefreshIsUnsafe(root)) return;
+            if (Date.now() - lastSuccessfulRefreshAt > staleWarningMs) {
+                setSyncStatus("warning", "Обновление задерживается — повторяем");
+            }
+        }, 1000);
     }
 
     window.refreshDispatcherShiftReport = refreshDispatcherShiftReport;
     window.applyOperationalStateRefresh = refreshDispatcherShiftReport;
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", startReportReconcile, {once: true});
+    } else {
+        startReportReconcile();
+    }
+    window.addEventListener("focus", runPeriodicReconcile);
+    document.addEventListener("visibilitychange", function () {
+        if (document.hidden !== true) runPeriodicReconcile();
+    });
+    window.addEventListener("pagehide", function () {
+        if (reconcileTimerId !== null) window.clearInterval(reconcileTimerId);
+        if (statusTimerId !== null) window.clearInterval(statusTimerId);
+    }, {once: true});
 })();
 </script>
 {% endblock %}
