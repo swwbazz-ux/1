@@ -165,12 +165,16 @@ class EmployeeAccessAdmin(admin.ModelAdmin):
 
 @admin.register(ActiveApplicationSession)
 class ActiveApplicationSessionAdmin(admin.ModelAdmin):
-    list_display = ('last_seen_at', 'access', 'app_code', 'path', 'device_kind')
+    list_display = (
+        'last_seen_at', 'access', 'app_code', 'client_kind',
+        'client_version', 'path', 'device_kind',
+    )
     search_fields = ('access__employee__full_name', 'role_code', 'app_code', 'path')
-    list_filter = ('app_code', 'role_code', 'device_kind')
+    list_filter = ('app_code', 'role_code', 'client_kind', 'device_kind')
     readonly_fields = (
         'session_key', 'access', 'role_code', 'app_code', 'path',
-        'device_kind', 'first_seen_at', 'last_seen_at',
+        'device_kind', 'client_kind', 'client_version', 'first_seen_at',
+        'last_seen_at', 'foreground_seen_at', 'background_seen_at',
     )
 
     def has_add_permission(self, request):

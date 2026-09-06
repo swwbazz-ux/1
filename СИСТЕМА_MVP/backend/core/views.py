@@ -3,6 +3,8 @@ from django.views.decorators.http import require_GET
 
 from users.models import EmployeeAccess
 from users.active_role import role_session_state
+from users.context_processors import parse_native_app_marker
+from users.live_monitor import PRESENCE_BACKGROUND, touch_application_session
 from users.role_apps import (
     APP_CONTRACT_VERSION,
     get_role_app,
@@ -61,6 +63,15 @@ def operational_state_version_view(request):
     )
 
     if role_is_active_for_app:
+        native_app, native_version = parse_native_app_marker(request)
+        if native_app and role_app:
+            touch_application_session(
+                request,
+                reported_path=role_app.start_url,
+                presence_kind=PRESENCE_BACKGROUND,
+                client_kind='android_apk',
+                client_version=native_version,
+            )
         from assignments.services import reconcile_due_haul_assignments_throttled
 
         reconcile_due_haul_assignments_throttled()

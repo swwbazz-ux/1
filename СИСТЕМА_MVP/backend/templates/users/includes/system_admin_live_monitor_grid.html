@@ -7,7 +7,12 @@
     <article>
         <span>Сотрудников онлайн</span>
         <strong>{{ online_employee_total }}</strong>
-        <small>активность до 90 секунд</small>
+        <small>приложение открыто</small>
+    </article>
+    <article class="is-background-metric">
+        <span>Связь в фоне</span>
+        <strong>{{ background_employee_total }}</strong>
+        <small>APK отвечает серверу</small>
     </article>
     <article>
         <span>Открытых смен</span>
@@ -18,7 +23,7 @@
 
 <section class="admin-live-app-grid" aria-label="Карта приложений">
     {% for card in app_cards %}
-        <article class="admin-live-app-card{% if card.online_count %} has-online{% endif %}{% if card.open_shift_count %} has-shift{% endif %}" data-app-code="{{ card.app.role_code }}">
+        <article class="admin-live-app-card{% if card.online_count %} has-online{% endif %}{% if card.background_count %} has-background{% endif %}{% if card.open_shift_count %} has-shift{% endif %}" data-app-code="{{ card.app.role_code }}">
             <header class="admin-live-app-header">
                 <span class="admin-live-app-icon" aria-hidden="true">{{ card.app.short_name|first }}</span>
                 <div>
@@ -27,6 +32,7 @@
                 </div>
                 <div class="admin-live-app-counts">
                     <span class="admin-live-status online">{{ card.online_count }} онлайн</span>
+                    {% if card.background_count %}<span class="admin-live-status background">{{ card.background_count }} в фоне</span>{% endif %}
                     {% if card.tracks_shifts %}<span class="admin-live-status shift">{{ card.open_shift_count }} в смене</span>{% endif %}
                 </div>
             </header>
@@ -42,10 +48,18 @@
                                 <strong>{{ row.employee.full_name }}</strong>
                                 <span>
                                     {% if row.is_online %}<b class="is-online">Онлайн</b>
+                                    {% elif row.is_background %}<b class="is-background">Связь в фоне</b>
                                     {% elif row.is_recent %}<b class="is-recent">Недавно</b>
                                     {% else %}<b>Нет активной связи</b>{% endif %}
                                     {% if row.last_seen_at %} · {{ row.last_seen_at|date:"H:i:s" }}{% endif %}
                                 </span>
+                                {% if row.client_badges %}
+                                    <small class="admin-live-client-badges" aria-label="Вариант приложения">
+                                        {% for badge in row.client_badges %}
+                                            <em class="admin-live-client-badge is-{{ badge.kind }}">{{ badge.label }}{% if badge.version %} · {{ badge.version }}{% endif %}</em>
+                                        {% endfor %}
+                                    </small>
+                                {% endif %}
                             </div>
                         </div>
 

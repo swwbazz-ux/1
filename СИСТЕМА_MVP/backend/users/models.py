@@ -575,6 +575,14 @@ class EmployeeAccess(models.Model):
 
 
 class ActiveApplicationSession(models.Model):
+    class ClientKind(models.TextChoices):
+        ANDROID_APK = 'android_apk', 'APK Android'
+        ANDROID_PWA = 'android_pwa', 'PWA Android'
+        IOS_PWA = 'ios_pwa', 'PWA iPhone/iPad'
+        PWA = 'pwa', 'PWA'
+        SAFARI = 'safari', 'Safari'
+        BROWSER = 'browser', 'Браузер'
+
     session_key = models.CharField('Ключ сессии', max_length=40, unique=True)
     access = models.ForeignKey(
         EmployeeAccess,
@@ -586,8 +594,25 @@ class ActiveApplicationSession(models.Model):
     app_code = models.CharField('Приложение', max_length=64, db_index=True)
     path = models.CharField('Текущий экран', max_length=255, blank=True)
     device_kind = models.CharField('Тип устройства', max_length=16, blank=True)
+    client_kind = models.CharField(
+        'Вариант приложения',
+        max_length=16,
+        choices=ClientKind.choices,
+        blank=True,
+    )
+    client_version = models.CharField('Версия APK', max_length=32, blank=True)
     first_seen_at = models.DateTimeField('Первое обращение', auto_now_add=True)
     last_seen_at = models.DateTimeField('Последняя активность', db_index=True)
+    foreground_seen_at = models.DateTimeField(
+        'Последняя активность на экране',
+        null=True,
+        blank=True,
+    )
+    background_seen_at = models.DateTimeField(
+        'Последняя фоновая связь',
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         verbose_name = 'Активная сессия приложения'

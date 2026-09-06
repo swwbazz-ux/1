@@ -37,7 +37,14 @@ OBSERVER_TOKEN_MAX_AGE_SECONDS = 14 * 60 * 60
 ONLINE_WINDOW = timedelta(seconds=90)
 RECENT_WINDOW = timedelta(minutes=10)
 HEARTBEAT_WRITE_INTERVAL_SECONDS = 20
+BACKGROUND_HEARTBEAT_WRITE_INTERVAL_SECONDS = 40
 HEARTBEAT_CACHE_PREFIX = 'admin-live-monitor-heartbeat-v1'
+PRESENCE_FOREGROUND = 'foreground'
+PRESENCE_BACKGROUND = 'background'
+PRESENCE_KINDS = frozenset({PRESENCE_FOREGROUND, PRESENCE_BACKGROUND})
+APPLICATION_CLIENT_KINDS = frozenset(
+    value for value, _ in ActiveApplicationSession.ClientKind.choices
+)
 
 
 class ObserverSessionProxy(MutableMapping):
@@ -218,22 +225,41 @@ def observer_context(request):
     }
 
 
-def _heartbeat_cache_key(session_key):
-    return f'{HEARTBEAT_CACHE_PREFIX}:{session_key}'
+def _heartbeat_cache_key(session_key, presence_kind):
+    return f'{HEARTBEAT_CACHE_PREFIX}:{presence_kind}:{session_key}'
 
 
-def touch_application_session(request, *, reported_path=''):
+def touch_application_session(
+    request,
+    *,
+    reported_path='',
+    presence_kind=PRESENCE_FOREGROUND,
+    client_kind='',
+    client_version='',
+):
     if getattr(request, 'observer_mode', False):
         return False
     access_id = request.session.get('employee_access_id')
     session_key = request.session.session_key
     if not access_id or not session_key:
         return False
+    if presence_kind not in PRESENCE_KINDS:
+        presence_kind = PRESENCE_FOREGROUND
+    client_kind = str(client_kind or '').strip()
+    if client_kind not in APPLICATION_CLIENT_KINDS:
+        client_kind = ''
+    client_version = str(client_version or '').strip()[:32]
     path = str(reported_path or '').strip()[:255]
     app_hint = get_role_app_for_request(request) or get_role_app_for_path(path)
-    cache_key = _heartbeat_cache_key(session_key)
+    cache_key = _heartbeat_cache_key(session_key, presence_kind)
     if app_hint:
-        marker = f'{access_id}:{app_hint.role_code}:{path or app_hint.start_url}'
+        marker = ':'.join((
+            str(access_id),
+            app_hint.role_code,
+            path or app_hint.start_url,
+            client_kind,
+            client_version,
+        ))
         if cache.get(cache_key) == marker:
             return True
     access = (
@@ -257,10 +283,24 @@ def touch_application_session(request, *, reported_path=''):
     path_app = get_role_app_for_path(path) if path else None
     if not path_app or path_app.role_code != app.role_code:
         path = app.start_url
-    marker = f'{access.pk}:{app.role_code}:{path or app.start_url}'
+    marker = ':'.join((
+        str(access.pk),
+        app.role_code,
+        path or app.start_url,
+        client_kind,
+        client_version,
+    ))
     if cache.get(cache_key) == marker:
         return True
-    cache.set(cache_key, marker, HEARTBEAT_WRITE_INTERVAL_SECONDS)
+    cache.set(
+        cache_key,
+        marker,
+        (
+            BACKGROUND_HEARTBEAT_WRITE_INTERVAL_SECONDS
+            if presence_kind == PRESENCE_BACKGROUND
+            else HEARTBEAT_WRITE_INTERVAL_SECONDS
+        ),
+    )
     now = timezone.now()
     defaults = {
         'access': access,
@@ -269,6 +309,14 @@ def touch_application_session(request, *, reported_path=''):
         'device_kind': request.session.get('device_kind', ''),
         'last_seen_at': now,
     }
+    if client_kind:
+        defaults['client_kind'] = client_kind
+    if client_version:
+        defaults['client_version'] = client_version
+    if presence_kind == PRESENCE_BACKGROUND:
+        defaults['background_seen_at'] = now
+    else:
+        defaults['foreground_seen_at'] = now
     defaults['path'] = path or app.start_url
     ActiveApplicationSession.objects.update_or_create(
         session_key=session_key,

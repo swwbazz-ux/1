@@ -15,12 +15,38 @@
         return item ? decodeURIComponent(item.slice(prefix.length)) : "";
     }
 
+    function clientKind() {
+        var body = document.body;
+        var userAgent = String(window.navigator && window.navigator.userAgent || "").toLowerCase();
+        var isIos = /iphone|ipad|ipod/.test(userAgent);
+        var isAndroid = /android/.test(userAgent);
+        var isStandalone = Boolean(
+            (window.navigator && window.navigator.standalone === true)
+            || (window.matchMedia && (
+                window.matchMedia("(display-mode: standalone)").matches
+                || window.matchMedia("(display-mode: fullscreen)").matches
+                || window.matchMedia("(display-mode: minimal-ui)").matches
+            ))
+        );
+        var isSafari = /safari/.test(userAgent)
+            && !/(crios|fxios|edgios|opios|chrome|chromium)/.test(userAgent);
+
+        if (body && body.dataset.nativeApp === "true") return "android_apk";
+        if (isStandalone && isAndroid) return "android_pwa";
+        if (isStandalone && isIos) return "ios_pwa";
+        if (isStandalone) return "pwa";
+        if (isSafari) return "safari";
+        return "browser";
+    }
+
     function send() {
         if (document.hidden) return;
         var csrfToken = cookie("csrftoken") || document.querySelector('meta[name="csrf-token"]')?.content || "";
         if (!csrfToken) return;
         var body = new URLSearchParams();
         body.set("path", window.location.pathname);
+        body.set("client_kind", clientKind());
+        body.set("client_version", document.body?.dataset.nativeAppVersion || "");
         window.fetch(endpoint, {
             method: "POST",
             credentials: "same-origin",
