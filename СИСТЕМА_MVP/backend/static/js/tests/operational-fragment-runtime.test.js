@@ -550,6 +550,78 @@ test("Driver uses Shift sounds only after the returned shell confirms the state 
     assert.equal(sandbox.context.map("complete-trip", closedShell), "action_ok");
 });
 
+test("open Driver APK plays one cue and one recorded dump-point announcement", async () => {
+    const announcements = [];
+    const sounds = [];
+    const vibrations = [];
+    const runtimeWindow = {
+        MobileOperationalSounds: {
+            announceDumpPoint(details) {
+                announcements.push(details);
+                return Promise.resolve({supported: true, announced: true});
+            },
+        },
+    };
+    const sandbox = {
+        context: {},
+        document: {body: {dataset: {nativeApp: "true"}}},
+        navigator: {vibrate(pattern) { vibrations.push(pattern); }},
+        playDriverSound(name) {
+            sounds.push(name);
+            return Promise.resolve(true);
+        },
+        Promise,
+        window: runtimeWindow,
+    };
+    runtimeWindow.window = runtimeWindow;
+    vm.runInNewContext(
+        [
+            "var driverLastDumpPointAlertVersion = 0;",
+            extractBraceBlock(
+                DRIVER_TEMPLATE_SOURCE,
+                "function latestDriverDumpPointEvent(context)",
+                "Driver dump-point event selector"
+            ),
+            extractBraceBlock(
+                DRIVER_TEMPLATE_SOURCE,
+                "function playDriverDumpPointAlert(context)",
+                "Driver foreground dump-point alert"
+            ),
+            "context.alert = playDriverDumpPointAlert;",
+        ].join("\n"),
+        sandbox,
+        {filename: "templates/users/driver_shift.html#foreground-dump-point-alert"}
+    );
+    const context = {
+        events: [
+            {version: 40, type: "assignment_changed", payload: {}},
+            {
+                version: 41,
+                type: "trip_changed",
+                payload: {
+                    action: "truck_loaded",
+                    trip_id: 17,
+                    assigned_dump_point_id: 2,
+                    dump_point_name: "СКДР",
+                },
+            },
+        ],
+    };
+
+    sandbox.context.alert(context);
+    await new Promise((resolve) => setImmediate(resolve));
+    sandbox.context.alert(context);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(announcements.length, 1);
+    assert.equal(announcements[0].eventVersion, 41);
+    assert.equal(announcements[0].tripId, 17);
+    assert.equal(announcements[0].dumpPointId, 2);
+    assert.equal(announcements[0].dumpPointName, "СКДР");
+    assert.deepEqual(sounds, ["truck_assigned"]);
+    assert.equal(vibrations.length, 1);
+});
+
 
 test("four production refresh handlers use narrow fragments, never a full HTML GET", () => {
     assertNarrowFragmentHandler(

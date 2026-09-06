@@ -40,7 +40,8 @@ import org.json.JSONObject;
 
 public class ConnectivityForegroundService extends Service {
     public static final String ACTION_TEST_ALERT = "ru.copperresources.mobile.action.TEST_ALERT";
-    private static final String PREFS_NAME = "native_connectivity";
+    static final String PREFS_NAME = "native_connectivity";
+    static final String LAST_DRIVER_DUMP_POINT_ALERT_VERSION = "last_driver_dump_point_alert_version";
     private static final long MAX_BACKOFF_MS = 120_000L;
     private static final int MAX_CAPTURED_RESPONSE_BYTES = 64 * 1024;
 
@@ -330,7 +331,7 @@ public class ConnectivityForegroundService extends Service {
             if (events == null) {
                 return false;
             }
-            long lastAnnouncedVersion = preferences.getLong("last_driver_dump_point_alert_version", 0L);
+            long lastAnnouncedVersion = preferences.getLong(LAST_DRIVER_DUMP_POINT_ALERT_VERSION, 0L);
             long selectedVersion = lastAnnouncedVersion;
             long selectedTripId = 0L;
             long selectedDumpPointId = 0L;
@@ -373,11 +374,13 @@ public class ConnectivityForegroundService extends Service {
                 return false;
             }
 
-            preferences.edit()
-                .putLong("last_driver_dump_point_alert_version", selectedVersion)
-                .putLong("last_driver_dump_point_alert_trip_id", selectedTripId)
-                .putLong("last_driver_dump_point_alert_dump_point_id", selectedDumpPointId)
-                .apply();
+            if (!claimDriverDumpPointAlert(
+                    this,
+                    selectedVersion,
+                    selectedTripId,
+                    selectedDumpPointId)) {
+                return false;
+            }
 
             boolean notificationShown = AppNotifications.showOperationalAlert(
                 this,
@@ -393,6 +396,29 @@ public class ConnectivityForegroundService extends Service {
         } catch (Exception error) {
             Log.w("ConnectivityForegroundService", "Driver dump-point alert was not parsed", error);
             return false;
+        }
+    }
+
+    static boolean claimDriverDumpPointAlert(
+            Context context,
+            long eventVersion,
+            long tripId,
+            long dumpPointId) {
+        if (eventVersion <= 0L || tripId <= 0L) {
+            return false;
+        }
+        synchronized (ConnectivityForegroundService.class) {
+            SharedPreferences preferences = context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            long lastAnnouncedVersion = preferences.getLong(LAST_DRIVER_DUMP_POINT_ALERT_VERSION, 0L);
+            if (eventVersion <= lastAnnouncedVersion) {
+                return false;
+            }
+            preferences.edit()
+                .putLong(LAST_DRIVER_DUMP_POINT_ALERT_VERSION, eventVersion)
+                .putLong("last_driver_dump_point_alert_trip_id", tripId)
+                .putLong("last_driver_dump_point_alert_dump_point_id", dumpPointId)
+                .apply();
+            return true;
         }
     }
 

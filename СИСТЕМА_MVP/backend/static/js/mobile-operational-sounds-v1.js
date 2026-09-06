@@ -27,10 +27,14 @@
     var activeSource = null;
     var lastConnectionState = "";
 
-    function nativeSoundPlugin() {
+    function capacitorNativeSoundPlugin() {
         var capacitor = window.Capacitor;
         var plugins = capacitor && capacitor.Plugins;
-        var plugin = plugins && plugins.NativeSound;
+        return plugins && plugins.NativeSound ? plugins.NativeSound : null;
+    }
+
+    function nativeSoundPlugin() {
+        var plugin = capacitorNativeSoundPlugin();
         return plugin && typeof plugin.play === "function" ? plugin : null;
     }
 
@@ -138,6 +142,18 @@
         return playWebSound(name);
     }
 
+    function announceDumpPoint(details) {
+        var plugin = capacitorNativeSoundPlugin();
+        if (!plugin || typeof plugin.announceDumpPoint !== "function") {
+            return Promise.resolve({supported: false, announced: false});
+        }
+        return Promise.resolve(plugin.announceDumpPoint(details || {})).then(function (result) {
+            return {supported: true, announced: !!(result && result.announced === true)};
+        }).catch(function () {
+            return {supported: true, announced: false};
+        });
+    }
+
     function unlock() {
         var context = getAudioContext();
         if (!context) return;
@@ -176,6 +192,7 @@
         profile: profile,
         files: soundFiles,
         play: play,
+        announceDumpPoint: announceDumpPoint,
         preload: unlock
     });
 })();

@@ -4616,6 +4616,70 @@ function playDriverAssignmentAlert() {
     playDriverSound("truck_assigned");
 }
 
+var driverLastDumpPointAlertVersion = 0;
+
+function latestDriverDumpPointEvent(context) {
+    var selected = null;
+    var events = context && Array.isArray(context.events) ? context.events : [];
+    events.forEach(function (event) {
+        var payload = event && event.payload ? event.payload : null;
+        var version = Number(event && event.version || 0);
+        if (
+            !payload
+            || event.type !== "trip_changed"
+            || payload.action !== "truck_loaded"
+            || version <= driverLastDumpPointAlertVersion
+            || (selected && version <= selected.eventVersion)
+        ) {
+            return;
+        }
+        var tripId = Number(payload.trip_id || 0);
+        var dumpPointId = Number(payload.assigned_dump_point_id || payload.dump_point_id || 0);
+        var dumpPointName = String(payload.dump_point_name || "").trim();
+        if (!tripId || (!dumpPointId && !dumpPointName)) return;
+        selected = {
+            eventVersion: version,
+            tripId: tripId,
+            dumpPointId: dumpPointId,
+            dumpPointName: dumpPointName
+        };
+    });
+    return selected;
+}
+
+function playDriverDumpPointAlert(context) {
+    var details = latestDriverDumpPointEvent(context);
+    if (!details) return;
+    var sounds = window.MobileOperationalSounds;
+    var announce = sounds && typeof sounds.announceDumpPoint === "function"
+        ? sounds.announceDumpPoint(details)
+        : Promise.resolve({supported: false, announced: false});
+    Promise.resolve(announce).then(function (nativeResult) {
+        nativeResult = nativeResult || {supported: false, announced: false};
+        /* Новая APK сама защищает событие от повтора между открытым экраном и
+           фоновым сервисом. Старая APK не знает голосовой bridge, но всё равно
+           получает прежний короткий сигнал после серверного обновления. */
+        if (nativeResult.supported && !nativeResult.announced) {
+            driverLastDumpPointAlertVersion = details.eventVersion;
+            return;
+        }
+        if (document.body && document.body.dataset.nativeApp === "true" && !nativeResult.supported) {
+            driverLastDumpPointAlertVersion = details.eventVersion;
+            playDriverSound("truck_assigned");
+            return;
+        }
+        driverLastDumpPointAlertVersion = details.eventVersion;
+        if (navigator.vibrate) {
+            try { navigator.vibrate([180, 90, 180]); } catch (error) {}
+        }
+        playDriverSound("truck_assigned");
+    });
+}
+
+window.addEventListener("operational-state-refresh-applied", function (event) {
+    playDriverDumpPointAlert(event && event.detail ? event.detail : null);
+});
+
 function driverAppliedActionSound(actionKind, freshShell) {
     if (actionKind === "shift-open") {
         return freshShell.querySelector("[data-driver-shift-close-button]")

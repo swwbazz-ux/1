@@ -35,8 +35,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "13",
-    versionName: "0.1.11",
+    versionCode: "15",
+    versionName: "0.1.12",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -57,7 +57,7 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "14",
+    versionCode: "16",
     versionName: "0.1.10",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
@@ -68,7 +68,7 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "13",
+    versionCode: "15",
     versionName: "0.1.10-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
@@ -344,6 +344,23 @@ test("background service announces only a fresh driver truck_loaded event", () =
   }
   assert.match(catalog, /normalized\.equals\("свх"\)[\s\S]*?voice_edem_na_svh/);
   assert.match(catalog, /normalized\.equals\("буферный склад"\)[\s\S]*?voice_na_bufernyi_sklad/);
+});
+
+test("foreground driver screen uses the same deduplicated recorded voice bridge", () => {
+  const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
+  const plugin = readFileSync(resolve(javaRoot, "NativeSoundPlugin.java"), "utf8");
+  const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  const sounds = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "static", "js", "mobile-operational-sounds-v1.js"), "utf8");
+  const driverTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "users", "driver_shift.html"), "utf8");
+
+  assert.match(plugin, /@PluginMethod\s+public void announceDumpPoint\(PluginCall call\)/);
+  assert.match(plugin, /ConnectivityForegroundService\.claimDriverDumpPointAlert/);
+  assert.match(plugin, /DriverVoicePlayer[\s\S]*?ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
+  assert.match(service, /static boolean claimDriverDumpPointAlert/);
+  assert.match(sounds, /announceDumpPoint: announceDumpPoint/);
+  assert.match(driverTemplate, /operational-state-refresh-applied/);
+  assert.match(driverTemplate, /event\.type !== "trip_changed"/);
+  assert.match(driverTemplate, /payload\.action !== "truck_loaded"/);
 });
 
 test("WebView cookies are accepted and flushed at every persistence boundary", () => {
