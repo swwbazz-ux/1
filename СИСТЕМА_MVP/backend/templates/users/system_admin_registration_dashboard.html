@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+{% load static l10n %}
+
+{% block title %}Подключение сотрудников{% endblock %}
+{% block body_class %}system-admin-registration-dashboard-screen{% endblock %}
+{% block extra_head %}
+{% include "users/includes/system_admin_workspace_styles.html" %}
+{% include "includes/role_app_pwa_head.html" with role_code="admin" manifest_url="/system-admin.webmanifest" service_worker_url="/system-admin-sw.js" legacy_scope="/system-admin/" theme_color="#53616F" apple_title="Админка" icon_180="img/pwa/admin-180.png" %}
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-registration-shell admin-day" data-admin-theme>
+    <header class="admin-console-header" aria-label="Административная шапка">
+        <section class="admin-console-identity">
+            {% include "users/includes/system_admin_avatar.html" %}
+            <span>
+                <strong>{{ access.employee.full_name }}</strong>
+                <em>Системный администратор</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <span>Админка MVP</span>
+                <h1>Подключение</h1>
+                <p>Активация сотрудников из опубликованной расстановки заместителя начальника участка.</p>
+            </div>
+            {% include "users/includes/system_admin_nav.html" %}
+        </section>
+
+        <section class="admin-console-actions">
+            <button type="button" class="admin-theme-button" data-admin-theme-toggle data-theme-icon="sun" aria-label="Переключить дневной и ночной режим" title="Переключить дневной и ночной режим"></button>
+            <a class="admin-utility-link" href="{% url 'system_admin_dashboard' %}">Назад</a>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page admin-registration-page">
+        <section class="adoption-filter-panel" aria-label="Фильтры отчёта">
+            <div class="adoption-filter-heading">
+                <div>
+                    <span>Отчёт по подключению</span>
+                    <h2>Охват расстановки</h2>
+                </div>
+                {% if has_published_plans %}
+                    <strong>На {{ selected_date|date:"d.m.Y" }}</strong>
+                {% else %}
+                    <strong class="is-warning">Нет опубликованной расстановки</strong>
+                {% endif %}
+            </div>
+            <form class="adoption-filter-form" method="get">
+                <label>
+                    <span>Дата расстановки</span>
+                    <select name="date">
+                        {% for item in available_dates %}
+                            <option value="{{ item|date:'Y-m-d' }}" {% if item == selected_date %}selected{% endif %}>{{ item|date:"d.m.Y" }}</option>
+                        {% empty %}
+                            <option value="">Нет данных</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    <span>Рабочая роль</span>
+                    <select name="role">
+                        <option value="">Все роли</option>
+                        {% for role in role_options %}
+                            <option value="{{ role.code }}" {% if role.code == selected_role %}selected{% endif %}>{{ role.name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    <span>Смена</span>
+                    <select name="shift">
+                        <option value="">Обе смены</option>
+                        {% for value, label in shift_options %}
+                            <option value="{{ value }}" {% if value == selected_shift %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    <span>Период графика</span>
+                    <select name="period">
+                        {% for value in period_options %}
+                            <option value="{{ value }}" {% if value == period_days %}selected{% endif %}>{{ value }} дней</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    <span>Статус в таблице</span>
+                    <select name="state">
+                        <option value="">Все сотрудники</option>
+                        {% for value, label in state_options %}
+                            <option value="{{ value }}" {% if value == selected_state %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <button class="admin-button admin-button-primary" type="submit">Показать</button>
+                <a class="adoption-filter-reset" href="{% url 'system_admin_registration_dashboard' %}">Сбросить</a>
+            </form>
+        </section>
+
+        <section class="adoption-metrics" aria-label="Основные показатели подключения">
+            <article class="adoption-metric is-total">
+                <span>В расстановке</span>
+                <strong>{{ total }}</strong>
+                <small>уникальных сотрудников</small>
+            </article>
+            <article class="adoption-metric is-issued">
+                <span>Доступ выдан</span>
+                <strong>{{ access_issued }}</strong>
+                <small>{{ issued_percent }}% от расстановки</small>
+            </article>
+            <article class="adoption-metric is-activated">
+                <span>Активировали</span>
+                <strong>{{ activated }}</strong>
+                <small>{{ coverage_percent }}% охвата</small>
+            </article>
+            <article class="adoption-metric is-login">
+                <span>Входили</span>
+                <strong>{{ logged_in }}</strong>
+                <small>{{ login_percent }}% от расстановки</small>
+            </article>
+        </section>
+
+        <section class="adoption-data-note" aria-label="Пояснение к данным">
+            <span aria-hidden="true">i</span>
+            <p><strong>Что считается регистрацией:</strong> активация персонального доступа. Установка PWA или APK пока не фиксируется отдельно; после добавления события первого запуска появится самостоятельный показатель установки.</p>
+        </section>
+
+        <section class="adoption-chart-grid">
+            <article class="adoption-panel adoption-growth-panel">
+                <header class="adoption-panel-heading">
+                    <div>
+                        <span>Динамика</span>
+                        <h2>Прирост регистраций по дням</h2>
+                        <p>{{ chart.start_date|date:"d.m.Y" }} — {{ chart.end_date|date:"d.m.Y" }}</p>
+                    </div>
+                    <div class="adoption-chart-legend" aria-label="Легенда графика">
+                        <span class="is-bars">Новые за день</span>
+                        <span class="is-line">Всего нарастающим итогом</span>
+                    </div>
+                </header>
+                <div class="adoption-chart-scroll">
+                    <div class="adoption-growth-chart" style="--chart-days: {{ period_days }};" role="img" aria-label="Столбцы новых регистраций за день и линия общего количества активированных сотрудников">
+                        <div class="adoption-bars" aria-hidden="true">
+                            {% for item in chart.days %}
+                                <div class="adoption-bar-column" title="{{ item.date|date:'d.m.Y' }}: новых {{ item.new_count }}, всего {{ item.cumulative }}">
+                                    <strong>{{ item.new_count }}</strong>
+                                    <i class="adoption-bar" style="--bar-height: {{ item.bar_height|unlocalize }}%;"></i>
+                                    <time>{% if item.show_label %}{{ item.date|date:"d.m" }}{% endif %}</time>
+                                </div>
+                            {% endfor %}
+                        </div>
+                        {% if total %}
+                            <svg class="adoption-cumulative-line" viewBox="0 0 1000 240" preserveAspectRatio="none" aria-hidden="true">
+                                <polyline points="{{ chart.polyline }}"></polyline>
+                                {% for item in chart.days %}
+                                    <circle cx="{{ item.svg_x|unlocalize }}" cy="{{ item.svg_y|unlocalize }}" r="{% if item.new_count %}4{% else %}2.5{% endif %}"></circle>
+                                {% endfor %}
+                            </svg>
+                        {% endif %}
+                    </div>
+                </div>
+            </article>
+
+            <article class="adoption-panel adoption-donut-panel">
+                <header class="adoption-panel-heading">
+                    <div>
+                        <span>Структура</span>
+                        <h2>Охват подключения</h2>
+                        <p>Текущий статус выбранной расстановки</p>
+                    </div>
+                </header>
+                <div class="adoption-donut-layout">
+                    <div class="adoption-donut" style="--activated-stop: {{ donut_activated_stop }}%; --pending-stop: {{ donut_pending_stop }}%;" role="img" aria-label="Активировали {{ activated }}, ждут активации {{ awaiting_activation }}, доступ не выдан {{ no_access }}">
+                        <span><strong>{{ coverage_percent }}%</strong><small>активировали</small></span>
+                    </div>
+                    <div class="adoption-donut-legend">
+                        <div class="is-activated"><span>Активировали</span><strong>{{ activated }}</strong></div>
+                        <div class="is-pending"><span>Ждут активации</span><strong>{{ awaiting_activation }}</strong></div>
+                        <div class="is-missing"><span>Доступ не выдан</span><strong>{{ no_access }}</strong></div>
+                    </div>
+                </div>
+            </article>
+        </section>
+
+        <section class="adoption-breakdown-grid">
+            <article class="adoption-panel adoption-breakdown-panel">
+                <header class="adoption-panel-heading compact">
+                    <div>
+                        <span>Разрез</span>
+                        <h2>По рабочим ролям</h2>
+                    </div>
+                </header>
+                <div class="adoption-breakdown-list">
+                    {% for item in role_breakdown %}
+                        <div class="adoption-breakdown-row">
+                            <div><span>{{ item.label }}</span><strong>{{ item.activated }} из {{ item.total }}</strong></div>
+                            <div class="adoption-progress"><i style="width: {{ item.percent }}%"></i></div>
+                            <small>{{ item.percent }}%</small>
+                        </div>
+                    {% empty %}
+                        <div class="adoption-empty">Для выбранных фильтров нет сотрудников.</div>
+                    {% endfor %}
+                </div>
+            </article>
+            <article class="adoption-panel adoption-breakdown-panel">
+                <header class="adoption-panel-heading compact">
+                    <div>
+                        <span>Разрез</span>
+                        <h2>По сменам</h2>
+                    </div>
+                </header>
+                <div class="adoption-breakdown-list">
+                    {% for item in shift_breakdown %}
+                        <div class="adoption-breakdown-row">
+                            <div><span>{{ item.label }}</span><strong>{{ item.activated }} из {{ item.total }}</strong></div>
+                            <div class="adoption-progress"><i style="width: {{ item.percent }}%"></i></div>
+                            <small>{{ item.percent }}%</small>
+                        </div>
+                    {% empty %}
+                        <div class="adoption-empty">Для выбранных фильтров нет сотрудников.</div>
+                    {% endfor %}
+                </div>
+            </article>
+        </section>
+
+        <section class="adoption-panel adoption-people-panel">
+            <header class="adoption-panel-heading">
+                <div>
+                    <span>Люди</span>
+                    <h2>Сотрудники из расстановки</h2>
+                    <p>Показано {{ visible_total }} из {{ total }}. Сначала отображаются те, кому требуется помощь с подключением.</p>
+                </div>
+            </header>
+            <div class="adoption-table-wrap">
+                <table class="adoption-table">
+                    <thead>
+                        <tr>
+                            <th>Сотрудник</th>
+                            <th>Роль и смена</th>
+                            <th>Техника</th>
+                            <th>Статус</th>
+                            <th>Активация</th>
+                            <th>Последний вход</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                            <tr>
+                                <td>
+                                    <a href="{% url 'system_admin_employee_detail' row.employee.id %}">{{ row.employee.full_name }}</a>
+                                    <small>{{ row.employee.phone|default:"Телефон не указан" }}</small>
+                                </td>
+                                <td><strong>{{ row.role_labels|join:", " }}</strong><small>{{ row.shift_labels|join:", " }}</small></td>
+                                <td>{{ row.equipment_labels|join:", " }}</td>
+                                <td><span class="adoption-status is-{{ row.tone }}">{{ row.label }}</span></td>
+                                <td>{{ row.activated_at|date:"d.m.Y H:i"|default:"—" }}</td>
+                                <td>{{ row.last_login_at|date:"d.m.Y H:i"|default:"—" }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="6"><div class="adoption-empty">По выбранным фильтрам сотрудники не найдены.</div></td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var shell = document.querySelector("[data-admin-theme]");
+    var themeToggle = document.querySelector("[data-admin-theme-toggle]");
+
+    function setAdminTheme(theme) {
+        if (!shell) return;
+        var isNight = theme === "night";
+        shell.classList.toggle("admin-night", isNight);
+        shell.classList.toggle("admin-day", !isNight);
+        if (themeToggle) themeToggle.setAttribute("data-theme-icon", isNight ? "moon" : "sun");
+        try {
+            window.localStorage.setItem("admin-theme", isNight ? "night" : "day");
+        } catch (error) {
+            return;
+        }
+    }
+
+    var savedTheme = "day";
+    try {
+        savedTheme = window.localStorage.getItem("admin-theme") || "day";
+    } catch (error) {
+        savedTheme = "day";
+    }
+    setAdminTheme(savedTheme);
+
+    if (themeToggle) {
+        themeToggle.addEventListener("click", function () {
+            setAdminTheme(shell && shell.classList.contains("admin-night") ? "day" : "night");
+        });
+    }
+});
+</script>
+{% endblock %}
