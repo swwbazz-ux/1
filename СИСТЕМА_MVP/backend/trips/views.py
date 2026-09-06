@@ -736,7 +736,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v206";
+const CACHE_NAME = "excavator-mobile-shell-v207";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -3552,6 +3552,7 @@ def excavator_truck_loaded_view(request):
                 'dump_point_id': trip.dump_point_id,
                 'assigned_dump_point_id': trip.assigned_dump_point_id,
                 'actual_dump_point_id': trip.actual_dump_point_id,
+                'dump_point_name': str(trip.assigned_dump_point or trip.dump_point),
                 'status': TripStatus.LOADED_WAITING_UNLOAD,
             },
         )
@@ -4132,6 +4133,11 @@ def excavator_work_view(request):
                                 'trip_id': trip.id,
                                 'truck_id': trip.truck_id,
                                 'excavator_id': trip.excavator_id,
+                                'dump_point_id': trip.dump_point_id,
+                                'assigned_dump_point_id': trip.assigned_dump_point_id or trip.dump_point_id,
+                                'actual_dump_point_id': trip.actual_dump_point_id or trip.dump_point_id,
+                                'dump_point_name': str(trip.assigned_dump_point or trip.dump_point),
+                                'status': TripStatus.LOADED_WAITING_UNLOAD,
                             },
                         )
             except ValidationError as error:

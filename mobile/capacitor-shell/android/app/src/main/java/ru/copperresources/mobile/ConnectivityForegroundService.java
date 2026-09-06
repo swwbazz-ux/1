@@ -35,6 +35,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class ConnectivityForegroundService extends Service {
@@ -49,6 +50,7 @@ public class ConnectivityForegroundService extends Service {
     private ScheduledFuture<?> pendingHeartbeat;
     private ConnectivityManager connectivityManager;
     private ConnectivityManager.NetworkCallback networkCallback;
+    private DriverVoicePlayer driverVoicePlayer;
     private int consecutiveFailures;
 
     public static void start(Context context) {
@@ -66,6 +68,9 @@ public class ConnectivityForegroundService extends Service {
     public void onCreate() {
         super.onCreate();
         AppNotifications.createChannels(this);
+        if (BuildConfig.DRIVER_VOICE_ALERTS_ENABLED) {
+            driverVoicePlayer = new DriverVoicePlayer(this);
+        }
         executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "native-server-heartbeat");
             thread.setDaemon(true);
@@ -108,6 +113,10 @@ public class ConnectivityForegroundService extends Service {
         }
         if (executor != null) {
             executor.shutdownNow();
+        }
+        if (driverVoicePlayer != null) {
+            driverVoicePlayer.shutdown();
+            driverVoicePlayer = null;
         }
         super.onDestroy();
     }
@@ -193,7 +202,10 @@ public class ConnectivityForegroundService extends Service {
                     && serverVersion > previousVersion
                     && relevant
                     && !AppVisibility.isForeground()) {
-                AppNotifications.showOperationalAlert(this, "На сервере появились новые данные смены");
+                boolean specificAlertShown = showLatestDriverDumpPointAlert(result.body, preferences);
+                if (!specificAlertShown) {
+                    AppNotifications.showOperationalAlert(this, "На сервере появились новые данные смены");
+                }
             }
             publishStatus("Сервер доступен • " + DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date()));
             scheduleHeartbeat(BuildConfig.HEARTBEAT_INTERVAL_MS);
@@ -312,6 +324,81 @@ public class ConnectivityForegroundService extends Service {
         try {
             return new JSONObject(body).optBoolean("relevant", false);
         } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private boolean showLatestDriverDumpPointAlert(String body, SharedPreferences preferences) {
+        if (!BuildConfig.DRIVER_VOICE_ALERTS_ENABLED) {
+            return false;
+        }
+        try {
+            JSONArray events = new JSONObject(body).optJSONArray("events");
+            if (events == null) {
+                return false;
+            }
+            long lastAnnouncedVersion = preferences.getLong("last_driver_dump_point_alert_version", 0L);
+            long selectedVersion = lastAnnouncedVersion;
+            long selectedTripId = 0L;
+            long selectedDumpPointId = 0L;
+            String selectedDumpPointName = "";
+
+            for (int index = 0; index < events.length(); index += 1) {
+                JSONObject event = events.optJSONObject(index);
+                if (event == null
+                        || !"trip_changed".equals(event.optString("type"))
+                        || event.optLong("version", 0L) <= selectedVersion) {
+                    continue;
+                }
+                JSONObject payload = event.optJSONObject("payload");
+                if (payload == null || !"truck_loaded".equals(payload.optString("action"))) {
+                    continue;
+                }
+                long tripId = payload.optLong("trip_id", 0L);
+                long dumpPointId = payload.optLong("assigned_dump_point_id", 0L);
+                if (dumpPointId <= 0L) {
+                    dumpPointId = payload.optLong("dump_point_id", 0L);
+                }
+                String dumpPointName = payload.optString("dump_point_name", "");
+                if (tripId <= 0L || (dumpPointId <= 0L && dumpPointName.isBlank())) {
+                    continue;
+                }
+                selectedVersion = event.optLong("version", 0L);
+                selectedTripId = tripId;
+                selectedDumpPointId = dumpPointId;
+                selectedDumpPointName = dumpPointName;
+            }
+
+            if (selectedVersion <= lastAnnouncedVersion || selectedTripId <= 0L) {
+                return false;
+            }
+            String displayName = DriverVoiceCatalog.displayNameFor(
+                selectedDumpPointId,
+                selectedDumpPointName
+            );
+            if (displayName.isEmpty()) {
+                return false;
+            }
+
+            preferences.edit()
+                .putLong("last_driver_dump_point_alert_version", selectedVersion)
+                .putLong("last_driver_dump_point_alert_trip_id", selectedTripId)
+                .putLong("last_driver_dump_point_alert_dump_point_id", selectedDumpPointId)
+                .apply();
+
+            boolean notificationShown = AppNotifications.showOperationalAlert(
+                this,
+                "Новая точка разгрузки",
+                displayName
+            );
+            if (notificationShown && driverVoicePlayer != null) {
+                long voiceDelayMs = BuildConfig.ALERT_CUE_DURATION_MS
+                    + BuildConfig.VOICE_AFTER_CUE_DELAY_MS;
+                driverVoicePlayer.announce(selectedDumpPointId, displayName, voiceDelayMs);
+            }
+            return true;
+        } catch (Exception error) {
+            Log.w("ConnectivityForegroundService", "Driver dump-point alert was not parsed", error);
             return false;
         }
     }

@@ -428,7 +428,10 @@ final class AppUpdateManager {
         String currentVersion = JSONObject.quote(BuildConfig.VERSION_NAME);
         String latestVersion = JSONObject.quote(available ? latestUpdate.versionName : "");
         String script = "(function(){" +
-            "var nodes=document.querySelectorAll('[data-native-app-version]');" +
+            /* The <body> carries the client version for session telemetry too.
+               Restrict mutations to the dedicated visible badge: assigning
+               textContent to <body> destroys the entire rendered application. */
+            "var nodes=document.querySelectorAll('.native-app-version[data-native-app-version]');" +
             "var available=" + available + ",downloading=" + downloadRunning + ";" +
             "var current=" + currentVersion + ",latest=" + latestVersion + ";" +
             "nodes.forEach(function(node){" +

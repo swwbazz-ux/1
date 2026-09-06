@@ -25,7 +25,7 @@ function runHeartbeat({
         body: {
             dataset: {
                 nativeApp: nativeApp ? "true" : "false",
-                nativeAppVersion: nativeVersion,
+                nativeClientVersion: nativeVersion,
             },
         },
         querySelector() {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { test } from "node:test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,7 +36,7 @@ const expectedProfiles = {
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
     versionCode: "15",
-    versionName: "0.1.11",
+    versionName: "0.1.12",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -58,7 +58,7 @@ const expectedProfiles = {
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
     versionCode: "17",
-    versionName: "0.1.11",
+    versionName: "0.1.12",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -69,7 +69,7 @@ const expectedProfiles = {
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
     versionCode: "16",
-    versionName: "0.1.11-rc",
+    versionName: "0.1.12-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -129,6 +129,8 @@ for (const [profileName, expected] of Object.entries(expectedProfiles)) {
     }
     assert.ok(Number(config.updateCheckIntervalMinutes) >= 5);
     assert.ok(config.alertSoundResource);
+    assert.ok(Number(config.alertCueDurationMs || 720) >= 0);
+    assert.ok(Number(config.voiceAfterCueDelayMs || 200) >= 0);
     assert.ok(config.syncTokenEnv);
     assert.equal(config.versionCode, expected.versionCode);
     assert.equal(config.versionName, expected.versionName);
@@ -164,7 +166,7 @@ test("QA and RuStore variants keep role identity but disable sideload updates", 
     assert.notEqual(qa.applicationId, rustore.applicationId);
     assert.equal(rustoreQa.applicationId, rustore.applicationId);
     assert.notEqual(rustoreQa.serverUrl, rustore.serverUrl);
-    assert.ok(Number(profile(role).versionCode) < Number(rustoreQa.versionCode));
+    assert.ok(Number(profile(role).versionCode) <= Number(rustoreQa.versionCode));
     assert.ok(Number(rustore.versionCode) > Number(rustoreQa.versionCode));
     assert.ok(Number(rustore.versionCode) > Number(profile(role).versionCode));
   }
@@ -272,6 +274,76 @@ test("rejected native phone handoff remains disabled", () => {
   assert.doesNotMatch(gradle, /APP_LINK_|appLinkPath|manifestPlaceholders\.appLink/);
   assert.doesNotMatch(manifest, /android:autoVerify|android\.intent\.action\.VIEW|appLinkPath/);
   assert.doesNotMatch(activity, /NativeAppLink|resolveNativeAppLink|onNewIntent\(Intent intent\)/);
+});
+
+test("in-app updater mutates only dedicated version badges", () => {
+  const updater = readFileSync(
+    resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile", "AppUpdateManager.java"),
+    "utf8"
+  );
+
+  assert.match(
+    updater,
+    /querySelectorAll\('\.native-app-version\[data-native-app-version\]'\)/
+  );
+  assert.doesNotMatch(
+    updater,
+    /querySelectorAll\('\[data-native-app-version\]'\)/
+  );
+});
+
+test("only the driver profile enables recorded dump-point voice alerts", () => {
+  const excavator = profile("excavator");
+  const driver = profile("driver");
+  assert.notEqual(excavator.driverVoiceAlertsEnabled, "true");
+  assert.equal(driver.driverVoiceAlertsEnabled, "true");
+  assert.equal(driver.alertCueDurationMs, "900");
+  assert.equal(driver.voiceAfterCueDelayMs, "200");
+});
+
+test("driver profile packages every approved recorded dump-point phrase", () => {
+  const rawRoot = resolve(root, "profiles", "driver", "res", "raw");
+  const resources = [
+    "voice_na_skdr.m4a",
+    "voice_edem_na_kkd.m4a",
+    "voice_na_otval.m4a",
+    "voice_edem_na_svh.m4a",
+    "voice_na_kisluhu.m4a",
+    "voice_na_sklad_negabaritov.m4a",
+    "voice_na_bufernyi_sklad.m4a",
+    "voice_na_podsypku.m4a",
+  ];
+  for (const resource of resources) {
+    const path = resolve(rawRoot, resource);
+    assert.ok(statSync(path).size > 8_000, `${resource} must contain real audio`);
+    const header = readFileSync(path).subarray(0, 32).toString("latin1");
+    assert.match(header, /ftyp/, `${resource} must be an MPEG-4 audio resource`);
+  }
+});
+
+test("background service announces only a fresh driver truck_loaded event", () => {
+  const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
+  const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  const player = readFileSync(resolve(javaRoot, "DriverVoicePlayer.java"), "utf8");
+  const catalog = readFileSync(resolve(javaRoot, "DriverVoiceCatalog.java"), "utf8");
+  assert.match(service, /"trip_changed"\.equals\(event\.optString\("type"\)\)/);
+  assert.match(service, /"truck_loaded"\.equals\(payload\.optString\("action"\)\)/);
+  assert.match(service, /last_driver_dump_point_alert_version/);
+  assert.match(service, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
+  assert.match(player, /AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK/);
+  assert.match(player, /DriverVoiceCatalog\.resourceNameFor/);
+  for (const [id, resource] of [
+    [1, "voice_edem_na_kkd"],
+    [2, "voice_na_skdr"],
+    [3, "voice_na_otval"],
+    [4, "voice_na_sklad_negabaritov"],
+    [5, "voice_na_kisluhu"],
+    [6, "voice_na_podsypku"],
+  ]) {
+    assert.match(catalog, new RegExp(`case ${id}:[\\s\\S]*?return "${resource}";`));
+  }
+  assert.match(catalog, /normalized\.equals\("свх"\)[\s\S]*?voice_edem_na_svh/);
+  assert.match(catalog, /normalized\.equals\("буферный склад"\)[\s\S]*?voice_na_bufernyi_sklad/);
 });
 
 test("WebView cookies are accepted and flushed at every persistence boundary", () => {

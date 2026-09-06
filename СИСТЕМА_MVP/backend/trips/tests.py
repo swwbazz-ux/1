@@ -949,11 +949,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v206')
+        self.assertContains(response, 'excavator-mobile-shell-v207')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 206')
+        self.assertContains(response, 'Версия 207')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
@@ -1110,6 +1110,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         # её примут за версию приложения. Лучше не показывать ничего.
         self.assertContains(response, 'class="eo-current-app-version native-app-version"')
         self.assertContains(response, 'data-native-app-version=""')
+        self.assertContains(response, 'data-native-client-version=""', count=1)
         self.assertContains(response, 'aria-label="Текущая версия приложения" hidden')
         self.assertNotContains(response, '<button class="eo-shift-update-button"')
         self.assertNotContains(response, '<div class="eo-mobile-update-modal" data-eo-pwa-update-modal')
@@ -1129,6 +1130,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<span class="eo-current-app-version native-app-version"')
         self.assertContains(response, 'data-native-app-version="0.1.4"')
+        self.assertContains(response, 'data-native-client-version="0.1.4"', count=1)
         self.assertContains(response, 'Версия 0.1.4')
         # Проверяем именно сам элемент версии: строка «excavator-mobile-shell-»
         # встречается на странице и в других местах (регистрация service
@@ -2690,7 +2692,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v206', script)
+        self.assertIn('excavator-mobile-shell-v207', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3519,6 +3521,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             payload__status=TripStatus.LOADED_WAITING_UNLOAD,
         ).first()
         self.assertIsNotNone(event)
+        self.assertEqual(event.payload['trip_id'], trip.id)
+        self.assertEqual(event.payload['assigned_dump_point_id'], self.dump_point.id)
+        self.assertEqual(event.payload['dump_point_name'], self.dump_point.name)
 
     def test_dispatcher_assigned_truck_load_unload_cycle_waits_ten_minutes_before_reuse(self):
         kkd = DumpPoint.objects.create(name='ККД')

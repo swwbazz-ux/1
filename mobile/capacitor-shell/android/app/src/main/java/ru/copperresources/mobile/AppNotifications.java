@@ -16,7 +16,7 @@ import androidx.core.app.NotificationManagerCompat;
 
 public final class AppNotifications {
     public static final int FOREGROUND_NOTIFICATION_ID = 1201;
-    private static final int TEST_ALERT_NOTIFICATION_ID = 1202;
+    private static final int OPERATIONAL_ALERT_NOTIFICATION_ID = 1202;
 
     private AppNotifications() {}
 
@@ -99,10 +99,21 @@ public final class AppNotifications {
     }
 
     public static void showTestAlert(Context context) {
-        showOperationalAlert(context, "Тестовое производственное оповещение");
+        showOperationalAlert(
+            context,
+            "Проверка оповещения",
+            "Тестовое производственное оповещение"
+        );
     }
 
-    public static void showOperationalAlert(Context context, String message) {
+    public static boolean showOperationalAlert(Context context, String message) {
+        return showOperationalAlert(context, BuildConfig.APP_DISPLAY_NAME, message);
+    }
+
+    public static boolean showOperationalAlert(Context context, String title, String message) {
+        if (!alertsEnabled(context)) {
+            return false;
+        }
         Intent openIntent = new Intent(context, MainActivity.class)
             .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent openPendingIntent = PendingIntent.getActivity(
@@ -113,18 +124,36 @@ public final class AppNotifications {
         );
         Notification notification = new NotificationCompat.Builder(context, BuildConfig.ALERT_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_alert)
-            .setContentTitle(BuildConfig.APP_DISPLAY_NAME)
+            .setContentTitle(title)
             .setContentText(message)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
             .setContentIntent(openPendingIntent)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
             .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
             .setDefaults(NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS)
             .build();
         try {
-            NotificationManagerCompat.from(context).notify(TEST_ALERT_NOTIFICATION_ID, notification);
+            NotificationManagerCompat.from(context).notify(OPERATIONAL_ALERT_NOTIFICATION_ID, notification);
+            return true;
         } catch (SecurityException ignored) {
             // Android 13+: пользователь может явно запретить уведомления.
+            return false;
         }
+    }
+
+    public static boolean alertsEnabled(Context context) {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            return false;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationManager manager = context.getSystemService(NotificationManager.class);
+            NotificationChannel channel = manager == null
+                ? null
+                : manager.getNotificationChannel(BuildConfig.ALERT_CHANNEL_ID);
+            return channel != null && channel.getImportance() != NotificationManager.IMPORTANCE_NONE;
+        }
+        return true;
     }
 }

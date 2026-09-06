@@ -259,7 +259,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v193')
+        self.assertContains(response, 'driver-mobile-shell-v194')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertContains(response, 'playDriverSound("truck_assigned")')
@@ -420,6 +420,7 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, '<small class="driver-shell-version"')
         self.assertContains(response, 'class="driver-native-app-version native-app-version"', count=1)
         self.assertContains(response, 'data-native-app-version=""', count=1)
+        self.assertContains(response, 'data-native-client-version=""', count=1)
         self.assertNotContains(response, '<div class="driver-mobile-update-modal" data-driver-pwa-update-modal')
         self.assertNotContains(response, '<span class="driver-mobile-update-badge" data-driver-pwa-update-badge')
         self.assertNotContains(response, 'data-driver-tab-open="manifest" data-driver-pwa-update-nav-target')
@@ -443,6 +444,7 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, '<small class="driver-shell-version"')
         self.assertContains(response, 'class="driver-native-app-version native-app-version"', count=1)
         self.assertContains(response, 'data-native-app-version="0.1.3"', count=1)
+        self.assertContains(response, 'data-native-client-version="0.1.3"', count=1)
         self.assertContains(response, '>Версия 0.1.3</span>', count=1)
         # Проверяем именно сам элемент версии: строка «driver-mobile-shell-»
         # есть на странице и в других местах (service worker, метаданные),
@@ -471,7 +473,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v193', script)
+        self.assertIn('driver-mobile-shell-v194', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -2854,7 +2856,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v193')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v194')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
