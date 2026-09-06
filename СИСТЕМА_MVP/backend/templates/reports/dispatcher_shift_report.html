@@ -30,17 +30,16 @@
         <form class="dispatcher-report-filters no-print" method="get">
             <label>
                 <span>Дата</span>
-                <input type="date" name="date" value="{{ report.date_value }}">
+                <input type="date" name="date" value="{{ report.date_value }}" onchange="this.form.requestSubmit()">
             </label>
             <label>
                 <span>Смена</span>
-                <select name="shift_type">
+                <select name="shift_type" onchange="this.form.requestSubmit()">
                     <option value="day" {% if report.meta.shift_type == 'day' %}selected{% endif %}>Дневная</option>
                     <option value="night" {% if report.meta.shift_type == 'night' %}selected{% endif %}>Ночная</option>
                 </select>
             </label>
-            <button type="submit">Показать</button>
-            <p>Границы смены: <strong>{{ report.meta.time_range }}</strong>. Отчёт пересчитывается из данных пульта при каждом открытии.</p>
+            <p>Дата и смена применяются сразу. Границы смены: <strong>{{ report.meta.time_range }}</strong>. Отчёт пересчитывается из данных пульта при каждом открытии.</p>
         </form>
 
         {% if messages %}

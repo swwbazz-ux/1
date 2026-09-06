@@ -126,6 +126,8 @@ class DispatcherShiftReportTests(TestCase):
         self.assertContains(hub, 'Работа выемочного оборудования')
         self.assertEqual(trucks.status_code, 200)
         self.assertContains(trucks, 'dispatcher-shift-report-screen')
+        self.assertContains(trucks, 'this.form.requestSubmit()', count=2)
+        self.assertNotContains(trucks, '>Показать</button>')
         self.assertContains(trucks, 'м³×км')
         self.assertContains(trucks, 'Корректировать')
         self.assertEqual(excavation.status_code, 200)
