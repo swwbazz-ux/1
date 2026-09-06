@@ -115,6 +115,45 @@ class DispatcherShiftReportTests(TestCase):
         self.assertTrue(all(row['rock_type'] == 'Первичная сульфидная' for row in report['excavation_rows']))
         self.assertTrue(all(row['horizon'] == '90' for row in report['excavation_rows']))
 
+    def test_excavation_downtimes_are_grouped_by_reason_and_zero_totals_hidden(self):
+        waiting, _ = DowntimeReason.objects.get_or_create(
+            name='Ожидание самосвалов',
+            defaults={'equipment_type': self.excavator.equipment_type},
+        )
+        inspection, _ = DowntimeReason.objects.get_or_create(
+            name='Тестовый осмотр для отчёта',
+            defaults={'equipment_type': self.excavator.equipment_type},
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            reason=waiting,
+            started_at=self.shift_at,
+            ended_at=self.shift_at + timedelta(seconds=30),
+            comment='Автоматически по производственному событию',
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            reason=waiting,
+            started_at=self.shift_at + timedelta(minutes=1),
+            ended_at=self.shift_at + timedelta(minutes=1, seconds=45),
+            comment='Автоматически по производственному событию',
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            reason=inspection,
+            started_at=self.shift_at + timedelta(minutes=2),
+            ended_at=self.shift_at + timedelta(minutes=2, seconds=20),
+        )
+
+        report = build_dispatcher_shift_report(self.selected_date, 'day')
+
+        self.assertTrue(report['excavation_rows'])
+        for row in report['excavation_rows']:
+            self.assertEqual(row['downtime'], 'Ожидание самосвалов—1 мин')
+            self.assertNotIn('0 мин', row['downtime'])
+            self.assertNotIn('Автоматически', row['downtime'])
+            self.assertNotIn('Тестовый осмотр', row['downtime'])
+
     def test_reports_hub_and_both_forms_are_available(self):
         params = {'date': self.selected_date.isoformat(), 'shift_type': 'day'}
         hub = self.client.get(reverse('dispatcher_reports'), params)

@@ -102,26 +102,58 @@ def load_shift_downtimes(selected_date, shift_type):
     )
 
 
-def format_downtime(event, shift_start, shift_end):
-    event_end = event.ended_at or min(timezone.now(), shift_end)
+def downtime_overlap_seconds(event, shift_start, shift_end, *, now=None):
+    now = now or timezone.now()
+    event_end = event.ended_at or min(now, shift_end)
     effective_start = max(event.started_at, shift_start)
     effective_end = min(event_end, shift_end)
-    minutes = max(int((effective_end - effective_start).total_seconds() // 60), 0)
+    return max(int((effective_end - effective_start).total_seconds()), 0)
+
+
+def format_downtime_total(reason_name, seconds, *, is_open=False):
+    minutes = max(seconds // 60, 0)
     hours, minute_remainder = divmod(minutes, 60)
     duration_parts = []
     if hours:
         duration_parts.append(f'{hours}ч')
     if minute_remainder or not duration_parts:
         duration_parts.append(f'{minute_remainder} мин')
-    comment = f', {event.comment.strip()}' if event.comment.strip() else ''
-    open_mark = ' (открыт)' if event.ended_at is None else ''
-    return f'{event.reason.name}—{" ".join(duration_parts)}{comment}{open_mark}'
+    open_mark = ' (открыт)' if is_open else ''
+    return f'{reason_name}—{" ".join(duration_parts)}{open_mark}'
 
 
 def notes_by_equipment(downtimes, shift_start, shift_end):
-    result = defaultdict(list)
+    now = timezone.now()
+    totals = {}
+    order = []
     for event in downtimes:
-        result[event.equipment_id].append(format_downtime(event, shift_start, shift_end))
+        key = (event.equipment_id, event.reason_id)
+        if key not in totals:
+            totals[key] = {
+                'equipment_id': event.equipment_id,
+                'reason_name': event.reason.name,
+                'seconds': 0,
+                'is_open': False,
+            }
+            order.append(key)
+        totals[key]['seconds'] += downtime_overlap_seconds(
+            event,
+            shift_start,
+            shift_end,
+            now=now,
+        )
+        totals[key]['is_open'] = totals[key]['is_open'] or event.ended_at is None
+
+    result = defaultdict(list)
+    for key in order:
+        total = totals[key]
+        if total['seconds'] < 60:
+            continue
+        result[total['equipment_id']].append(format_downtime_total(
+            total['reason_name'],
+            total['seconds'],
+            is_open=total['is_open'],
+        ))
     return result
 
 
