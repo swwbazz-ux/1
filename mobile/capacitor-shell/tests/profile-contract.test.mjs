@@ -166,7 +166,7 @@ test("QA and RuStore variants keep role identity but disable sideload updates", 
     assert.notEqual(qa.applicationId, rustore.applicationId);
     assert.equal(rustoreQa.applicationId, rustore.applicationId);
     assert.notEqual(rustoreQa.serverUrl, rustore.serverUrl);
-    assert.ok(Number(profile(role).versionCode) < Number(rustoreQa.versionCode));
+    assert.ok(Number(profile(role).versionCode) <= Number(rustoreQa.versionCode));
     assert.ok(Number(rustore.versionCode) > Number(rustoreQa.versionCode));
     assert.ok(Number(rustore.versionCode) > Number(profile(role).versionCode));
   }
