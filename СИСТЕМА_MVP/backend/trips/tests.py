@@ -3519,6 +3519,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             payload__status=TripStatus.LOADED_WAITING_UNLOAD,
         ).first()
         self.assertIsNotNone(event)
+        self.assertEqual(event.payload['trip_id'], trip.id)
+        self.assertEqual(event.payload['assigned_dump_point_id'], self.dump_point.id)
+        self.assertEqual(event.payload['dump_point_name'], self.dump_point.name)
 
     def test_dispatcher_assigned_truck_load_unload_cycle_waits_ten_minutes_before_reuse(self):
         kkd = DumpPoint.objects.create(name='ККД')

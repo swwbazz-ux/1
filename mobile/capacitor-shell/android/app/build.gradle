@@ -145,6 +145,9 @@ android {
                     profile.getProperty('inAppUpdaterEnabled', 'true')
             )
             String updateManifestUrl = profile.getProperty('updateManifestUrl', '').trim()
+            boolean driverVoiceAlertsEnabled = Boolean.parseBoolean(profile.getProperty('driverVoiceAlertsEnabled', 'false'))
+            long alertCueDurationMs = Long.parseLong(profile.getProperty('alertCueDurationMs', '720'))
+            long voiceAfterCueDelayMs = Long.parseLong(profile.getProperty('voiceAfterCueDelayMs', '200'))
             String splashBackgroundColor = profile.getProperty('splashBackgroundColor', '').trim()
             String splashAccentColor = profile.getProperty('splashAccentColor', '').trim()
             String splashIconResource = profile.getProperty('splashIconResource', '').trim()
@@ -168,6 +171,9 @@ android {
             }
             if (inAppUpdaterEnabled && !updateManifestUrl.startsWith('https://')) {
                 throw new GradleException("updateManifestUrl must use HTTPS in ${profileDir}/app.properties")
+            }
+            if (alertCueDurationMs < 0L || voiceAfterCueDelayMs < 0L) {
+                throw new GradleException("Audio alert delays must not be negative in ${profileDir}/app.properties")
             }
 
             create(profileId) {
@@ -200,6 +206,9 @@ android {
                 buildConfigField "String", "FOREGROUND_CHANNEL_ID", javaStringLiteral(profile.getProperty('foregroundChannelId'))
                 buildConfigField "String", "ALERT_CHANNEL_ID", javaStringLiteral(profile.getProperty('alertChannelId'))
                 buildConfigField "String", "ALERT_SOUND_RESOURCE", javaStringLiteral(profile.getProperty('alertSoundResource', 'app_alert'))
+                buildConfigField "boolean", "DRIVER_VOICE_ALERTS_ENABLED", Boolean.toString(driverVoiceAlertsEnabled)
+                buildConfigField "long", "ALERT_CUE_DURATION_MS", "${alertCueDurationMs}L"
+                buildConfigField "long", "VOICE_AFTER_CUE_DELAY_MS", "${voiceAfterCueDelayMs}L"
                 buildConfigField "String", "SPLASH_BACKGROUND_COLOR", javaStringLiteral(splashBackgroundColor)
                 buildConfigField "String", "SPLASH_ACCENT_COLOR", javaStringLiteral(splashAccentColor)
                 buildConfigField "String", "SPLASH_ICON_RESOURCE", javaStringLiteral(splashIconResource)

@@ -3551,6 +3551,7 @@ def excavator_truck_loaded_view(request):
                 'dump_point_id': trip.dump_point_id,
                 'assigned_dump_point_id': trip.assigned_dump_point_id,
                 'actual_dump_point_id': trip.actual_dump_point_id,
+                'dump_point_name': str(trip.assigned_dump_point or trip.dump_point),
                 'status': TripStatus.LOADED_WAITING_UNLOAD,
             },
         )
@@ -4131,6 +4132,11 @@ def excavator_work_view(request):
                                 'trip_id': trip.id,
                                 'truck_id': trip.truck_id,
                                 'excavator_id': trip.excavator_id,
+                                'dump_point_id': trip.dump_point_id,
+                                'assigned_dump_point_id': trip.assigned_dump_point_id or trip.dump_point_id,
+                                'actual_dump_point_id': trip.actual_dump_point_id or trip.dump_point_id,
+                                'dump_point_name': str(trip.assigned_dump_point or trip.dump_point),
+                                'status': TripStatus.LOADED_WAITING_UNLOAD,
                             },
                         )
             except ValidationError as error:
