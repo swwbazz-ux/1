@@ -426,6 +426,31 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertEqual(self.client.session['employee_access_id'], next_access.id)
         self.assertEqual(self.client.session['device_kind'], 'shared')
 
+    def test_shared_dispatcher_can_reauthenticate_same_access_and_start_shift(self):
+        previous_login_at = timezone.now() - timedelta(hours=1)
+        self.current_access.last_login_at = previous_login_at
+        self.current_access.save(update_fields=['last_login_at'])
+
+        response = self.client.post(
+            reverse('dispatcher_toggle_shift'),
+            {
+                'shift_action': 'start',
+                'reauth_phone': '900-000-05-00',
+                'reauth_access_code': '50-00-00',
+                'device_kind': 'shared',
+            },
+        )
+
+        self.assertRedirects(response, reverse('dispatcher_control'))
+        shift = EmployeeShift.objects.get(
+            employee=self.current_dispatcher,
+            closed_at__isnull=True,
+        )
+        self.assertEqual(shift.workplace_code, 'dispatcher')
+        self.assertEqual(shift.opened_by, self.current_dispatcher)
+        self.current_access.refresh_from_db()
+        self.assertGreater(self.current_access.last_login_at, previous_login_at)
+
 
 class DispatcherGarageCurrentStateTests(TestCase):
     def setUp(self):

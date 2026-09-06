@@ -5257,6 +5257,11 @@ def dispatcher_toggle_shift_view(request):
                 messages.error(request, reauth_error)
                 return redirect(redirect_url)
             access = reauth_access
+            # Повторная авторизация обновляет last_login_at и метку активной
+            # роли в сессии. Проверять загруженный до неё session_access нельзя:
+            # для того же диспетчера он уже содержит устаревшую метку и ложно
+            # переводит только что авторизованную роль в режим просмотра.
+            session_access = access
         else:
             access = active_access_for_employee_role(access.employee, 'dispatcher')
             if not access:
