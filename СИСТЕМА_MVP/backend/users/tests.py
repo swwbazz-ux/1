@@ -1125,6 +1125,7 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Справочники админки')
         self.assertContains(response, 'Виды техники')
+        self.assertContains(response, 'Модели техники')
         self.assertContains(response, 'Породы')
         self.assertContains(response, 'Точки разгрузки')
         self.assertContains(response, 'Ежесменные планы техники')
@@ -1132,6 +1133,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Сменные планы (история)')
         self.assertContains(response, 'Планы техники (история)')
         self.assertContains(response, '/admin/references/equipmenttype/')
+        self.assertContains(response, '/system-admin/references/equipment-models/')
         self.assertContains(response, '/system-admin/references/equipment/')
         self.assertContains(response, '/system-admin/references/equipment-plan-groups/')
         self.assertContains(response, '/system-admin/references/achievement-prizes/')
@@ -1143,6 +1145,60 @@ class AccessLoginTests(TestCase):
         self.assertEqual(detail_response.status_code, 200)
         self.assertContains(detail_response, 'reference-detail-page')
         self.assertContains(detail_response, '/admin/references/equipment/')
+
+    def test_admin_adds_contractor_excavator_model_and_equipment(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        model_page = self.client.get('/system-admin/references/equipment-models/', HTTP_HOST='localhost')
+        equipment_page = self.client.get('/system-admin/references/equipment/', HTTP_HOST='localhost')
+
+        self.assertContains(model_page, 'Модели техники')
+        self.assertContains(model_page, 'фактический объем ковша')
+        self.assertContains(equipment_page, 'Снимите флажок, если техника принадлежит подрядчику.')
+
+        model_response = self.client.post(
+            '/system-admin/references/equipment-models/',
+            {
+                'action': 'save',
+                'equipment_type': str(excavator_type.id),
+                'name': 'SANY SY750H',
+                'body_volume_m3': '4.50',
+                'payload_tons': '',
+                'fuel_capacity_limit_l': '',
+                'is_active': 'on',
+            },
+            HTTP_HOST='localhost',
+        )
+        equipment_model = EquipmentModel.objects.get(name='SANY SY750H')
+
+        equipment_response = self.client.post(
+            '/system-admin/references/equipment/',
+            {
+                'action': 'save',
+                'equipment_type': str(excavator_type.id),
+                'model': str(equipment_model.id),
+                'garage_number': 'ПОДР-SANY-01',
+                'vin': '',
+                'is_active': 'on',
+            },
+            HTTP_HOST='localhost',
+        )
+        equipment = Equipment.objects.get(garage_number='ПОДР-SANY-01')
+
+        self.assertEqual(model_response.status_code, 302)
+        self.assertEqual(equipment_model.body_volume_m3, Decimal('4.50'))
+        self.assertEqual(equipment_response.status_code, 302)
+        self.assertEqual(equipment.model, equipment_model)
+        self.assertFalse(equipment.is_own)
 
     def test_admin_saves_active_achievement_prize_image_from_reference_screen(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
