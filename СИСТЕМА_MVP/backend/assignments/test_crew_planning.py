@@ -175,6 +175,39 @@ class CrewPlanningServiceTests(TestCase):
         self.assertEqual(repeated_plan.version, same_plan.version)
         self.assertEqual(repeated_plan.slots.filter(equipment=new_excavator).count(), 2)
 
+    def test_existing_draft_removes_disabled_equipment_with_assigned_crew(self):
+        plan, _created = get_or_create_crew_draft(role=self.driver_role, actor=self.actor)
+        original_version = plan.version
+        night_slot = plan.slots.get(
+            equipment=self.truck_1,
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        night_slot.secondary_employee = self.free_driver
+        night_slot.baseline_secondary_employee = self.free_driver
+        night_slot.save(update_fields=['secondary_employee', 'baseline_secondary_employee'])
+        self.truck_1.is_active = False
+        self.truck_1.save(update_fields=['is_active'])
+
+        same_plan, created = get_or_create_crew_draft(
+            role=self.driver_role,
+            actor=self.actor,
+        )
+
+        self.assertFalse(created)
+        self.assertEqual(same_plan.id, plan.id)
+        self.assertEqual(same_plan.version, original_version + 1)
+        self.assertFalse(same_plan.slots.filter(equipment=self.truck_1).exists())
+
+        published = publish_crew_plan(
+            plan=same_plan,
+            expected_version=same_plan.version,
+            actor=self.actor,
+        )
+
+        self.assertEqual(published.status, CrewPlanStatus.PUBLISHED)
+        self.assignment_1.refresh_from_db()
+        self.assertIsNotNone(self.assignment_1.ended_at)
+
     def test_draft_update_moves_and_swaps_without_changing_baseline(self):
         plan, _created = get_or_create_crew_draft(role=self.driver_role, actor=self.actor)
         target = plan.slots.get(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1)

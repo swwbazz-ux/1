@@ -1046,6 +1046,70 @@ class DeputyPlanningViewTests(TestCase):
             self.truck_1,
         )
 
+    def test_disabled_equipment_disappears_and_returns_full_crew_to_free_pool(self):
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        excavator = Equipment.objects.create(
+            equipment_type=excavator_type,
+            garage_number='ЭКС-ОТКЛ',
+        )
+        operator, _operator_access = self.create_employee_with_access(
+            'Иванов Тестовый Машинист',
+            self.excavator_role,
+            phone='+79000000031',
+            access_code='310031',
+        )
+        set_active_equipment_assignment(
+            employee=operator,
+            role=self.excavator_role,
+            equipment=excavator,
+            shift_type=WorkShiftType.SHIFT_1,
+            assigned_by=self.deputy,
+        )
+        assistant_specialization = ProductionSpecialization.objects.get(
+            code='assistant_excavator_operator',
+        )
+        assistant = Employee.objects.create(
+            full_name='Петров Тестовый Помощник',
+            phone='+79000000032',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            base_specialization=assistant_specialization,
+        )
+        plan, _created = get_or_create_crew_draft(
+            role=self.excavator_role,
+            actor=self.deputy,
+        )
+        night_slot = plan.slots.get(
+            equipment=excavator,
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        night_slot.secondary_employee = assistant
+        night_slot.baseline_secondary_employee = assistant
+        night_slot.save(update_fields=['secondary_employee', 'baseline_secondary_employee'])
+        original_version = plan.version
+        excavator.is_active = False
+        excavator.save(update_fields=['is_active'])
+
+        response = self.client.get(
+            reverse('deputy_mining_manager_placement'),
+            {'role': self.excavator_role.code},
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        plan.refresh_from_db()
+        payload = response.context['planning_payload']
+        self.assertEqual(plan.version, original_version + 1)
+        self.assertFalse(plan.slots.filter(equipment=excavator).exists())
+        self.assertNotIn(
+            excavator.id,
+            {row['equipment']['id'] for row in payload['rows']},
+        )
+        free_employee_ids = {item['id'] for item in payload['employees']}
+        self.assertIn(operator.id, free_employee_ids)
+        self.assertIn(assistant.id, free_employee_ids)
+        self.assertEqual(payload['summary']['conflict_count'], 0)
+
     def test_autosave_assignment_locks_only_slot_table_with_nullable_employee_joins(self):
         plan = self.create_draft()
         second_driver, _second_access = self.create_employee_with_access(

@@ -232,14 +232,20 @@ def _validate_crew_equipment(equipment, role):
 
 
 def _sync_crew_draft_equipment_slots(plan, *, actor=None, bump_version=True):
-    """Add newly registered equipment to an existing editable crew draft.
+    """Reconcile an editable crew draft with the active equipment directory.
 
-    A crew plan keeps its existing rows as an operational snapshot, but active
-    equipment may legitimately arrive during a watch.  Synchronization is
-    additive only: it never removes old rows or rewrites assignments already
-    edited by the deputy.
+    Active equipment may legitimately arrive or leave during a watch. New
+    equipment receives day/night slots. Equipment disabled in the directory is
+    removed from the draft together with its slots, so its crew members return
+    to the unassigned pool instead of blocking publication.
     """
     equipment = list(equipment_queryset_for_work_role(plan.role.code))
+    active_equipment_ids = {item.id for item in equipment}
+    obsolete_slots = plan.slots.exclude(equipment_id__in=active_equipment_ids)
+    removed_slot_count = obsolete_slots.count()
+    if removed_slot_count:
+        obsolete_slots.delete()
+
     existing_slots = set(
         plan.slots.values_list('equipment_id', 'shift_type')
     )
@@ -251,7 +257,7 @@ def _sync_crew_draft_equipment_slots(plan, *, actor=None, bump_version=True):
             for shift_type in WorkShiftType.values
         )
     }
-    if not missing_equipment_ids:
+    if not missing_equipment_ids and not removed_slot_count:
         return 0
 
     active_assignments = (
@@ -332,14 +338,14 @@ def _sync_crew_draft_equipment_slots(plan, *, actor=None, bump_version=True):
             ))
 
     CrewPlanSlot.objects.bulk_create(slots)
-    if slots and bump_version:
+    if (slots or removed_slot_count) and bump_version:
         plan.version += 1
         update_fields = ['version', 'updated_at']
         if actor is not None:
             plan.updated_by = actor
             update_fields.append('updated_by')
         plan.save(update_fields=update_fields)
-    return len(slots)
+    return len(slots) + removed_slot_count
 
 
 @transaction.atomic
