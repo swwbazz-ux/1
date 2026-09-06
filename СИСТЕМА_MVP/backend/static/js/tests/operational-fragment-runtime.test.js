@@ -550,7 +550,7 @@ test("Driver uses Shift sounds only after the returned shell confirms the state 
     assert.equal(sandbox.context.map("complete-trip", closedShell), "action_ok");
 });
 
-test("open Driver APK plays one cue and one recorded dump-point announcement", async () => {
+test("open Driver APK delegates the complete cue and voice chain to one native announcement", async () => {
     const announcements = [];
     const sounds = [];
     const vibrations = [];
@@ -618,8 +618,33 @@ test("open Driver APK plays one cue and one recorded dump-point announcement", a
     assert.equal(announcements[0].tripId, 17);
     assert.equal(announcements[0].dumpPointId, 2);
     assert.equal(announcements[0].dumpPointName, "СКДР");
+    assert.deepEqual(sounds, []);
+    assert.equal(vibrations.length, 0);
+
+    runtimeWindow.MobileOperationalSounds.announceDumpPoint = function () {
+        return Promise.resolve({supported: true, announced: false, reason: "bridge_error"});
+    };
+    context.events = [{
+        version: 42,
+        type: "trip_changed",
+        payload: {
+            action: "truck_loaded",
+            trip_id: 18,
+            assigned_dump_point_id: 1,
+            dump_point_name: "ККД",
+        },
+    }];
+    sandbox.context.alert(context);
+    await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(sounds, ["truck_assigned"]);
-    assert.equal(vibrations.length, 1);
+
+    runtimeWindow.MobileOperationalSounds.announceDumpPoint = function () {
+        return Promise.resolve({supported: true, announced: false, reason: "already_announced"});
+    };
+    context.events[0].version = 43;
+    sandbox.context.alert(context);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(sounds, ["truck_assigned"]);
 });
 
 

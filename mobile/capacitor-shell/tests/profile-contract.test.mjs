@@ -35,8 +35,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "17",
-    versionName: "0.1.13",
+      versionCode: "19",
+      versionName: "0.1.14",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -57,7 +57,7 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "18",
+    versionCode: "21",
     versionName: "0.1.10",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
@@ -68,7 +68,7 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "17",
+    versionCode: "20",
     versionName: "0.1.10-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
@@ -350,12 +350,16 @@ test("foreground driver screen uses the same deduplicated recorded voice bridge"
   const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
   const plugin = readFileSync(resolve(javaRoot, "NativeSoundPlugin.java"), "utf8");
   const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  const player = readFileSync(resolve(javaRoot, "DriverVoicePlayer.java"), "utf8");
   const sounds = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "static", "js", "mobile-operational-sounds-v1.js"), "utf8");
   const driverTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "users", "driver_shift.html"), "utf8");
 
   assert.match(plugin, /@PluginMethod\s+public void announceDumpPoint\(PluginCall call\)/);
   assert.match(plugin, /ConnectivityForegroundService\.claimDriverDumpPointAlert/);
   assert.match(plugin, /DriverVoicePlayer[\s\S]*?ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
+  assert.match(plugin, /driverVoicePlayer\.announce\([\s\S]*?true[\s\S]*?cuePlayed/);
+  assert.match(player, /void announce\([\s\S]*?boolean playCue\)[\s\S]*?playAlertCue\(\)/);
+  assert.match(service, /driverVoicePlayer\.announce\([\s\S]*?!notificationShown/);
   assert.match(service, /static boolean claimDriverDumpPointAlert/);
   assert.match(sounds, /announceDumpPoint: announceDumpPoint/);
   assert.match(driverTemplate, /operational-state-refresh-applied/);

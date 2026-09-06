@@ -387,12 +387,17 @@ public class ConnectivityForegroundService extends Service {
                 "Новая точка разгрузки",
                 displayName
             );
-            if (notificationShown && driverVoicePlayer != null) {
+            if (driverVoicePlayer != null) {
                 long voiceDelayMs = BuildConfig.ALERT_CUE_DURATION_MS
                     + BuildConfig.VOICE_AFTER_CUE_DELAY_MS;
-                driverVoicePlayer.announce(selectedDumpPointId, displayName, voiceDelayMs);
+                driverVoicePlayer.announce(
+                    selectedDumpPointId,
+                    displayName,
+                    voiceDelayMs,
+                    !notificationShown
+                );
             }
-            return true;
+            return notificationShown || driverVoicePlayer != null;
         } catch (Exception error) {
             Log.w("ConnectivityForegroundService", "Driver dump-point alert was not parsed", error);
             return false;

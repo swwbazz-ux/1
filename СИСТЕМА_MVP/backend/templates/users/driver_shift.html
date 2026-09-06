@@ -4656,11 +4656,20 @@ function playDriverDumpPointAlert(context) {
         : Promise.resolve({supported: false, announced: false});
     Promise.resolve(announce).then(function (nativeResult) {
         nativeResult = nativeResult || {supported: false, announced: false};
-        /* Новая APK сама защищает событие от повтора между открытым экраном и
-           фоновым сервисом. Старая APK не знает голосовой bridge, но всё равно
-           получает прежний короткий сигнал после серверного обновления. */
-        if (nativeResult.supported && !nativeResult.announced) {
+        /* Новая APK сама проигрывает всю цепочку «сигнал → голос» и защищает
+           событие от повтора между открытым экраном и фоновым сервисом. */
+        if (nativeResult.supported && nativeResult.announced) {
             driverLastDumpPointAlertVersion = details.eventVersion;
+            return;
+        }
+        if (nativeResult.supported && nativeResult.reason === "already_announced") {
+            driverLastDumpPointAlertVersion = details.eventVersion;
+            return;
+        }
+        /* При реальной ошибке bridge не оставляем водителя в полной тишине. */
+        if (nativeResult.supported) {
+            driverLastDumpPointAlertVersion = details.eventVersion;
+            playDriverSound("truck_assigned");
             return;
         }
         if (document.body && document.body.dataset.nativeApp === "true" && !nativeResult.supported) {

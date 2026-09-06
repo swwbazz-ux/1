@@ -148,9 +148,18 @@
             return Promise.resolve({supported: false, announced: false});
         }
         return Promise.resolve(plugin.announceDumpPoint(details || {})).then(function (result) {
-            return {supported: true, announced: !!(result && result.announced === true)};
-        }).catch(function () {
-            return {supported: true, announced: false};
+            return {
+                supported: true,
+                announced: !!(result && result.announced === true),
+                reason: result && result.reason ? String(result.reason) : ""
+            };
+        }).catch(function (error) {
+            return {
+                supported: true,
+                announced: false,
+                reason: "bridge_error",
+                error: error && error.message ? String(error.message) : ""
+            };
         });
     }
 
