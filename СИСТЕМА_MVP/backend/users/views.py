@@ -131,7 +131,11 @@ from .models import (
     WatchComposition,
     WorkSchedule,
 )
-from .live_monitor import attach_application_presence, application_presence_by_employee_ids
+from .live_monitor import (
+    attach_application_presence,
+    application_presence_by_employee_ids,
+    presence_by_employee_id,
+)
 from .oup_undo import (
     get_oup_action_undo_state,
     undo_oup_action,

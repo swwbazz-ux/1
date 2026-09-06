@@ -22,6 +22,7 @@ from references.models import (
 )
 from shifts.models import EmployeeShift, WatchPeriod
 from users.models import (
+    ActiveApplicationSession,
     DriverPrimaryRegistration,
     Employee,
     EmployeeAccess,
@@ -578,6 +579,48 @@ class DeputyPlanningViewTests(TestCase):
             reverse('deputy_mining_manager_export', args=[payload['plan']['id']]),
         )
         self.assertContains(response, 'data-export-excel', count=1)
+
+    def test_board_payload_uses_shared_background_presence_and_client_badge(self):
+        now = timezone.now()
+        ActiveApplicationSession.objects.create(
+            session_key='deputy-visible-background-driver',
+            access=self.driver_access,
+            role_code='driver',
+            app_code='driver',
+            path='/driver/',
+            last_seen_at=now,
+            background_seen_at=now,
+            client_kind=ActiveApplicationSession.ClientKind.ANDROID_APK,
+            client_version='0.1.18',
+        )
+
+        response = self.client.get(
+            reverse('deputy_mining_manager_placement'),
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.context['planning_payload']
+        assigned_employee = next(
+            slot['employee']
+            for row in payload['rows']
+            for slot in row['slots']
+            if slot['employee'] and slot['employee']['id'] == self.driver.id
+        )
+        presence = assigned_employee['presence']
+        self.assertEqual(presence['status_code'], 'background')
+        self.assertEqual(presence['status_label'], 'Связь в фоне')
+        self.assertEqual(presence['last_seen_time'], timezone.localtime(now).strftime('%H:%M:%S'))
+        self.assertEqual(
+            presence['client_badges'],
+            [{
+                'kind': 'android_apk',
+                'label': 'APK Android',
+                'version': '0.1.18',
+                'app_code': 'driver',
+                'app_label': 'Водитель',
+            }],
+        )
         self.assertContains(response, 'id="deputy-candidate-search"', count=1)
         self.assertContains(response, 'Поиск по ФИО, должности или телефону', count=1)
         self.assertContains(response, 'aria-controls="deputy-candidate-list"', count=1)

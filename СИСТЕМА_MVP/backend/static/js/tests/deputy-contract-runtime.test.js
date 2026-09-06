@@ -281,6 +281,18 @@ function planningPayload({assigned = false, version = 1, employees = null} = {})
         id: 101,
         full_name: "Иванов Иван",
         position_label: "Водитель",
+        presence: {
+            status_code: "background",
+            status_label: "Связь в фоне",
+            last_seen_time: "16:50:23",
+            client_badges: [{
+                kind: "android_apk",
+                label: "APK Android",
+                version: "0.1.18",
+                app_code: "driver",
+                app_label: "Водитель",
+            }],
+        },
     };
     return {
         plan: {
@@ -541,6 +553,35 @@ async function flushPromises() {
         await Promise.resolve();
     }
 }
+
+test("deputy cards use the shared blue background-presence contract", () => {
+    const freeRuntime = createDeputyRuntime({locked: false});
+    const freePresence = freeRuntime.employeeList.querySelector(".application-presence");
+    assert.ok(freePresence, "free employee card has no presence component");
+    assert.equal(freePresence.getAttribute("data-application-presence"), "background");
+    assert.equal(
+        freePresence.querySelector(".application-presence__line").children[1].textContent,
+        "Связь в фоне"
+    );
+    assert.equal(freePresence.querySelector("time").textContent, "16:50:23");
+    assert.equal(
+        freePresence.querySelector(".application-presence__client").textContent,
+        "APK Android · 0.1.18"
+    );
+
+    const assignedRuntime = createDeputyRuntime({
+        locked: false,
+        payload: planningPayload({assigned: true}),
+    });
+    const assignedPresence = assignedRuntime.board.querySelector(".application-presence");
+    assert.ok(assignedPresence, "assigned employee card has no presence component");
+    assert.equal(assignedPresence.getAttribute("data-application-presence"), "background");
+    assert.ok(assignedPresence.querySelector(".application-presence__dot"));
+    assert.equal(
+        assignedPresence.querySelector(".application-presence__client").textContent,
+        "APK Android · 0.1.18"
+    );
+});
 
 test(
     "locked deputy drag source stays inactive and artificial drop sends no request",

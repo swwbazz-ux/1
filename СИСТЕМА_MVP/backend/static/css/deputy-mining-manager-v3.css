@@ -644,60 +644,23 @@ button.deputy-avatar {
     object-fit: cover;
 }
 
-.deputy-presence-badge {
-    display: inline-flex;
-    min-height: 24px;
-    align-items: center;
-    gap: 5px;
-    padding: 0 7px;
-    border: 1px solid var(--admin-line);
-    border-radius: 999px;
-    background: var(--admin-panel);
-    color: var(--admin-muted);
-    font-size: 10px;
-    font-weight: 900;
-    letter-spacing: .02em;
-    line-height: 1;
-    text-transform: uppercase;
+.deputy-presence {
+    max-width: 190px;
+    justify-self: end;
+}
+
+.deputy-presence .application-presence__line,
+.deputy-presence .application-presence__clients {
+    justify-content: flex-end;
+}
+
+.deputy-presence .application-presence__line b,
+.deputy-presence .application-presence__line time,
+.deputy-presence .application-presence__client {
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
 }
-
-.deputy-presence-badge__dot {
-    display: block;
-    width: 8px;
-    height: 8px;
-    flex: 0 0 auto;
-    border-radius: 50%;
-    background: currentColor;
-    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 18%, transparent);
-}
-
-.deputy-presence-badge.is-online {
-    border-color: color-mix(in srgb, var(--admin-green) 48%, var(--admin-line));
-    background: var(--admin-green-soft);
-    color: var(--admin-green);
-}
-
-.deputy-presence-badge.is-recent {
-    border-color: color-mix(in srgb, var(--admin-yellow) 52%, var(--admin-line));
-    background: var(--admin-yellow-soft);
-    color: #8a5c00;
-}
-
-.deputy-presence-badge.is-offline {
-    border-color: color-mix(in srgb, var(--admin-red) 45%, var(--admin-line));
-    background: var(--admin-red-soft);
-    color: var(--admin-red);
-}
-
-.deputy-presence-badge.is-not_registered {
-    background: var(--admin-panel-soft);
-    color: var(--admin-muted);
-}
-
-.deputy-employee-presence.is-online { color: var(--admin-green); }
-.deputy-employee-presence.is-recent { color: #9d6800; }
-.deputy-employee-presence.is-offline { color: var(--admin-red); }
 
 .deputy-assignment-board {
     position: relative;
@@ -1104,13 +1067,19 @@ button.deputy-avatar {
 
 .deputy-slot-flags {
     display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
     gap: 4px;
     align-items: center;
+    justify-content: flex-end;
 }
 
-.deputy-slot-flags .deputy-presence-badge {
-    min-height: 22px;
-    padding-inline: 6px;
+.deputy-slot-flags .deputy-presence {
+    max-width: 100%;
+}
+
+.deputy-slot-flags .application-presence__line,
+.deputy-slot-flags .application-presence__client {
     font-size: 9px;
 }
 
@@ -2011,6 +1980,20 @@ button.deputy-avatar {
         grid-auto-columns: minmax(220px, 76vw);
         overflow-x: auto;
         overflow-y: hidden;
+    }
+
+    .deputy-employee-card {
+        grid-template-columns: 38px minmax(0, 1fr) 16px;
+    }
+
+    .deputy-employee-card > .deputy-presence {
+        grid-column: 2;
+        justify-self: start;
+    }
+
+    .deputy-employee-card > .deputy-drag-mark {
+        grid-column: 3;
+        grid-row: 1 / span 2;
     }
 
     .deputy-employee-drop-hint {

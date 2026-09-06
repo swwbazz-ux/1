@@ -24,7 +24,7 @@ from users.role_apps import (
     role_app_manifest_response,
     role_app_service_worker_response,
 )
-from users.live_monitor import presence_by_employee_id
+from users.live_monitor import application_presence_by_employee_ids, empty_application_presence
 from users.work_profiles import (
     effective_specialization,
     eligible_employee_ids_for_work_role,
@@ -405,6 +405,39 @@ def _employee_brigade_code(employee):
     return brigade_match.group(1) if brigade_match else ''
 
 
+def _application_presence_payload(presence):
+    presence = presence or empty_application_presence()
+    last_seen_at = presence.get('last_seen_at')
+    last_seen_time = ''
+    if last_seen_at:
+        last_seen_time = (
+            timezone.localtime(last_seen_at).strftime('%H:%M:%S')
+            if hasattr(last_seen_at, 'utcoffset')
+            else str(last_seen_at)
+        )
+    return {
+        'status_code': presence.get('status_code') or 'offline',
+        'status_label': presence.get('status_label') or 'Нет активной связи',
+        'last_seen_at': (
+            last_seen_at.isoformat()
+            if last_seen_at and hasattr(last_seen_at, 'isoformat')
+            else str(last_seen_at or '')
+        ),
+        'last_seen_time': last_seen_time,
+        'client_badges': [
+            {
+                'kind': badge.get('kind') or '',
+                'label': badge.get('label') or '',
+                'version': badge.get('version') or '',
+                'app_code': badge.get('app_code') or '',
+                'app_label': badge.get('app_label') or '',
+            }
+            for badge in presence.get('client_badges', [])
+            if badge.get('label')
+        ],
+    }
+
+
 def _employee_payload(employee, *, presence=None, eligible_positions=None):
     if not employee:
         return None
@@ -438,12 +471,7 @@ def _employee_payload(employee, *, presence=None, eligible_positions=None):
         'brigade_code': brigade_code,
         'brigade_label': f'Бригада {brigade_code}' if brigade_code else 'Не указана',
         'search': f'{employee.full_name} {employee.personnel_number}'.strip().lower(),
-        'presence': presence or {
-            'status': 'not_registered',
-            'label': 'Не зарегистрирован',
-            'last_seen_at': '',
-            'app_code': '',
-        },
+        'presence': _application_presence_payload(presence),
     }
     if eligible_positions is not None:
         payload['eligible_positions'] = list(eligible_positions)
@@ -632,7 +660,7 @@ def build_crew_plan_payload(plan, *, request=None):
         for slot in slots
         if slot.baseline_secondary_employee_id
     )
-    presence_by_employee = presence_by_employee_id(payload_employee_ids)
+    presence_by_employee = application_presence_by_employee_ids(payload_employee_ids)
 
     equipment_items = []
     seen_equipment_ids = set()

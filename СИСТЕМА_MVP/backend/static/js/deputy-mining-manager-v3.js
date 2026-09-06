@@ -164,31 +164,51 @@
         var presence = employee && employee.presence && typeof employee.presence === "object"
             ? employee.presence
             : {};
-        var status = textValue(presence.status) || "not_registered";
+        var status = textValue(presence.status_code || presence.status) || "offline";
         return {
             status: status,
-            label: textValue(presence.label) || "Нет связи с приложением"
+            label: textValue(presence.status_label || presence.label) || "Нет активной связи",
+            lastSeenTime: textValue(presence.last_seen_time),
+            clientBadges: Array.isArray(presence.client_badges) ? presence.client_badges : []
         };
     }
 
     function createPresenceBadge(employee) {
         var presence = employeePresence(employee);
-        var shortLabels = {
-            online: "В сети",
-            recent: "Недавно",
-            offline: "Нет связи",
-            not_registered: "Нет входа"
-        };
-        var badge = createElement("span", "deputy-presence-badge is-" + presence.status);
-        badge.setAttribute("aria-label", "Приложение: " + presence.label);
-        badge.setAttribute("title", "Приложение: " + presence.label);
-        badge.appendChild(createElement("i", "deputy-presence-badge__dot"));
-        badge.appendChild(createElement(
-            "span",
-            "deputy-presence-badge__label",
-            shortLabels[presence.status] || presence.label
-        ));
-        return badge;
+        var wrapper = createElement("span", "application-presence is-compact deputy-presence");
+        wrapper.setAttribute("data-application-presence", presence.status);
+        wrapper.setAttribute("aria-label", "Приложение: " + presence.label);
+        wrapper.setAttribute("title", "Приложение: " + presence.label);
+
+        var line = createElement("span", "application-presence__line");
+        line.appendChild(createElement("i", "application-presence__dot is-" + presence.status));
+        line.appendChild(createElement("b", "is-" + presence.status, presence.label));
+        if (presence.lastSeenTime) {
+            line.appendChild(createElement("time", "", presence.lastSeenTime));
+        }
+        wrapper.appendChild(line);
+
+        if (presence.clientBadges.length) {
+            var clients = createElement(
+                "small",
+                "application-presence__clients admin-live-client-badges"
+            );
+            clients.setAttribute("aria-label", "Вариант приложения");
+            presence.clientBadges.forEach(function (client) {
+                var label = textValue(client.label) || "Приложение";
+                if (presence.clientBadges.length > 1 && client.app_label) {
+                    label = textValue(client.app_label) + " · " + label;
+                }
+                if (client.version) label += " · " + textValue(client.version);
+                clients.appendChild(createElement(
+                    "em",
+                    "application-presence__client admin-live-client-badge is-" + textValue(client.kind),
+                    label
+                ));
+            });
+            wrapper.appendChild(clients);
+        }
+        return wrapper;
     }
 
     function normalizeSearch(value) {
@@ -640,7 +660,17 @@
         }
         appendRecordField("Назначение", assignmentLabel || "Свободен");
         appendRecordField("Статус", employee.status_label || "Активен");
-        appendRecordField("Связь с приложением", employeePresence(employee).label);
+        var presence = employeePresence(employee);
+        appendRecordField("Связь с приложением", presence.label);
+        if (presence.clientBadges.length) {
+            appendRecordField(
+                "Вариант приложения",
+                presence.clientBadges.map(function (client) {
+                    return (textValue(client.label) || "Приложение")
+                        + (client.version ? " · " + textValue(client.version) : "");
+                }).join(", ")
+            );
+        }
         openDialog(recordDialog);
     }
 
@@ -767,12 +797,8 @@
         preview.appendChild(createAvatar(employee, false));
         var main = createElement("span", "deputy-employee-main");
         main.appendChild(createElement("strong", "", employeeName(employee)));
-        var presence = employeePresence(employee);
-        main.appendChild(createElement(
-            "small",
-            "deputy-employee-presence is-" + presence.status,
-            (employeeMeta(employee) || "Сотрудник") + " · " + presence.label
-        ));
+        main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
+        main.appendChild(createPresenceBadge(employee));
         preview.appendChild(main);
         applyDragPreviewTheme(preview);
         document.body.appendChild(preview);
