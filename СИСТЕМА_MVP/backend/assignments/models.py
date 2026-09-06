@@ -429,6 +429,13 @@ class ExcavatorPlacement(models.Model):
     )
     loading_horizon = models.CharField('Горизонт погрузки', max_length=64, blank=True)
     loading_block = models.CharField('Блок погрузки', max_length=64, blank=True)
+    transport_distance_km = models.DecimalField(
+        'Рабочее плечо до разгрузки, км',
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     work_context_updated_at = models.DateTimeField('Контекст забоя обновлен', null=True, blank=True)
     changed_by = models.ForeignKey(
         'users.Employee',

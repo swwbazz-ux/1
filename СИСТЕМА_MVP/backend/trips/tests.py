@@ -1,5 +1,6 @@
 ﻿import json
 from datetime import datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -9,9 +10,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
-from core.models import OperationalStateEvent
+from core.models import OperationalStateEvent, OperationalStateVersion
 from users.role_apps import ROLE_APPS_BY_CODE
-from core.production_time import production_work_date
+from core.production_time import production_shift_type, production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import upsert_default_equipment_states
 from references.models import (
@@ -3251,3 +3252,186 @@ class DispatcherAssignmentRealtimeTests(TestCase):
         self.assertEqual(response.json()['assignment_id'], pending.id)
         self.assertTrue(active_assignments.filter(status=AssignmentStatus.ACCEPTED).exists())
         self.assertTrue(active_assignments.filter(id=pending.id, status=AssignmentStatus.PENDING).exists())
+
+
+class DispatcherEquipmentDetailTests(TestCase):
+    def setUp(self):
+        self.dispatcher_role = Role.objects.create(code='dispatcher', name='Горный диспетчер')
+        self.driver_role = Role.objects.create(code='driver', name='Водитель')
+        self.operator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
+        self.dispatcher = Employee.objects.create(
+            full_name='Диспетчер карточек',
+            phone='79000000701',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.driver = Employee.objects.create(
+            full_name='Назначенный водитель',
+            phone='79000000702',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.operator = Employee.objects.create(
+            full_name='Назначенный машинист',
+            phone='79000000703',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.access = EmployeeAccess.objects.create(
+            employee=self.dispatcher,
+            role=self.dispatcher_role,
+            access_code='701701',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        EmployeeShift.objects.create(
+            employee=self.dispatcher,
+            shift_type=production_shift_type(),
+            workplace_code='dispatcher',
+            opened_at=timezone.now(),
+            opened_by=self.dispatcher,
+        )
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        self.truck = Equipment.objects.create(
+            equipment_type=truck_type,
+            model=EquipmentModel.objects.create(
+                equipment_type=truck_type,
+                name='БелАЗ тест',
+                payload_tons=140,
+            ),
+            garage_number='50',
+            vin='TEST-TRUCK-VIN',
+            is_active=True,
+        )
+        self.excavator = Equipment.objects.create(
+            equipment_type=excavator_type,
+            model=EquipmentModel.objects.create(
+                equipment_type=excavator_type,
+                name='Экскаватор тест',
+            ),
+            garage_number='5',
+            vin='TEST-EXCAVATOR-VIN',
+            is_active=True,
+        )
+        self.rock = RockType.objects.create(name='Скальная масса', is_active=True)
+        self.dump = DumpPoint.objects.create(name='Отвал тест', is_active=True)
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+            work_rock_type=self.rock,
+            work_dump_point=self.dump,
+            loading_horizon='220',
+            loading_block='7',
+        )
+        current_shift_type = production_shift_type()
+        EquipmentAssignment.objects.create(
+            employee=self.driver,
+            role=self.driver_role,
+            equipment=self.truck,
+            shift_type=current_shift_type,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        EquipmentAssignment.objects.create(
+            employee=self.operator,
+            role=self.operator_role,
+            equipment=self.excavator,
+            shift_type=current_shift_type,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        session = self.client.session
+        session['employee_access_id'] = self.access.id
+        session.save()
+
+    def detail_url(self, category, equipment):
+        version = self.current_state_version()
+        return f'{reverse("dispatcher_equipment_detail", args=[category, equipment.id])}?state_version={version}'
+
+    def current_state_version(self):
+        return OperationalStateVersion.objects.filter(key='production').values_list('version', flat=True).first() or 0
+
+    def test_detail_uses_current_work_assignments_and_hides_vin(self):
+        truck_response = self.client.get(self.detail_url('equipment', self.truck))
+        complex_response = self.client.get(self.detail_url('complex', self.excavator))
+
+        self.assertEqual(truck_response.status_code, 200)
+        self.assertEqual(complex_response.status_code, 200)
+        truck_card = truck_response.json()['card']
+        complex_card = complex_response.json()['card']
+        self.assertEqual(truck_card['employee']['name'], self.driver.full_name)
+        self.assertIn('Назначен на', truck_card['employee']['presence_label'])
+        self.assertEqual(complex_card['employee']['name'], self.operator.full_name)
+        self.assertIn('Назначен на', complex_card['employee']['presence_label'])
+        self.assertNotIn('VIN/серийный N', [row['label'] for row in truck_card['details']])
+        self.assertNotIn('VIN/серийный N', [row['label'] for row in complex_card['details']])
+        self.assertEqual(complex_card['settings']['dump_point_id'], self.dump.id)
+        self.assertEqual(complex_card['settings']['rock_type_id'], self.rock.id)
+
+    def test_open_shift_employee_has_priority_over_planned_assignment(self):
+        actual_driver = Employee.objects.create(
+            full_name='Фактический водитель',
+            phone='79000000704',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        EmployeeShift.objects.create(
+            employee=actual_driver,
+            shift_type=production_shift_type(),
+            workplace_code='driver',
+            equipment=self.truck,
+            opened_at=timezone.now(),
+            opened_by=actual_driver,
+        )
+
+        response = self.client.get(self.detail_url('equipment', self.truck))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['card']['employee']['name'], actual_driver.full_name)
+        self.assertEqual(response.json()['card']['employee']['presence_label'], 'В смене')
+
+    def test_dispatcher_updates_complex_work_settings_and_distance(self):
+        response = self.client.post(
+            reverse('dispatcher_equipment_detail', args=['complex', self.excavator.id]),
+            data=json.dumps({
+                'state_version': self.current_state_version(),
+                'loading_horizon': '230',
+                'loading_block': '8',
+                'rock_type_id': self.rock.id,
+                'dump_point_id': self.dump.id,
+                'transport_distance_km': '3,25',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        placement = ExcavatorPlacement.objects.get(excavator=self.excavator)
+        self.assertEqual(placement.loading_horizon, '230')
+        self.assertEqual(placement.loading_block, '8')
+        self.assertEqual(placement.transport_distance_km, Decimal('3.25'))
+        self.assertEqual(placement.changed_by, self.dispatcher)
+        self.assertEqual(response.json()['contract'], 'dispatcher-equipment-settings-v1')
+        self.assertTrue(OperationalStateEvent.objects.filter(
+            event_type='equipment_changed',
+            object_id=str(self.excavator.id),
+            payload__action='dispatcher_excavator_work_settings',
+        ).exists())
+
+    def test_dispatcher_rejects_stale_settings_update(self):
+        OperationalStateVersion.objects.update_or_create(key='production', defaults={'version': 4})
+
+        response = self.client.post(
+            reverse('dispatcher_equipment_detail', args=['equipment', self.excavator.id]),
+            data=json.dumps({
+                'state_version': 3,
+                'loading_horizon': '230',
+                'loading_block': '8',
+                'rock_type_id': self.rock.id,
+                'dump_point_id': self.dump.id,
+                'transport_distance_km': '3.25',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['error'], 'stale_board')
+        self.assertIsNone(ExcavatorPlacement.objects.get(excavator=self.excavator).transport_distance_km)

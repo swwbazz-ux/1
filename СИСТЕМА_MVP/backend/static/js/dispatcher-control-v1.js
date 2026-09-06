@@ -39,6 +39,17 @@ document.addEventListener("DOMContentLoaded", function () {
     var detailEmployeeInitials = document.querySelector("[data-gd-detail-employee-initials]");
     var detailEmployeeName = document.querySelector("[data-gd-detail-employee-name]");
     var detailEmployeePhone = document.querySelector("[data-gd-detail-employee-phone]");
+    var detailEmployeePresence = document.querySelector("[data-gd-detail-employee-presence]");
+    var detailSettings = document.querySelector("[data-gd-detail-settings]");
+    var detailSettingsTitle = document.querySelector("[data-gd-detail-settings-title]");
+    var detailSettingsHint = document.querySelector("[data-gd-detail-settings-hint]");
+    var detailSettingsStatus = document.querySelector("[data-gd-detail-settings-status]");
+    var detailSettingHorizon = document.querySelector("[data-gd-setting-horizon]");
+    var detailSettingBlock = document.querySelector("[data-gd-setting-block]");
+    var detailSettingRock = document.querySelector("[data-gd-setting-rock]");
+    var detailSettingDump = document.querySelector("[data-gd-setting-dump]");
+    var detailSettingDistance = document.querySelector("[data-gd-setting-distance]");
+    var detailSettingSave = document.querySelector("[data-gd-setting-save]");
     var detailShiftReport = document.querySelector("[data-gd-detail-shift-report]");
     var detailMetrics = document.querySelector("[data-gd-detail-metrics]");
     var detailTabs = document.querySelector("[data-gd-detail-tabs]");
@@ -1730,8 +1741,103 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function resetDetailContent() {
         if (detailEmployee) detailEmployee.hidden = true;
+        if (detailSettings) detailSettings.hidden = true;
+        if (detailSettingsStatus) detailSettingsStatus.textContent = "";
         if (detailList) detailList.innerHTML = "";
         if (detailShiftReport) detailShiftReport.hidden = true;
+    }
+
+    function fillDetailSettingSelect(select, options, selectedId) {
+        if (!select) return;
+        select.innerHTML = "";
+        var placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Выберите";
+        select.appendChild(placeholder);
+        (options || []).forEach(function (item) {
+            var option = document.createElement("option");
+            option.value = String(item.id || "");
+            option.textContent = item.name || "";
+            option.selected = String(item.id || "") === String(selectedId || "");
+            select.appendChild(option);
+        });
+    }
+
+    function renderDetailSettings(settings) {
+        if (!detailSettings) return;
+        if (!settings || !settings.editable) {
+            detailSettings.hidden = true;
+            return;
+        }
+        detailSettings.hidden = false;
+        if (detailSettingsTitle) detailSettingsTitle.textContent = settings.title || "Рабочие параметры комплекса";
+        if (detailSettingsHint) detailSettingsHint.textContent = settings.hint || "";
+        if (detailSettingsStatus) detailSettingsStatus.textContent = "";
+        if (detailSettingHorizon) detailSettingHorizon.value = settings.loading_horizon || "";
+        if (detailSettingBlock) detailSettingBlock.value = settings.loading_block || "";
+        if (detailSettingDistance) detailSettingDistance.value = String(settings.transport_distance_km || "").replace(".", ",");
+        fillDetailSettingSelect(detailSettingRock, settings.rock_types, settings.rock_type_id);
+        fillDetailSettingSelect(detailSettingDump, settings.dump_points, settings.dump_point_id);
+        if (detailSettingSave) detailSettingSave.disabled = dispatcherRoleIsReadonly() || !dispatcherShiftOpen;
+    }
+
+    function detailSettingsErrorMessage(code) {
+        if (code === "stale_board") return "Данные пульта уже изменились. Закройте карточку и откройте снова.";
+        if (code === "dispatcher_shift_required") return "Сначала откройте смену Горного диспетчера.";
+        if (code === "invalid_transport_distance") return "Плечо должно быть числом не меньше нуля.";
+        if (code === "invalid_work_settings") return "Выберите действующие породу и точку разгрузки.";
+        if (code === "inactive_role") return "Роль неактивна — доступен только просмотр.";
+        return "Не удалось сохранить параметры.";
+    }
+
+    function saveDetailSettings() {
+        if (!detailLayer || !detailSettingSave) return;
+        var url = detailLayer.dataset.gdSettingsUrl || "";
+        if (!url) return;
+        if (!detailSettingRock || !detailSettingRock.value || !detailSettingDump || !detailSettingDump.value) {
+            if (detailSettingsStatus) detailSettingsStatus.textContent = "Выберите породу и точку разгрузки.";
+            return;
+        }
+        detailSettingSave.disabled = true;
+        if (detailSettingsStatus) detailSettingsStatus.textContent = "Сохраняю…";
+        fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-CSRFToken": getCsrfToken(),
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: JSON.stringify({
+                state_version: currentDispatcherBoardVersion(),
+                loading_horizon: detailSettingHorizon ? detailSettingHorizon.value : "",
+                loading_block: detailSettingBlock ? detailSettingBlock.value : "",
+                rock_type_id: detailSettingRock.value,
+                dump_point_id: detailSettingDump.value,
+                transport_distance_km: detailSettingDistance ? detailSettingDistance.value : ""
+            })
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+                if (!response.ok) {
+                    var error = new Error("settings_request_failed");
+                    error.code = payload.error || "";
+                    throw error;
+                }
+                return payload;
+            });
+        }).then(function (payload) {
+            if (detailSettingsStatus) detailSettingsStatus.textContent = "Параметры сохранены";
+            if (payload && payload.settings) renderDetailSettings(payload.settings);
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("dispatcher_settings_saved");
+            }
+            window.setTimeout(closeEquipmentCard, 650);
+        }).catch(function (error) {
+            if (detailSettingsStatus) detailSettingsStatus.textContent = detailSettingsErrorMessage(error && error.code);
+            detailSettingSave.disabled = dispatcherRoleIsReadonly() || !dispatcherShiftOpen;
+        });
     }
 
     function renderEquipmentCard(cardId, data) {
@@ -1746,10 +1852,8 @@ document.addEventListener("DOMContentLoaded", function () {
         if (detailZone) detailZone.textContent = data.zone || "";
         if (detailEmployee) {
             var employee = data.employee || {};
-            if (data.category === "complex") {
-                detailEmployee.hidden = true;
-            } else {
             detailEmployee.hidden = false;
+            if (detailEmployeePresence) detailEmployeePresence.textContent = employee.presence_label || "Сотрудник не назначен";
             if (detailEmployeeName) detailEmployeeName.textContent = employee.name || "Сотрудник не назначен";
             if (detailEmployeePhone) {
                 detailEmployeePhone.textContent = employee.phone || "телефон не указан";
@@ -1773,8 +1877,8 @@ document.addEventListener("DOMContentLoaded", function () {
                     detailEmployeeInitials.hidden = false;
                 }
             }
-            }
         }
+        renderDetailSettings(data.settings || null);
         if (detailList) {
             detailList.innerHTML = "";
             (data.details || []).forEach(function (row) {
@@ -1827,6 +1931,7 @@ document.addEventListener("DOMContentLoaded", function () {
         delete equipmentCards[cardKey];
         detailLayer.dataset.gdActiveCardId = cardKey;
         detailLayer.dataset.gdRequestedVersion = String(boardVersion);
+        detailLayer.dataset.gdSettingsUrl = url;
         detailLayer.setAttribute("aria-busy", "true");
         resetDetailContent();
         if (detailType) detailType.textContent = trigger.dataset.dispatcherDrag === "complex" ? "Комплекс" : "Техника";
@@ -1900,6 +2005,7 @@ document.addEventListener("DOMContentLoaded", function () {
             detailLayer.removeAttribute("aria-busy");
             delete detailLayer.dataset.gdActiveCardId;
             delete detailLayer.dataset.gdRequestedVersion;
+            delete detailLayer.dataset.gdSettingsUrl;
         }
         if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
             window.AppRealtime.wake("dispatcher_detail_closed");
@@ -5259,6 +5365,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
             });
         });
+    }
+    if (detailSettingSave) {
+        detailSettingSave.addEventListener("click", saveDetailSettings);
     }
     function requestDispatcherDesktopDangerConfirmation(options) {
         options = options || {};

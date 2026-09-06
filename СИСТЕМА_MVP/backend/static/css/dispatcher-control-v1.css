@@ -9903,6 +9903,118 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     text-align: right;
 }
 
+.gd-detail-settings {
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid color-mix(in srgb, var(--gd-blue) 45%, var(--gd-detail-line));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--gd-blue) 7%, transparent);
+}
+
+.gd-detail-settings[hidden] {
+    display: none;
+}
+
+.gd-detail-settings-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.gd-detail-settings-head strong,
+.gd-detail-settings-head span {
+    display: block;
+}
+
+.gd-detail-settings-head strong {
+    color: var(--gd-detail-ink);
+    font-size: 13px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.gd-detail-settings-head > div > span {
+    max-width: 720px;
+    margin-top: 4px;
+    color: var(--gd-detail-muted);
+    font-size: 11px;
+    line-height: 1.25;
+}
+
+.gd-detail-settings-status {
+    min-height: 16px;
+    color: var(--gd-green);
+    font-size: 11px;
+    font-weight: 800;
+    text-align: right;
+}
+
+.gd-detail-settings-grid {
+    display: grid;
+    grid-template-columns: .7fr .7fr 1.25fr 1.4fr .85fr auto;
+    gap: 8px;
+    align-items: end;
+    margin-top: 10px;
+}
+
+.gd-detail-settings-grid label,
+.gd-detail-settings-grid label > span {
+    display: block;
+}
+
+.gd-detail-settings-grid label > span {
+    margin-bottom: 4px;
+    color: var(--gd-detail-muted);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.gd-detail-settings-grid input,
+.gd-detail-settings-grid select,
+.gd-detail-settings-save {
+    width: 100%;
+    min-height: 34px;
+    border: 1px solid var(--gd-detail-line);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--gd-detail-panel) 86%, #ffffff 14%);
+    color: var(--gd-detail-ink);
+    font: inherit;
+    font-size: 12px;
+}
+
+.gd-detail-settings-grid input,
+.gd-detail-settings-grid select {
+    padding: 6px 8px;
+}
+
+.gd-detail-settings-save {
+    width: auto;
+    min-width: 152px;
+    padding: 6px 12px;
+    border-color: color-mix(in srgb, var(--gd-green) 66%, var(--gd-detail-line));
+    background: color-mix(in srgb, var(--gd-green) 18%, transparent);
+    color: var(--gd-green);
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.gd-detail-settings-save:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+@media (max-width: 1180px) {
+    .gd-detail-settings-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .gd-detail-settings-save {
+        width: 100%;
+    }
+}
+
 .gd-detail-shift-report {
     margin-top: 14px;
     padding-top: 12px;

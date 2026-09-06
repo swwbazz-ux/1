@@ -825,11 +825,43 @@
                     <span data-gd-detail-employee-initials></span>
                 </div>
                 <div class="mm-detail-employee-info">
-                    <span>В смене</span>
+                    <span data-gd-detail-employee-presence>В смене</span>
                     <strong data-gd-detail-employee-name></strong>
                     <a data-gd-detail-employee-phone href=""></a>
                 </div>
             </div>
+            <section class="gd-detail-settings" data-gd-detail-settings hidden>
+                <div class="gd-detail-settings-head">
+                    <div>
+                        <strong data-gd-detail-settings-title>Рабочие параметры комплекса</strong>
+                        <span data-gd-detail-settings-hint></span>
+                    </div>
+                    <span class="gd-detail-settings-status" data-gd-detail-settings-status role="status" aria-live="polite"></span>
+                </div>
+                <div class="gd-detail-settings-grid">
+                    <label>
+                        <span>Горизонт</span>
+                        <input type="text" inputmode="numeric" maxlength="16" data-gd-setting-horizon>
+                    </label>
+                    <label>
+                        <span>Блок</span>
+                        <input type="text" inputmode="numeric" maxlength="16" data-gd-setting-block>
+                    </label>
+                    <label>
+                        <span>Порода</span>
+                        <select data-gd-setting-rock></select>
+                    </label>
+                    <label>
+                        <span>Точка разгрузки</span>
+                        <select data-gd-setting-dump></select>
+                    </label>
+                    <label>
+                        <span>Плечо, км</span>
+                        <input type="text" inputmode="decimal" maxlength="12" placeholder="Например, 3,2" data-gd-setting-distance>
+                    </label>
+                    <button type="button" class="gd-detail-settings-save" data-gd-setting-save>Сохранить параметры</button>
+                </div>
+            </section>
             <dl class="mm-detail-list" data-gd-detail-list></dl>
             <div class="gd-detail-load-state" data-gd-detail-load-state hidden>
                 <span data-gd-detail-load-message>Загружаю свежие данные…</span>
@@ -6053,6 +6085,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v58" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v59" defer></script>
 {% endif %}
 {% endblock %}
