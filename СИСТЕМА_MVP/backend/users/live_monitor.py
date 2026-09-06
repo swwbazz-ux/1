@@ -35,6 +35,7 @@ from .role_apps import get_role_app, get_role_app_for_path, get_role_app_for_req
 OBSERVER_TOKEN_SALT = 'users.admin-live-monitor.observer-v1'
 OBSERVER_TOKEN_MAX_AGE_SECONDS = 14 * 60 * 60
 ONLINE_WINDOW = timedelta(seconds=90)
+BACKGROUND_ONLINE_WINDOW = timedelta(seconds=150)
 RECENT_WINDOW = timedelta(minutes=10)
 HEARTBEAT_WRITE_INTERVAL_SECONDS = 20
 BACKGROUND_HEARTBEAT_WRITE_INTERVAL_SECONDS = 40
@@ -45,6 +46,140 @@ PRESENCE_KINDS = frozenset({PRESENCE_FOREGROUND, PRESENCE_BACKGROUND})
 APPLICATION_CLIENT_KINDS = frozenset(
     value for value, _ in ActiveApplicationSession.ClientKind.choices
 )
+APPLICATION_PRESENCE_OFFLINE = 'offline'
+APPLICATION_PRESENCE_RECENT = 'recent'
+APPLICATION_PRESENCE_BACKGROUND = 'background'
+APPLICATION_PRESENCE_ONLINE = 'online'
+
+
+def empty_application_presence():
+    return {
+        'status_code': APPLICATION_PRESENCE_OFFLINE,
+        'status_label': 'Нет активной связи',
+        'is_online': False,
+        'is_background': False,
+        'is_recent': False,
+        'last_seen_at': None,
+        'current_path': '',
+        'client_badges': [],
+    }
+
+
+def _summarize_application_sessions(sessions, *, now):
+    summary = empty_application_presence()
+    client_badges = {}
+    for session in sessions:
+        if summary['last_seen_at'] is None or session.last_seen_at > summary['last_seen_at']:
+            summary['last_seen_at'] = session.last_seen_at
+            summary['current_path'] = session.path
+
+        foreground_seen_at = session.foreground_seen_at
+        if foreground_seen_at is None and session.background_seen_at is None:
+            # Сессии до разделения foreground/background остаются экранными
+            # в переходном окне, но не получают бессрочный статус «Онлайн».
+            foreground_seen_at = session.last_seen_at
+        summary['is_online'] = summary['is_online'] or bool(
+            foreground_seen_at and foreground_seen_at >= now - ONLINE_WINDOW
+        )
+        summary['is_background'] = summary['is_background'] or bool(
+            session.background_seen_at
+            and session.background_seen_at >= now - BACKGROUND_ONLINE_WINDOW
+        )
+        summary['is_recent'] = summary['is_recent'] or bool(
+            session.last_seen_at >= now - RECENT_WINDOW
+        )
+
+        if not session.client_kind:
+            continue
+        badge_key = (session.app_code, session.client_kind)
+        badge = client_badges.get(badge_key)
+        if badge is None:
+            app = get_role_app(session.app_code)
+            client_badges[badge_key] = {
+                'kind': session.client_kind,
+                'label': session.get_client_kind_display(),
+                'version': session.client_version,
+                'app_code': session.app_code,
+                'app_label': app.short_name if app else session.app_code,
+                'last_seen_at': session.last_seen_at,
+            }
+        elif not badge['version'] and session.client_version:
+            # Старый фоновый heartbeat мог не передавать VERSION_NAME. Если
+            # версия уже была зафиксирована экраном, не теряем её в карточке.
+            badge['version'] = session.client_version
+
+    if summary['is_online']:
+        summary['is_background'] = False
+        summary['status_code'] = APPLICATION_PRESENCE_ONLINE
+        summary['status_label'] = 'Онлайн'
+    elif summary['is_background']:
+        summary['status_code'] = APPLICATION_PRESENCE_BACKGROUND
+        summary['status_label'] = 'Связь в фоне'
+    elif summary['is_recent']:
+        summary['status_code'] = APPLICATION_PRESENCE_RECENT
+        summary['status_label'] = 'Недавно'
+    summary['client_badges'] = list(client_badges.values())
+    return summary
+
+
+def application_presence_by_access_ids(access_ids, *, now=None):
+    access_ids = {int(access_id) for access_id in access_ids if access_id}
+    if not access_ids:
+        return {}
+    now = now or timezone.now()
+    sessions_by_access = {}
+    sessions = (
+        ActiveApplicationSession.objects
+        .select_related('access__employee', 'access__role')
+        .filter(access_id__in=access_ids)
+        .order_by('access_id', '-last_seen_at', '-pk')
+    )
+    for session in sessions:
+        sessions_by_access.setdefault(session.access_id, []).append(session)
+    return {
+        access_id: _summarize_application_sessions(
+            sessions_by_access.get(access_id, []),
+            now=now,
+        )
+        for access_id in access_ids
+    }
+
+
+def application_presence_by_employee_ids(employee_ids, *, now=None):
+    employee_ids = {int(employee_id) for employee_id in employee_ids if employee_id}
+    if not employee_ids:
+        return {}
+    now = now or timezone.now()
+    sessions_by_employee = {}
+    sessions = (
+        ActiveApplicationSession.objects
+        .select_related('access__employee', 'access__role')
+        .filter(access__employee_id__in=employee_ids)
+        .order_by('access__employee_id', '-last_seen_at', '-pk')
+    )
+    for session in sessions:
+        sessions_by_employee.setdefault(session.access.employee_id, []).append(session)
+    return {
+        employee_id: _summarize_application_sessions(
+            sessions_by_employee.get(employee_id, []),
+            now=now,
+        )
+        for employee_id in employee_ids
+    }
+
+
+def attach_application_presence(employees, *, now=None):
+    employees = list(employees)
+    presence_by_employee = application_presence_by_employee_ids(
+        (employee.pk for employee in employees),
+        now=now,
+    )
+    for employee in employees:
+        employee.application_presence = presence_by_employee.get(
+            employee.pk,
+            empty_application_presence(),
+        )
+    return employees
 
 
 class ObserverSessionProxy(MutableMapping):

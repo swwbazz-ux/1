@@ -1,0 +1,16 @@
+{% if presence %}
+<span class="application-presence{% if compact %} is-compact{% endif %}" data-application-presence="{{ presence.status_code }}">
+    <span class="application-presence__line">
+        <i class="application-presence__dot is-{{ presence.status_code }}" aria-hidden="true"></i>
+        <b class="is-{{ presence.status_code }}">{{ presence.status_label }}</b>
+        {% if show_time and presence.last_seen_at %}<time datetime="{{ presence.last_seen_at|date:'c' }}">{{ presence.last_seen_at|date:"H:i:s" }}</time>{% endif %}
+    </span>
+    {% if presence.client_badges %}
+        <small class="application-presence__clients admin-live-client-badges" aria-label="Вариант приложения">
+            {% for badge in presence.client_badges %}
+                <em class="application-presence__client admin-live-client-badge is-{{ badge.kind }}">{% if show_apps %}{{ badge.app_label }} · {% endif %}{{ badge.label }}{% if badge.version %} · {{ badge.version }}{% endif %}</em>
+            {% endfor %}
+        </small>
+    {% endif %}
+</span>
+{% endif %}

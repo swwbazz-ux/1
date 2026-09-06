@@ -24,7 +24,9 @@ import com.getcapacitor.WebViewListener;
 public class MainActivity extends BridgeActivity {
     private static final int NOTIFICATION_PERMISSION_REQUEST = 4101;
     private static final String PREFS_NAME = "native_shell";
-    private static final String BATTERY_PROMPT_REQUESTED = "battery_prompt_requested";
+    private static final String BATTERY_PROMPT_LAST_AT = "battery_prompt_last_at";
+    private static final String BATTERY_PROMPT_VERSION = "battery_prompt_version";
+    private static final long BATTERY_PROMPT_COOLDOWN_MS = 7L * 24L * 60L * 60L * 1000L;
     private enum PageState { UNKNOWN, STARTED, LOADED }
 
     private StartupLoadingOverlay startupLoadingOverlay;
@@ -222,6 +224,9 @@ public class MainActivity extends BridgeActivity {
     public void onStart() {
         super.onStart();
         AppVisibility.setForeground(true);
+        // Activity могла пережить перезапуск сервиса производителем Android.
+        // Повторный start безопасен и возвращает heartbeat в рабочее состояние.
+        ConnectivityForegroundService.start(this);
     }
 
     @Override
@@ -259,9 +264,6 @@ public class MainActivity extends BridgeActivity {
         if (startupLoadingOverlay != null) {
             startupLoadingOverlay.destroy();
         }
-        if (!isChangingConfigurations()) {
-            ConnectivityForegroundService.stop(this);
-        }
         super.onDestroy();
     }
 
@@ -287,7 +289,7 @@ public class MainActivity extends BridgeActivity {
             );
             return;
         }
-        requestBatteryOptimizationExemptionOnce();
+        requestBatteryOptimizationExemptionIfNeeded();
     }
 
     @Override
@@ -297,18 +299,24 @@ public class MainActivity extends BridgeActivity {
             @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
-            requestBatteryOptimizationExemptionOnce();
+            requestBatteryOptimizationExemptionIfNeeded();
         }
     }
 
     @SuppressLint("BatteryLife")
-    private void requestBatteryOptimizationExemptionOnce() {
+    private void requestBatteryOptimizationExemptionIfNeeded() {
         PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
         if (powerManager != null && powerManager.isIgnoringBatteryOptimizations(getPackageName())) {
             return;
         }
         SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        if (preferences.getBoolean(BATTERY_PROMPT_REQUESTED, false)) {
+        long now = System.currentTimeMillis();
+        long lastPromptAt = preferences.getLong(BATTERY_PROMPT_LAST_AT, 0L);
+        String promptedVersion = preferences.getString(BATTERY_PROMPT_VERSION, "");
+        boolean appWasUpdated = !BuildConfig.VERSION_NAME.equals(promptedVersion);
+        if (!appWasUpdated
+                && lastPromptAt > 0L
+                && now - lastPromptAt < BATTERY_PROMPT_COOLDOWN_MS) {
             return;
         }
         try {
@@ -316,10 +324,16 @@ public class MainActivity extends BridgeActivity {
                 android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
                 Uri.parse("package:" + getPackageName())
             );
-            preferences.edit().putBoolean(BATTERY_PROMPT_REQUESTED, true).apply();
+            preferences.edit()
+                .putLong(BATTERY_PROMPT_LAST_AT, now)
+                .putString(BATTERY_PROMPT_VERSION, BuildConfig.VERSION_NAME)
+                .apply();
             startActivity(request);
         } catch (Exception ignored) {
-            preferences.edit().remove(BATTERY_PROMPT_REQUESTED).apply();
+            preferences.edit()
+                .remove(BATTERY_PROMPT_LAST_AT)
+                .remove(BATTERY_PROMPT_VERSION)
+                .apply();
         }
     }
 }

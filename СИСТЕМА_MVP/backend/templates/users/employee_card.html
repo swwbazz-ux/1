@@ -88,6 +88,7 @@
                         <h2>{% if page_mode == 'create' %}Основные сведения{% else %}{{ employee.full_name }}{% endif %}</h2>
                     </div>
                     <div class="employee-card-heading-actions">
+                        {% if employee_presence %}{% include "users/includes/application_presence.html" with presence=employee_presence compact=True show_time=True show_apps=True %}{% endif %}
                         {% if employee %}<span class="employee-card-status status-{{ employee.status }}">{{ employee.get_status_display }}</span>{% endif %}
                         {% if employee.is_protected %}<span class="employee-card-status is-protected" title="Карточку может изменить только её владелец. Загрузка списка сотрудников её не тронет.">Защищена</span>{% endif %}
                         <button type="button" class="employee-card-icon-button employee-copy-icon" data-copy-card aria-label="Скопировать всю карточку" title="Скопировать всю карточку"></button>

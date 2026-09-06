@@ -24,8 +24,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "24",
-    versionName: "0.1.18",
+    versionCode: "27",
+    versionName: "0.1.19",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -35,8 +35,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "12",
-    versionName: "0.1.10",
+    versionCode: "15",
+    versionName: "0.1.11",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -46,8 +46,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver.qa",
     appName: "Водитель QA",
-    versionCode: "1",
-    versionName: "1.0.0-qa",
+    versionCode: "2",
+    versionName: "1.0.1-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -57,8 +57,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "14",
-    versionName: "0.1.10",
+    versionCode: "17",
+    versionName: "0.1.11",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -68,8 +68,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "13",
-    versionName: "0.1.10-rc",
+    versionCode: "16",
+    versionName: "0.1.11-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -79,8 +79,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator.qa",
     appName: "Экскаваторщик QA",
-    versionCode: "5",
-    versionName: "1.0.4-qa",
+    versionCode: "6",
+    versionName: "1.0.5-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -90,8 +90,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "26",
-    versionName: "0.1.18",
+    versionCode: "29",
+    versionName: "0.1.19",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -101,8 +101,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "25",
-    versionName: "0.1.18-rc",
+    versionCode: "28",
+    versionName: "0.1.19-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -295,6 +295,30 @@ test("Android backup cannot export persisted WebView sessions", () => {
   );
   assert.match(manifest, /android:allowBackup="false"/);
   assert.doesNotMatch(manifest, /android:allowBackup="true"/);
+});
+
+test("native heartbeat survives task removal and reports the exact APK version", () => {
+  const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
+  const activity = readFileSync(resolve(javaRoot, "MainActivity.java"), "utf8");
+  const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  const manifest = readFileSync(
+    resolve(root, "android", "app", "src", "main", "AndroidManifest.xml"),
+    "utf8"
+  );
+
+  assert.match(service, /return START_STICKY;/);
+  assert.doesNotMatch(service, /return START_NOT_STICKY;/);
+  assert.match(service, /onTaskRemoved\(Intent rootIntent\)[\s\S]*?scheduleHeartbeat\(0L\)/);
+  assert.doesNotMatch(service, /onTaskRemoved\(Intent rootIntent\)[\s\S]*?stopSelf\(\)/);
+  assert.match(service, /MAX_BACKOFF_MS = 60_000L/);
+  assert.match(service, /CopperResourcesNative\/" \+ BuildConfig\.APP_PROFILE_ID[\s\S]*?BuildConfig\.VERSION_NAME/);
+  assert.match(manifest, /android:stopWithTask="false"/);
+  assert.doesNotMatch(manifest, /android:stopWithTask="true"/);
+  assert.match(activity, /onStart\(\)[\s\S]*?ConnectivityForegroundService\.start\(this\)/);
+  assert.doesNotMatch(activity, /onDestroy\(\)[\s\S]*?ConnectivityForegroundService\.stop\(this\)/);
+  assert.match(activity, /BATTERY_PROMPT_COOLDOWN_MS/);
+  assert.match(activity, /BuildConfig\.VERSION_NAME\.equals\(promptedVersion\)/);
+  assert.match(activity, /ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS/);
 });
 
 test("native implementation reads role data only from BuildConfig", () => {

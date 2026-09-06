@@ -46,20 +46,7 @@
                             </span>
                             <div>
                                 <strong>{{ row.employee.full_name }}</strong>
-                                <span>
-                                    {% if row.is_online %}<b class="is-online">Онлайн</b>
-                                    {% elif row.is_background %}<b class="is-background">Связь в фоне</b>
-                                    {% elif row.is_recent %}<b class="is-recent">Недавно</b>
-                                    {% else %}<b>Нет активной связи</b>{% endif %}
-                                    {% if row.last_seen_at %} · {{ row.last_seen_at|date:"H:i:s" }}{% endif %}
-                                </span>
-                                {% if row.client_badges %}
-                                    <small class="admin-live-client-badges" aria-label="Вариант приложения">
-                                        {% for badge in row.client_badges %}
-                                            <em class="admin-live-client-badge is-{{ badge.kind }}">{{ badge.label }}{% if badge.version %} · {{ badge.version }}{% endif %}</em>
-                                        {% endfor %}
-                                    </small>
-                                {% endif %}
+                                {% include "users/includes/application_presence.html" with presence=row.presence show_time=True %}
                             </div>
                         </div>
 

@@ -40,7 +40,7 @@ import org.json.JSONObject;
 public class ConnectivityForegroundService extends Service {
     public static final String ACTION_TEST_ALERT = "ru.copperresources.mobile.action.TEST_ALERT";
     private static final String PREFS_NAME = "native_connectivity";
-    private static final long MAX_BACKOFF_MS = 120_000L;
+    private static final long MAX_BACKOFF_MS = 60_000L;
     private static final int MAX_CAPTURED_RESPONSE_BYTES = 64 * 1024;
 
     private final Object scheduleLock = new Object();
@@ -83,7 +83,9 @@ public class ConnectivityForegroundService extends Service {
         }
         startAsForeground(currentStatusText());
         scheduleHeartbeat(0L);
-        return START_NOT_STICKY;
+        // Если Android освободил процесс под давлением памяти, он должен
+        // восстановить рабочую связь без повторного открытия приложения.
+        return START_STICKY;
     }
 
     @Nullable
@@ -112,9 +114,10 @@ public class ConnectivityForegroundService extends Service {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        Log.i("ConnectivityForegroundService", "Task removed; stopping service");
-        stopForeground(STOP_FOREGROUND_REMOVE);
-        stopSelf();
+        // Смахивание карточки из списка последних приложений не равно выходу
+        // из рабочей смены. Оставляем foreground-service и его уведомление.
+        Log.i("ConnectivityForegroundService", "Task removed; keeping heartbeat service active");
+        scheduleHeartbeat(0L);
         super.onTaskRemoved(rootIntent);
     }
 
@@ -228,7 +231,11 @@ public class ConnectivityForegroundService extends Service {
             connection.setRequestProperty("Accept", "application/json");
             connection.setRequestProperty("Cache-Control", "no-store");
             connection.setRequestProperty("Connection", "keep-alive");
-            connection.setRequestProperty("User-Agent", "CopperResourcesNative/" + BuildConfig.APP_PROFILE_ID);
+            connection.setRequestProperty(
+                "User-Agent",
+                "CopperResourcesNative/" + BuildConfig.APP_PROFILE_ID
+                    + "/" + BuildConfig.VERSION_NAME
+            );
 
             String cookie = readWebViewCookie();
             if (cookie != null && !cookie.isBlank()) {

@@ -730,7 +730,10 @@
                             {% for shift in open_shifts %}
                                 <tr>
                                     <td>{{ shift.opened_at|date:"d.m.Y H:i" }}</td>
-                                    <td>{{ shift.employee }}</td>
+                                    <td>
+                                        <strong>{{ shift.employee }}</strong>
+                                        {% include "users/includes/application_presence.html" with presence=shift.application_presence compact=True show_time=True show_apps=True %}
+                                    </td>
                                     <td>{{ shift.role_name }}</td>
                                     <td>{{ shift.equipment|default:"-" }}</td>
                                     <td>

@@ -73,6 +73,7 @@ from shifts.services import (
 from users.access_auth import find_employee_access_by_credentials
 from users.active_role import activate_role_session, active_access_for_employee_role
 from users.models import Employee, EmployeeAccess
+from users.live_monitor import attach_application_presence
 from users.active_role import role_session_state
 from users.role_apps import role_app_manifest_response, role_app_service_worker_response
 from users.session_device import get_session_device_kind, set_session_device_kind
@@ -556,7 +557,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v55";
+const CACHE_NAME = "dispatcher-desktop-shell-v57";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -5086,6 +5087,13 @@ def dispatcher_control_view(
     if excavator_id:
         open_shifts = open_shifts.filter(equipment_id=excavator_id)
     open_shifts = list(open_shifts[:120])
+    open_shift_employees = attach_application_presence(
+        shift.employee for shift in open_shifts
+    )
+    presence_by_employee_id = {
+        employee.pk: employee.application_presence
+        for employee in open_shift_employees
+    }
 
     employee_ids = [shift.employee_id for shift in open_shifts]
     role_by_employee_id = {
@@ -5099,6 +5107,7 @@ def dispatcher_control_view(
     }
     for shift in open_shifts:
         shift.role_name = role_by_employee_id.get(shift.employee_id, '-')
+        shift.application_presence = presence_by_employee_id.get(shift.employee_id)
 
     trucks = (
         Equipment.objects

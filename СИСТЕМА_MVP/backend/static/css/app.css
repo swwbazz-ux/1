@@ -33546,3 +33546,107 @@ body.is-observer-mode .app-contract-banner {
         letter-spacing: 0;
     }
 }
+/* Единый живой статус приложения на оперативных карточках сотрудников. */
+.application-presence {
+    --application-presence-color: #64748b;
+    display: inline-grid;
+    min-width: 0;
+    gap: 4px;
+    color: var(--application-presence-color);
+    font: 700 11px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.application-presence__line {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 5px;
+    color: inherit;
+}
+
+.application-presence__line b {
+    color: inherit;
+    font: inherit;
+}
+
+.application-presence__line time {
+    color: #82909f;
+    font: 500 10px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.application-presence__dot {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 8px;
+    border-radius: 50%;
+    background: #64748b;
+    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.application-presence[data-application-presence="online"] { --application-presence-color: #159a68; }
+.application-presence[data-application-presence="background"] { --application-presence-color: #287de8; }
+.application-presence[data-application-presence="recent"] { --application-presence-color: #c3830d; }
+.application-presence[data-application-presence="offline"] { --application-presence-color: #6f7b87; }
+
+.application-presence__clients {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.application-presence__client {
+    display: inline-flex;
+    max-width: 100%;
+    padding: 2px 6px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, currentColor 50%, transparent);
+    border-radius: 999px;
+    color: #287de8;
+    font: 700 9px/1.15 system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-style: normal;
+    letter-spacing: .02em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.application-presence.is-compact {
+    gap: 2px;
+}
+
+.application-presence.is-compact .application-presence__clients {
+    display: inline-flex;
+}
+
+.conflict-person-meta {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+}
+
+.admin-dashboard-shell .dashboard-row-presence {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+}
+
+.admin-dashboard-shell .dashboard-row-presence > .application-presence {
+    overflow: visible;
+    white-space: normal;
+}
+
+.admin-dashboard-shell .dashboard-row-presence > .dashboard-row-employment {
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.dispatcher-table-wrap td > .application-presence {
+    margin-top: 4px;
+}
+
+@media (max-width: 720px) {
+    .application-presence__clients {
+        max-width: 100%;
+    }
+}

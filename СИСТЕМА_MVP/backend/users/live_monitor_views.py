@@ -14,9 +14,10 @@ from shifts.services import equipment_is_truck
 from .active_role import latest_active_role_access
 from .live_monitor import (
     PRESENCE_FOREGROUND,
-    ONLINE_WINDOW,
     OBSERVER_MODE_CONTROL,
+    application_presence_by_access_ids,
     build_observer_url,
+    empty_application_presence,
     force_close_employee_shift,
     force_end_access_sessions,
     recent_application_sessions,
@@ -172,48 +173,26 @@ def build_live_monitor_context(request, access):
                 },
             )
             row['sessions'].append(session)
-            if row['last_seen_at'] is None or session.last_seen_at > row['last_seen_at']:
-                row['last_seen_at'] = session.last_seen_at
-                row['current_path'] = session.path
-            row['is_recent'] = True
-            foreground_seen_at = session.foreground_seen_at
-            if foreground_seen_at is None and session.background_seen_at is None:
-                # Сессии, созданные до миграции, считаем экранными до первого
-                # нового heartbeat — иначе после выкладки все люди мгновенно
-                # станут серыми на полторы минуты.
-                foreground_seen_at = session.last_seen_at
-            session_is_online = bool(
-                foreground_seen_at
-                and foreground_seen_at >= now - ONLINE_WINDOW
-            )
-            session_is_background = bool(
-                session.background_seen_at
-                and session.background_seen_at >= now - ONLINE_WINDOW
-            )
-            row['is_online'] = row['is_online'] or session_is_online
-            row['is_background'] = row['is_background'] or session_is_background
-            if session.client_kind:
-                row['_client_badges'].setdefault(
-                    session.client_kind,
-                    {
-                        'kind': session.client_kind,
-                        'label': session.get_client_kind_display(),
-                        'version': session.client_version,
-                    },
-                )
-            if session_is_online:
-                online_access_ids.add(session.access_id)
-            elif session_is_background:
-                background_access_ids.add(session.access_id)
+        presence_by_access = application_presence_by_access_ids(
+            (row['access'].pk for row in row_map.values() if row['access']),
+            now=now,
+        )
 
         rows = []
         for row in row_map.values():
-            if row['is_online']:
-                row['is_background'] = False
-                if row['access']:
-                    background_access_ids.discard(row['access'].pk)
-            row['client_badges'] = list(row.pop('_client_badges').values())
             target_access = row['access']
+            presence = (
+                presence_by_access.get(target_access.pk, empty_application_presence())
+                if target_access else empty_application_presence()
+            )
+            row.update(presence)
+            row['presence'] = presence
+            row.pop('_client_badges', None)
+            if target_access and row['is_online']:
+                online_access_ids.add(target_access.pk)
+                background_access_ids.discard(target_access.pk)
+            elif target_access and row['is_background']:
+                background_access_ids.add(target_access.pk)
             if target_access:
                 row['observe_url'] = build_observer_url(
                     request=request,

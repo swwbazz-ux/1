@@ -175,7 +175,10 @@
                         {% for employee in recent_employees|slice:":4" %}
                             <a class="dashboard-row status-{{ employee.status }}" href="{% url 'system_admin_employee_detail' employee.id %}">
                                 <span class="dashboard-row-main">{{ employee.full_name }}</span>
-                                <span>{{ employee.get_status_display }}</span>
+                                <span class="dashboard-row-presence">
+                                    <small class="dashboard-row-employment">{{ employee.get_status_display }}</small>
+                                    {% include "users/includes/application_presence.html" with presence=employee.application_presence compact=True show_apps=True %}
+                                </span>
                                 <strong>{{ employee.phone|default:"-" }}</strong>
                             </a>
                         {% empty %}

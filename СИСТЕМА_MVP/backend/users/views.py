@@ -131,6 +131,7 @@ from .models import (
     WatchComposition,
     WorkSchedule,
 )
+from .live_monitor import attach_application_presence, application_presence_by_employee_ids
 from .oup_undo import (
     get_oup_action_undo_state,
     undo_oup_action,
@@ -1433,6 +1434,9 @@ def system_admin_dashboard_view(request):
         ('Шаблоны отчетов', ReportTemplate.objects.count(), '/reports/templates/'),
     ]
 
+    recent_employees = attach_application_presence(
+        Employee.objects.order_by('-created_at')[:5]
+    )
     return render(
         request,
         'users/system_admin_dashboard.html',
@@ -1443,7 +1447,7 @@ def system_admin_dashboard_view(request):
             'not_activated_total': access_status_counts.get(EmployeeAccess.Status.NOT_ACTIVATED, 0),
             'blocked_total': access_status_counts.get(EmployeeAccess.Status.BLOCKED, 0),
             'deactivated_total': access_status_counts.get(EmployeeAccess.Status.DEACTIVATED, 0),
-            'recent_employees': Employee.objects.order_by('-created_at')[:5],
+            'recent_employees': recent_employees,
             'recent_accesses': EmployeeAccess.objects.select_related('employee', 'role').order_by('-last_login_at', '-created_at')[:5],
             'recent_logs': AdminActionLog.objects.select_related('actor')[:8],
             'open_conflicts': AdminConflict.objects.select_related('employee', 'role').filter(status=AdminConflict.Status.OPEN)[:8],
@@ -2242,7 +2246,17 @@ def system_admin_conflicts_view(request):
         for item in AdminConflict.objects.values('status').annotate(total=Count('id'))
     }
     conflicts = list(conflicts[:200])
+    conflict_employees = attach_application_presence(
+        conflict.employee for conflict in conflicts if conflict.employee_id
+    )
+    conflict_presence_by_employee_id = {
+        employee.pk: employee.application_presence
+        for employee in conflict_employees
+    }
     for conflict in conflicts:
+        conflict.application_presence = conflict_presence_by_employee_id.get(
+            conflict.employee_id
+        )
         if conflict.status == AdminConflict.Status.OPEN:
             conflict.status_class = 'danger'
         elif conflict.status == AdminConflict.Status.IN_PROGRESS:
@@ -2532,6 +2546,7 @@ def system_admin_employees_view(request):
         employees = employees.filter(personnel_position_id=int(personnel_position))
     if query:
         employees = employees.filter(full_name__icontains=query)
+    employees = attach_application_presence(employees)
 
     return render(
         request,
@@ -2766,6 +2781,7 @@ def system_admin_employee_detail_view(request, employee_id):
             'block_form': AdminAccessBlockForm(),
             'employee_accesses': employee_accesses,
             'current_role_access': current_role_access,
+            'employee_presence': application_presence_by_employee_ids([employee.pk]).get(employee.pk),
             'active_equipment_assignment': active_equipment_assignment,
             'work_assignment_role': work_assignment_role,
             'work_assignment_supports_equipment': bool(

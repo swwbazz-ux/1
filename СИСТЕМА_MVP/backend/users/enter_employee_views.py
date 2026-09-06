@@ -16,13 +16,11 @@ from __future__ import annotations
 
 from django.db.models import Q
 from django.shortcuts import redirect, render
-from django.utils import timezone
-
 from .live_monitor import (
     OBSERVER_MODE_CONTROL,
-    ONLINE_WINDOW,
+    application_presence_by_access_ids,
     build_observer_url,
-    recent_application_sessions,
+    empty_application_presence,
 )
 from .models import EmployeeAccess
 from .role_apps import ROLE_APPS
@@ -65,13 +63,11 @@ def system_admin_enter_employee_view(request):
     truncated = len(accesses) > RESULT_LIMIT
     accesses = accesses[:RESULT_LIMIT]
 
-    # «Сейчас в приложении» — подсказка, а не условие: войти можно к любому.
-    now = timezone.now()
-    online_access_ids = {
-        session.access_id
-        for session in recent_application_sessions(now=now)
-        if session.last_seen_at >= now - ONLINE_WINDOW
-    }
+    # Статус — подсказка, а не условие: войти можно к любому. Используем тот
+    # же контракт, что на «Смене онлайн» и в карточках сотрудников.
+    presence_by_access = application_presence_by_access_ids(
+        target.pk for target in accesses
+    )
 
     rows = []
     for target in accesses:
@@ -79,7 +75,7 @@ def system_admin_enter_employee_view(request):
             'access': target,
             'employee': target.employee,
             'role': target.role,
-            'is_online': target.pk in online_access_ids,
+            'presence': presence_by_access.get(target.pk, empty_application_presence()),
             'is_self': target.pk == access.pk,
             'activated': target.status == EmployeeAccess.Status.ACTIVATED,
             'observe_url': build_observer_url(

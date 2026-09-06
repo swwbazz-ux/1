@@ -24,6 +24,7 @@ from .models import (
     TemporaryWorkTransfer,
     WorkSchedule,
 )
+from .live_monitor import attach_application_presence, application_presence_by_employee_ids
 from .oup_forms import (
     OupAccessRoleForm,
     OupDismissEmployeeForm,
@@ -199,6 +200,7 @@ def oup_employees_view(request, scope='active'):
             if rotation.isdigit()
             else employees.filter(rotation=rotation)
         )
+    employees = attach_application_presence(employees)
 
     active_queryset = _employees_queryset('active')
     today = timezone.localdate()
@@ -470,6 +472,7 @@ def oup_employee_detail_view(request, employee_id):
     context.update({
         'form': form,
         'employee': employee,
+        'employee_presence': application_presence_by_employee_ids([employee.pk]).get(employee.pk),
         'is_dismissed': is_dismissed,
         'page_mode': 'detail',
         'title': employee.full_name,
@@ -740,7 +743,12 @@ def oup_employee_dismiss_view(request, employee_id):
         form = OupDismissEmployeeForm(employee=employee)
 
     context = _oup_base_context(access, active_nav='employees')
-    context.update({'employee': employee, 'form': form, 'blockers': blockers})
+    context.update({
+        'employee': employee,
+        'employee_presence': application_presence_by_employee_ids([employee.pk]).get(employee.pk),
+        'form': form,
+        'blockers': blockers,
+    })
     return render(request, 'users/oup_employee_dismiss.html', context)
 
 

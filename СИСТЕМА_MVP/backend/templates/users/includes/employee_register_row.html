@@ -44,6 +44,7 @@
     <span class="oup-state-cell">
         <span class="oup-status-chip status-{{ employee.status }}">{{ employee.get_status_display }}</span>
         <small>{{ employee.get_work_category_display }}</small>
+        {% include "users/includes/application_presence.html" with presence=employee.application_presence compact=True show_apps=True %}
     </span>
     <span class="oup-row-arrow" aria-hidden="true">›</span>
 {% if admin_employee_row %}

@@ -11,6 +11,10 @@ from .active_role import (
     ACTIVE_ROLE_SESSION_KEY,
 )
 from .models import ActiveApplicationSession, Employee, EmployeeAccess, Role
+from .live_monitor import (
+    application_presence_by_access_ids,
+    application_presence_by_employee_ids,
+)
 
 
 @override_settings(ALLOWED_HOSTS=['testserver', '.localhost'])
@@ -194,3 +198,110 @@ class LiveMonitorPresenceTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertFalse(ActiveApplicationSession.objects.exists())
+
+    def test_background_heartbeat_has_recovery_allowance_beyond_foreground_window(self):
+        now = timezone.now()
+        ActiveApplicationSession.objects.create(
+            session_key='background-recovery-window',
+            access=self.driver_access,
+            role_code='driver',
+            app_code='driver',
+            path='/driver/',
+            last_seen_at=now - timedelta(seconds=120),
+            background_seen_at=now - timedelta(seconds=120),
+            client_kind=ActiveApplicationSession.ClientKind.ANDROID_APK,
+            client_version='0.1.11',
+        )
+        presence = application_presence_by_access_ids(
+            [self.driver_access.pk],
+            now=now,
+        )[self.driver_access.pk]
+        self.assertFalse(presence['is_online'])
+        self.assertTrue(presence['is_background'])
+        self.assertEqual(presence['status_label'], 'Связь в фоне')
+
+    def test_last_known_client_kind_and_version_remain_visible_after_disconnect(self):
+        now = timezone.now()
+        ActiveApplicationSession.objects.create(
+            session_key='known-installed-client',
+            access=self.excavator_access,
+            role_code='excavator_operator',
+            app_code='excavator_operator',
+            path='/excavator/work/',
+            last_seen_at=now - timedelta(days=2),
+            foreground_seen_at=now - timedelta(days=2),
+            client_kind=ActiveApplicationSession.ClientKind.ANDROID_APK,
+            client_version='0.1.19',
+        )
+        presence = application_presence_by_employee_ids(
+            [self.excavator_access.employee_id],
+            now=now,
+        )[self.excavator_access.employee_id]
+        self.assertEqual(presence['status_code'], 'offline')
+        self.assertEqual(presence['status_label'], 'Нет активной связи')
+        self.assertEqual(
+            presence['client_badges'],
+            [{
+                'kind': 'android_apk',
+                'label': 'APK Android',
+                'version': '0.1.19',
+                'app_code': 'excavator_operator',
+                'app_label': 'Экскаватор',
+                'last_seen_at': now - timedelta(days=2),
+            }],
+        )
+
+    def test_employee_without_any_session_has_explicit_offline_presence(self):
+        presence = application_presence_by_employee_ids(
+            [self.driver_access.employee_id],
+        )[self.driver_access.employee_id]
+        self.assertEqual(presence['status_code'], 'offline')
+        self.assertEqual(presence['status_label'], 'Нет активной связи')
+        self.assertEqual(presence['client_badges'], [])
+
+    def test_employee_register_and_admin_entry_use_shared_presence_component(self):
+        ActiveApplicationSession.objects.create(
+            session_key='shared-component-client',
+            access=self.driver_access,
+            role_code='driver',
+            app_code='driver',
+            path='/driver/',
+            last_seen_at=timezone.now(),
+            background_seen_at=timezone.now(),
+            client_kind=ActiveApplicationSession.ClientKind.ANDROID_APK,
+            client_version='0.1.11',
+        )
+        employees = self.admin.get(reverse('system_admin_employees'))
+        enter = self.admin.get(reverse('system_admin_enter_employee'))
+        employee_card = self.admin.get(
+            reverse('system_admin_employee_detail', args=[self.driver_access.employee_id])
+        )
+        for response in (employees, enter, employee_card):
+            with self.subTest(path=response.request['PATH_INFO']):
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'data-application-presence="background"')
+                self.assertContains(response, 'Связь в фоне')
+                self.assertContains(response, 'APK Android · 0.1.11')
+
+    def test_oup_employee_register_uses_the_same_presence_component(self):
+        oup_access = self._make_access(
+            'Тестовый специалист ОУП',
+            '+79990000304',
+            'oup',
+        )
+        oup = Client()
+        self._authorize(oup, oup_access)
+        ActiveApplicationSession.objects.create(
+            session_key='oup-visible-driver-client',
+            access=self.driver_access,
+            role_code='driver',
+            app_code='driver',
+            path='/driver/',
+            last_seen_at=timezone.now(),
+            foreground_seen_at=timezone.now(),
+            client_kind=ActiveApplicationSession.ClientKind.ANDROID_PWA,
+        )
+        response = oup.get(reverse('oup_employees'), HTTP_HOST='oup.localhost')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-application-presence="online"')
+        self.assertContains(response, 'PWA Android')
