@@ -5945,15 +5945,43 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!draggedTile || draggedTile.dataset.dispatcherDrag !== "complex") return;
             var inactiveComplexCard = draggedTile;
             var inactiveExcavatorId = inactiveComplexCard.dataset.equipmentId;
-            dispatcherPost(dispatcherMoveExcavatorUrl, {
-                excavator_id: inactiveExcavatorId,
-                zone: "inactive"
-            }).then(function (response) {
-                return refreshDesktopBoardAfterStructuralAction(response, function () {
-                    moveDesktopComplexToExcavatorGarage(inactiveComplexCard);
-                });
-            }).catch(handleDesktopOptimisticBoardError);
+            var inactiveComplexName = (inactiveComplexCard.dataset.equipmentName || "комплекс").trim();
+            var inactiveTruckCount = inactiveComplexCard.querySelectorAll("[data-complex-truck='true']").length;
+            requestDispatcherDesktopDangerConfirmation({
+                title: "Расформировать комплекс?",
+                message: "Экскаватор " + inactiveComplexName + " уйдет в гараж экскаваторов, а все самосвалы " +
+                    "комплекса (" + inactiveTruckCount + " шт.) — в гараж самосвалов через 5 минут.",
+                acceptLabel: "Расформировать",
+                action: function () {
+                    dispatcherPost(dispatcherMoveExcavatorUrl, {
+                        excavator_id: inactiveExcavatorId,
+                        zone: "inactive"
+                    }).then(function (response) {
+                        return refreshDesktopBoardAfterStructuralAction(response, function () {
+                            moveDesktopComplexToExcavatorGarage(inactiveComplexCard);
+                        });
+                    }).catch(handleDesktopOptimisticBoardError);
+                }
+            });
         });
+    }
+    function requestDispatcherDesktopDangerConfirmation(options) {
+        options = options || {};
+        if (typeof options.action !== "function") return;
+        if (typeof window.openAppConfirmDialog !== "function") {
+            showDispatcherDnDError(new Error("Подтверждение действия недоступно. Обновите страницу."));
+            return;
+        }
+        window.openAppConfirmDialog(
+            options.message || "Подтвердить опасное действие?",
+            options.action,
+            0,
+            options.acceptLabel || "Подтвердить",
+            {
+                confirmTitle: options.title || "Опасное действие",
+                confirmDescription: options.message || "Подтвердите действие."
+            }
+        );
     }
     function bindDispatcherTruckGarageDrop(garage) {
         if (!garage || garage.dataset.dispatcherDropBound === "true") return;
@@ -5972,15 +6000,25 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!draggedTile) return;
             if (draggedTile.dataset.dispatcherDrag === "complex") {
                 var complexCard = draggedTile;
-                dispatcherPost(dispatcherAssignTruckUrl, {
-                    action: "release_complex",
-                    excavator_id: complexCard.dataset.equipmentId
-                }).then(function (response) {
-                    return applyDesktopTruckAction(response, {
-                        type: "release_complex",
-                        complexCard: complexCard
-                    });
-                }).catch(showDispatcherDnDError);
+                var complexName = (complexCard.dataset.equipmentName || "комплекса").trim();
+                var truckCount = complexCard.querySelectorAll("[data-complex-truck='true']").length;
+                requestDispatcherDesktopDangerConfirmation({
+                    title: "Снять все самосвалы?",
+                    message: "Снять все самосвалы комплекса " + complexName + " (" + truckCount +
+                        " шт.)? Экскаватор останется на месте, самосвалы уйдут в гараж через 5 минут.",
+                    acceptLabel: "Снять самосвалы",
+                    action: function () {
+                        dispatcherPost(dispatcherAssignTruckUrl, {
+                            action: "release_complex",
+                            excavator_id: complexCard.dataset.equipmentId
+                        }).then(function (response) {
+                            return applyDesktopTruckAction(response, {
+                                type: "release_complex",
+                                complexCard: complexCard
+                            });
+                        }).catch(showDispatcherDnDError);
+                    }
+                });
                 return;
             }
             if (draggedTile.dataset.complexTruck !== "true") return;
@@ -6015,6 +6053,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v58" defer></script>
 {% endif %}
 {% endblock %}

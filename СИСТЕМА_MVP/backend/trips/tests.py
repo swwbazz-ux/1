@@ -3190,6 +3190,19 @@ class DispatcherAssignmentRealtimeTests(TestCase):
         self.assertEqual(event.payload['excavator_ids'], [self.excavator.id])
         self.assertEqual(event.payload['truck_ids'], [self.truck.id])
 
+    def test_dispatcher_control_confirms_both_dangerous_complex_drops(self):
+        response = self.client.get(reverse('dispatcher_control'))
+        desktop_runtime = (
+            Path(__file__).resolve().parents[1] / 'static' / 'js' / 'dispatcher-control-v1.js'
+        ).read_text(encoding='utf-8')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'static/js/dispatcher-control-v1.js')
+        self.assertIn('title: "Снять все самосвалы?"', desktop_runtime)
+        self.assertIn('acceptLabel: "Снять самосвалы"', desktop_runtime)
+        self.assertIn('title: "Расформировать комплекс?"', desktop_runtime)
+        self.assertIn('acceptLabel: "Расформировать"', desktop_runtime)
+
     def test_dispatcher_control_renders_duplicate_active_truck_assignment_once(self):
         HaulAssignment.objects.create(
             truck=self.truck,

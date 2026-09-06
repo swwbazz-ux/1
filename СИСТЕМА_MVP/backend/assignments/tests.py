@@ -879,6 +879,39 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(accepted.status, AssignmentStatus.CANCELLED)
         self.assertEqual(pending.status, AssignmentStatus.CANCELLED)
 
+    def test_new_placement_cancels_pending_release_and_truck_stays_assigned(self):
+        HaulAssignment.objects.filter(truck=self.free_truck).delete()
+        start = timezone.now()
+        accepted = HaulAssignment.objects.create(
+            truck=self.free_truck,
+            excavator=self.excavator,
+            assigned_by=self.master,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=start,
+        )
+        pending_release, _ = schedule_haul_release(
+            truck=self.free_truck,
+            assigned_by=self.master,
+            now=start,
+        )
+
+        current, created = schedule_haul_assignment(
+            truck=self.free_truck,
+            excavator=self.excavator,
+            assigned_by=self.master,
+            now=start + timedelta(minutes=1),
+        )
+        reconcile_due_haul_assignments(now=start + timedelta(minutes=6))
+
+        accepted.refresh_from_db()
+        pending_release.refresh_from_db()
+        self.assertFalse(created)
+        self.assertEqual(current.id, accepted.id)
+        self.assertEqual(accepted.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNone(accepted.ended_at)
+        self.assertEqual(pending_release.status, AssignmentStatus.CANCELLED)
+        self.assertIsNotNone(pending_release.ended_at)
+
     def test_mining_master_can_release_excavator_complex_to_garage(self):
         other_assignment = HaulAssignment.objects.create(
             truck=self.free_truck,
