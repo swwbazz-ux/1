@@ -26,7 +26,8 @@ public final class DriverDumpPointAnnouncer {
             long tripId,
             long dumpPointId,
             String dumpPointName,
-            boolean showNotification) {
+            boolean showNotification,
+            boolean playCue) {
         if (eventVersion <= 0L || tripId <= 0L) {
             return Result.rejected(REASON_INVALID_EVENT);
         }
@@ -65,7 +66,7 @@ public final class DriverDumpPointAnnouncer {
             dumpPointId,
             displayName,
             voiceDelayMs,
-            !notificationShown,
+            playCue && !notificationShown,
             eventVersion,
             tripId
         );
@@ -75,26 +76,28 @@ public final class DriverDumpPointAnnouncer {
             .putLong("last_driver_dump_point_alert_trip_id", tripId)
             .putLong("last_driver_dump_point_alert_dump_point_id", dumpPointId)
             .commit();
-        return Result.announced(notificationShown);
+        return Result.announced(notificationShown, playCue && !notificationShown);
     }
 
     public static final class Result {
         public final boolean announced;
         public final boolean notificationShown;
+        public final boolean cuePlayed;
         public final String reason;
 
-        private Result(boolean announced, boolean notificationShown, String reason) {
+        private Result(boolean announced, boolean notificationShown, boolean cuePlayed, String reason) {
             this.announced = announced;
             this.notificationShown = notificationShown;
+            this.cuePlayed = cuePlayed;
             this.reason = reason;
         }
 
-        static Result announced(boolean notificationShown) {
-            return new Result(true, notificationShown, "");
+        static Result announced(boolean notificationShown, boolean cuePlayed) {
+            return new Result(true, notificationShown, cuePlayed, "");
         }
 
         static Result rejected(String reason) {
-            return new Result(false, false, reason);
+            return new Result(false, false, false, reason);
         }
     }
 }

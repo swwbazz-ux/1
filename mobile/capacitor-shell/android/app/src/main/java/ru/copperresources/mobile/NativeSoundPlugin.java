@@ -59,9 +59,9 @@ public class NativeSoundPlugin extends Plugin {
             call.resolve(new JSObject().put("announced", false));
             return;
         }
-        long eventVersion = call.getLong("eventVersion", 0L);
-        long tripId = call.getLong("tripId", 0L);
-        long dumpPointId = call.getLong("dumpPointId", 0L);
+        long eventVersion = readNumericLong(call, "eventVersion");
+        long tripId = readNumericLong(call, "tripId");
+        long dumpPointId = readNumericLong(call, "dumpPointId");
         String dumpPointName = call.getString("dumpPointName", "");
         if (getActivity() == null) {
             call.reject("Activity is unavailable");
@@ -74,18 +74,43 @@ public class NativeSoundPlugin extends Plugin {
                 tripId,
                 dumpPointId,
                 dumpPointName,
-                false
+                false,
+                true
             );
             if (!result.announced) {
                 call.resolve(new JSObject()
                     .put("announced", false)
-                    .put("reason", result.reason));
+                    .put("reason", result.reason)
+                    .put("eventVersion", eventVersion)
+                    .put("tripId", tripId));
                 return;
             }
             call.resolve(new JSObject()
                 .put("announced", true)
-                .put("cuePlayed", true));
+                .put("cuePlayed", result.cuePlayed));
         });
+    }
+
+    /**
+     * Capacitor deserializes ordinary JavaScript integer literals as Integer,
+     * while PluginCall.getLong() accepts only an actual Long instance. Read
+     * every JSON Number through the common Number contract so event and trip
+     * identifiers are not silently replaced with zero.
+     */
+    private long readNumericLong(PluginCall call, String name) {
+        return numericLong(call.getData().opt(name));
+    }
+
+    static long numericLong(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        if (value instanceof String) {
+            try {
+                return Long.parseLong(((String) value).trim());
+            } catch (NumberFormatException ignored) {}
+        }
+        return 0L;
     }
 
     @PluginMethod

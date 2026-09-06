@@ -377,7 +377,8 @@ public class ConnectivityForegroundService extends Service {
                 selectedTripId,
                 selectedDumpPointId,
                 displayName,
-                showNotification
+                showNotification,
+                true
             );
             return result.announced;
         } catch (Exception error) {
