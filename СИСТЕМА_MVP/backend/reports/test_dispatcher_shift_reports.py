@@ -155,6 +155,48 @@ class DispatcherShiftReportTests(TestCase):
         self.assertNotIn('Автоматически', '; '.join(downtime_values))
         self.assertNotIn('Тестовый осмотр', '; '.join(downtime_values))
 
+    def test_truck_downtimes_are_grouped_by_reason_and_zero_totals_hidden(self):
+        waiting, _ = DowntimeReason.objects.get_or_create(
+            name='Ожидание разгрузки',
+            defaults={'equipment_type': self.belaz.equipment_type},
+        )
+        inspection, _ = DowntimeReason.objects.get_or_create(
+            name='Тестовый осмотр самосвала для отчёта',
+            defaults={'equipment_type': self.belaz.equipment_type},
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.belaz,
+            reason=waiting,
+            started_at=self.shift_at,
+            ended_at=self.shift_at + timedelta(seconds=30),
+            comment='Автоматически по производственному событию',
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.belaz,
+            reason=waiting,
+            started_at=self.shift_at + timedelta(minutes=1),
+            ended_at=self.shift_at + timedelta(minutes=1, seconds=45),
+            comment='Автоматически по производственному событию',
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.belaz,
+            reason=inspection,
+            started_at=self.shift_at + timedelta(minutes=2),
+            ended_at=self.shift_at + timedelta(minutes=2, seconds=20),
+        )
+
+        report = build_dispatcher_shift_report(self.selected_date, 'day')
+        truck_row = next(
+            row for row in report['truck_rows']
+            if row['equipment'].id == self.belaz.id
+        )
+
+        self.assertEqual(truck_row['notes'], 'Ожидание разгрузки—1 мин')
+        self.assertEqual(truck_row['notes'].count('Ожидание разгрузки'), 1)
+        self.assertNotIn('0 мин', truck_row['notes'])
+        self.assertNotIn('Автоматически', truck_row['notes'])
+        self.assertNotIn('Тестовый осмотр', truck_row['notes'])
+
     def test_reports_hub_and_both_forms_are_available(self):
         params = {'date': self.selected_date.isoformat(), 'shift_type': 'day'}
         hub = self.client.get(reverse('dispatcher_reports'), params)
