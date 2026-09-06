@@ -1110,6 +1110,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         # её примут за версию приложения. Лучше не показывать ничего.
         self.assertContains(response, 'class="eo-current-app-version native-app-version"')
         self.assertContains(response, 'data-native-app-version=""')
+        self.assertContains(response, 'data-native-client-version=""', count=1)
         self.assertContains(response, 'aria-label="Текущая версия приложения" hidden')
         self.assertNotContains(response, '<button class="eo-shift-update-button"')
         self.assertNotContains(response, '<div class="eo-mobile-update-modal" data-eo-pwa-update-modal')
@@ -1129,6 +1130,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<span class="eo-current-app-version native-app-version"')
         self.assertContains(response, 'data-native-app-version="0.1.4"')
+        self.assertContains(response, 'data-native-client-version="0.1.4"', count=1)
         self.assertContains(response, 'Версия 0.1.4')
         # Проверяем именно сам элемент версии: строка «excavator-mobile-shell-»
         # встречается на странице и в других местах (регистрация service

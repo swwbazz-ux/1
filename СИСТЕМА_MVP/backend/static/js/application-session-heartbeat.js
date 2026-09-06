@@ -46,7 +46,7 @@
         var body = new URLSearchParams();
         body.set("path", window.location.pathname);
         body.set("client_kind", clientKind());
-        body.set("client_version", document.body?.dataset.nativeAppVersion || "");
+        body.set("client_version", document.body?.dataset.nativeClientVersion || "");
         window.fetch(endpoint, {
             method: "POST",
             credentials: "same-origin",

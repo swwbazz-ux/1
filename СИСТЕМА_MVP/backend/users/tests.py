@@ -420,6 +420,7 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, '<small class="driver-shell-version"')
         self.assertContains(response, 'class="driver-native-app-version native-app-version"', count=1)
         self.assertContains(response, 'data-native-app-version=""', count=1)
+        self.assertContains(response, 'data-native-client-version=""', count=1)
         self.assertNotContains(response, '<div class="driver-mobile-update-modal" data-driver-pwa-update-modal')
         self.assertNotContains(response, '<span class="driver-mobile-update-badge" data-driver-pwa-update-badge')
         self.assertNotContains(response, 'data-driver-tab-open="manifest" data-driver-pwa-update-nav-target')
@@ -443,6 +444,7 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, '<small class="driver-shell-version"')
         self.assertContains(response, 'class="driver-native-app-version native-app-version"', count=1)
         self.assertContains(response, 'data-native-app-version="0.1.3"', count=1)
+        self.assertContains(response, 'data-native-client-version="0.1.3"', count=1)
         self.assertContains(response, '>Версия 0.1.3</span>', count=1)
         # Проверяем именно сам элемент версии: строка «driver-mobile-shell-»
         # есть на странице и в других местах (service worker, метаданные),

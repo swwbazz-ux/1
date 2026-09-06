@@ -276,6 +276,22 @@ test("rejected native phone handoff remains disabled", () => {
   assert.doesNotMatch(activity, /NativeAppLink|resolveNativeAppLink|onNewIntent\(Intent intent\)/);
 });
 
+test("in-app updater mutates only dedicated version badges", () => {
+  const updater = readFileSync(
+    resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile", "AppUpdateManager.java"),
+    "utf8"
+  );
+
+  assert.match(
+    updater,
+    /querySelectorAll\('\.native-app-version\[data-native-app-version\]'\)/
+  );
+  assert.doesNotMatch(
+    updater,
+    /querySelectorAll\('\[data-native-app-version\]'\)/
+  );
+});
+
 test("only the driver profile enables recorded dump-point voice alerts", () => {
   const excavator = profile("excavator");
   const driver = profile("driver");
