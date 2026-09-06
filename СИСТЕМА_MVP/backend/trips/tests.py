@@ -37,7 +37,12 @@ from shifts.models import (
 from shifts.services import assign_shift_plan_snapshot, progress_cycle_visual_context
 from trips.dispatcher_header import open_dispatcher_shift
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
-from trips.views import build_dispatcher_dashboard_context, dispatcher_empty_snapshot_progress, finalize_trip_unloaded
+from trips.views import (
+    build_dispatcher_dashboard_context,
+    dispatcher_empty_snapshot_progress,
+    finalize_trip_unloaded,
+    truck_post_unload_cooldown,
+)
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
 
@@ -3588,6 +3593,26 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(returned_cards['21']['equipment_state_code'], 'assigned')
         self.assertTrue(returned_cards['21']['can_drag'])
         self.assertTrue(returned_cards['21']['can_load'])
+
+    def test_test_one_truck_skips_post_unload_cooldown(self):
+        now = timezone.now()
+        self.truck.garage_number = 'ТЕСТ-1'
+        self.truck.save(update_fields=['garage_number'])
+
+        cooldown = truck_post_unload_cooldown(
+            self.truck,
+            completed_at=now,
+            now=now,
+        )
+        normal_cooldown = truck_post_unload_cooldown(
+            self.other_truck,
+            completed_at=now,
+            now=now,
+        )
+
+        self.assertIsNone(cooldown)
+        self.assertIsNotNone(normal_cooldown)
+        self.assertEqual(normal_cooldown['code'], 'post_unload_cooldown')
 
     def test_waiting_for_unloading_uses_one_tap_and_closes_with_trip(self):
         driver_client = self.client_class()

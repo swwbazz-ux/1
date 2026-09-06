@@ -92,6 +92,7 @@ logger = logging.getLogger(__name__)
 TRUCK_POST_UNLOAD_COOLDOWN = timedelta(
     seconds=getattr(settings, 'TRUCK_POST_UNLOAD_COOLDOWN_SECONDS', 600)
 )
+TRUCK_POST_UNLOAD_ZERO_COOLDOWN_GARAGE_NUMBERS = frozenset({'ТЕСТ-1'})
 
 
 def truck_waiting_loading_downtime(event):
@@ -101,6 +102,9 @@ def truck_waiting_loading_downtime(event):
 
 def truck_post_unload_cooldown(truck, *, completed_at=None, now=None):
     if not truck:
+        return None
+    garage_number = str(getattr(truck, 'garage_number', '') or '').strip().upper()
+    if garage_number in TRUCK_POST_UNLOAD_ZERO_COOLDOWN_GARAGE_NUMBERS:
         return None
     if completed_at is None:
         completed_at = (
