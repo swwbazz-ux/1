@@ -29,7 +29,6 @@ public class NativeSoundPlugin extends Plugin {
     ));
 
     private MediaPlayer activePlayer;
-    private DriverVoicePlayer driverVoicePlayer;
 
     @PluginMethod
     public void play(PluginCall call) {
@@ -64,37 +63,25 @@ public class NativeSoundPlugin extends Plugin {
         long tripId = call.getLong("tripId", 0L);
         long dumpPointId = call.getLong("dumpPointId", 0L);
         String dumpPointName = call.getString("dumpPointName", "");
-        String displayName = DriverVoiceCatalog.displayNameFor(dumpPointId, dumpPointName);
-        if (displayName.isEmpty()) {
-            call.resolve(new JSObject()
-                .put("announced", false)
-                .put("reason", "dump_point_unavailable"));
-            return;
-        }
         if (getActivity() == null) {
             call.reject("Activity is unavailable");
             return;
         }
         getActivity().runOnUiThread(() -> {
-            if (!ConnectivityForegroundService.claimDriverDumpPointAlert(
-                    getContext(),
-                    eventVersion,
-                    tripId,
-                    dumpPointId)) {
+            DriverDumpPointAnnouncer.Result result = DriverDumpPointAnnouncer.announce(
+                getContext(),
+                eventVersion,
+                tripId,
+                dumpPointId,
+                dumpPointName,
+                false
+            );
+            if (!result.announced) {
                 call.resolve(new JSObject()
                     .put("announced", false)
-                    .put("reason", "already_announced"));
+                    .put("reason", result.reason));
                 return;
             }
-            if (driverVoicePlayer == null) {
-                driverVoicePlayer = new DriverVoicePlayer(getContext());
-            }
-            driverVoicePlayer.announce(
-                dumpPointId,
-                displayName,
-                BuildConfig.ALERT_CUE_DURATION_MS + BuildConfig.VOICE_AFTER_CUE_DELAY_MS,
-                true
-            );
             call.resolve(new JSObject()
                 .put("announced", true)
                 .put("cuePlayed", true));
@@ -166,10 +153,6 @@ public class NativeSoundPlugin extends Plugin {
     @Override
     protected void handleOnDestroy() {
         releaseActivePlayer();
-        if (driverVoicePlayer != null) {
-            driverVoicePlayer.shutdown();
-            driverVoicePlayer = null;
-        }
         super.handleOnDestroy();
     }
 }

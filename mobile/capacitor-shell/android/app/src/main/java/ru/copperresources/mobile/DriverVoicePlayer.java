@@ -72,9 +72,23 @@ public final class DriverVoicePlayer {
             String dumpPointName,
             long delayMs,
             boolean playCue) {
+        announce(dumpPointId, dumpPointName, delayMs, playCue, 0L, 0L);
+    }
+
+    public void announce(
+            long dumpPointId,
+            String dumpPointName,
+            long delayMs,
+            boolean playCue,
+            long eventVersion,
+            long tripId) {
         int scheduledGeneration = ++generation;
         String resourceName = DriverVoiceCatalog.resourceNameFor(dumpPointId, dumpPointName);
         String fallbackText = DriverVoiceCatalog.fallbackPhrase(dumpPointName);
+        recordStage(
+            "queued",
+            resourceName + ";event=" + eventVersion + ";trip=" + tripId
+        );
         if (playCue) {
             mainHandler.post(() -> {
                 if (destroyed || scheduledGeneration != generation) {

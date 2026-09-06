@@ -35,8 +35,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "20",
-    versionName: "0.1.15",
+    versionCode: "21",
+    versionName: "0.1.16",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -57,8 +57,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "21",
-    versionName: "0.1.10",
+    versionCode: "23",
+    versionName: "0.1.16",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -68,8 +68,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "20",
-    versionName: "0.1.10-rc",
+    versionCode: "22",
+    versionName: "0.1.16-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -292,13 +292,15 @@ test("in-app updater mutates only dedicated version badges", () => {
   );
 });
 
-test("only the driver profile enables recorded dump-point voice alerts", () => {
+test("every driver build enables the same recorded dump-point voice alerts", () => {
   const excavator = profile("excavator");
-  const driver = profile("driver");
   assert.notEqual(excavator.driverVoiceAlertsEnabled, "true");
-  assert.equal(driver.driverVoiceAlertsEnabled, "true");
-  assert.equal(driver.alertCueDurationMs, "900");
-  assert.equal(driver.voiceAfterCueDelayMs, "200");
+  for (const profileName of ["driver", "driver_qa", "driver_rustore_qa", "driver_rustore"]) {
+    const driver = profile(profileName);
+    assert.equal(driver.driverVoiceAlertsEnabled, "true");
+    assert.equal(driver.alertCueDurationMs, "900");
+    assert.equal(driver.voiceAfterCueDelayMs, "200");
+  }
 });
 
 test("driver profile packages every approved recorded dump-point phrase", () => {
@@ -329,7 +331,8 @@ test("background service announces only a fresh driver truck_loaded event", () =
   assert.match(service, /"trip_changed"\.equals\(event\.optString\("type"\)\)/);
   assert.match(service, /"truck_loaded"\.equals\(payload\.optString\("action"\)\)/);
   assert.match(service, /last_driver_dump_point_alert_version/);
-  assert.match(service, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
+  const announcer = readFileSync(resolve(javaRoot, "DriverDumpPointAnnouncer.java"), "utf8");
+  assert.match(announcer, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
   assert.match(service, /serverVersion > previousVersion && relevant[\s\S]*?showLatestDriverDumpPointAlert/);
   assert.doesNotMatch(service, /serverVersion > previousVersion[\s\S]{0,120}!AppVisibility\.isForeground/);
   assert.match(player, /AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK/);
@@ -357,12 +360,17 @@ test("foreground driver screen uses the same deduplicated recorded voice bridge"
   const driverTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "users", "driver_shift.html"), "utf8");
 
   assert.match(plugin, /@PluginMethod\s+public void announceDumpPoint\(PluginCall call\)/);
-  assert.match(plugin, /ConnectivityForegroundService\.claimDriverDumpPointAlert/);
-  assert.match(plugin, /DriverVoicePlayer[\s\S]*?ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
-  assert.match(plugin, /driverVoicePlayer\.announce\([\s\S]*?true[\s\S]*?cuePlayed/);
+  const announcer = readFileSync(resolve(javaRoot, "DriverDumpPointAnnouncer.java"), "utf8");
+  assert.match(plugin, /DriverDumpPointAnnouncer\.announce/);
+  assert.match(announcer, /private static DriverVoicePlayer sharedPlayer/);
+  assert.match(announcer, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS[\s\S]*?sharedPlayer\.announce/);
+  assert.match(announcer, /sharedPlayer\.announce\([\s\S]*?preferences\.edit\(\)/);
+  assert.match(plugin, /result\.announced[\s\S]*?cuePlayed/);
   assert.match(player, /void announce\([\s\S]*?boolean playCue\)[\s\S]*?playAlertCue\(\)/);
-  assert.match(service, /driverVoicePlayer\.announce\([\s\S]*?!notificationShown/);
-  assert.match(service, /static boolean claimDriverDumpPointAlert/);
+  assert.match(service, /DriverDumpPointAnnouncer\.announce/);
+  assert.doesNotMatch(service, /private DriverVoicePlayer driverVoicePlayer/);
+  assert.doesNotMatch(plugin, /private DriverVoicePlayer driverVoicePlayer/);
+  assert.match(player, /recordStage\([\s\S]*?"queued"/);
   assert.match(sounds, /announceDumpPoint: announceDumpPoint/);
   assert.match(sounds, /diagnostics: diagnostics/);
   assert.match(driverTemplate, /operational-state-refresh-applied/);

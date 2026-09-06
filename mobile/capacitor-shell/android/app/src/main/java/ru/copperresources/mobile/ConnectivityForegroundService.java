@@ -51,7 +51,6 @@ public class ConnectivityForegroundService extends Service {
     private ScheduledFuture<?> pendingHeartbeat;
     private ConnectivityManager connectivityManager;
     private ConnectivityManager.NetworkCallback networkCallback;
-    private DriverVoicePlayer driverVoicePlayer;
     private int consecutiveFailures;
 
     public static void start(Context context) {
@@ -69,9 +68,6 @@ public class ConnectivityForegroundService extends Service {
     public void onCreate() {
         super.onCreate();
         AppNotifications.createChannels(this);
-        if (BuildConfig.DRIVER_VOICE_ALERTS_ENABLED) {
-            driverVoicePlayer = new DriverVoicePlayer(this);
-        }
         executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "native-server-heartbeat");
             thread.setDaemon(true);
@@ -112,10 +108,6 @@ public class ConnectivityForegroundService extends Service {
         }
         if (executor != null) {
             executor.shutdownNow();
-        }
-        if (driverVoicePlayer != null) {
-            driverVoicePlayer.shutdown();
-            driverVoicePlayer = null;
         }
         super.onDestroy();
     }
@@ -379,56 +371,18 @@ public class ConnectivityForegroundService extends Service {
                 return false;
             }
 
-            if (!claimDriverDumpPointAlert(
-                    this,
-                    selectedVersion,
-                    selectedTripId,
-                    selectedDumpPointId)) {
-                return false;
-            }
-
-            boolean notificationShown = showNotification && AppNotifications.showOperationalAlert(
+            DriverDumpPointAnnouncer.Result result = DriverDumpPointAnnouncer.announce(
                 this,
-                "Новая точка разгрузки",
-                displayName
+                selectedVersion,
+                selectedTripId,
+                selectedDumpPointId,
+                displayName,
+                showNotification
             );
-            if (driverVoicePlayer != null) {
-                long voiceDelayMs = BuildConfig.ALERT_CUE_DURATION_MS
-                    + BuildConfig.VOICE_AFTER_CUE_DELAY_MS;
-                driverVoicePlayer.announce(
-                    selectedDumpPointId,
-                    displayName,
-                    voiceDelayMs,
-                    !notificationShown
-                );
-            }
-            return notificationShown || driverVoicePlayer != null;
+            return result.announced;
         } catch (Exception error) {
             Log.w("ConnectivityForegroundService", "Driver dump-point alert was not parsed", error);
             return false;
-        }
-    }
-
-    static boolean claimDriverDumpPointAlert(
-            Context context,
-            long eventVersion,
-            long tripId,
-            long dumpPointId) {
-        if (eventVersion <= 0L || tripId <= 0L) {
-            return false;
-        }
-        synchronized (ConnectivityForegroundService.class) {
-            SharedPreferences preferences = context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            long lastAnnouncedVersion = preferences.getLong(LAST_DRIVER_DUMP_POINT_ALERT_VERSION, 0L);
-            if (eventVersion <= lastAnnouncedVersion) {
-                return false;
-            }
-            preferences.edit()
-                .putLong(LAST_DRIVER_DUMP_POINT_ALERT_VERSION, eventVersion)
-                .putLong("last_driver_dump_point_alert_trip_id", tripId)
-                .putLong("last_driver_dump_point_alert_dump_point_id", dumpPointId)
-                .apply();
-            return true;
         }
     }
 
