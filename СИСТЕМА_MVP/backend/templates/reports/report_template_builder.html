@@ -1,8 +1,27 @@
 {% extends "base.html" %}
 
 {% block title %}Конструктор шаблонов отчетов{% endblock %}
+{% block body_class %}{% if access.role.code == 'dispatcher' %}dispatcher-control-screen{% endif %}{% endblock %}
 
 {% block body %}
+{% if access.role.code == 'dispatcher' %}
+<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report is-dispatcher-report" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Конструктор шаблонов отчётов">
+        <header class="dispatcher-topbar dispatcher-unified-topbar no-print">
+            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="reports" dispatcher_header_screen="Конструктор отчётов" %}
+        </header>
+        <div class="dispatcher-report-controlbar dispatcher-linked-report-controlbar no-print">
+            <nav class="dispatcher-subnav" aria-label="Разделы отчётов диспетчера">
+                <a href="{% url 'dispatcher_reports' %}">← Все отчёты</a>
+                <a href="{% url 'volume_report' %}">Объёмы</a>
+                <a class="is-active" href="{% url 'report_template_builder' %}">Шаблоны</a>
+            </nav>
+            {% if edit_template %}
+                <div class="dispatcher-report-actions"><a href="{% url 'report_template_builder' %}">Новый шаблон</a></div>
+            {% endif %}
+        </div>
+        <div class="management-linked-report-content">
+{% else %}
 <header class="app-header">
     <div class="header-inner">
         <div class="topline">
@@ -15,13 +34,14 @@
 </header>
 
 <main class="page">
+{% endif %}
     {% if messages %}
         {% for message in messages %}
             <div class="message {{ message.tags }}">{{ message }}</div>
         {% endfor %}
     {% endif %}
 
-    <section class="card">
+    <section class="card dispatcher-linked-actions-card">
         <div class="actions">
             <a class="button-link button-secondary" href="{% url 'volume_report' %}">Вернуться в отчет по объемам</a>
             {% if edit_template %}
@@ -183,5 +203,12 @@
             </div>
         </div>
     </section>
+{% if access.role.code == 'dispatcher' %}
+        </div>
+    </section>
 </main>
+{% include "reports/includes/management_report_theme.html" %}
+{% else %}
+</main>
+{% endif %}
 {% endblock %}

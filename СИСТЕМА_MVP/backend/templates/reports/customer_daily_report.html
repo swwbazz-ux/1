@@ -4,9 +4,9 @@
 {% block body_class %}dispatcher-control-screen{% endblock %}
 
 {% block body %}
-<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme>
+<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report{% if access.role.code == 'dispatcher' %} is-dispatcher-report{% endif %}" data-dispatcher-theme>
     <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Суточный отчет">
-        {% include "reports/includes/management_report_header.html" with active="daily" title="Суточный отчет" subtitle="Суточный срез, смены, план-факт и выгрузка для заказчика." %}
+        {% include "reports/includes/management_report_header.html" with active="daily" title="Суточный отчет" subtitle="Суточный срез, смены, план-факт и выгрузка для заказчика." export_url=export_url %}
         <div class="management-linked-report-content">
 
     <section class="metric-grid">
@@ -37,7 +37,7 @@
         </div>
     </section>
 
-    <section class="card">
+    <section class="card dispatcher-linked-filter-card">
         <form method="get" class="filters">
             <div>
                 <label for="date">Дата отчета</label>

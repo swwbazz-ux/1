@@ -9,29 +9,27 @@
         <header class="dispatcher-topbar dispatcher-unified-topbar">
             {% include "includes/dispatcher_header.html" with dispatcher_nav_active="transport" dispatcher_header_screen="Автотранспорт" %}
         </header>
-        <div class="dispatcher-analytics-toolbar">
-            {% include "includes/dispatcher_analytics_tabs.html" with dispatcher_nav_active="transport" %}
+        <section class="dispatcher-report-controlbar no-print" aria-label="Управление отчётом по автотранспорту">
+            {% include "includes/dispatcher_analytics_tabs.html" with dispatcher_nav_active="transport" reports_back=True %}
+            <form class="dispatcher-report-controlbar-filters" method="get" data-auto-filter-form>
+                <label>
+                    <span>Дата</span>
+                    <input type="date" name="date" value="{{ filters.date_value }}">
+                </label>
+                <label>
+                    <span>Смена</span>
+                    <select name="shift_type">
+                        <option value="" {% if not filters.shift_type %}selected{% endif %}>Все смены</option>
+                        <option value="day" {% if filters.shift_type == 'day' %}selected{% endif %}>Дневная</option>
+                        <option value="night" {% if filters.shift_type == 'night' %}selected{% endif %}>Ночная</option>
+                    </select>
+                </label>
+            </form>
             <div class="dispatcher-report-actions">
                 <a href="{% url 'dispatcher_transport_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
                 <button type="button" onclick="window.print()">Печать</button>
             </div>
-        </div>
-
-        <form class="dispatcher-report-filters" method="get" data-auto-filter-form>
-            <label>
-                <span>Дата</span>
-                <input type="date" name="date" value="{{ filters.date_value }}">
-            </label>
-            <label>
-                <span>Смена</span>
-                <select name="shift_type">
-                    <option value="" {% if not filters.shift_type %}selected{% endif %}>Все смены</option>
-                    <option value="day" {% if filters.shift_type == 'day' %}selected{% endif %}>Дневная</option>
-                    <option value="night" {% if filters.shift_type == 'night' %}selected{% endif %}>Ночная</option>
-                </select>
-            </label>
-            <button type="submit">Показать</button>
-        </form>
+        </section>
 
         <section class="dispatcher-analytics-grid dispatcher-transport-grid">
             <article class="dispatcher-report-card">

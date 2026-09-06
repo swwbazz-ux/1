@@ -4278,6 +4278,12 @@ def volume_report_view(request):
         'reports/volume_report.html',
         {
             'access': access,
+            'dispatcher_header': build_dispatcher_header_context(access, request),
+            'export_url': (
+                f"{reverse('volume_report_export')}?{request.GET.urlencode()}"
+                if request.GET.urlencode()
+                else reverse('volume_report_export')
+            ),
             'report_headers': headers,
             'report_rows': rows,
             'total_volume': total_volume,
@@ -4359,6 +4365,7 @@ def shift_analytics_report_view(request):
         'reports/shift_analytics.html',
         {
             'access': access,
+            'dispatcher_header': build_dispatcher_header_context(access, request),
             **shift_analytics_report_context(request),
         },
     )
@@ -4594,6 +4601,12 @@ def downtime_report_view(request):
         'reports/downtime_report.html',
         {
             'access': access,
+            'dispatcher_header': build_dispatcher_header_context(access, request),
+            'export_url': (
+                f"{reverse('downtime_report_export')}?{request.GET.urlencode()}"
+                if request.GET.urlencode()
+                else reverse('downtime_report_export')
+            ),
             **downtime_report_context(request),
         },
     )
@@ -5380,6 +5393,7 @@ def report_template_builder_view(request):
         'reports/report_template_builder.html',
         {
             'access': access,
+            'dispatcher_header': build_dispatcher_header_context(access, request),
             'report_templates': ReportTemplate.objects.order_by('name'),
             'edit_template': edit_template,
             'column_options': report_template_column_options(selected_columns, column_labels),
@@ -5716,12 +5730,15 @@ def customer_daily_report_view(request):
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
 
+    report_context = customer_daily_report_context(request)
     return render(
         request,
         'reports/customer_daily_report.html',
         {
             'access': access,
-            **customer_daily_report_context(request),
+            'dispatcher_header': build_dispatcher_header_context(access, request),
+            'export_url': f"{reverse('customer_daily_report_export')}?date={report_context['date_input']}",
+            **report_context,
         },
     )
 

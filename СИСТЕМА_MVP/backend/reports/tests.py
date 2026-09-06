@@ -144,6 +144,27 @@ class ManagementDashboardAccessContractTests(TestCase):
                 self.assertNotContains(response, 'Руководство MVP')
                 self.assertNotContains(response, f'href="{reverse("management_dashboard")}"')
 
+    def test_dispatcher_report_screens_use_compact_controlbar(self):
+        self.activate(self.dispatcher_access)
+
+        route_names = (
+            'dispatcher_mining_volumes',
+            'dispatcher_transport',
+            'dispatcher_downtimes',
+            'dispatcher_shift_log',
+            'customer_daily_report',
+            'volume_report',
+            'downtime_report',
+            'shift_analytics_report',
+            'report_template_builder',
+        )
+        for route_name in route_names:
+            with self.subTest(route_name=route_name):
+                response = self.client.get(reverse(route_name))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'dispatcher-report-controlbar')
+                self.assertContains(response, reverse('dispatcher_reports'))
+
     def test_mechanic_downtime_report_keeps_mechanic_navigation_contract(self):
         self.activate(self.mechanic_access)
 

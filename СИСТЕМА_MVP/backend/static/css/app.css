@@ -33698,6 +33698,81 @@ body.dispatcher-shift-report-screen {
     margin-left: auto;
 }
 
+/* Единая компактная верхняя панель остальных диспетчерских отчётов. */
+.dispatcher-report-controlbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid var(--gd-line);
+    border-radius: 6px;
+    background: var(--gd-panel);
+}
+
+.dispatcher-report-controlbar > .dispatcher-subnav {
+    flex: 0 1 auto;
+}
+
+.dispatcher-report-controlbar-filters {
+    display: flex;
+    align-items: end;
+    gap: 8px;
+    flex: 0 1 auto;
+    min-width: 0;
+    padding-left: 12px;
+    border-left: 1px solid var(--gd-line);
+}
+
+.dispatcher-report-controlbar-filters label {
+    display: grid;
+    gap: 3px;
+    min-width: 132px;
+    color: var(--gd-muted);
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.dispatcher-report-controlbar-filters input,
+.dispatcher-report-controlbar-filters select {
+    width: 100%;
+    min-height: 30px;
+    border: 1px solid var(--gd-line);
+    border-radius: 4px;
+    background: var(--gd-panel-soft);
+    color: var(--gd-text);
+    font: inherit;
+    font-weight: 900;
+}
+
+.dispatcher-report-controlbar > .dispatcher-report-actions {
+    margin-left: auto;
+}
+
+.dispatcher-linked-report-controlbar {
+    padding-block: 8px;
+}
+
+.is-dispatcher-report .dispatcher-linked-actions-card,
+.dispatcher-shift-report-page .dispatcher-linked-actions-card {
+    display: none;
+}
+
+.dispatcher-linked-filter-card {
+    padding: 9px 11px;
+}
+
+.dispatcher-linked-filter-card > h2 {
+    margin: 0 0 7px;
+    font-size: 13px;
+}
+
+.dispatcher-linked-filter-card > .filters {
+    gap: 8px;
+    margin: 0;
+}
+
 .dispatcher-shift-report-messages,
 .dispatcher-shift-report-issues,
 .dispatcher-shift-report-ready {
@@ -33975,6 +34050,13 @@ body.dispatcher-shift-report-screen {
     .dispatcher-shift-report-filters { width: 100%; align-items: stretch; flex-wrap: wrap; margin-left: 0; padding: 8px 0 0; border-top: 1px solid var(--gd-line); border-left: 0; }
     .dispatcher-shift-report-filters label { flex: 1 1 130px; }
     .dispatcher-shift-report-filters p { width: 100%; margin: 0; }
+    .dispatcher-report-controlbar { align-items: stretch; flex-wrap: wrap; }
+    .dispatcher-report-controlbar > .dispatcher-subnav { width: 100%; flex: 1 1 100%; }
+    .dispatcher-report-controlbar-filters { width: 100%; flex: 1 1 100%; align-items: stretch; flex-wrap: wrap; padding: 8px 0 0; border-top: 1px solid var(--gd-line); border-left: 0; }
+    .dispatcher-report-controlbar-filters label { flex: 1 1 130px; }
+    .dispatcher-report-controlbar > .dispatcher-report-actions { width: 100%; margin-left: 0; }
+    .dispatcher-report-controlbar > .dispatcher-report-actions a,
+    .dispatcher-report-controlbar > .dispatcher-report-actions button { flex: 1 1 0; min-height: 42px; }
     .dispatcher-shift-report-paper-title h1 { font-size: 15px; }
     .dispatcher-shift-source-head { display: grid; }
     .dispatcher-shift-source-row summary { grid-template-columns: 72px minmax(0, 1fr); min-height: 48px; }
