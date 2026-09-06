@@ -17,6 +17,7 @@ public final class DriverDumpPointAnnouncer {
 
     private static DriverVoicePlayer sharedPlayer;
     private static long lastScheduledVersion;
+    private static long lastScheduledTripId;
 
     private DriverDumpPointAnnouncer() {}
 
@@ -45,7 +46,15 @@ public final class DriverDumpPointAnnouncer {
             ConnectivityForegroundService.LAST_DRIVER_DUMP_POINT_ALERT_VERSION,
             0L
         );
-        if (eventVersion <= Math.max(persistedVersion, lastScheduledVersion)) {
+        long persistedTripId = preferences.getLong(
+            "last_driver_dump_point_alert_trip_id",
+            0L
+        );
+        if (
+            eventVersion <= Math.max(persistedVersion, lastScheduledVersion)
+            || tripId == persistedTripId
+            || tripId == lastScheduledTripId
+        ) {
             return Result.rejected(REASON_ALREADY_ANNOUNCED);
         }
 
@@ -71,6 +80,7 @@ public final class DriverDumpPointAnnouncer {
             tripId
         );
         lastScheduledVersion = eventVersion;
+        lastScheduledTripId = tripId;
         preferences.edit()
             .putLong(ConnectivityForegroundService.LAST_DRIVER_DUMP_POINT_ALERT_VERSION, eventVersion)
             .putLong("last_driver_dump_point_alert_trip_id", tripId)

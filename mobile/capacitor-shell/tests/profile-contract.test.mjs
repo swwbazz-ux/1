@@ -35,8 +35,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "22",
-    versionName: "0.1.17",
+    versionCode: "23",
+    versionName: "0.1.18",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -57,8 +57,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "24",
-    versionName: "0.1.17",
+    versionCode: "25",
+    versionName: "0.1.18",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -68,8 +68,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "23",
-    versionName: "0.1.17-rc",
+    versionCode: "24",
+    versionName: "0.1.18-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -366,6 +366,8 @@ test("foreground driver screen uses the same deduplicated recorded voice bridge"
   const announcer = readFileSync(resolve(javaRoot, "DriverDumpPointAnnouncer.java"), "utf8");
   assert.match(plugin, /DriverDumpPointAnnouncer\.announce/);
   assert.match(announcer, /private static DriverVoicePlayer sharedPlayer/);
+  assert.match(announcer, /lastScheduledTripId/);
+  assert.match(announcer, /last_driver_dump_point_alert_trip_id[\s\S]*?tripId == persistedTripId[\s\S]*?tripId == lastScheduledTripId/);
   assert.match(announcer, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS[\s\S]*?sharedPlayer\.announce/);
   assert.match(announcer, /sharedPlayer\.announce\([\s\S]*?preferences\.edit\(\)/);
   assert.match(plugin, /result\.announced[\s\S]*?cuePlayed/);
