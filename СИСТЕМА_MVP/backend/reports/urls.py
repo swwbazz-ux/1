@@ -150,6 +150,18 @@ urlpatterns = [
         {'report_kind': 'excavation'},
         name='dispatcher_shift_excavation_export',
     ),
+    path(
+        'dispatcher/shift-reports/hourly/',
+        dispatcher_shift_report_view,
+        {'report_kind': 'hourly'},
+        name='dispatcher_shift_hourly',
+    ),
+    path(
+        'dispatcher/shift-reports/hourly/export/',
+        dispatcher_shift_report_export_view,
+        {'report_kind': 'hourly'},
+        name='dispatcher_shift_hourly_export',
+    ),
     path('dispatcher/reports/', dispatcher_reports_view, name='dispatcher_reports'),
     path('dispatcher/reports/export/', dispatcher_reports_export_view, name='dispatcher_reports_export'),
     path('dispatcher/management/', dispatcher_management_view, name='dispatcher_management'),

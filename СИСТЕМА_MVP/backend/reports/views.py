@@ -3360,6 +3360,16 @@ def dispatcher_reports_context(request, access):
             'export_url': reverse('dispatcher_shift_excavation_export'),
         },
         {
+            'title': 'Почасовая сводка смены',
+            'kind': 'shift-hourly',
+            'status': 'ok' if trips else 'risk',
+            'primary': f'{len(trips)} рейс.',
+            'secondary': f'{len({trip.excavator_id for trip in trips if trip.excavator_id})} экск. / {format_volume(volume_total)} м³',
+            'readiness': 'Рейсы по часам, экскаваторам и фактическим точкам разгрузки',
+            'view_url': reverse('dispatcher_shift_hourly'),
+            'export_url': reverse('dispatcher_shift_hourly_export'),
+        },
+        {
             'title': 'Сменные объемы',
             'kind': 'mining',
             'status': report_status('mining'),
@@ -3487,7 +3497,10 @@ def parse_report_decimal(value, label, max_value):
 
 
 def dispatcher_shift_report_url(report_kind, selected_date, shift_type):
-    route_name = 'dispatcher_shift_excavation' if report_kind == 'excavation' else 'dispatcher_shift_trucks'
+    route_name = {
+        'excavation': 'dispatcher_shift_excavation',
+        'hourly': 'dispatcher_shift_hourly',
+    }.get(report_kind, 'dispatcher_shift_trucks')
     return f'{reverse(route_name)}?{urlencode({"date": selected_date.isoformat(), "shift_type": shift_type})}'
 
 
@@ -3623,6 +3636,7 @@ def dispatcher_shift_report_view(request, report_kind='trucks'):
         'rock_types': RockType.objects.filter(is_active=True).order_by('name'),
         'dump_points': DumpPoint.objects.filter(is_active=True).order_by('name'),
         'operational_state_version': operational_state_version,
+        'source_trips': report['hourly_trips'] if report_kind == 'hourly' else report['trips'],
     })
     if request.GET.get('_operational_fragment', '').strip() == 'dispatcher-shift-report':
         return operational_fragment_response(
@@ -3642,7 +3656,7 @@ def dispatcher_shift_report_export_view(request, report_kind='trucks'):
     report = build_dispatcher_shift_report(selected_date, shift_type)
     workbook = build_shift_report_workbook(report, report_kind)
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    kind_name = 'excavation' if report_kind == 'excavation' else 'trucks'
+    kind_name = report_kind if report_kind in {'excavation', 'hourly'} else 'trucks'
     response['Content-Disposition'] = (
         f'attachment; filename="dispatcher_shift_{kind_name}_{selected_date:%Y-%m-%d}_{shift_type}.xlsx"'
     )

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load l10n %}
 
-{% block title %}{% if report_kind == 'excavation' %}Выемочное оборудование{% else %}Итоги смены по самосвалам{% endif %}{% endblock %}
+{% block title %}{% if report_kind == 'hourly' %}Почасовая сводка смены{% elif report_kind == 'excavation' %}Выемочное оборудование{% else %}Итоги смены по самосвалам{% endif %}{% endblock %}
 {% block body_class %}dispatcher-control-screen dispatcher-shift-report-screen{% endblock %}
 
 {% block body %}
@@ -17,6 +17,7 @@
                 <nav class="dispatcher-shift-report-tabs" aria-label="Вид сменного отчёта">
                     <a class="{% if report_kind == 'trucks' %}is-active{% endif %}" href="{% url 'dispatcher_shift_trucks' %}?{{ query_string }}">Самосвалы</a>
                     <a class="{% if report_kind == 'excavation' %}is-active{% endif %}" href="{% url 'dispatcher_shift_excavation' %}?{{ query_string }}">Выемочное оборудование</a>
+                    <a class="{% if report_kind == 'hourly' %}is-active{% endif %}" href="{% url 'dispatcher_shift_hourly' %}?{{ query_string }}">Почасовая сводка</a>
                 </nav>
             </div>
 
@@ -36,7 +37,9 @@
             </form>
 
             <div class="dispatcher-report-actions">
-                {% if report_kind == 'excavation' %}
+                {% if report_kind == 'hourly' %}
+                    <a href="{% url 'dispatcher_shift_hourly_export' %}?{{ query_string }}">Excel</a>
+                {% elif report_kind == 'excavation' %}
                     <a href="{% url 'dispatcher_shift_excavation_export' %}?{{ query_string }}">Excel</a>
                 {% else %}
                     <a href="{% url 'dispatcher_shift_trucks_export' %}?{{ query_string }}">Excel</a>
@@ -61,8 +64,74 @@
             <section class="dispatcher-shift-report-ready no-print">Данные смены заполнены. Отчёт готов к выгрузке или печати.</section>
         {% endif %}
 
-        <section class="dispatcher-shift-report-paper" id="{% if report_kind == 'excavation' %}excavation{% else %}trucks{% endif %}">
-            {% if report_kind == 'excavation' %}
+        <section class="dispatcher-shift-report-paper" id="{{ report_kind }}">
+            {% if report_kind == 'hourly' %}
+                <header class="dispatcher-shift-report-paper-title is-hourly">
+                    <h1>Почасовая сводка смены</h1>
+                    <p>{{ report.date|date:"d.m.Y" }} · {{ report.meta.label }} смена {{ report.meta.time_range }}</p>
+                </header>
+                <div class="dispatcher-shift-report-table-wrap is-hourly" data-hourly-report-scroll>
+                    <table class="dispatcher-shift-report-table is-hourly" style="min-width: {{ report.hourly.min_width_px }}px">
+                        <thead>
+                            <tr>
+                                <th class="is-sticky is-excavator" rowspan="2">№ экс</th>
+                                <th class="is-sticky is-fleet" rowspan="2">а/с</th>
+                                {% for hour in report.hourly.hours %}
+                                    <th class="is-hour {% if hour.trip_count %}has-trips{% endif %}" colspan="{{ hour.points|length|add:2 }}">
+                                        {{ hour.label }}<small>{{ hour.range_label }}</small>
+                                    </th>
+                                {% endfor %}
+                                <th class="is-total" colspan="2">Итого</th>
+                            </tr>
+                            <tr>
+                                {% for hour in report.hourly.hours %}
+                                    {% for point in hour.points %}<th class="is-dump-point">{{ point.label }}</th>{% endfor %}
+                                    <th>Рейсы</th><th>Объём</th>
+                                {% endfor %}
+                                <th>Рейсы</th><th>Объём</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in report.hourly.rows %}
+                                {% for fleet in row.fleet_rows %}
+                                    <tr class="is-{{ fleet.key }}">
+                                        {% if forloop.first %}<th class="is-sticky is-excavator" rowspan="2">{{ row.label }}</th>{% endif %}
+                                        <th class="is-sticky is-fleet">{{ fleet.label }}</th>
+                                        {% for hour in fleet.hours %}
+                                            {% for cell in hour.cells %}<td>{% if cell.trip_count %}{{ cell.trip_count }}{% endif %}</td>{% endfor %}
+                                            <td class="is-hour-total">{% if hour.trip_count %}{{ hour.trip_count }}{% endif %}</td>
+                                            <td class="is-hour-total">{% if hour.volume %}{{ hour.volume|floatformat:"0g" }}{% endif %}</td>
+                                        {% endfor %}
+                                        <td class="is-shift-total">{% if fleet.trip_count %}{{ fleet.trip_count }}{% endif %}</td>
+                                        <td class="is-shift-total">{% if fleet.volume %}{{ fleet.volume|floatformat:"0g" }}{% endif %}</td>
+                                    </tr>
+                                {% endfor %}
+                                <tr class="is-excavator-total">
+                                    <th class="is-sticky is-excavator">Рейсы</th><th class="is-sticky is-fleet">Объёмы</th>
+                                    {% for hour in row.hours %}
+                                        {% for cell in hour.cells %}<td>{% if cell.trip_count %}{{ cell.trip_count }}{% endif %}</td>{% endfor %}
+                                        <td>{{ hour.trip_count|default:"" }}</td><td>{% if hour.volume %}{{ hour.volume|floatformat:"0g" }}{% endif %}</td>
+                                    {% endfor %}
+                                    <td>{{ row.trip_count }}</td><td>{{ row.volume|floatformat:"0g" }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr><td class="dispatcher-shift-report-empty" colspan="{{ report.hourly.column_count }}">В справочнике нет активных экскаваторов.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <th class="is-sticky is-excavator" colspan="2">Итого за смену</th>
+                                {% for hour in report.hourly.hours %}
+                                    {% for cell in hour.point_totals %}<th>{% if cell.trip_count %}{{ cell.trip_count }}{% endif %}</th>{% endfor %}
+                                    <th>{{ hour.trip_count }}</th><th>{{ hour.volume|floatformat:"0g" }}</th>
+                                {% endfor %}
+                                <th>{{ report.hourly.trip_count }}</th><th>{{ report.hourly.volume|floatformat:"0g" }}</th>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                <p class="dispatcher-hourly-hint no-print">Таблица прокручивается по горизонтали. В каждом часовом блоке показаны только те точки разгрузки, куда за этот час были рейсы.</p>
+            {% elif report_kind == 'excavation' %}
                 <header class="dispatcher-shift-report-paper-title is-blue">
                     <h1>Отчёт о работе выемочного оборудования</h1>
                     <p>{{ report.date|date:"d.m.Y" }} · {{ report.meta.label }} смена {{ report.meta.time_range }}</p>
@@ -118,10 +187,10 @@
         <section class="dispatcher-shift-source no-print">
             <div class="dispatcher-shift-source-head">
                 <div><span>Исходные данные</span><h2>Завершённые рейсы смены</h2></div>
-                <p>Корректировка меняет исходный рейс, поэтому оба отчёта пересчитаются одинаково.</p>
+                <p>Корректировка меняет исходный рейс, поэтому все сменные отчёты пересчитаются одинаково.</p>
             </div>
             <div class="dispatcher-shift-source-list">
-                {% for trip in report.trips %}
+                {% for trip in source_trips %}
                     <details class="dispatcher-shift-source-row">
                         <summary>
                             <strong>Рейс №{{ trip.id }}</strong>
@@ -129,9 +198,9 @@
                             <span>{{ trip.rock_type }}</span>
                             <span>{{ trip.volume_m3|floatformat:"2g"|default:"нет объёма" }} м³</span>
                             <span>{{ trip.transport_distance_km|floatformat:"2g"|default:"нет плеча" }} км</span>
-                            {% if can_correct %}<b>Корректировать</b>{% endif %}
+                            {% if can_correct and trip.status == 'completed' %}<b>Корректировать</b>{% elif report_kind == 'hourly' %}<b>В пути</b>{% endif %}
                         </summary>
-                        {% if can_correct %}
+                        {% if can_correct and trip.status == 'completed' %}
                             <form method="post" class="dispatcher-shift-correction-form">
                                 {% csrf_token %}
                                 <input type="hidden" name="date" value="{{ report.date_value }}">
@@ -205,7 +274,19 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!freshRoot || !currentRoot) {
                 return {deferred: true, reason: "dispatcher_shift_report_fragment_missing"};
             }
+            var currentHourlyScroll = currentRoot.querySelector("[data-hourly-report-scroll]");
+            var hourlyScrollPosition = currentHourlyScroll ? {
+                left: currentHourlyScroll.scrollLeft,
+                top: currentHourlyScroll.scrollTop
+            } : null;
             currentRoot.replaceWith(freshRoot);
+            if (hourlyScrollPosition) {
+                var freshHourlyScroll = freshRoot.querySelector("[data-hourly-report-scroll]");
+                if (freshHourlyScroll) {
+                    freshHourlyScroll.scrollLeft = hourlyScrollPosition.left;
+                    freshHourlyScroll.scrollTop = hourlyScrollPosition.top;
+                }
+            }
             return {applied: true};
         }).catch(function () {
             return {deferred: true, reason: "dispatcher_shift_report_refresh_failed"};

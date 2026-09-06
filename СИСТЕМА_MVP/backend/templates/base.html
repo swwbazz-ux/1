@@ -2408,7 +2408,7 @@ window.AppRealtimeConfig = {
     mobileQueueKey: "mining-master-mobile-sync-queue-v1",
     screens: [
         {name: "dispatcher-control", role: "dispatcher", mode: "custom", path: "^/dispatcher/control/?$", customRefresh: true},
-        {name: "dispatcher-shift-report", role: "dispatcher", mode: "custom", path: "^/dispatcher/shift-reports/(?:trucks|excavation)/?$", customRefresh: true},
+        {name: "dispatcher-shift-report", role: "dispatcher", mode: "custom", path: "^/dispatcher/shift-reports/(?:trucks|excavation|hourly)/?$", customRefresh: true},
         {name: "dispatcher-reports", role: "dispatcher", mode: "manual", path: "^/dispatcher/"},
         {name: "mining-master", role: "mining_master", mode: "custom", path: "^/mining-master/", customRefresh: true},
         {name: "excavator", role: "excavator_operator", mode: "custom", path: "^/excavator/work/?$", customRefresh: true},

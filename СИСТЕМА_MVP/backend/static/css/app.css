@@ -33661,7 +33661,9 @@ body.dispatcher-shift-report-screen {
 
 .dispatcher-shift-report-page {
     width: 100%;
+    max-width: 100vw;
     height: auto;
+    min-width: 0;
     min-height: 100vh;
     overflow: visible;
     transform: none;
@@ -33669,11 +33671,14 @@ body.dispatcher-shift-report-screen {
 
 .dispatcher-shift-report-page .dispatcher-analytics-board {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: none;
     align-content: start;
     gap: 10px;
     min-height: 100vh;
     height: auto;
+    width: 100%;
+    max-width: 100%;
     padding-bottom: 24px;
     overflow: visible;
 }
@@ -33892,7 +33897,10 @@ body.dispatcher-shift-report-screen {
 }
 
 .dispatcher-shift-report-paper {
+    width: 100%;
+    max-width: 100%;
     min-width: 0;
+    overflow: hidden;
     border: 1px solid #707070;
     background: #fff;
     color: #111;
@@ -33913,6 +33921,10 @@ body.dispatcher-shift-report-screen {
     background: #9dc3e6;
 }
 
+.dispatcher-shift-report-paper-title.is-hourly {
+    background: #ffd966;
+}
+
 .dispatcher-shift-report-paper-title h1,
 .dispatcher-shift-report-paper-title p {
     margin: 0;
@@ -33931,6 +33943,8 @@ body.dispatcher-shift-report-screen {
 }
 
 .dispatcher-shift-report-table-wrap {
+    width: 100%;
+    min-width: 0;
     max-width: 100%;
     overflow: auto;
 }
@@ -33991,6 +34005,115 @@ body.dispatcher-shift-report-screen {
 .dispatcher-shift-report-table.is-excavation th:nth-child(10) { width: 17%; }
 .dispatcher-shift-report-table.is-excavation tbody tr td { background: #d9e2f3; }
 .dispatcher-shift-report-table.is-excavation tbody tr.is-other td { background: #bdd7ee; }
+
+.dispatcher-shift-report-table-wrap.is-hourly {
+    position: relative;
+    max-height: calc(100vh - 280px);
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+.dispatcher-shift-report-table.is-hourly {
+    width: max-content;
+    table-layout: auto;
+    font-size: 11px;
+}
+
+.dispatcher-shift-report-table.is-hourly th,
+.dispatcher-shift-report-table.is-hourly td {
+    min-width: 62px;
+    height: 30px;
+    padding: 4px 6px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.dispatcher-shift-report-table.is-hourly thead th {
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    background: #fff2cc;
+    border-bottom-width: 2px;
+}
+
+.dispatcher-shift-report-table.is-hourly thead tr:nth-child(2) th {
+    top: 39px;
+}
+
+.dispatcher-shift-report-table.is-hourly .is-hour {
+    min-width: 126px;
+    font-size: 13px;
+}
+
+.dispatcher-shift-report-table.is-hourly .is-hour.has-trips {
+    background: #fff;
+    color: #d90000;
+}
+
+.dispatcher-shift-report-table.is-hourly .is-hour small {
+    display: block;
+    margin-top: 2px;
+    color: #666;
+    font-size: 9px;
+}
+
+.dispatcher-shift-report-table.is-hourly .is-dump-point {
+    min-width: 74px;
+    background: #fff200;
+    white-space: normal;
+}
+
+.dispatcher-shift-report-table.is-hourly tbody tr.is-belaz td,
+.dispatcher-shift-report-table.is-hourly tbody tr.is-belaz th {
+    background: #e7e6e6;
+}
+
+.dispatcher-shift-report-table.is-hourly tbody tr.is-nhl td,
+.dispatcher-shift-report-table.is-hourly tbody tr.is-nhl th {
+    background: #bdd7ee;
+}
+
+.dispatcher-shift-report-table.is-hourly tbody tr.is-excavator-total td,
+.dispatcher-shift-report-table.is-hourly tbody tr.is-excavator-total th,
+.dispatcher-shift-report-table.is-hourly tfoot th {
+    background: #ffd966;
+    font-weight: 800;
+}
+
+.dispatcher-shift-report-table.is-hourly .is-hour-total,
+.dispatcher-shift-report-table.is-hourly .is-shift-total {
+    border-left-width: 2px;
+    font-weight: 800;
+}
+
+.dispatcher-shift-report-table.is-hourly .is-sticky {
+    position: sticky;
+    z-index: 3;
+    min-width: 86px;
+    box-shadow: 1px 0 0 #111;
+}
+
+.dispatcher-shift-report-table.is-hourly .is-sticky.is-excavator {
+    left: 0;
+}
+
+.dispatcher-shift-report-table.is-hourly .is-sticky.is-fleet {
+    left: 86px;
+}
+
+.dispatcher-shift-report-table.is-hourly thead .is-sticky,
+.dispatcher-shift-report-table.is-hourly tfoot .is-sticky {
+    z-index: 7;
+}
+
+.dispatcher-hourly-hint {
+    margin: 0;
+    padding: 8px 12px;
+    border-top: 1px solid #707070;
+    background: #fff2cc;
+    color: #333;
+    font: 600 11px/1.35 Calibri, Arial, sans-serif;
+}
 
 .dispatcher-shift-report-table tfoot th {
     background: #ffe699;
@@ -34136,6 +34259,7 @@ body.dispatcher-shift-report-screen {
     .dispatcher-report-controlbar > .dispatcher-report-actions a,
     .dispatcher-report-controlbar > .dispatcher-report-actions button { flex: 1 1 0; min-height: 42px; }
     .dispatcher-shift-report-paper-title h1 { font-size: 15px; }
+    .dispatcher-shift-report-table-wrap.is-hourly { max-height: none; }
     .dispatcher-shift-source-head { display: grid; }
     .dispatcher-shift-source-row summary { grid-template-columns: 72px minmax(0, 1fr); min-height: 48px; }
     .dispatcher-shift-source-row summary span:nth-of-type(n+2) { display: none; }
@@ -34148,6 +34272,7 @@ body.dispatcher-shift-report-screen {
 
 @media print {
     @page { size: A4 landscape; margin: 8mm; }
+    @page hourly-report { size: A3 landscape; margin: 7mm; }
     body.dispatcher-control-screen { background: #fff !important; }
     .no-print,
     .dispatcher-shift-source,
@@ -34165,8 +34290,13 @@ body.dispatcher-shift-report-screen {
         transform: none !important;
     }
     .dispatcher-shift-report-paper { border: 0; box-shadow: none; }
+    .dispatcher-shift-report-paper#hourly { page: hourly-report; }
     .dispatcher-shift-report-table-wrap { overflow: visible; }
     .dispatcher-shift-report-table { min-width: 0; font-size: 8pt; }
+    .dispatcher-shift-report-table.is-hourly { width: 100%; min-width: 0 !important; table-layout: fixed; }
+    .dispatcher-shift-report-table.is-hourly th,
+    .dispatcher-shift-report-table.is-hourly td { min-width: 0; white-space: normal; }
+    .dispatcher-shift-report-table.is-hourly .is-sticky { position: static; min-width: 0; box-shadow: none; }
     .dispatcher-shift-report-table th,
     .dispatcher-shift-report-table td { padding: 2px 3px; font-size: 8pt; }
     .dispatcher-shift-report-paper-title { padding: 5px; }

@@ -7,6 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
 
+from core.production_time import production_shift_context
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType
 from shifts.models import EmployeeShift
@@ -48,7 +49,7 @@ class DispatcherShiftReportTests(TestCase):
             density=Decimal('2.5000'),
         )
         self.dump_point = DumpPoint.objects.create(name='ККД')
-        self.selected_date = timezone.localdate()
+        self.selected_date = production_shift_context().production_date
         self.shift_at = timezone.make_aware(
             datetime.combine(self.selected_date, time(10, 0)),
             timezone.get_current_timezone(),
@@ -74,7 +75,7 @@ class DispatcherShiftReportTests(TestCase):
         )
 
     def create_trip(self, truck, volume, distance, *, completed_at):
-        return Trip.objects.create(
+        trip = Trip.objects.create(
             excavator=self.excavator,
             truck=truck,
             loading_shift=self.loading_shift,
@@ -88,6 +89,9 @@ class DispatcherShiftReportTests(TestCase):
             status=TripStatus.COMPLETED,
             completed_at=completed_at,
         )
+        Trip.objects.filter(pk=trip.pk).update(created_at=completed_at)
+        trip.created_at = completed_at
+        return trip
 
     def test_report_calculates_weighted_distance_and_m3km(self):
         report = build_dispatcher_shift_report(self.selected_date, 'day')
@@ -114,6 +118,41 @@ class DispatcherShiftReportTests(TestCase):
         self.assertEqual(report['excavation_totals']['trip_count'], 3)
         self.assertTrue(all(row['rock_type'] == 'Первичная сульфидная' for row in report['excavation_rows']))
         self.assertTrue(all(row['horizon'] == '90' for row in report['excavation_rows']))
+
+    def test_hourly_report_uses_loading_hour_and_only_actual_hour_dump_points(self):
+        second_point = DumpPoint.objects.create(name='СКДР')
+        nhl_trip = Trip.objects.filter(truck=self.nhl).get()
+        nhl_trip.actual_dump_point = second_point
+        nhl_trip.save(update_fields=['actual_dump_point'])
+        in_transit = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.belaz,
+            loading_shift=self.loading_shift,
+            rock_type=self.rock,
+            dump_point=second_point,
+            volume_m3=Decimal('25.00'),
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+        Trip.objects.filter(pk=in_transit.pk).update(
+            created_at=self.shift_at + timedelta(hours=2, minutes=15),
+        )
+
+        report = build_dispatcher_shift_report(self.selected_date, 'day')
+        hourly = report['hourly']
+        first_hour = next(hour for hour in hourly['hours'] if hour['label'] == '11.00')
+        second_hour = next(hour for hour in hourly['hours'] if hour['label'] == '12.00')
+        third_hour = next(hour for hour in hourly['hours'] if hour['label'] == '13.00')
+        excavator_row = next(row for row in hourly['rows'] if row['equipment'].id == self.excavator.id)
+
+        self.assertEqual([point['label'] for point in first_hour['points']], ['ККД'])
+        self.assertEqual([point['label'] for point in second_hour['points']], ['СКДР'])
+        self.assertNotIn('СКДР', [point['label'] for point in first_hour['points']])
+        self.assertNotIn('ККД', [point['label'] for point in second_hour['points']])
+        self.assertEqual(first_hour['trip_count'], 2)
+        self.assertEqual(second_hour['trip_count'], 1)
+        self.assertEqual(third_hour['trip_count'], 1)
+        self.assertEqual(excavator_row['trip_count'], 4)
+        self.assertEqual(hourly['volume'], Decimal('165.00'))
 
     def test_excavation_downtimes_are_grouped_by_reason_and_zero_totals_hidden(self):
         waiting, _ = DowntimeReason.objects.get_or_create(
@@ -202,10 +241,12 @@ class DispatcherShiftReportTests(TestCase):
         hub = self.client.get(reverse('dispatcher_reports'), params)
         trucks = self.client.get(reverse('dispatcher_shift_trucks'), params)
         excavation = self.client.get(reverse('dispatcher_shift_excavation'), params)
+        hourly = self.client.get(reverse('dispatcher_shift_hourly'), params)
 
         self.assertEqual(hub.status_code, 200)
         self.assertContains(hub, 'Итоги смены по самосвалам')
         self.assertContains(hub, 'Работа выемочного оборудования')
+        self.assertContains(hub, 'Почасовая сводка смены')
         self.assertEqual(trucks.status_code, 200)
         self.assertContains(trucks, 'dispatcher-shift-report-screen')
         self.assertContains(trucks, 'data-dispatcher-shift-report-live')
@@ -221,6 +262,10 @@ class DispatcherShiftReportTests(TestCase):
         self.assertContains(excavation, 'data-dispatcher-shift-report-live')
         self.assertContains(excavation, 'Тип грунта')
         self.assertContains(excavation, 'Место разгрузки')
+        self.assertEqual(hourly.status_code, 200)
+        self.assertContains(hourly, 'Почасовая сводка смены')
+        self.assertContains(hourly, 'ККД')
+        self.assertContains(hourly, 'data-dispatcher-shift-report-live')
 
     def test_both_shift_reports_expose_live_operational_fragment(self):
         params = {
@@ -230,7 +275,7 @@ class DispatcherShiftReportTests(TestCase):
             '_operational_version': '0',
         }
 
-        for route_name in ('dispatcher_shift_trucks', 'dispatcher_shift_excavation'):
+        for route_name in ('dispatcher_shift_trucks', 'dispatcher_shift_excavation', 'dispatcher_shift_hourly'):
             with self.subTest(route_name=route_name):
                 response = self.client.get(
                     reverse(route_name),
@@ -254,6 +299,7 @@ class DispatcherShiftReportTests(TestCase):
         params = {'date': self.selected_date.isoformat(), 'shift_type': 'day'}
         trucks_response = self.client.get(reverse('dispatcher_shift_trucks_export'), params)
         excavation_response = self.client.get(reverse('dispatcher_shift_excavation_export'), params)
+        hourly_response = self.client.get(reverse('dispatcher_shift_hourly_export'), params)
 
         self.assertEqual(trucks_response.status_code, 200)
         truck_book = load_workbook(BytesIO(trucks_response.content), data_only=False)
@@ -270,6 +316,15 @@ class DispatcherShiftReportTests(TestCase):
         excavation_book = load_workbook(BytesIO(excavation_response.content), data_only=False)
         self.assertEqual(excavation_book.sheetnames, ['Выемочное оборудование'])
         self.assertEqual(excavation_book.active['A3'].value, 'Тип грунта')
+
+        self.assertEqual(hourly_response.status_code, 200)
+        hourly_book = load_workbook(BytesIO(hourly_response.content), data_only=False)
+        self.assertEqual(hourly_book.sheetnames, ['Почасовая сводка'])
+        hourly_sheet = hourly_book.active
+        self.assertEqual(hourly_sheet['A1'].value, 'Почасовая сводка смены')
+        self.assertEqual(hourly_sheet['C3'].value, '08.00')
+        self.assertIn('ККД', [cell.value for cell in hourly_sheet[4]])
+        self.assertTrue(any(cell.data_type == 'f' for row in hourly_sheet.iter_rows() for cell in row))
 
     def test_dispatcher_correction_updates_source_and_writes_audit_log(self):
         response = self.client.post(reverse('dispatcher_shift_trucks'), {

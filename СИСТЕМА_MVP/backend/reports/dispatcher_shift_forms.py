@@ -1,5 +1,6 @@
 import re
 from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db.models import Q
@@ -308,6 +309,162 @@ def build_excavation_rows(trips, downtimes, meta):
     return rows, totals, other_rows
 
 
+def build_hourly_shift_matrix(trips, meta):
+    """Build the dispatcher hourly matrix by loading time at the excavator."""
+    hours = []
+    hour_start = meta['start']
+    while hour_start < meta['end']:
+        hour_end = min(hour_start + timedelta(hours=1), meta['end'])
+        hours.append({
+            'index': len(hours),
+            'start': hour_start,
+            'end': hour_end,
+            'label': timezone.localtime(hour_end).strftime('%H.%M'),
+            'range_label': (
+                f'{timezone.localtime(hour_start):%H:%M}–'
+                f'{timezone.localtime(hour_end):%H:%M}'
+            ),
+            'points': [],
+            'trip_count': 0,
+            'volume': ZERO,
+        })
+        hour_start = hour_end
+
+    bucketed = defaultdict(lambda: {'trip_count': 0, 'volume': ZERO})
+    point_objects = {}
+    excavator_objects = {}
+    for trip in trips:
+        loaded_at = trip.created_at
+        hour_index = next((
+            hour['index'] for hour in hours
+            if hour['start'] <= loaded_at < hour['end']
+        ), None)
+        if hour_index is None:
+            continue
+        point = effective_dump_point(trip)
+        point_key = point.id if point else 0
+        point_objects[point_key] = point
+        excavator_objects[trip.excavator_id] = trip.excavator
+        fleet = 'nhl' if is_nhl(trip.truck) else 'belaz'
+        metric = bucketed[(trip.excavator_id, fleet, hour_index, point_key)]
+        metric['trip_count'] += 1
+        metric['volume'] += trip.volume_m3 or ZERO
+        hours[hour_index]['trip_count'] += 1
+        hours[hour_index]['volume'] += trip.volume_m3 or ZERO
+
+    points_by_hour = defaultdict(set)
+    for _, _, hour_index, point_key in bucketed:
+        points_by_hour[hour_index].add(point_key)
+    for hour in hours:
+        hour['points'] = [
+            {
+                'key': point_key,
+                'label': str(point_objects[point_key]) if point_objects[point_key] else 'Без точки',
+            }
+            for point_key in sorted(
+                points_by_hour[hour['index']],
+                key=lambda key: natural_key(str(point_objects[key]) if point_objects[key] else 'Без точки'),
+            )
+        ]
+        hour['point_totals'] = [
+            {
+                'trip_count': sum(
+                    metric['trip_count']
+                    for (excavator_id, fleet, hour_index, point_key), metric in bucketed.items()
+                    if hour_index == hour['index'] and point_key == point['key']
+                ),
+                'volume': decimal_sum(
+                    metric['volume']
+                    for (excavator_id, fleet, hour_index, point_key), metric in bucketed.items()
+                    if hour_index == hour['index'] and point_key == point['key']
+                ),
+            }
+            for point in hour['points']
+        ]
+
+    active_excavators = [
+        equipment
+        for equipment in Equipment.objects.filter(is_active=True).select_related('equipment_type', 'model')
+        if 'экскаватор' in equipment.equipment_type.name.lower()
+    ]
+    known_ids = {equipment.id for equipment in active_excavators}
+    active_excavators.extend(
+        equipment for equipment in excavator_objects.values()
+        if equipment.id not in known_ids and not known_ids.add(equipment.id)
+    )
+
+    rows = []
+    grand_trip_count = 0
+    grand_volume = ZERO
+    for excavator in sorted(active_excavators, key=lambda item: natural_key(item.garage_number)):
+        fleet_rows = []
+        excavator_hour_totals = []
+        excavator_trip_count = 0
+        excavator_volume = ZERO
+        for fleet, fleet_label in (('belaz', 'БелАЗ'), ('nhl', 'NHL')):
+            fleet_hours = []
+            fleet_trip_count = 0
+            fleet_volume = ZERO
+            for hour in hours:
+                cells = []
+                hour_trip_count = 0
+                hour_volume = ZERO
+                for point in hour['points']:
+                    metric = bucketed[(excavator.id, fleet, hour['index'], point['key'])]
+                    cells.append(metric)
+                    hour_trip_count += metric['trip_count']
+                    hour_volume += metric['volume']
+                fleet_hours.append({
+                    'cells': cells,
+                    'trip_count': hour_trip_count,
+                    'volume': hour_volume,
+                })
+                fleet_trip_count += hour_trip_count
+                fleet_volume += hour_volume
+            fleet_rows.append({
+                'key': fleet,
+                'label': fleet_label,
+                'hours': fleet_hours,
+                'trip_count': fleet_trip_count,
+                'volume': fleet_volume,
+            })
+            excavator_trip_count += fleet_trip_count
+            excavator_volume += fleet_volume
+
+        for hour_index, hour in enumerate(hours):
+            point_totals = []
+            for point_index, _point in enumerate(hour['points']):
+                point_totals.append({
+                    'trip_count': sum(row['hours'][hour_index]['cells'][point_index]['trip_count'] for row in fleet_rows),
+                    'volume': decimal_sum(row['hours'][hour_index]['cells'][point_index]['volume'] for row in fleet_rows),
+                })
+            excavator_hour_totals.append({
+                'cells': point_totals,
+                'trip_count': sum(row['hours'][hour_index]['trip_count'] for row in fleet_rows),
+                'volume': decimal_sum(row['hours'][hour_index]['volume'] for row in fleet_rows),
+            })
+
+        rows.append({
+            'equipment': excavator,
+            'label': excavator.garage_number,
+            'fleet_rows': fleet_rows,
+            'hours': excavator_hour_totals,
+            'trip_count': excavator_trip_count,
+            'volume': excavator_volume,
+        })
+        grand_trip_count += excavator_trip_count
+        grand_volume += excavator_volume
+
+    return {
+        'hours': hours,
+        'rows': rows,
+        'trip_count': grand_trip_count,
+        'volume': grand_volume,
+        'column_count': 4 + sum(len(hour['points']) + 2 for hour in hours),
+        'min_width_px': 300 + sum((len(hour['points']) * 74) + 126 for hour in hours),
+    }
+
+
 def build_quality_issues(trips, open_trips, downtimes):
     issues = []
     missing_volume = sum(1 for trip in trips if trip.volume_m3 is None)
@@ -328,15 +485,22 @@ def build_dispatcher_shift_report(selected_date, shift_type):
     meta = shift_meta(selected_date, shift_type)
     meta['shift_type'] = shift_type
     trips = load_shift_trips(selected_date, shift_type)
+    hourly_trips = load_shift_trips(
+        selected_date,
+        shift_type,
+        statuses=(TripStatus.LOADED_WAITING_UNLOAD, TripStatus.COMPLETED),
+    )
     open_trips = load_shift_trips(selected_date, shift_type, statuses=OPEN_TRIP_STATUSES)
     downtimes = load_shift_downtimes(selected_date, shift_type)
     truck_rows, truck_totals = build_truck_rows(trips, downtimes, meta)
     excavation_rows, excavation_totals, other_rows = build_excavation_rows(trips, downtimes, meta)
+    hourly = build_hourly_shift_matrix(hourly_trips, meta)
     return {
         'date': selected_date,
         'date_value': selected_date.isoformat(),
         'meta': meta,
         'trips': trips,
+        'hourly_trips': hourly_trips,
         'open_trips': open_trips,
         'downtimes': downtimes,
         'truck_rows': truck_rows,
@@ -344,6 +508,7 @@ def build_dispatcher_shift_report(selected_date, shift_type):
         'excavation_rows': excavation_rows,
         'excavation_totals': excavation_totals,
         'other_rows': other_rows,
+        'hourly': hourly,
         'issues': build_quality_issues(trips, open_trips, downtimes),
     }
 
@@ -490,9 +655,139 @@ def write_excavation_sheet(sheet, report):
     sheet.print_area = f'A1:J{total_row}'
 
 
+def write_hourly_sheet(sheet, report):
+    sheet.title = 'Почасовая сводка'
+    hourly = report['hourly']
+    hours = hourly['hours']
+    border = Border(left=THIN_BLACK, right=THIN_BLACK, top=THIN_BLACK, bottom=THIN_BLACK)
+    medium_border = Border(left=MEDIUM_BLACK, right=MEDIUM_BLACK, top=MEDIUM_BLACK, bottom=MEDIUM_BLACK)
+    belaz_fill = PatternFill('solid', fgColor='E7E6E6')
+    nhl_fill = PatternFill('solid', fgColor='BDD7EE')
+    total_fill = PatternFill('solid', fgColor='FFD966')
+    hour_fill = PatternFill('solid', fgColor='FFF2CC')
+
+    columns = []
+    current_column = 3
+    for hour in hours:
+        point_columns = []
+        for point in hour['points']:
+            point_columns.append({'column': current_column, 'point': point})
+            current_column += 1
+        columns.append({
+            'hour': hour,
+            'points': point_columns,
+            'trip_column': current_column,
+            'volume_column': current_column + 1,
+            'start_column': point_columns[0]['column'] if point_columns else current_column,
+            'end_column': current_column + 1,
+        })
+        current_column += 2
+    total_trip_column = current_column
+    total_volume_column = current_column + 1
+    last_column = total_volume_column
+
+    sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_column)
+    sheet.cell(1, 1, 'Почасовая сводка смены')
+    sheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_column)
+    sheet.cell(2, 1, f'{report["date"]:%d.%m.%Y} · {report["meta"]["label"]} смена {report["meta"]["time_range"]}')
+    sheet.merge_cells(start_row=3, start_column=1, end_row=4, end_column=1)
+    sheet.merge_cells(start_row=3, start_column=2, end_row=4, end_column=2)
+    sheet.cell(3, 1, '№ экс')
+    sheet.cell(3, 2, 'а/с')
+    for column in columns:
+        sheet.merge_cells(
+            start_row=3,
+            start_column=column['start_column'],
+            end_row=3,
+            end_column=column['end_column'],
+        )
+        sheet.cell(3, column['start_column'], column['hour']['label'])
+        for point_column in column['points']:
+            sheet.cell(4, point_column['column'], point_column['point']['label'])
+        sheet.cell(4, column['trip_column'], 'Рейсы')
+        sheet.cell(4, column['volume_column'], 'Объём')
+    sheet.merge_cells(start_row=3, start_column=total_trip_column, end_row=3, end_column=total_volume_column)
+    sheet.cell(3, total_trip_column, 'ИТОГО')
+    sheet.cell(4, total_trip_column, 'Рейсы')
+    sheet.cell(4, total_volume_column, 'Объём')
+
+    style_range(sheet, f'A1:{get_column_letter(last_column)}1', fill=total_fill, font=Font(bold=True, size=15), alignment=Alignment(horizontal='center'))
+    style_range(sheet, f'A2:{get_column_letter(last_column)}2', fill=total_fill, font=Font(bold=True), alignment=Alignment(horizontal='center'))
+    style_range(sheet, f'A3:{get_column_letter(last_column)}4', fill=hour_fill, font=Font(bold=True), alignment=Alignment(horizontal='center', vertical='center', wrap_text=True), border=border)
+    sheet.freeze_panes = 'C5'
+    sheet.sheet_view.showGridLines = False
+
+    detail_rows = []
+    for row in hourly['rows']:
+        first_row = sheet.max_row + 1
+        fleet_excel_rows = []
+        for fleet_row in row['fleet_rows']:
+            sheet.append(['', fleet_row['label']])
+            row_number = sheet.max_row
+            fleet_excel_rows.append(row_number)
+            for hour_index, column in enumerate(columns):
+                hour_data = fleet_row['hours'][hour_index]
+                for point_index, point_column in enumerate(column['points']):
+                    value = hour_data['cells'][point_index]['trip_count']
+                    sheet.cell(row_number, point_column['column'], value or '')
+                sheet.cell(row_number, column['trip_column'], hour_data['trip_count'] or '')
+                sheet.cell(row_number, column['volume_column'], float(hour_data['volume']) if hour_data['volume'] else '')
+            sheet.cell(row_number, total_trip_column, fleet_row['trip_count'] or '')
+            sheet.cell(row_number, total_volume_column, float(fleet_row['volume']) if fleet_row['volume'] else '')
+            row_fill = nhl_fill if fleet_row['key'] == 'nhl' else belaz_fill
+            style_range(sheet, f'A{row_number}:{get_column_letter(last_column)}{row_number}', fill=row_fill, alignment=Alignment(horizontal='center', vertical='center'), border=border)
+            detail_rows.append(row_number)
+        sheet.merge_cells(start_row=first_row, start_column=1, end_row=first_row + 1, end_column=1)
+        sheet.cell(first_row, 1, row['label'])
+        sheet.cell(first_row, 1).font = Font(bold=True, size=12)
+        sheet.cell(first_row, 1).alignment = Alignment(horizontal='center', vertical='center')
+
+        sheet.append(['Рейсы', 'Объёмы'])
+        subtotal_row = sheet.max_row
+        for column in columns:
+            for point_column in column['points']:
+                letter = get_column_letter(point_column['column'])
+                sheet.cell(subtotal_row, point_column['column'], f'=SUM({letter}{fleet_excel_rows[0]}:{letter}{fleet_excel_rows[-1]})')
+            trip_letter = get_column_letter(column['trip_column'])
+            volume_letter = get_column_letter(column['volume_column'])
+            sheet.cell(subtotal_row, column['trip_column'], f'=SUM({trip_letter}{fleet_excel_rows[0]}:{trip_letter}{fleet_excel_rows[-1]})')
+            sheet.cell(subtotal_row, column['volume_column'], f'=SUM({volume_letter}{fleet_excel_rows[0]}:{volume_letter}{fleet_excel_rows[-1]})')
+        total_trip_letter = get_column_letter(total_trip_column)
+        total_volume_letter = get_column_letter(total_volume_column)
+        sheet.cell(subtotal_row, total_trip_column, f'=SUM({total_trip_letter}{fleet_excel_rows[0]}:{total_trip_letter}{fleet_excel_rows[-1]})')
+        sheet.cell(subtotal_row, total_volume_column, f'=SUM({total_volume_letter}{fleet_excel_rows[0]}:{total_volume_letter}{fleet_excel_rows[-1]})')
+        style_range(sheet, f'A{subtotal_row}:{get_column_letter(last_column)}{subtotal_row}', fill=total_fill, font=Font(bold=True), alignment=Alignment(horizontal='center', vertical='center'), border=medium_border)
+
+    sheet.append(['ИТОГО ЗА СМЕНУ', ''])
+    grand_row = sheet.max_row
+    for column in columns:
+        for point_column in column['points']:
+            letter = get_column_letter(point_column['column'])
+            sheet.cell(grand_row, point_column['column'], f'=SUM({",".join(f"{letter}{row}" for row in detail_rows)})' if detail_rows else 0)
+        sheet.cell(grand_row, column['trip_column'], column['hour']['trip_count'])
+        sheet.cell(grand_row, column['volume_column'], float(column['hour']['volume']))
+    sheet.cell(grand_row, total_trip_column, hourly['trip_count'])
+    sheet.cell(grand_row, total_volume_column, float(hourly['volume']))
+    style_range(sheet, f'A{grand_row}:{get_column_letter(last_column)}{grand_row}', fill=total_fill, font=Font(bold=True, size=11), alignment=Alignment(horizontal='center', vertical='center'), border=medium_border)
+
+    sheet.column_dimensions['A'].width = 11
+    sheet.column_dimensions['B'].width = 11
+    for column in range(3, last_column + 1):
+        sheet.column_dimensions[get_column_letter(column)].width = 11
+    sheet.page_setup.orientation = 'landscape'
+    sheet.page_setup.paperSize = sheet.PAPERSIZE_A3
+    sheet.page_setup.fitToWidth = 1
+    sheet.page_setup.fitToHeight = 0
+    sheet.sheet_properties.pageSetUpPr.fitToPage = True
+    sheet.print_title_rows = '1:4'
+    sheet.print_area = f'A1:{get_column_letter(last_column)}{grand_row}'
+
+
 def build_shift_report_workbook(report, report_kind):
     workbook = Workbook()
-    if report_kind == 'excavation':
+    if report_kind == 'hourly':
+        write_hourly_sheet(workbook.active, report)
+    elif report_kind == 'excavation':
         write_excavation_sheet(workbook.active, report)
     elif report_kind == 'all':
         write_truck_sheet(workbook.active, report)
