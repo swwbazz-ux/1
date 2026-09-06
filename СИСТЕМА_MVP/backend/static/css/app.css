@@ -33575,6 +33575,12 @@ body.is-observer-mode .app-contract-banner {
 
 /* Сменные формы диспетчера: на экране это рабочий контроль,
    а белая область повторяет привычную табличную форму и идёт в печать. */
+body.dispatcher-shift-report-screen {
+    min-height: 100vh;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
 .dispatcher-shift-report-page {
     width: 100%;
     height: auto;

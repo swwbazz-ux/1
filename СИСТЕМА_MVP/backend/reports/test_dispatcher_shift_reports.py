@@ -125,9 +125,11 @@ class DispatcherShiftReportTests(TestCase):
         self.assertContains(hub, 'Итоги смены по самосвалам')
         self.assertContains(hub, 'Работа выемочного оборудования')
         self.assertEqual(trucks.status_code, 200)
+        self.assertContains(trucks, 'dispatcher-shift-report-screen')
         self.assertContains(trucks, 'м³×км')
         self.assertContains(trucks, 'Корректировать')
         self.assertEqual(excavation.status_code, 200)
+        self.assertContains(excavation, 'dispatcher-shift-report-screen')
         self.assertContains(excavation, 'Тип грунта')
         self.assertContains(excavation, 'Место разгрузки')
 
