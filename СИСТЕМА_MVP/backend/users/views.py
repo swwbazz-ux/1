@@ -113,6 +113,7 @@ from .models import (
     WorkSchedule,
 )
 from .live_monitor import presence_by_employee_id
+from .registration_dashboard import build_registration_dashboard
 from .oup_undo import (
     get_oup_action_undo_state,
     undo_oup_action,
@@ -1096,6 +1097,17 @@ def system_admin_dashboard_view(request):
             'shift_reading_corrections': recent_shift_reading_corrections(),
         },
     )
+
+
+@require_GET
+def system_admin_registration_dashboard_view(request):
+    access = require_admin_access(request)
+    if not access:
+        return redirect('role_home')
+
+    context = build_registration_dashboard(request.GET)
+    context['access'] = access
+    return render(request, 'users/system_admin_registration_dashboard.html', context)
 
 
 @require_POST
