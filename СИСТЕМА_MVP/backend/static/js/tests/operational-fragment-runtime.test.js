@@ -570,6 +570,7 @@ test("open Driver APK delegates the complete cue and voice chain to one native a
             sounds.push(name);
             return Promise.resolve(true);
         },
+        reportDriverAudioDiagnostic() {},
         Promise,
         window: runtimeWindow,
     };
@@ -645,6 +646,87 @@ test("open Driver APK delegates the complete cue and voice chain to one native a
     sandbox.context.alert(context);
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(sounds, ["truck_assigned"]);
+});
+
+test("Driver loaded fragment triggers dump-point audio even when realtime events are empty", async () => {
+    const alertContexts = [];
+    let currentShell;
+    const oldShell = {
+        dataset: {activeTab: "work", driverHasLoadedTrip: "false"},
+        querySelector(selector) {
+            if (selector === "[data-driver-active-downtime-flow]") {
+                return {dataset: {driverActiveDowntimeFlow: "waiting_loading"}};
+            }
+            return null;
+        },
+        replaceWith(nextShell) { currentShell = nextShell; },
+    };
+    const freshShell = {
+        dataset: {
+            driverHasLoadedTrip: "true",
+            driverActiveTripId: "420",
+            driverAssignedDumpPointId: "5",
+            driverAssignedDumpPointName: "Склад окисленной руды",
+        },
+        querySelector() { return null; },
+        querySelectorAll() { return []; },
+    };
+    currentShell = oldShell;
+    const runtimeWindow = {
+        AppOperationalFragment: {
+            request(screen, version) {
+                assert.equal(screen, "driver");
+                assert.equal(version, 10830);
+                return Promise.resolve({html: "<main></main>"});
+            },
+            parseRoot() { return freshShell; },
+        },
+        history: {replaceState() {}},
+        location: {href: "https://driver.example/driver/?tab=work"},
+        bindDriverMobileShell() {},
+        checkAchievementPrize() {},
+    };
+    const sandbox = {
+        context: {},
+        document: {
+            body: {dataset: {}},
+            querySelector(selector) {
+                return selector === "[data-driver-shell]" ? currentShell : null;
+            },
+            querySelectorAll() { return []; },
+        },
+        isDriverOperationalRefreshUnsafe() { return false; },
+        playDriverDumpPointAlert(context) { alertContexts.push(context); },
+        Promise,
+        URL,
+        window: runtimeWindow,
+    };
+    runtimeWindow.window = runtimeWindow;
+    vm.runInNewContext(
+        [
+            extractBraceBlock(
+                DRIVER_TEMPLATE_SOURCE,
+                "function syncDriverTabMarkup(shell, tab)",
+                "Driver tab markup sync"
+            ),
+            extractBraceBlock(
+                DRIVER_TEMPLATE_SOURCE,
+                "window.applyOperationalStateRefresh = function (context)",
+                "Driver operational refresh"
+            ),
+            "context.refresh = window.applyOperationalStateRefresh;",
+        ].join("\n"),
+        sandbox,
+        {filename: "templates/users/driver_shift.html#loaded-fragment-audio"}
+    );
+
+    const result = await sandbox.context.refresh({version: 10830, events: []});
+
+    assert.equal(result.applied, true);
+    assert.equal(alertContexts.length, 1);
+    assert.equal(alertContexts[0].events[0].version, 10830);
+    assert.equal(alertContexts[0].events[0].payload.trip_id, 420);
+    assert.equal(alertContexts[0].events[0].payload.assigned_dump_point_id, 5);
 });
 
 

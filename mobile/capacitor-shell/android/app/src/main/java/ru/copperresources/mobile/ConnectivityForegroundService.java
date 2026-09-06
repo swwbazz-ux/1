@@ -196,12 +196,14 @@ public class ConnectivityForegroundService extends Service {
                 .putString("last_response", result.body)
                 .putLong("last_server_version", serverVersion > 0L ? serverVersion : previousVersion)
                 .apply();
-            if (previousVersion > 0L
-                    && serverVersion > previousVersion
-                    && relevant
-                    && !AppVisibility.isForeground()) {
-                boolean specificAlertShown = showLatestDriverDumpPointAlert(result.body, preferences);
-                if (!specificAlertShown) {
+            if (previousVersion > 0L && serverVersion > previousVersion && relevant) {
+                boolean appIsForeground = AppVisibility.isForeground();
+                boolean specificAlertHandled = showLatestDriverDumpPointAlert(
+                    result.body,
+                    preferences,
+                    !appIsForeground
+                );
+                if (!appIsForeground && !specificAlertHandled) {
                     AppNotifications.showOperationalAlert(this, "На сервере появились новые данные смены");
                 }
             }
@@ -322,7 +324,10 @@ public class ConnectivityForegroundService extends Service {
         }
     }
 
-    private boolean showLatestDriverDumpPointAlert(String body, SharedPreferences preferences) {
+    private boolean showLatestDriverDumpPointAlert(
+            String body,
+            SharedPreferences preferences,
+            boolean showNotification) {
         if (!BuildConfig.DRIVER_VOICE_ALERTS_ENABLED) {
             return false;
         }
@@ -382,7 +387,7 @@ public class ConnectivityForegroundService extends Service {
                 return false;
             }
 
-            boolean notificationShown = AppNotifications.showOperationalAlert(
+            boolean notificationShown = showNotification && AppNotifications.showOperationalAlert(
                 this,
                 "Новая точка разгрузки",
                 displayName

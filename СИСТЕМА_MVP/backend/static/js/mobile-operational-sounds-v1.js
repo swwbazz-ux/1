@@ -163,6 +163,23 @@
         });
     }
 
+    function diagnostics() {
+        var plugin = capacitorNativeSoundPlugin();
+        if (!plugin || typeof plugin.getDiagnostics !== "function") {
+            return Promise.resolve({supported: false});
+        }
+        return Promise.resolve(plugin.getDiagnostics()).then(function (result) {
+            result = result || {};
+            result.supported = true;
+            return result;
+        }).catch(function (error) {
+            return {
+                supported: true,
+                error: error && error.message ? String(error.message) : "bridge_error"
+            };
+        });
+    }
+
     function unlock() {
         var context = getAudioContext();
         if (!context) return;
@@ -202,6 +219,7 @@
         files: soundFiles,
         play: play,
         announceDumpPoint: announceDumpPoint,
+        diagnostics: diagnostics,
         preload: unlock
     });
 })();

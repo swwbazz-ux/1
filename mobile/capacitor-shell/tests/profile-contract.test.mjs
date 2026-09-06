@@ -35,8 +35,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-      versionCode: "19",
-      versionName: "0.1.14",
+    versionCode: "20",
+    versionName: "0.1.15",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -330,6 +330,8 @@ test("background service announces only a fresh driver truck_loaded event", () =
   assert.match(service, /"truck_loaded"\.equals\(payload\.optString\("action"\)\)/);
   assert.match(service, /last_driver_dump_point_alert_version/);
   assert.match(service, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
+  assert.match(service, /serverVersion > previousVersion && relevant[\s\S]*?showLatestDriverDumpPointAlert/);
+  assert.doesNotMatch(service, /serverVersion > previousVersion[\s\S]{0,120}!AppVisibility\.isForeground/);
   assert.match(player, /AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK/);
   assert.match(player, /DriverVoiceCatalog\.resourceNameFor/);
   for (const [id, resource] of [
@@ -362,9 +364,16 @@ test("foreground driver screen uses the same deduplicated recorded voice bridge"
   assert.match(service, /driverVoicePlayer\.announce\([\s\S]*?!notificationShown/);
   assert.match(service, /static boolean claimDriverDumpPointAlert/);
   assert.match(sounds, /announceDumpPoint: announceDumpPoint/);
+  assert.match(sounds, /diagnostics: diagnostics/);
   assert.match(driverTemplate, /operational-state-refresh-applied/);
   assert.match(driverTemplate, /event\.type !== "trip_changed"/);
   assert.match(driverTemplate, /payload\.action !== "truck_loaded"/);
+  assert.match(driverTemplate, /oldShell\.dataset\.driverHasLoadedTrip !== "true"/);
+  assert.match(driverTemplate, /freshShell\.dataset\.driverHasLoadedTrip === "true"/);
+  assert.match(driverTemplate, /becameLoaded[\s\S]*?playDriverDumpPointAlert/);
+  assert.match(plugin, /@PluginMethod\s+public void getDiagnostics\(PluginCall call\)/);
+  assert.match(player, /recordStage\("cue_started"/);
+  assert.match(player, /recordStage\("voice_started"/);
 });
 
 test("WebView cookies are accepted and flushed at every persistence boundary", () => {

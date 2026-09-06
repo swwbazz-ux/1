@@ -10,11 +10,16 @@ import android.os.Handler;
 import android.os.Looper;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
+import android.util.Log;
 
 import java.util.Locale;
 
 /** Проигрывает проверенную запись после штатного сигнала уведомления. */
 public final class DriverVoicePlayer {
+    static final String DIAGNOSTIC_PREFS = "driver_voice_diagnostics";
+    static final String DIAGNOSTIC_STAGE = "last_stage";
+    static final String DIAGNOSTIC_DETAIL = "last_detail";
+    static final String DIAGNOSTIC_AT = "last_stage_at";
     private static final String TTS_UTTERANCE_ID = "driver-dump-point";
     private static final AudioAttributes SPEECH_ATTRIBUTES = new AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
@@ -42,6 +47,16 @@ public final class DriverVoicePlayer {
     private int generation;
     private boolean textToSpeechInitializing;
     private boolean destroyed;
+
+    private void recordStage(String stage, String detail) {
+        context.getSharedPreferences(DIAGNOSTIC_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(DIAGNOSTIC_STAGE, stage)
+            .putString(DIAGNOSTIC_DETAIL, detail == null ? "" : detail)
+            .putLong(DIAGNOSTIC_AT, System.currentTimeMillis())
+            .apply();
+        Log.i("DriverVoicePlayer", stage + (detail == null || detail.isBlank() ? "" : ": " + detail));
+    }
 
     public DriverVoicePlayer(Context context) {
         this.context = context.getApplicationContext();
@@ -85,6 +100,7 @@ public final class DriverVoicePlayer {
             context.getPackageName()
         );
         if (resourceId == 0) {
+            recordStage("cue_resource_missing", BuildConfig.ALERT_SOUND_RESOURCE);
             return;
         }
         cuePlayer = MediaPlayer.create(
@@ -94,15 +110,18 @@ public final class DriverVoicePlayer {
             AudioManager.AUDIO_SESSION_ID_GENERATE
         );
         if (cuePlayer == null) {
+            recordStage("cue_create_failed", BuildConfig.ALERT_SOUND_RESOURCE);
             return;
         }
         cuePlayer.setVolume(1.0f, 1.0f);
         cuePlayer.setOnCompletionListener(player -> releaseCuePlayer(player));
         cuePlayer.setOnErrorListener((player, what, extra) -> {
+            recordStage("cue_error", what + "/" + extra);
             releaseCuePlayer(player);
             return true;
         });
         cuePlayer.start();
+        recordStage("cue_started", BuildConfig.ALERT_SOUND_RESOURCE);
     }
 
     private void releaseCuePlayer(MediaPlayer player) {
@@ -129,6 +148,7 @@ public final class DriverVoicePlayer {
             ? 0
             : context.getResources().getIdentifier(resourceName, "raw", context.getPackageName());
         if (resourceId == 0) {
+            recordStage("voice_resource_missing", resourceName);
             speakFallback(fallbackText, scheduledGeneration);
             return;
         }
@@ -141,23 +161,27 @@ public final class DriverVoicePlayer {
             AudioManager.AUDIO_SESSION_ID_GENERATE
         );
         if (mediaPlayer == null) {
+            recordStage("voice_create_failed", resourceName);
             abandonAudioFocus();
             speakFallback(fallbackText, scheduledGeneration);
             return;
         }
         mediaPlayer.setOnCompletionListener(player -> stopCurrentPlayback());
         mediaPlayer.setOnErrorListener((player, what, extra) -> {
+            recordStage("voice_error", what + "/" + extra);
             stopCurrentPlayback();
             speakFallback(fallbackText, scheduledGeneration);
             return true;
         });
         mediaPlayer.start();
+        recordStage("voice_started", resourceName);
     }
 
     private void speakFallback(String fallbackText, int scheduledGeneration) {
         if (destroyed || scheduledGeneration != generation || fallbackText.isBlank()) {
             return;
         }
+        recordStage("tts_requested", fallbackText);
         pendingFallbackText = fallbackText;
         if (textToSpeech != null) {
             startTextToSpeech(scheduledGeneration);

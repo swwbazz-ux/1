@@ -1,7 +1,10 @@
 package ru.copperresources.mobile;
 
 import android.media.AudioAttributes;
+import android.media.AudioManager;
 import android.media.MediaPlayer;
+import android.content.Context;
+import android.content.SharedPreferences;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -96,6 +99,27 @@ public class NativeSoundPlugin extends Plugin {
                 .put("announced", true)
                 .put("cuePlayed", true));
         });
+    }
+
+    @PluginMethod
+    public void getDiagnostics(PluginCall call) {
+        SharedPreferences preferences = getContext().getSharedPreferences(
+            DriverVoicePlayer.DIAGNOSTIC_PREFS,
+            Context.MODE_PRIVATE
+        );
+        AudioManager audioManager = getContext().getSystemService(AudioManager.class);
+        JSObject result = new JSObject()
+            .put("stage", preferences.getString(DriverVoicePlayer.DIAGNOSTIC_STAGE, "none"))
+            .put("detail", preferences.getString(DriverVoicePlayer.DIAGNOSTIC_DETAIL, ""))
+            .put("stageAt", preferences.getLong(DriverVoicePlayer.DIAGNOSTIC_AT, 0L))
+            .put("appForeground", AppVisibility.isForeground());
+        if (audioManager != null) {
+            result.put("musicVolume", audioManager.getStreamVolume(AudioManager.STREAM_MUSIC));
+            result.put("musicVolumeMax", audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+            result.put("ringerMode", audioManager.getRingerMode());
+            result.put("audioMode", audioManager.getMode());
+        }
+        call.resolve(result);
     }
 
     private synchronized void playResource(int resourceId, PluginCall call) {
