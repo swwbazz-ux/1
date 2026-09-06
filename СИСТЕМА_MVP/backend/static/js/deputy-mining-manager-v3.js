@@ -164,10 +164,10 @@
         var presence = employee && employee.presence && typeof employee.presence === "object"
             ? employee.presence
             : {};
-        var status = textValue(presence.status_code || presence.status) || "offline";
+        var status = textValue(presence.status_code || presence.status) || "not_registered";
         return {
             status: status,
-            label: textValue(presence.status_label || presence.label) || "Нет активной связи",
+            label: textValue(presence.status_label || presence.label) || "Не подключался",
             lastSeenTime: textValue(presence.last_seen_time),
             clientBadges: Array.isArray(presence.client_badges) ? presence.client_badges : []
         };

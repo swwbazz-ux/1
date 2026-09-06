@@ -416,8 +416,8 @@ def _application_presence_payload(presence):
             else str(last_seen_at)
         )
     return {
-        'status_code': presence.get('status_code') or 'offline',
-        'status_label': presence.get('status_label') or 'Нет активной связи',
+        'status_code': presence.get('status_code') or 'not_registered',
+        'status_label': presence.get('status_label') or 'Не подключался',
         'last_seen_at': (
             last_seen_at.isoformat()
             if last_seen_at and hasattr(last_seen_at, 'isoformat')

@@ -583,6 +583,42 @@ test("deputy cards use the shared blue background-presence contract", () => {
     );
 });
 
+test("deputy cards keep never-connected employees distinct from offline employees", () => {
+    const neverConnected = planningPayload({assigned: false});
+    neverConnected.employees[0].presence = {
+        status_code: "not_registered",
+        status_label: "Не подключался",
+        last_seen_time: "",
+        client_badges: []
+    };
+    const neverRuntime = createDeputyRuntime({locked: false, payload: neverConnected});
+    const neverPresence = neverRuntime.employeeList.querySelector(".application-presence");
+    assert.equal(neverPresence.getAttribute("data-application-presence"), "not_registered");
+    assert.equal(
+        neverPresence.querySelector(".application-presence__line").children[1].textContent,
+        "Не подключался"
+    );
+
+    const offline = planningPayload({assigned: false});
+    offline.employees[0].presence = {
+        status_code: "offline",
+        status_label: "Нет связи",
+        last_seen_time: "12:34:56",
+        client_badges: [{kind: "android_apk", label: "APK Android", version: "0.1.18"}]
+    };
+    const offlineRuntime = createDeputyRuntime({locked: false, payload: offline});
+    const offlinePresence = offlineRuntime.employeeList.querySelector(".application-presence");
+    assert.equal(offlinePresence.getAttribute("data-application-presence"), "offline");
+    assert.equal(
+        offlinePresence.querySelector(".application-presence__line").children[1].textContent,
+        "Нет связи"
+    );
+    assert.equal(
+        offlinePresence.querySelector(".application-presence__client").textContent,
+        "APK Android · 0.1.18"
+    );
+});
+
 test(
     "locked deputy drag source stays inactive and artificial drop sends no request",
     async () => {

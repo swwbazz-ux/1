@@ -238,7 +238,7 @@ class LiveMonitorPresenceTests(TestCase):
             now=now,
         )[self.excavator_access.employee_id]
         self.assertEqual(presence['status_code'], 'offline')
-        self.assertEqual(presence['status_label'], 'Нет активной связи')
+        self.assertEqual(presence['status_label'], 'Нет связи')
         self.assertEqual(
             presence['client_badges'],
             [{
@@ -251,13 +251,60 @@ class LiveMonitorPresenceTests(TestCase):
             }],
         )
 
-    def test_employee_without_any_session_has_explicit_offline_presence(self):
+    def test_logged_in_employee_without_any_session_has_explicit_offline_presence(self):
         presence = application_presence_by_employee_ids(
             [self.driver_access.employee_id],
         )[self.driver_access.employee_id]
         self.assertEqual(presence['status_code'], 'offline')
-        self.assertEqual(presence['status_label'], 'Нет активной связи')
+        self.assertEqual(presence['status_label'], 'Нет связи')
+        self.assertTrue(presence['has_logged_in'])
         self.assertEqual(presence['client_badges'], [])
+
+    def test_employee_who_never_logged_in_is_visibly_distinct_from_offline(self):
+        employee = Employee.objects.create(
+            full_name='Новый сотрудник',
+            phone='+79990000305',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=employee,
+            role=self.driver_access.role,
+            access_code='305305',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            is_active=True,
+        )
+
+        presence = application_presence_by_employee_ids([employee.pk])[employee.pk]
+
+        self.assertEqual(presence['status_code'], 'not_registered')
+        self.assertEqual(presence['status_label'], 'Не подключался')
+        self.assertFalse(presence['has_logged_in'])
+        self.assertIsNone(presence['last_seen_at'])
+        self.assertEqual(presence['client_badges'], [])
+
+    def test_access_presence_distinguishes_never_logged_in_from_offline(self):
+        never_logged_in = EmployeeAccess.objects.create(
+            employee=Employee.objects.create(
+                full_name='Новый водитель',
+                phone='+79990000306',
+                status=Employee.Status.ACTIVE,
+                is_active=True,
+            ),
+            role=self.driver_access.role,
+            access_code='306306',
+            status=EmployeeAccess.Status.NOT_ACTIVATED,
+            is_active=True,
+        )
+
+        presence = application_presence_by_access_ids(
+            [never_logged_in.pk, self.driver_access.pk]
+        )
+
+        self.assertEqual(presence[never_logged_in.pk]['status_code'], 'not_registered')
+        self.assertEqual(presence[never_logged_in.pk]['status_label'], 'Не подключался')
+        self.assertEqual(presence[self.driver_access.pk]['status_code'], 'offline')
+        self.assertEqual(presence[self.driver_access.pk]['status_label'], 'Нет связи')
 
     def test_employee_register_and_admin_entry_use_shared_presence_component(self):
         ActiveApplicationSession.objects.create(

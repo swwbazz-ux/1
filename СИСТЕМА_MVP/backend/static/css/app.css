@@ -33586,7 +33586,8 @@ body.is-observer-mode .app-contract-banner {
 .application-presence[data-application-presence="online"] { --application-presence-color: #159a68; }
 .application-presence[data-application-presence="background"] { --application-presence-color: #287de8; }
 .application-presence[data-application-presence="recent"] { --application-presence-color: #c3830d; }
-.application-presence[data-application-presence="offline"] { --application-presence-color: #6f7b87; }
+.application-presence[data-application-presence="offline"] { --application-presence-color: #c64545; }
+.application-presence[data-application-presence="not_registered"] { --application-presence-color: #6f7b87; }
 
 .application-presence__clients {
     display: flex;

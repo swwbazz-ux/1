@@ -60,7 +60,10 @@ class EmployeePresenceTests(TestCase):
         )
 
         self.assertEqual(payload[not_registered.id]['status'], 'not_registered')
+        self.assertEqual(payload[not_registered.id]['label'], 'Не подключался')
         self.assertEqual(payload[offline.id]['status'], 'offline')
+        self.assertEqual(payload[offline.id]['label'], 'Нет связи')
         self.assertEqual(payload[recent.id]['status'], 'recent')
+        self.assertEqual(payload[recent.id]['label'], 'Недавно')
         self.assertEqual(payload[online.id]['status'], 'online')
         self.assertEqual(payload[online.id]['app_code'], 'driver')

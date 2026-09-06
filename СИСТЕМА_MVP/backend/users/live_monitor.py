@@ -47,15 +47,21 @@ APPLICATION_CLIENT_KINDS = frozenset(
     value for value, _ in ActiveApplicationSession.ClientKind.choices
 )
 APPLICATION_PRESENCE_OFFLINE = 'offline'
+APPLICATION_PRESENCE_NOT_REGISTERED = 'not_registered'
 APPLICATION_PRESENCE_RECENT = 'recent'
 APPLICATION_PRESENCE_BACKGROUND = 'background'
 APPLICATION_PRESENCE_ONLINE = 'online'
 
 
-def empty_application_presence():
+def empty_application_presence(*, has_logged_in=False):
     return {
-        'status_code': APPLICATION_PRESENCE_OFFLINE,
-        'status_label': 'Нет активной связи',
+        'status_code': (
+            APPLICATION_PRESENCE_OFFLINE
+            if has_logged_in
+            else APPLICATION_PRESENCE_NOT_REGISTERED
+        ),
+        'status_label': 'Нет связи' if has_logged_in else 'Не подключался',
+        'has_logged_in': bool(has_logged_in),
         'is_online': False,
         'is_background': False,
         'is_recent': False,
@@ -65,8 +71,11 @@ def empty_application_presence():
     }
 
 
-def _summarize_application_sessions(sessions, *, now):
-    summary = empty_application_presence()
+def _summarize_application_sessions(sessions, *, now, has_logged_in=False):
+    sessions = list(sessions)
+    summary = empty_application_presence(
+        has_logged_in=has_logged_in or bool(sessions),
+    )
     client_badges = {}
     for session in sessions:
         if summary['last_seen_at'] is None or session.last_seen_at > summary['last_seen_at']:
@@ -127,6 +136,11 @@ def application_presence_by_access_ids(access_ids, *, now=None):
     if not access_ids:
         return {}
     now = now or timezone.now()
+    logged_in_access_ids = set(
+        EmployeeAccess.objects
+        .filter(pk__in=access_ids, last_login_at__isnull=False)
+        .values_list('pk', flat=True)
+    )
     sessions_by_access = {}
     sessions = (
         ActiveApplicationSession.objects
@@ -140,6 +154,7 @@ def application_presence_by_access_ids(access_ids, *, now=None):
         access_id: _summarize_application_sessions(
             sessions_by_access.get(access_id, []),
             now=now,
+            has_logged_in=access_id in logged_in_access_ids,
         )
         for access_id in access_ids
     }
@@ -150,6 +165,11 @@ def application_presence_by_employee_ids(employee_ids, *, now=None):
     if not employee_ids:
         return {}
     now = now or timezone.now()
+    logged_in_employee_ids = set(
+        EmployeeAccess.objects
+        .filter(employee_id__in=employee_ids, last_login_at__isnull=False)
+        .values_list('employee_id', flat=True)
+    )
     sessions_by_employee = {}
     sessions = (
         ActiveApplicationSession.objects
@@ -163,6 +183,7 @@ def application_presence_by_employee_ids(employee_ids, *, now=None):
         employee_id: _summarize_application_sessions(
             sessions_by_employee.get(employee_id, []),
             now=now,
+            has_logged_in=employee_id in logged_in_employee_ids,
         )
         for employee_id in employee_ids
     }
@@ -513,16 +534,16 @@ def presence_by_employee_id(employee_ids, *, now=None):
         latest_session = max(sessions, key=lambda session: session.last_seen_at) if sessions else None
         if not logged_in:
             status = 'not_registered'
-            label = 'Не зарегистрирован'
+            label = 'Не подключался'
         elif latest_session and latest_session.last_seen_at >= now - ONLINE_WINDOW:
             status = 'online'
             label = 'Онлайн'
         elif latest_session and latest_session.last_seen_at >= now - RECENT_WINDOW:
             status = 'recent'
-            label = 'Недавно в сети'
+            label = 'Недавно'
         else:
             status = 'offline'
-            label = 'Не в сети'
+            label = 'Нет связи'
         result[employee_id] = {
             'status': status,
             'label': label,
