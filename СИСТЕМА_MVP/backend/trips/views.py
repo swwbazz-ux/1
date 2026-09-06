@@ -4217,13 +4217,14 @@ def excavator_work_view(request):
                 status=TripStatus.COMPLETED,
                 completed_at__gt=cooldown_cutoff,
             )
-            .only('truck_id', 'completed_at')
+            .select_related('truck')
+            .only('truck_id', 'truck__garage_number', 'completed_at')
             .order_by('truck_id', '-completed_at')
         ):
             post_unload_cooldown_by_truck_id.setdefault(
                 completed_trip.truck_id,
                 truck_post_unload_cooldown(
-                    completed_trip.truck_id,
+                    completed_trip.truck,
                     completed_at=completed_trip.completed_at,
                 ),
             )
