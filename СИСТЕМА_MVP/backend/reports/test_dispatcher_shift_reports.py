@@ -148,11 +148,12 @@ class DispatcherShiftReportTests(TestCase):
         report = build_dispatcher_shift_report(self.selected_date, 'day')
 
         self.assertTrue(report['excavation_rows'])
-        for row in report['excavation_rows']:
-            self.assertEqual(row['downtime'], 'Ожидание самосвалов—1 мин')
-            self.assertNotIn('0 мин', row['downtime'])
-            self.assertNotIn('Автоматически', row['downtime'])
-            self.assertNotIn('Тестовый осмотр', row['downtime'])
+        downtime_values = [row['downtime'] for row in report['excavation_rows']]
+        self.assertEqual(downtime_values.count('Ожидание самосвалов—1 мин'), 1)
+        self.assertTrue(all(not value for value in downtime_values[1:]))
+        self.assertNotIn('0 мин', '; '.join(downtime_values))
+        self.assertNotIn('Автоматически', '; '.join(downtime_values))
+        self.assertNotIn('Тестовый осмотр', '; '.join(downtime_values))
 
     def test_reports_hub_and_both_forms_are_available(self):
         params = {'date': self.selected_date.isoformat(), 'shift_type': 'day'}

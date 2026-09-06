@@ -268,6 +268,13 @@ def build_excavation_rows(trips, downtimes, meta):
         rows.append(row)
 
     rows.sort(key=lambda row: (row['rock_type'].lower(), natural_key(row['excavator_label']), row['dump_point'].lower()))
+    downtime_shown_for = set()
+    for row in rows:
+        equipment_id = row['excavator'].id
+        if equipment_id in downtime_shown_for:
+            row['downtime'] = ''
+            continue
+        downtime_shown_for.add(equipment_id)
     totals = {
         'planned_volume': decimal_sum(row['planned_volume'] for row in rows),
         'volume': decimal_sum(row['volume'] for row in rows),
