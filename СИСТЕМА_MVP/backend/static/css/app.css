@@ -33591,7 +33591,8 @@ body.dispatcher-shift-report-screen {
 
 .dispatcher-shift-report-page .dispatcher-analytics-board {
     display: grid;
-    grid-template-rows: auto auto auto auto auto auto;
+    grid-template-rows: none;
+    align-content: start;
     gap: 10px;
     min-height: 100vh;
     height: auto;
@@ -33599,10 +33600,21 @@ body.dispatcher-shift-report-screen {
     overflow: visible;
 }
 
-.dispatcher-shift-report-toolbar {
+.dispatcher-shift-report-controlbar {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid var(--gd-line);
+    border-radius: 6px;
+    background: var(--gd-panel);
+}
+
+.dispatcher-shift-report-switcher {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     min-width: 0;
 }
 
@@ -33627,7 +33639,6 @@ body.dispatcher-shift-report-screen {
     display: flex;
     gap: 6px;
     min-width: 0;
-    margin-right: auto;
 }
 
 .dispatcher-shift-report-tabs a.is-active {
@@ -33636,16 +33647,55 @@ body.dispatcher-shift-report-screen {
     color: var(--gd-cyan);
 }
 
-.dispatcher-shift-report-page .dispatcher-report-filters p {
-    align-self: center;
-    margin: 0 0 0 8px;
-    color: var(--gd-muted);
-    font-size: 11px;
-    line-height: 1.3;
+.dispatcher-shift-report-filters {
+    display: flex;
+    align-items: end;
+    gap: 8px;
+    min-width: 0;
+    margin-left: 4px;
+    padding: 0 0 0 12px;
+    border: 0;
+    border-left: 1px solid var(--gd-line);
+    border-radius: 0;
+    background: transparent;
 }
 
-.dispatcher-shift-report-page .dispatcher-report-filters p strong {
+.dispatcher-shift-report-filters label {
+    display: grid;
+    gap: 3px;
+    min-width: 132px;
+    color: var(--gd-muted);
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.dispatcher-shift-report-filters input,
+.dispatcher-shift-report-filters select {
+    min-height: 30px;
+    border: 1px solid var(--gd-line);
+    border-radius: 4px;
+    background: var(--gd-panel-soft);
     color: var(--gd-text);
+    font: inherit;
+    font-weight: 900;
+}
+
+.dispatcher-shift-report-filters p {
+    align-self: center;
+    margin: 12px 0 0;
+    color: var(--gd-muted);
+    font-size: 10px;
+    line-height: 1.3;
+    white-space: nowrap;
+}
+
+.dispatcher-shift-report-filters p strong {
+    color: var(--gd-text);
+}
+
+.dispatcher-shift-report-controlbar > .dispatcher-report-actions {
+    margin-left: auto;
 }
 
 .dispatcher-shift-report-messages,
@@ -33914,17 +33964,17 @@ body.dispatcher-shift-report-screen {
 
 @media (max-width: 760px) and (orientation: portrait) {
     .dispatcher-shift-report-page .dispatcher-analytics-board { padding: 6px; gap: 8px; }
-    .dispatcher-shift-report-toolbar { align-items: stretch; flex-wrap: wrap; }
+    .dispatcher-shift-report-controlbar { align-items: stretch; flex-wrap: wrap; }
+    .dispatcher-shift-report-switcher { width: 100%; flex-wrap: wrap; }
     .dispatcher-shift-report-back { width: 100%; justify-content: flex-start; }
     .dispatcher-shift-report-tabs { width: 100%; overflow-x: auto; }
     .dispatcher-shift-report-tabs a { flex: 0 0 auto; min-height: 42px; }
-    .dispatcher-shift-report-toolbar .dispatcher-report-actions { width: 100%; }
-    .dispatcher-shift-report-toolbar .dispatcher-report-actions a,
-    .dispatcher-shift-report-toolbar .dispatcher-report-actions button { flex: 1 1 0; min-height: 42px; }
-    .dispatcher-shift-report-page .dispatcher-report-filters { align-items: stretch; flex-wrap: wrap; }
-    .dispatcher-shift-report-page .dispatcher-report-filters label { flex: 1 1 130px; }
-    .dispatcher-shift-report-page .dispatcher-report-filters button { display: block; flex: 1 1 100%; min-height: 42px; }
-    .dispatcher-shift-report-page .dispatcher-report-filters p { margin: 0; }
+    .dispatcher-shift-report-controlbar .dispatcher-report-actions { width: 100%; margin-left: 0; }
+    .dispatcher-shift-report-controlbar .dispatcher-report-actions a,
+    .dispatcher-shift-report-controlbar .dispatcher-report-actions button { flex: 1 1 0; min-height: 42px; }
+    .dispatcher-shift-report-filters { width: 100%; align-items: stretch; flex-wrap: wrap; margin-left: 0; padding: 8px 0 0; border-top: 1px solid var(--gd-line); border-left: 0; }
+    .dispatcher-shift-report-filters label { flex: 1 1 130px; }
+    .dispatcher-shift-report-filters p { width: 100%; margin: 0; }
     .dispatcher-shift-report-paper-title h1 { font-size: 15px; }
     .dispatcher-shift-source-head { display: grid; }
     .dispatcher-shift-source-row summary { grid-template-columns: 72px minmax(0, 1fr); min-height: 48px; }

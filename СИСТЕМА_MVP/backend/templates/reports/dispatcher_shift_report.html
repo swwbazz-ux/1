@@ -11,12 +11,30 @@
             {% include "includes/dispatcher_header.html" with dispatcher_nav_active="reports" dispatcher_header_screen="Сменные отчёты" %}
         </header>
 
-        <div class="dispatcher-shift-report-toolbar no-print">
-            <a class="dispatcher-shift-report-back" href="{% url 'dispatcher_reports' %}?{{ query_string }}">← Все отчёты</a>
-            <nav class="dispatcher-shift-report-tabs" aria-label="Вид сменного отчёта">
-                <a class="{% if report_kind == 'trucks' %}is-active{% endif %}" href="{% url 'dispatcher_shift_trucks' %}?{{ query_string }}">Самосвалы</a>
-                <a class="{% if report_kind == 'excavation' %}is-active{% endif %}" href="{% url 'dispatcher_shift_excavation' %}?{{ query_string }}">Выемочное оборудование</a>
-            </nav>
+        <section class="dispatcher-shift-report-controlbar no-print" aria-label="Управление сменным отчётом">
+            <div class="dispatcher-shift-report-switcher">
+                <a class="dispatcher-shift-report-back" href="{% url 'dispatcher_reports' %}?{{ query_string }}">← Все отчёты</a>
+                <nav class="dispatcher-shift-report-tabs" aria-label="Вид сменного отчёта">
+                    <a class="{% if report_kind == 'trucks' %}is-active{% endif %}" href="{% url 'dispatcher_shift_trucks' %}?{{ query_string }}">Самосвалы</a>
+                    <a class="{% if report_kind == 'excavation' %}is-active{% endif %}" href="{% url 'dispatcher_shift_excavation' %}?{{ query_string }}">Выемочное оборудование</a>
+                </nav>
+            </div>
+
+            <form class="dispatcher-shift-report-filters" method="get">
+                <label>
+                    <span>Дата</span>
+                    <input type="date" name="date" value="{{ report.date_value }}" onchange="this.form.requestSubmit()">
+                </label>
+                <label>
+                    <span>Смена</span>
+                    <select name="shift_type" onchange="this.form.requestSubmit()">
+                        <option value="day" {% if report.meta.shift_type == 'day' %}selected{% endif %}>Дневная</option>
+                        <option value="night" {% if report.meta.shift_type == 'night' %}selected{% endif %}>Ночная</option>
+                    </select>
+                </label>
+                <p>Применяются сразу · <strong>{{ report.meta.time_range }}</strong></p>
+            </form>
+
             <div class="dispatcher-report-actions">
                 {% if report_kind == 'excavation' %}
                     <a href="{% url 'dispatcher_shift_excavation_export' %}?{{ query_string }}">Excel</a>
@@ -25,22 +43,7 @@
                 {% endif %}
                 <button type="button" onclick="window.print()">Печать</button>
             </div>
-        </div>
-
-        <form class="dispatcher-report-filters no-print" method="get">
-            <label>
-                <span>Дата</span>
-                <input type="date" name="date" value="{{ report.date_value }}" onchange="this.form.requestSubmit()">
-            </label>
-            <label>
-                <span>Смена</span>
-                <select name="shift_type" onchange="this.form.requestSubmit()">
-                    <option value="day" {% if report.meta.shift_type == 'day' %}selected{% endif %}>Дневная</option>
-                    <option value="night" {% if report.meta.shift_type == 'night' %}selected{% endif %}>Ночная</option>
-                </select>
-            </label>
-            <p>Дата и смена применяются сразу. Границы смены: <strong>{{ report.meta.time_range }}</strong>. Отчёт пересчитывается из данных пульта при каждом открытии.</p>
-        </form>
+        </section>
 
         {% if messages %}
             <div class="dispatcher-shift-report-messages no-print" aria-live="polite">
