@@ -12,6 +12,7 @@ from .models import Employee, EmployeeAccess, Role
 class AdminRegistrationDashboardTests(TestCase):
     def setUp(self):
         self.admin_role = Role.objects.create(code='admin', name='Администратор')
+        self.manager_role = Role.objects.create(code='manager', name='Руководство')
         self.driver_role = Role.objects.create(code='driver', name='Водитель самосвала')
         self.excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
         self.admin = Employee.objects.create(
@@ -23,6 +24,18 @@ class AdminRegistrationDashboardTests(TestCase):
             employee=self.admin,
             role=self.admin_role,
             access_code='910001',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        self.manager = Employee.objects.create(
+            full_name='Руководитель отчёта',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.manager_access = EmployeeAccess.objects.create(
+            employee=self.manager,
+            role=self.manager_role,
+            access_code='910005',
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
         )
@@ -121,6 +134,11 @@ class AdminRegistrationDashboardTests(TestCase):
         session['employee_access_id'] = self.admin_access.id
         session.save()
 
+    def authenticate_manager(self):
+        session = self.client.session
+        session['employee_access_id'] = self.manager_access.id
+        session.save()
+
     def test_dashboard_builds_funnel_charts_and_attention_table(self):
         self.authenticate_admin()
 
@@ -194,3 +212,54 @@ class AdminRegistrationDashboardTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'href="/system-admin/registrations/"')
         self.assertContains(response, 'Подключение сотрудников')
+
+    def test_manager_opens_same_dashboard_in_management_shell(self):
+        self.authenticate_manager()
+
+        response = self.client.get('/reports/management/registrations/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['total'], 4)
+        self.assertEqual(response.context['activated'], 2)
+        self.assertEqual(response.context['logged_in'], 1)
+        self.assertTrue(response.context['management_mode'])
+        self.assertContains(response, 'Руководство MVP')
+        self.assertContains(response, 'Прирост регистраций по дням')
+        self.assertContains(response, 'href="/reports/management/registrations/"')
+        self.assertNotContains(
+            response,
+            f'href="/system-admin/employees/{self.driver_active.id}/"',
+        )
+        self.assertNotContains(response, 'Телефон не указан')
+
+    def test_management_summary_links_manager_to_registration_dashboard(self):
+        self.authenticate_manager()
+
+        response = self.client.get('/reports/management/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="/reports/management/registrations/"')
+        self.assertContains(response, '>Подключение</a>', html=False)
+
+    def test_dispatcher_cannot_open_management_registration_dashboard(self):
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        dispatcher = Employee.objects.create(
+            full_name='Диспетчер без доступа к подключениям',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        dispatcher_access = EmployeeAccess.objects.create(
+            employee=dispatcher,
+            role=dispatcher_role,
+            access_code='910006',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        session = self.client.session
+        session['employee_access_id'] = dispatcher_access.id
+        session.save()
+
+        response = self.client.get('/reports/management/registrations/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], '/home/')

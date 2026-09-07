@@ -82,6 +82,9 @@
 <div class="dispatcher-analytics-toolbar">
     <nav class="dispatcher-subnav" aria-label="Разделы витрины руководства">
         <a class="{% if active == 'summary' %}is-active{% endif %}" href="{% url 'management_dashboard' %}">Сводка</a>
+        {% if access.role.code == 'manager' or access.role.code == 'admin' %}
+            <a class="{% if active == 'registrations' %}is-active{% endif %}" href="{% url 'management_registration_dashboard' %}">Подключение</a>
+        {% endif %}
         <a class="{% if active == 'shift_analytics' %}is-active{% endif %}" href="{% url 'shift_analytics_report' %}">Смена</a>
         <a class="{% if active == 'dynamics' %}is-active{% endif %}" href="{% url 'management_dynamics' %}">Динамика</a>
         <a class="{% if active == 'daily' %}is-active{% endif %}" href="{% url 'customer_daily_report' %}">Сутки</a>

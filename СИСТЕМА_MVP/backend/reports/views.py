@@ -48,6 +48,7 @@ from users.active_role import (
     ACTIVE_ROLE_SESSION_KEY,
     role_session_state,
 )
+from users.registration_dashboard import build_registration_dashboard
 from users.models import (
     Employee,
     EmployeeAccess,
@@ -6241,6 +6242,19 @@ def management_dashboard_view(request):
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
     return render(request, 'reports/management_dashboard.html', management_dashboard_context(request, access))
+
+
+@require_GET
+def management_registration_dashboard_view(request):
+    access = get_reports_access(request, MANAGEMENT_REPORT_ROLE_CODES)
+    if not access:
+        return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
+    context = build_registration_dashboard(request.GET)
+    context.update({
+        'access': access,
+        'management_mode': True,
+    })
+    return render(request, 'users/system_admin_registration_dashboard.html', context)
 
 
 def write_key_value_rows(sheet, start_row, rows):

@@ -1,15 +1,25 @@
 {% extends "base.html" %}
 {% load static l10n %}
 
-{% block title %}Подключение сотрудников{% endblock %}
-{% block body_class %}system-admin-registration-dashboard-screen{% endblock %}
+{% block title %}{% if management_mode %}Подключение сотрудников — руководство{% else %}Подключение сотрудников{% endif %}{% endblock %}
+{% block body_class %}{% if management_mode %}dispatcher-control-screen management-registration-dashboard-screen{% else %}system-admin-registration-dashboard-screen{% endif %}{% endblock %}
 {% block extra_head %}
-{% include "users/includes/system_admin_workspace_styles.html" %}
-<link rel="stylesheet" href="{% static 'css/system-admin-registration-dashboard-v1.css' %}?v=20260906-2">
-{% include "includes/role_app_pwa_head.html" with role_code="admin" manifest_url="/system-admin.webmanifest" service_worker_url="/system-admin-sw.js" legacy_scope="/system-admin/" theme_color="#53616F" apple_title="Админка" icon_180="img/pwa/admin-180.png" %}
+{% if not management_mode %}{% include "users/includes/system_admin_workspace_styles.html" %}{% endif %}
+<link rel="stylesheet" href="{% static 'css/system-admin-registration-dashboard-v1.css' %}?v=20260907-1">
+{% if management_mode %}
+    {% include "includes/role_app_pwa_head.html" with role_code="manager" manifest_url="/management.webmanifest" service_worker_url="/management-sw.js" legacy_scope="/reports/management/" theme_color="#5058A4" apple_title="Руководство" icon_180="img/pwa/management-180.png" %}
+{% else %}
+    {% include "includes/role_app_pwa_head.html" with role_code="admin" manifest_url="/system-admin.webmanifest" service_worker_url="/system-admin-sw.js" legacy_scope="/system-admin/" theme_color="#53616F" apple_title="Админка" icon_180="img/pwa/admin-180.png" %}
+{% endif %}
 {% endblock %}
 
 {% block body %}
+{% if management_mode %}
+<main class="dispatcher-shell dispatcher-analytics-shell management-registration-shell" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board management-dashboard-board" aria-label="Подключение сотрудников">
+        {% include "reports/includes/management_report_header.html" with active="registrations" title="Подключение сотрудников" subtitle="Охват опубликованной расстановки, активации и входы в приложение." section_label="Подключение" %}
+        <section class="admin-registration-page management-registration-page">
+{% else %}
 <div class="admin-shell admin-exports-shell admin-registration-shell admin-day" data-admin-theme>
     <header class="admin-console-header" aria-label="Административная шапка">
         <section class="admin-console-identity">
@@ -37,6 +47,7 @@
     </header>
 
     <main class="admin-console-page admin-registration-page">
+{% endif %}
         <section class="adoption-filter-panel" aria-label="Фильтры отчёта">
             <div class="adoption-filter-heading">
                 <div>
@@ -96,7 +107,7 @@
                     </select>
                 </label>
                 <button class="admin-button admin-button-primary" type="submit">Показать</button>
-                <a class="adoption-filter-reset" href="{% url 'system_admin_registration_dashboard' %}">Сбросить</a>
+                <a class="adoption-filter-reset" href="{% if management_mode %}{% url 'management_registration_dashboard' %}{% else %}{% url 'system_admin_registration_dashboard' %}{% endif %}">Сбросить</a>
             </form>
         </section>
 
@@ -250,8 +261,12 @@
                         {% for row in rows %}
                             <tr>
                                 <td>
-                                    <a href="{% url 'system_admin_employee_detail' row.employee.id %}">{{ row.employee.full_name }}</a>
-                                    <small>{{ row.employee.phone|default:"Телефон не указан" }}</small>
+                                    {% if management_mode %}
+                                        <strong>{{ row.employee.full_name }}</strong>
+                                    {% else %}
+                                        <a href="{% url 'system_admin_employee_detail' row.employee.id %}">{{ row.employee.full_name }}</a>
+                                        <small>{{ row.employee.phone|default:"Телефон не указан" }}</small>
+                                    {% endif %}
                                 </td>
                                 <td><strong>{{ row.role_labels|join:", " }}</strong><small>{{ row.shift_labels|join:", " }}</small></td>
                                 <td>{{ row.equipment_labels|join:", " }}</td>
@@ -266,6 +281,11 @@
                 </table>
             </div>
         </section>
+{% if management_mode %}
+        </section>
+    </section>
+</main>
+{% else %}
     </main>
 </div>
 
@@ -302,4 +322,5 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 });
 </script>
+{% endif %}
 {% endblock %}

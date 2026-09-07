@@ -9,6 +9,38 @@
     zoom: 1;
 }
 
+/* Экран руководства использует тот же отчёт, но наследует палитру и оболочку
+   управленческой витрины. Алиасы сохраняют единое оформление компонентов без
+   копирования всей таблицы и графиков во второй набор стилей. */
+.management-registration-shell {
+    --admin-panel: var(--gd-panel);
+    --admin-panel-soft: var(--gd-panel-soft);
+    --admin-ink: var(--gd-ink);
+    --admin-muted: var(--gd-muted);
+    --admin-line: var(--gd-line);
+    --admin-line-soft: var(--gd-line-soft);
+    --admin-green: var(--gd-green);
+    --admin-green-soft: var(--gd-green-soft);
+    --admin-cyan: var(--gd-cyan);
+    --admin-cyan-soft: var(--gd-blue-soft);
+    --admin-yellow: var(--gd-yellow);
+    --admin-yellow-soft: var(--gd-yellow-soft);
+    --admin-red: var(--gd-red);
+    --admin-red-soft: var(--gd-red-soft);
+    --admin-shadow: var(--gd-shadow);
+}
+
+.management-registration-page {
+    min-height: 0;
+    padding: 0 2px 8px;
+    overflow: auto;
+    user-select: text;
+}
+
+.management-registration-page .adoption-filter-form .admin-button {
+    font-family: inherit;
+}
+
 @supports not (zoom: 1) {
     .admin-registration-shell {
         min-height: 100dvh;
@@ -646,6 +678,10 @@
 }
 
 @media (max-width: 640px) {
+    .management-registration-page {
+        overflow: visible;
+    }
+
     .adoption-filter-form,
     .adoption-metrics,
     .adoption-chart-grid,
