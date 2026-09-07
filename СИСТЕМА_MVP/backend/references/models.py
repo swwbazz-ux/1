@@ -43,6 +43,14 @@ class Equipment(models.Model):
     garage_number = models.CharField('Гаражный номер', max_length=64, unique=True)
     vin = models.CharField('VIN/серийный номер', max_length=128, blank=True)
     is_own = models.BooleanField('Своя техника', default=True)
+    contractor_organization = models.ForeignKey(
+        'users.ContractorOrganization',
+        verbose_name='Организация-подрядчик',
+        on_delete=models.PROTECT,
+        related_name='equipment',
+        null=True,
+        blank=True,
+    )
     is_active = models.BooleanField('Активна', default=True)
 
     class Meta:
@@ -52,6 +60,21 @@ class Equipment(models.Model):
 
     def __str__(self):
         return f'{self.equipment_type} {self.garage_number}'
+
+    def clean(self):
+        super().clean()
+        if self.is_own and self.contractor_organization_id:
+            from django.core.exceptions import ValidationError
+
+            raise ValidationError({
+                'contractor_organization': 'Для собственной техники организация подрядчика не указывается.'
+            })
+        if not self.is_own and not self.contractor_organization_id:
+            from django.core.exceptions import ValidationError
+
+            raise ValidationError({
+                'contractor_organization': 'Для подрядной техники выберите организацию-владельца.'
+            })
 
 
 class EquipmentState(models.Model):

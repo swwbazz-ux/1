@@ -2868,8 +2868,17 @@ def excavator_access_from_request(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return None
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code != 'excavator_operator':
+    access = (
+        EmployeeAccess.objects
+        .select_related('employee', 'employee__contractor_organization', 'role')
+        .filter(id=access_id, is_active=True)
+        .first()
+    )
+    if (
+        not access
+        or access.role.code != 'excavator_operator'
+        or not role_session_state(request, access)['is_active']
+    ):
         return None
     return access
 

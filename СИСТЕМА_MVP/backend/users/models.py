@@ -1,9 +1,61 @@
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 
 from .protected_cards import guard_access_write, guard_employee_write
+
+
+class ContractorOrganization(models.Model):
+    """Юридическое лицо подрядчика, допущенное к производственным работам."""
+
+    name = models.CharField('Наименование организации', max_length=255, unique=True)
+    short_name = models.CharField('Краткое наименование', max_length=128, blank=True)
+    contract_number = models.CharField('Номер договора', max_length=128, blank=True)
+    contract_valid_from = models.DateField('Договор действует с', null=True, blank=True)
+    contract_valid_until = models.DateField('Договор действует по', null=True, blank=True)
+    contact_person = models.CharField('Контактное лицо', max_length=255, blank=True)
+    contact_phone = models.CharField('Телефон подрядчика', max_length=32, blank=True)
+    comment = models.TextField('Комментарий', blank=True)
+    is_active = models.BooleanField('Допущен к работам', default=True)
+
+    class Meta:
+        verbose_name = 'Организация-подрядчик'
+        verbose_name_plural = 'Организации-подрядчики'
+        ordering = ['name']
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(contract_valid_from__isnull=True)
+                    | models.Q(contract_valid_until__isnull=True)
+                    | models.Q(contract_valid_until__gte=models.F('contract_valid_from'))
+                ),
+                name='contractor_org_contract_dates_ordered',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if (
+            self.contract_valid_from
+            and self.contract_valid_until
+            and self.contract_valid_until < self.contract_valid_from
+        ):
+            raise ValidationError({
+                'contract_valid_until': 'Дата окончания договора не может быть раньше даты начала.'
+            })
+
+    def is_valid_on(self, as_of=None):
+        as_of = as_of or timezone.localdate()
+        return bool(
+            self.is_active
+            and (not self.contract_valid_from or self.contract_valid_from <= as_of)
+            and (not self.contract_valid_until or self.contract_valid_until >= as_of)
+        )
+
+    def __str__(self):
+        return self.short_name or self.name
 
 class PersonnelDepartment(models.Model):
     """Official organizational unit imported from 1C."""
@@ -123,6 +175,10 @@ class Employee(models.Model):
         EXCAVATOR_OPERATOR = 'excavator_operator', 'Машинист экскаватора'
         OTHER = 'other', 'Без привязки к технике'
 
+    class EmploymentType(models.TextChoices):
+        STAFF = 'staff', 'Штатный сотрудник'
+        CONTRACTOR = 'contractor', 'Сотрудник подрядчика'
+
     class Sex(models.TextChoices):
         UNKNOWN = 'unknown', 'Не указан'
         MALE = 'male', 'Мужской'
@@ -139,6 +195,22 @@ class Employee(models.Model):
     objects = EmployeeWatchProfileManager()
 
     full_name = models.CharField('ФИО', max_length=255)
+    employment_type = models.CharField(
+        'Тип сотрудника',
+        max_length=16,
+        choices=EmploymentType.choices,
+        default=EmploymentType.STAFF,
+    )
+    contractor_organization = models.ForeignKey(
+        ContractorOrganization,
+        verbose_name='Организация-подрядчик',
+        on_delete=models.PROTECT,
+        related_name='employees',
+        null=True,
+        blank=True,
+    )
+    contractor_access_from = models.DateField('Допуск действует с', null=True, blank=True)
+    contractor_access_until = models.DateField('Допуск действует по', null=True, blank=True)
     birth_date = models.DateField('Дата рождения', null=True, blank=True)
     sex = models.CharField(
         'Пол',
@@ -241,7 +313,97 @@ class Employee(models.Model):
                 condition=models.Q(sex__in=['unknown', 'male', 'female']),
                 name='employee_sex_valid',
             ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(contractor_access_from__isnull=True)
+                    | models.Q(contractor_access_until__isnull=True)
+                    | models.Q(contractor_access_until__gte=models.F('contractor_access_from'))
+                ),
+                name='employee_contractor_access_dates_ordered',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        employment_type='staff',
+                        contractor_organization__isnull=True,
+                        contractor_access_from__isnull=True,
+                        contractor_access_until__isnull=True,
+                    )
+                    | models.Q(
+                        employment_type='contractor',
+                        contractor_organization__isnull=False,
+                        contractor_access_from__isnull=False,
+                        contractor_access_until__isnull=False,
+                    )
+                ),
+                name='employee_contractor_fields_match_type',
+            ),
         ]
+
+    @classmethod
+    def work_eligibility_q(cls, as_of=None):
+        as_of = as_of or timezone.localdate()
+        return (
+            models.Q(employment_type=cls.EmploymentType.STAFF)
+            | models.Q(
+                employment_type=cls.EmploymentType.CONTRACTOR,
+                contractor_organization__is_active=True,
+                contractor_access_from__lte=as_of,
+                contractor_access_until__gte=as_of,
+            )
+            & (
+                models.Q(contractor_organization__contract_valid_from__isnull=True)
+                | models.Q(contractor_organization__contract_valid_from__lte=as_of)
+            )
+            & (
+                models.Q(contractor_organization__contract_valid_until__isnull=True)
+                | models.Q(contractor_organization__contract_valid_until__gte=as_of)
+            )
+        )
+
+    def contractor_access_is_valid(self, as_of=None):
+        if self.employment_type != self.EmploymentType.CONTRACTOR:
+            return True
+        as_of = as_of or timezone.localdate()
+        return bool(
+            self.contractor_organization_id
+            and self.contractor_organization.is_valid_on(as_of)
+            and self.contractor_access_from
+            and self.contractor_access_until
+            and self.contractor_access_from <= as_of <= self.contractor_access_until
+        )
+
+    def clean(self):
+        super().clean()
+        if self.employment_type == self.EmploymentType.STAFF:
+            if self.contractor_organization_id:
+                raise ValidationError({'contractor_organization': 'Для штатного сотрудника подрядчик не указывается.'})
+            if self.contractor_access_from or self.contractor_access_until:
+                raise ValidationError({'contractor_access_from': 'Для штатного сотрудника срок допуска не указывается.'})
+            return
+
+        errors = {}
+        if not self.contractor_organization_id:
+            errors['contractor_organization'] = 'Выберите организацию подрядчика.'
+        if not self.contractor_access_from:
+            errors['contractor_access_from'] = 'Укажите дату начала допуска.'
+        if not self.contractor_access_until:
+            errors['contractor_access_until'] = 'Укажите дату окончания допуска.'
+        if (
+            self.contractor_access_from
+            and self.contractor_access_until
+            and self.contractor_access_until < self.contractor_access_from
+        ):
+            errors['contractor_access_until'] = 'Дата окончания допуска не может быть раньше даты начала.'
+        organization = self.contractor_organization if self.contractor_organization_id else None
+        if organization and self.contractor_access_from and organization.contract_valid_from:
+            if self.contractor_access_from < organization.contract_valid_from:
+                errors['contractor_access_from'] = 'Допуск сотрудника не может начинаться раньше договора подрядчика.'
+        if organization and self.contractor_access_until and organization.contract_valid_until:
+            if self.contractor_access_until > organization.contract_valid_until:
+                errors['contractor_access_until'] = 'Допуск сотрудника не может заканчиваться позже договора подрядчика.'
+        if errors:
+            raise ValidationError(errors)
 
     def delete(self, *args, **kwargs):
         guard_employee_write(self.pk, type(self))

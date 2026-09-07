@@ -99,6 +99,9 @@ def employee_has_effective_access_role(
     access records. Old employees without a personnel position retain the
     previous work-category behavior during the migration period.
     """
+    as_of = as_of or timezone.localdate()
+    if not employee.contractor_access_is_valid(as_of):
+        return False
     if role_code not in PRODUCTION_APP_ROLE_CODES:
         return True
 
@@ -136,6 +139,7 @@ def eligible_employee_ids_for_work_role(role_code, *, as_of=None):
             'personnel_position',
             'base_specialization',
             'base_specialization__access_role',
+            'contractor_organization',
         )
         .prefetch_related('accesses__role')
         .order_by('id')

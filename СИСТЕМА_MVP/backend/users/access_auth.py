@@ -1,5 +1,5 @@
 from .forms import is_valid_russian_mobile_phone, normalize_phone
-from .models import EmployeeAccess
+from .models import Employee, EmployeeAccess
 
 
 def find_employee_access_by_credentials(
@@ -16,8 +16,14 @@ def find_employee_access_by_credentials(
 
     access_candidates = (
         EmployeeAccess.objects
-        .select_related('employee', 'role')
-        .filter(access_code=access_code, is_active=True, employee__is_active=True, role__is_active=True)
+        .select_related('employee', 'role', 'employee__contractor_organization')
+        .filter(
+            access_code=access_code,
+            is_active=True,
+            employee__is_active=True,
+            employee__status__in=(Employee.Status.ACTIVE, Employee.Status.NOT_ACTIVATED),
+            role__is_active=True,
+        )
     )
     if role_code:
         access_candidates = access_candidates.filter(role__code=role_code)
@@ -26,6 +32,8 @@ def find_employee_access_by_credentials(
 
     matches = []
     for candidate in access_candidates.order_by('employee_id', 'id'):
+        if not candidate.employee.contractor_access_is_valid():
+            continue
         employee_phone = normalize_phone(candidate.employee.phone)
         if employee_phone and is_valid_russian_mobile_phone(phone) and len(access_code) == 6 and normalized_phone == employee_phone:
             matches.append(candidate)
@@ -57,7 +65,7 @@ def find_unactivated_accesses_by_phone(phone, role_codes=None):
 
     candidates = (
         EmployeeAccess.objects
-        .select_related('employee', 'role')
+        .select_related('employee', 'role', 'employee__contractor_organization')
         .filter(is_active=True, employee__is_active=True, role__is_active=True)
     )
     if role_codes:
@@ -65,6 +73,7 @@ def find_unactivated_accesses_by_phone(phone, role_codes=None):
     return [
         candidate
         for candidate in candidates
+        if candidate.employee.contractor_access_is_valid()
         if normalize_phone(candidate.employee.phone) == normalized_phone
     ]
 

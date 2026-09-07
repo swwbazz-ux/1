@@ -384,6 +384,21 @@
     }
 
     document.addEventListener("DOMContentLoaded", function () {
+        var employmentType = document.querySelector("[data-employment-type]");
+        var contractorDetails = Array.prototype.slice.call(document.querySelectorAll("[data-contractor-details]"));
+        function syncContractorDetails() {
+            var visible = employmentType && employmentType.value === "contractor";
+            contractorDetails.forEach(function (field) {
+                field.hidden = !visible;
+                field.querySelectorAll("input, select, textarea").forEach(function (control) {
+                    control.disabled = !visible;
+                });
+            });
+        }
+        if (employmentType) {
+            employmentType.addEventListener("change", syncContractorDetails);
+            syncContractorDetails();
+        }
         initTheme();
         initNotices();
         initPhone();
