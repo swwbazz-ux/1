@@ -12,7 +12,7 @@ from users.role_apps import (
 )
 
 from .models import OperationalStateEvent, OperationalStateVersion
-from .realtime import relevant_event_delta
+from .realtime import relevant_event_delta, worker_equipment_ids_for_access
 
 
 def parse_positive_int(value, default, maximum=None):
@@ -110,6 +110,11 @@ def operational_state_version_view(request):
         'app_contract_version': APP_CONTRACT_VERSION,
         'role_shell_version': role_app.shell_version if role_app else '',
         'role_app_code': role_app.role_code if role_app else access.role.code,
+        'worker_equipment_ids': (
+            sorted(worker_equipment_ids_for_access(access))
+            if role_is_active_for_app and access.role.code in {'driver', 'excavator_operator'}
+            else []
+        ),
         'key': 'production',
         'version': state_version,
         'events': events,

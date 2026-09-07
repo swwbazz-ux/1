@@ -24,7 +24,7 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "27",
+    versionCode: "25",
     versionName: "0.1.19",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
@@ -35,8 +35,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "15",
-    versionName: "0.1.12",
+    versionCode: "27",
+    versionName: "0.1.20",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -344,6 +344,98 @@ test("background service announces only a fresh driver truck_loaded event", () =
   }
   assert.match(catalog, /normalized\.equals\("свх"\)[\s\S]*?voice_edem_na_svh/);
   assert.match(catalog, /normalized\.equals\("буферный склад"\)[\s\S]*?voice_na_bufernyi_sklad/);
+});
+
+test("both production profiles package every approved operational voice phrase", () => {
+  const common = [
+    "voice_shift_opened",
+    "voice_shift_closed",
+    "voice_downtime_started",
+    "voice_downtime_finished",
+    "voice_action_failed",
+    "voice_connection_lost",
+    "voice_connection_restored",
+  ];
+  const byRole = {
+    driver: [
+      "voice_excavator_assigned",
+      "voice_excavator_changed",
+      "voice_assignment_removed",
+      "voice_trip_finished",
+      "voice_trip_finish_failed",
+    ],
+    excavator: [
+      "voice_truck_assigned",
+      "voice_truck_removed",
+      "voice_face_settings_saved",
+      "voice_truck_sent",
+      "voice_truck_send_failed",
+    ],
+  };
+  for (const role of Object.keys(byRole)) {
+    const rawRoot = resolve(root, "profiles", role, "res", "raw");
+    for (const suffix of [...common, ...byRole[role]]) {
+      const resource = resolve(rawRoot, `${role}_${suffix}.m4a`);
+      assert.ok(statSync(resource).size > 8_000, `${resource} must contain real audio`);
+      assert.match(
+        readFileSync(resource).subarray(0, 32).toString("latin1"),
+        /ftyp/,
+        `${resource} must be an MPEG-4 audio resource`
+      );
+    }
+  }
+
+  const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
+  const plugin = readFileSync(resolve(javaRoot, "NativeSoundPlugin.java"), "utf8");
+  const player = readFileSync(resolve(javaRoot, "OperationalVoicePlayer.java"), "utf8");
+  const announcer = readFileSync(resolve(javaRoot, "OperationalVoiceAnnouncer.java"), "utf8");
+  const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  assert.match(plugin, /public void announceOperational\(PluginCall call\)/);
+  assert.match(player, /VOICE_AFTER_CUE_DELAY_MS/);
+  assert.match(player, /AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK/);
+  assert.match(announcer, /last_operational_voice_/);
+  assert.match(service, /showLatestAssignmentAlert/);
+  assert.match(service, /CONNECTION_LOSS_ANNOUNCED/);
+});
+
+test("foreground driver screen uses the same deduplicated recorded voice bridge", () => {
+  const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
+  const plugin = readFileSync(resolve(javaRoot, "NativeSoundPlugin.java"), "utf8");
+  const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  const player = readFileSync(resolve(javaRoot, "DriverVoicePlayer.java"), "utf8");
+  const sounds = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "static", "js", "mobile-operational-sounds-v1.js"), "utf8");
+  const driverTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "users", "driver_shift.html"), "utf8");
+
+  assert.match(plugin, /@PluginMethod\s+public void announceDumpPoint\(PluginCall call\)/);
+  assert.match(plugin, /call\.getData\(\)\.opt\(name\)/);
+  assert.match(plugin, /static long numericLong\(Object value\)[\s\S]*?value instanceof Number[\s\S]*?longValue\(\)/);
+  assert.doesNotMatch(plugin, /call\.getLong\("(?:eventVersion|tripId|dumpPointId)"/);
+  const announcer = readFileSync(resolve(javaRoot, "DriverDumpPointAnnouncer.java"), "utf8");
+  assert.match(plugin, /DriverDumpPointAnnouncer\.announce/);
+  assert.match(announcer, /private static DriverVoicePlayer sharedPlayer/);
+  assert.match(announcer, /lastScheduledTripId/);
+  assert.match(announcer, /last_driver_dump_point_alert_trip_id[\s\S]*?tripId == persistedTripId[\s\S]*?tripId == lastScheduledTripId/);
+  assert.match(announcer, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS[\s\S]*?sharedPlayer\.announce/);
+  assert.match(announcer, /sharedPlayer\.announce\([\s\S]*?preferences\.edit\(\)/);
+  assert.match(plugin, /result\.announced[\s\S]*?cuePlayed/);
+  assert.match(plugin, /dumpPointName,[\s\S]*?false,[\s\S]*?true/);
+  assert.match(service, /displayName,[\s\S]*?showNotification,[\s\S]*?true/);
+  assert.match(player, /void announce\([\s\S]*?boolean playCue\)[\s\S]*?playAlertCue\(\)/);
+  assert.match(service, /DriverDumpPointAnnouncer\.announce/);
+  assert.doesNotMatch(service, /private DriverVoicePlayer driverVoicePlayer/);
+  assert.doesNotMatch(plugin, /private DriverVoicePlayer driverVoicePlayer/);
+  assert.match(player, /recordStage\([\s\S]*?"queued"/);
+  assert.match(sounds, /announceDumpPoint: announceDumpPoint/);
+  assert.match(sounds, /diagnostics: diagnostics/);
+  assert.match(driverTemplate, /operational-state-refresh-applied/);
+  assert.match(driverTemplate, /event\.type !== "trip_changed"/);
+  assert.match(driverTemplate, /payload\.action !== "truck_loaded"/);
+  assert.match(driverTemplate, /oldShell\.dataset\.driverHasLoadedTrip !== "true"/);
+  assert.match(driverTemplate, /freshShell\.dataset\.driverHasLoadedTrip === "true"/);
+  assert.match(driverTemplate, /becameLoaded[\s\S]*?playDriverDumpPointAlert/);
+  assert.match(plugin, /@PluginMethod\s+public void getDiagnostics\(PluginCall call\)/);
+  assert.match(player, /recordStage\("cue_started"/);
+  assert.match(player, /recordStage\("voice_started"/);
 });
 
 test("WebView cookies are accepted and flushed at every persistence boundary", () => {

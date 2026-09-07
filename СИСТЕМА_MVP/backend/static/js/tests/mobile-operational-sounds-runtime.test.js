@@ -14,6 +14,8 @@ const SOURCE = fs.readFileSync(
 function createRuntime(profile = "excavator") {
     const windowListeners = new Map();
     const played = [];
+    const announced = [];
+    const operationalAnnouncements = [];
     const document = {
         body: {dataset: {}},
         currentScript: {dataset: {
@@ -30,6 +32,14 @@ function createRuntime(profile = "excavator") {
                         played.push(options.name);
                         return Promise.resolve({played: true});
                     },
+                    announceDumpPoint(options) {
+                        announced.push(options);
+                        return Promise.resolve({announced: true});
+                    },
+                    announceOperational(options) {
+                        operationalAnnouncements.push(options);
+                        return Promise.resolve({announced: true});
+                    },
                 },
             },
         },
@@ -45,8 +55,42 @@ function createRuntime(profile = "excavator") {
         Promise,
         window,
     }, {filename: "mobile-operational-sounds-v1.js"});
-    return {document, played, window, windowListeners};
+    return {announced, document, operationalAnnouncements, played, window, windowListeners};
 }
+
+test("driver native bridge announces a dump point with its event identity", async () => {
+    const runtime = createRuntime("driver");
+    const details = {
+        eventVersion: 51,
+        tripId: 17,
+        dumpPointId: 2,
+        dumpPointName: "СКДР",
+    };
+
+    const result = await runtime.window.MobileOperationalSounds.announceDumpPoint(details);
+    assert.equal(result.supported, true);
+    assert.equal(result.announced, true);
+    assert.equal(runtime.announced.length, 1);
+    assert.deepEqual(runtime.announced[0], details);
+});
+
+test("native bridge receives the cue, recorded phrase and event identity", async () => {
+    const runtime = createRuntime("driver");
+    const result = await runtime.window.MobileOperationalSounds.announceOperational({
+        cue: "shift_start",
+        voice: "voice_shift_opened",
+        eventVersion: 73,
+        eventKey: "driver_shift",
+    });
+    assert.equal(result.supported, true);
+    assert.equal(result.announced, true);
+    assert.equal(JSON.stringify(runtime.operationalAnnouncements), JSON.stringify([{
+        cue: "shift_start",
+        voice: "voice_shift_opened",
+        eventVersion: 73,
+        eventKey: "driver_shift",
+    }]));
+});
 
 for (const profile of ["excavator", "driver"]) {
 test(`${profile} native app receives the exact event name and full sound map`, async () => {

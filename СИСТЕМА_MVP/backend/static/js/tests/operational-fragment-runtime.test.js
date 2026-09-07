@@ -203,7 +203,7 @@ function createExcavatorRefreshRuntime() {
 
 
 function extractExcavatorShiftSuccessHandler() {
-    const marker = '}).then(function () {\n            playExcavatorSound(action === "close" ? "shift_end" : "shift_start");';
+    const marker = '}).then(function () {\n            playExcavatorVoice(';
     const start = EXCAVATOR_TEMPLATE_SOURCE.indexOf(marker);
     assert.notEqual(start, -1, "Excavator Shift success handler was not found.");
     return extractBraceBlock(
@@ -489,7 +489,7 @@ test("successful Excavator Shift save clears its draft before owned fragment rec
         clearShiftErrors() {
             clearCalls += 1;
         },
-        playExcavatorSound() {
+        playExcavatorVoice() {
             return Promise.resolve(true);
         },
         action: "open",
@@ -522,16 +522,16 @@ test("successful Excavator Shift save clears its draft before owned fragment rec
 });
 
 
-test("Driver uses Shift sounds only after the returned shell confirms the state change", () => {
+test("Driver selects Shift voice only after the returned shell confirms the state change", () => {
     const sandbox = {context: {}};
     vm.runInNewContext(
         [
             extractBraceBlock(
                 DRIVER_TEMPLATE_SOURCE,
-                "function driverAppliedActionSound(actionKind, freshShell)",
-                "Driver applied action sound mapper"
+                "function driverAppliedActionVoice(actionKind, freshShell)",
+                "Driver applied action voice mapper"
             ),
-            "context.map = driverAppliedActionSound;",
+            "context.map = driverAppliedActionVoice;",
         ].join("\n"),
         sandbox,
         {filename: "templates/users/driver_shift.html#applied-action-sound"}
@@ -543,11 +543,11 @@ test("Driver uses Shift sounds only after the returned shell confirms the state 
     };
     const closedShell = {querySelector() { return null; }};
 
-    assert.equal(sandbox.context.map("shift-open", openShell), "shift_start");
-    assert.equal(sandbox.context.map("shift-open", closedShell), "action_error");
-    assert.equal(sandbox.context.map("shift-close", openShell), "action_error");
-    assert.equal(sandbox.context.map("shift-close", closedShell), "shift_end");
-    assert.equal(sandbox.context.map("complete-trip", closedShell), "action_ok");
+    assert.equal(JSON.stringify(sandbox.context.map("shift-open", openShell)), JSON.stringify({cue: "shift_start", voice: "voice_shift_opened"}));
+    assert.equal(JSON.stringify(sandbox.context.map("shift-open", closedShell)), JSON.stringify({cue: "action_error", voice: "voice_action_failed"}));
+    assert.equal(JSON.stringify(sandbox.context.map("shift-close", openShell)), JSON.stringify({cue: "action_error", voice: "voice_action_failed"}));
+    assert.equal(JSON.stringify(sandbox.context.map("shift-close", closedShell)), JSON.stringify({cue: "shift_end", voice: "voice_shift_closed"}));
+    assert.equal(JSON.stringify(sandbox.context.map("complete-trip", closedShell)), JSON.stringify({cue: "action_ok", voice: "voice_trip_finished"}));
 });
 
 
