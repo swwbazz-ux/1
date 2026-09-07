@@ -176,6 +176,37 @@ class ContractorWorkforceTests(TestCase):
                 employment_type=Employee.EmploymentType.CONTRACTOR,
             )
 
+    def test_contractor_organizations_is_visible_in_admin_references(self):
+        admin_role, _ = Role.objects.update_or_create(
+            code='admin',
+            defaults={'name': 'Системный администратор', 'is_active': True},
+        )
+        admin_employee = Employee.objects.create(
+            full_name='Администратор Подрядчиков',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        admin_access = EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='771124',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+            activated_at=timezone.now(),
+        )
+        session = self.client.session
+        session['employee_access_id'] = admin_access.id
+        session.save()
+
+        response = self.client.get(reverse('system_admin_references'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Организации подрядчиков')
+        self.assertContains(
+            response,
+            reverse('system_admin_reference_detail', args=['contractor-organizations']),
+        )
+
     def test_expired_contractor_assistant_is_hidden_from_secondary_placement(self):
         assistant_specialization, _ = ProductionSpecialization.objects.update_or_create(
             code='assistant_excavator_operator',

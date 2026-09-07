@@ -1530,6 +1530,7 @@ def system_admin_references_view(request):
             'title': 'Сотрудники и доступы',
             'items': [
                 {'name': 'Сотрудники', 'count': Employee.objects.count(), 'url': 'system_admin_employees', 'external_url': ''},
+                {'name': 'Организации подрядчиков', 'count': ContractorOrganization.objects.count(), 'url': '', 'external_url': '/admin/users/contractororganization/', 'detail_code': 'contractor-organizations'},
                 {'name': 'Подразделения', 'count': PersonnelDepartment.objects.count(), 'url': '', 'external_url': '/admin/users/personneldepartment/', 'detail_code': 'personnel-departments'},
                 {'name': 'Графики работы', 'count': WorkSchedule.objects.count(), 'url': '', 'external_url': '/admin/users/workschedule/', 'detail_code': 'work-schedules'},
                 {'name': 'Утверждённые составы вахт', 'count': WatchComposition.objects.count(), 'url': '', 'external_url': '/admin/users/watchcomposition/', 'detail_code': 'watch-compositions'},
