@@ -11,6 +11,7 @@ import android.os.Looper;
 
 /** Единая нативная цепочка «действующий сигнал → записанная рабочая фраза». */
 public final class OperationalVoicePlayer {
+    private static final long VOICE_SEGMENT_GAP_MS = 120L;
     private static final AudioAttributes CUE_ATTRIBUTES = new AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -47,16 +48,37 @@ public final class OperationalVoicePlayer {
             String voiceName,
             boolean playCue,
             long voiceDelayMs) {
+        return playSequence(
+            context,
+            cueName,
+            new String[] {voiceName},
+            playCue,
+            voiceDelayMs
+        );
+    }
+
+    public static synchronized boolean playSequence(
+            Context context,
+            String cueName,
+            String[] voiceNames,
+            boolean playCue,
+            long voiceDelayMs) {
         if (shared == null) {
             shared = new OperationalVoicePlayer(context);
         }
-        return shared.enqueue(cueName, voiceName, playCue, voiceDelayMs);
+        return shared.enqueue(cueName, voiceNames, playCue, voiceDelayMs);
     }
 
-    private boolean enqueue(String cueName, String voiceName, boolean playCue, long voiceDelayMs) {
-        int voiceResourceId = resourceId(voiceName);
-        if (voiceResourceId == 0) {
+    private boolean enqueue(String cueName, String[] voiceNames, boolean playCue, long voiceDelayMs) {
+        if (voiceNames == null || voiceNames.length == 0) {
             return false;
+        }
+        int[] voiceResourceIds = new int[voiceNames.length];
+        for (int index = 0; index < voiceNames.length; index += 1) {
+            voiceResourceIds[index] = resourceId(voiceNames[index]);
+            if (voiceResourceIds[index] == 0) {
+                return false;
+            }
         }
         int cueResourceId = playCue ? resourceId(cueName) : 0;
         int scheduledGeneration = ++generation;
@@ -67,10 +89,10 @@ public final class OperationalVoicePlayer {
             stopCurrentPlayback();
             requestTransientAudioFocus();
             if (cueResourceId != 0) {
-                playCueThenVoice(cueResourceId, voiceResourceId, scheduledGeneration);
+                playCueThenVoice(cueResourceId, voiceResourceIds, scheduledGeneration);
             } else {
                 mainHandler.postDelayed(
-                    () -> playVoice(voiceResourceId, scheduledGeneration),
+                    () -> playVoiceSegment(voiceResourceIds, 0, scheduledGeneration),
                     Math.max(0L, voiceDelayMs)
                 );
             }
@@ -89,7 +111,7 @@ public final class OperationalVoicePlayer {
         );
     }
 
-    private void playCueThenVoice(int cueResourceId, int voiceResourceId, int scheduledGeneration) {
+    private void playCueThenVoice(int cueResourceId, int[] voiceResourceIds, int scheduledGeneration) {
         cuePlayer = MediaPlayer.create(
             context,
             cueResourceId,
@@ -97,7 +119,7 @@ public final class OperationalVoicePlayer {
             AudioManager.AUDIO_SESSION_ID_GENERATE
         );
         if (cuePlayer == null) {
-            playVoice(voiceResourceId, scheduledGeneration);
+            playVoiceSegment(voiceResourceIds, 0, scheduledGeneration);
             return;
         }
         cuePlayer.setVolume(1.0f, 1.0f);
@@ -107,7 +129,7 @@ public final class OperationalVoicePlayer {
             }
             player.release();
             mainHandler.postDelayed(
-                () -> playVoice(voiceResourceId, scheduledGeneration),
+                () -> playVoiceSegment(voiceResourceIds, 0, scheduledGeneration),
                 Math.max(0L, BuildConfig.VOICE_AFTER_CUE_DELAY_MS)
             );
         });
@@ -116,19 +138,23 @@ public final class OperationalVoicePlayer {
                 cuePlayer = null;
             }
             player.release();
-            playVoice(voiceResourceId, scheduledGeneration);
+            playVoiceSegment(voiceResourceIds, 0, scheduledGeneration);
             return true;
         });
         cuePlayer.start();
     }
 
-    private void playVoice(int resourceId, int scheduledGeneration) {
+    private void playVoiceSegment(int[] resourceIds, int index, int scheduledGeneration) {
         if (scheduledGeneration != generation) {
+            return;
+        }
+        if (resourceIds == null || index >= resourceIds.length) {
+            abandonAudioFocus();
             return;
         }
         voicePlayer = MediaPlayer.create(
             context,
-            resourceId,
+            resourceIds[index],
             SPEECH_ATTRIBUTES,
             AudioManager.AUDIO_SESSION_ID_GENERATE
         );
@@ -137,7 +163,20 @@ public final class OperationalVoicePlayer {
             return;
         }
         voicePlayer.setVolume(1.0f, 1.0f);
-        voicePlayer.setOnCompletionListener(player -> stopCurrentPlayback());
+        voicePlayer.setOnCompletionListener(player -> {
+            if (voicePlayer == player) {
+                voicePlayer = null;
+            }
+            player.release();
+            if (index + 1 >= resourceIds.length) {
+                abandonAudioFocus();
+                return;
+            }
+            mainHandler.postDelayed(
+                () -> playVoiceSegment(resourceIds, index + 1, scheduledGeneration),
+                VOICE_SEGMENT_GAP_MS
+            );
+        });
         voicePlayer.setOnErrorListener((player, what, extra) -> {
             stopCurrentPlayback();
             return true;

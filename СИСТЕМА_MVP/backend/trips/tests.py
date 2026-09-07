@@ -995,15 +995,15 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v216')
+        self.assertContains(response, 'excavator-mobile-shell-v217')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 216')
+        self.assertContains(response, 'Версия 217')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
-        self.assertContains(response, 'playExcavatorSound("truck_assigned")')
+        self.assertContains(response, 'playExcavatorEquipmentVoice(action, truckNumber')
         self.assertContains(response, 'playExcavatorSound(action === "close" ? "shift_end" : "shift_start")')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'actionOwner.dataset.eoCancelActionId')
@@ -1016,7 +1016,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'mobile-shift__field--reference')
         self.assertContains(response, 'Лимит топлива')
         self.assertContains(response, 'Для этой модели')
-        self.assertContains(response, '<strong>7000</strong><em>л</em>', html=True)
+        self.assertContains(response, '<strong>0</strong><em>л</em>', html=True)
         self.assertContains(response, 'data-mobile-shift-field="engine_hours"')
         self.assertNotContains(response, 'data-mobile-shift-field="mileage"')
         self.assertNotContains(response, 'data-eo-shift-review')
@@ -2814,7 +2814,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v216', script)
+        self.assertIn('excavator-mobile-shell-v217', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -4587,6 +4587,8 @@ class DispatcherAssignmentRealtimeTests(TestCase):
         ).latest('version')
         self.assertEqual(event.payload['excavator_ids'], [self.excavator.id])
         self.assertEqual(event.payload['truck_ids'], [self.truck.id])
+        self.assertEqual(event.payload['truck_number'], '201')
+        self.assertEqual(event.payload['target_excavator_number'], '')
 
     def test_dispatcher_control_renders_duplicate_active_truck_assignment_once(self):
         HaulAssignment.objects.create(

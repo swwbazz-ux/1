@@ -1132,6 +1132,14 @@ def clear_active_equipment_assignment(*, employee, assigned_by=None, now=None, r
 def _emit_assignment_changed(
         *, action, truck_id, excavator_ids, assignment_id=None,
         target_excavator_id=None):
+    related_equipment_ids = {
+        value for value in [truck_id, target_excavator_id, *excavator_ids] if value
+    }
+    equipment_numbers = dict(
+        Equipment.objects
+        .filter(id__in=related_equipment_ids)
+        .values_list('id', 'garage_number')
+    )
     bump_operational_state(
         f'HaulAssignment:{action}',
         event_type='assignment_changed',
@@ -1140,8 +1148,12 @@ def _emit_assignment_changed(
         payload={
             'action': action,
             'truck_ids': [truck_id],
+            'truck_number': str(equipment_numbers.get(truck_id, '') or ''),
             'excavator_ids': sorted({value for value in excavator_ids if value}),
             'target_excavator_id': target_excavator_id,
+            'target_excavator_number': str(
+                equipment_numbers.get(target_excavator_id, '') or ''
+            ),
         },
     )
 

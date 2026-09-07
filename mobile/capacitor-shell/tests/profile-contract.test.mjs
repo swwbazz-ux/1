@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { test } from "node:test";
 import { dirname, resolve } from "node:path";
@@ -24,8 +25,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "33",
-    versionName: "0.1.21",
+    versionCode: "34",
+    versionName: "0.1.22",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -35,8 +36,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "33",
-    versionName: "0.1.21",
+    versionCode: "34",
+    versionName: "0.1.22",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -57,8 +58,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "35",
-    versionName: "0.1.21",
+    versionCode: "36",
+    versionName: "0.1.22",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -68,8 +69,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "34",
-    versionName: "0.1.21-rc",
+    versionCode: "35",
+    versionName: "0.1.22-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -90,8 +91,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "35",
-    versionName: "0.1.21",
+    versionCode: "36",
+    versionName: "0.1.22",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -101,8 +102,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "34",
-    versionName: "0.1.21-rc",
+    versionCode: "35",
+    versionName: "0.1.22-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -397,6 +398,53 @@ test("both production profiles package every approved operational voice phrase",
   assert.match(announcer, /last_operational_voice_/);
   assert.match(service, /showLatestAssignmentAlert/);
   assert.match(service, /CONNECTION_LOSS_ANNOUNCED/);
+});
+
+test("recorded equipment numbers are packaged and routed through native sequences", () => {
+  const manifest = JSON.parse(readFileSync(resolve(root, "audio", "equipment-voices-manifest.json"), "utf8"));
+  const counts = {
+    excavatorCommon: 3,
+    excavatorDestinations: 8,
+    truckNumbers: 54,
+    driverAssignments: 13,
+    driverReserveAssignments: 2,
+  };
+  for (const [batchName, expectedCount] of Object.entries(counts)) {
+    const batch = manifest.batches[batchName];
+    assert.equal(batch.segments.length, expectedCount);
+    for (const segment of batch.segments) {
+      const audioPath = resolve(root, "profiles", batch.profile, "res", "raw", segment.resource);
+      const bytes = readFileSync(audioPath);
+      assert.ok(bytes.length > 1_000, `${segment.resource} must contain recorded audio`);
+      assert.match(bytes.subarray(0, 32).toString("latin1"), /ftyp/);
+      assert.ok(segment.peakDbfs > -20, `${segment.resource} must contain audible speech`);
+      assert.equal(createHash("sha256").update(bytes).digest("hex"), segment.sha256);
+    }
+  }
+
+  const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
+  const catalog = readFileSync(resolve(javaRoot, "EquipmentVoiceCatalog.java"), "utf8");
+  const plugin = readFileSync(resolve(javaRoot, "NativeSoundPlugin.java"), "utf8");
+  const player = readFileSync(resolve(javaRoot, "OperationalVoicePlayer.java"), "utf8");
+  const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  const sounds = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "static", "js", "mobile-operational-sounds-v1.js"), "utf8");
+  const driverTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "users", "driver_shift.html"), "utf8");
+  const excavatorTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "trips", "excavator_work.html"), "utf8");
+
+  assert.match(plugin, /public void announceEquipment\(PluginCall call\)/);
+  assert.match(player, /playSequence\([\s\S]*?playVoiceSegment/);
+  assert.match(catalog, /case "528":[\s\S]*?voice_excavator_assignment_" \+ normalized/);
+  assert.match(catalog, /number >= 10 && number <= 52/);
+  assert.match(catalog, /number >= 54 && number <= 63/);
+  assert.match(catalog, /voice_truck_sent_sklad_okislennoy_rudy/);
+  assert.match(service, /target_excavator_number/);
+  assert.match(service, /truck_number/);
+  assert.match(sounds, /announceEquipment: announceEquipment/);
+  assert.match(driverTemplate, /driver_excavator_assigned/);
+  assert.match(driverTemplate, /data-driver-excavator-number/);
+  assert.match(excavatorTemplate, /excavator_truck_assigned/);
+  assert.match(excavatorTemplate, /excavator_truck_removed/);
+  assert.match(excavatorTemplate, /excavator_truck_sent/);
 });
 
 test("foreground driver screen uses the same deduplicated recorded voice bridge", () => {

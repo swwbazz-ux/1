@@ -501,7 +501,7 @@ public class ConnectivityForegroundService extends Service {
             String roleCode = root.optString("role_app_code", BuildConfig.APP_PROFILE_ID);
             JSONArray workerEquipmentIds = root.optJSONArray("worker_equipment_ids");
             long selectedVersion = 0L;
-            String selectedVoice = "";
+            String[] selectedVoices = new String[0];
             String selectedTitle = "";
             String selectedBody = "";
 
@@ -519,20 +519,25 @@ public class ConnectivityForegroundService extends Service {
                     continue;
                 }
                 String action = payload.optString("action", "");
-                String voice = "";
+                String[] voices = new String[0];
                 String title = "";
                 String message = "";
 
                 if ("driver".equals(roleCode)) {
                     if ("assignment_pending".equals(action)) {
-                        JSONArray excavatorIds = payload.optJSONArray("excavator_ids");
-                        voice = excavatorIds != null && excavatorIds.length() > 1
-                            ? "voice_excavator_changed"
-                            : "voice_excavator_assigned";
+                        String assignmentVoice = EquipmentVoiceCatalog.driverExcavatorAssignmentVoice(
+                            payload.optString("target_excavator_number", "")
+                        );
+                        voices = new String[] {
+                            assignmentVoice.isEmpty() ? "voice_excavator_assigned" : assignmentVoice
+                        };
                         title = "Новое назначение";
-                        message = "Проверьте назначенный экскаватор.";
+                        String excavatorNumber = payload.optString("target_excavator_number", "");
+                        message = excavatorNumber.isBlank()
+                            ? "Проверьте назначенный экскаватор."
+                            : "Экскаватор № " + excavatorNumber;
                     } else if ("release_applied".equals(action)) {
-                        voice = "voice_assignment_removed";
+                        voices = new String[] {"voice_assignment_removed"};
                         title = "Назначение снято";
                         message = "Ожидайте нового экскаватора.";
                     }
@@ -542,35 +547,45 @@ public class ConnectivityForegroundService extends Service {
                     boolean isTarget = targetExcavatorId > 0L
                         && jsonArrayContains(workerEquipmentIds, targetExcavatorId);
                     boolean wasRelated = jsonArraysIntersect(workerEquipmentIds, excavatorIds);
+                    String truckNumber = payload.optString("truck_number", "");
+                    String numberVoice = EquipmentVoiceCatalog.truckNumberVoice(truckNumber);
                     if ("assignment_applied".equals(action) && isTarget) {
-                        voice = "voice_truck_assigned";
+                        voices = numberVoice.isEmpty()
+                            ? new String[] {"voice_truck_assigned"}
+                            : new String[] {"voice_truck_assigned_prefix", numberVoice};
                         title = "Назначен самосвал";
-                        message = "Проверьте номер на экране.";
+                        message = truckNumber.isBlank()
+                            ? "Проверьте номер на экране."
+                            : "Самосвал № " + truckNumber;
                     } else if (
                         ("assignment_applied".equals(action) || "release_applied".equals(action))
                         && wasRelated
                     ) {
-                        voice = "voice_truck_removed";
+                        voices = numberVoice.isEmpty()
+                            ? new String[] {"voice_truck_removed"}
+                            : new String[] {"voice_truck_removed_prefix", numberVoice};
                         title = "Самосвал снят";
-                        message = "Назначение самосвала изменено.";
+                        message = truckNumber.isBlank()
+                            ? "Назначение самосвала изменено."
+                            : "Самосвал № " + truckNumber;
                     }
                 }
 
-                if (!voice.isEmpty()) {
+                if (voices.length > 0) {
                     selectedVersion = version;
-                    selectedVoice = voice;
+                    selectedVoices = voices;
                     selectedTitle = title;
                     selectedBody = message;
                 }
             }
 
-            if (selectedVersion <= 0L || selectedVoice.isEmpty()) {
+            if (selectedVersion <= 0L || selectedVoices.length == 0) {
                 return false;
             }
-            OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announce(
+            OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceSequence(
                 this,
                 "truck_assigned",
-                selectedVoice,
+                selectedVoices,
                 selectedVersion,
                 roleCode + "_assignment",
                 showNotification,
