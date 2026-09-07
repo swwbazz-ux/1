@@ -26176,6 +26176,354 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     }
 }
 
+/* Mining master shift plan report v143. Kept outside mobile media so the
+   realtime fragment remains structured in landscape and tablet layouts. */
+.mm-shift-plan-detail {
+    z-index: 1720;
+    --mm-report-bg: #0a171d;
+    --mm-report-surface: #0d2027;
+    --mm-report-line: #24404a;
+    --mm-report-text: #f2f7f8;
+    --mm-report-muted: #8da4ad;
+    --mm-report-plan: #63e36b;
+    --mm-report-analytic: #42c7ea;
+}
+
+.mm-shift-plan-detail.gd-equipment-detail .mm-shift-plan-panel {
+    box-sizing: border-box;
+    width: min(430px, 100%);
+    max-height: min(88dvh, 760px);
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+    border: 1px solid var(--mm-report-line);
+    border-bottom: 0;
+    border-radius: 20px 20px 0 0;
+    background: var(--mm-report-bg);
+    color: var(--mm-report-text);
+    box-shadow: 0 -16px 42px rgba(0, 0, 0, .36);
+    scrollbar-width: thin;
+}
+
+.mm-shift-plan-detail .mm-detail-close {
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--mm-report-line);
+    border-radius: 12px;
+    background: var(--mm-report-surface);
+    color: var(--mm-report-text);
+    font-size: 29px;
+    font-weight: 500;
+    line-height: 1;
+    box-shadow: none;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-head {
+    min-width: 0;
+    padding-right: 54px;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-head > span {
+    display: block;
+    color: var(--mm-report-muted);
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .1em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-head h2 {
+    margin: 6px 0 0;
+    color: var(--mm-report-text);
+    font-size: clamp(23px, 6.5vw, 28px);
+    line-height: 1.08;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-total {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 14px;
+    align-items: center;
+    margin-top: 16px;
+    padding: 13px;
+    border: 1px solid rgba(99, 227, 107, .28);
+    border-radius: 14px;
+    background: rgba(99, 227, 107, .055);
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-total-ring,
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-ring {
+    position: relative;
+    display: grid;
+    place-content: center;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    text-align: center;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-total-ring {
+    width: 72px;
+    height: 72px;
+    background: conic-gradient(var(--mm-report-plan) var(--mm-shift-plan-total-percent, 0%), rgba(141, 164, 173, .18) 0);
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-total-ring::after,
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-ring::after {
+    position: absolute;
+    content: "";
+    border-radius: inherit;
+    background: var(--mm-report-bg);
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-total-ring::after {
+    inset: 6px;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-total-ring > *,
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-ring > * {
+    position: relative;
+    z-index: 1;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-total-ring strong {
+    color: var(--mm-report-text);
+    font-size: 20px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-total-ring span,
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-ring span {
+    margin-top: 3px;
+    color: var(--mm-report-muted);
+    font-size: 8px;
+    font-weight: 900;
+    letter-spacing: .04em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-total-copy {
+    min-width: 0;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-total-copy > * {
+    display: block;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-total-copy > span {
+    color: var(--mm-report-muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-total-copy > strong {
+    margin-top: 3px;
+    color: var(--mm-report-text);
+    font-size: 21px;
+    line-height: 1.12;
+    font-variant-numeric: tabular-nums;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-total-copy > small {
+    margin-top: 5px;
+    color: var(--mm-report-muted);
+    font-size: 11px;
+    line-height: 1.25;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-section-title {
+    margin: 18px 2px 9px;
+    color: var(--mm-report-muted);
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-points {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    min-width: 0;
+    padding: 10px 8px;
+    border: 1px solid var(--mm-report-line);
+    border-radius: 12px;
+    background: var(--mm-report-surface);
+    text-align: center;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-ring {
+    width: 58px;
+    height: 58px;
+    background: conic-gradient(var(--mm-report-analytic) var(--mm-shift-plan-point-percent, 0%), rgba(141, 164, 173, .18) 0);
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-ring::after {
+    inset: 5px;
+    background: var(--mm-report-surface);
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-ring strong {
+    color: var(--mm-report-text);
+    font-size: 15px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-copy {
+    width: 100%;
+    min-width: 0;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-copy strong,
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-copy span,
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-copy small {
+    display: block;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-copy strong {
+    overflow: hidden;
+    color: var(--mm-report-text);
+    font-size: 14px;
+    line-height: 1.05;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-copy span {
+    min-height: 2.4em;
+    margin-top: 5px;
+    color: var(--mm-report-muted);
+    font-size: 10px;
+    line-height: 1.2;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-copy small {
+    margin-top: 4px;
+    color: var(--mm-report-analytic);
+    font-size: 9px;
+    line-height: 1.15;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-routes {
+    display: block;
+    overflow: hidden;
+    border: 1px solid var(--mm-report-line);
+    border-radius: 12px;
+    background: var(--mm-report-surface);
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-route {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
+    min-height: 54px;
+    padding: 9px 11px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-route + .mm-shift-plan-route {
+    border-top: 1px solid var(--mm-report-line);
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-route-copy {
+    min-width: 0;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-route-copy > strong {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    min-width: 0;
+    color: var(--mm-report-text);
+    font-size: 13px;
+    line-height: 1.1;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-route-copy > strong span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-route-copy > strong i {
+    flex: 0 0 auto;
+    color: var(--mm-report-analytic);
+    font-style: normal;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-route-copy > small {
+    display: block;
+    margin-top: 5px;
+    color: var(--mm-report-muted);
+    font-size: 10px;
+    line-height: 1;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-route > b {
+    display: grid;
+    justify-items: end;
+    color: var(--mm-report-analytic);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-route > b strong {
+    font-size: 16px;
+    line-height: 1;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-route > b span {
+    margin-top: 3px;
+    color: var(--mm-report-muted);
+    font-size: 8px;
+    letter-spacing: .05em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-empty {
+    grid-column: 1 / -1;
+    padding: 18px 12px;
+    border: 1px dashed var(--mm-report-line);
+    border-radius: 12px;
+    color: var(--mm-report-muted);
+    font-size: 13px;
+    line-height: 1.3;
+    text-align: center;
+}
+
+@media (max-width: 345px) {
+    .mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-points {
+        grid-template-columns: 1fr;
+    }
+
+    .mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point {
+        display: grid;
+        grid-template-columns: 58px minmax(0, 1fr);
+        text-align: left;
+    }
+
+    .mm-shift-plan-detail.mm-equipment-detail .mm-shift-plan-point-copy span {
+        min-height: 0;
+    }
+}
+
 .mm-mobile-shell {
     display: none;
 }

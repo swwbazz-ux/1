@@ -165,8 +165,8 @@
                 <h1>{{ dispatcher_header.active_dispatcher_short_name|default:"Смена не открыта" }}</h1>
             </div>
             <div class="mm-mobile-header-actions">
-                <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
-                    {{ dispatcher_dashboard.completion_percent|default:0 }}%
+                <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Удерживайте для отчёта">
+                    {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                 </button>
                 {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
             </div>
@@ -257,8 +257,8 @@
                     <h1>Экскаваторы</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
-                        {{ dispatcher_dashboard.completion_percent|default:0 }}%
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Удерживайте для отчёта">
+                        {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                     </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
@@ -311,8 +311,8 @@
                     <h1>Самосвалы</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
-                        {{ dispatcher_dashboard.completion_percent|default:0 }}%
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Удерживайте для отчёта">
+                        {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                     </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
@@ -364,8 +364,8 @@
                     <h1>Отчеты</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
-                        {{ dispatcher_dashboard.completion_percent|default:0 }}%
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Удерживайте для отчёта">
+                        {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                     </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
@@ -477,8 +477,8 @@
                             <h1>Набор самосвалов</h1>
                         </div>
                         <div class="mm-mobile-header-actions">
-                            <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
-                                {{ dispatcher_dashboard.completion_percent|default:0 }}%
+                            <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Удерживайте для отчёта">
+                                {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                             </button>
                             {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                         </div>
@@ -520,44 +520,49 @@
             {% endif %}
         {% endfor %}
 
+        <style data-mm-shift-plan-critical-v143>
+            .mm-shift-plan-panel{width:min(430px,100%);max-height:min(88dvh,760px);overflow-y:auto}.mm-shift-plan-total{display:grid;grid-template-columns:72px minmax(0,1fr);gap:14px;align-items:center}.mm-shift-plan-total-ring,.mm-shift-plan-point-ring{display:grid;place-content:center;border-radius:50%;text-align:center}.mm-shift-plan-points{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.mm-shift-plan-point{display:flex;min-width:0;flex-direction:column;align-items:center}.mm-shift-plan-route{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;min-width:0}@media(max-width:345px){.mm-shift-plan-points{grid-template-columns:1fr}}
+        </style>
         <div class="gd-equipment-detail mm-equipment-detail mm-shift-plan-detail" data-mm-shift-plan-detail hidden>
             <div class="mm-equipment-detail-backdrop" data-mm-shift-plan-detail-close></div>
             <section class="mm-equipment-detail-panel mm-shift-plan-panel" role="dialog" aria-modal="true" aria-labelledby="mm-shift-plan-title">
                 <button type="button" class="mm-detail-close" data-mm-shift-plan-detail-close aria-label="Закрыть детализацию плана">×</button>
                 <header class="mm-shift-plan-head">
-                    <span>Отчёт за текущую смену</span>
-                    <h2 id="mm-shift-plan-title">Куда вывезен объём</h2>
+                    <span>Текущая смена</span>
+                    <h2 id="mm-shift-plan-title">Выполнение плана</h2>
                 </header>
                 <div class="mm-shift-plan-total" aria-label="Общее выполнение плана">
-                    <div class="mm-shift-plan-total-ring" style="--mm-shift-plan-total-percent: {{ dispatcher_dashboard.shift_plan_detail.completion_percent|default:0 }}%;">
-                        <strong>{{ dispatcher_dashboard.shift_plan_detail.completion_percent|default:0 }}%</strong>
+                    <div class="mm-shift-plan-total-ring" style="--mm-shift-plan-total-percent: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;">
+                        <strong>{{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%</strong>
                         <span>плана</span>
                     </div>
                     <div class="mm-shift-plan-total-copy">
-                        <span>Факт / план</span>
-                        <strong>{{ dispatcher_dashboard.shift_plan_detail.fact_tons|default:"0" }} / {{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</strong>
-                        <small>Круги ниже в сумме дают этот общий процент</small>
+                        <span>Выполнено</span>
+                        <strong>{{ dispatcher_dashboard.shift_plan_detail.fact_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</strong>
+                        <small>из {{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ dispatcher_dashboard.shift_plan_detail.trip_count_label }}</small>
                     </div>
                 </div>
-                <h3 class="mm-shift-plan-section-title">По точкам разгрузки</h3>
+                <h3 class="mm-shift-plan-section-title">Куда вывезено</h3>
                 <div class="mm-shift-plan-points" aria-label="Выполнение по точкам разгрузки">
                     {% for point in dispatcher_dashboard.shift_plan_detail.points %}
-                        <article class="mm-shift-plan-point" style="--mm-shift-plan-point-percent: {{ point.contribution_percent }}%;">
-                            <div class="mm-shift-plan-point-ring"><strong>{{ point.contribution_percent }}%</strong><span>плана</span></div>
-                            <div class="mm-shift-plan-point-copy"><strong>{{ point.name }}</strong><span>{{ point.fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ point.trip_count_label }}</span><small>{{ point.fact_share_percent }}% текущего факта</small></div>
+                        <article class="mm-shift-plan-point" style="--mm-shift-plan-point-percent: {{ point.fact_share_percent }}%;">
+                            <div class="mm-shift-plan-point-ring"><strong>{{ point.fact_share_percent }}%</strong><span>факта</span></div>
+                            <div class="mm-shift-plan-point-copy"><strong>{{ point.name }}</strong><span>{{ point.fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ point.trip_count_label }}</span><small>{{ point.plan_percent_label }}% общего плана</small></div>
                         </article>
                     {% empty %}
                         <div class="mm-shift-plan-empty">Нет рейсов с точкой разгрузки в текущей смене</div>
                     {% endfor %}
                 </div>
                 {% if dispatcher_dashboard.shift_plan_detail.routes %}
-                    <h3 class="mm-shift-plan-section-title">Откуда → куда</h3>
+                    <h3 class="mm-shift-plan-section-title">Основные маршруты</h3>
                     <div class="mm-shift-plan-routes" aria-label="Маршруты текущей смены">
                         {% for route in dispatcher_dashboard.shift_plan_detail.routes %}
                             <article class="mm-shift-plan-route">
-                                <strong><span>{{ route.source }}</span><i aria-hidden="true">→</i><span>{{ route.destination }}</span></strong>
-                                <small>{{ route.fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ route.trip_count_label }}</small>
-                                <b>{{ route.contribution_percent }}%</b>
+                                <div class="mm-shift-plan-route-copy">
+                                    <strong><span>{{ route.source }}</span><i aria-hidden="true">→</i><span>{{ route.destination }}</span></strong>
+                                    <small>{{ route.fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ route.trip_count_label }}</small>
+                                </div>
+                                <b><strong>{{ route.fact_share_percent }}%</strong><span>факта</span></b>
                             </article>
                         {% endfor %}
                     </div>
@@ -1119,7 +1124,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v142";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v143";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");

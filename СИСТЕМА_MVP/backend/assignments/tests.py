@@ -347,8 +347,13 @@ class MiningMasterAssignmentsViewTests(TestCase):
         skdr = DumpPoint.objects.create(name='СКДР')
         dump = DumpPoint.objects.create(name='Отвал')
         now = timezone.now()
-        for point, tonnage in ((kkd, '84000.00'), (skdr, '84000.00'), (dump, '42000.00')):
-            Trip.objects.create(
+        shift_start, _ = production_shift_bounds(
+            production_work_date(self.shift.opened_at),
+            self.shift.shift_type,
+        )
+        point_tonnages = ((kkd, '84000.00'), (skdr, '84000.00'), (dump, '42000.00'))
+        for index, (point, tonnage) in enumerate(point_tonnages):
+            trip = Trip.objects.create(
                 truck=self.assigned_truck,
                 excavator=self.excavator,
                 rock_type=rock_type,
@@ -357,6 +362,9 @@ class MiningMasterAssignmentsViewTests(TestCase):
                 tonnage=tonnage,
                 status=TripStatus.COMPLETED,
                 completed_at=now,
+            )
+            Trip.objects.filter(pk=trip.pk).update(
+                created_at=shift_start + timedelta(minutes=index + 1),
             )
 
         response = self.client.get(reverse('mining_master_assignments'))
@@ -368,8 +376,12 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(detail['completion_percent'], 50)
+        self.assertEqual(detail['completion_percent_label'], '50')
+        self.assertEqual(detail['completion_percent_css'], '50')
+        self.assertEqual(detail['trip_count_label'], '3 рейса')
         self.assertEqual(contribution_by_point, {'ККД': 20, 'СКДР': 20, 'Отвал': 10})
         self.assertEqual(sum(contribution_by_point.values()), detail['completion_percent'])
+        self.assertEqual(sum(point['fact_share_percent'] for point in detail['points']), 100)
         self.assertEqual(detail['unit_label'], 'т')
         self.assertEqual(
             {(route['source'], route['destination']) for route in detail['routes']},
@@ -381,9 +393,57 @@ class MiningMasterAssignmentsViewTests(TestCase):
         )
         self.assertContains(response, 'data-mm-open-shift-plan-detail')
         self.assertContains(response, 'data-mm-shift-plan-detail')
-        self.assertContains(response, 'По точкам разгрузки')
-        self.assertContains(response, 'Откуда → куда')
+        self.assertContains(response, 'Выполнение плана')
+        self.assertContains(response, 'Куда вывезено')
+        self.assertContains(response, 'Основные маршруты')
         self.assertContains(response, 'var holdDelayMs = 620;')
+
+    def test_mining_master_shift_plan_keeps_early_shift_progress_visible(self):
+        rock_type = RockType.objects.create(name='Порода начала смены')
+        points = (
+            (DumpPoint.objects.create(name='ККД'), '2055.00'),
+            (DumpPoint.objects.create(name='СКДР'), '899.00'),
+            (DumpPoint.objects.create(name='Отвал'), '385.00'),
+        )
+        now = timezone.now()
+        shift_start, _ = production_shift_bounds(
+            production_work_date(self.shift.opened_at),
+            self.shift.shift_type,
+        )
+        for index, (point, tonnage) in enumerate(points):
+            trip = Trip.objects.create(
+                truck=self.assigned_truck,
+                excavator=self.excavator,
+                rock_type=rock_type,
+                dump_point=point,
+                actual_dump_point=point,
+                tonnage=tonnage,
+                status=TripStatus.COMPLETED,
+                completed_at=now,
+            )
+            Trip.objects.filter(pk=trip.pk).update(
+                created_at=shift_start + timedelta(minutes=index + 1),
+            )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        detail = response.context['dispatcher_dashboard']['shift_plan_detail']
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(detail['completion_percent'], 0)
+        self.assertEqual(detail['completion_percent_label'], '0,8')
+        self.assertEqual(detail['completion_percent_css'], '0.8')
+        self.assertEqual(detail['trip_count_label'], '3 рейса')
+        self.assertEqual(
+            {point['name']: point['fact_share_percent'] for point in detail['points']},
+            {'ККД': 62, 'СКДР': 27, 'Отвал': 11},
+        )
+        self.assertEqual(
+            {point['name']: point['plan_percent_label'] for point in detail['points']},
+            {'ККД': '0,49', 'СКДР': '0,21', 'Отвал': '0,09'},
+        )
+        self.assertEqual(sum(route['fact_share_percent'] for route in detail['routes']), 100)
+        self.assertContains(response, '0,8%')
+        self.assertContains(response, '62%')
 
     def test_mining_master_shift_plan_uses_full_production_shift_window(self):
         rock_type = RockType.objects.create(name='Порода до входа мастера')
@@ -536,7 +596,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v142')
+        self.assertContains(response, 'mining-master-mobile-shell-v143')
         self.assertNotContains(response, '>v116<')
         self.assertContains(response, 'function hasMiningMasterRelevantEvents')
         self.assertContains(response, 'return Array.isArray(events) && events.length > 0;')
@@ -606,7 +666,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v142', script)
+        self.assertIn('mining-master-mobile-shell-v143', script)
         self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
