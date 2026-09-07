@@ -86,7 +86,7 @@ def employee_work_category_blockers(employee):
     ).exists():
         blockers.append('есть действующее назначение на технику')
     if CrewPlanSlot.objects.filter(
-        employee=employee,
+        Q(employee=employee) | Q(secondary_employee=employee),
         plan__status=CrewPlanStatus.DRAFT,
         plan__work_date__gte=production_work_date(),
     ).exists():
@@ -574,7 +574,12 @@ def dismiss_employee(*, employee, actor, dismissed_at, reason=''):
 
     affected_plan_ids = list(
         CrewPlanSlot.objects.filter(plan_id__in=draft_plan_ids)
-        .filter(Q(employee=employee) | Q(baseline_employee=employee))
+        .filter(
+            Q(employee=employee)
+            | Q(secondary_employee=employee)
+            | Q(baseline_employee=employee)
+            | Q(baseline_secondary_employee=employee)
+        )
         .values_list('plan_id', flat=True)
         .distinct()
     )
@@ -582,8 +587,16 @@ def dismiss_employee(*, employee, actor, dismissed_at, reason=''):
         CrewPlanSlot.objects.filter(plan_id__in=affected_plan_ids, employee=employee).update(employee=None)
         CrewPlanSlot.objects.filter(
             plan_id__in=affected_plan_ids,
+            secondary_employee=employee,
+        ).update(secondary_employee=None)
+        CrewPlanSlot.objects.filter(
+            plan_id__in=affected_plan_ids,
             baseline_employee=employee,
         ).update(baseline_employee=None)
+        CrewPlanSlot.objects.filter(
+            plan_id__in=affected_plan_ids,
+            baseline_secondary_employee=employee,
+        ).update(baseline_secondary_employee=None)
         CrewPlan.objects.filter(id__in=affected_plan_ids).update(
             version=F('version') + 1,
             updated_by=actor,

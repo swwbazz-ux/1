@@ -3919,7 +3919,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-has-open-trip="{% if driver_has_open_trip %}true{% else %}false{% endif %}" data-driver-has-loaded-trip="{% if driver_has_loaded_trip %}true{% else %}false{% endif %}" data-driver-pwa-version="{{ driver_shell_version }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-has-open-trip="{% if driver_has_open_trip %}true{% else %}false{% endif %}" data-driver-has-loaded-trip="{% if driver_has_loaded_trip %}true{% else %}false{% endif %}" data-driver-active-trip-id="{% if active_trip %}{{ active_trip.id }}{% endif %}" data-driver-assigned-dump-point-id="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point.id }}{% endif %}" data-driver-assigned-dump-point-name="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -4616,6 +4616,110 @@ function playDriverAssignmentAlert() {
     playDriverSound("truck_assigned");
 }
 
+function reportDriverAudioDiagnostic(stage, details, extra) {
+    if (!document.body || document.body.dataset.nativeApp !== "true" || !window.fetch) return;
+    var payload = {
+        message: "driver_audio:" + String(stage || "unknown"),
+        source: "driver-audio",
+        stack: JSON.stringify({details: details || {}, extra: extra || {}}),
+        screen: "driver",
+        role: "driver",
+        appVersion: document.body.dataset.appShellVersion || ""
+    };
+    try {
+        window.fetch("/client-error/", {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            keepalive: true,
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+        }).catch(function () {});
+    } catch (error) {}
+}
+
+var driverLastDumpPointAlertVersion = 0;
+
+function latestDriverDumpPointEvent(context) {
+    var selected = null;
+    var events = context && Array.isArray(context.events) ? context.events : [];
+    events.forEach(function (event) {
+        var payload = event && event.payload ? event.payload : null;
+        var version = Number(event && event.version || 0);
+        if (
+            !payload
+            || event.type !== "trip_changed"
+            || payload.action !== "truck_loaded"
+            || version <= driverLastDumpPointAlertVersion
+            || (selected && version <= selected.eventVersion)
+        ) {
+            return;
+        }
+        var tripId = Number(payload.trip_id || 0);
+        var dumpPointId = Number(payload.assigned_dump_point_id || payload.dump_point_id || 0);
+        var dumpPointName = String(payload.dump_point_name || "").trim();
+        if (!tripId || (!dumpPointId && !dumpPointName)) return;
+        selected = {
+            eventVersion: version,
+            tripId: tripId,
+            dumpPointId: dumpPointId,
+            dumpPointName: dumpPointName
+        };
+    });
+    return selected;
+}
+
+function playDriverDumpPointAlert(context) {
+    var details = latestDriverDumpPointEvent(context);
+    if (!details) return;
+    reportDriverAudioDiagnostic("trigger", details, {
+        capacitor: !!window.Capacitor,
+        nativeSound: !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeSound)
+    });
+    var sounds = window.MobileOperationalSounds;
+    var announce = sounds && typeof sounds.announceDumpPoint === "function"
+        ? sounds.announceDumpPoint(details)
+        : Promise.resolve({supported: false, announced: false});
+    Promise.resolve(announce).then(function (nativeResult) {
+        nativeResult = nativeResult || {supported: false, announced: false};
+        reportDriverAudioDiagnostic("result", details, nativeResult);
+        if (sounds && typeof sounds.diagnostics === "function") {
+            window.setTimeout(function () {
+                sounds.diagnostics().then(function (diagnostics) {
+                    reportDriverAudioDiagnostic("playback", details, diagnostics);
+                });
+            }, 1600);
+        }
+        if (nativeResult.supported && nativeResult.announced) {
+            driverLastDumpPointAlertVersion = details.eventVersion;
+            return;
+        }
+        if (nativeResult.supported && nativeResult.reason === "already_announced") {
+            driverLastDumpPointAlertVersion = details.eventVersion;
+            return;
+        }
+        if (nativeResult.supported) {
+            driverLastDumpPointAlertVersion = details.eventVersion;
+            playDriverSound("truck_assigned");
+            return;
+        }
+        if (document.body && document.body.dataset.nativeApp === "true" && !nativeResult.supported) {
+            driverLastDumpPointAlertVersion = details.eventVersion;
+            playDriverSound("truck_assigned");
+            return;
+        }
+        driverLastDumpPointAlertVersion = details.eventVersion;
+        if (navigator.vibrate) {
+            try { navigator.vibrate([180, 90, 180]); } catch (error) {}
+        }
+        playDriverSound("truck_assigned");
+    });
+}
+
+window.addEventListener("operational-state-refresh-applied", function (event) {
+    playDriverDumpPointAlert(event && event.detail ? event.detail : null);
+});
+
 function driverAppliedActionSound(actionKind, freshShell) {
     if (actionKind === "shift-open") {
         return freshShell.querySelector("[data-driver-shift-close-button]")
@@ -4674,6 +4778,10 @@ window.applyOperationalStateRefresh = function (context) {
             previousDowntimeFlow === "waiting_loading"
             && freshShell.dataset.driverHasLoadedTrip === "true"
         );
+        var becameLoaded = (
+            oldShell.dataset.driverHasLoadedTrip !== "true"
+            && freshShell.dataset.driverHasLoadedTrip === "true"
+        );
         if (movedFromLoadingWaitToWork) {
             activeTab = "work";
         }
@@ -4693,6 +4801,18 @@ window.applyOperationalStateRefresh = function (context) {
         }
         if (typeof window.checkAchievementPrize === "function") {
             window.checkAchievementPrize(context);
+        }
+        if (becameLoaded) {
+            playDriverDumpPointAlert({events: [{
+                version: targetVersion,
+                type: "trip_changed",
+                payload: {
+                    action: "truck_loaded",
+                    trip_id: Number(freshShell.dataset.driverActiveTripId || 0),
+                    assigned_dump_point_id: Number(freshShell.dataset.driverAssignedDumpPointId || 0),
+                    dump_point_name: String(freshShell.dataset.driverAssignedDumpPointName || "")
+                }
+            }]});
         }
         if (nextAssignmentKey && nextAssignmentKey !== previousAssignmentKey) {
             playDriverAssignmentAlert();

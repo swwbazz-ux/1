@@ -8,21 +8,8 @@
     <title>{% block title %}MVP учетной системы{% endblock %}</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}?v={{ static_asset_release }}">
+    {% block app_stylesheets %}{% endblock %}
     <style>
-        .qa-environment-ribbon {
-            position: fixed;
-            inset: max(env(safe-area-inset-top), 4px) auto auto 50%;
-            z-index: 20000;
-            transform: translateX(-50%);
-            padding: 3px 10px;
-            border: 1px solid rgba(255, 210, 0, 0.78);
-            border-radius: 999px;
-            background: rgba(46, 35, 0, 0.94);
-            color: #ffe65b;
-            font: 700 10px/1.15 system-ui, sans-serif;
-            letter-spacing: 0.08em;
-            pointer-events: none;
-        }
         .app-sync-overlay {
             position: fixed;
             inset: 0;
@@ -451,6 +438,13 @@
     /* APP_PWA_CONTRACT_GUARD_START */
     (function (window, document) {
         "use strict";
+
+        /* /start/ is a neutral application selector, not a role PWA shell.
+           A previously installed root-scope worker on an Android phone can
+           emit controllerchange while this page is open. The role contract
+           guard must not react here: otherwise the result screen is reloaded
+           repeatedly before the user can open the selected application. */
+        if (/^\/start\/?$/.test(window.location.pathname || "")) return;
 
         var state = {
             javascriptVersion: "",
@@ -1207,10 +1201,16 @@
                 state.locked
                 && state.javascriptVersion
                 && state.serviceWorker
-                && state.server
-                && !state.serverUnavailable
+                && (
+                    (state.server && !state.serverUnavailable)
+                    || (javascriptMatches && !workerMatches)
+                )
             ) {
-                requestControlledUpdate(state.server);
+                requestControlledUpdate(
+                    state.server && !state.serverUnavailable
+                        ? state.server
+                        : expected
+                );
             }
             if (controllerReloadPending) {
                 reloadOnceForExpectedContract();
@@ -1580,7 +1580,6 @@
     {% block extra_head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-native-app="{{ is_native_app|yesno:'true,false' }}" data-native-client-version="{{ native_app_version }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
-{% if qa_environment_enabled %}<div class="qa-environment-ribbon" role="status">{{ qa_environment_label }}</div>{% endif %}
 {% if is_yandex_android and not observer_mode %}
 <div class="app-yandex-warning-banner" data-yandex-warning role="status" aria-live="polite">
     <span><strong>Это Яндекс Браузер.</strong> Приложение может установиться неправильно — со своей строкой снизу. Нажмите «Скопировать ссылку», откройте Google Chrome и вставьте её в адресную строку.</span>
@@ -1614,6 +1613,7 @@
     </div>
 </div>
 
+{% block global_realtime_ui %}
 <!-- Плашка «Связь потеряна» закрывала собой нижнюю панель вкладок и говорила
    ровно то же, что цветная точка в углу. Оставляем её в разметке только как
    запасной путь: realtime-client прячет её, если на экране есть индикатор
@@ -1659,6 +1659,7 @@
     <span data-app-realtime-update-text>На сервере появились новые данные.</span>
     <button class="app-realtime-update__button" type="button" data-app-realtime-update-button>Обновить</button>
 </div>
+{% endblock %}
 
 <div class="app-confirm-modal" id="app-confirm-modal" hidden>
     <div class="app-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="app-confirm-title">
@@ -1737,6 +1738,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     var logoutPath = "{% url 'logout' %}";
     var roleHomePath = "{% url 'role_home' %}";
+    var linkedReportsHomePath = "{% if access.role.code == 'dispatcher' %}{% url 'dispatcher_reports' %}{% elif access.role.code == 'mechanic' %}{% url 'mechanic_dashboard' %}{% else %}{% url 'management_dashboard' %}{% endif %}";
     var confirmModal = document.getElementById("app-confirm-modal");
     var confirmMessage = document.getElementById("app-confirm-message");
     var confirmAccept = confirmModal ? confirmModal.querySelector("[data-confirm-accept]") : null;
@@ -1767,9 +1769,9 @@ document.addEventListener("DOMContentLoaded", function () {
         {pattern: /^\/reports\/pilot-feedback\/?$/, target: "{% url 'pilot_launch_scenario' %}"},
         {pattern: /^\/reports\/pilot-checklist\/?$/, target: "{% url 'pilot_launch_scenario' %}"},
         {pattern: /^\/reports\/management\/?$/, target: roleHomePath},
-        {pattern: /^\/reports\/customer-daily\/?$/, target: "{% url 'management_dashboard' %}"},
-        {pattern: /^\/reports\/volume\/?$/, target: "{% url 'management_dashboard' %}"},
-        {pattern: /^\/reports\/downtimes\/?$/, target: "{% url 'management_dashboard' %}"},
+        {pattern: /^\/reports\/customer-daily\/?$/, target: linkedReportsHomePath},
+        {pattern: /^\/reports\/volume\/?$/, target: linkedReportsHomePath},
+        {pattern: /^\/reports\/downtimes\/?$/, target: linkedReportsHomePath},
         {pattern: /^\/driver\/registration\/?$/, target: roleHomePath},
         {pattern: /^\/driver\/shift\/?$/, target: roleHomePath},
         {pattern: /^\/dispatcher\/control\/?$/, target: roleHomePath},
@@ -2407,6 +2409,7 @@ window.AppRealtimeConfig = {
     mobileQueueKey: "mining-master-mobile-sync-queue-v1",
     screens: [
         {name: "dispatcher-control", role: "dispatcher", mode: "custom", path: "^/dispatcher/control/?$", customRefresh: true},
+        {name: "dispatcher-shift-report", role: "dispatcher", mode: "custom", path: "^/dispatcher/shift-reports/(?:trucks|excavation|hourly)/?$", customRefresh: true},
         {name: "dispatcher-reports", role: "dispatcher", mode: "manual", path: "^/dispatcher/"},
         {name: "mining-master", role: "mining_master", mode: "custom", path: "^/mining-master/", customRefresh: true},
         {name: "excavator", role: "excavator_operator", mode: "custom", path: "^/excavator/work/?$", customRefresh: true, foregroundReconcile: true},

@@ -1,4 +1,4 @@
-﻿import secrets
+import secrets
 import json
 from datetime import datetime, timedelta
 from contextlib import nullcontext
@@ -141,6 +141,7 @@ from .models import (
     WorkSchedule,
 )
 from .live_monitor import attach_application_presence, application_presence_by_employee_ids
+from .registration_dashboard import build_registration_dashboard
 from .oup_undo import (
     get_oup_action_undo_state,
     undo_oup_action,
@@ -253,7 +254,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v194'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v197'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -1466,6 +1467,17 @@ def system_admin_dashboard_view(request):
             'shift_reading_corrections': recent_shift_reading_corrections(),
         },
     )
+
+
+@require_GET
+def system_admin_registration_dashboard_view(request):
+    access = require_admin_access(request)
+    if not access:
+        return redirect('role_home')
+
+    context = build_registration_dashboard(request.GET)
+    context['access'] = access
+    return render(request, 'users/system_admin_registration_dashboard.html', context)
 
 
 @require_POST

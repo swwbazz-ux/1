@@ -98,8 +98,8 @@ class ObserverModeMiddleware:
             comment='Выполнено администратором в режиме управления',
         )
 
-    @staticmethod
-    def _keep_token_on_redirect(request, response, token):
+    @classmethod
+    def _keep_token_on_redirect(cls, request, response, token):
         """Перенаправление внутри приложения не должно ронять пропуск.
 
         Пропуск живёт в адресе, а не в сессии: настоящую сессию сотрудника мы
@@ -113,7 +113,7 @@ class ObserverModeMiddleware:
             return
         path, _, fragment = location.partition('#')
         path, _, query = path.partition('?')
-        if path in self.exit_paths:
+        if path in cls.exit_paths:
             return
         params = parse_qsl(query, keep_blank_values=True)
         if any(key == 'observe' for key, _ in params):

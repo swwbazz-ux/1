@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% load static l10n %}
 
 {% block title %}Экскаваторщик{% endblock %}
@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v210">
 <link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v210">
 <link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v210">
+<link rel="stylesheet" href="{% static 'css/excavator-destination-distances-v1.css' %}?v=excavator-mobile-shell-v210">
 <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v210" defer></script>
 <script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v210" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
@@ -108,18 +109,33 @@
 
                 <div class="mobile-face__destinations" aria-label="Выбор точек разгрузки">
                     {% for card in dump_choice_cards %}
-                        <button
-                            class="eo-unload-card mobile-face__destination status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_persisted %} is-dump-applied{% elif card.is_selected %} is-dump-pending{% endif %}"
-                            type="button"
-                            data-eo-dump-select="{{ card.point.id }}"
-                            data-eo-dump-name="{{ card.name }}"
-                            data-eo-dump-persisted="{% if card.is_persisted %}true{% else %}false{% endif %}"
-                            aria-pressed="{% if card.is_selected %}true{% else %}false{% endif %}"
-                            aria-label="{{ card.name }}. {% if card.is_persisted %}Активная точка разгрузки{% elif card.is_selected %}Будет добавлена после применения{% else %}Не выбрана{% endif %}."
-                            {% if not open_shift %}disabled aria-disabled="true"{% endif %}
-                        >
-                            <strong>{{ card.name }}</strong>
-                        </button>
+                        <div class="mobile-face__destination-row{% if card.is_selected %} is-selected{% endif %}" data-eo-dump-row="{{ card.point.id }}">
+                            <button
+                                class="eo-unload-card mobile-face__destination status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_persisted %} is-dump-applied{% elif card.is_selected %} is-dump-pending{% endif %}"
+                                type="button"
+                                data-eo-dump-select="{{ card.point.id }}"
+                                data-eo-dump-name="{{ card.name }}"
+                                data-eo-dump-persisted="{% if card.is_persisted %}true{% else %}false{% endif %}"
+                                aria-pressed="{% if card.is_selected %}true{% else %}false{% endif %}"
+                                aria-label="{{ card.name }}. {% if card.is_persisted %}Активная точка разгрузки{% elif card.is_selected %}Будет добавлена после применения{% else %}Не выбрана{% endif %}."
+                                {% if not open_shift %}disabled aria-disabled="true"{% endif %}
+                            >
+                                <strong>{{ card.name }}</strong>
+                            </button>
+                            <label class="mobile-face__destination-distance">
+                                <span>км</span>
+                                <input
+                                    type="text"
+                                    inputmode="decimal"
+                                    maxlength="12"
+                                    value="{{ card.transport_distance_km }}"
+                                    placeholder="—"
+                                    data-eo-dump-distance="{{ card.point.id }}"
+                                    aria-label="Плечо до точки {{ card.name }}, км"
+                                    {% if not open_shift or not card.is_selected %}disabled aria-disabled="true"{% endif %}
+                                >
+                            </label>
+                        </div>
                     {% empty %}
                         <div class="eo-empty-state eo-empty-state-compact mobile-face__empty">
                             <strong>Нет точек</strong>
@@ -202,7 +218,7 @@
             <div class="eo-dashboard-dump-zone">
                 <div class="eo-unload-grid eo-unload-grid-work eo-dashboard-unload-grid is-count-{{ dump_cards|length }}{% if dump_cards|length == 1 %} is-single{% endif %}" aria-label="Точки разгрузки">
                     {% for card in dump_cards %}
-                        <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_last_sent %} is-last-dump{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}" data-eo-has-pending-trucks="{% if card.pending_trucks %}true{% else %}false{% endif %}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% endif %}>
+                        <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_last_sent %} is-last-dump{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}" data-eo-dump-distance="{{ card.transport_distance_km }}" data-eo-has-pending-trucks="{% if card.pending_trucks %}true{% else %}false{% endif %}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% endif %}>
                             <span class="eo-dashboard-unload-top">
                                 <strong>{{ card.name }}</strong>
                                 <small>{{ card.completed_count|default:0 }}</small>
@@ -821,6 +837,7 @@ window.initExcavatorWorkShell = function () {
     var assignmentInput = shell.querySelector("[data-eo-assignment-input]");
     var dumpInput = shell.querySelector("[data-eo-dump-input]");
     var dumpPointsInput = shell.querySelector("[data-eo-dump-points-input]");
+    var transportDistanceInput = shell.querySelector("input[name='transport_distance_km']");
     var downtimeInput = shell.querySelector("[data-eo-downtime-input]");
     var activeDuration = shell.querySelector("[data-eo-active-duration]");
     var downtimeCard = shell.querySelector("[data-eo-active-downtime-id]");
@@ -1304,6 +1321,9 @@ window.initExcavatorWorkShell = function () {
         if (!id) return;
         shell.querySelectorAll("[data-eo-dump-target]").forEach(function (item) {
             item.classList.toggle("is-selected", item.dataset.eoDumpTarget === id);
+            if (item.dataset.eoDumpTarget === id && transportDistanceInput) {
+                transportDistanceInput.value = item.dataset.eoDumpDistance || "";
+            }
         });
         if (dumpInput) {
             dumpInput.value = id;
@@ -1747,6 +1767,16 @@ window.initExcavatorWorkShell = function () {
         button.dataset.eoDumpPersisted = persisted ? "true" : "false";
         button.setAttribute("aria-pressed", selected ? "true" : "false");
         button.setAttribute("aria-label", name + ". " + stateLabel + ".");
+        var row = button.closest("[data-eo-dump-row]");
+        if (row) {
+            row.classList.toggle("is-selected", selected);
+            var distanceInput = row.querySelector("[data-eo-dump-distance]");
+            if (distanceInput) {
+                var isAvailable = !!(faceContent && faceContent.dataset.eoFaceSettingsAvailable === "true");
+                distanceInput.disabled = faceSettingsPending || !isAvailable || !selected;
+                distanceInput.setAttribute("aria-disabled", distanceInput.disabled ? "true" : "false");
+            }
+        }
     }
 
     function renderDumpChoiceStates() {
@@ -1782,6 +1812,24 @@ window.initExcavatorWorkShell = function () {
             }
         });
         return ids;
+    }
+
+    function selectedDestinationSettings() {
+        return selectedDumpPointIds().map(function (id) {
+            var distanceInput = shell.querySelector('[data-eo-dump-distance="' + id + '"]');
+            return {
+                dump_point_id: id,
+                transport_distance_km: distanceInput ? distanceInput.value : ""
+            };
+        });
+    }
+
+    function replaceDestinationDistances(destinations) {
+        (Array.isArray(destinations) ? destinations : []).forEach(function (row) {
+            var id = String(row && (row.dump_point_id || row.id) || "");
+            var input = id ? shell.querySelector('[data-eo-dump-distance="' + id + '"]') : null;
+            if (input) input.value = String(row.transport_distance_km || "").replace(".", ",");
+        });
     }
 
     function syncDumpPointInputs() {
@@ -1826,7 +1874,12 @@ window.initExcavatorWorkShell = function () {
             rockTypeId: rockSelect ? String(rockSelect.value || "") : "",
             loadingHorizon: normalizeFaceSetting(horizonInput ? horizonInput.value : ""),
             loadingBlock: normalizeFaceSetting(blockInput ? blockInput.value : ""),
-            dumpPointIds: selectedDumpPointIds().map(String).sort()
+            destinations: selectedDestinationSettings().map(function (row) {
+                return {
+                    dumpPointId: String(row.dump_point_id),
+                    distanceKm: String(row.transport_distance_km || "").trim().replace(",", ".")
+                };
+            })
         });
     }
 
@@ -1848,6 +1901,12 @@ window.initExcavatorWorkShell = function () {
         });
         shell.querySelectorAll("[data-eo-face-horizon], [data-eo-face-block], [data-eo-rock-select]").forEach(function (control) {
             control.disabled = faceSettingsPending || !isAvailable;
+            control.setAttribute("aria-disabled", control.disabled ? "true" : "false");
+        });
+        shell.querySelectorAll("[data-eo-dump-distance]").forEach(function (control) {
+            var row = control.closest("[data-eo-dump-row]");
+            var selected = !!(row && row.classList.contains("is-selected"));
+            control.disabled = faceSettingsPending || !isAvailable || !selected;
             control.setAttribute("aria-disabled", control.disabled ? "true" : "false");
         });
     }
@@ -2012,7 +2071,7 @@ window.initExcavatorWorkShell = function () {
             loading_horizon: shell.querySelector("input[name='loading_horizon']") ? shell.querySelector("input[name='loading_horizon']").value : "",
             loading_block: shell.querySelector("input[name='loading_block']") ? shell.querySelector("input[name='loading_block']").value : "",
             planned_volume_m3: shell.querySelector("input[name='planned_volume_m3']") ? shell.querySelector("input[name='planned_volume_m3']").value : "",
-            transport_distance_km: shell.querySelector("input[name='transport_distance_km']") ? shell.querySelector("input[name='transport_distance_km']").value : "",
+            transport_distance_km: dumpTarget.dataset.eoDumpDistance || (transportDistanceInput ? transportDistanceInput.value : ""),
             downtime_text: downtimeInput ? downtimeInput.value : "",
             note: shell.querySelector("input[name='note']") ? shell.querySelector("input[name='note']").value : ""
         };
@@ -2639,6 +2698,10 @@ window.initExcavatorWorkShell = function () {
             input.addEventListener("input", markFaceDraftChanged);
             input.addEventListener("change", markFaceDraftChanged);
         });
+        shell.querySelectorAll("[data-eo-dump-distance]").forEach(function (input) {
+            input.addEventListener("input", markFaceDraftChanged);
+            input.addEventListener("change", markFaceDraftChanged);
+        });
         var settingsRockSelect = shell.querySelector("[data-eo-rock-select]");
         if (settingsRockSelect) {
             settingsRockSelect.addEventListener("change", markFaceDraftChanged);
@@ -2673,6 +2736,7 @@ window.initExcavatorWorkShell = function () {
                 client_action_id: generateClientActionId("excavator-settings"),
                 rock_type_id: rockSelect.value || "",
                 dump_point_ids: ids,
+                destinations: selectedDestinationSettings(),
                 loading_horizon: horizonInput ? horizonInput.value : "",
                 loading_block: blockInput ? blockInput.value : ""
             };
@@ -2704,6 +2768,7 @@ window.initExcavatorWorkShell = function () {
                 var savedIds = normalizeDumpPointIds(data.dump_point_ids || ids);
                 replaceDraftDumpPointIds(savedIds);
                 replacePersistedDumpPointIds(savedIds);
+                replaceDestinationDistances(data.destinations || payload.destinations);
                 syncDumpPointInputs();
                 faceDraftTouched = false;
                 appliedExcavatorSettingsSnapshot = currentExcavatorSettingsSnapshot();

@@ -1,0 +1,417 @@
+{% extends "base.html" %}
+{% load l10n %}
+
+{% block title %}{% if report_kind == 'hourly' %}Почасовая сводка смены{% elif report_kind == 'excavation' %}Выемочное оборудование{% else %}Итоги смены по самосвалам{% endif %}{% endblock %}
+{% block body_class %}dispatcher-control-screen dispatcher-shift-report-screen{% endblock %}
+
+{% block body %}
+<main class="dispatcher-shell dispatcher-analytics-shell dispatcher-shift-report-page" data-dispatcher-theme>
+    <section class="dispatcher-analytics-board">
+        <header class="dispatcher-topbar dispatcher-unified-topbar no-print">
+            {% include "includes/dispatcher_header.html" with dispatcher_nav_active="reports" dispatcher_header_screen="Сменные отчёты" %}
+        </header>
+
+        <section class="dispatcher-shift-report-controlbar no-print" aria-label="Управление сменным отчётом">
+            <div class="dispatcher-shift-report-switcher">
+                <a class="dispatcher-shift-report-back" href="{% url 'dispatcher_reports' %}?{{ query_string }}">← Все отчёты</a>
+                <nav class="dispatcher-shift-report-tabs" aria-label="Вид сменного отчёта">
+                    <a class="{% if report_kind == 'trucks' %}is-active{% endif %}" href="{% url 'dispatcher_shift_trucks' %}?{{ query_string }}">Самосвалы</a>
+                    <a class="{% if report_kind == 'excavation' %}is-active{% endif %}" href="{% url 'dispatcher_shift_excavation' %}?{{ query_string }}">Выемочное оборудование</a>
+                    <a class="{% if report_kind == 'hourly' %}is-active{% endif %}" href="{% url 'dispatcher_shift_hourly' %}?{{ query_string }}">Почасовая сводка</a>
+                </nav>
+            </div>
+
+            <form class="dispatcher-shift-report-filters" method="get">
+                <label>
+                    <span>Дата</span>
+                    <input type="date" name="date" value="{{ report.date_value }}" onchange="this.form.requestSubmit()">
+                </label>
+                <label>
+                    <span>Смена</span>
+                    <select name="shift_type" onchange="this.form.requestSubmit()">
+                        <option value="day" {% if report.meta.shift_type == 'day' %}selected{% endif %}>Дневная</option>
+                        <option value="night" {% if report.meta.shift_type == 'night' %}selected{% endif %}>Ночная</option>
+                    </select>
+                </label>
+                <p class="dispatcher-shift-report-filter-summary">
+                    <span class="dispatcher-shift-report-range-hint">Применяются сразу · <strong>{{ report.meta.time_range }}</strong></span>
+                    <span class="dispatcher-shift-report-sync is-ok" data-dispatcher-shift-report-sync role="status" aria-live="polite">
+                        <i aria-hidden="true"></i>
+                        <span data-dispatcher-shift-report-sync-text>Обновлено при открытии</span>
+                    </span>
+                </p>
+            </form>
+
+            <div class="dispatcher-report-actions">
+                {% if report_kind == 'hourly' %}
+                    <a href="{% url 'dispatcher_shift_hourly_export' %}?{{ query_string }}">Excel</a>
+                {% elif report_kind == 'excavation' %}
+                    <a href="{% url 'dispatcher_shift_excavation_export' %}?{{ query_string }}">Excel</a>
+                {% else %}
+                    <a href="{% url 'dispatcher_shift_trucks_export' %}?{{ query_string }}">Excel</a>
+                {% endif %}
+                <button type="button" onclick="window.print()">Печать</button>
+            </div>
+        </section>
+
+        {% if messages %}
+            <div class="dispatcher-shift-report-messages no-print" aria-live="polite">
+                {% for message in messages %}<div class="is-{{ message.tags|default:'info' }}">{{ message }}</div>{% endfor %}
+            </div>
+        {% endif %}
+
+        <div data-dispatcher-shift-report-live>
+        {% if report.issues %}
+            <section class="dispatcher-shift-report-issues no-print" aria-label="Замечания перед выгрузкой">
+                <strong>Проверить перед выгрузкой:</strong>
+                {% for issue in report.issues %}<span class="is-{{ issue.level }}">{{ issue.label }} — {{ issue.count }}</span>{% endfor %}
+            </section>
+        {% else %}
+            <section class="dispatcher-shift-report-ready no-print">Данные смены заполнены. Отчёт готов к выгрузке или печати.</section>
+        {% endif %}
+
+        <section class="dispatcher-shift-report-paper" id="{{ report_kind }}">
+            {% if report_kind == 'hourly' %}
+                <header class="dispatcher-shift-report-paper-title is-hourly">
+                    <h1>Почасовая сводка смены</h1>
+                    <p>{{ report.date|date:"d.m.Y" }} · {{ report.meta.label }} смена {{ report.meta.time_range }}</p>
+                </header>
+                <div class="dispatcher-shift-report-table-wrap is-hourly" data-hourly-report-scroll>
+                    <table class="dispatcher-shift-report-table is-hourly" style="min-width: {{ report.hourly.min_width_px }}px">
+                        <thead>
+                            <tr>
+                                <th class="is-sticky is-excavator" rowspan="2">№ экс</th>
+                                <th class="is-sticky is-fleet" rowspan="2">а/с</th>
+                                {% for hour in report.hourly.hours %}
+                                    <th class="is-hour {% if hour.trip_count %}has-trips{% endif %}" colspan="{{ hour.points|length|add:2 }}">
+                                        {{ hour.label }}<small>{{ hour.range_label }}</small>
+                                    </th>
+                                {% endfor %}
+                                <th class="is-total" colspan="2">Итого</th>
+                            </tr>
+                            <tr>
+                                {% for hour in report.hourly.hours %}
+                                    {% for point in hour.points %}<th class="is-dump-point">{{ point.label }}</th>{% endfor %}
+                                    <th>Рейсы</th><th>Объём</th>
+                                {% endfor %}
+                                <th>Рейсы</th><th>Объём</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in report.hourly.rows %}
+                                {% for fleet in row.fleet_rows %}
+                                    <tr class="is-{{ fleet.key }}">
+                                        {% if forloop.first %}<th class="is-sticky is-excavator" rowspan="2">{{ row.label }}</th>{% endif %}
+                                        <th class="is-sticky is-fleet">{{ fleet.label }}</th>
+                                        {% for hour in fleet.hours %}
+                                            {% for cell in hour.cells %}<td>{% if cell.trip_count %}{{ cell.trip_count }}{% endif %}</td>{% endfor %}
+                                            <td class="is-hour-total">{% if hour.trip_count %}{{ hour.trip_count }}{% endif %}</td>
+                                            <td class="is-hour-total">{% if hour.volume %}{{ hour.volume|floatformat:"0g" }}{% endif %}</td>
+                                        {% endfor %}
+                                        <td class="is-shift-total">{% if fleet.trip_count %}{{ fleet.trip_count }}{% endif %}</td>
+                                        <td class="is-shift-total">{% if fleet.volume %}{{ fleet.volume|floatformat:"0g" }}{% endif %}</td>
+                                    </tr>
+                                {% endfor %}
+                                <tr class="is-excavator-total">
+                                    <th class="is-sticky is-excavator">Рейсы</th><th class="is-sticky is-fleet">Объёмы</th>
+                                    {% for hour in row.hours %}
+                                        {% for cell in hour.cells %}<td>{% if cell.trip_count %}{{ cell.trip_count }}{% endif %}</td>{% endfor %}
+                                        <td>{{ hour.trip_count|default:"" }}</td><td>{% if hour.volume %}{{ hour.volume|floatformat:"0g" }}{% endif %}</td>
+                                    {% endfor %}
+                                    <td>{{ row.trip_count }}</td><td>{{ row.volume|floatformat:"0g" }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr><td class="dispatcher-shift-report-empty" colspan="{{ report.hourly.column_count }}">В справочнике нет активных экскаваторов.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <th class="is-sticky is-excavator" colspan="2">Итого за смену</th>
+                                {% for hour in report.hourly.hours %}
+                                    {% for cell in hour.point_totals %}<th>{% if cell.trip_count %}{{ cell.trip_count }}{% endif %}</th>{% endfor %}
+                                    <th>{{ hour.trip_count }}</th><th>{{ hour.volume|floatformat:"0g" }}</th>
+                                {% endfor %}
+                                <th>{{ report.hourly.trip_count }}</th><th>{{ report.hourly.volume|floatformat:"0g" }}</th>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+                <p class="dispatcher-hourly-hint no-print">Таблица прокручивается по горизонтали. В каждом часовом блоке показаны только те точки разгрузки, куда за этот час были рейсы.</p>
+            {% elif report_kind == 'excavation' %}
+                <header class="dispatcher-shift-report-paper-title is-blue">
+                    <h1>Отчёт о работе выемочного оборудования</h1>
+                    <p>{{ report.date|date:"d.m.Y" }} · {{ report.meta.label }} смена {{ report.meta.time_range }}</p>
+                </header>
+                <div class="dispatcher-shift-report-table-wrap">
+                    <table class="dispatcher-shift-report-table is-excavation">
+                        <thead><tr>
+                            <th>Тип грунта</th><th>Экскаватор</th><th>План, м³</th><th>Выполнено, м³</th>
+                            <th>Горизонт</th><th>Блок</th><th>Место разгрузки</th><th>Плечо, км</th><th>Простои</th><th>Примечание</th>
+                        </tr></thead>
+                        <tbody>
+                            {% for row in report.excavation_rows %}
+                                <tr>
+                                    <td><strong>{{ row.rock_type }}</strong></td><td>{{ row.excavator_label }}</td>
+                                    <td>{{ row.planned_volume|floatformat:"0g"|default:"—" }}</td><td><strong>{{ row.volume|floatformat:"0g" }}</strong><small>{{ row.trip_count }} рейс.</small></td>
+                                    <td>{{ row.horizon|default:"—" }}</td><td>{{ row.block|default:"—" }}</td><td>{{ row.dump_point|default:"—" }}</td>
+                                    <td>{{ row.distance|floatformat:"1g"|default:"—" }}</td><td>{{ row.downtime|default:"—" }}</td><td>{{ row.note|default:"—" }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr><td class="dispatcher-shift-report-empty" colspan="10">Завершённых рейсов за смену ещё нет.</td></tr>
+                            {% endfor %}
+                            {% for row in report.other_rows %}
+                                <tr class="is-other"><td><strong>Прочие работы</strong></td><td>{{ row.label }}</td><td colspan="7"></td><td>{{ row.note }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot><tr><th colspan="2">Итого</th><th>{{ report.excavation_totals.planned_volume|floatformat:"0g" }}</th><th>{{ report.excavation_totals.volume|floatformat:"0g" }}</th><th colspan="6">{{ report.excavation_totals.trip_count }} рейсов</th></tr></tfoot>
+                    </table>
+                </div>
+            {% else %}
+                <header class="dispatcher-shift-report-paper-title is-yellow">
+                    <h1>Итоги смены по самосвалам</h1>
+                    <p>{{ report.date|date:"d.m.Y" }} · {{ report.meta.short_label }} · {{ report.meta.time_range }}</p>
+                </header>
+                <div class="dispatcher-shift-report-table-wrap">
+                    <table class="dispatcher-shift-report-table is-trucks">
+                        <thead><tr><th>№ А/С</th><th>Рейсы</th><th>км</th><th>Итог, м³</th><th>м³×км</th><th>Примечание / простои</th></tr></thead>
+                        <tbody>
+                            {% for row in report.truck_rows %}
+                                <tr class="is-{{ row.fleet }} {% if row.idle and row.notes %}is-idle-note{% endif %}">
+                                    <td><strong>{{ row.label }}</strong></td><td>{{ row.trip_count|default:"—" }}</td><td>{{ row.distance|floatformat:"1g"|default:"—" }}</td>
+                                    <td>{% if row.volume %}{{ row.volume|floatformat:"0g" }}{% else %}—{% endif %}</td><td>{% if row.m3km %}{{ row.m3km|floatformat:"0g" }}{% else %}—{% endif %}</td><td>{{ row.notes|default:"—" }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr><td class="dispatcher-shift-report-empty" colspan="6">В справочнике нет активных самосвалов.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot><tr><th>Итого</th><th>{{ report.truck_totals.trip_count }}</th><th>{{ report.truck_totals.distance|floatformat:"1g"|default:"—" }}</th><th>{{ report.truck_totals.volume|floatformat:"0g" }}</th><th>{{ report.truck_totals.m3km|floatformat:"0g" }}</th><th></th></tr></tfoot>
+                    </table>
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="dispatcher-shift-source no-print">
+            <div class="dispatcher-shift-source-head">
+                <div><span>Исходные данные</span><h2>Завершённые рейсы смены</h2></div>
+                <p>Корректировка меняет исходный рейс, поэтому все сменные отчёты пересчитаются одинаково.</p>
+            </div>
+            <div class="dispatcher-shift-source-list">
+                {% for trip in source_trips %}
+                    <details class="dispatcher-shift-source-row">
+                        <summary>
+                            <strong>Рейс №{{ trip.id }}</strong>
+                            <span>{{ trip.truck.garage_number }} → {{ trip.actual_dump_point|default:trip.assigned_dump_point|default:trip.dump_point }}</span>
+                            <span>{{ trip.rock_type }}</span>
+                            <span>{{ trip.volume_m3|floatformat:"2g"|default:"нет объёма" }} м³</span>
+                            <span>{{ trip.transport_distance_km|floatformat:"2g"|default:"нет плеча" }} км</span>
+                            {% if can_correct and trip.status == 'completed' %}<b>Корректировать</b>{% elif report_kind == 'hourly' %}<b>В пути</b>{% endif %}
+                        </summary>
+                        {% if can_correct and trip.status == 'completed' %}
+                            <form method="post" class="dispatcher-shift-correction-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="date" value="{{ report.date_value }}">
+                                <input type="hidden" name="shift_type" value="{{ report.meta.shift_type }}">
+                                <input type="hidden" name="trip_id" value="{{ trip.id }}">
+                                <label><span>Объём, м³</span><input name="volume_m3" inputmode="decimal" value="{{ trip.volume_m3|unlocalize }}"></label>
+                                <label><span>Плечо, км</span><input name="transport_distance_km" inputmode="decimal" value="{{ trip.transport_distance_km|unlocalize }}"></label>
+                                <label><span>Порода</span><select name="rock_type_id">{% for rock in rock_types %}<option value="{{ rock.id }}" {% if rock.id == trip.rock_type_id %}selected{% endif %}>{{ rock.name }}</option>{% endfor %}</select></label>
+                                <label><span>Факт. разгрузка</span><select name="actual_dump_point_id"><option value="">По назначению: {{ trip.assigned_dump_point|default:trip.dump_point }}</option>{% for point in dump_points %}<option value="{{ point.id }}" {% if point.id == trip.actual_dump_point_id %}selected{% endif %}>{{ point.name }}</option>{% endfor %}</select></label>
+                                <label><span>Горизонт</span><input name="loading_horizon" maxlength="64" value="{{ trip.loading_horizon }}"></label>
+                                <label><span>Блок</span><input name="loading_block" maxlength="64" value="{{ trip.loading_block }}"></label>
+                                <label class="is-wide"><span>Простои в рейсе</span><input name="downtime_text" maxlength="255" value="{{ trip.downtime_text }}"></label>
+                                <label class="is-wide"><span>Примечание</span><textarea name="note" rows="2">{{ trip.note }}</textarea></label>
+                                <label class="is-wide is-required"><span>Причина корректировки</span><input name="correction_reason" maxlength="255" required placeholder="Например: уточнено по сводке горного мастера"></label>
+                                <div class="dispatcher-shift-correction-actions"><button type="submit">Сохранить и пересчитать отчёт</button></div>
+                            </form>
+                        {% else %}
+                            <p class="dispatcher-shift-readonly-note">Для роли руководителя отчёт доступен только для просмотра, выгрузки и печати.</p>
+                        {% endif %}
+                    </details>
+                {% empty %}<p class="dispatcher-empty-note">В выбранной смене нет завершённых рейсов.</p>{% endfor %}
+            </div>
+        </section>
+        </div>
+    </section>
+</main>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    var shell = document.querySelector("[data-dispatcher-theme]");
+    var saved = localStorage.getItem("dispatcher-theme") || "night";
+    if (shell) {
+        shell.classList.toggle("dispatcher-night", saved === "night");
+        shell.classList.toggle("dispatcher-day", saved !== "night");
+    }
+});
+
+(function () {
+    "use strict";
+
+    var liveRootSelector = "[data-dispatcher-shift-report-live]";
+    var fragmentScreen = "dispatcher-shift-report";
+    var fragmentTimeoutMs = 3000;
+    var fragmentRetryDelayMs = 500;
+    var reconcileIntervalMs = 10000;
+    var staleWarningMs = 15000;
+    var refreshInFlight = null;
+    var reconcileTimerId = null;
+    var statusTimerId = null;
+    var lastSuccessfulRefreshAt = Date.now();
+
+    function syncStatusElements() {
+        return {
+            root: document.querySelector("[data-dispatcher-shift-report-sync]"),
+            text: document.querySelector("[data-dispatcher-shift-report-sync-text]")
+        };
+    }
+
+    function formatRefreshTime(timestamp) {
+        return new Date(timestamp).toLocaleTimeString("ru-RU", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+        });
+    }
+
+    function setSyncStatus(state, text) {
+        var elements = syncStatusElements();
+        if (!elements.root || !elements.text) return;
+        elements.root.classList.remove("is-ok", "is-updating", "is-warning", "is-paused");
+        elements.root.classList.add("is-" + state);
+        elements.text.textContent = text;
+    }
+
+    function markRefreshSuccessful() {
+        lastSuccessfulRefreshAt = Date.now();
+        setSyncStatus("ok", "Обновлено в " + formatRefreshTime(lastSuccessfulRefreshAt));
+    }
+
+    function reportRefreshIsUnsafe(root) {
+        if (!root) return true;
+        if (root.querySelector(".dispatcher-shift-source-row[open]")) return true;
+        var active = document.activeElement;
+        return !!(
+            active
+            && root.contains(active)
+            && /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(active.tagName || "")
+        );
+    }
+
+    function requestReportFragment(version, attempt) {
+        return window.AppOperationalFragment.request(fragmentScreen, version, {
+            timeoutMs: fragmentTimeoutMs
+        }).catch(function (error) {
+            if (attempt >= 2) throw error;
+            return new Promise(function (resolve) {
+                window.setTimeout(resolve, fragmentRetryDelayMs);
+            }).then(function () {
+                return requestReportFragment(version, attempt + 1);
+            });
+        });
+    }
+
+    function refreshDispatcherShiftReport(context) {
+        var root = document.querySelector(liveRootSelector);
+        if (reportRefreshIsUnsafe(root)) {
+            setSyncStatus("paused", "Обновление ждёт завершения корректировки");
+            return Promise.resolve({deferred: true, reason: "dispatcher_shift_report_editing"});
+        }
+        if (
+            !window.AppOperationalFragment
+            || typeof window.AppOperationalFragment.request !== "function"
+            || typeof window.AppOperationalFragment.parseRoot !== "function"
+        ) {
+            setSyncStatus("warning", "Автообновление недоступно");
+            return Promise.resolve({deferred: true, reason: "dispatcher_shift_report_refresh_unavailable"});
+        }
+
+        if (refreshInFlight) {
+            return refreshInFlight;
+        }
+
+        setSyncStatus("updating", "Обновляем отчёт…");
+
+        refreshInFlight = requestReportFragment(context && context.version, 1).then(function (payload) {
+            var freshRoot = window.AppOperationalFragment.parseRoot(payload.html, liveRootSelector);
+            var currentRoot = document.querySelector(liveRootSelector);
+            if (!freshRoot || !currentRoot) {
+                return {deferred: true, reason: "dispatcher_shift_report_fragment_missing"};
+            }
+            var currentHourlyScroll = currentRoot.querySelector("[data-hourly-report-scroll]");
+            var hourlyScrollPosition = currentHourlyScroll ? {
+                left: currentHourlyScroll.scrollLeft,
+                top: currentHourlyScroll.scrollTop
+            } : null;
+            currentRoot.replaceWith(freshRoot);
+            if (hourlyScrollPosition) {
+                var freshHourlyScroll = freshRoot.querySelector("[data-hourly-report-scroll]");
+                if (freshHourlyScroll) {
+                    freshHourlyScroll.scrollLeft = hourlyScrollPosition.left;
+                    freshHourlyScroll.scrollTop = hourlyScrollPosition.top;
+                }
+            }
+            if (document.body && Number(payload.version || 0) > 0) {
+                document.body.dataset.operationalStateVersion = String(payload.version);
+            }
+            markRefreshSuccessful();
+            return {applied: true, version: Number(payload.version || 0)};
+        }).catch(function () {
+            setSyncStatus("warning", "Обновление задерживается — повторяем");
+            return {deferred: true, reason: "dispatcher_shift_report_refresh_failed"};
+        }).finally(function () {
+            refreshInFlight = null;
+        });
+
+        return refreshInFlight;
+    }
+
+    function reportPageIsActive() {
+        return document.hidden !== true
+            && (typeof document.hasFocus !== "function" || document.hasFocus());
+    }
+
+    function runPeriodicReconcile() {
+        if (!reportPageIsActive()) return;
+        var root = document.querySelector(liveRootSelector);
+        if (reportRefreshIsUnsafe(root)) {
+            setSyncStatus("paused", "Обновление ждёт завершения корректировки");
+            return;
+        }
+        refreshDispatcherShiftReport({
+            version: Number(document.body && document.body.dataset.operationalStateVersion || 0),
+            reason: "periodic_reconcile"
+        });
+    }
+
+    function startReportReconcile() {
+        markRefreshSuccessful();
+        reconcileTimerId = window.setInterval(runPeriodicReconcile, reconcileIntervalMs);
+        statusTimerId = window.setInterval(function () {
+            if (!reportPageIsActive() || refreshInFlight) return;
+            var root = document.querySelector(liveRootSelector);
+            if (reportRefreshIsUnsafe(root)) return;
+            if (Date.now() - lastSuccessfulRefreshAt > staleWarningMs) {
+                setSyncStatus("warning", "Обновление задерживается — повторяем");
+            }
+        }, 1000);
+    }
+
+    window.refreshDispatcherShiftReport = refreshDispatcherShiftReport;
+    window.applyOperationalStateRefresh = refreshDispatcherShiftReport;
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", startReportReconcile, {once: true});
+    } else {
+        startReportReconcile();
+    }
+    window.addEventListener("focus", runPeriodicReconcile);
+    document.addEventListener("visibilitychange", function () {
+        if (document.hidden !== true) runPeriodicReconcile();
+    });
+    window.addEventListener("pagehide", function () {
+        if (reconcileTimerId !== null) window.clearInterval(reconcileTimerId);
+        if (statusTimerId !== null) window.clearInterval(statusTimerId);
+    }, {once: true});
+})();
+</script>
+{% endblock %}

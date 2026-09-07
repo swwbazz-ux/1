@@ -4,9 +4,9 @@
 {% block body_class %}dispatcher-control-screen{% endblock %}
 
 {% block body %}
-<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme>
+<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report{% if access.role.code == 'dispatcher' %} is-dispatcher-report{% endif %}" data-dispatcher-theme>
     <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Простои">
-        {% include "reports/includes/management_report_header.html" with active="downtime" title="Простои" subtitle="События простоев, причины, техника, длительность и критичность." %}
+        {% include "reports/includes/management_report_header.html" with active="downtime" title="Простои" subtitle="События простоев, причины, техника, длительность и критичность." export_url=export_url %}
         <div class="management-linked-report-content">
 
     <section class="metric-grid">
@@ -37,19 +37,23 @@
         </div>
     </section>
 
-    <section class="card">
+    <section class="card dispatcher-linked-actions-card">
         <div class="actions">
             <a class="button-link" href="{% url 'downtime_report_export' %}{% if filters.query_string %}?{{ filters.query_string }}{% endif %}">Выгрузить в Excel</a>
             <a class="button-link button-secondary" href="{% url 'mechanic_dashboard' %}">Экран механиков</a>
-            <a class="button-link button-secondary" href="{% url 'dispatcher_control' %}">Диспетчерский пульт</a>
-            <a class="button-link button-secondary" href="{% url 'management_dashboard' %}">Витрина руководства</a>
+            {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
+                <a class="button-link button-secondary" href="{% url 'dispatcher_control' %}">Диспетчерский пульт</a>
+            {% endif %}
+            {% if access.role.code == 'manager' or access.role.code == 'admin' %}
+                <a class="button-link button-secondary" href="{% url 'management_dashboard' %}">Витрина руководства</a>
+            {% endif %}
             {% if selected_single_date %}
                 <a class="button-link button-secondary" href="{% url 'customer_daily_report' %}?date={{ selected_single_date }}">Суточный отчет за дату</a>
             {% endif %}
         </div>
     </section>
 
-    <section class="card">
+    <section class="card dispatcher-linked-filter-card">
         <h2>Фильтры</h2>
         <form method="get" class="filters">
             <div>

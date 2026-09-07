@@ -9,29 +9,27 @@
         <header class="dispatcher-topbar dispatcher-unified-topbar">
             {% include "includes/dispatcher_header.html" with dispatcher_nav_active="downtimes" dispatcher_header_screen="Простои" %}
         </header>
-        <div class="dispatcher-analytics-toolbar">
-            {% include "includes/dispatcher_analytics_tabs.html" with dispatcher_nav_active="downtimes" %}
+        <section class="dispatcher-report-controlbar no-print" aria-label="Управление отчётом по простоям">
+            {% include "includes/dispatcher_analytics_tabs.html" with dispatcher_nav_active="downtimes" reports_back=True %}
+            <form class="dispatcher-report-controlbar-filters" method="get" data-auto-filter-form>
+                <label>
+                    <span>Дата</span>
+                    <input type="date" name="date" value="{{ filters.date_value }}">
+                </label>
+                <label>
+                    <span>Статус</span>
+                    <select name="status">
+                        {% for item in status_choices %}
+                            <option value="{{ item.code }}" {% if filters.status == item.code %}selected{% endif %}>{{ item.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </form>
             <div class="dispatcher-report-actions">
                 <a href="{% url 'dispatcher_downtimes_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
                 <button type="button" onclick="window.print()">Печать</button>
             </div>
-        </div>
-
-        <form class="dispatcher-report-filters" method="get" data-auto-filter-form>
-            <label>
-                <span>Дата</span>
-                <input type="date" name="date" value="{{ filters.date_value }}">
-            </label>
-            <label>
-                <span>Статус</span>
-                <select name="status">
-                    {% for item in status_choices %}
-                        <option value="{{ item.code }}" {% if filters.status == item.code %}selected{% endif %}>{{ item.label }}</option>
-                    {% endfor %}
-                </select>
-            </label>
-            <button type="submit">Показать</button>
-        </form>
+        </section>
 
         <section class="dispatcher-analytics-grid dispatcher-downtime-grid">
             <article class="dispatcher-report-card dispatcher-report-card-wide">

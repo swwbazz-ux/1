@@ -9,29 +9,30 @@
         <header class="dispatcher-topbar dispatcher-unified-topbar">
             {% include "includes/dispatcher_header.html" with dispatcher_nav_active="shift_log" dispatcher_header_screen="Журнал смены" %}
         </header>
-        <div class="dispatcher-analytics-toolbar">
-            <span class="dispatcher-toolbar-spacer"></span>
+        <section class="dispatcher-report-controlbar no-print" aria-label="Управление журналом смены">
+            <nav class="dispatcher-subnav" aria-label="Раздел журнала смены">
+                <a href="{% url 'dispatcher_reports' %}">← Все отчёты</a>
+                <a class="is-active" href="{% url 'dispatcher_shift_log' %}">Журнал смены</a>
+            </nav>
+            <form class="dispatcher-report-controlbar-filters" method="get" data-auto-filter-form>
+                <label>
+                    <span>Дата</span>
+                    <input type="date" name="date" value="{{ filters.date_value }}">
+                </label>
+                <label>
+                    <span>Тип события</span>
+                    <select name="event_type">
+                        {% for item in event_type_choices %}
+                            <option value="{{ item.code }}" {% if filters.event_type == item.code %}selected{% endif %}>{{ item.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </form>
             <div class="dispatcher-report-actions">
                 <a href="{% url 'dispatcher_shift_log_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
                 <button type="button" onclick="window.print()">Печать</button>
             </div>
-        </div>
-
-        <form class="dispatcher-report-filters" method="get" data-auto-filter-form>
-            <label>
-                <span>Дата</span>
-                <input type="date" name="date" value="{{ filters.date_value }}">
-            </label>
-            <label>
-                <span>Тип события</span>
-                <select name="event_type">
-                    {% for item in event_type_choices %}
-                        <option value="{{ item.code }}" {% if filters.event_type == item.code %}selected{% endif %}>{{ item.label }}</option>
-                    {% endfor %}
-                </select>
-            </label>
-            <button type="submit">Показать</button>
-        </form>
+        </section>
 
         <section class="dispatcher-analytics-grid dispatcher-shift-log-grid">
             {% include "includes/shift_reading_corrections.html" %}

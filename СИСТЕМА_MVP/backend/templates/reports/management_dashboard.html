@@ -35,6 +35,9 @@
         <div class="dispatcher-analytics-toolbar">
             <nav class="dispatcher-subnav" aria-label="Разделы витрины руководства">
                 <a class="is-active" href="{% url 'management_dashboard' %}?date={{ selected_date|date:'Y-m-d' }}">Сводка</a>
+                {% if access.role.code == 'manager' or access.role.code == 'admin' %}
+                    <a href="{% url 'management_registration_dashboard' %}">Подключение</a>
+                {% endif %}
                 <a href="{% url 'shift_analytics_report' %}?date={{ selected_date|date:'Y-m-d' }}">Смена</a>
                 <a href="{% url 'management_dynamics' %}?date_from={{ selected_date|date:'Y-m-d' }}&date_to={{ selected_date|date:'Y-m-d' }}">Динамика</a>
                 <a href="{% url 'customer_daily_report' %}?date={{ selected_date|date:'Y-m-d' }}">Сутки</a>

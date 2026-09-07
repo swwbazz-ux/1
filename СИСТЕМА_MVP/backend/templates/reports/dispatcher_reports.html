@@ -5,18 +5,10 @@
 
 {% block body %}
 <main class="dispatcher-shell dispatcher-analytics-shell" data-dispatcher-theme>
-    <section class="dispatcher-analytics-board" aria-label="Отчеты диспетчера">
+    <section class="dispatcher-analytics-board dispatcher-reports-home-board" aria-label="Отчеты диспетчера">
         <header class="dispatcher-topbar dispatcher-unified-topbar">
             {% include "includes/dispatcher_header.html" with dispatcher_nav_active="reports" dispatcher_header_screen="Отчеты и шаблоны" %}
         </header>
-        <div class="dispatcher-analytics-toolbar">
-            <span class="dispatcher-toolbar-spacer"></span>
-            <div class="dispatcher-report-actions">
-                <a href="{% url 'dispatcher_reports_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
-                <button type="button" onclick="window.print()">Печать</button>
-            </div>
-        </div>
-
         <form class="dispatcher-report-filters" method="get" data-auto-filter-form>
             <label>
                 <span>Дата</span>
@@ -31,6 +23,10 @@
                 </select>
             </label>
             <button type="submit">Показать</button>
+            <div class="dispatcher-report-actions dispatcher-report-filter-actions">
+                <a href="{% url 'dispatcher_reports_export' %}{% if query_string %}?{{ query_string }}{% endif %}">Excel</a>
+                <button type="button" onclick="window.print()">Печать</button>
+            </div>
         </form>
 
         <section class="dispatcher-reports-layout">
