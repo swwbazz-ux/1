@@ -7,6 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from assignments.models import WorkShiftType
+from assignments.deputy_views import _secondary_eligible_employee_ids
 from assignments.services import validate_work_assignment
 from references.models import Equipment, EquipmentModel, EquipmentType
 
@@ -174,3 +175,41 @@ class ContractorWorkforceTests(TestCase):
                 full_name='Подрядчиков Без Реквизитов',
                 employment_type=Employee.EmploymentType.CONTRACTOR,
             )
+
+    def test_expired_contractor_assistant_is_hidden_from_secondary_placement(self):
+        assistant_specialization, _ = ProductionSpecialization.objects.update_or_create(
+            code='assistant_excavator_operator',
+            defaults={
+                'name': 'Помощник машиниста экскаватора',
+                'equipment_type': self.equipment_type,
+                'access_role': self.role,
+                'is_active': True,
+            },
+        )
+        active_assistant = Employee.objects.create(
+            full_name='Помощников Активный',
+            phone='+79990000802',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            employment_type=Employee.EmploymentType.CONTRACTOR,
+            contractor_organization=self.organization,
+            contractor_access_from=self.today - timedelta(days=1),
+            contractor_access_until=self.today + timedelta(days=10),
+            base_specialization=assistant_specialization,
+        )
+        expired_assistant = Employee.objects.create(
+            full_name='Помощников Просроченный',
+            phone='+79990000803',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            employment_type=Employee.EmploymentType.CONTRACTOR,
+            contractor_organization=self.organization,
+            contractor_access_from=self.today - timedelta(days=10),
+            contractor_access_until=self.today - timedelta(days=1),
+            base_specialization=assistant_specialization,
+        )
+
+        employee_ids = _secondary_eligible_employee_ids('excavator_operator')
+
+        self.assertIn(active_assistant.id, employee_ids)
+        self.assertNotIn(expired_assistant.id, employee_ids)
