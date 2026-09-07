@@ -39,10 +39,11 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class ConnectivityForegroundService extends Service {
+    public static final String ACTION_TEST_ALERT = "ru.copperresources.mobile.action.TEST_ALERT";
     static final String PREFS_NAME = "native_connectivity";
     static final String LAST_DRIVER_DUMP_POINT_ALERT_VERSION = "last_driver_dump_point_alert_version";
     private static final String CONNECTION_LOSS_ANNOUNCED = "connection_loss_announced";
-    private static final long MAX_BACKOFF_MS = 120_000L;
+    private static final long MAX_BACKOFF_MS = 60_000L;
     private static final int MAX_CAPTURED_RESPONSE_BYTES = 64 * 1024;
 
     private final Object scheduleLock = new Object();
