@@ -165,15 +165,23 @@
                 <h1>{{ dispatcher_header.active_dispatcher_short_name|default:"Смена не открыта" }}</h1>
             </div>
             <div class="mm-mobile-header-actions">
-                <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
+                <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
                     {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                </div>
+                </button>
                 {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
             </div>
         </header>
 
         <div class="mm-mobile-section-title">
             <span>Активная смена</span>
+        </div>
+
+        <div class="mm-mobile-truck-transfer-bar" data-mm-truck-transfer-bar hidden role="status" aria-live="polite">
+            <div>
+                <span data-mm-truck-transfer-caption>Перестановка самосвала</span>
+                <strong data-mm-truck-transfer-title>Выберите комплекс</strong>
+            </div>
+            <button type="button" data-mm-truck-transfer-cancel aria-label="Отменить перестановку">Отмена</button>
         </div>
 
         <div class="mm-mobile-create-complex-target" aria-hidden="true">
@@ -188,6 +196,7 @@
                         <div class="mm-mobile-complex-card-head">
                             <h2>{{ complex.id }}</h2>
                             <div class="mm-mobile-complex-head-meta">
+                                <span class="mm-mobile-complex-truck-count">{{ complex.active_truck_tiles|length }} сам.</span>
                                 <span class="mm-mobile-status-chip">
                                     {{ complex.status_label|default:"состояние" }}
                                 </span>
@@ -202,12 +211,12 @@
                         <div class="mm-mobile-complex-visual" aria-hidden="true" data-mm-mobile-release-trucks>
                             <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
                         </div>
-                        <div class="mm-mobile-truck-preview" aria-label="Самосвалы комплекса" data-mm-mobile-truck-count="{% if complex.mobile_truck_overflow %}17{% else %}{{ complex.active_truck_tiles|length }}{% endif %}">
-                            {% for truck in complex.active_truck_tiles|slice:":16" %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
+                        <div class="mm-mobile-truck-preview" aria-label="Самосвалы комплекса" data-mm-mobile-truck-count="{{ complex.active_truck_tiles|length }}"{% if complex.mobile_transfer_notice %} data-mm-transfer-notice="{{ complex.mobile_transfer_notice }}"{% endif %}>
+                            {% for truck in complex.active_truck_tiles %}
+                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}{% if truck.transfer_pending %} is-transfer-pending{% endif %}"{% if forloop.counter > 3 %} hidden{% endif %}{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}"{% if truck.transfer_pending %} data-mm-transfer-label="из {{ truck.transfer_source_label }} · до 5 мин"{% endif %} data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
                             {% endfor %}
                             {% if complex.mobile_truck_overflow %}
-                                <span class="mm-mobile-truck-mini is-more">+{{ complex.mobile_truck_overflow }}</span>
+                                <button type="button" class="mm-mobile-truck-mini is-more" data-mm-mobile-open-truck-list data-mm-mobile-ignore-double-tap="true" aria-label="Показать остальные самосвалы комплекса">+{{ complex.mobile_truck_overflow }}</button>
                             {% endif %}
                             {% if not complex.active_truck_tiles %}
                                 <span class="mm-mobile-truck-empty">нет</span>
@@ -248,9 +257,9 @@
                     <h1>Экскаваторы</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                    </div>
+                    </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
@@ -302,9 +311,9 @@
                     <h1>Самосвалы</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                    </div>
+                    </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
@@ -355,9 +364,9 @@
                     <h1>Отчеты</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                    </div>
+                    </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
@@ -468,9 +477,9 @@
                             <h1>Набор самосвалов</h1>
                         </div>
                         <div class="mm-mobile-header-actions">
-                            <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
+                            <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
                                 {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                            </div>
+                            </button>
                             {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                         </div>
                     </header>
@@ -510,6 +519,51 @@
                 </section>
             {% endif %}
         {% endfor %}
+
+        <div class="gd-equipment-detail mm-equipment-detail mm-shift-plan-detail" data-mm-shift-plan-detail hidden>
+            <div class="mm-equipment-detail-backdrop" data-mm-shift-plan-detail-close></div>
+            <section class="mm-equipment-detail-panel mm-shift-plan-panel" role="dialog" aria-modal="true" aria-labelledby="mm-shift-plan-title">
+                <button type="button" class="mm-detail-close" data-mm-shift-plan-detail-close aria-label="Закрыть детализацию плана">×</button>
+                <header class="mm-shift-plan-head">
+                    <span>Отчёт за текущую смену</span>
+                    <h2 id="mm-shift-plan-title">Куда вывезен объём</h2>
+                </header>
+                <div class="mm-shift-plan-total" aria-label="Общее выполнение плана">
+                    <div class="mm-shift-plan-total-ring" style="--mm-shift-plan-total-percent: {{ dispatcher_dashboard.shift_plan_detail.completion_percent|default:0 }}%;">
+                        <strong>{{ dispatcher_dashboard.shift_plan_detail.completion_percent|default:0 }}%</strong>
+                        <span>плана</span>
+                    </div>
+                    <div class="mm-shift-plan-total-copy">
+                        <span>Факт / план</span>
+                        <strong>{{ dispatcher_dashboard.shift_plan_detail.fact_tons|default:"0" }} / {{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</strong>
+                        <small>Круги ниже в сумме дают этот общий процент</small>
+                    </div>
+                </div>
+                <h3 class="mm-shift-plan-section-title">По точкам разгрузки</h3>
+                <div class="mm-shift-plan-points" aria-label="Выполнение по точкам разгрузки">
+                    {% for point in dispatcher_dashboard.shift_plan_detail.points %}
+                        <article class="mm-shift-plan-point" style="--mm-shift-plan-point-percent: {{ point.contribution_percent }}%;">
+                            <div class="mm-shift-plan-point-ring"><strong>{{ point.contribution_percent }}%</strong><span>плана</span></div>
+                            <div class="mm-shift-plan-point-copy"><strong>{{ point.name }}</strong><span>{{ point.fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ point.trip_count_label }}</span><small>{{ point.fact_share_percent }}% текущего факта</small></div>
+                        </article>
+                    {% empty %}
+                        <div class="mm-shift-plan-empty">Нет рейсов с точкой разгрузки в текущей смене</div>
+                    {% endfor %}
+                </div>
+                {% if dispatcher_dashboard.shift_plan_detail.routes %}
+                    <h3 class="mm-shift-plan-section-title">Откуда → куда</h3>
+                    <div class="mm-shift-plan-routes" aria-label="Маршруты текущей смены">
+                        {% for route in dispatcher_dashboard.shift_plan_detail.routes %}
+                            <article class="mm-shift-plan-route">
+                                <strong><span>{{ route.source }}</span><i aria-hidden="true">→</i><span>{{ route.destination }}</span></strong>
+                                <small>{{ route.fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ route.trip_count_label }}</small>
+                                <b>{{ route.contribution_percent }}%</b>
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </section>
+        </div>
     </section>
     {% endif %}
 
@@ -1065,7 +1119,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v139";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v142";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -1507,7 +1561,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (document.body.classList.contains("modal-open")) {
             return true;
         }
-        if (document.querySelector(".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), .mm-mobile-update-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden])")) {
+        if (document.querySelector(".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), .mm-mobile-update-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden]), [data-mm-shift-plan-detail]:not([hidden])")) {
             return true;
         }
         if (mobileShell.querySelector(".is-dragging, .is-hold-pending, .is-hold-ready, .is-work-swiping, .is-swiping, .is-truck-swiping, .is-fill-swiping, .is-create-swiping, .is-activating, .is-removing, .is-releasing, .is-releasing-trucks")) {
@@ -1516,6 +1570,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (mobileShell.classList.contains("is-fill-target-peeking") || mobileShell.classList.contains("is-create-complex-peeking") || mobileShell.classList.contains("is-truck-garage-peeking") || mobileShell.classList.contains("is-excavator-garage-peeking")) {
             return true;
         }
+        if (mobileShell.classList.contains("is-truck-transfer-mode")) return true;
         return false;
     }
     window.miningMasterHasPendingWork = isMobileOperationalRefreshUnsafe;
@@ -1593,7 +1648,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (document.body.classList.contains("modal-open")) {
             return true;
         }
-        if (document.querySelector(".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), .mm-mobile-update-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden])")) {
+        if (document.querySelector(".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), .mm-mobile-update-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden]), [data-mm-shift-plan-detail]:not([hidden])")) {
             return true;
         }
         if (document.querySelector(".dispatcher-dragging, .dispatcher-drop-target, .is-dragging")) {
@@ -2272,6 +2327,16 @@ document.addEventListener("DOMContentLoaded", function () {
         return dispatcherEquipmentStateColor(legacyCodes[status] || status || "inactive");
     }
 
+    function pulseMiningMasterInfoTarget(node) {
+        if (!node) return;
+        node.classList.remove("is-mobile-tap-feedback");
+        void node.offsetWidth;
+        node.classList.add("is-mobile-tap-feedback");
+        window.setTimeout(function () {
+            node.classList.remove("is-mobile-tap-feedback");
+        }, 260);
+    }
+
     function cleanDetailTile(tile) {
         tile.classList.remove("is-assigned", "is-placeholder", "dispatcher-dragging");
         tile.classList.add("gd-detail-slot-clone");
@@ -2565,6 +2630,26 @@ document.addEventListener("DOMContentLoaded", function () {
         detailShiftReport.hidden = metrics.length === 0 && charts.length === 0;
     }
 
+    function miningMasterOperationalDetailRows(data) {
+        var rows = (data && data.details) || [];
+        if (!isMiningMasterMobilePage()) return rows;
+        var hiddenLabels = [
+            "Гаражный N",
+            "VIN/серийный N",
+            "Модель",
+            "ГП, т",
+            "Кузов/ковш, м3",
+            "Комплекс",
+            "Состояние"
+        ];
+        var emptyOperationalValues = ["Забой не указан", "не указан", "не указана"];
+        return rows.filter(function (row) {
+            if (!row || !row.value) return false;
+            if (hiddenLabels.indexOf(String(row.label || "")) !== -1) return false;
+            return emptyOperationalValues.indexOf(String(row.value || "").trim()) === -1;
+        });
+    }
+
     function openEquipmentCard(cardId) {
         var data = equipmentCards[String(cardId || "")];
         if (!data || !detailLayer) return false;
@@ -2572,7 +2657,10 @@ document.addEventListener("DOMContentLoaded", function () {
         renderDetailGarageIcon(cardId, data);
         if (detailType) detailType.textContent = data.type || "";
         if (detailTitle) detailTitle.textContent = data.label || "";
-        if (detailStatus) detailStatus.textContent = data.status_label || "";
+        if (detailStatus) {
+            detailStatus.className = "status-" + normalizeTileStatus(data.status_key);
+            detailStatus.textContent = "Состояние: " + (data.status_label || "не определено");
+        }
         if (detailZone) detailZone.textContent = data.zone || "";
         if (detailEmployee) {
             var employee = data.employee || {};
@@ -2607,7 +2695,8 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         if (detailList) {
             detailList.innerHTML = "";
-            (data.details || []).forEach(function (row) {
+            var detailRows = miningMasterOperationalDetailRows(data);
+            detailRows.forEach(function (row) {
                 if (!row || !row.value) return;
                 var term = document.createElement("dt");
                 var value = document.createElement("dd");
@@ -2616,6 +2705,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 detailList.appendChild(term);
                 detailList.appendChild(value);
             });
+            detailList.hidden = detailRows.length === 0;
         }
         renderDetailShiftReport(data.shift_report || {});
         detailLayer.hidden = false;
@@ -2643,6 +2733,96 @@ document.addEventListener("DOMContentLoaded", function () {
         var home = shell.querySelector("[data-mm-mobile-view='home']");
         var tabPanels = Array.from(shell.querySelectorAll("[data-mm-mobile-panel]"));
         var fillScreens = Array.from(shell.querySelectorAll("[data-mm-mobile-fill]"));
+        var shiftPlanDetail = shell.querySelector("[data-mm-shift-plan-detail]");
+        var shiftPlanReturnFocus = null;
+        function closeShiftPlanDetail() {
+            if (!shiftPlanDetail) return;
+            shiftPlanDetail.hidden = true;
+            if (shiftPlanReturnFocus && shiftPlanReturnFocus.isConnected) {
+                shiftPlanReturnFocus.focus({preventScroll: true});
+            }
+            shiftPlanReturnFocus = null;
+        }
+        function openShiftPlanDetail(trigger) {
+            if (!shiftPlanDetail) return;
+            shiftPlanReturnFocus = trigger || null;
+            shiftPlanDetail.hidden = false;
+            var closeButton = shiftPlanDetail.querySelector("[data-mm-shift-plan-detail-close]");
+            if (closeButton) closeButton.focus({preventScroll: true});
+        }
+        function bindShiftPlanDetailTrigger(ring) {
+            if (!ring || ring.dataset.mmShiftPlanDetailBound === "true") return;
+            ring.dataset.mmShiftPlanDetailBound = "true";
+            var holdDelayMs = 620;
+            var holdTimer = null;
+            var activePointerId = null;
+            var pointerStartX = 0;
+            var pointerStartY = 0;
+            var suppressNextClick = false;
+            function cancelHold() {
+                if (holdTimer !== null) {
+                    window.clearTimeout(holdTimer);
+                    holdTimer = null;
+                }
+                ring.classList.remove("is-hold-pending");
+            }
+            ring.addEventListener("click", function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                if (suppressNextClick) {
+                    suppressNextClick = false;
+                    return;
+                }
+                pulseMiningMasterInfoTarget(ring);
+            });
+            ring.addEventListener("pointerdown", function (event) {
+                if (event.button !== undefined && event.button !== 0) return;
+                cancelHold();
+                activePointerId = event.pointerId;
+                pointerStartX = event.clientX;
+                pointerStartY = event.clientY;
+                ring.classList.add("is-hold-pending");
+                holdTimer = window.setTimeout(function () {
+                    holdTimer = null;
+                    ring.classList.remove("is-hold-pending");
+                    ring.classList.add("is-hold-ready");
+                    window.setTimeout(function () {
+                        ring.classList.remove("is-hold-ready");
+                    }, 180);
+                    suppressNextClick = true;
+                    openShiftPlanDetail(ring);
+                }, holdDelayMs);
+            });
+            ring.addEventListener("pointermove", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                if (Math.hypot(event.clientX - pointerStartX, event.clientY - pointerStartY) > 10) {
+                    cancelHold();
+                }
+            });
+            ring.addEventListener("pointerup", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                activePointerId = null;
+                cancelHold();
+            });
+            ring.addEventListener("pointercancel", function () {
+                activePointerId = null;
+                cancelHold();
+            });
+            ring.addEventListener("contextmenu", function (event) {
+                event.preventDefault();
+            });
+            ring.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                cancelHold();
+                openShiftPlanDetail(ring);
+            });
+        }
+        if (shiftPlanDetail) {
+            shiftPlanDetail.querySelectorAll("[data-mm-shift-plan-detail-close]").forEach(function (button) {
+                button.addEventListener("click", closeShiftPlanDetail);
+            });
+        }
         function isMiningMasterMobileReadonly() {
             return (
                 (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly())
@@ -2754,9 +2934,9 @@ document.addEventListener("DOMContentLoaded", function () {
                         '<button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>',
                         '<div class="mm-mobile-detail-title mm-mobile-fill-title"><h1>Набор самосвалов</h1></div>',
                         {% if is_native_app %}
-                        '<div class="mm-mobile-header-actions"><div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: 0%;" role="img" aria-label="Выполнение плана смены 0%">0%</div></div>',
+                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Удерживайте для отчёта">0%</button></div>',
                         {% else %}
-                        '<div class="mm-mobile-header-actions"><div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: 0%;" role="img" aria-label="Выполнение плана смены 0%">0%</div><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
+                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Удерживайте для отчёта">0%</button><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
                         {% endif %}
                     '</header>',
                     '<div class="mm-mobile-fill-save-overlay" aria-hidden="true">Сохранить</div>',
@@ -2816,6 +2996,7 @@ document.addEventListener("DOMContentLoaded", function () {
             screen.querySelectorAll("[data-mm-mobile-fill-drop]").forEach(bindMobileFillFinishSwipe);
             shell.appendChild(screen);
             fillScreens.push(screen);
+            screen.querySelectorAll("[data-mm-open-shift-plan-detail]").forEach(bindShiftPlanDetailTrigger);
             return screen;
         }
         function updateMobileFillAssignedLayout(screenOrAssigned) {
@@ -2832,8 +3013,37 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         function updateMobileHomeTruckPreviewLayout(preview) {
             if (!preview) return;
-            var tiles = preview.querySelectorAll(".mm-mobile-truck-mini").length;
+            var truckTiles = Array.from(preview.querySelectorAll(".mm-mobile-truck-mini:not(.is-more)"));
+            var tiles = truckTiles.length;
+            var visibleLimit = 3;
+            truckTiles.forEach(function (tile, index) {
+                tile.hidden = index >= visibleLimit;
+            });
+            var overflowCount = Math.max(0, tiles - visibleLimit);
+            var overflow = preview.querySelector(".mm-mobile-truck-mini.is-more");
+            if (overflowCount > 0 && !overflow) {
+                overflow = document.createElement("button");
+                overflow.type = "button";
+                overflow.className = "mm-mobile-truck-mini is-more";
+                overflow.dataset.mmMobileOpenTruckList = "true";
+                overflow.dataset.mmMobileIgnoreDoubleTap = "true";
+                overflow.setAttribute("aria-label", "Показать остальные самосвалы комплекса");
+                preview.appendChild(overflow);
+            }
+            if (overflow) {
+                overflow.hidden = overflowCount === 0;
+                overflow.textContent = "+" + overflowCount;
+            }
             preview.dataset.mmMobileTruckCount = String(tiles);
+            var complexCard = preview.closest(".mm-mobile-complex-card");
+            var countLabel = complexCard && complexCard.querySelector(".mm-mobile-complex-truck-count");
+            if (countLabel) countLabel.textContent = tiles + " сам.";
+            var pendingTile = truckTiles.find(function (tile) { return tile.classList.contains("is-transfer-pending"); });
+            if (pendingTile) {
+                preview.dataset.mmTransferNotice = "№" + (pendingTile.dataset.mmMobileHomeTruckNumber || pendingTile.textContent || "") + " " + (pendingTile.dataset.mmTransferLabel || "перестановка ожидает");
+            } else {
+                delete preview.dataset.mmTransferNotice;
+            }
             var empty = preview.querySelector(".mm-mobile-truck-empty");
             if (empty) empty.hidden = tiles > 0;
             if (!tiles) {
@@ -2845,38 +3055,16 @@ document.addEventListener("DOMContentLoaded", function () {
                 return;
             }
             var width = preview.clientWidth;
-            var height = preview.clientHeight;
-            if (!width || !height) return;
-            var gap = tiles > 9 ? 2 : 4;
-            var maxColumns = tiles > 9 ? 5 : 3;
-            var bestColumns = tiles > 9 ? 1 : 3;
-            var bestRows = Math.ceil(tiles / bestColumns);
-            var bestSize = 0;
-            var bestWaste = Infinity;
-            for (var columns = tiles > 9 ? 1 : 3; columns <= maxColumns; columns += 1) {
-                var rows = Math.ceil(tiles / columns);
-                var size = Math.floor(Math.min(
-                    (width - gap * (columns - 1)) / columns,
-                    (height - gap * (rows - 1)) / rows
-                ));
-                var waste = (columns * rows) - tiles;
-                if (
-                    size > bestSize ||
-                    (size === bestSize && waste < bestWaste) ||
-                    (size === bestSize && waste === bestWaste && columns > bestColumns)
-                ) {
-                    bestColumns = columns;
-                    bestRows = rows;
-                    bestSize = size;
-                    bestWaste = waste;
-                }
-            }
-            bestSize = Math.max(34, bestSize);
-            preview.dataset.mmMobilePreviewRows = String(bestRows);
-            preview.style.setProperty("--mm-mobile-preview-columns", bestColumns);
+            if (!width) return;
+            var displayCount = Math.min(visibleLimit, tiles) + (overflowCount > 0 ? 1 : 0);
+            var columns = Math.max(1, displayCount);
+            var gap = 4;
+            var bestSize = Math.max(34, Math.min(44, Math.floor((width - gap * (columns - 1)) / columns)));
+            preview.dataset.mmMobilePreviewRows = "1";
+            preview.style.setProperty("--mm-mobile-preview-columns", columns);
             preview.style.setProperty("--mm-mobile-preview-tile", bestSize + "px");
             preview.style.setProperty("--mm-mobile-preview-gap", gap + "px");
-            preview.style.setProperty("--mm-mobile-preview-font", Math.max(12, Math.min(28, Math.round(bestSize * .34))) + "px");
+            preview.style.setProperty("--mm-mobile-preview-font", Math.max(12, Math.min(20, Math.round(bestSize * .38))) + "px");
         }
         var mobileLayoutReconcileTimer = null;
         function reconcileMobileLocalLayout() {
@@ -2908,7 +3096,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 empty.textContent = "нет";
                 preview.appendChild(empty);
             }
-            empty.hidden = preview.querySelectorAll(".mm-mobile-truck-mini").length > 0;
+            empty.hidden = preview.querySelectorAll(".mm-mobile-truck-mini:not(.is-more)").length > 0;
         }
         function syncMobileHomeComplexFromFill(screen) {
             if (!screen) return;
@@ -3422,7 +3610,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 card.classList.remove("is-mobile-truck-drop-target");
             });
         }
-        function bindMobileHomeTruckDrag(mini) {
+        function bindMobileHomeTruckDragLegacy(mini) {
             if (!mini || mini.dataset.mmMobileHomeTruckBound === "true") return;
             mini.dataset.mmMobileHomeTruckBound = "true";
             var activeTouchId = null;
@@ -3704,6 +3892,227 @@ document.addEventListener("DOMContentLoaded", function () {
             });
             mini.addEventListener("mm-mobile-complex-swipe-takeover", resetState);
         }
+        var mobileTruckTransfer = null;
+        var mobileTruckTransferNoticeTimer = null;
+        var mobileTruckTransferBar = shell.querySelector("[data-mm-truck-transfer-bar]");
+        var mobileTruckTransferCaption = mobileTruckTransferBar && mobileTruckTransferBar.querySelector("[data-mm-truck-transfer-caption]");
+        var mobileTruckTransferTitle = mobileTruckTransferBar && mobileTruckTransferBar.querySelector("[data-mm-truck-transfer-title]");
+        var mobileTruckTransferCancel = mobileTruckTransferBar && mobileTruckTransferBar.querySelector("[data-mm-truck-transfer-cancel]");
+
+        function clearMobileTruckTransferTargets() {
+            shell.classList.remove("is-truck-transfer-mode");
+            shell.querySelectorAll(".mm-mobile-complex-card.is-transfer-source, .mm-mobile-complex-card.is-transfer-target").forEach(function (card) {
+                card.classList.remove("is-transfer-source", "is-transfer-target");
+            });
+        }
+
+        function finishMobileTruckTransferUi(message) {
+            clearMobileTruckTransferTargets();
+            mobileTruckTransfer = null;
+            if (!mobileTruckTransferBar) return;
+            if (mobileTruckTransferNoticeTimer) window.clearTimeout(mobileTruckTransferNoticeTimer);
+            if (!message) {
+                mobileTruckTransferBar.hidden = true;
+                return;
+            }
+            if (mobileTruckTransferCaption) mobileTruckTransferCaption.textContent = "Перестановка создана";
+            if (mobileTruckTransferTitle) mobileTruckTransferTitle.textContent = message;
+            if (mobileTruckTransferCancel) mobileTruckTransferCancel.hidden = true;
+            mobileTruckTransferBar.hidden = false;
+            mobileTruckTransferNoticeTimer = window.setTimeout(function () {
+                mobileTruckTransferBar.hidden = true;
+                if (mobileTruckTransferCancel) mobileTruckTransferCancel.hidden = false;
+            }, 2200);
+        }
+
+        function cancelMobileTruckTransfer() {
+            finishMobileTruckTransferUi("");
+        }
+
+        function mobileTruckTransferSource(node) {
+            if (!node) return null;
+            var truckId = node.dataset.mmMobileHomeTruckId || node.dataset.mmMobileAssignedTruckId || "";
+            var truckNumber = node.dataset.mmMobileHomeTruckNumber || node.dataset.mmMobileAssignedTruckNumber || String(node.childNodes[0] && node.childNodes[0].nodeValue || node.textContent || "").trim();
+            var sourceExcavatorId = node.dataset.mmMobileHomeSourceExcavatorId || "";
+            var fillScreen = node.closest("[data-mm-mobile-fill]");
+            if (!sourceExcavatorId && fillScreen) {
+                var fillDrop = fillScreen.querySelector("[data-mm-mobile-fill-excavator-id]");
+                sourceExcavatorId = fillDrop && fillDrop.dataset.mmMobileFillExcavatorId || "";
+            }
+            if (!truckId || !sourceExcavatorId) return null;
+            var sourceCard = shell.querySelector("[data-mm-mobile-excavator-id='" + CSS.escape(String(sourceExcavatorId)) + "']");
+            var sourceLabel = sourceCard && sourceCard.querySelector("h2") ? sourceCard.querySelector("h2").textContent.trim() : "текущего комплекса";
+            var homeMini = shell.querySelector("[data-mm-mobile-home-truck-id='" + CSS.escape(String(truckId)) + "']");
+            return {
+                truckId: String(truckId),
+                truckNumber: truckNumber,
+                sourceExcavatorId: String(sourceExcavatorId),
+                sourceCard: sourceCard,
+                sourceLabel: sourceLabel,
+                homeMini: homeMini
+            };
+        }
+
+        function beginMobileTruckTransfer(node) {
+            if (isMiningMasterMobileReadonly() || !node || node.classList.contains("is-transfer-pending")) return false;
+            var transfer = mobileTruckTransferSource(node);
+            if (!transfer || !transfer.sourceCard) return false;
+            if (mobileTruckTransferNoticeTimer) window.clearTimeout(mobileTruckTransferNoticeTimer);
+            mobileTruckTransfer = transfer;
+            if (node.closest("[data-mm-mobile-fill]")) closeDetails();
+            shell.classList.add("is-truck-transfer-mode");
+            shell.querySelectorAll(".mm-mobile-complex-card:not(.status-empty)").forEach(function (card) {
+                var isSource = card.dataset.mmMobileExcavatorId === transfer.sourceExcavatorId;
+                card.classList.toggle("is-transfer-source", isSource);
+                card.classList.toggle("is-transfer-target", !isSource);
+            });
+            if (mobileTruckTransferCaption) mobileTruckTransferCaption.textContent = "Перестановка самосвала";
+            if (mobileTruckTransferTitle) mobileTruckTransferTitle.textContent = "№" + transfer.truckNumber + " из " + transfer.sourceLabel + " — выберите комплекс";
+            if (mobileTruckTransferCancel) mobileTruckTransferCancel.hidden = false;
+            if (mobileTruckTransferBar) mobileTruckTransferBar.hidden = false;
+            if (window.navigator && typeof window.navigator.vibrate === "function") window.navigator.vibrate(35);
+            return true;
+        }
+
+        function completeMobileTruckTransfer(targetCard) {
+            var transfer = mobileTruckTransfer;
+            if (!transfer || !targetCard || targetCard.classList.contains("status-empty")) return;
+            var targetExcavatorId = targetCard.dataset.mmMobileExcavatorId || "";
+            if (!targetExcavatorId || targetExcavatorId === transfer.sourceExcavatorId) {
+                pulseMiningMasterInfoTarget(targetCard);
+                return;
+            }
+            var targetLabel = targetCard.querySelector("h2") ? targetCard.querySelector("h2").textContent.trim() : "комплекс";
+            var rollbackOptimisticMove = transfer.homeMini ? moveMobileHomeTruckLocal(transfer.homeMini, targetCard) : null;
+            var pendingTile = targetCard.querySelector("[data-mm-mobile-home-truck-id='" + CSS.escape(transfer.truckId) + "']");
+            if (pendingTile) {
+                pendingTile.classList.add("is-transfer-pending");
+                pendingTile.dataset.mmTransferLabel = "из " + transfer.sourceLabel + " · до 5 мин";
+            }
+            finishMobileTruckTransferUi("№" + transfer.truckNumber + " → " + targetLabel + " · до 5 мин");
+            dispatcherPostQueued(dispatcherAssignTruckUrl, {
+                action: "assign",
+                truck_id: transfer.truckId,
+                excavator_id: targetExcavatorId,
+                expected_source_excavator_id: transfer.sourceExcavatorId
+            }).then(function () {
+                if (rollbackOptimisticMove && rollbackOptimisticMove.commit) rollbackOptimisticMove.commit();
+            }).catch(function (error) {
+                if (rollbackOptimisticMove) rollbackOptimisticMove();
+                finishMobileTruckTransferUi("");
+                showDispatcherDnDError(error);
+            });
+        }
+
+        if (mobileTruckTransferCancel) {
+            mobileTruckTransferCancel.addEventListener("click", function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                cancelMobileTruckTransfer();
+            });
+        }
+        if (shell.dataset.mmTruckTransferTargetBound !== "true") {
+            shell.dataset.mmTruckTransferTargetBound = "true";
+            shell.addEventListener("click", function (event) {
+                if (!mobileTruckTransfer) return;
+                var targetCard = event.target && event.target.closest ? event.target.closest("[data-mm-mobile-open-complex]") : null;
+                if (!targetCard || !shell.contains(targetCard)) return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                completeMobileTruckTransfer(targetCard);
+            }, true);
+        }
+
+        function bindMobileHomeTruckDrag(mini) {
+            if (!mini || mini.dataset.mmMobileHomeTruckBound === "true") return;
+            mini.dataset.mmMobileHomeTruckBound = "true";
+            mini.setAttribute("role", "button");
+            mini.setAttribute("tabindex", "0");
+            mini.setAttribute("aria-label", "Самосвал " + (mini.dataset.mmMobileHomeTruckNumber || mini.textContent || "") + ". Удерживайте для перестановки, двойной тап — карточка");
+            var holdTimer = null;
+            var startX = 0;
+            var startY = 0;
+            var activeTouchId = null;
+            var activePointerId = null;
+            var transferStarted = false;
+            function clearHold() {
+                if (holdTimer) window.clearTimeout(holdTimer);
+                holdTimer = null;
+                mini.classList.remove("is-hold-pending", "is-hold-ready");
+            }
+            function scheduleHold() {
+                clearHold();
+                transferStarted = false;
+                mini.classList.add("is-hold-pending");
+                holdTimer = window.setTimeout(function () {
+                    holdTimer = null;
+                    mini.classList.remove("is-hold-pending");
+                    mini.classList.add("is-hold-ready");
+                    transferStarted = beginMobileTruckTransfer(mini);
+                }, 460);
+            }
+            mini.addEventListener("touchstart", function (event) {
+                if (isMiningMasterMobileReadonly() || !event.changedTouches || !event.changedTouches.length) return;
+                var touch = event.changedTouches[0];
+                activeTouchId = touch.identifier;
+                startX = touch.clientX;
+                startY = touch.clientY;
+                scheduleHold();
+            }, { passive: true });
+            mini.addEventListener("touchmove", function (event) {
+                if (activeTouchId === null) return;
+                var touch = Array.from(event.changedTouches || event.touches || []).find(function (item) { return item.identifier === activeTouchId; });
+                if (!touch) return;
+                if (!transferStarted && Math.hypot(touch.clientX - startX, touch.clientY - startY) > 10) clearHold();
+                if (transferStarted) event.preventDefault();
+            }, { passive: false });
+            mini.addEventListener("touchend", function (event) {
+                if (activeTouchId === null) return;
+                activeTouchId = null;
+                if (transferStarted) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                clearHold();
+                transferStarted = false;
+            }, { passive: false });
+            mini.addEventListener("touchcancel", function () {
+                activeTouchId = null;
+                clearHold();
+                transferStarted = false;
+            });
+            mini.addEventListener("pointerdown", function (event) {
+                if (event.pointerType === "touch" || isMiningMasterMobileReadonly()) return;
+                if (event.pointerType === "mouse" && event.button !== 0) return;
+                activePointerId = event.pointerId;
+                startX = event.clientX;
+                startY = event.clientY;
+                scheduleHold();
+            });
+            mini.addEventListener("pointermove", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                if (!transferStarted && Math.hypot(event.clientX - startX, event.clientY - startY) > 10) clearHold();
+            });
+            mini.addEventListener("pointerup", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                activePointerId = null;
+                clearHold();
+                transferStarted = false;
+            });
+            mini.addEventListener("pointercancel", function () {
+                activePointerId = null;
+                clearHold();
+                transferStarted = false;
+            });
+            mini.addEventListener("contextmenu", function (event) {
+                event.preventDefault();
+            });
+            mini.addEventListener("mm-mobile-complex-swipe-takeover", function () {
+                clearHold();
+                transferStarted = false;
+            });
+        }
+
         function openTabPanel(panelName) {
             var panel = shell.querySelector("[data-mm-mobile-panel='" + CSS.escape(String(panelName || "")) + "']");
             if (!panel) return;
@@ -3754,7 +4163,10 @@ document.addEventListener("DOMContentLoaded", function () {
             card.innerHTML =
                 '<div class="mm-mobile-complex-card-head">' +
                     '<h2></h2>' +
-                    '<span class="mm-mobile-status-chip">' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
+                    '<div class="mm-mobile-complex-head-meta">' +
+                        '<span class="mm-mobile-complex-truck-count">0 сам.</span>' +
+                        '<span class="mm-mobile-status-chip">' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
+                    '</div>' +
                 '</div>' +
                 '<div class="mm-mobile-complex-visual" aria-hidden="true" data-mm-mobile-release-trucks>' +
                     '<img src="' + staticPrefix + 'img/equipment/excavator-gray.png" alt="">' +
@@ -4266,8 +4678,30 @@ document.addEventListener("DOMContentLoaded", function () {
                 return results.some(Boolean);
             });
         }
+        function ensureMobileTruckTransferHandle(mini) {
+            if (!mini || mini.querySelector("[data-mm-truck-transfer-handle]")) return;
+            var handle = document.createElement("button");
+            handle.type = "button";
+            handle.className = "mm-mobile-truck-transfer-handle";
+            handle.dataset.mmTruckTransferHandle = "true";
+            handle.setAttribute("aria-label", "Переставить самосвал " + (mini.dataset.mmMobileAssignedTruckNumber || mini.textContent || ""));
+            handle.textContent = "↗";
+            ["pointerdown", "touchstart"].forEach(function (eventName) {
+                handle.addEventListener(eventName, function (event) {
+                    event.stopPropagation();
+                }, { passive: eventName === "touchstart" });
+            });
+            handle.addEventListener("click", function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                beginMobileTruckTransfer(mini);
+            });
+            mini.appendChild(handle);
+        }
         function bindMobileFillAssignedTruckRelease(mini) {
-            if (!window.PointerEvent || !mini || mini.dataset.mmMobileReleaseBound === "true") return;
+            if (!mini) return;
+            ensureMobileTruckTransferHandle(mini);
+            if (!window.PointerEvent || mini.dataset.mmMobileReleaseBound === "true") return;
             mini.dataset.mmMobileReleaseBound = "true";
             var startX = 0;
             var startY = 0;
@@ -4997,6 +5431,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
                 if (card.classList.contains("is-releasing")) return;
+                var truckControl = event.target && event.target.closest
+                    ? event.target.closest("[data-mm-mobile-home-truck-id], [data-mm-mobile-open-truck-list]")
+                    : null;
+                if (truckControl && card.contains(truckControl)) return;
                 activePointerId = event.pointerId;
                 activeTouchId = null;
                 touchTakeoverTarget = null;
@@ -5060,18 +5498,91 @@ document.addEventListener("DOMContentLoaded", function () {
             bindMobileComplexSwipe(card);
             if (card.dataset.mmMobileComplexOpenBound === "true") return;
             card.dataset.mmMobileComplexOpenBound = "true";
+            var previousInfoTapAt = 0;
+            var previousInfoTapKey = "";
+            var previousInfoTapX = 0;
+            var previousInfoTapY = 0;
+            var infoDoubleTapWindowMs = 340;
+            var infoDoubleTapDistancePx = 24;
+
+            function infoTargetFromEvent(event) {
+                var overflow = event.target && event.target.closest
+                    ? event.target.closest(".mm-mobile-truck-mini.is-more")
+                    : null;
+                if (overflow && card.contains(overflow)) {
+                    return { openTruckList: true, node: overflow };
+                }
+                var truck = event.target && event.target.closest
+                    ? event.target.closest("[data-mm-mobile-home-truck-id]")
+                    : null;
+                if (truck && card.contains(truck)) {
+                    if (truck.dataset.mmMobileIgnoreDoubleTap === "true") return null;
+                    return {
+                        key: "truck:" + (truck.dataset.mmMobileHomeTruckId || ""),
+                        cardId: truck.dataset.mmMobileHomeTruckId || "",
+                        node: truck
+                    };
+                }
+                return {
+                    key: "excavator:" + (card.dataset.mmMobileExcavatorId || ""),
+                    cardId: card.dataset.mmMobileExcavatorId || "",
+                    node: card
+                };
+            }
+
+            function resetPreviousInfoTap() {
+                previousInfoTapAt = 0;
+                previousInfoTapKey = "";
+                previousInfoTapX = 0;
+                previousInfoTapY = 0;
+            }
+
             card.addEventListener("click", function (event) {
                 if (card.dataset.mmMobileSwipeIgnoreClick === "true" || card.classList.contains("is-releasing") || card.classList.contains("is-releasing-trucks")) {
                     event.preventDefault();
                     event.stopPropagation();
+                    resetPreviousInfoTap();
                     return;
                 }
                 event.preventDefault();
                 event.stopPropagation();
-                openFill(card.dataset.mmMobileOpenComplex);
+                var target = infoTargetFromEvent(event);
+                if (target && target.openTruckList) {
+                    resetPreviousInfoTap();
+                    openFill(card.dataset.mmMobileOpenComplex);
+                    return;
+                }
+                if (!target || !target.cardId) {
+                    resetPreviousInfoTap();
+                    return;
+                }
+                var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
+                var distance = Math.hypot(event.clientX - previousInfoTapX, event.clientY - previousInfoTapY);
+                if (
+                    previousInfoTapKey === target.key &&
+                    now - previousInfoTapAt <= infoDoubleTapWindowMs &&
+                    distance <= infoDoubleTapDistancePx
+                ) {
+                    resetPreviousInfoTap();
+                    openEquipmentCard(target.cardId);
+                    return;
+                }
+                previousInfoTapAt = now;
+                previousInfoTapKey = target.key;
+                previousInfoTapX = event.clientX;
+                previousInfoTapY = event.clientY;
+                pulseMiningMasterInfoTarget(target.node);
             });
             card.addEventListener("keydown", function (event) {
                 if (event.key !== "Enter" && event.key !== " ") return;
+                var truck = event.target && event.target.closest
+                    ? event.target.closest("[data-mm-mobile-home-truck-id]")
+                    : null;
+                if (truck && card.contains(truck) && openEquipmentCard(truck.dataset.mmMobileHomeTruckId)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
                 event.preventDefault();
                 openFill(card.dataset.mmMobileOpenComplex);
             });
@@ -5173,6 +5684,7 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         });
         shell.querySelectorAll("[data-mm-mobile-panel='trucks'] .mm-mobile-truck-card[data-equipment-card-id]").forEach(bindEquipmentCardTrigger);
+        shell.querySelectorAll("[data-mm-open-shift-plan-detail]").forEach(bindShiftPlanDetailTrigger);
         shell.querySelectorAll("[data-mm-mobile-fill-back]").forEach(function (button) {
             button.addEventListener("click", function (event) {
                 event.preventDefault();
@@ -5226,6 +5738,10 @@ document.addEventListener("DOMContentLoaded", function () {
         syncMobileGarageNavState();
         scheduleMobileLocalLayoutReconcile();
         document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && shiftPlanDetail && !shiftPlanDetail.hidden) {
+                closeShiftPlanDetail();
+                return;
+            }
             if (event.key === "Escape" && shell.dataset.mobileScreen === "fill") {
                 closeDetails();
             }
@@ -5827,8 +6343,13 @@ document.addEventListener("DOMContentLoaded", function () {
         var mobileTapPointerId = null;
         var mobileTapStartX = 0;
         var mobileTapStartY = 0;
-        var mobileLongTapTimer = null;
-        var mobileLongTapOpened = false;
+        var mobileTapStartedAt = 0;
+        var mobilePreviousTapAt = 0;
+        var mobilePreviousTapX = 0;
+        var mobilePreviousTapY = 0;
+        var mobileDoubleTapWindowMs = 340;
+        var mobileDoubleTapDistancePx = 24;
+        var mobileTapMaxDurationMs = 360;
         var shouldUsePointerTap = Boolean(node.closest(".mm-mobile-shell")) && (
             node.classList.contains("mm-mobile-truck-card") ||
             node.classList.contains("mm-mobile-garage-excavator")
@@ -5838,18 +6359,13 @@ document.addEventListener("DOMContentLoaded", function () {
             return node.classList.contains("is-placeholder") ||
                 Boolean(control && control !== node);
         }
-        function clearMobileLongTapTimer() {
-            if (!mobileLongTapTimer) return;
-            window.clearTimeout(mobileLongTapTimer);
-            mobileLongTapTimer = null;
+        function resetMobilePreviousTap() {
+            mobilePreviousTapAt = 0;
+            mobilePreviousTapX = 0;
+            mobilePreviousTapY = 0;
         }
         function pulseMobileEquipmentCard() {
-            node.classList.remove("is-mobile-tap-feedback");
-            void node.offsetWidth;
-            node.classList.add("is-mobile-tap-feedback");
-            window.setTimeout(function () {
-                node.classList.remove("is-mobile-tap-feedback");
-            }, 260);
+            pulseMiningMasterInfoTarget(node);
         }
         function openMobileEquipmentCard(event) {
             if (!openEquipmentCard(node.dataset.equipmentCardId)) return false;
@@ -5865,38 +6381,48 @@ document.addEventListener("DOMContentLoaded", function () {
                 mobileTapPointerId = event.pointerId;
                 mobileTapStartX = event.clientX;
                 mobileTapStartY = event.clientY;
-                mobileLongTapOpened = false;
-                clearMobileLongTapTimer();
-                mobileLongTapTimer = window.setTimeout(function () {
-                    if (mobileTapPointerId !== event.pointerId) return;
-                    mobileLongTapOpened = openMobileEquipmentCard(event);
-                }, 520);
+                mobileTapStartedAt = window.performance && window.performance.now ? window.performance.now() : Date.now();
             });
             node.addEventListener("pointermove", function (event) {
                 if (mobileTapPointerId === null || event.pointerId !== mobileTapPointerId) return;
                 var dx = event.clientX - mobileTapStartX;
                 var dy = event.clientY - mobileTapStartY;
                 if (Math.hypot(dx, dy) > 10) {
-                    clearMobileLongTapTimer();
+                    mobileTapPointerId = null;
+                    resetMobilePreviousTap();
                 }
             });
             node.addEventListener("pointerup", function (event) {
                 if (mobileTapPointerId === null || event.pointerId !== mobileTapPointerId) return;
                 var dx = event.clientX - mobileTapStartX;
                 var dy = event.clientY - mobileTapStartY;
-                clearMobileLongTapTimer();
+                var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
+                var tapDuration = now - mobileTapStartedAt;
                 mobileTapPointerId = null;
-                if (Math.hypot(dx, dy) > 10 || isEquipmentCardTapBlocked(event)) return;
-                if (!mobileLongTapOpened) {
-                    pulseMobileEquipmentCard();
-                    event.preventDefault();
-                    event.stopPropagation();
+                if (Math.hypot(dx, dy) > 10 || tapDuration > mobileTapMaxDurationMs || isEquipmentCardTapBlocked(event)) {
+                    resetMobilePreviousTap();
+                    return;
                 }
+                event.preventDefault();
+                event.stopPropagation();
+                var previousDistance = Math.hypot(event.clientX - mobilePreviousTapX, event.clientY - mobilePreviousTapY);
+                if (mobilePreviousTapAt && now - mobilePreviousTapAt <= mobileDoubleTapWindowMs && previousDistance <= mobileDoubleTapDistancePx) {
+                    resetMobilePreviousTap();
+                    openMobileEquipmentCard(event);
+                    return;
+                }
+                mobilePreviousTapAt = now;
+                mobilePreviousTapX = event.clientX;
+                mobilePreviousTapY = event.clientY;
+                pulseMobileEquipmentCard();
             });
             node.addEventListener("pointercancel", function () {
-                clearMobileLongTapTimer();
                 mobileTapPointerId = null;
-                mobileLongTapOpened = false;
+                resetMobilePreviousTap();
+            });
+            node.addEventListener("dblclick", function (event) {
+                if (isEquipmentCardTapBlocked(event)) return;
+                openMobileEquipmentCard(event);
             });
         }
         node.addEventListener("click", function (event) {

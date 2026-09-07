@@ -63,6 +63,8 @@ from shifts.services import (
     calculate_truck_shift_progress,
     close_excavator_shift,
     equipment_is_truck,
+    excavator_fuel_capacity_l,
+    excavator_fuel_liters_from_percent,
     format_progress_percent,
     plan_status_label,
     progress_cycle_visual_context,
@@ -741,7 +743,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v211";
+const CACHE_NAME = "excavator-mobile-shell-v215";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -1099,6 +1101,20 @@ def format_whole_input_value(value):
     return str(int(parsed.to_integral_value(rounding=ROUND_HALF_UP)))
 
 
+def excavator_fuel_percent_from_liters(value, capacity):
+    if value in {None, ''} or not capacity:
+        return ''
+    try:
+        liters = Decimal(value)
+        capacity_value = Decimal(capacity)
+    except (InvalidOperation, TypeError, ValueError):
+        return ''
+    if capacity_value <= 0:
+        return '0'
+    percent = (liters * Decimal('100') / capacity_value).to_integral_value(rounding=ROUND_HALF_UP)
+    return str(max(0, min(100, int(percent))))
+
+
 def format_whole_value_with_unit(value, unit):
     formatted = format_whole_number(value)
     return f'{formatted} {unit}' if formatted and unit else formatted
@@ -1198,21 +1214,58 @@ def dispatcher_shift_plan_detail(
     completion_percent,
 ):
     by_dump_point = defaultdict(lambda: {'fact': Decimal('0'), 'trip_count': 0})
+    by_route = defaultdict(lambda: {'fact': Decimal('0'), 'trip_count': 0})
 
     def add_trip(trip, amount):
         amount = amount or Decimal('0')
         if amount <= 0:
             return
         dump_point = trip.actual_dump_point or trip.assigned_dump_point or trip.dump_point
-        label = str(dump_point) if dump_point else 'Точка не указана'
-        by_dump_point[label]['fact'] += amount
-        by_dump_point[label]['trip_count'] += 1
+        destination_label = str(dump_point) if dump_point else 'Точка не указана'
+        excavator_number = str(getattr(trip.excavator, 'garage_number', '') or '').strip()
+        excavator_match = re.search(r'\d+', excavator_number)
+        source_label = (
+            f'К-{int(excavator_match.group(0))}'
+            if excavator_match
+            else excavator_number or 'Комплекс не указан'
+        )
+        by_dump_point[destination_label]['fact'] += amount
+        by_dump_point[destination_label]['trip_count'] += 1
+        route = by_route[(source_label, destination_label)]
+        route['source'] = source_label
+        route['destination'] = destination_label
+        route['fact'] += amount
+        route['trip_count'] += 1
 
     for trip in completed_trips:
         add_trip(trip, trip.tonnage if completed_use_tonnage else trip.volume_m3)
     for trip in active_trips:
         add_trip(trip, trip.tonnage or trip.volume_m3)
 
+    def allocate_contribution(rows):
+        total = sum((row['fact'] for row in rows), Decimal('0'))
+        allocations = []
+        for index, row in enumerate(rows):
+            exact_percent = (
+                (row['fact'] / total) * visible_percent
+                if total and visible_percent
+                else Decimal('0')
+            )
+            whole_percent = int(exact_percent)
+            allocations.append({
+                **row,
+                'index': index,
+                'contribution_percent': whole_percent,
+                'remainder': exact_percent - whole_percent,
+                'fact_share_percent': int(round((row['fact'] / total) * 100)) if total else 0,
+            })
+        unallocated = visible_percent - sum(row['contribution_percent'] for row in allocations)
+        for row in sorted(allocations, key=lambda item: (-item['remainder'], item['index']))[:unallocated]:
+            row['contribution_percent'] += 1
+        return allocations
+
+    visible_percent = max(0, int(completion_percent or 0))
+    unit_label = 'т' if completed_use_tonnage or any(trip.tonnage for trip in active_trips) else 'м³'
     points = [{'name': name, **values} for name, values in by_dump_point.items()]
     points.sort(key=lambda row: (-row['fact'], row['name']))
     if len(points) > 5:
@@ -1223,38 +1276,44 @@ def dispatcher_shift_plan_detail(
             'trip_count': sum(row['trip_count'] for row in other_points),
         }]
 
-    visible_percent = max(0, int(completion_percent or 0))
-    point_fact_total = sum((row['fact'] for row in points), Decimal('0'))
-    allocations = []
-    for index, row in enumerate(points):
-        exact_percent = (
-            (row['fact'] / point_fact_total) * visible_percent
-            if point_fact_total and visible_percent
-            else Decimal('0')
-        )
-        whole_percent = int(exact_percent)
-        allocations.append({
-            **row,
-            'index': index,
-            'contribution_percent': whole_percent,
-            'remainder': exact_percent - whole_percent,
-        })
-    unallocated = visible_percent - sum(row['contribution_percent'] for row in allocations)
-    for row in sorted(allocations, key=lambda item: (-item['remainder'], item['index']))[:unallocated]:
-        row['contribution_percent'] += 1
+    point_allocations = allocate_contribution(points)
+
+    routes = list(by_route.values())
+    routes.sort(key=lambda row: (-row['fact'], row['source'], row['destination']))
+    if len(routes) > 6:
+        other_routes = routes[5:]
+        routes = routes[:5] + [{
+            'source': 'Другие',
+            'destination': 'разные точки',
+            'fact': sum((row['fact'] for row in other_routes), Decimal('0')),
+            'trip_count': sum(row['trip_count'] for row in other_routes),
+        }]
+    route_allocations = allocate_contribution(routes)
 
     return {
         'completion_percent': visible_percent,
         'fact_tons': format_dispatcher_number(fact_tons),
         'plan_tons': format_dispatcher_number(plan_tons),
+        'unit_label': unit_label,
         'points': [
             {
                 'name': row['name'],
                 'fact_tons': format_dispatcher_number(row['fact']),
                 'trip_count_label': dispatcher_trip_count_label(row['trip_count']),
                 'contribution_percent': row['contribution_percent'],
+                'fact_share_percent': row['fact_share_percent'],
             }
-            for row in allocations
+            for row in point_allocations
+        ],
+        'routes': [
+            {
+                'source': row['source'],
+                'destination': row['destination'],
+                'fact_tons': format_dispatcher_number(row['fact']),
+                'trip_count_label': dispatcher_trip_count_label(row['trip_count']),
+                'contribution_percent': row['contribution_percent'],
+            }
+            for row in route_allocations
         ],
     }
 
@@ -1581,6 +1640,9 @@ def build_dispatcher_dashboard_context(
     active_trips_list = list(active_trips)
     pending_assignments_list = list(pending_assignments)
     accepted_assignments_list = list(accepted_assignments)
+    accepted_source_assignment_by_truck_id = {}
+    for assignment in accepted_assignments_list:
+        accepted_source_assignment_by_truck_id.setdefault(assignment.truck_id, assignment)
     assignment_by_truck = {}
     for assignment in accepted_assignments_list + pending_assignments_list:
         current = assignment_by_truck.get(assignment.truck_id)
@@ -1608,16 +1670,28 @@ def build_dispatcher_dashboard_context(
     trucks_list = list(trucks)
     excavators_list = list(excavators)
     shift_trip_queryset = Trip.objects.none()
+    shift_trip_attribution = None
+    production_shift_start = None
+    production_shift_end = None
     if dispatcher_shift:
+        production_shift_start, production_shift_end = production_shift_bounds(
+            production_work_date(dispatcher_shift.opened_at),
+            dispatcher_shift.shift_type,
+        )
+        shift_trip_attribution = (
+            Q(
+                loading_shift__opened_at__gte=production_shift_start,
+                loading_shift__opened_at__lt=production_shift_end,
+            )
+            | Q(
+                loading_shift__isnull=True,
+                created_at__gte=production_shift_start,
+                created_at__lt=production_shift_end,
+            )
+        )
         shift_trip_queryset = (
             Trip.objects
-            .filter(
-                Q(loading_shift__opened_at__gte=dispatcher_shift.opened_at)
-                | Q(
-                    loading_shift__isnull=True,
-                    created_at__gte=dispatcher_shift.opened_at,
-                )
-            )
+            .filter(shift_trip_attribution)
             .select_related(
                 'truck',
                 'excavator',
@@ -1802,13 +1876,6 @@ def build_dispatcher_dashboard_context(
     completed_tons = Decimal('0')
     completed_use_tonnage = False
     if dispatcher_shift:
-        shift_trip_attribution = (
-            Q(loading_shift__opened_at__gte=dispatcher_shift.opened_at)
-            | Q(
-                loading_shift__isnull=True,
-                created_at__gte=dispatcher_shift.opened_at,
-            )
-        )
         completed_tons = (
             Trip.objects
             .filter(status=TripStatus.COMPLETED)
@@ -1832,11 +1899,11 @@ def build_dispatcher_dashboard_context(
             if (
                 (
                     trip.loading_shift_id
-                    and trip.loading_shift.opened_at >= dispatcher_shift.opened_at
+                    and production_shift_start <= trip.loading_shift.opened_at < production_shift_end
                 )
                 or (
                     not trip.loading_shift_id
-                    and trip.created_at >= dispatcher_shift.opened_at
+                    and production_shift_start <= trip.created_at < production_shift_end
                 )
             )
         )
@@ -1979,6 +2046,10 @@ def build_dispatcher_dashboard_context(
 
         current_assignments = [assignment for assignment in accepted_assignments_list + pending_assignments_list if assignment.excavator_id == excavator.id]
         current_truck_ids = {assignment.truck_id for assignment in current_assignments}
+        current_assignment_by_truck_id = {
+            assignment.truck_id: assignment
+            for assignment in current_assignments
+        }
         volume_by_truck = defaultdict(Decimal)
         target_by_truck = {}
         rock_by_truck = {}
@@ -1996,6 +2067,20 @@ def build_dispatcher_dashboard_context(
             truck = truck_by_id.get(truck_id)
             if not truck:
                 continue
+            current_assignment = current_assignment_by_truck_id.get(truck_id)
+            source_assignment = accepted_source_assignment_by_truck_id.get(truck_id)
+            transfer_pending = bool(
+                current_assignment
+                and current_assignment.status == AssignmentStatus.PENDING
+                and current_assignment.action == HaulAssignmentAction.ASSIGN
+                and source_assignment
+                and source_assignment.excavator_id != current_assignment.excavator_id
+            )
+            transfer_source_excavator = (
+                excavator_by_id.get(source_assignment.excavator_id)
+                if transfer_pending
+                else None
+            )
             truck_status, truck_state_label, truck_state_code = truck_current_state(truck)
             truck_volume = volume_by_truck.get(truck_id, Decimal('0'))
             truck_plan = dispatcher_plan_for_equipment(truck)
@@ -2024,6 +2109,12 @@ def build_dispatcher_dashboard_context(
                 'plan_percent_label': truck_plan['percent_label'],
                 'plan_unit': truck_plan['unit'],
                 'plan_has_plan': truck_plan['has_plan'],
+                'transfer_pending': transfer_pending,
+                'transfer_source_label': (
+                    f'К-{garage_number_int(transfer_source_excavator)}'
+                    if transfer_source_excavator
+                    else ''
+                ),
             })
         forecast = fact
         current_rock = (
@@ -2185,7 +2276,10 @@ def build_dispatcher_dashboard_context(
                 'plan_percent_label': row.get('plan_percent_label') or 'Не назначен',
                 'plan_unit': row.get('plan_unit') or '',
                 'plan_has_plan': bool(row.get('plan_has_plan')),
+                'transfer_pending': bool(row.get('transfer_pending')),
+                'transfer_source_label': row.get('transfer_source_label') or '',
             })
+        pending_transfer_tile = next((tile for tile in truck_tiles if tile.get('transfer_pending')), None)
         unload_totals = {}
         for row in current_truck_rows:
             target = row.get('target')
@@ -2225,7 +2319,12 @@ def build_dispatcher_dashboard_context(
             'truck_column_count': 6,
             'truck_preview': current_trucks[:6],
             'truck_overflow': max(len(current_trucks) - 6, 0),
-            'mobile_truck_overflow': max(len(current_trucks) - 16, 0),
+            'mobile_truck_overflow': max(len(truck_tiles) - 3, 0),
+            'mobile_transfer_notice': (
+                f'№{pending_transfer_tile.get("name")} из {pending_transfer_tile.get("transfer_source_label")} · до 5 мин'
+                if pending_transfer_tile
+                else ''
+            ),
             'current_face': dispatcher_complex_face_label(card),
             'current_horizon': current_horizon,
             'current_block': current_block,
@@ -4313,11 +4412,19 @@ def excavator_shift_action_view(request):
 
     try:
         if action == 'close':
+            fuel_value = payload.get('fuel')
+            fuel_limit_override = None
+            if 'fuel_percent' in payload and open_shift:
+                fuel_value, _, fuel_limit_override = excavator_fuel_liters_from_percent(
+                    open_shift.equipment,
+                    payload.get('fuel_percent'),
+                )
             response_payload = close_excavator_shift(
                 employee=access.employee,
-                fuel_value=payload.get('fuel'),
+                fuel_value=fuel_value,
                 engine_hours_value=payload.get('engine_hours'),
                 client_action_id=client_action_id,
+                fuel_limit_override=fuel_limit_override,
             )
             return JsonResponse(response_payload)
 
@@ -4325,13 +4432,21 @@ def excavator_shift_action_view(request):
         assignment_state = work_assignment_state(access.employee, work_assignment)
         if assignment_state not in {'assigned', 'assignment_conflict'}:
             return JsonResponse({'ok': False, 'error': work_assignment_error_message(assignment_state), 'assignment_state': assignment_state}, status=409)
+        fuel_value = payload.get('fuel')
+        fuel_limit_override = None
+        if 'fuel_percent' in payload:
+            fuel_value, _, fuel_limit_override = excavator_fuel_liters_from_percent(
+                work_assignment.equipment,
+                payload.get('fuel_percent'),
+            )
         response_payload = open_excavator_shift(
             employee=access.employee,
             equipment=work_assignment.equipment,
             shift_type=work_assignment.shift_type,
-            fuel_value=payload.get('fuel'),
+            fuel_value=fuel_value,
             engine_hours_value=payload.get('engine_hours'),
             client_action_id=client_action_id,
+            fuel_limit_override=fuel_limit_override,
         )
         return JsonResponse(response_payload)
     except ExcavatorShiftError as error:
@@ -4375,19 +4490,13 @@ def excavator_work_view(request):
             .order_by('-opened_at')
             .first()
         )
-    shift_fuel_limit = getattr(
-        getattr(shift_start_excavator, 'model', None),
-        'fuel_capacity_limit_l',
-        None,
-    )
+    shift_fuel_limit = excavator_fuel_capacity_l(shift_start_excavator) if shift_start_excavator else Decimal('0')
     shift_action_block_message = ''
     if not open_shift:
         if assignment_state != 'assigned':
             shift_action_block_message = work_assignment_error_message(assignment_state)
         elif equipment_open_shift:
             shift_action_block_message = 'Техника занята в другой смене.'
-        elif not shift_fuel_limit:
-            shift_action_block_message = 'Для модели не настроен допустимый объём топлива.'
     previous_equipment_shift = None if open_shift or equipment_open_shift else get_previous_closed_equipment_shift(shift_start_excavator)
 
     legacy_trip_client_action_id = (
@@ -5094,6 +5203,10 @@ def excavator_work_view(request):
             'shift_action_block_message': shift_action_block_message,
             'shift_previous_readings': bool(previous_equipment_shift),
             'shift_start_fuel_display': format_whole_input_value(open_shift.start_fuel if open_shift else None),
+            'shift_start_fuel_percent_display': excavator_fuel_percent_from_liters(
+                open_shift.start_fuel if open_shift else None,
+                shift_fuel_limit,
+            ),
             'shift_start_engine_hours_display': format_whole_input_value(open_shift.start_engine_hours if open_shift else None),
             'shift_plan_percent': shift_plan_percent,
             'shift_plan_visual': shift_plan_visual,
@@ -5107,8 +5220,9 @@ def excavator_work_view(request):
             'shift_fact_label': shift_fact_label,
             'shift_fact_value': shift_fact_value,
             'shift_fact_meta': shift_fact_meta,
-            'shift_fuel_display': format_whole_input_value(
-                open_shift.end_fuel if open_shift else getattr(previous_equipment_shift, 'end_fuel', None)
+            'shift_fuel_display': excavator_fuel_percent_from_liters(
+                open_shift.end_fuel if open_shift else getattr(previous_equipment_shift, 'end_fuel', None),
+                shift_fuel_limit,
             ),
             'shift_engine_hours_display': format_whole_input_value(
                 open_shift.end_engine_hours if open_shift else getattr(previous_equipment_shift, 'end_engine_hours', None)
@@ -5498,7 +5612,10 @@ def dispatcher_control_view(
             'excavator__equipment_type',
             'rock_type',
             'dump_point',
+            'assigned_dump_point',
+            'actual_dump_point',
             'excavator_operator',
+            'loading_shift',
         )
         .order_by('created_at')
     )

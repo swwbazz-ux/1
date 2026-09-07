@@ -1129,7 +1129,9 @@ def clear_active_equipment_assignment(*, employee, assigned_by=None, now=None, r
     return len(assignments)
 
 
-def _emit_assignment_changed(*, action, truck_id, excavator_ids, assignment_id=None):
+def _emit_assignment_changed(
+        *, action, truck_id, excavator_ids, assignment_id=None,
+        target_excavator_id=None):
     bump_operational_state(
         f'HaulAssignment:{action}',
         event_type='assignment_changed',
@@ -1139,6 +1141,7 @@ def _emit_assignment_changed(*, action, truck_id, excavator_ids, assignment_id=N
             'action': action,
             'truck_ids': [truck_id],
             'excavator_ids': sorted({value for value in excavator_ids if value}),
+            'target_excavator_id': target_excavator_id,
         },
     )
 
@@ -1188,6 +1191,7 @@ def schedule_haul_assignment(*, truck, excavator, assigned_by=None, now=None):
             _emit_assignment_changed(
                 action='pending_cancelled', truck_id=truck.id,
                 excavator_ids=excavator_ids, assignment_id=accepted.id,
+                target_excavator_id=accepted.excavator_id,
             )
         return accepted, False
 
@@ -1203,6 +1207,7 @@ def schedule_haul_assignment(*, truck, excavator, assigned_by=None, now=None):
     _emit_assignment_changed(
         action='assignment_pending', truck_id=truck.id,
         excavator_ids=excavator_ids, assignment_id=assignment.id,
+        target_excavator_id=excavator.id,
     )
     return assignment, True
 
@@ -1335,6 +1340,11 @@ def apply_pending_haul_assignment(assignment_id, *, now=None):
     _emit_assignment_changed(
         action=applied_action, truck_id=pending.truck_id,
         excavator_ids=excavator_ids, assignment_id=pending.id,
+        target_excavator_id=(
+            pending.excavator_id
+            if pending.action != HaulAssignmentAction.RELEASE
+            else None
+        ),
     )
     notify_excavator_assignment_changed(
         pending,

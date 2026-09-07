@@ -39,6 +39,19 @@ document.addEventListener("DOMContentLoaded", function () {
     var detailEmployeeInitials = document.querySelector("[data-gd-detail-employee-initials]");
     var detailEmployeeName = document.querySelector("[data-gd-detail-employee-name]");
     var detailEmployeePhone = document.querySelector("[data-gd-detail-employee-phone]");
+    var detailEmployeePresence = document.querySelector("[data-gd-detail-employee-presence]");
+    var detailSettings = document.querySelector("[data-gd-detail-settings]");
+    var detailSettingsTitle = document.querySelector("[data-gd-detail-settings-title]");
+    var detailSettingsHint = document.querySelector("[data-gd-detail-settings-hint]");
+    var detailSettingsStatus = document.querySelector("[data-gd-detail-settings-status]");
+    var detailSettingHorizon = document.querySelector("[data-gd-setting-horizon]");
+    var detailSettingBlock = document.querySelector("[data-gd-setting-block]");
+    var detailSettingRock = document.querySelector("[data-gd-setting-rock]");
+    var detailDestinationList = document.querySelector("[data-gd-destination-list]");
+    var detailDestinationAdd = document.querySelector("[data-gd-destination-add]");
+    var detailDestinationCount = document.querySelector("[data-gd-destination-count]");
+    var detailSettingSave = document.querySelector("[data-gd-setting-save]");
+    var detailDumpPointOptions = [];
     var detailShiftReport = document.querySelector("[data-gd-detail-shift-report]");
     var detailMetrics = document.querySelector("[data-gd-detail-metrics]");
     var detailTabs = document.querySelector("[data-gd-detail-tabs]");
@@ -1730,8 +1743,217 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function resetDetailContent() {
         if (detailEmployee) detailEmployee.hidden = true;
+        if (detailSettings) detailSettings.hidden = true;
+        if (detailSettingsStatus) detailSettingsStatus.textContent = "";
         if (detailList) detailList.innerHTML = "";
         if (detailShiftReport) detailShiftReport.hidden = true;
+    }
+
+    function fillDetailSettingSelect(select, options, selectedId) {
+        if (!select) return;
+        select.innerHTML = "";
+        var placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Выберите";
+        select.appendChild(placeholder);
+        (options || []).forEach(function (item) {
+            var option = document.createElement("option");
+            option.value = String(item.id || "");
+            option.textContent = item.name || "";
+            option.selected = String(item.id || "") === String(selectedId || "");
+            select.appendChild(option);
+        });
+    }
+
+    function detailDestinationRows() {
+        return detailDestinationList
+            ? Array.prototype.slice.call(detailDestinationList.querySelectorAll("[data-gd-destination-row]"))
+            : [];
+    }
+
+    function refreshDetailDestinationRows() {
+        var rows = detailDestinationRows();
+        var selectedIds = rows.map(function (row) {
+            var select = row.querySelector("[data-gd-destination-select]");
+            return select ? String(select.value || "") : "";
+        }).filter(Boolean);
+        rows.forEach(function (row) {
+            var select = row.querySelector("[data-gd-destination-select]");
+            var remove = row.querySelector("[data-gd-destination-remove]");
+            if (select) {
+                Array.prototype.forEach.call(select.options, function (option) {
+                    option.disabled = !!option.value
+                        && option.value !== select.value
+                        && selectedIds.indexOf(String(option.value)) !== -1;
+                });
+            }
+            if (remove) remove.disabled = rows.length <= 1;
+        });
+        if (detailDestinationCount) {
+            detailDestinationCount.textContent = rows.length
+                ? rows.length + " " + (rows.length === 1 ? "точка" : rows.length < 5 ? "точки" : "точек")
+                : "не назначены";
+        }
+        if (detailDestinationAdd) {
+            detailDestinationAdd.disabled = dispatcherRoleIsReadonly()
+                || !dispatcherShiftOpen
+                || rows.length >= detailDumpPointOptions.length;
+        }
+    }
+
+    function addDetailDestinationRow(destination) {
+        if (!detailDestinationList) return;
+        var row = document.createElement("div");
+        row.className = "gd-detail-destination-row";
+        row.setAttribute("data-gd-destination-row", "");
+
+        var selectLabel = document.createElement("label");
+        var selectCaption = document.createElement("span");
+        selectCaption.textContent = "Точка";
+        var select = document.createElement("select");
+        select.setAttribute("data-gd-destination-select", "");
+        fillDetailSettingSelect(select, detailDumpPointOptions, destination && destination.dump_point_id);
+        selectLabel.appendChild(selectCaption);
+        selectLabel.appendChild(select);
+
+        var distanceLabel = document.createElement("label");
+        distanceLabel.className = "gd-detail-destination-distance";
+        var distanceCaption = document.createElement("span");
+        distanceCaption.textContent = "Плечо, км";
+        var distance = document.createElement("input");
+        distance.type = "text";
+        distance.inputMode = "decimal";
+        distance.maxLength = 12;
+        distance.placeholder = "—";
+        distance.value = String(destination && destination.transport_distance_km || "").replace(".", ",");
+        distance.setAttribute("data-gd-destination-distance", "");
+        distanceLabel.appendChild(distanceCaption);
+        distanceLabel.appendChild(distance);
+
+        var remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "gd-detail-destination-remove";
+        remove.setAttribute("data-gd-destination-remove", "");
+        remove.setAttribute("aria-label", "Убрать точку разгрузки");
+        remove.textContent = "×";
+
+        select.addEventListener("change", refreshDetailDestinationRows);
+        remove.addEventListener("click", function () {
+            row.remove();
+            refreshDetailDestinationRows();
+        });
+        row.appendChild(selectLabel);
+        row.appendChild(distanceLabel);
+        row.appendChild(remove);
+        detailDestinationList.appendChild(row);
+        refreshDetailDestinationRows();
+    }
+
+    function collectDetailDestinations() {
+        var seen = Object.create(null);
+        var destinations = [];
+        detailDestinationRows().forEach(function (row) {
+            var select = row.querySelector("[data-gd-destination-select]");
+            var distance = row.querySelector("[data-gd-destination-distance]");
+            var id = select ? String(select.value || "") : "";
+            if (!id || seen[id]) return;
+            seen[id] = true;
+            destinations.push({
+                dump_point_id: id,
+                transport_distance_km: distance ? distance.value : ""
+            });
+        });
+        return destinations;
+    }
+
+    function renderDetailSettings(settings) {
+        if (!detailSettings) return;
+        if (!settings || !settings.editable) {
+            detailSettings.hidden = true;
+            return;
+        }
+        detailSettings.hidden = false;
+        if (detailSettingsTitle) detailSettingsTitle.textContent = settings.title || "Рабочие параметры комплекса";
+        if (detailSettingsHint) detailSettingsHint.textContent = settings.hint || "";
+        if (detailSettingsStatus) detailSettingsStatus.textContent = "";
+        if (detailSettingHorizon) detailSettingHorizon.value = settings.loading_horizon || "";
+        if (detailSettingBlock) detailSettingBlock.value = settings.loading_block || "";
+        fillDetailSettingSelect(detailSettingRock, settings.rock_types, settings.rock_type_id);
+        detailDumpPointOptions = settings.dump_points || [];
+        if (detailDestinationList) detailDestinationList.innerHTML = "";
+        var destinations = Array.isArray(settings.destinations) ? settings.destinations : [];
+        if (!destinations.length && settings.dump_point_id) {
+            destinations = [{
+                dump_point_id: settings.dump_point_id,
+                transport_distance_km: settings.transport_distance_km || ""
+            }];
+        }
+        destinations.forEach(addDetailDestinationRow);
+        if (!destinations.length && detailDumpPointOptions.length) {
+            addDetailDestinationRow({dump_point_id: detailDumpPointOptions[0].id});
+        }
+        refreshDetailDestinationRows();
+        if (detailSettingSave) detailSettingSave.disabled = dispatcherRoleIsReadonly() || !dispatcherShiftOpen;
+    }
+
+    function detailSettingsErrorMessage(code) {
+        if (code === "stale_board") return "Данные пульта уже изменились. Закройте карточку и откройте снова.";
+        if (code === "dispatcher_shift_required") return "Сначала откройте смену Горного диспетчера.";
+        if (code === "invalid_transport_distance") return "Плечо должно быть числом не меньше нуля.";
+        if (code === "invalid_work_settings") return "Выберите действующие породу и точку разгрузки.";
+        if (code === "inactive_role") return "Роль неактивна — доступен только просмотр.";
+        return "Не удалось сохранить параметры.";
+    }
+
+    function saveDetailSettings() {
+        if (!detailLayer || !detailSettingSave) return;
+        var url = detailLayer.dataset.gdSettingsUrl || "";
+        if (!url) return;
+        var destinations = collectDetailDestinations();
+        if (!detailSettingRock || !detailSettingRock.value || !destinations.length) {
+            if (detailSettingsStatus) detailSettingsStatus.textContent = "Выберите породу и хотя бы одну точку.";
+            return;
+        }
+        detailSettingSave.disabled = true;
+        if (detailSettingsStatus) detailSettingsStatus.textContent = "Сохраняю…";
+        fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-CSRFToken": getCsrfToken(),
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: JSON.stringify({
+                state_version: currentDispatcherBoardVersion(),
+                loading_horizon: detailSettingHorizon ? detailSettingHorizon.value : "",
+                loading_block: detailSettingBlock ? detailSettingBlock.value : "",
+                rock_type_id: detailSettingRock.value,
+                dump_point_ids: destinations.map(function (row) { return row.dump_point_id; }),
+                destinations: destinations
+            })
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+                if (!response.ok) {
+                    var error = new Error("settings_request_failed");
+                    error.code = payload.error || "";
+                    throw error;
+                }
+                return payload;
+            });
+        }).then(function (payload) {
+            if (detailSettingsStatus) detailSettingsStatus.textContent = "Настройки сохранены";
+            if (payload && payload.settings) renderDetailSettings(payload.settings);
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("dispatcher_settings_saved");
+            }
+            window.setTimeout(closeEquipmentCard, 650);
+        }).catch(function (error) {
+            if (detailSettingsStatus) detailSettingsStatus.textContent = detailSettingsErrorMessage(error && error.code);
+            detailSettingSave.disabled = dispatcherRoleIsReadonly() || !dispatcherShiftOpen;
+        });
     }
 
     function renderEquipmentCard(cardId, data) {
@@ -1746,10 +1968,8 @@ document.addEventListener("DOMContentLoaded", function () {
         if (detailZone) detailZone.textContent = data.zone || "";
         if (detailEmployee) {
             var employee = data.employee || {};
-            if (data.category === "complex") {
-                detailEmployee.hidden = true;
-            } else {
             detailEmployee.hidden = false;
+            if (detailEmployeePresence) detailEmployeePresence.textContent = employee.presence_label || "Сотрудник не назначен";
             if (detailEmployeeName) detailEmployeeName.textContent = employee.name || "Сотрудник не назначен";
             if (detailEmployeePhone) {
                 detailEmployeePhone.textContent = employee.phone || "телефон не указан";
@@ -1773,8 +1993,8 @@ document.addEventListener("DOMContentLoaded", function () {
                     detailEmployeeInitials.hidden = false;
                 }
             }
-            }
         }
+        renderDetailSettings(data.settings || null);
         if (detailList) {
             detailList.innerHTML = "";
             (data.details || []).forEach(function (row) {
@@ -1827,6 +2047,7 @@ document.addEventListener("DOMContentLoaded", function () {
         delete equipmentCards[cardKey];
         detailLayer.dataset.gdActiveCardId = cardKey;
         detailLayer.dataset.gdRequestedVersion = String(boardVersion);
+        detailLayer.dataset.gdSettingsUrl = url;
         detailLayer.setAttribute("aria-busy", "true");
         resetDetailContent();
         if (detailType) detailType.textContent = trigger.dataset.dispatcherDrag === "complex" ? "Комплекс" : "Техника";
@@ -1900,6 +2121,7 @@ document.addEventListener("DOMContentLoaded", function () {
             detailLayer.removeAttribute("aria-busy");
             delete detailLayer.dataset.gdActiveCardId;
             delete detailLayer.dataset.gdRequestedVersion;
+            delete detailLayer.dataset.gdSettingsUrl;
         }
         if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
             window.AppRealtime.wake("dispatcher_detail_closed");
@@ -5240,15 +5462,57 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!draggedTile || draggedTile.dataset.dispatcherDrag !== "complex") return;
             var inactiveComplexCard = draggedTile;
             var inactiveExcavatorId = inactiveComplexCard.dataset.equipmentId;
-            dispatcherPost(dispatcherMoveExcavatorUrl, {
-                excavator_id: inactiveExcavatorId,
-                zone: "inactive"
-            }).then(function (response) {
-                return refreshDesktopBoardAfterStructuralAction(response, function () {
-                    moveDesktopComplexToExcavatorGarage(inactiveComplexCard);
-                });
-            }).catch(handleDesktopOptimisticBoardError);
+            var inactiveComplexName = (inactiveComplexCard.dataset.equipmentName || "комплекс").trim();
+            var inactiveTruckCount = inactiveComplexCard.querySelectorAll("[data-complex-truck='true']").length;
+            requestDispatcherDesktopDangerConfirmation({
+                title: "Расформировать комплекс?",
+                message: "Экскаватор " + inactiveComplexName + " уйдет в гараж экскаваторов, а все самосвалы " +
+                    "комплекса (" + inactiveTruckCount + " шт.) — в гараж самосвалов через 5 минут.",
+                acceptLabel: "Расформировать",
+                action: function () {
+                    dispatcherPost(dispatcherMoveExcavatorUrl, {
+                        excavator_id: inactiveExcavatorId,
+                        zone: "inactive"
+                    }).then(function (response) {
+                        return refreshDesktopBoardAfterStructuralAction(response, function () {
+                            moveDesktopComplexToExcavatorGarage(inactiveComplexCard);
+                        });
+                    }).catch(handleDesktopOptimisticBoardError);
+                }
+            });
         });
+    }
+    if (detailSettingSave) {
+        detailSettingSave.addEventListener("click", saveDetailSettings);
+    }
+    if (detailDestinationAdd) {
+        detailDestinationAdd.addEventListener("click", function () {
+            var usedIds = collectDetailDestinations().map(function (row) {
+                return String(row.dump_point_id);
+            });
+            var nextPoint = detailDumpPointOptions.find(function (option) {
+                return usedIds.indexOf(String(option.id)) === -1;
+            });
+            if (nextPoint) addDetailDestinationRow({dump_point_id: nextPoint.id});
+        });
+    }
+    function requestDispatcherDesktopDangerConfirmation(options) {
+        options = options || {};
+        if (typeof options.action !== "function") return;
+        if (typeof window.openAppConfirmDialog !== "function") {
+            showDispatcherDnDError(new Error("Подтверждение действия недоступно. Обновите страницу."));
+            return;
+        }
+        window.openAppConfirmDialog(
+            options.message || "Подтвердить опасное действие?",
+            options.action,
+            0,
+            options.acceptLabel || "Подтвердить",
+            {
+                confirmTitle: options.title || "Опасное действие",
+                confirmDescription: options.message || "Подтвердите действие."
+            }
+        );
     }
     function bindDispatcherTruckGarageDrop(garage) {
         if (!garage || garage.dataset.dispatcherDropBound === "true") return;
@@ -5267,15 +5531,25 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!draggedTile) return;
             if (draggedTile.dataset.dispatcherDrag === "complex") {
                 var complexCard = draggedTile;
-                dispatcherPost(dispatcherAssignTruckUrl, {
-                    action: "release_complex",
-                    excavator_id: complexCard.dataset.equipmentId
-                }).then(function (response) {
-                    return applyDesktopTruckAction(response, {
-                        type: "release_complex",
-                        complexCard: complexCard
-                    });
-                }).catch(showDispatcherDnDError);
+                var complexName = (complexCard.dataset.equipmentName || "комплекса").trim();
+                var truckCount = complexCard.querySelectorAll("[data-complex-truck='true']").length;
+                requestDispatcherDesktopDangerConfirmation({
+                    title: "Снять все самосвалы?",
+                    message: "Снять все самосвалы комплекса " + complexName + " (" + truckCount +
+                        " шт.)? Экскаватор останется на месте, самосвалы уйдут в гараж через 5 минут.",
+                    acceptLabel: "Снять самосвалы",
+                    action: function () {
+                        dispatcherPost(dispatcherAssignTruckUrl, {
+                            action: "release_complex",
+                            excavator_id: complexCard.dataset.equipmentId
+                        }).then(function (response) {
+                            return applyDesktopTruckAction(response, {
+                                type: "release_complex",
+                                complexCard: complexCard
+                            });
+                        }).catch(showDispatcherDnDError);
+                    }
+                });
                 return;
             }
             if (draggedTile.dataset.complexTruck !== "true") return;
