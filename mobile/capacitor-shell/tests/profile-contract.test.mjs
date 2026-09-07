@@ -24,8 +24,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "24",
-    versionName: "0.1.18",
+    versionCode: "25",
+    versionName: "0.1.19",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -35,8 +35,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "26",
-    versionName: "0.1.19",
+    versionCode: "27",
+    versionName: "0.1.20",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -369,6 +369,58 @@ test("background service announces only a fresh driver truck_loaded event", () =
   }
   assert.match(catalog, /normalized\.equals\("свх"\)[\s\S]*?voice_edem_na_svh/);
   assert.match(catalog, /normalized\.equals\("буферный склад"\)[\s\S]*?voice_na_bufernyi_sklad/);
+});
+
+test("both production profiles package every approved operational voice phrase", () => {
+  const common = [
+    "voice_shift_opened",
+    "voice_shift_closed",
+    "voice_downtime_started",
+    "voice_downtime_finished",
+    "voice_action_failed",
+    "voice_connection_lost",
+    "voice_connection_restored",
+  ];
+  const byRole = {
+    driver: [
+      "voice_excavator_assigned",
+      "voice_excavator_changed",
+      "voice_assignment_removed",
+      "voice_trip_finished",
+      "voice_trip_finish_failed",
+    ],
+    excavator: [
+      "voice_truck_assigned",
+      "voice_truck_removed",
+      "voice_face_settings_saved",
+      "voice_truck_sent",
+      "voice_truck_send_failed",
+    ],
+  };
+  for (const role of Object.keys(byRole)) {
+    const rawRoot = resolve(root, "profiles", role, "res", "raw");
+    for (const suffix of [...common, ...byRole[role]]) {
+      const resource = resolve(rawRoot, `${role}_${suffix}.m4a`);
+      assert.ok(statSync(resource).size > 8_000, `${resource} must contain real audio`);
+      assert.match(
+        readFileSync(resource).subarray(0, 32).toString("latin1"),
+        /ftyp/,
+        `${resource} must be an MPEG-4 audio resource`
+      );
+    }
+  }
+
+  const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
+  const plugin = readFileSync(resolve(javaRoot, "NativeSoundPlugin.java"), "utf8");
+  const player = readFileSync(resolve(javaRoot, "OperationalVoicePlayer.java"), "utf8");
+  const announcer = readFileSync(resolve(javaRoot, "OperationalVoiceAnnouncer.java"), "utf8");
+  const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  assert.match(plugin, /public void announceOperational\(PluginCall call\)/);
+  assert.match(player, /VOICE_AFTER_CUE_DELAY_MS/);
+  assert.match(player, /AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK/);
+  assert.match(announcer, /last_operational_voice_/);
+  assert.match(service, /showLatestAssignmentAlert/);
+  assert.match(service, /CONNECTION_LOSS_ANNOUNCED/);
 });
 
 test("foreground driver screen uses the same deduplicated recorded voice bridge", () => {

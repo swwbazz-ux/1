@@ -27,6 +27,25 @@ public class NativeSoundPlugin extends Plugin {
         "shift_start",
         "shift_end"
     ));
+    private static final Set<String> ALLOWED_VOICES = new HashSet<>(Arrays.asList(
+        "voice_shift_opened",
+        "voice_shift_closed",
+        "voice_downtime_started",
+        "voice_downtime_finished",
+        "voice_action_failed",
+        "voice_connection_lost",
+        "voice_connection_restored",
+        "voice_excavator_assigned",
+        "voice_excavator_changed",
+        "voice_assignment_removed",
+        "voice_trip_finished",
+        "voice_trip_finish_failed",
+        "voice_truck_assigned",
+        "voice_truck_removed",
+        "voice_face_settings_saved",
+        "voice_truck_sent",
+        "voice_truck_send_failed"
+    ));
 
     private MediaPlayer activePlayer;
 
@@ -89,6 +108,32 @@ public class NativeSoundPlugin extends Plugin {
                 .put("announced", true)
                 .put("cuePlayed", result.cuePlayed));
         });
+    }
+
+    @PluginMethod
+    public void announceOperational(PluginCall call) {
+        String cueName = call.getString("cue", "");
+        String voiceName = call.getString("voice", "");
+        if (!ALLOWED_SOUNDS.contains(cueName) || !ALLOWED_VOICES.contains(voiceName)) {
+            call.reject("Unknown operational voice");
+            return;
+        }
+        long eventVersion = readNumericLong(call, "eventVersion");
+        String eventKey = call.getString("eventKey", "");
+        OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announce(
+            getContext(),
+            cueName,
+            voiceName,
+            eventVersion,
+            eventKey,
+            false,
+            "",
+            ""
+        );
+        call.resolve(new JSObject()
+            .put("announced", result.announced)
+            .put("reason", result.reason)
+            .put("eventVersion", eventVersion));
     }
 
     /**

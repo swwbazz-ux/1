@@ -4609,11 +4609,27 @@ function playDriverSound(name) {
     return window.MobileOperationalSounds.play(name);
 }
 
-function playDriverAssignmentAlert() {
+function playDriverVoice(cue, voice, options) {
+    options = options || {};
+    if (!window.MobileOperationalSounds || typeof window.MobileOperationalSounds.announceOperational !== "function") {
+        return playDriverSound(cue);
+    }
+    return window.MobileOperationalSounds.announceOperational({
+        cue: cue,
+        voice: voice,
+        eventVersion: Number(options.eventVersion || 0),
+        eventKey: String(options.eventKey || "")
+    });
+}
+
+function playDriverAssignmentAlert(eventVersion) {
     if (navigator.vibrate) {
         try { navigator.vibrate([180, 90, 180]); } catch (error) {}
     }
-    playDriverSound("truck_assigned");
+    playDriverVoice("truck_assigned", "voice_excavator_assigned", {
+        eventVersion: Number(eventVersion || 0),
+        eventKey: "driver_assignment"
+    });
 }
 
 function reportDriverAudioDiagnostic(stage, details, extra) {
@@ -4723,18 +4739,21 @@ window.addEventListener("operational-state-refresh-applied", function (event) {
     playDriverDumpPointAlert(event && event.detail ? event.detail : null);
 });
 
-function driverAppliedActionSound(actionKind, freshShell) {
+function driverAppliedActionVoice(actionKind, freshShell) {
     if (actionKind === "shift-open") {
         return freshShell.querySelector("[data-driver-shift-close-button]")
-            ? "shift_start"
-            : "action_error";
+            ? {cue: "shift_start", voice: "voice_shift_opened"}
+            : {cue: "action_error", voice: "voice_action_failed"};
     }
     if (actionKind === "shift-close") {
         return freshShell.querySelector("[data-driver-shift-close-button]")
-            ? "action_error"
-            : "shift_end";
+            ? {cue: "action_error", voice: "voice_action_failed"}
+            : {cue: "shift_end", voice: "voice_shift_closed"};
     }
-    return "action_ok";
+    if (actionKind === "complete-trip") {
+        return {cue: "action_ok", voice: "voice_trip_finished"};
+    }
+    return {cue: "action_ok", voice: ""};
 }
 
 function syncDriverTabMarkup(shell, tab) {
@@ -4822,7 +4841,7 @@ window.applyOperationalStateRefresh = function (context) {
             }]});
         }
         if (nextAssignmentKey && nextAssignmentKey !== previousAssignmentKey) {
-            playDriverAssignmentAlert();
+            playDriverAssignmentAlert(targetVersion);
         }
         return {applied: true};
     }).catch(function () {
@@ -4861,7 +4880,7 @@ window.submitDriverFormInPlace = function (form, options) {
         var freshShell = window.AppOperationalFragment.parseRoot(result.html, "[data-driver-shell]");
         var oldShell = document.querySelector("[data-driver-shell]");
         if (!freshShell || !oldShell) throw new Error("driver shell missing");
-        var soundName = driverAppliedActionSound(actionKind, freshShell);
+        var actionVoice = driverAppliedActionVoice(actionKind, freshShell);
         oldShell.replaceWith(freshShell);
         if (result.url && window.history && window.history.replaceState) {
             var responseUrl = new URL(result.url, window.location.href);
@@ -4876,10 +4895,17 @@ window.submitDriverFormInPlace = function (form, options) {
         if (typeof window.bindDriverMobileShell === "function") {
             window.bindDriverMobileShell();
         }
-        playDriverSound(soundName);
+        if (actionVoice.voice) {
+            playDriverVoice(actionVoice.cue, actionVoice.voice);
+        } else {
+            playDriverSound(actionVoice.cue);
+        }
         return true;
     }).catch(function () {
-        playDriverSound("action_error");
+        playDriverVoice(
+            "action_error",
+            actionKind === "complete-trip" ? "voice_trip_finish_failed" : "voice_action_failed"
+        );
         if (options.fallbackToNavigation !== false) {
             form.submit();
             return false;
@@ -6058,7 +6084,7 @@ window.bindDriverMobileShell = function () {
                 reason_id: button.dataset.driverDowntimeReasonId,
                 client_action_id: generateClientActionId("driver-downtime")
             }).then(function (payload) {
-                playDriverSound("action_ok");
+                playDriverVoice("action_ok", "voice_downtime_started");
                 if (applyDriverActiveDowntime(payload)) {
                     openDriverTab("work");
                 }
@@ -6066,7 +6092,7 @@ window.bindDriverMobileShell = function () {
                     window.AppRealtime.wake("driver_downtime_saved");
                 }
             }).catch(function (error) {
-                playDriverSound("action_error");
+                playDriverVoice("action_error", "voice_action_failed");
                 showDriverToast(error.message || "Простой не сохранен");
                 button.classList.remove("is-selected");
             }).finally(function () {
@@ -6090,13 +6116,13 @@ window.bindDriverMobileShell = function () {
                 action: "close",
                 client_action_id: generateClientActionId("driver-downtime-close")
             }).then(function (payload) {
-                playDriverSound("action_ok");
+                playDriverVoice("action_ok", "voice_downtime_finished");
                 clearDriverActiveDowntime(payload);
                 if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                     window.AppRealtime.wake("driver_downtime_closed");
                 }
             }).catch(function (error) {
-                playDriverSound("action_error");
+                playDriverVoice("action_error", "voice_action_failed");
                 showDriverToast(error.message || "Простой не завершен");
                 downtimeClose.disabled = false;
                 downtimeClose.classList.remove("is-disabled");

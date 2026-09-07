@@ -15,6 +15,7 @@ function createRuntime(profile = "excavator") {
     const windowListeners = new Map();
     const played = [];
     const announced = [];
+    const operationalAnnouncements = [];
     const document = {
         body: {dataset: {}},
         currentScript: {dataset: {
@@ -35,6 +36,10 @@ function createRuntime(profile = "excavator") {
                         announced.push(options);
                         return Promise.resolve({announced: true});
                     },
+                    announceOperational(options) {
+                        operationalAnnouncements.push(options);
+                        return Promise.resolve({announced: true});
+                    },
                 },
             },
         },
@@ -50,7 +55,7 @@ function createRuntime(profile = "excavator") {
         Promise,
         window,
     }, {filename: "mobile-operational-sounds-v1.js"});
-    return {announced, document, played, window, windowListeners};
+    return {announced, document, operationalAnnouncements, played, window, windowListeners};
 }
 
 test("driver native bridge announces a dump point with its event identity", async () => {
@@ -67,6 +72,24 @@ test("driver native bridge announces a dump point with its event identity", asyn
     assert.equal(result.announced, true);
     assert.equal(runtime.announced.length, 1);
     assert.deepEqual(runtime.announced[0], details);
+});
+
+test("native bridge receives the cue, recorded phrase and event identity", async () => {
+    const runtime = createRuntime("driver");
+    const result = await runtime.window.MobileOperationalSounds.announceOperational({
+        cue: "shift_start",
+        voice: "voice_shift_opened",
+        eventVersion: 73,
+        eventKey: "driver_shift",
+    });
+    assert.equal(result.supported, true);
+    assert.equal(result.announced, true);
+    assert.equal(JSON.stringify(runtime.operationalAnnouncements), JSON.stringify([{
+        cue: "shift_start",
+        voice: "voice_shift_opened",
+        eventVersion: 73,
+        eventKey: "driver_shift",
+    }]));
 });
 
 for (const profile of ["excavator", "driver"]) {

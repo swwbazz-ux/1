@@ -6,14 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v206">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v206">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v206">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v206">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v206">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v206">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v206" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v206" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v207">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v207">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v207">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v207">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v207">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v207">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v207" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v207" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -393,7 +393,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v206";
+var excavatorShellVersion = "excavator-mobile-shell-v207";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -453,13 +453,29 @@ function playExcavatorSound(name) {
     return window.MobileOperationalSounds.play(name);
 }
 
-function playExcavatorAssignmentAlert() {
+function playExcavatorVoice(cue, voice, options) {
+    options = options || {};
+    if (!window.MobileOperationalSounds || typeof window.MobileOperationalSounds.announceOperational !== "function") {
+        return playExcavatorSound(cue);
+    }
+    return window.MobileOperationalSounds.announceOperational({
+        cue: cue,
+        voice: voice,
+        eventVersion: Number(options.eventVersion || 0),
+        eventKey: String(options.eventKey || "")
+    });
+}
+
+function playExcavatorAssignmentAlert(voice, eventVersion) {
     if (navigator.vibrate) {
         try {
             navigator.vibrate([180, 90, 180]);
         } catch (error) {}
     }
-    playExcavatorSound("truck_assigned");
+    playExcavatorVoice("truck_assigned", voice || "voice_truck_assigned", {
+        eventVersion: Number(eventVersion || 0),
+        eventKey: "excavator_operator_assignment"
+    });
 }
 
 function readExcavatorAssignmentSnapshot(root) {
@@ -497,7 +513,7 @@ function storeExcavatorAssignments(root, snapshot) {
     } catch (error) {}
 }
 
-function announceExcavatorAssignmentChanges(previousSnapshot, nextSnapshot) {
+function announceExcavatorAssignmentChanges(previousSnapshot, nextSnapshot, eventVersion) {
     var previous = previousSnapshot || {};
     var next = nextSnapshot || {};
     var addedNumbers = Object.keys(next).filter(function (truckId) {
@@ -530,11 +546,14 @@ function announceExcavatorAssignmentChanges(previousSnapshot, nextSnapshot) {
                 : "Сняты самосвалы: " + removedNumbers.join(", ") + "."
         );
     }
-    playExcavatorAssignmentAlert();
+    playExcavatorAssignmentAlert(
+        addedNumbers.length ? "voice_truck_assigned" : "voice_truck_removed",
+        eventVersion
+    );
     showExcavatorNotice(parts.join(" "));
 }
 
-function syncExcavatorAssignmentSnapshot(root, previousSnapshot) {
+function syncExcavatorAssignmentSnapshot(root, previousSnapshot, eventVersion) {
     if (!root) return;
     var nextSnapshot = readExcavatorAssignmentSnapshot(root);
     var baseline = previousSnapshot;
@@ -542,7 +561,7 @@ function syncExcavatorAssignmentSnapshot(root, previousSnapshot) {
         baseline = readStoredExcavatorAssignments(root);
     }
     if (baseline) {
-        announceExcavatorAssignmentChanges(baseline, nextSnapshot);
+        announceExcavatorAssignmentChanges(baseline, nextSnapshot, eventVersion);
     }
     storeExcavatorAssignments(root, nextSnapshot);
 }
@@ -768,7 +787,7 @@ function refreshExcavatorWorkFromServer(options) {
         if (typeof window.checkAchievementPrize === "function") {
             window.checkAchievementPrize(options.achievementContext);
         }
-        syncExcavatorAssignmentSnapshot(newShell, previousAssignments);
+        syncExcavatorAssignmentSnapshot(newShell, previousAssignments, Number(options.version || 0));
         scheduleExcavatorViewportHeightSync();
         return true;
     }).catch(function () {
@@ -1966,7 +1985,7 @@ window.initExcavatorWorkShell = function () {
                 return data;
             });
         }).then(function (data) {
-            playExcavatorSound("action_ok");
+            playExcavatorVoice("action_ok", "voice_truck_sent");
             delete card.dataset.eoLoadActionKey;
             delete card.dataset.eoLoadActionId;
             if (data.refresh_required) {
@@ -1994,7 +2013,7 @@ window.initExcavatorWorkShell = function () {
                 window.AppRealtime.wake("truck_loaded");
             }
         }).catch(function (error) {
-            playExcavatorSound("action_error");
+            playExcavatorVoice("action_error", "voice_truck_send_failed");
             restoreTruckCard(card, snapshot);
             if (optimisticBadge) optimisticBadge.remove();
             ensureMutedPendingBadge(pendingBadgeList(dumpTarget));
@@ -2457,7 +2476,7 @@ window.initExcavatorWorkShell = function () {
                     reason_id: button.dataset.eoDowntimeReasonId,
                     client_action_id: generateClientActionId("excavator-downtime")
                 }).then(function (payload) {
-                    playExcavatorSound("action_ok");
+                    playExcavatorVoice("action_ok", "voice_downtime_started");
                     applyActiveDowntime(payload);
                     if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                         try {
@@ -2467,7 +2486,7 @@ window.initExcavatorWorkShell = function () {
                         }
                     }
                 }, function (error) {
-                    playExcavatorSound("action_error");
+                    playExcavatorVoice("action_error", "voice_action_failed");
                     downtimeReasonButtons.forEach(function (item) {
                         item.classList.remove("is-selected");
                     });
@@ -2557,7 +2576,7 @@ window.initExcavatorWorkShell = function () {
                     return data;
                 });
             }).then(function (data) {
-                playExcavatorSound("action_ok");
+                playExcavatorVoice("action_ok", "voice_face_settings_saved");
                 var savedIds = normalizeDumpPointIds(data.dump_point_ids || ids);
                 replaceDraftDumpPointIds(savedIds);
                 replacePersistedDumpPointIds(savedIds);
@@ -2588,7 +2607,7 @@ window.initExcavatorWorkShell = function () {
                     }
                 });
             }, function (error) {
-                playExcavatorSound("action_error");
+                playExcavatorVoice("action_error", "voice_action_failed");
                 setFaceSettingsPending(false);
                 applySettings.classList.remove("is-pending");
                 setApplySettingsLabel("Применить настройки");
@@ -2619,7 +2638,7 @@ window.initExcavatorWorkShell = function () {
     }
 
     function showShiftErrors(message, fieldErrors) {
-        playExcavatorSound("action_error");
+        playExcavatorVoice("action_error", "voice_action_failed");
         clearShiftErrors();
         if (shiftFormError) {
             shiftFormError.textContent = message || "Проверьте показания.";
@@ -2759,7 +2778,10 @@ window.initExcavatorWorkShell = function () {
                 return data;
             });
         }).then(function () {
-            playExcavatorSound(action === "close" ? "shift_end" : "shift_start");
+            playExcavatorVoice(
+                action === "close" ? "shift_end" : "shift_start",
+                action === "close" ? "voice_shift_closed" : "voice_shift_opened"
+            );
             shiftPendingActionKey = "";
             shiftPendingActionId = "";
             if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "false";
@@ -2798,7 +2820,7 @@ window.initExcavatorWorkShell = function () {
             },
             onBlockedPress: function () {
                 if (shiftServerBlocked) {
-                    playExcavatorSound("action_error");
+                    playExcavatorVoice("action_error", "voice_action_failed");
                     showExcavatorNotice(shiftBlockMessage || "Смена сейчас недоступна.");
                     return;
                 }
@@ -2838,7 +2860,7 @@ window.initExcavatorWorkShell = function () {
                 action: "close",
                 client_action_id: generateClientActionId("excavator-downtime-close")
             }).then(function (payload) {
-                playExcavatorSound("action_ok");
+                playExcavatorVoice("action_ok", "voice_downtime_finished");
                 clearActiveDowntime(payload);
                 if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                     try {
@@ -2848,7 +2870,7 @@ window.initExcavatorWorkShell = function () {
                     }
                 }
             }, function (error) {
-                playExcavatorSound("action_error");
+                playExcavatorVoice("action_error", "voice_action_failed");
                 showExcavatorNotice(error.message || "Простой не завершен");
                 var canRetry = !!(
                     downtimeCard

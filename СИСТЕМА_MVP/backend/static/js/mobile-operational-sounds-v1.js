@@ -163,6 +163,32 @@
         });
     }
 
+    function announceOperational(details) {
+        details = details || {};
+        var plugin = capacitorNativeSoundPlugin();
+        if (!plugin || typeof plugin.announceOperational !== "function") {
+            return play(String(details.cue || "action_ok")).then(function (played) {
+                return {supported: false, announced: played};
+            });
+        }
+        return Promise.resolve(plugin.announceOperational({
+            cue: String(details.cue || "action_ok"),
+            voice: String(details.voice || ""),
+            eventVersion: Number(details.eventVersion || 0),
+            eventKey: String(details.eventKey || "")
+        })).then(function (result) {
+            return {
+                supported: true,
+                announced: !!(result && result.announced === true),
+                reason: result && result.reason ? String(result.reason) : ""
+            };
+        }).catch(function () {
+            return play(String(details.cue || "action_ok")).then(function (played) {
+                return {supported: true, announced: played, reason: "bridge_error"};
+            });
+        });
+    }
+
     function diagnostics() {
         var plugin = capacitorNativeSoundPlugin();
         if (!plugin || typeof plugin.getDiagnostics !== "function") {
@@ -219,6 +245,7 @@
         files: soundFiles,
         play: play,
         announceDumpPoint: announceDumpPoint,
+        announceOperational: announceOperational,
         diagnostics: diagnostics,
         preload: unlock
     });
