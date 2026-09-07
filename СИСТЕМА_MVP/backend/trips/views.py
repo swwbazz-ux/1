@@ -741,7 +741,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v210";
+const CACHE_NAME = "excavator-mobile-shell-v211";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -1173,6 +1173,92 @@ def dispatcher_empty_shift_report(*, is_truck=False):
     }
 
 
+def dispatcher_trip_count_label(count):
+    count = int(count or 0)
+    remainder_100 = count % 100
+    remainder_10 = count % 10
+    if 11 <= remainder_100 <= 14:
+        word = 'рейсов'
+    elif remainder_10 == 1:
+        word = 'рейс'
+    elif 2 <= remainder_10 <= 4:
+        word = 'рейса'
+    else:
+        word = 'рейсов'
+    return f'{count} {word}'
+
+
+def dispatcher_shift_plan_detail(
+    *,
+    completed_trips,
+    active_trips,
+    completed_use_tonnage,
+    fact_tons,
+    plan_tons,
+    completion_percent,
+):
+    by_dump_point = defaultdict(lambda: {'fact': Decimal('0'), 'trip_count': 0})
+
+    def add_trip(trip, amount):
+        amount = amount or Decimal('0')
+        if amount <= 0:
+            return
+        dump_point = trip.actual_dump_point or trip.assigned_dump_point or trip.dump_point
+        label = str(dump_point) if dump_point else 'Точка не указана'
+        by_dump_point[label]['fact'] += amount
+        by_dump_point[label]['trip_count'] += 1
+
+    for trip in completed_trips:
+        add_trip(trip, trip.tonnage if completed_use_tonnage else trip.volume_m3)
+    for trip in active_trips:
+        add_trip(trip, trip.tonnage or trip.volume_m3)
+
+    points = [{'name': name, **values} for name, values in by_dump_point.items()]
+    points.sort(key=lambda row: (-row['fact'], row['name']))
+    if len(points) > 5:
+        other_points = points[4:]
+        points = points[:4] + [{
+            'name': 'Другие точки',
+            'fact': sum((row['fact'] for row in other_points), Decimal('0')),
+            'trip_count': sum(row['trip_count'] for row in other_points),
+        }]
+
+    visible_percent = max(0, int(completion_percent or 0))
+    point_fact_total = sum((row['fact'] for row in points), Decimal('0'))
+    allocations = []
+    for index, row in enumerate(points):
+        exact_percent = (
+            (row['fact'] / point_fact_total) * visible_percent
+            if point_fact_total and visible_percent
+            else Decimal('0')
+        )
+        whole_percent = int(exact_percent)
+        allocations.append({
+            **row,
+            'index': index,
+            'contribution_percent': whole_percent,
+            'remainder': exact_percent - whole_percent,
+        })
+    unallocated = visible_percent - sum(row['contribution_percent'] for row in allocations)
+    for row in sorted(allocations, key=lambda item: (-item['remainder'], item['index']))[:unallocated]:
+        row['contribution_percent'] += 1
+
+    return {
+        'completion_percent': visible_percent,
+        'fact_tons': format_dispatcher_number(fact_tons),
+        'plan_tons': format_dispatcher_number(plan_tons),
+        'points': [
+            {
+                'name': row['name'],
+                'fact_tons': format_dispatcher_number(row['fact']),
+                'trip_count_label': dispatcher_trip_count_label(row['trip_count']),
+                'contribution_percent': row['contribution_percent'],
+            }
+            for row in allocations
+        ],
+    }
+
+
 def dispatcher_shift_report_for_equipment(equipment, *, equipment_kind='', shift_trips=None):
     equipment_type = (equipment_kind or getattr(getattr(equipment, 'equipment_type', None), 'name', '') or '').lower()
     is_truck = 'самосвал' in equipment_type
@@ -1529,7 +1615,14 @@ def build_dispatcher_dashboard_context(
                     created_at__gte=dispatcher_shift.opened_at,
                 )
             )
-            .select_related('truck', 'excavator', 'rock_type', 'dump_point')
+            .select_related(
+                'truck',
+                'excavator',
+                'rock_type',
+                'dump_point',
+                'assigned_dump_point',
+                'actual_dump_point',
+            )
             .order_by('-created_at')
         )
     shift_trips = list(shift_trip_queryset[:500])
@@ -1704,6 +1797,7 @@ def build_dispatcher_dashboard_context(
         ]
 
     completed_tons = Decimal('0')
+    completed_use_tonnage = False
     if dispatcher_shift:
         shift_trip_attribution = (
             Q(loading_shift__opened_at__gte=dispatcher_shift.opened_at)
@@ -1719,6 +1813,7 @@ def build_dispatcher_dashboard_context(
             .aggregate(total=Sum('tonnage'))['total']
             or Decimal('0')
         )
+        completed_use_tonnage = completed_tons > 0
     if dispatcher_shift and completed_tons == 0:
         completed_tons = (
             Trip.objects
@@ -1750,6 +1845,16 @@ def build_dispatcher_dashboard_context(
     forecast_tons = min(DISPATCHER_PLAN_TOTAL_TONS, display_fact_tons)
     completion_percent = int((display_fact_tons / DISPATCHER_PLAN_TOTAL_TONS) * 100) if DISPATCHER_PLAN_TOTAL_TONS else 0
     completion_percent = max(0, min(99, completion_percent))
+    completed_shift_trips = [trip for trip in shift_trips if trip.status == TripStatus.COMPLETED]
+    active_shift_trips = [trip for trip in shift_trips if trip.status in OPEN_TRIP_STATUSES]
+    shift_plan_detail = dispatcher_shift_plan_detail(
+        completed_trips=completed_shift_trips,
+        active_trips=active_shift_trips,
+        completed_use_tonnage=completed_use_tonnage,
+        fact_tons=display_fact_tons,
+        plan_tons=DISPATCHER_PLAN_TOTAL_TONS,
+        completion_percent=completion_percent,
+    )
     deficit_tons = forecast_tons - DISPATCHER_PLAN_TOTAL_TONS
 
     by_excavator = defaultdict(lambda: {
@@ -2578,6 +2683,8 @@ def build_dispatcher_dashboard_context(
             'trucks_total': total_trucks,
             'alerts': len([event for event in event_rows if event['status'] in {'danger', 'warning'}]),
         },
+        'completion_percent': completion_percent,
+        'shift_plan_detail': shift_plan_detail,
         'excavator_tiles': excavator_tiles,
         'excavator_garage_tiles': excavator_garage_tiles,
         'mobile_excavator_garage_tiles': mobile_excavator_garage_tiles,
