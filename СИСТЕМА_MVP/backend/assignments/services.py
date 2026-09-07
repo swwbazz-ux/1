@@ -16,7 +16,7 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-from core.models import bump_operational_state
+from core.models import bump_operational_state, lock_production_state
 from core.production_time import production_work_date as contract_production_work_date
 from references.models import Equipment
 from shifts.models import EmployeeShift
@@ -31,6 +31,8 @@ from .models import (
     EquipmentAssignment,
     HaulAssignment,
     HaulAssignmentAction,
+    HaulAssignmentHandoff,
+    HaulAssignmentHandoffStatus,
     WorkShiftType,
 )
 
@@ -1234,6 +1236,186 @@ def projected_haul_assignments_for_excavator(excavator, *, for_update=False):
     ]
 
 
+def open_haul_handoffs_for_shift(shift, *, for_update=False):
+    """Возвращает только права завершения, принадлежащие текущей смене.
+
+    Эти записи намеренно не участвуют в диспетчерской проекции: они дают
+    прежнему экскаватору возможность одним штатным действием оформить уже
+    идущую физическую погрузку, но не возвращают самосвал в старый комплекс.
+    """
+    if not shift or shift.closed_at or not shift.equipment_id:
+        return HaulAssignmentHandoff.objects.none()
+    queryset = (
+        HaulAssignmentHandoff.objects
+        .filter(
+            source_shift=shift,
+            source_excavator_id=shift.equipment_id,
+            status=HaulAssignmentHandoffStatus.OPEN,
+            resolved_at__isnull=True,
+        )
+        .select_related(
+            'truck',
+            'source_assignment',
+            'source_assignment__truck',
+            'source_assignment__truck__model',
+            'source_assignment__excavator',
+            'target_assignment',
+        )
+        .order_by('-created_at', '-id')
+    )
+    if for_update:
+        queryset = queryset.select_for_update(of=('self',))
+    return queryset
+
+
+def excavator_load_assignment_queryset(shift):
+    """Назначения, из которых эта смена вправе создать ровно один рейс."""
+    if not shift or shift.closed_at or not shift.equipment_id:
+        return HaulAssignment.objects.none()
+    current_assignments = HaulAssignment.objects.filter(
+        excavator_id=shift.equipment_id,
+        status=AssignmentStatus.ACCEPTED,
+        ended_at__isnull=True,
+    )
+    current_truck_ids = current_assignments.values('truck_id')
+    handoff_assignment_ids = open_haul_handoffs_for_shift(shift).exclude(
+        truck_id__in=current_truck_ids,
+    ).values(
+        'source_assignment_id'
+    )
+    return (
+        HaulAssignment.objects
+        .filter(excavator_id=shift.equipment_id)
+        .filter(
+            Q(
+                status=AssignmentStatus.ACCEPTED,
+                ended_at__isnull=True,
+            )
+            | Q(id__in=handoff_assignment_ids)
+        )
+        .select_related('truck', 'truck__model', 'excavator')
+        .order_by('truck__garage_number', '-assigned_at', '-id')
+    )
+
+
+def resolve_excavator_load_authority(
+    *, truck_id, excavator_id, source_shift, requested_assignment_id=None,
+):
+    """Под блокировкой подтверждает текущее либо переходное право погрузки."""
+    assignments = (
+        HaulAssignment.objects
+        .select_for_update(of=('self',))
+        .select_related('truck', 'truck__model', 'excavator')
+        .filter(truck_id=truck_id, excavator_id=excavator_id)
+    )
+    current = assignments.filter(
+        status=AssignmentStatus.ACCEPTED,
+        ended_at__isnull=True,
+    ).first()
+    if current:
+        if (
+            requested_assignment_id is not None
+            and current.id != requested_assignment_id
+        ):
+            return None, None
+        current.is_handoff_completion = False
+        return current, None
+
+    handoffs = open_haul_handoffs_for_shift(source_shift, for_update=True).filter(
+        truck_id=truck_id,
+        source_excavator_id=excavator_id,
+    )
+    if requested_assignment_id is not None:
+        handoffs = handoffs.filter(source_assignment_id=requested_assignment_id)
+    handoff = handoffs.first()
+    if not handoff:
+        return None, None
+    assignment = handoff.source_assignment
+    assignment.is_handoff_completion = True
+    return assignment, handoff
+
+
+def resolve_haul_handoffs_for_trip(trip, *, now=None):
+    """Первый созданный рейс погашает все переходные права по самосвалу."""
+    now = now or timezone.now()
+    return (
+        HaulAssignmentHandoff.objects
+        .filter(
+            truck_id=trip.truck_id,
+            status=HaulAssignmentHandoffStatus.OPEN,
+            resolved_at__isnull=True,
+        )
+        .update(
+            status=HaulAssignmentHandoffStatus.RESOLVED,
+            resolved_at=now,
+            resolved_by_trip=trip,
+        )
+    )
+
+
+def expire_haul_handoffs_for_shift(shift, *, now=None):
+    """Закрывает неиспользованные права вместе со сменой-источником."""
+    if not shift:
+        return 0
+    now = now or timezone.now()
+    return (
+        HaulAssignmentHandoff.objects
+        .filter(
+            source_shift=shift,
+            status=HaulAssignmentHandoffStatus.OPEN,
+            resolved_at__isnull=True,
+        )
+        .update(
+            status=HaulAssignmentHandoffStatus.EXPIRED,
+            resolved_at=now,
+            resolved_by_trip=None,
+        )
+    )
+
+
+def _handoff_source_shift(assignment):
+    return (
+        EmployeeShift.objects
+        .filter(
+            equipment_id=assignment.excavator_id,
+            closed_at__isnull=True,
+        )
+        .filter(
+            Q(workplace_code='excavator_operator')
+            | Q(
+                workplace_code='',
+                equipment__equipment_type__name='Экскаватор',
+            )
+        )
+        .order_by('-opened_at', '-id')
+        .first()
+    )
+
+
+def _preserve_previous_loading_authority(
+    *, previous_assignment, target_assignment,
+):
+    if not previous_assignment:
+        return None
+    if (
+        target_assignment.action == HaulAssignmentAction.ASSIGN
+        and previous_assignment.excavator_id == target_assignment.excavator_id
+    ):
+        return None
+    source_shift = _handoff_source_shift(previous_assignment)
+    if not source_shift:
+        return None
+    handoff, _ = HaulAssignmentHandoff.objects.get_or_create(
+        truck_id=previous_assignment.truck_id,
+        source_assignment=previous_assignment,
+        target_assignment=target_assignment,
+        source_excavator_id=previous_assignment.excavator_id,
+        source_shift=source_shift,
+        status=HaulAssignmentHandoffStatus.OPEN,
+    )
+    return handoff
+
+
 def validate_projected_excavator_state(assignments, expected_states):
     """Проверяет, что массовое действие применяется к видимому составу."""
     actual = {str(item.truck_id): item.id for item in assignments}
@@ -1260,6 +1442,7 @@ def schedule_haul_assignment(
     *, truck, excavator, assigned_by=None, now=None, expected_state_id=None,
 ):
     now = now or timezone.now()
+    lock_production_state()
     truck = Equipment.objects.select_for_update().get(pk=truck.pk)
     open_assignments = list(
         HaulAssignment.objects.select_for_update()
@@ -1310,6 +1493,8 @@ def schedule_haul_assignment(
 @transaction.atomic
 def schedule_haul_release(*, truck, assigned_by=None, now=None, expected_state_id=None):
     now = now or timezone.now()
+    lock_production_state()
+    truck = Equipment.objects.select_for_update().get(pk=truck.pk)
     open_assignments = list(
         HaulAssignment.objects.select_for_update(of=('self',))
         .filter(truck=truck, ended_at__isnull=True)
@@ -1406,6 +1591,23 @@ def apply_pending_haul_assignment(assignment_id, *, now=None):
     # ошибкой у всех, кто в приложениях, — не только у того, чьё назначение.
     now = now or timezone.now()
     with transaction.atomic():
+        lock_production_state()
+        pending_truck_id = (
+            HaulAssignment.objects
+            .filter(
+                id=assignment_id,
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+            )
+            .values_list('truck_id', flat=True)
+            .first()
+        )
+        if not pending_truck_id:
+            return None
+        # Единый порядок всех команд: сначала блокируем самосвал, затем его
+        # назначения. Это сериализует таймер, принятие водителем, DnD
+        # диспетчера и отправку рейса экскаваторщиком.
+        Equipment.objects.select_for_update().get(pk=pending_truck_id)
         pending = (
             HaulAssignment.objects.select_for_update()
             .filter(id=assignment_id, status=AssignmentStatus.PENDING, ended_at__isnull=True)
@@ -1420,6 +1622,25 @@ def apply_pending_haul_assignment(assignment_id, *, now=None):
             .exclude(status=AssignmentStatus.CANCELLED)
             .order_by('-assigned_at', '-id')
         )
+        previous_accepted = next(
+            (
+                item for item in open_assignments
+                if item.id != pending.id and item.status == AssignmentStatus.ACCEPTED
+            ),
+            None,
+        )
+        from trips.models import OPEN_TRIP_STATUSES, Trip
+        active_trip_exists = (
+            Trip.objects
+            .select_for_update()
+            .filter(truck_id=pending.truck_id, status__in=OPEN_TRIP_STATUSES)
+            .exists()
+        )
+        if previous_accepted and not active_trip_exists:
+            _preserve_previous_loading_authority(
+                previous_assignment=previous_accepted,
+                target_assignment=pending,
+            )
         excavator_ids = [item.excavator_id for item in open_assignments]
         if pending.action == HaulAssignmentAction.RELEASE:
             _cancel_assignments(open_assignments, now)

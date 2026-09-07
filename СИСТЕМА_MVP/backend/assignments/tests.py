@@ -1,6 +1,7 @@
 import json
 from datetime import timedelta
 
+from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, TransactionTestCase
 
 from django.urls import reverse
@@ -9,13 +10,19 @@ from django.utils import timezone
 from core.production_time import production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentState, EquipmentType, RockType
-from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanCalculationMode
+from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanCalculationMode, ShiftClientAction
 from shifts.services import assign_shift_plan_snapshot
 from trips.models import Trip, TripStatus
 from users.models import Employee, EmployeeAccess, Role
 
 from .models import AssignmentStatus, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
-from .services import apply_pending_haul_assignment, reconcile_due_haul_assignments, schedule_haul_assignment, schedule_haul_release
+from .services import (
+    apply_pending_haul_assignment,
+    projected_haul_assignments_for_excavator,
+    reconcile_due_haul_assignments,
+    schedule_haul_assignment,
+    schedule_haul_release,
+)
 from .views import build_excavator_tile, build_truck_tile
 
 
@@ -357,7 +364,13 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v139')
+        self.assertContains(response, 'mining-master-mobile-shell-v143')
+        self.assertContains(response, 'mining-master-mobile-sync-queue-v3')
+        self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v1")')
+        self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v2")')
+        self.assertContains(response, 'expected_assignment_state_id')
+        self.assertContains(response, 'expected_assignment_states')
+        self.assertContains(response, 'queueOnNetworkFailure: false')
         self.assertNotContains(response, '>v116<')
         self.assertContains(response, 'function hasMiningMasterRelevantEvents')
         self.assertContains(response, 'return Array.isArray(events) && events.length > 0;')
@@ -427,7 +440,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v139', script)
+        self.assertIn('mining-master-mobile-shell-v143', script)
         self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
@@ -748,7 +761,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertNotContains(response, 'Предыдущая смена закрыта')
         self.assertNotContains(response, 'ожидание запуска')
 
-    def test_mining_master_can_create_assignment_from_screen(self):
+    def test_legacy_mining_master_assignment_post_cannot_bypass_version_guard(self):
         response = self.client.post(
             reverse('mining_master_assignments'),
             {
@@ -759,9 +772,12 @@ class MiningMasterAssignmentsViewTests(TestCase):
         )
 
         self.assertRedirects(response, reverse('mining_master_assignments'))
-        assignment = HaulAssignment.objects.get(truck=self.free_truck, excavator=self.excavator)
-        self.assertEqual(assignment.assigned_by, self.master)
-        self.assertEqual(assignment.status, AssignmentStatus.PENDING)
+        self.assertFalse(
+            HaulAssignment.objects.filter(
+                truck=self.free_truck,
+                excavator=self.excavator,
+            ).exists()
+        )
 
     def test_mining_master_cannot_assign_without_open_shift(self):
         self.shift.closed_at = timezone.now()
@@ -780,7 +796,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertRedirects(response, reverse('mining_master_assignments'))
         self.assertFalse(HaulAssignment.objects.filter(truck=self.free_truck, excavator=self.excavator).exists())
 
-    def test_mining_master_can_release_truck_to_garage(self):
+    def test_legacy_mining_master_release_post_cannot_bypass_version_guard(self):
         HaulAssignment.objects.create(
             truck=self.assigned_truck,
             excavator=self.excavator,
@@ -799,12 +815,13 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertRedirects(response, reverse('mining_master_assignments'))
         assignments = HaulAssignment.objects.filter(truck=self.assigned_truck)
         self.assertTrue(assignments.filter(status=AssignmentStatus.ACCEPTED, ended_at__isnull=True).exists())
-        pending_release = assignments.get(
-            action=HaulAssignmentAction.RELEASE,
-            status=AssignmentStatus.PENDING,
-            ended_at__isnull=True,
+        self.assertFalse(
+            assignments.filter(
+                action=HaulAssignmentAction.RELEASE,
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+            ).exists()
         )
-        self.assertGreater(pending_release.effective_at, timezone.now())
 
     def test_reassignment_keeps_old_excavator_until_driver_accepts(self):
         HaulAssignment.objects.filter(truck=self.assigned_truck).delete()
@@ -879,7 +896,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(accepted.status, AssignmentStatus.CANCELLED)
         self.assertEqual(pending.status, AssignmentStatus.CANCELLED)
 
-    def test_mining_master_can_release_excavator_complex_to_garage(self):
+    def test_legacy_release_complex_post_cannot_bypass_version_guard(self):
         other_assignment = HaulAssignment.objects.create(
             truck=self.free_truck,
             excavator=self.excavator,
@@ -896,7 +913,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         )
 
         self.assertRedirects(response, reverse('mining_master_assignments'))
-        self.assertTrue(
+        self.assertFalse(
             HaulAssignment.objects
             .filter(excavator=self.excavator, action=HaulAssignmentAction.RELEASE, status=AssignmentStatus.PENDING, ended_at__isnull=True)
             .exists()
@@ -904,7 +921,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         other_assignment.refresh_from_db()
         self.assertIsNone(other_assignment.ended_at)
 
-    def test_mining_master_can_release_all_complexes_to_garage(self):
+    def test_legacy_release_all_post_cannot_bypass_version_guard(self):
         HaulAssignment.objects.create(
             truck=self.free_truck,
             excavator=self.other_excavator,
@@ -918,18 +935,18 @@ class MiningMasterAssignmentsViewTests(TestCase):
         )
 
         self.assertRedirects(response, reverse('mining_master_assignments'))
-        self.assertTrue(
+        self.assertFalse(
             HaulAssignment.objects
             .filter(action=HaulAssignmentAction.RELEASE, status=AssignmentStatus.PENDING, ended_at__isnull=True)
             .exists()
         )
-        self.assertFalse(
+        self.assertTrue(
             ExcavatorPlacement.objects
             .filter(zone=ExcavatorPlacement.Zone.ACTIVE)
             .exists()
         )
 
-    def test_mining_master_can_move_excavator_to_inactive_shift(self):
+    def test_legacy_move_excavator_post_cannot_bypass_version_guard(self):
         response = self.client.post(
             reverse('mining_master_assignments'),
             {
@@ -940,8 +957,8 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertRedirects(response, reverse('mining_master_assignments'))
         placement = ExcavatorPlacement.objects.get(excavator=self.excavator)
-        self.assertEqual(placement.zone, ExcavatorPlacement.Zone.INACTIVE)
-        self.assertTrue(
+        self.assertEqual(placement.zone, ExcavatorPlacement.Zone.ACTIVE)
+        self.assertFalse(
             HaulAssignment.objects
             .filter(excavator=self.excavator, action=HaulAssignmentAction.RELEASE, status=AssignmentStatus.PENDING, ended_at__isnull=True)
             .exists()
@@ -979,16 +996,20 @@ class MiningMasterAssignmentsViewTests(TestCase):
             status=TripStatus.ACTIVE,
         )
 
+        state_id = HaulAssignment.objects.get(truck=self.assigned_truck).id
         response = self.client.post(
-            reverse('mining_master_assignments'),
-            {
+            reverse('mining_master_assign_truck'),
+            data=json.dumps({
                 'action': 'assign',
-                'excavator': self.other_excavator.id,
-                'truck': self.assigned_truck.id,
-            },
+                'excavator_id': self.other_excavator.id,
+                'truck_id': self.assigned_truck.id,
+                'expected_assignment_state_id': state_id,
+                'client_action_id': 'mm-reassign-active-trip',
+            }),
+            content_type='application/json',
         )
 
-        self.assertRedirects(response, reverse('mining_master_assignments'))
+        self.assertEqual(response.status_code, 200)
         self.assertFalse(
             HaulAssignment.objects
             .filter(truck=self.assigned_truck, excavator=self.excavator, ended_at__isnull=True)
@@ -1020,6 +1041,8 @@ class MiningMasterAssignmentsViewTests(TestCase):
                 'action': 'assign',
                 'truck_id': self.free_truck.id,
                 'excavator_id': self.excavator.id,
+                'expected_assignment_state_id': 0,
+                'client_action_id': 'mm-assign-free-truck',
             }),
             content_type='application/json',
         )
@@ -1038,11 +1061,14 @@ class MiningMasterAssignmentsViewTests(TestCase):
         )
 
     def test_mining_master_json_can_release_truck_to_garage(self):
+        state_id = HaulAssignment.objects.get(truck=self.assigned_truck).id
         response = self.client.post(
             reverse('mining_master_assign_truck'),
             data=json.dumps({
                 'action': 'release',
                 'truck_id': self.assigned_truck.id,
+                'expected_assignment_state_id': state_id,
+                'client_action_id': 'mm-release-assigned-truck',
             }),
             content_type='application/json',
         )
@@ -1062,13 +1088,14 @@ class MiningMasterAssignmentsViewTests(TestCase):
         )
 
     def test_mining_master_json_rejects_stale_truck_move_conflict(self):
+        state_id = HaulAssignment.objects.get(truck=self.assigned_truck).id
         response = self.client.post(
             reverse('mining_master_assign_truck'),
             data=json.dumps({
                 'action': 'assign',
                 'truck_id': self.assigned_truck.id,
                 'excavator_id': self.other_excavator.id,
-                'expected_source_excavator_id': self.other_excavator.id,
+                'expected_assignment_state_id': state_id + 1000,
                 'client_action_id': 'client-action-1',
             }),
             content_type='application/json',
@@ -1092,11 +1119,17 @@ class MiningMasterAssignmentsViewTests(TestCase):
             status=AssignmentStatus.ACCEPTED,
         )
 
+        expected_states = {
+            str(item.truck_id): item.id
+            for item in projected_haul_assignments_for_excavator(self.excavator)
+        }
         response = self.client.post(
             reverse('mining_master_assign_truck'),
             data=json.dumps({
                 'action': 'release_complex',
                 'excavator_id': self.excavator.id,
+                'expected_assignment_states': expected_states,
+                'client_action_id': 'mm-release-complex',
             }),
             content_type='application/json',
         )
@@ -1127,6 +1160,8 @@ class MiningMasterAssignmentsViewTests(TestCase):
             data=json.dumps({
                 'excavator_id': self.other_excavator.id,
                 'zone': ExcavatorPlacement.Zone.ACTIVE,
+                'expected_zone': ExcavatorPlacement.Zone.INACTIVE,
+                'client_action_id': 'mm-activate-excavator',
             }),
             content_type='application/json',
         )
@@ -1147,27 +1182,79 @@ class MiningMasterAssignmentsViewTests(TestCase):
             status=AssignmentStatus.ACCEPTED,
         )
 
+        expected_states = {
+            str(item.truck_id): item.id
+            for item in projected_haul_assignments_for_excavator(self.excavator)
+        }
         response = self.client.post(
             reverse('mining_master_move_excavator'),
             data=json.dumps({
                 'excavator_id': self.excavator.id,
                 'zone': ExcavatorPlacement.Zone.INACTIVE,
+                'expected_zone': ExcavatorPlacement.Zone.ACTIVE,
+                'expected_assignment_states': expected_states,
+                'client_action_id': 'mm-deactivate-excavator',
             }),
             content_type='application/json',
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()['ok'])
-        self.assertFalse(
+        self.assertTrue(
             HaulAssignment.objects
-            .filter(excavator=self.excavator, ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED)
+            .filter(
+                excavator=self.excavator,
+                action=HaulAssignmentAction.RELEASE,
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+            )
             .exists()
         )
         self.assertTrue(
             ExcavatorPlacement.objects
             .filter(excavator=self.excavator, zone=ExcavatorPlacement.Zone.INACTIVE)
             .exists()
+        )
+
+    def test_mining_master_assignment_retry_returns_saved_response_once(self):
+        state_id = HaulAssignment.objects.get(truck=self.assigned_truck).id
+        payload = {
+            'action': 'release',
+            'truck_id': self.assigned_truck.id,
+            'expected_assignment_state_id': state_id,
+            'client_action_id': 'mm-release-retry',
+        }
+
+        first = self.client.post(
+            reverse('mining_master_assign_truck'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        second = self.client.post(
+            reverse('mining_master_assign_truck'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(second.json()['deduplicated'])
+        self.assertEqual(first.json()['assignment_id'], second.json()['assignment_id'])
+        self.assertEqual(
+            HaulAssignment.objects.filter(
+                truck=self.assigned_truck,
+                action=HaulAssignmentAction.RELEASE,
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            ShiftClientAction.objects.filter(
+                action_type='mining_master_assign_truck',
+                client_action_id='mm-release-retry',
+            ).count(),
+            1,
         )
 
     def test_mining_master_can_start_and_end_shift(self):
@@ -1419,6 +1506,33 @@ class HaulAssignmentTransactionTests(TransactionTestCase):
         )
         self.assertTrue(states, 'select_for_update ни разу не выполнился')
         self.assertTrue(all(states), 'select_for_update выполнился без активной транзакции')
+
+    def test_database_rejects_duplicate_open_accepted_and_pending_states(self):
+        HaulAssignment.objects.create(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                HaulAssignment.objects.create(
+                    truck=self.truck,
+                    excavator=self.excavator,
+                    status=AssignmentStatus.ACCEPTED,
+                )
+
+        HaulAssignment.objects.create(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.PENDING,
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                HaulAssignment.objects.create(
+                    truck=self.truck,
+                    excavator=self.excavator,
+                    status=AssignmentStatus.PENDING,
+                )
 
 
 class ComplexBoardTestEquipmentExclusionTests(TestCase):

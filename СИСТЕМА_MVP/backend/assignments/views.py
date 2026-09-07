@@ -88,7 +88,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v142";
+const CACHE_NAME = "mining-master-mobile-shell-v143";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -859,6 +859,7 @@ def mining_master_move_excavator_view(request):
         return mining_master_client_action_error(payload, error)
     if repeated_response is not None:
         return JsonResponse(repeated_response)
+    lock_production_state()
     excavator = get_object_or_404(
         Equipment.objects.select_for_update().select_related('equipment_type', 'model'),
         id=payload.get('excavator_id'),
@@ -962,6 +963,7 @@ def mining_master_assign_truck_view(request):
         return mining_master_client_action_error(payload, error)
     if repeated_response is not None:
         return JsonResponse(repeated_response)
+    lock_production_state()
 
     if action == 'release_complex':
         excavator = get_object_or_404(
@@ -1198,12 +1200,23 @@ def mining_master_assignments_view(request):
                     access = reauth_access
                     current_shift, blocking_shift = get_shift_state_for_access(access)
             handle_shift_action(request, action, access, current_shift, blocking_shift)
-        elif action in {'assign', 'release'}:
-            handle_assignment_action(request, action, access, current_shift)
-        elif action in {'release_excavator', 'release_all'}:
-            handle_bulk_release_action(request, action, current_shift, access)
-        elif action in {'activate_excavator', 'deactivate_excavator'}:
-            handle_excavator_placement_action(request, action, access, current_shift)
+        elif action in {
+            'assign',
+            'release',
+            'release_excavator',
+            'release_all',
+            'activate_excavator',
+            'deactivate_excavator',
+        }:
+            # Старые HTML-формы не передавали версию состояния и уникальный
+            # идентификатор команды. После восстановления офлайн-вкладки такой
+            # POST мог молча перезаписать более свежее решение другого экрана.
+            # Все изменения расстановки теперь принимаются только JSON-
+            # обработчиками с optimistic lock и idempotency key.
+            messages.error(
+                request,
+                'Экран открыт в старой версии. Обновите пульт перед изменением расстановки.',
+            )
         else:
             messages.error(request, 'Неизвестное действие.')
         return redirect('mining_master_assignments')

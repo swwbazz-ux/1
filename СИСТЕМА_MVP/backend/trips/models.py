@@ -59,6 +59,16 @@ class Trip(models.Model):
         verbose_name = 'Рейс'
         verbose_name_plural = 'Рейсы'
         ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['truck'],
+                condition=models.Q(status__in=(
+                    TripStatus.ACTIVE,
+                    TripStatus.LOADED_WAITING_UNLOAD,
+                )),
+                name='uniq_open_trip_per_truck',
+            ),
+        ]
 
     def save(self, *args, **kwargs):
         if (

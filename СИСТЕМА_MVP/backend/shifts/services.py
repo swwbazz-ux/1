@@ -1360,6 +1360,10 @@ def close_excavator_shift(
     shift.closed_at = timezone.now()
     shift.closed_by = employee
     shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
+    # Переходное право существует только до конца конкретной смены старого
+    # экскаватора. После закрытия оно не должно всплыть в следующей смене.
+    from assignments.services import expire_haul_handoffs_for_shift
+    expire_haul_handoffs_for_shift(shift, now=shift.closed_at)
     Trip.objects.filter(loading_shift=shift, status__in=OPEN_TRIP_STATUSES).update(is_carryover=True)
 
     response = {

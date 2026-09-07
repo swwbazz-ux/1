@@ -32,7 +32,12 @@ from assignments.services import (
     reconcile_due_haul_assignments,
     work_assignment_state,
 )
-from core.models import OperationalStateEvent, OperationalStateVersion, bump_operational_state
+from core.models import (
+    OperationalStateEvent,
+    OperationalStateVersion,
+    bump_operational_state,
+    lock_production_state,
+)
 from core.operational_fragments import operational_fragment_response
 from downtimes.driver_workflow import (
     DRIVER_DOWNTIME_FLOW_WAITING_LOADING,
@@ -4261,8 +4266,13 @@ def driver_accept_assignment_view(request, assignment_id):
     )
     if not open_shift or not open_shift.equipment_id:
         return JsonResponse({'ok': False, 'error': 'Открытая смена водителя не найдена.'}, status=409)
+    # Тот же порядок блокировок, что у диспетчера, таймера и
+    # экскаваторщика: production -> truck -> haul assignments. Раньше здесь
+    # сначала блокировалось назначение, из-за чего параллельное принятие и DnD
+    # могли упереться друг в друга.
+    lock_production_state()
     assignment = get_object_or_404(
-        HaulAssignment.objects.select_for_update(),
+        HaulAssignment.objects,
         id=assignment_id,
         truck_id=open_shift.equipment_id,
         status=AssignmentStatus.PENDING,

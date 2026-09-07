@@ -29,9 +29,12 @@ from assignments.models import (
 )
 from assignments.services import (
     HaulAssignmentStateConflict,
+    excavator_load_assignment_queryset,
     get_active_equipment_assignment,
+    open_haul_handoffs_for_shift,
     projected_haul_assignments_for_excavator,
     reconcile_due_haul_assignments,
+    resolve_excavator_load_authority,
     schedule_haul_assignment,
     schedule_haul_release,
     validate_projected_excavator_state,
@@ -573,7 +576,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v61";
+const CACHE_NAME = "dispatcher-desktop-shell-v62";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -1996,6 +1999,20 @@ def build_dispatcher_dashboard_context(
         match = re.search(r'\d+', str(getattr(equipment, 'garage_number', '') or ''))
         return int(match.group(0)) if match else 9999
 
+    def dispatcher_complex_label(equipment):
+        """Человекочитаемое и однозначное имя комплекса.
+
+        Обычные номера ``5``/``Э-5``/``ЭКГ-5`` остаются ``K-5``. Маркированный
+        номер вроде ``ТВИ 4`` нельзя сводить к первой цифре: иначе он сливается
+        с реальным экскаватором ``4`` и ломает ключи realtime-фрагмента.
+        """
+        raw = str(getattr(equipment, 'garage_number', '') or '').strip().upper()
+        ordinary = re.fullmatch(r'(?:ЭКГ|ЭКС|Э)?[\s\-№]*(\d+)', raw)
+        if ordinary:
+            return f'K-{int(ordinary.group(1))}'
+        slug = re.sub(r'[^0-9A-ZА-ЯЁ]+', '-', raw).strip('-')
+        return f'K-{slug}' if slug else f'K-ID-{equipment.id}'
+
     def complex_number_int(card):
         match = re.search(r'\d+', str(card.get('id', '') or ''))
         return int(match.group(0)) if match else 9999
@@ -2023,6 +2040,7 @@ def build_dispatcher_dashboard_context(
         if str(excavator.garage_number or '').strip().upper().startswith('ТЕСТ'):
             continue
         index = garage_number_int(excavator)
+        complex_label = dispatcher_complex_label(excavator)
         row = by_excavator[excavator.id]
         need = max(len(row['trucks']), row['accepted'] + row['pending'], 0)
         assigned = row['accepted'] + row['active_trips']
@@ -2125,7 +2143,7 @@ def build_dispatcher_dashboard_context(
                 ),
                 'transfer_pending': transfer_pending,
                 'transfer_source_label': (
-                    f'К-{garage_number_int(transfer_source_excavator)}'
+                    dispatcher_complex_label(transfer_source_excavator)
                     if transfer_source_excavator
                     else ''
                 ),
@@ -2137,8 +2155,9 @@ def build_dispatcher_dashboard_context(
             else (rock_values[0] if rock_values else '')
         )
         complex_cards.append({
-            'id': f'K-{index}',
-            'excavator_slot': index,
+            'id': complex_label,
+            'zone_key': f'equipment-{excavator.id}',
+            'excavator_slot': complex_label[2:],
             'material': current_rock,
             'status_key': status_key,
             'status_label': status_label,
@@ -2165,7 +2184,7 @@ def build_dispatcher_dashboard_context(
             'plan_tons': format_dispatcher_number(plan),
             'fact_tons': format_dispatcher_number(fact),
             'forecast_tons': format_dispatcher_number(forecast),
-            'card_id': f'complex-K-{index}',
+            'card_id': f'complex-equipment-{excavator.id}',
             'equipment_card_id': str(excavator.id) if excavator else '',
             'truck_rows': truck_rows,
             'current_horizon': current_horizon,
@@ -2182,7 +2201,8 @@ def build_dispatcher_dashboard_context(
         excavator_tiles.append({
             'equipment': excavator,
             'name': equipment_short_name(excavator),
-            'complex': f'K-{board_number}' if excavator.id in active_excavator_ids else '',
+            'complex': dispatcher_complex_label(excavator) if excavator.id in active_excavator_ids else '',
+            'complex_label': dispatcher_complex_label(excavator),
             'status': status,
             'label': label,
             'equipment_state_code': equipment_state_code,
@@ -2207,11 +2227,14 @@ def build_dispatcher_dashboard_context(
     excavator_garage_tiles = []
     inactive_excavator_tiles = sorted(
         [tile for tile in excavator_tiles if tile.get('equipment') and tile['equipment'].id not in active_excavator_ids],
-        key=lambda tile: tile.get('board_number') or 9999,
+        key=lambda tile: (
+            tile.get('board_number') or 9999,
+            tile.get('complex_label') or '',
+        ),
     )
     for index, tile in enumerate(inactive_excavator_tiles[:12], start=1):
         garage_tile = tile.copy()
-        garage_tile['display_name'] = str(tile.get('board_number') or index)
+        garage_tile['display_name'] = str(tile.get('complex_label') or f'K-{index}')[2:]
         garage_tile['is_placeholder'] = False
         excavator_garage_tiles.append(garage_tile)
     while len(excavator_garage_tiles) < 12:
@@ -2367,11 +2390,19 @@ def build_dispatcher_dashboard_context(
         'normal': 4,
         'gray': 5,
     }
-    complex_zones = sorted(complex_cards, key=lambda card: (status_order.get(card['status_key'], 3), complex_number_int(card)))
+    complex_zones = sorted(
+        complex_cards,
+        key=lambda card: (
+            status_order.get(card['status_key'], 3),
+            complex_number_int(card),
+            card.get('id') or '',
+        ),
+    )
     while len(complex_zones) < 9:
         index = len(complex_zones) + 1
         complex_zones.append({
             'id': f'K-{index}',
+            'zone_key': f'empty-{index}',
             'is_empty': True,
             'status_key': 'empty',
             'status_label': 'СВОБОДНАЯ ЗОНА',
@@ -2421,6 +2452,7 @@ def build_dispatcher_dashboard_context(
             index = len(mobile_complex_zones) + 1
             mobile_complex_zones.append({
                 'id': f'K-{index}',
+                'zone_key': f'mobile-empty-{index}',
                 'is_empty': True,
                 'status_key': 'empty',
                 'status_label': 'СВОБОДНАЯ ЗОНА',
@@ -3001,6 +3033,7 @@ def dispatcher_move_excavator_view(request):
         return dispatcher_client_action_error(payload, error)
     if repeated_response is not None:
         return JsonResponse(repeated_response)
+    lock_production_state()
     excavator = get_object_or_404(
         Equipment.objects.select_for_update().select_related('equipment_type'),
         id=payload.get('excavator_id'),
@@ -3124,6 +3157,7 @@ def dispatcher_assign_truck_view(request):
         return dispatcher_client_action_error(payload, error)
     if repeated_response is not None:
         return JsonResponse(repeated_response)
+    lock_production_state()
 
     if action == 'release_complex':
         excavator = get_object_or_404(
@@ -3299,9 +3333,22 @@ def get_excavator_open_shift(employee):
     )
 
 
-def restrict_excavator_trip_form(form, current_excavator):
-    if current_excavator:
-        form.fields['assignment'].queryset = form.fields['assignment'].queryset.filter(excavator=current_excavator)
+def restrict_excavator_trip_form(form, current_excavator, current_shift=None):
+    if current_excavator and current_shift:
+        form.fields['assignment'].queryset = excavator_load_assignment_queryset(
+            current_shift
+        )
+    elif current_excavator:
+        form.fields['assignment'].queryset = (
+            HaulAssignment.objects
+            .filter(
+                excavator=current_excavator,
+                status=AssignmentStatus.ACCEPTED,
+                ended_at__isnull=True,
+            )
+            .select_related('truck', 'truck__model', 'excavator')
+            .order_by('truck__garage_number', '-assigned_at', '-id')
+        )
     else:
         form.fields['assignment'].queryset = form.fields['assignment'].queryset.none()
     return form
@@ -4069,6 +4116,7 @@ def excavator_truck_loaded_view(request):
         current_excavator = open_shift.equipment if open_shift else None
         if not current_excavator:
             return JsonResponse({'ok': False, 'error': 'Сначала нужно открыть смену на экскаваторе.'}, status=409)
+        lock_production_state()
 
         try:
             truck_id = int(payload.get('truck_id') or 0)
@@ -4081,24 +4129,10 @@ def excavator_truck_loaded_view(request):
         if excavator_id != current_excavator.id:
             return JsonResponse({'ok': False, 'error': 'Экскаватор в действии не совпадает с текущей сменой.'}, status=409)
 
-        assignment_reference = (
-            HaulAssignment.objects
-            .select_related('truck', 'truck__model', 'excavator')
-            .filter(
-                truck_id=truck_id,
-                excavator=current_excavator,
-                ended_at__isnull=True,
-                status=AssignmentStatus.ACCEPTED,
-            )
-            .first()
-        )
-        if not assignment_reference:
-            return JsonResponse({'ok': False, 'error': 'Самосвал не назначен текущему экскаватору.'}, status=409)
-
         try:
             current_excavator, locked_truck = lock_trip_participant_equipment(
                 excavator_id=current_excavator.pk,
-                truck_id=assignment_reference.truck_id,
+                truck_id=truck_id,
             )
         except ValidationError as error:
             return JsonResponse(
@@ -4110,33 +4144,26 @@ def excavator_truck_loaded_view(request):
                 status=409,
             )
         open_shift.equipment = current_excavator
-        assignment_reference.truck = locked_truck
+        assignment, handoff = resolve_excavator_load_authority(
+            truck_id=locked_truck.id,
+            excavator_id=current_excavator.id,
+            source_shift=open_shift,
+        )
+        if not assignment:
+            return JsonResponse({
+                'ok': False,
+                'error': 'Назначение уже изменилось или право завершить погрузку использовано.',
+            }, status=409)
+        assignment.truck = locked_truck
+        assignment.excavator = current_excavator
         open_trip = (
             Trip.objects
             .select_for_update()
-            .filter(truck_id=assignment_reference.truck_id, status__in=OPEN_TRIP_STATUSES)
+            .filter(truck_id=locked_truck.id, status__in=OPEN_TRIP_STATUSES)
             .first()
         )
         if open_trip:
             return JsonResponse({'ok': False, 'error': 'Самосвал уже находится в незакрытом рейсе.', 'trip_id': open_trip.id}, status=409)
-
-        assignment = (
-            HaulAssignment.objects
-            .select_for_update(of=('self',))
-            .select_related('truck', 'truck__model', 'excavator')
-            .filter(
-                pk=assignment_reference.pk,
-                truck_id=assignment_reference.truck_id,
-                excavator=current_excavator,
-                ended_at__isnull=True,
-                status=AssignmentStatus.ACCEPTED,
-            )
-            .first()
-        )
-        if not assignment:
-            return JsonResponse({'ok': False, 'error': 'Назначение самосвала уже изменилось.'}, status=409)
-        assignment.truck = locked_truck
-        assignment.excavator = current_excavator
         load_block = excavator_truck_load_block(
             assignment,
             current_excavator=current_excavator,
@@ -4402,6 +4429,7 @@ def excavator_work_settings_view(request):
     form = restrict_excavator_trip_form(
         TripCreateForm(excavator_operator=access.employee),
         current_excavator,
+        open_shift,
     )
     rock_queryset = form.fields['rock_type'].queryset
     dump_point_queryset = form.fields['dump_point'].queryset
@@ -4701,6 +4729,7 @@ def excavator_work_view(request):
         form = restrict_excavator_trip_form(
             TripCreateForm(request.POST, excavator_operator=access.employee),
             current_excavator,
+            open_shift,
         )
         if not legacy_trip_client_action_id:
             form.add_error(None, 'Не передан client_action_id. Обновите экран и повторите погрузку.')
@@ -4746,51 +4775,34 @@ def excavator_work_view(request):
                         )
                         if not locked_shift or not locked_shift.equipment_id:
                             raise ValidationError('Сначала нужно открыть смену на экскаваторе.')
-                        assignment_reference = (
-                            HaulAssignment.objects
-                            .select_related('truck', 'truck__model', 'excavator')
-                            .filter(
-                                pk=form.cleaned_data['assignment'].pk,
-                                excavator_id=locked_shift.equipment_id,
-                                ended_at__isnull=True,
-                                status=AssignmentStatus.ACCEPTED,
-                            )
-                            .first()
-                        )
-                        if not assignment_reference:
-                            raise ValidationError('Самосвал не назначен текущему экскаватору.')
+                        lock_production_state()
+                        requested_assignment = form.cleaned_data['assignment']
                         locked_excavator, locked_truck = lock_trip_participant_equipment(
                             excavator_id=locked_shift.equipment_id,
-                            truck_id=assignment_reference.truck_id,
+                            truck_id=requested_assignment.truck_id,
                         )
                         locked_shift.equipment = locked_excavator
-                        assignment_reference.truck = locked_truck
+                        locked_assignment, handoff = resolve_excavator_load_authority(
+                            truck_id=locked_truck.id,
+                            excavator_id=locked_excavator.id,
+                            source_shift=locked_shift,
+                            requested_assignment_id=requested_assignment.id,
+                        )
+                        if not locked_assignment:
+                            raise ValidationError(
+                                'Назначение уже изменилось или право завершить погрузку использовано.'
+                            )
+                        locked_assignment.truck = locked_truck
+                        locked_assignment.excavator = locked_excavator
                         open_trip = (
                             Trip.objects
                             .select_for_update()
                             .filter(
-                                truck_id=assignment_reference.truck_id,
+                                truck_id=locked_truck.id,
                                 status__in=OPEN_TRIP_STATUSES,
                             )
                             .first()
                         )
-                        locked_assignment = (
-                            HaulAssignment.objects
-                            .select_for_update(of=('self',))
-                            .select_related('truck', 'truck__model', 'excavator')
-                            .filter(
-                                pk=assignment_reference.pk,
-                                truck_id=assignment_reference.truck_id,
-                                excavator=locked_excavator,
-                                ended_at__isnull=True,
-                                status=AssignmentStatus.ACCEPTED,
-                            )
-                            .first()
-                        )
-                        if not locked_assignment:
-                            raise ValidationError('Назначение самосвала уже изменилось.')
-                        locked_assignment.truck = locked_truck
-                        locked_assignment.excavator = locked_excavator
                         block_reason = excavator_truck_load_block_reason(
                             locked_assignment,
                             current_excavator=locked_excavator,
@@ -4859,9 +4871,25 @@ def excavator_work_view(request):
         form = restrict_excavator_trip_form(
             TripCreateForm(excavator_operator=access.employee),
             current_excavator,
+            open_shift,
         )
 
-    available_assignments = list(form.fields['assignment'].queryset)
+    handoff_assignment_ids = set(
+        open_haul_handoffs_for_shift(open_shift)
+        .values_list('source_assignment_id', flat=True)
+    )
+    available_assignments = []
+    visible_assignment_index_by_truck = {}
+    for assignment in form.fields['assignment'].queryset:
+        assignment.is_handoff_completion = assignment.id in handoff_assignment_ids
+        existing_index = visible_assignment_index_by_truck.get(assignment.truck_id)
+        if existing_index is None:
+            visible_assignment_index_by_truck[assignment.truck_id] = len(available_assignments)
+            available_assignments.append(assignment)
+            continue
+        existing = available_assignments[existing_index]
+        if existing.is_handoff_completion and not assignment.is_handoff_completion:
+            available_assignments[existing_index] = assignment
     assignment_truck_ids = [assignment.truck_id for assignment in available_assignments if assignment.truck_id]
     active_trips_queryset = (
         Trip.objects
@@ -5050,7 +5078,10 @@ def excavator_work_view(request):
             if assignment.truck_id in driver_assignment_truck_ids:
                 return 'waiting_for_shift'
             return 'no_driver'
-        if assignment.status in {AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED}:
+        if (
+            getattr(assignment, 'is_handoff_completion', False)
+            or assignment.status in {AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED}
+        ):
             return 'assigned'
         return 'free'
 
@@ -5085,7 +5116,11 @@ def excavator_work_view(request):
                 else (
                     block_reason
                     if load_block_reason_code == 'post_unload_cooldown'
-                    else state_ui['label']
+                    else (
+                        'Завершить погрузку'
+                        if getattr(assignment, 'is_handoff_completion', False)
+                        else state_ui['label']
+                    )
                 )
             ),
             'target_label': target_label,
@@ -5096,6 +5131,7 @@ def excavator_work_view(request):
             'can_drag': can_load,
             'can_load': can_load,
             'is_waiting_for_loading': is_waiting_for_loading,
+            'is_handoff_completion': getattr(assignment, 'is_handoff_completion', False),
             'driver_shift_started': assignment.truck_id in open_truck_shift_equipment_ids,
             'block_reason': block_reason,
             'load_block_reason_code': load_block_reason_code,
@@ -6298,6 +6334,7 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
     shift_error = dispatcher_shift_required_redirect(request, access, redirect_url)
     if shift_error:
         return shift_error
+    lock_production_state()
     reason = request.POST.get('reason', '').strip()
 
     assignment = (
@@ -6312,11 +6349,19 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
         return redirect(redirect_url)
 
     if assignment.status == AssignmentStatus.ACCEPTED:
-        pending_release, _ = schedule_haul_release(
-            truck=assignment.truck,
-            assigned_by=access.employee,
-            now=timezone.now(),
-        )
+        try:
+            pending_release, _ = schedule_haul_release(
+                truck=assignment.truck,
+                assigned_by=access.employee,
+                now=timezone.now(),
+                expected_state_id=assignment.id,
+            )
+        except HaulAssignmentStateConflict:
+            messages.error(
+                request,
+                'Назначение уже изменилось. Обновите пульт и повторите действие.',
+            )
+            return redirect(redirect_url)
         logged_assignment = pending_release or assignment
     else:
         assignment.status = AssignmentStatus.CANCELLED

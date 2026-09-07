@@ -6,6 +6,7 @@ from .models import (
     EquipmentAssignment,
     ExcavatorPlacement,
     HaulAssignment,
+    HaulAssignmentHandoff,
 )
 
 
@@ -67,6 +68,30 @@ class HaulAssignmentAdmin(admin.ModelAdmin):
     list_display = ('truck', 'excavator', 'status', 'assigned_at', 'accepted_at', 'ended_at')
     search_fields = ('truck__garage_number', 'excavator__garage_number')
     list_filter = ('status',)
+
+
+@admin.register(HaulAssignmentHandoff)
+class HaulAssignmentHandoffAdmin(admin.ModelAdmin):
+    list_display = (
+        'truck', 'source_excavator', 'source_shift', 'target_assignment',
+        'status', 'created_at', 'resolved_at', 'resolved_by_trip',
+    )
+    list_filter = ('status',)
+    search_fields = (
+        'truck__garage_number', 'source_excavator__garage_number',
+        'source_shift__employee__full_name',
+    )
+    readonly_fields = (
+        'truck', 'source_assignment', 'target_assignment', 'source_excavator',
+        'source_shift', 'status', 'created_at', 'resolved_at',
+        'resolved_by_trip',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ExcavatorPlacement)

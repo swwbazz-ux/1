@@ -171,7 +171,7 @@
                 <div class="eo-truck-grid eo-dashboard-truck-grid{% if not truck_cards %} is-empty{% elif truck_cards|length > 9 %} is-many is-rows-4{% else %} is-rows-3{% endif %}" aria-label="Самосвалы">
                     {% for card in truck_cards %}
                             <button
-                                class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if open_shift and card.is_selected %} is-selected{% endif %}{% if card.is_inactive %} is-inactive{% endif %}{% if card.is_load_blocked %} is-load-blocked{% endif %}{% if card.load_block_reason_code == 'driver_shift_not_started' %} is-shift-pending{% endif %}{% if card.load_block_reason_code == 'no_driver' %} is-no-driver{% endif %}{% if card.plan_visual.is_overrun %} is-plan-overrun{% endif %}"
+                                class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if open_shift and card.is_selected %} is-selected{% endif %}{% if card.is_inactive %} is-inactive{% endif %}{% if card.is_load_blocked %} is-load-blocked{% endif %}{% if card.is_handoff_completion %} is-handoff-completion{% endif %}{% if card.load_block_reason_code == 'driver_shift_not_started' %} is-shift-pending{% endif %}{% if card.load_block_reason_code == 'no_driver' %} is-no-driver{% endif %}{% if card.plan_visual.is_overrun %} is-plan-overrun{% endif %}"
                                 type="button"
                                 draggable="{% if open_shift and card.can_drag %}true{% else %}false{% endif %}"
                                 style="--eo-truck-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --eo-truck-total-progress: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}%; --plan-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --truck-plan-percent: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %};"
@@ -182,6 +182,7 @@
                                 data-eo-truck-detail-id="{{ card.detail_card_id }}"
                                 data-eo-equipment-state="{{ card.equipment_state_code }}"
                                 data-eo-can-load="{% if open_shift and card.can_load %}1{% else %}0{% endif %}"
+                                data-eo-handoff-completion="{% if card.is_handoff_completion %}1{% else %}0{% endif %}"
                                 {% if card.load_block_reason_code %}data-eo-load-block-reason-code="{{ card.load_block_reason_code }}"{% endif %}
                                 {% if card.load_block_reason_label %}data-eo-load-block-reason-label="{{ card.load_block_reason_label }}"{% endif %}
                                 data-eo-plan-percent="{% if card.plan_has_plan %}{{ card.plan_percent }}{% endif %}"

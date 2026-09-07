@@ -90,7 +90,7 @@
             </div>
             <div class="dispatcher-zone-grid">
             {% for complex in dispatcher_dashboard.complex_zones %}
-                <article class="dispatcher-complex-card {% if complex.is_empty %}status-empty{% else %}status-{{ complex.status_key }}{% endif %}{% if complex.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--complex-progress: {% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% else %}0{% endif %}%; --complex-total-progress: {{ complex.percent|default:0 }}%;" data-dispatcher-drop="complex" data-zone-id="{{ complex.id }}"{% if not complex.is_empty %} role="button" tabindex="0" draggable="true" data-dispatcher-drag="complex" data-equipment-card-id="{{ complex.card_id }}" data-source-equipment-card-id="{{ complex.equipment_card_id }}" data-equipment-id="{{ complex.equipment_card_id }}" data-equipment-name="{{ complex.excavator_name }}" data-equipment-state="{{ complex.equipment_state_code }}" data-excavator-slot="{{ complex.excavator_slot }}" data-placement-zone="active" data-plan-status="{{ complex.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ complex.percent|default:0 }}" data-plan-loop-percent="{% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ complex.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if complex.plan_has_plan %}{{ complex.plan_visual.phase }}{% endif %}" data-plan-mode="{{ complex.plan_calculation_mode|default:'' }}" data-plan-value="{{ complex.plan_value|default:'' }}" data-plan-fact="{{ complex.plan_fact_value|default:'' }}" data-plan-unit="{{ complex.plan_unit|default:'' }}" data-plan-group="{{ complex.plan_group_name|default:'' }}"{% endif %}>
+                <article class="dispatcher-complex-card {% if complex.is_empty %}status-empty{% else %}status-{{ complex.status_key }}{% endif %}{% if complex.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--complex-progress: {% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% else %}0{% endif %}%; --complex-total-progress: {{ complex.percent|default:0 }}%;" data-dispatcher-drop="complex" data-zone-id="{{ complex.zone_key }}" data-zone-label="{{ complex.id }}"{% if not complex.is_empty %} role="button" tabindex="0" draggable="true" data-dispatcher-drag="complex" data-equipment-card-id="{{ complex.card_id }}" data-source-equipment-card-id="{{ complex.equipment_card_id }}" data-equipment-id="{{ complex.equipment_card_id }}" data-equipment-name="{{ complex.excavator_name }}" data-equipment-state="{{ complex.equipment_state_code }}" data-excavator-slot="{{ complex.excavator_slot }}" data-placement-zone="active" data-plan-status="{{ complex.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ complex.percent|default:0 }}" data-plan-loop-percent="{% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ complex.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if complex.plan_has_plan %}{{ complex.plan_visual.phase }}{% endif %}" data-plan-mode="{{ complex.plan_calculation_mode|default:'' }}" data-plan-value="{{ complex.plan_value|default:'' }}" data-plan-fact="{{ complex.plan_fact_value|default:'' }}" data-plan-unit="{{ complex.plan_unit|default:'' }}" data-plan-group="{{ complex.plan_group_name|default:'' }}"{% endif %}>
                     {% if complex.is_empty %}
                         <div class="complex-empty" aria-hidden="true"></div>
                     {% else %}
@@ -120,7 +120,7 @@
                         </div>
                         <div class="complex-assigned-trucks {{ complex.truck_scale_class }}" style="--complex-truck-cols: {{ complex.truck_column_count|default:1 }};" aria-label="Активные самосвалы комплекса">
                             {% for truck in complex.active_truck_tiles %}
-                                <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-complex-truck="true" data-assigned-zone="{{ complex.id }}" data-plan-status="{{ truck.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ truck.percent|default:0 }}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" data-plan-mode="{{ truck.plan_calculation_mode|default:'' }}" data-plan-value="{{ truck.plan_value|default:'' }}" data-plan-fact="{{ truck.plan_fact_value|default:'' }}" data-plan-unit="{{ truck.plan_unit|default:'' }}" data-plan-group="{{ truck.plan_group_name|default:'' }}">
+                                <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-complex-truck="true" data-assigned-zone="{{ complex.zone_key }}" data-plan-status="{{ truck.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ truck.percent|default:0 }}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" data-plan-mode="{{ truck.plan_calculation_mode|default:'' }}" data-plan-value="{{ truck.plan_value|default:'' }}" data-plan-fact="{{ truck.plan_fact_value|default:'' }}" data-plan-unit="{{ truck.plan_unit|default:'' }}" data-plan-group="{{ truck.plan_group_name|default:'' }}">
                                     <strong>{{ truck.name }}</strong>
                                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                                     <span>{{ truck.label }}</span>
@@ -273,7 +273,7 @@
             <div class="mm-mobile-detail-trucks mm-mobile-excavator-garage-grid" style="--mm-mobile-garage-rows: {{ dispatcher_dashboard.mobile_excavator_garage_row_count|default:3 }};" aria-label="Гараж экскаваторов">
                 {% for excavator in dispatcher_dashboard.mobile_excavator_garage_tiles %}
                     {% if not excavator.is_placeholder %}
-                        <button type="button" class="mm-mobile-garage-excavator status-{{ excavator.status }}" data-mm-mobile-activate-excavator="{{ excavator.card_id }}" data-equipment-card-id="{{ excavator.card_id }}" data-mm-mobile-excavator-sort="{{ excavator.board_number|default:9999 }}" data-mm-mobile-equipment-state="{{ excavator.equipment_state_code }}" title="{{ excavator.label }}" aria-label="Вернуть экскаватор {{ excavator.display_name }} в активную смену">
+                        <button type="button" class="mm-mobile-garage-excavator status-{{ excavator.status }}" data-mm-mobile-activate-excavator="{{ excavator.card_id }}" data-equipment-card-id="{{ excavator.card_id }}" data-mm-mobile-complex-label="{{ excavator.complex_label }}" data-mm-mobile-excavator-sort="{{ excavator.board_number|default:9999 }}" data-mm-mobile-equipment-state="{{ excavator.equipment_state_code }}" title="{{ excavator.label }}" aria-label="Вернуть экскаватор {{ excavator.display_name }} в активную смену">
                             <span>Экс {{ excavator.display_name }}</span>
                             <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
                         </button>
@@ -1110,7 +1110,13 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
     var dispatcherSyncPendingCount = 0;
-    var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v1";
+    var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v3";
+    try {
+        // Старые очереди не содержат версии назначения и могут повторить уже
+        // отменённую команду после восстановления связи.
+        window.localStorage.removeItem("mining-master-mobile-sync-queue-v1");
+        window.localStorage.removeItem("mining-master-mobile-sync-queue-v2");
+    } catch (error) {}
     var dispatcherSyncQueueFlushing = false;
     var dispatcherSyncFlushTimer = null;
     var dispatcherMobileSyncFlushDelayMs = 300;
@@ -1119,7 +1125,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v142";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v143";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -1185,11 +1191,20 @@ document.addEventListener("DOMContentLoaded", function () {
             return false;
         }
         var queue = readDispatcherSyncQueue();
-        queue.push(Object.assign({
+        var queuedRequest = Object.assign({
             id: "sync-" + Date.now() + "-" + Math.random().toString(16).slice(2),
             createdAt: Date.now(),
             attempts: 0
-        }, request || {}));
+        }, request || {});
+        var replaceIndex = queuedRequest.coalesceKey ? queue.findIndex(function (item, index) {
+            return item.coalesceKey === queuedRequest.coalesceKey && !(dispatcherSyncQueueFlushing && index === 0);
+        }) : -1;
+        if (replaceIndex >= 0) {
+            queuedRequest.createdAt = queue[replaceIndex].createdAt || queuedRequest.createdAt;
+            queue[replaceIndex] = queuedRequest;
+        } else {
+            queue.push(queuedRequest);
+        }
         writeDispatcherSyncQueue(queue);
         scheduleDispatcherSyncFlush(delayMs);
         return true;
@@ -1230,6 +1245,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 return response.json().catch(function () { return {}; }).then(function (payload) {
                     var error = new Error(payload.error || "Действие не выполнено.");
                     error.isServerResponse = true;
+                    error.code = payload.code || "";
+                    error.conflict = Boolean(payload.conflict);
+                    error.status = response.status;
                     throw error;
                 });
             }
@@ -1324,11 +1342,12 @@ document.addEventListener("DOMContentLoaded", function () {
             flushDispatcherSyncQueue();
         }, typeof delayMs === "number" ? delayMs : 80);
     }
-    function dispatcherPost(url, data) {
+    function dispatcherPost(url, data, options) {
         if (dispatcherRoleIsReadonly()) {
             return Promise.reject(dispatcherInactiveRoleError());
         }
         var payload = Object.assign({}, data || {});
+        options = options || {};
         if (!payload.client_action_id) {
             payload.client_action_id = "mm-" + Date.now() + "-" + Math.random().toString(16).slice(2);
         }
@@ -1340,6 +1359,7 @@ document.addEventListener("DOMContentLoaded", function () {
         setDispatcherSyncPending(true);
         return sendDispatcherSyncRequest(request).catch(function (error) {
             if (error && error.isServerResponse) throw error;
+            if (options.queueOnNetworkFailure === false) throw error;
             enqueueDispatcherSyncRequest(request);
             return { queued: true };
         }).finally(function () {
@@ -1358,11 +1378,42 @@ document.addEventListener("DOMContentLoaded", function () {
             kind: "json",
             url: url,
             data: payload,
+            coalesceKey: payload.truck_id ? "haul-truck-" + String(payload.truck_id) : "",
             refreshMobileBoard: true
         }, typeof delayMs === "number" ? delayMs : dispatcherMobileSyncFlushDelayMs)) {
             return Promise.reject(dispatcherInactiveRoleError());
         }
         return Promise.resolve({ queued: true });
+    }
+    function haulAssignmentStateId(node) {
+        var value = node && node.dataset ? node.dataset.haulAssignmentStateId : "";
+        return /^\d+$/.test(String(value || "")) ? String(value) : "0";
+    }
+    function collectComplexAssignmentStates(complexCard) {
+        var states = {};
+        if (!complexCard) return states;
+        complexCard.querySelectorAll(
+            "[data-complex-truck='true'][data-equipment-id], " +
+            "[data-mm-mobile-home-truck-id]"
+        ).forEach(function (truck) {
+            var truckId = truck.dataset.equipmentId || truck.dataset.mmMobileHomeTruckId || "";
+            if (truckId) states[String(truckId)] = haulAssignmentStateId(truck);
+        });
+        return states;
+    }
+    function applyHaulAssignmentState(response, truckNode) {
+        if (!response || !truckNode || response.assignment_state_id === undefined) return;
+        truckNode.dataset.haulAssignmentStateId = String(response.assignment_state_id || 0);
+    }
+    function applyHaulAssignmentStates(response, root) {
+        var states = response && response.assignment_state_ids;
+        if (!states || !root) return;
+        root.querySelectorAll("[data-equipment-id], [data-mm-mobile-home-truck-id]").forEach(function (node) {
+            var truckId = node.dataset.equipmentId || node.dataset.mmMobileHomeTruckId || "";
+            if (truckId && Object.prototype.hasOwnProperty.call(states, truckId)) {
+                node.dataset.haulAssignmentStateId = String(states[truckId] || 0);
+            }
+        });
     }
     window.addEventListener("focus", scheduleDispatcherSyncFlush);
     window.addEventListener("pageshow", scheduleDispatcherSyncFlush);
@@ -1845,6 +1896,10 @@ document.addEventListener("DOMContentLoaded", function () {
         var message = error && error.message ? error.message : "Действие не выполнено.";
         if (!showDispatcherNotice(message)) {
             console.warn(message);
+        }
+        if (error && error.conflict) {
+            Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
+            Promise.resolve(refreshDispatcherDesktopBoardFromServer()).catch(function () {});
         }
     }
     var miningMasterUpdateModal = document.querySelector("[data-mm-pwa-update-modal]");
@@ -3117,6 +3172,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 mini.dataset.mmMobileHomeTruckNumber = source.dataset.mmMobileAssignedTruckNumber || source.textContent || "";
                 mini.dataset.mmMobileHomeSourceExcavatorId = excavatorId;
                 mini.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+                mini.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
                 mini.textContent = mini.dataset.mmMobileHomeTruckNumber || "";
                 syncMobilePlanVisual(source, mini);
                 preview.appendChild(mini);
@@ -3264,6 +3320,7 @@ document.addEventListener("DOMContentLoaded", function () {
             card.style.display = "";
             card.dataset.mmMobileTruckSort = truckNumber;
             card.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+            card.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
             var image = card.querySelector("img");
             if (image) image.src = getMobileGarageTruckIcon(source);
             var title = card.querySelector("strong");
@@ -3303,6 +3360,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 existing.classList.add(getMobileGarageTruckStatusClass(source));
                 existing.dataset.mmMobileTruckSort = truckNumber;
                 existing.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+                existing.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
                 var existingImage = existing.querySelector("img");
                 if (existingImage) existingImage.src = getMobileGarageTruckIcon(source);
                 existing.hidden = false;
@@ -3317,6 +3375,7 @@ document.addEventListener("DOMContentLoaded", function () {
             button.dataset.mmMobileFillTruckNumber = truckNumber;
             button.dataset.mmMobileTruckSort = button.dataset.mmMobileFillTruckNumber || "";
             button.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+            button.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
             var img = document.createElement("img");
             img.src = getMobileGarageTruckIcon(source);
             img.alt = "";
@@ -3346,6 +3405,7 @@ document.addEventListener("DOMContentLoaded", function () {
             mini.dataset.mmMobileAssignedTruckId = homeTruck.dataset.mmMobileHomeTruckId || "";
             mini.dataset.mmMobileAssignedTruckNumber = homeTruck.dataset.mmMobileHomeTruckNumber || homeTruck.textContent || "";
             mini.dataset.mmMobileEquipmentState = homeTruck.dataset.mmMobileEquipmentState || "";
+            mini.dataset.haulAssignmentStateId = haulAssignmentStateId(homeTruck);
             mini.dataset.mmMobileFillOriginal = "true";
             mini.textContent = mini.dataset.mmMobileAssignedTruckNumber || "";
             syncMobilePlanVisual(homeTruck, mini);
@@ -3407,7 +3467,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 dispatcherPostQueued(dispatcherAssignTruckUrl, {
                     action: "assign",
                     truck_id: truckId,
-                    excavator_id: excavatorId
+                    excavator_id: excavatorId,
+                    expected_assignment_state_id: haulAssignmentStateId(mini)
                 }).catch(showDispatcherDnDError);
             });
             Array.from(screen.querySelectorAll(".mm-mobile-fill-truck[data-mm-mobile-fill-was-assigned='true']")).forEach(function (button) {
@@ -3415,7 +3476,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (!truckId) return;
                 dispatcherPostQueued(dispatcherAssignTruckUrl, {
                     action: "release",
-                    truck_id: truckId
+                    truck_id: truckId,
+                    expected_assignment_state_id: haulAssignmentStateId(button)
                 }).catch(showDispatcherDnDError);
                 delete button.dataset.mmMobileFillWasAssigned;
             });
@@ -3555,6 +3617,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 button.className = "mm-mobile-garage-excavator " + statusClass;
                 button.dataset.mmMobileActivateExcavator = excavatorId;
                 button.dataset.equipmentCardId = excavatorId;
+                button.dataset.mmMobileComplexLabel = titleText;
                 button.setAttribute("aria-label", "Вернуть экскаватор " + labelText + " в активную смену");
                 button.innerHTML = '<span></span><img src="' + staticPrefix + 'img/equipment/excavator-gray.png" alt="">';
                 var firstEmpty = grid.querySelector(".mm-mobile-garage-slot.status-empty");
@@ -3729,13 +3792,17 @@ document.addEventListener("DOMContentLoaded", function () {
                 var sourceExcavatorId = mini.dataset.mmMobileHomeSourceExcavatorId || "";
                 var payload = null;
                 if (currentDropMode === "garage") {
-                    payload = { action: "release", truck_id: truckId, expected_source_excavator_id: sourceExcavatorId };
+                    payload = {
+                        action: "release",
+                        truck_id: truckId,
+                        expected_assignment_state_id: haulAssignmentStateId(mini)
+                    };
                 } else if (currentDropMode === "complex" && currentTargetCard) {
                     payload = {
                         action: "assign",
                         truck_id: truckId,
                         excavator_id: currentTargetCard.dataset.mmMobileExcavatorId,
-                        expected_source_excavator_id: sourceExcavatorId
+                        expected_assignment_state_id: haulAssignmentStateId(mini)
                     };
                 }
                 if (!payload || !truckId) {
@@ -3949,7 +4016,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 sourceExcavatorId: String(sourceExcavatorId),
                 sourceCard: sourceCard,
                 sourceLabel: sourceLabel,
-                homeMini: homeMini
+                homeMini: homeMini,
+                assignmentStateId: haulAssignmentStateId(node)
             };
         }
 
@@ -3994,7 +4062,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 action: "assign",
                 truck_id: transfer.truckId,
                 excavator_id: targetExcavatorId,
-                expected_source_excavator_id: transfer.sourceExcavatorId
+                expected_assignment_state_id: transfer.assignmentStateId
             }).then(function () {
                 if (rollbackOptimisticMove && rollbackOptimisticMove.commit) rollbackOptimisticMove.commit();
             }).catch(function (error) {
@@ -4149,7 +4217,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (existing) return existing;
             var labelText = (button.querySelector("span") && button.querySelector("span").textContent || "").trim();
             var numberMatch = labelText.match(/(\d+)/);
-            var complexTitle = numberMatch ? "К-" + numberMatch[1] : labelText.replace(/^Экс\s*/i, "К-") || "К";
+            var complexTitle = button.dataset.mmMobileComplexLabel || (numberMatch ? "К-" + numberMatch[1] : labelText.replace(/^Экс\s*/i, "К-") || "К");
             var targetCard = grid.querySelector(".mm-mobile-complex-card.status-empty:not([hidden])") || grid.querySelector(".mm-mobile-complex-card.status-empty");
             var card = document.createElement("article");
             var stateCode = "assigned";
@@ -4239,10 +4307,11 @@ document.addEventListener("DOMContentLoaded", function () {
                 } catch (error) {}
             }
             preserveExcavatorReturnPanel();
-            dispatcherPostQueued(dispatcherMoveExcavatorUrl, {
+            dispatcherPost(dispatcherMoveExcavatorUrl, {
                 excavator_id: excavatorId,
-                zone: "active"
-            }).catch(function (error) {
+                zone: "active",
+                expected_zone: "inactive"
+            }, { queueOnNetworkFailure: false }).catch(function (error) {
                 if (!existingCard && createdCard && createdCard.parentNode) {
                     createdCard.remove();
                 }
@@ -4421,6 +4490,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (isMiningMasterMobileReadonly()) return;
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing")) return;
+            var expectedAssignmentStates = collectComplexAssignmentStates(card);
             card.classList.remove("is-swiping", "is-swipe-ready");
             card.classList.add("is-releasing");
             shell.classList.add("is-excavator-garage-peeking");
@@ -4440,10 +4510,12 @@ document.addEventListener("DOMContentLoaded", function () {
                 var grid = shell.querySelector(".mm-mobile-complex-grid");
                 if (grid) grid.scrollTop = 0;
             }, Math.min(260, flightTime));
-            dispatcherPostQueued(dispatcherMoveExcavatorUrl, {
+            dispatcherPost(dispatcherMoveExcavatorUrl, {
                 excavator_id: excavatorId,
-                zone: "inactive"
-            })
+                zone: "inactive",
+                expected_zone: "active",
+                expected_assignment_states: expectedAssignmentStates
+            }, { queueOnNetworkFailure: false })
                 .then(function () {
                     window.setTimeout(function () {
                         shell.classList.remove("is-truck-garage-peeking");
@@ -4549,6 +4621,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (isMiningMasterMobileReadonly()) return;
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing-trucks")) return;
+            var expectedAssignmentStates = collectComplexAssignmentStates(card);
             card.classList.remove("is-truck-swiping", "is-truck-swipe-ready");
             card.classList.add("is-releasing-trucks");
             shell.classList.add("is-truck-garage-peeking");
@@ -4566,10 +4639,11 @@ document.addEventListener("DOMContentLoaded", function () {
             ensureMobileTruckPreviewEmpty(preview);
             updateMobileHomeTruckPreviewLayout(preview);
             scheduleMobileLocalLayoutReconcile();
-            dispatcherPostQueued(dispatcherAssignTruckUrl, {
+            dispatcherPost(dispatcherAssignTruckUrl, {
                 action: "release_complex",
-                excavator_id: excavatorId
-            })
+                excavator_id: excavatorId,
+                expected_assignment_states: expectedAssignmentStates
+            }, { queueOnNetworkFailure: false })
                 .then(function () {
                     window.setTimeout(function () {
                         resetMobileComplexTruckSwipe(card);
@@ -4602,6 +4676,7 @@ document.addEventListener("DOMContentLoaded", function () {
             mini.dataset.mmMobileAssignedTruckId = truckButton.dataset.mmMobileFillTruckId || "";
             mini.dataset.mmMobileAssignedTruckNumber = truckButton.dataset.mmMobileFillTruckNumber || (truckButton.querySelector("strong") && truckButton.querySelector("strong").textContent) || "";
             mini.dataset.mmMobileEquipmentState = stateCode;
+            mini.dataset.haulAssignmentStateId = haulAssignmentStateId(truckButton);
             if (truckButton.dataset.mmMobileFillWasAssigned === "true") {
                 mini.dataset.mmMobileFillOriginal = "true";
             } else {
@@ -4632,6 +4707,7 @@ document.addEventListener("DOMContentLoaded", function () {
             button.dataset.mmMobileFillTruckNumber = mini.dataset.mmMobileAssignedTruckNumber || mini.textContent || "";
             button.dataset.mmMobileTruckSort = button.dataset.mmMobileFillTruckNumber || "";
             button.dataset.mmMobileEquipmentState = stateCode;
+            button.dataset.haulAssignmentStateId = haulAssignmentStateId(mini);
             if (mini.dataset.mmMobileFillOriginal === "true") {
                 button.dataset.mmMobileFillWasAssigned = "true";
             }
@@ -6200,11 +6276,13 @@ document.addEventListener("DOMContentLoaded", function () {
         var cardId = tile.dataset.equipmentId || tile.dataset.equipmentCardId || "";
         var name = tile.dataset.equipmentName || "";
         var slot = tile.dataset.excavatorSlot || (tile.querySelector("strong") && tile.querySelector("strong").textContent) || "";
+        var zoneLabel = slot ? "K-" + slot : (targetCard.dataset.zoneLabel || "K");
         var stateCode = "assigned";
         targetCard.className = "dispatcher-complex-card " + dispatcherEquipmentStateClass(stateCode) + " is-sync-pending";
         targetCard.style.setProperty("--complex-progress", "0%");
         targetCard.dataset.dispatcherDrop = "complex";
         targetCard.dataset.zoneId = zoneId;
+        targetCard.dataset.zoneLabel = zoneLabel;
         targetCard.dataset.dispatcherDrag = "complex";
         targetCard.dataset.equipmentCardId = cardId;
         targetCard.dataset.sourceEquipmentCardId = cardId;
@@ -6220,7 +6298,7 @@ document.addEventListener("DOMContentLoaded", function () {
         targetCard.innerHTML =
             '<div class="complex-work-head">' +
                 '<div class="complex-title-state">' +
-                    "<h2>" + escapeHtml(zoneId) + "</h2>" +
+                    "<h2>" + escapeHtml(zoneLabel) + "</h2>" +
                     '<span class="complex-state-chip">' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
                 '</div>' +
                 '<div class="complex-context">' +
@@ -6279,6 +6357,8 @@ document.addEventListener("DOMContentLoaded", function () {
     function applyDesktopTruckAction(response, action) {
         if (response && response.queued) return response;
         if (!action || !action.type) return response;
+        if (action.truckTile) applyHaulAssignmentState(response, action.truckTile);
+        if (action.complexCard) applyHaulAssignmentStates(response, action.complexCard);
         var applied = false;
         if (action.type === "assign") {
             applied = moveDesktopTruckToComplex(action.truckTile, action.complexCard);
@@ -6464,8 +6544,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 var targetComplexCard = zone;
                 dispatcherPost(dispatcherMoveExcavatorUrl, {
                     excavator_id: activatedExcavatorTile.dataset.equipmentId,
-                    zone: "active"
-                }).then(function (response) {
+                    zone: "active",
+                    expected_zone: "inactive"
+                }, { queueOnNetworkFailure: false }).then(function (response) {
                     return refreshDesktopBoardAfterStructuralAction(response, function () {
                         activateDesktopComplexFromExcavatorTile(activatedExcavatorTile, targetComplexCard);
                     });
@@ -6481,7 +6562,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 dispatcherPost(dispatcherAssignTruckUrl, {
                     action: "assign",
                     truck_id: assignedTruckTile.dataset.equipmentId,
-                    excavator_id: zone.dataset.equipmentId
+                    excavator_id: zone.dataset.equipmentId,
+                    expected_assignment_state_id: haulAssignmentStateId(assignedTruckTile)
                 }).then(function (response) {
                     return applyDesktopTruckAction(response, {
                         type: "assign",
@@ -6520,8 +6602,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 action: function () {
                     dispatcherPost(dispatcherMoveExcavatorUrl, {
                         excavator_id: inactiveExcavatorId,
-                        zone: "inactive"
-                    }).then(function (response) {
+                        zone: "inactive",
+                        expected_zone: "active",
+                        expected_assignment_states: collectComplexAssignmentStates(inactiveComplexCard)
+                    }, { queueOnNetworkFailure: false }).then(function (response) {
                         return refreshDesktopBoardAfterStructuralAction(response, function () {
                             moveDesktopComplexToExcavatorGarage(inactiveComplexCard);
                         });
@@ -6575,8 +6659,9 @@ document.addEventListener("DOMContentLoaded", function () {
                     action: function () {
                         dispatcherPost(dispatcherAssignTruckUrl, {
                             action: "release_complex",
-                            excavator_id: complexCard.dataset.equipmentId
-                        }).then(function (response) {
+                            excavator_id: complexCard.dataset.equipmentId,
+                            expected_assignment_states: collectComplexAssignmentStates(complexCard)
+                        }, { queueOnNetworkFailure: false }).then(function (response) {
                             return applyDesktopTruckAction(response, {
                                 type: "release_complex",
                                 complexCard: complexCard
@@ -6590,7 +6675,8 @@ document.addEventListener("DOMContentLoaded", function () {
             var releasedTruckTile = draggedTile;
             dispatcherPost(dispatcherAssignTruckUrl, {
                 action: "release",
-                truck_id: releasedTruckTile.dataset.equipmentId
+                truck_id: releasedTruckTile.dataset.equipmentId,
+                expected_assignment_state_id: haulAssignmentStateId(releasedTruckTile)
             }).then(function (response) {
                 return applyDesktopTruckAction(response, {
                     type: "release",
@@ -6618,6 +6704,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v61" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v62" defer></script>
 {% endif %}
 {% endblock %}

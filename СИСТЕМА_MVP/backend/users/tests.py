@@ -2507,6 +2507,8 @@ class AccessLoginTests(TestCase):
                 'action': 'assign',
                 'truck_id': truck.id,
                 'excavator_id': excavator.id,
+                'expected_assignment_state_id': 0,
+                'client_action_id': 'driver-chain-dispatcher-assign-1',
             }),
             content_type='application/json',
             HTTP_HOST='localhost',

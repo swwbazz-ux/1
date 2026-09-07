@@ -191,6 +191,11 @@ function createRuntime(initialShiftOpen, freshShiftOpen) {
         "function bindDispatcherComplexDrop(zone)",
         "Dispatcher complex drop bind"
     );
+    const assignmentStateSource = extractBraceBlock(
+        RUNTIME_SOURCE,
+        "function haulAssignmentStateId(node)",
+        "Haul assignment state helper"
+    );
     const bindAllSource = extractBraceBlock(
         RUNTIME_SOURCE,
         "function bindDispatcherDesktopInteractions()",
@@ -219,6 +224,7 @@ function createRuntime(initialShiftOpen, freshShiftOpen) {
         function applyDesktopTruckAction(response) { return response; }
         function showDispatcherDnDError(error) { throw error; }
         ${syncSource}
+        ${assignmentStateSource}
         ${bindDragSource}
         ${bindDropSource}
         ${bindAllSource}

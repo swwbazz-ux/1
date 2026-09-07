@@ -24,6 +24,12 @@ class HaulAssignmentAction(models.TextChoices):
     RELEASE = 'release', 'Снять назначение'
 
 
+class HaulAssignmentHandoffStatus(models.TextChoices):
+    OPEN = 'open', 'Можно завершить погрузку'
+    RESOLVED = 'resolved', 'Завершено рейсом'
+    EXPIRED = 'expired', 'Смена завершена'
+
+
 class EquipmentAssignmentQuerySet(models.QuerySet):
     PROVENANCE_FIELDS = {
         'source_kind',
@@ -416,6 +422,97 @@ class HaulAssignment(models.Model):
 
     def __str__(self):
         return f'{self.truck} под {self.excavator}'
+
+
+class HaulAssignmentHandoff(models.Model):
+    """Одноразовое право прежней смены завершить физическую погрузку.
+
+    Диспетчерская проекция при этом уже следует новому ``target_assignment``.
+    Запись не является вторым назначением самосвала и никогда не участвует в
+    расчёте текущего комплекса.
+    """
+
+    truck = models.ForeignKey(
+        'references.Equipment',
+        verbose_name='Самосвал',
+        on_delete=models.PROTECT,
+        related_name='haul_assignment_handoffs',
+    )
+    source_assignment = models.ForeignKey(
+        HaulAssignment,
+        verbose_name='Прежнее назначение',
+        on_delete=models.PROTECT,
+        related_name='outgoing_handoffs',
+    )
+    target_assignment = models.ForeignKey(
+        HaulAssignment,
+        verbose_name='Новое решение диспетчера',
+        on_delete=models.PROTECT,
+        related_name='incoming_handoffs',
+    )
+    source_excavator = models.ForeignKey(
+        'references.Equipment',
+        verbose_name='Прежний экскаватор',
+        on_delete=models.PROTECT,
+        related_name='outgoing_haul_handoffs',
+    )
+    source_shift = models.ForeignKey(
+        'shifts.EmployeeShift',
+        verbose_name='Смена, завершающая погрузку',
+        on_delete=models.PROTECT,
+        related_name='haul_handoff_completions',
+    )
+    status = models.CharField(
+        'Статус',
+        max_length=16,
+        choices=HaulAssignmentHandoffStatus.choices,
+        default=HaulAssignmentHandoffStatus.OPEN,
+    )
+    created_at = models.DateTimeField('Создано', auto_now_add=True)
+    resolved_at = models.DateTimeField('Завершено', null=True, blank=True)
+    resolved_by_trip = models.ForeignKey(
+        'trips.Trip',
+        verbose_name='Рейс, завершивший передачу',
+        on_delete=models.PROTECT,
+        related_name='resolved_haul_handoffs',
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = 'Передача погрузки между экскаваторами'
+        verbose_name_plural = 'Передачи погрузки между экскаваторами'
+        ordering = ['-created_at', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['source_assignment', 'target_assignment', 'source_shift'],
+                condition=models.Q(status=HaulAssignmentHandoffStatus.OPEN),
+                name='uniq_open_haul_handoff_transition',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status=HaulAssignmentHandoffStatus.OPEN,
+                        resolved_at__isnull=True,
+                        resolved_by_trip__isnull=True,
+                    )
+                    | models.Q(
+                        status=HaulAssignmentHandoffStatus.RESOLVED,
+                        resolved_at__isnull=False,
+                        resolved_by_trip__isnull=False,
+                    )
+                    | models.Q(
+                        status=HaulAssignmentHandoffStatus.EXPIRED,
+                        resolved_at__isnull=False,
+                        resolved_by_trip__isnull=True,
+                    )
+                ),
+                name='haul_handoff_resolution_consistent',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.truck}: {self.source_excavator} → {self.target_assignment}'
 
 class ExcavatorPlacement(models.Model):
     class Zone(models.TextChoices):

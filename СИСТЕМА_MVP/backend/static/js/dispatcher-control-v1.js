@@ -118,12 +118,13 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
     var dispatcherSyncPendingCount = 0;
-    var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v2";
+    var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v3";
     try {
         // Очередь v1 не содержала версии назначения. Повторять такие команды
         // после обновления опасно: они могли быть сформированы до более нового
         // решения диспетчера.
         window.localStorage.removeItem("mining-master-mobile-sync-queue-v1");
+        window.localStorage.removeItem("mining-master-mobile-sync-queue-v2");
     } catch (error) {}
     var dispatcherSyncQueueFlushing = false;
     var dispatcherSyncFlushTimer = null;
@@ -133,7 +134,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v139";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v143";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -2934,6 +2935,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 button.className = "mm-mobile-garage-excavator " + statusClass;
                 button.dataset.mmMobileActivateExcavator = excavatorId;
                 button.dataset.equipmentCardId = excavatorId;
+                button.dataset.mmMobileComplexLabel = titleText;
                 button.setAttribute("aria-label", "Вернуть экскаватор " + labelText + " в активную смену");
                 button.innerHTML = '<span></span><img src="' + staticPrefix + 'img/equipment/excavator-gray.png" alt="">';
                 var firstEmpty = grid.querySelector(".mm-mobile-garage-slot.status-empty");
@@ -3311,7 +3313,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (existing) return existing;
             var labelText = (button.querySelector("span") && button.querySelector("span").textContent || "").trim();
             var numberMatch = labelText.match(/(\d+)/);
-            var complexTitle = numberMatch ? "К-" + numberMatch[1] : labelText.replace(/^Экс\s*/i, "К-") || "К";
+            var complexTitle = button.dataset.mmMobileComplexLabel || (numberMatch ? "К-" + numberMatch[1] : labelText.replace(/^Экс\s*/i, "К-") || "К");
             var targetCard = grid.querySelector(".mm-mobile-complex-card.status-empty:not([hidden])") || grid.querySelector(".mm-mobile-complex-card.status-empty");
             var card = document.createElement("article");
             var stateCode = "assigned";
@@ -5234,11 +5236,13 @@ document.addEventListener("DOMContentLoaded", function () {
         var cardId = tile.dataset.equipmentId || tile.dataset.equipmentCardId || "";
         var name = tile.dataset.equipmentName || "";
         var slot = tile.dataset.excavatorSlot || (tile.querySelector("strong") && tile.querySelector("strong").textContent) || "";
+        var zoneLabel = slot ? "K-" + slot : (targetCard.dataset.zoneLabel || "K");
         var stateCode = "assigned";
         targetCard.className = "dispatcher-complex-card " + dispatcherEquipmentStateClass(stateCode) + " is-sync-pending";
         targetCard.style.setProperty("--complex-progress", "0%");
         targetCard.dataset.dispatcherDrop = "complex";
         targetCard.dataset.zoneId = zoneId;
+        targetCard.dataset.zoneLabel = zoneLabel;
         targetCard.dataset.dispatcherDrag = "complex";
         targetCard.dataset.equipmentCardId = cardId;
         targetCard.dataset.sourceEquipmentCardId = cardId;
@@ -5254,7 +5258,7 @@ document.addEventListener("DOMContentLoaded", function () {
         targetCard.innerHTML =
             '<div class="complex-work-head">' +
                 '<div class="complex-title-state">' +
-                    "<h2>" + escapeHtml(zoneId) + "</h2>" +
+                    "<h2>" + escapeHtml(zoneLabel) + "</h2>" +
                     '<span class="complex-state-chip">' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
                 '</div>' +
                 '<div class="complex-context">' +

@@ -1,10 +1,11 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 
 from references.models import Equipment, TruckCapacityRule
 
-from .models import Trip, TripStatus
+from .models import OPEN_TRIP_STATUSES, Trip, TripStatus
 
 
 TRIP_CAPACITY_UNRESOLVED_MESSAGE = (
@@ -68,6 +69,7 @@ def resolve_required_trip_measurements(truck, rock_type):
     return volume, tonnage
 
 
+@transaction.atomic
 def create_loaded_waiting_unload_trip(
     *,
     assignment,
@@ -83,11 +85,23 @@ def create_loaded_waiting_unload_trip(
     note='',
 ):
     """Create the single server-side state used after an excavator loads a truck."""
+    locked_truck = (
+        Equipment.objects
+        .select_for_update(of=('self',))
+        .select_related('model')
+        .get(pk=assignment.truck_id)
+    )
+    if Trip.objects.select_for_update().filter(
+        truck=locked_truck,
+        status__in=OPEN_TRIP_STATUSES,
+    ).exists():
+        raise ValidationError('Самосвал уже находится в незакрытом рейсе.')
+    assignment.truck = locked_truck
     volume_m3, tonnage = resolve_required_trip_measurements(
         assignment.truck,
         rock_type,
     )
-    return Trip.objects.create(
+    trip = Trip.objects.create(
         excavator=assignment.excavator,
         truck=assignment.truck,
         excavator_operator=excavator_operator,
@@ -106,3 +120,7 @@ def create_loaded_waiting_unload_trip(
         note=str(note or '')[:1000],
         status=TripStatus.LOADED_WAITING_UNLOAD,
     )
+    # Импорт внутри функции не образует циклическую зависимость models/services.
+    from assignments.services import resolve_haul_handoffs_for_trip
+    resolve_haul_handoffs_for_trip(trip)
+    return trip
