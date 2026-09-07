@@ -39,7 +39,6 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class ConnectivityForegroundService extends Service {
-    public static final String ACTION_TEST_ALERT = "ru.copperresources.mobile.action.TEST_ALERT";
     static final String PREFS_NAME = "native_connectivity";
     static final String LAST_DRIVER_DUMP_POINT_ALERT_VERSION = "last_driver_dump_point_alert_version";
     private static final long MAX_BACKOFF_MS = 120_000L;
@@ -80,9 +79,6 @@ public class ConnectivityForegroundService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_TEST_ALERT.equals(intent.getAction())) {
-            AppNotifications.showTestAlert(this);
-        }
         startAsForeground(currentStatusText());
         scheduleHeartbeat(0L);
         return START_NOT_STICKY;
@@ -190,14 +186,11 @@ public class ConnectivityForegroundService extends Service {
                 .apply();
             if (previousVersion > 0L && serverVersion > previousVersion && relevant) {
                 boolean appIsForeground = AppVisibility.isForeground();
-                boolean specificAlertHandled = showLatestDriverDumpPointAlert(
+                showLatestDriverDumpPointAlert(
                     result.body,
                     preferences,
                     !appIsForeground
                 );
-                if (!appIsForeground && !specificAlertHandled) {
-                    AppNotifications.showOperationalAlert(this, "На сервере появились новые данные смены");
-                }
             }
             publishStatus("Сервер доступен • " + DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date()));
             scheduleHeartbeat(BuildConfig.HEARTBEAT_INTERVAL_MS);

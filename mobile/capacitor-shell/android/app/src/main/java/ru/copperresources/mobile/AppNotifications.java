@@ -37,7 +37,10 @@ public final class AppNotifications {
         );
         foreground.setDescription("Постоянная связь рабочего приложения с сервером");
         foreground.setShowBadge(false);
+        foreground.enableVibration(false);
+        foreground.enableLights(false);
         foreground.setSound(null, null);
+        foreground.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
         manager.createNotificationChannel(foreground);
 
         int soundId = context.getResources().getIdentifier(
@@ -75,15 +78,6 @@ public final class AppNotifications {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
-        Intent testIntent = new Intent(context, ConnectivityForegroundService.class)
-            .setAction(ConnectivityForegroundService.ACTION_TEST_ALERT);
-        PendingIntent testPendingIntent = PendingIntent.getService(
-            context,
-            1,
-            testIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-        );
-
         return new NotificationCompat.Builder(context, BuildConfig.FOREGROUND_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_service)
             .setContentTitle(context.getString(R.string.foreground_notification_title))
@@ -93,17 +87,11 @@ public final class AppNotifications {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setLocalOnly(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .addAction(R.drawable.ic_stat_alert, "Тест сигнала", testPendingIntent)
             .build();
-    }
-
-    public static void showTestAlert(Context context) {
-        showOperationalAlert(
-            context,
-            "Проверка оповещения",
-            "Тестовое производственное оповещение"
-        );
     }
 
     public static boolean showOperationalAlert(Context context, String message) {

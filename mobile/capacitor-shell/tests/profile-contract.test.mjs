@@ -35,8 +35,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "23",
-    versionName: "0.1.18",
+    versionCode: "26",
+    versionName: "0.1.19",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -57,8 +57,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "25",
-    versionName: "0.1.18",
+    versionCode: "28",
+    versionName: "0.1.19",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -68,8 +68,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "24",
-    versionName: "0.1.18-rc",
+    versionCode: "27",
+    versionName: "0.1.19-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -176,6 +176,11 @@ test("driver QA and store variants use isolated notification channels and QA cre
   const driverProfiles = ["driver", "driver_qa", "driver_rustore_qa", "driver_rustore"].map(profile);
   assert.equal(new Set(driverProfiles.map((config) => config.foregroundChannelId)).size, driverProfiles.length);
   assert.equal(new Set(driverProfiles.map((config) => config.alertChannelId)).size, driverProfiles.length);
+
+  for (const config of driverProfiles) {
+    assert.match(config.foregroundChannelId, /_v2$/);
+    assert.match(config.foregroundChannelName, /без звука$/);
+  }
 
   for (const config of [profile("driver_qa"), profile("driver_rustore_qa")]) {
     assert.equal(config.syncTokenEnv, "COPPER_DRIVER_QA_SYNC_TOKEN");
@@ -301,6 +306,21 @@ test("every driver build enables the same recorded dump-point voice alerts", () 
     assert.equal(driver.alertCueDurationMs, "900");
     assert.equal(driver.voiceAfterCueDelayMs, "200");
   }
+});
+
+test("background connectivity stays silent and does not emit generic shift notifications", () => {
+  const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
+  const notifications = readFileSync(resolve(javaRoot, "AppNotifications.java"), "utf8");
+  const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+
+  assert.match(notifications, /NotificationManager\.IMPORTANCE_LOW/);
+  assert.match(notifications, /foreground\.setSound\(null, null\)/);
+  assert.match(notifications, /foreground\.enableVibration\(false\)/);
+  assert.match(notifications, /\.setOnlyAlertOnce\(true\)[\s\S]*?\.setSilent\(true\)/);
+  assert.match(notifications, /\.setContentIntent\(openPendingIntent\)/);
+  assert.doesNotMatch(notifications, /Тест сигнала|ACTION_TEST_ALERT/);
+  assert.doesNotMatch(service, /На сервере появились новые данные смены/);
+  assert.doesNotMatch(service, /showOperationalAlert\(this,\s*"На сервере появились/);
 });
 
 test("driver profile packages every approved recorded dump-point phrase", () => {
