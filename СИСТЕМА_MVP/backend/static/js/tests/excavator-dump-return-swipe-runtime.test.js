@@ -107,18 +107,33 @@ test("direct return resolves the explicitly marked newest truck and submits once
 });
 
 test("successful swipe restarts and clears the dump-card rebound", () => {
+    const releaseSource = extractBraceBlock(
+        templateSource,
+        "function setDumpReturnReleaseVector",
+        "dump return release vector"
+    );
+    const clearSource = extractBraceBlock(
+        templateSource,
+        "function clearDumpReturnReleaseVector",
+        "dump return release cleanup"
+    );
     const reboundSource = extractBraceBlock(
         templateSource,
         "function playDumpReturnRebound",
         "dump return rebound"
     );
     const classes = new Set(["is-return-rebounding"]);
+    const properties = new Map();
     const timers = [];
     let layoutReads = 0;
     const target = {
         classList: {
             add(value) { classes.add(value); },
             remove(value) { classes.delete(value); },
+        },
+        style: {
+            setProperty(name, value) { properties.set(name, value); },
+            removeProperty(name) { properties.delete(name); },
         },
         get offsetWidth() {
             layoutReads += 1;
@@ -132,28 +147,81 @@ test("successful swipe restarts and clears the dump-card rebound", () => {
             },
         },
     };
-    vm.runInNewContext(`${reboundSource}; this.run = playDumpReturnRebound;`, context);
+    vm.runInNewContext(
+        `${releaseSource}\n${clearSource}\n${reboundSource}; this.run = playDumpReturnRebound;`,
+        context
+    );
 
-    context.run(target);
+    context.run(target, {
+        elasticX: 28,
+        elasticY: -48,
+        elasticTilt: 2.5,
+        elasticStretchX: 1.04,
+        elasticStretchY: 1.09,
+    });
     assert.equal(layoutReads, 1);
     assert.equal(classes.has("is-return-rebounding"), true);
     assert.equal(timers.length, 1);
-    assert.equal(timers[0].delay, 620);
+    assert.equal(timers[0].delay, 860);
+    assert.equal(properties.get("--eo-return-release-x"), "28.00px");
+    assert.equal(properties.get("--eo-return-release-y"), "-48.00px");
+    assert.equal(properties.get("--eo-return-bounce-1-y"), "13.44px");
 
     timers[0].callback();
     assert.equal(classes.has("is-return-rebounding"), false);
+    assert.equal(properties.has("--eo-return-release-x"), false);
+});
+
+test("the whole dump zone follows the finger with visible rubber resistance in every direction", () => {
+    const rubberSource = extractBraceBlock(
+        templateSource,
+        "function rubberBandDumpReturnOffset",
+        "rubber-band offset"
+    );
+    const updateSource = extractBraceBlock(
+        templateSource,
+        "function updateDumpReturnElastic",
+        "elastic dump update"
+    );
+    const properties = new Map();
+    const target = {
+        style: {
+            setProperty(name, value) { properties.set(name, value); },
+        },
+    };
+    const context = {Math, Number};
+    vm.runInNewContext(
+        `${rubberSource}\n${updateSource}; this.update = updateDumpReturnElastic;`,
+        context
+    );
+
+    const swipe = {deltaX: 64, deltaY: -64};
+    context.update(target, swipe);
+    assert.ok(swipe.elasticX > 35, "horizontal zone travel must be clearly visible");
+    assert.ok(swipe.elasticY < -48, "upward zone travel must be clearly visible");
+    assert.equal(properties.get("--eo-return-origin-x"), "0%");
+    assert.equal(properties.get("--eo-return-origin-y"), "100%");
+    assert.match(properties.get("--eo-return-anchor-x"), /^-\d/);
+    assert.match(properties.get("--eo-return-anchor-y"), /^\d/);
+
+    const oppositeSwipe = {deltaX: -48, deltaY: 48};
+    context.update(target, oppositeSwipe);
+    assert.ok(oppositeSwipe.elasticX < -25);
+    assert.ok(oppositeSwipe.elasticY > 35);
+    assert.equal(properties.get("--eo-return-origin-x"), "100%");
+    assert.equal(properties.get("--eo-return-origin-y"), "0%");
 });
 
 test("gesture, fallback queue and realtime safety contracts stay wired", () => {
     assert.match(templateSource, /target\.addEventListener\("pointerup"[\s\S]*returnLastTruckFromDump\(target\)/);
-    assert.match(templateSource, /target\.addEventListener\("pointerup"[\s\S]*playDumpReturnRebound\(target\)[\s\S]*returnLastTruckFromDump\(target\)/);
+    assert.match(templateSource, /target\.addEventListener\("pointerup"[\s\S]*playDumpReturnRebound\(target, releasedSwipe\)[\s\S]*returnLastTruckFromDump\(target\)/);
     assert.match(templateSource, /window\.setTimeout\(function \(\) \{[\s\S]*openDumpQueueModal\(target\)[\s\S]*\}, 560\)/);
     assert.match(templateSource, /\.eo-dashboard-unload-card\.is-return-swiping/);
-    assert.match(shiftCss, /\.eo-dashboard-unload-card\.is-return-swiping[\s\S]*--eo-return-swipe-progress[\s\S]*-14px/);
-    assert.match(shiftCss, /\.eo-dashboard-unload-card\.is-return-rebounding[\s\S]*animation: eo-dump-return-rebound \.58s/);
-    assert.match(shiftCss, /@keyframes eo-dump-return-rebound[\s\S]*translate3d\(0, 3px[\s\S]*translate3d\(0, -5px[\s\S]*translate3d\(0, 1\.5px[\s\S]*translate3d\(0, -2px/);
+    assert.match(shiftCss, /\.eo-dashboard-unload-card\.is-return-swiping[\s\S]*--eo-return-drag-x[\s\S]*--eo-return-drag-y[\s\S]*scaleX\(var\(--eo-return-stretch-x\)\)/);
+    assert.match(shiftCss, /\.eo-dashboard-unload-card\.is-return-rebounding[\s\S]*animation: eo-dump-return-rebound \.82s/);
+    assert.match(shiftCss, /@keyframes eo-dump-return-rebound[\s\S]*--eo-return-bounce-1-x[\s\S]*--eo-return-bounce-2-x[\s\S]*--eo-return-bounce-3-x[\s\S]*--eo-return-bounce-4-x/);
     assert.match(templateSource, /\.eo-dashboard-unload-card\.is-return-pending/);
-    assert.match(shiftCss, /touch-action: pan-x !important;/);
+    assert.match(shiftCss, /data-eo-has-pending-trucks="true"[\s\S]*touch-action: none !important;/);
     assert.match(shiftCss, /\[data-eo-last-sent-truck="true"\]/);
     assert.match(shiftCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.is-return-rebounding[\s\S]*animation: none !important/);
 });
