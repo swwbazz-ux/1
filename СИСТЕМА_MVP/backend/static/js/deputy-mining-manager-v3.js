@@ -51,6 +51,11 @@
         payload.temporary_transfer = payload.temporary_transfer || {};
         payload.categories = Array.isArray(payload.categories) ? payload.categories : [];
         payload.employees = Array.isArray(payload.employees) ? payload.employees : [];
+        payload.employees.forEach(function (employee) {
+            employee.eligible_positions = Array.isArray(employee.eligible_positions)
+                ? employee.eligible_positions
+                : ["primary"];
+        });
         payload.rows = Array.isArray(payload.rows) ? payload.rows : [];
         payload.temporary_transfer.candidates = Array.isArray(payload.temporary_transfer.candidates)
             ? payload.temporary_transfer.candidates
@@ -85,6 +90,9 @@
     var temporaryTransferOpenButton = root.querySelector("[data-temporary-transfer-open]");
     var candidateDialog = document.querySelector("[data-candidate-dialog]");
     var candidateContext = document.querySelector("[data-candidate-context]");
+    var candidateSearchInput = document.querySelector("[data-candidate-search]");
+    var candidateSearchClear = document.querySelector("[data-candidate-search-clear]");
+    var candidateCount = document.querySelector("[data-candidate-count]");
     var candidateList = document.querySelector("[data-candidate-list]");
     var clearSlotButton = document.querySelector("[data-clear-slot]");
     var photoDialog = document.querySelector("[data-photo-dialog]");
@@ -115,6 +123,10 @@
     var currentFilter = "all";
     var currentBrigade = "all";
     var currentSlot = null;
+    var candidateEmployees = [];
+    var activeEquipmentId = "";
+    var dragSourceEquipmentId = "";
+    var dragTargetEquipmentId = "";
     var saving = false;
     var toastTimer = null;
     var dragPayload = null;
@@ -152,6 +164,57 @@
         return employeeName(employee).split(/\s+/).filter(Boolean).slice(0, 2).map(function (part) {
             return part.charAt(0);
         }).join("").toUpperCase() || "??";
+    }
+
+    function employeePresence(employee) {
+        var presence = employee && employee.presence && typeof employee.presence === "object"
+            ? employee.presence
+            : {};
+        var status = textValue(presence.status_code || presence.status) || "not_registered";
+        return {
+            status: status,
+            label: textValue(presence.status_label || presence.label) || "Не подключался",
+            lastSeenTime: textValue(presence.last_seen_time),
+            clientBadges: Array.isArray(presence.client_badges) ? presence.client_badges : []
+        };
+    }
+
+    function createPresenceBadge(employee) {
+        var presence = employeePresence(employee);
+        var wrapper = createElement("span", "application-presence is-compact deputy-presence");
+        wrapper.setAttribute("data-application-presence", presence.status);
+        wrapper.setAttribute("aria-label", "Приложение: " + presence.label);
+        wrapper.setAttribute("title", "Приложение: " + presence.label);
+
+        var line = createElement("span", "application-presence__line");
+        line.appendChild(createElement("i", "application-presence__dot is-" + presence.status));
+        line.appendChild(createElement("b", "is-" + presence.status, presence.label));
+        if (presence.lastSeenTime) {
+            line.appendChild(createElement("time", "", presence.lastSeenTime));
+        }
+        wrapper.appendChild(line);
+
+        if (presence.clientBadges.length) {
+            var clients = createElement(
+                "small",
+                "application-presence__clients admin-live-client-badges"
+            );
+            clients.setAttribute("aria-label", "Вариант приложения");
+            presence.clientBadges.forEach(function (client) {
+                var label = textValue(client.label) || "Приложение";
+                if (presence.clientBadges.length > 1 && client.app_label) {
+                    label = textValue(client.app_label) + " · " + label;
+                }
+                if (client.version) label += " · " + textValue(client.version);
+                clients.appendChild(createElement(
+                    "em",
+                    "application-presence__client admin-live-client-badge is-" + textValue(client.kind),
+                    label
+                ));
+            });
+            wrapper.appendChild(clients);
+        }
+        return wrapper;
     }
 
     function normalizeSearch(value) {
@@ -232,6 +295,7 @@
         var ranks = [equipmentSearchRank(row, query)];
         (row.slots || []).forEach(function (slot) {
             if (slot.employee) ranks.push(employeeSearchRank(slot.employee, query));
+            if (slot.secondary_employee) ranks.push(employeeSearchRank(slot.secondary_employee, query));
         });
         ranks = ranks.filter(function (rank) { return rank !== null; });
         return ranks.length ? Math.min.apply(Math, ranks) : null;
@@ -279,13 +343,75 @@
         }
     }
 
-    function closeDialog(dialog) {
+    function closeDialog(dialog, options) {
         if (!dialog) return;
+        var preserveEquipmentActive = Boolean(options && options.preserveEquipmentActive);
+        var candidateWasOpen = dialog === candidateDialog && Boolean(dialog.open || dialog.hasAttribute("open"));
+        if (dialog === candidateDialog) {
+            if (preserveEquipmentActive) {
+                dialog.setAttribute("data-preserve-equipment-active", "true");
+            } else {
+                dialog.removeAttribute("data-preserve-equipment-active");
+            }
+        }
         if (typeof dialog.close === "function" && dialog.open) {
             dialog.close();
         } else {
             dialog.removeAttribute("open");
         }
+        if (candidateWasOpen && !preserveEquipmentActive) clearActiveEquipmentRow();
+    }
+
+    function equipmentRowId(row) {
+        return textValue(row && row.equipment && row.equipment.id);
+    }
+
+    function syncEquipmentRowStates() {
+        if (!board) return;
+        Array.prototype.slice.call(board.querySelectorAll(".deputy-equipment-row")).forEach(function (rowNode) {
+            var rowId = textValue(rowNode.getAttribute("data-equipment-id"));
+            var isActive = Boolean(activeEquipmentId) && rowId === activeEquipmentId;
+            var isDragSource = Boolean(dragSourceEquipmentId) && rowId === dragSourceEquipmentId;
+            var isDropTarget = Boolean(dragTargetEquipmentId) && rowId === dragTargetEquipmentId;
+            var interactionLabel = isDropTarget ? "Сюда" : (isDragSource ? "Отсюда" : (isActive ? "Выбрано" : ""));
+            var stateBadge = rowNode.querySelector(".deputy-equipment-state");
+            rowNode.classList.toggle("is-active-equipment", isActive);
+            rowNode.classList.toggle("is-drag-source", isDragSource);
+            rowNode.classList.toggle("is-drop-target", isDropTarget);
+            if (isActive) {
+                rowNode.setAttribute("aria-current", "true");
+            } else {
+                rowNode.removeAttribute("aria-current");
+            }
+            if (stateBadge) {
+                stateBadge.textContent = interactionLabel || "Выбрано";
+                stateBadge.classList.toggle("is-visible", Boolean(interactionLabel));
+            }
+        });
+    }
+
+    function setActiveEquipmentRow(row) {
+        activeEquipmentId = equipmentRowId(row);
+        syncEquipmentRowStates();
+    }
+
+    function clearActiveEquipmentRow() {
+        if (!activeEquipmentId) return;
+        activeEquipmentId = "";
+        syncEquipmentRowStates();
+    }
+
+    function setDragTargetEquipmentRow(row) {
+        var nextId = equipmentRowId(row);
+        if (dragTargetEquipmentId === nextId) return;
+        dragTargetEquipmentId = nextId;
+        syncEquipmentRowStates();
+    }
+
+    function clearDragTargetEquipmentRow(row) {
+        if (row && dragTargetEquipmentId !== equipmentRowId(row)) return;
+        dragTargetEquipmentId = "";
+        syncEquipmentRowStates();
     }
 
     function temporaryTransferData() {
@@ -457,8 +583,16 @@
         var assignment = employee && employee.assignment && typeof employee.assignment === "object" ? employee.assignment : {};
         return {
             source_equipment_id: employee && (employee.source_equipment_id || assignment.equipment_id) || null,
-            source_shift_type: employee && (employee.source_shift_type || assignment.shift_type) || null
+            source_shift_type: employee && (employee.source_shift_type || assignment.shift_type) || null,
+            source_position: employee && employee.source_position || null
         };
+    }
+
+    function employeeCanFillPosition(employee, position) {
+        var positions = employee && Array.isArray(employee.eligible_positions)
+            ? employee.eligible_positions
+            : ["primary"];
+        return positions.indexOf(position) !== -1;
     }
 
     function openPhoto(employee) {
@@ -532,6 +666,17 @@
         }
         appendRecordField("Назначение", assignmentLabel || "Свободен");
         appendRecordField("Статус", employee.status_label || "Активен");
+        var presence = employeePresence(employee);
+        appendRecordField("Связь с приложением", presence.label);
+        if (presence.clientBadges.length) {
+            appendRecordField(
+                "Вариант приложения",
+                presence.clientBadges.map(function (client) {
+                    return (textValue(client.label) || "Приложение")
+                        + (client.version ? " · " + textValue(client.version) : "");
+                }).join(", ")
+            );
+        }
         openDialog(recordDialog);
     }
 
@@ -553,6 +698,10 @@
         appendRecordField("Принадлежность", equipment.ownership_label || "Не указана");
         (row.slots || []).forEach(function (slot) {
             appendRecordField(slot.label || "Смена", slot.employee ? employeeName(slot.employee) : "Не назначен");
+            appendRecordField(
+                (slot.label || "Смена") + " · " + (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник"),
+                slot.secondary_employee ? employeeName(slot.secondary_employee) : "Не назначен"
+            );
         });
         openDialog(recordDialog);
     }
@@ -641,6 +790,9 @@
             node.classList.remove("is-dragging");
         });
         clearDropHighlights();
+        dragSourceEquipmentId = "";
+        dragTargetEquipmentId = "";
+        syncEquipmentRowStates();
         removeDragPreview();
         dragPayload = null;
     }
@@ -652,6 +804,7 @@
         var main = createElement("span", "deputy-employee-main");
         main.appendChild(createElement("strong", "", employeeName(employee)));
         main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
+        main.appendChild(createPresenceBadge(employee));
         preview.appendChild(main);
         applyDragPreviewTheme(preview);
         document.body.appendChild(preview);
@@ -679,8 +832,11 @@
             dragPayload = {
                 employeeId: employee.id,
                 sourceEquipmentId: source.source_equipment_id,
-                sourceShiftType: source.source_shift_type
+                sourceShiftType: source.source_shift_type,
+                sourcePosition: source.source_position
             };
+            dragSourceEquipmentId = textValue(source.source_equipment_id);
+            syncEquipmentRowStates();
             visual.classList.add("is-dragging");
             if (event.dataTransfer) {
                 event.dataTransfer.effectAllowed = "move";
@@ -703,6 +859,7 @@
         main.appendChild(createElement("strong", "", employeeName(employee)));
         main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
         card.appendChild(main);
+        card.appendChild(createPresenceBadge(employee));
         card.appendChild(createElement("span", "deputy-drag-mark", "⠿"));
         bindDragSource(card, employee);
         card.addEventListener("dblclick", function (event) {
@@ -747,11 +904,15 @@
     }
 
     function rowHasConflict(row) {
-        return Boolean(row.conflict || (row.slots || []).some(function (slot) { return slot.conflict; }));
+        return Boolean(row.conflict || (row.slots || []).some(function (slot) {
+            return slot.conflict || slot.secondary_conflict;
+        }));
     }
 
     function rowHasChanged(row) {
-        return Boolean(row.changed || (row.slots || []).some(function (slot) { return slot.changed; }));
+        return Boolean(row.changed || (row.slots || []).some(function (slot) {
+            return slot.changed || slot.secondary_changed;
+        }));
     }
 
     function rowIsUnfilled(row) {
@@ -759,7 +920,9 @@
     }
 
     function rowIsAssigned(row) {
-        return (row.slots || []).some(function (slot) { return Boolean(slot.employee); });
+        return (row.slots || []).some(function (slot) {
+            return Boolean(slot.employee || slot.secondary_employee);
+        });
     }
 
     function rowMatchesFilter(row) {
@@ -799,6 +962,9 @@
         var main = createElement("span", "deputy-equipment-main");
         main.appendChild(createElement("strong", "", equipment.label || "Техника"));
         if (equipment.model_label) main.appendChild(createElement("small", "", equipment.model_label));
+        var stateBadge = createElement("span", "deputy-equipment-state", "Выбрано");
+        stateBadge.setAttribute("aria-hidden", "true");
+        main.appendChild(stateBadge);
         var issue = attentionLabel(row);
         var status = textValue(equipment.status_label);
         var note = issue || (!neutralStatus(status) ? status : "");
@@ -819,33 +985,19 @@
         return wrapper;
     }
 
-    function openCandidatePicker(row, slot) {
-        if (!planEditable() || saving || !candidateDialog || !candidateList) return;
-        currentSlot = { row: row, slot: slot };
-        if (candidateContext) {
-            candidateContext.textContent = [row.equipment && row.equipment.label, slot.label]
-                .filter(Boolean).join(" · ");
-        }
+    function renderCandidatePicker() {
+        if (!candidateList || !currentSlot) return;
+        var query = normalizeSearch(candidateSearchInput && candidateSearchInput.value);
+        var candidates = rankedEmployeeMatches(candidateEmployees, query).map(function (match) {
+            return match.employee;
+        });
         candidateList.replaceChildren();
-        var candidatesById = new Map();
-        state.employees.forEach(function (employee) {
-            candidatesById.set(textValue(employee.id), employee);
-        });
-        state.rows.forEach(function (candidateRow) {
-            (candidateRow.slots || []).forEach(function (candidateSlot) {
-                if (!candidateSlot.employee) return;
-                var assignedEmployee = Object.assign({}, candidateSlot.employee, {
-                    source_equipment_id: candidateRow.equipment && candidateRow.equipment.id,
-                    source_shift_type: candidateSlot.shift_type,
-                    assigned_label: [candidateRow.equipment && candidateRow.equipment.label, candidateSlot.label]
-                        .filter(Boolean).join(" · ")
-                });
-                candidatesById.set(textValue(assignedEmployee.id), assignedEmployee);
-            });
-        });
-        var candidates = Array.from(candidatesById.values()).filter(employeeMatchesBrigade).sort(function (left, right) {
-            return employeeName(left).localeCompare(employeeName(right), "ru");
-        });
+        if (candidateCount) {
+            candidateCount.textContent = query
+                ? "Найдено: " + candidates.length + " из " + candidateEmployees.length
+                : "Кандидатов: " + candidateEmployees.length;
+        }
+        if (candidateSearchClear) candidateSearchClear.hidden = !query;
         candidates.forEach(function (employee) {
             var button = createElement("button", "deputy-candidate");
             button.type = "button";
@@ -855,22 +1007,96 @@
             main.appendChild(createElement("strong", "", employeeName(employee)));
             main.appendChild(createElement("small", "", employee.busy_reason || employee.assigned_label || employeeMeta(employee) || "Сотрудник"));
             button.appendChild(main);
+            button.appendChild(createPresenceBadge(employee));
             button.addEventListener("click", function () {
                 var source = sourceForEmployee(employee);
-                closeDialog(candidateDialog);
-                saveSlot(row, slot, employee.id, source);
+                var target = currentSlot;
+                closeDialog(candidateDialog, { preserveEquipmentActive: true });
+                setActiveEquipmentRow(target.row);
+                saveSlot(target.row, target.slot, employee.id, source, target.position);
             });
             candidateList.appendChild(button);
         });
         if (!candidates.length) {
-            candidateList.appendChild(createElement(
-                "p",
-                "deputy-empty-state",
-                currentBrigade === "all" ? "Свободных сотрудников нет." : "В бригаде " + currentBrigade + " подходящих сотрудников нет."
-            ));
+            var emptyMessage;
+            if (query) {
+                emptyMessage = "По вашему запросу сотрудники не найдены.";
+            } else {
+                emptyMessage = currentBrigade === "all"
+                    ? "Свободных сотрудников нет."
+                    : "В бригаде " + currentBrigade + " подходящих сотрудников нет.";
+            }
+            candidateList.appendChild(createElement("p", "deputy-empty-state", emptyMessage));
         }
-        if (clearSlotButton) clearSlotButton.hidden = !slot.employee;
+        candidateList.scrollTop = 0;
+    }
+
+    function clearCandidateSearch(restoreFocus) {
+        if (!candidateSearchInput) return;
+        candidateSearchInput.value = "";
+        renderCandidatePicker();
+        if (restoreFocus && typeof candidateSearchInput.focus === "function") {
+            candidateSearchInput.focus({ preventScroll: true });
+        }
+    }
+
+    function focusFirstCandidate() {
+        if (!candidateList) return false;
+        var candidate = Array.prototype.slice.call(candidateList.querySelectorAll(".deputy-candidate"))
+            .find(function (item) { return !item.disabled; });
+        if (!candidate || typeof candidate.focus !== "function") return false;
+        candidate.focus({ preventScroll: true });
+        return true;
+    }
+
+    function openCandidatePicker(row, slot, position) {
+        if (!planEditable() || saving || !candidateDialog || !candidateList) return;
+        position = position === "secondary" ? "secondary" : "primary";
+        var employeeKey = position === "secondary" ? "secondary_employee" : "employee";
+        var positionLabel = position === "secondary"
+            ? (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник")
+            : (state.role.code === "driver" ? "Водитель" : "Машинист");
+        currentSlot = { row: row, slot: slot, position: position };
+        setActiveEquipmentRow(row);
+        if (candidateContext) {
+            candidateContext.textContent = [row.equipment && row.equipment.label, slot.label, positionLabel]
+                .filter(Boolean).join(" · ");
+        }
+        var candidatesById = new Map();
+        state.employees.filter(function (employee) {
+            return employeeCanFillPosition(employee, position);
+        }).forEach(function (employee) {
+            candidatesById.set(textValue(employee.id), employee);
+        });
+        state.rows.forEach(function (candidateRow) {
+            (candidateRow.slots || []).forEach(function (candidateSlot) {
+                [
+                    { key: "employee", position: "primary", label: state.role.code === "driver" ? "Водитель" : "Машинист" },
+                    { key: "secondary_employee", position: "secondary", label: candidateSlot.secondary_label || state.secondary_employee_label }
+                ].forEach(function (assignment) {
+                    var assigned = candidateSlot[assignment.key];
+                    if (!assigned || !employeeCanFillPosition(assigned, position)) return;
+                    var assignedEmployee = Object.assign({}, assigned, {
+                        source_equipment_id: candidateRow.equipment && candidateRow.equipment.id,
+                        source_shift_type: candidateSlot.shift_type,
+                        source_position: assignment.position,
+                        assigned_label: [candidateRow.equipment && candidateRow.equipment.label, candidateSlot.label, assignment.label]
+                            .filter(Boolean).join(" · ")
+                    });
+                    candidatesById.set(textValue(assignedEmployee.id), assignedEmployee);
+                });
+            });
+        });
+        candidateEmployees = Array.from(candidatesById.values()).filter(employeeMatchesBrigade);
+        if (candidateSearchInput) candidateSearchInput.value = "";
+        renderCandidatePicker();
+        if (clearSlotButton) clearSlotButton.hidden = !slot[employeeKey];
         openDialog(candidateDialog);
+        var coarseMobilePointer = window.matchMedia
+            && window.matchMedia("(max-width: 720px) and (pointer: coarse)").matches;
+        if (candidateSearchInput && !coarseMobilePointer && typeof candidateSearchInput.focus === "function") {
+            candidateSearchInput.focus({ preventScroll: true });
+        }
     }
 
     function dropPayloadFromEvent(event) {
@@ -886,11 +1112,12 @@
         return {
             employeeId: payload.employeeId || payload.employee_id || null,
             sourceEquipmentId: payload.sourceEquipmentId || payload.source_equipment_id || null,
-            sourceShiftType: payload.sourceShiftType || payload.source_shift_type || null
+            sourceShiftType: payload.sourceShiftType || payload.source_shift_type || null,
+            sourcePosition: payload.sourcePosition || payload.source_position || null
         };
     }
 
-    function findSlot(equipmentId, shiftType) {
+    function findSlot(equipmentId, shiftType, position) {
         var matched = null;
         state.rows.some(function (row) {
             if (textValue(row.equipment && row.equipment.id) !== textValue(equipmentId)) return false;
@@ -898,47 +1125,59 @@
                 return textValue(candidate.shift_type) === textValue(shiftType);
             });
             if (!slot) return false;
-            matched = { row: row, slot: slot };
+            matched = { row: row, slot: slot, position: position === "secondary" ? "secondary" : "primary" };
             return true;
         });
         return matched;
     }
 
-    function createSlot(row, slot) {
-        var button = createElement("div", "deputy-slot");
+    function createCrewPosition(row, slot, position) {
+        var isSecondary = position === "secondary";
+        var employeeKey = isSecondary ? "secondary_employee" : "employee";
+        var employee = slot[employeeKey];
+        var changed = isSecondary ? slot.secondary_changed : slot.changed;
+        var conflict = isSecondary ? slot.secondary_conflict : slot.conflict;
+        var issue = isSecondary ? slot.secondary_issue : slot.issue;
+        var positionLabel = isSecondary
+            ? (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник")
+            : (state.role.code === "driver" ? "Водитель" : "Машинист");
+        var button = createElement("div", "deputy-crew-position is-" + position);
         button.classList.toggle("is-disabled", !planEditable());
-        button.classList.toggle("has-employee", Boolean(slot.employee));
-        button.classList.toggle("has-conflict", Boolean(slot.conflict));
+        button.classList.toggle("has-employee", Boolean(employee));
+        button.classList.toggle("has-conflict", Boolean(conflict));
+        button.appendChild(createElement("span", "deputy-crew-position-label", positionLabel));
 
-        if (slot.employee) {
+        if (employee) {
             button.title = "Двойной клик — открыть карточку сотрудника";
-            button.appendChild(createAvatar(slot.employee));
+            button.appendChild(createAvatar(employee));
             var person = createElement("button", "deputy-slot-person");
             person.type = "button";
-            person.setAttribute("aria-label", "Открыть карточку сотрудника: " + employeeName(slot.employee));
+            person.setAttribute("aria-label", "Открыть карточку сотрудника: " + employeeName(employee));
             var main = createElement("span", "deputy-employee-main");
-            main.appendChild(createElement("strong", "", employeeName(slot.employee)));
-            main.appendChild(createElement("small", "", employeeMeta(slot.employee) || slot.label || "Назначен"));
+            main.appendChild(createElement("strong", "", employeeName(employee)));
+            main.appendChild(createElement("small", "", employeeMeta(employee) || positionLabel));
             person.appendChild(main);
             var flags = createElement("span", "deputy-slot-flags");
-            if (slot.changed) flags.appendChild(createElement("span", "deputy-slot-flag", "ИЗМ"));
-            if (slot.conflict) flags.appendChild(createElement("span", "deputy-slot-flag is-conflict", "!"));
+            flags.appendChild(createPresenceBadge(employee));
+            if (changed) flags.appendChild(createElement("span", "deputy-slot-flag", "ИЗМ"));
+            if (conflict) flags.appendChild(createElement("span", "deputy-slot-flag is-conflict", "!"));
             person.appendChild(flags);
             button.appendChild(person);
-            bindDragSource(person, Object.assign({}, slot.employee, {
+            bindDragSource(person, Object.assign({}, employee, {
                 source_equipment_id: row.equipment && row.equipment.id,
-                source_shift_type: slot.shift_type
+                source_shift_type: slot.shift_type,
+                source_position: position
             }), button);
             person.title = "Двойной клик — открыть карточку сотрудника";
             person.addEventListener("click", function (event) {
                 if (event.detail === 0) {
-                    openEmployeeRecord(slot.employee, [row.equipment && row.equipment.label, slot.label].filter(Boolean).join(" · "));
+                    openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
                 }
             });
             person.addEventListener("dblclick", function (event) {
                 event.preventDefault();
                 event.stopPropagation();
-                openEmployeeRecord(slot.employee, [row.equipment && row.equipment.label, slot.label].filter(Boolean).join(" · "));
+                openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
             });
             if (planEditable()) {
                 var editButton = createElement("button", "deputy-slot-edit", "Сменить");
@@ -947,52 +1186,84 @@
                 editButton.addEventListener("click", function (event) {
                     event.preventDefault();
                     event.stopPropagation();
-                    openCandidatePicker(row, slot);
+                    openCandidatePicker(row, slot, position);
                 });
                 button.appendChild(editButton);
             }
             button.addEventListener("dblclick", function (event) {
                 event.preventDefault();
-                openEmployeeRecord(slot.employee, [row.equipment && row.equipment.label, slot.label].filter(Boolean).join(" · "));
+                openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
             });
         } else {
-            var emptyAction = createElement("button", "deputy-slot-empty", "Назначить");
+            var emptyAction = createElement("button", "deputy-slot-empty", isSecondary ? "Добавить" : "Назначить");
             emptyAction.type = "button";
             emptyAction.disabled = !planEditable();
-            emptyAction.setAttribute("aria-label", "Назначить сотрудника: " + textValue(slot.label));
+            emptyAction.setAttribute("aria-label", "Назначить сотрудника: " + textValue(slot.label) + " · " + positionLabel);
             emptyAction.addEventListener("click", function () {
-                openCandidatePicker(row, slot);
+                openCandidatePicker(row, slot, position);
             });
             button.appendChild(emptyAction);
         }
-        if (slot.issue) button.appendChild(createElement("span", "deputy-slot-issue", slot.issue));
+        if (issue) button.appendChild(createElement("span", "deputy-slot-issue", issue));
         button.addEventListener("dragover", function (event) {
             if (!planEditable() || saving) return;
             event.preventDefault();
             button.classList.add("is-drag-over");
+            setActiveEquipmentRow(row);
+            setDragTargetEquipmentRow(row);
             if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
         });
         button.addEventListener("dragleave", function () {
             button.classList.remove("is-drag-over");
+            clearDragTargetEquipmentRow(row);
         });
         button.addEventListener("drop", function (event) {
             if (!planEditable() || saving) return;
             event.preventDefault();
             button.classList.remove("is-drag-over");
             var payload = dropPayloadFromEvent(event);
-            if (!payload || !payload.employeeId) return;
+            if (!payload || !payload.employeeId) {
+                finishDrag();
+                return;
+            }
+            var employee = state.employees.concat(
+                state.rows.reduce(function (items, candidateRow) {
+                    (candidateRow.slots || []).forEach(function (candidateSlot) {
+                        if (candidateSlot.employee) items.push(candidateSlot.employee);
+                        if (candidateSlot.secondary_employee) items.push(candidateSlot.secondary_employee);
+                    });
+                    return items;
+                }, [])
+            ).find(function (candidate) {
+                return textValue(candidate.id) === textValue(payload.employeeId);
+            });
+            if (employee && !employeeCanFillPosition(employee, position)) {
+                finishDrag();
+                return;
+            }
             if (
                 textValue(payload.sourceEquipmentId) === textValue(row.equipment && row.equipment.id)
                 && textValue(payload.sourceShiftType) === textValue(slot.shift_type)
+                && textValue(payload.sourcePosition || "primary") === textValue(position)
             ) {
+                finishDrag();
                 return;
             }
+            finishDrag();
             saveSlot(row, slot, payload.employeeId, {
                 source_equipment_id: payload.sourceEquipmentId,
-                source_shift_type: payload.sourceShiftType
-            });
+                source_shift_type: payload.sourceShiftType,
+                source_position: payload.sourcePosition
+            }, position);
         });
         return button;
+    }
+
+    function createSlot(row, slot) {
+        var wrapper = createElement("div", "deputy-slot");
+        wrapper.appendChild(createCrewPosition(row, slot, "primary"));
+        wrapper.appendChild(createCrewPosition(row, slot, "secondary"));
+        return wrapper;
     }
 
     function renderBoard() {
@@ -1022,8 +1293,12 @@
         var tbody = document.createElement("tbody");
         rows.forEach(function (row) {
             var tr = document.createElement("tr");
+            tr.classList.add("deputy-equipment-row");
+            tr.setAttribute("data-equipment-id", equipmentRowId(row));
             tr.classList.toggle("has-attention", Boolean(row.attention || row.issue));
             tr.classList.toggle("has-conflict", rowHasConflict(row));
+            tr.addEventListener("pointerdown", function () { setActiveEquipmentRow(row); });
+            tr.addEventListener("focusin", function () { setActiveEquipmentRow(row); });
             var equipmentCell = document.createElement("td");
             equipmentCell.appendChild(createEquipmentCell(row));
             tr.appendChild(equipmentCell);
@@ -1041,6 +1316,7 @@
         });
         table.appendChild(tbody);
         board.appendChild(table);
+        syncEquipmentRowStates();
     }
 
     function updatePublishButton() {
@@ -1125,7 +1401,7 @@
         renderAll();
     }
 
-    async function saveSlot(row, slot, employeeId, source) {
+    async function saveSlot(row, slot, employeeId, source, position) {
         if (
             saving
             || !mutationAllowed()
@@ -1140,7 +1416,8 @@
             expected_version: state.plan.version,
             equipment_id: row.equipment && row.equipment.id,
             shift_type: slot.shift_type,
-            employee_id: employeeId === null ? null : employeeId
+            employee_id: employeeId === null ? null : employeeId,
+            position: position === "secondary" ? "secondary" : "primary"
         };
         if (source && source.source_equipment_id) body.source_equipment_id = source.source_equipment_id;
         if (source && source.source_shift_type) body.source_shift_type = source.source_shift_type;
@@ -1290,6 +1567,24 @@
             renderBoard();
         });
     }
+    if (candidateSearchInput) {
+        candidateSearchInput.addEventListener("input", renderCandidatePicker);
+        candidateSearchInput.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && normalizeSearch(candidateSearchInput.value)) {
+                event.preventDefault();
+                event.stopPropagation();
+                clearCandidateSearch(true);
+                return;
+            }
+            if (event.key !== "Enter" && event.key !== "ArrowDown") return;
+            if (focusFirstCandidate()) event.preventDefault();
+        });
+    }
+    if (candidateSearchClear) {
+        candidateSearchClear.addEventListener("click", function () {
+            clearCandidateSearch(true);
+        });
+    }
 
     if (employeePool) {
         employeePool.addEventListener("dragover", function (event) {
@@ -1317,7 +1612,7 @@
             if (!payload || !payload.sourceEquipmentId || !payload.sourceShiftType) return;
             event.preventDefault();
             employeePool.classList.remove("is-drag-over");
-            var source = findSlot(payload.sourceEquipmentId, payload.sourceShiftType);
+            var source = findSlot(payload.sourceEquipmentId, payload.sourceShiftType, payload.sourcePosition);
             if (!source) {
                 showNotice("Исходное назначение не найдено. Обновите данные и повторите действие.", {
                     title: "Назначение не изменено",
@@ -1326,7 +1621,7 @@
                 });
                 return;
             }
-            saveSlot(source.row, source.slot, null, null);
+            saveSlot(source.row, source.slot, null, null, source.position);
         });
     }
 
@@ -1349,8 +1644,10 @@
     if (clearSlotButton) {
         clearSlotButton.addEventListener("click", function () {
             if (!currentSlot) return;
-            closeDialog(candidateDialog);
-            saveSlot(currentSlot.row, currentSlot.slot, null, null);
+            var target = currentSlot;
+            closeDialog(candidateDialog, { preserveEquipmentActive: true });
+            setActiveEquipmentRow(target.row);
+            saveSlot(target.row, target.slot, null, null, target.position);
         });
     }
     if (publishButton) publishButton.addEventListener("click", openPublishConfirmation);
@@ -1388,6 +1685,13 @@
         });
     }
     if (candidateDialog) {
+        candidateDialog.addEventListener("close", function () {
+            if (candidateDialog.hasAttribute("data-preserve-equipment-active")) {
+                candidateDialog.removeAttribute("data-preserve-equipment-active");
+                return;
+            }
+            clearActiveEquipmentRow();
+        });
         candidateDialog.addEventListener("click", function (event) {
             if (event.target === candidateDialog) closeDialog(candidateDialog);
         });
@@ -1406,6 +1710,22 @@
         if (event.key === "Escape" && photoDialog && photoDialog.open) closeDialog(photoDialog);
         if (event.key === "Escape" && notice && !notice.hidden) hideNotice();
     });
+    document.addEventListener("pointerdown", function (event) {
+        if (!event.target || typeof event.target.closest !== "function") return;
+        if (event.target.closest(".deputy-equipment-row")) return;
+        if (candidateDialog && candidateDialog.contains(event.target)) return;
+        if (recordDialog && recordDialog.contains(event.target)) return;
+        if (photoDialog && photoDialog.contains(event.target)) return;
+        clearActiveEquipmentRow();
+    });
+    document.addEventListener("focusin", function (event) {
+        if (!event.target || typeof event.target.closest !== "function") return;
+        if (event.target.closest(".deputy-equipment-row")) return;
+        if (candidateDialog && candidateDialog.contains(event.target)) return;
+        if (recordDialog && recordDialog.contains(event.target)) return;
+        if (photoDialog && photoDialog.contains(event.target)) return;
+        clearActiveEquipmentRow();
+    });
     document.addEventListener("dragover", moveDragPreview);
     document.addEventListener("drop", finishDrag);
 
@@ -1414,6 +1734,7 @@
             finishDrag();
             currentSlot = null;
             closeDialog(candidateDialog);
+            clearActiveEquipmentRow();
             closeDialog(publishDialog);
             closeDialog(temporaryTransferDialog);
         }
