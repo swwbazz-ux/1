@@ -12,9 +12,9 @@ from core.production_time import (
     production_shift_type,
     production_work_date,
 )
-
 from trips.models import Trip, TripStatus
 
+from .equipment_plan_groups import equipment_garage_number_int
 from .models import (
     EmployeeShift,
     EquipmentPlanGroup,
@@ -1019,10 +1019,38 @@ def excavator_fuel_limit(equipment):
     return Decimal(limit)
 
 
-def validate_excavator_shift_readings(equipment, fuel_value, engine_hours_value, *, opening_shift=None):
+def excavator_fuel_capacity_l(equipment):
+    garage_number = equipment_garage_number_int(equipment)
+    if garage_number in {1, 8}:
+        return Decimal('7450')
+    if garage_number in {2, 3, 4, 5, 6, 7}:
+        return Decimal('5700')
+    return Decimal('0')
+
+
+def excavator_fuel_liters_from_percent(equipment, percent_value):
+    percent = parse_required_shift_integer(percent_value, 'Топливо, %', 'fuel')
+    if percent > Decimal('100'):
+        raise ExcavatorShiftError(
+            'Топливо не может превышать 100%.',
+            field_errors={'fuel': 'Укажите значение от 0 до 100%.'},
+        )
+    capacity = excavator_fuel_capacity_l(equipment)
+    liters = (capacity * percent / Decimal('100')).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+    return liters, percent, capacity
+
+
+def validate_excavator_shift_readings(
+    equipment,
+    fuel_value,
+    engine_hours_value,
+    *,
+    opening_shift=None,
+    fuel_limit_override=None,
+):
     fuel = parse_required_shift_integer(fuel_value, 'Топливо', 'fuel')
     engine_hours = parse_required_shift_integer(engine_hours_value, 'Моточасы', 'engine_hours')
-    fuel_limit = excavator_fuel_limit(equipment)
+    fuel_limit = Decimal(fuel_limit_override) if fuel_limit_override is not None else excavator_fuel_limit(equipment)
     if fuel > fuel_limit:
         raise ExcavatorShiftError(
             f'Топливо не может превышать {int(fuel_limit)} л для модели этого экскаватора.',
@@ -1062,7 +1090,16 @@ def existing_shift_action_payload(action_type, client_action_id):
 
 
 @transaction.atomic
-def _open_excavator_shift_atomic(*, employee, equipment, shift_type, fuel_value, engine_hours_value, client_action_id):
+def _open_excavator_shift_atomic(
+    *,
+    employee,
+    equipment,
+    shift_type,
+    fuel_value,
+    engine_hours_value,
+    client_action_id,
+    fuel_limit_override=None,
+):
     from references.models import Equipment
 
     action_type = 'excavator_shift_opened'
@@ -1115,7 +1152,12 @@ def _open_excavator_shift_atomic(*, employee, equipment, shift_type, fuel_value,
             code='equipment_shift_already_open',
         )
 
-    fuel, engine_hours = validate_excavator_shift_readings(equipment, fuel_value, engine_hours_value)
+    fuel, engine_hours = validate_excavator_shift_readings(
+        equipment,
+        fuel_value,
+        engine_hours_value,
+        fuel_limit_override=fuel_limit_override,
+    )
     previous_shift = (
         EmployeeShift.objects.select_for_update(of=('self',))
         .filter(equipment=equipment, closed_at__isnull=False)
@@ -1207,7 +1249,16 @@ def _open_excavator_shift_atomic(*, employee, equipment, shift_type, fuel_value,
     return response
 
 
-def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_hours_value, client_action_id):
+def open_excavator_shift(
+    *,
+    employee,
+    equipment,
+    shift_type,
+    fuel_value,
+    engine_hours_value,
+    client_action_id,
+    fuel_limit_override=None,
+):
     try:
         return _open_excavator_shift_atomic(
             employee=employee,
@@ -1216,6 +1267,7 @@ def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_
             fuel_value=fuel_value,
             engine_hours_value=engine_hours_value,
             client_action_id=client_action_id,
+            fuel_limit_override=fuel_limit_override,
         )
     except IntegrityError as error:
         existing = existing_shift_action_payload(
@@ -1253,7 +1305,14 @@ def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_
 
 
 @transaction.atomic
-def close_excavator_shift(*, employee, fuel_value, engine_hours_value, client_action_id):
+def close_excavator_shift(
+    *,
+    employee,
+    fuel_value,
+    engine_hours_value,
+    client_action_id,
+    fuel_limit_override=None,
+):
     from references.models import Equipment
     from trips.models import OPEN_TRIP_STATUSES, Trip
     from users.models import Employee
@@ -1293,6 +1352,7 @@ def close_excavator_shift(*, employee, fuel_value, engine_hours_value, client_ac
         fuel_value,
         engine_hours_value,
         opening_shift=shift,
+        fuel_limit_override=fuel_limit_override,
     )
     shift.end_fuel = fuel
     shift.end_mileage = None

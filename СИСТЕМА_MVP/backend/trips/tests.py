@@ -950,11 +950,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v214')
+        self.assertContains(response, 'excavator-mobile-shell-v215')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 214')
+        self.assertContains(response, 'Версия 215')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
@@ -969,9 +969,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-mobile-shift-field="fuel"')
         self.assertContains(response, 'data-mobile-shift-field="fuel_limit"')
         self.assertContains(response, 'mobile-shift__field--reference')
-        self.assertContains(response, 'Лимит топлива')
-        self.assertContains(response, 'Для этой модели')
-        self.assertContains(response, '<strong>7000</strong><em>л</em>', html=True)
+        self.assertContains(response, 'Топливо в литрах')
+        self.assertContains(response, 'Бак 0 л')
+        self.assertContains(response, 'data-eo-shift-fuel-capacity="0"')
+        self.assertContains(response, 'data-eo-shift-fuel-liters')
+        self.assertContains(response, '<em>%</em>', html=True)
         self.assertContains(response, 'data-mobile-shift-field="engine_hours"')
         self.assertNotContains(response, 'data-mobile-shift-field="mileage"')
         self.assertNotContains(response, 'data-eo-shift-review')
@@ -2085,9 +2087,76 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(payload['calculation_mode'], 'volume_m3')
         self.assertEqual(payload['plan_value'], '4200.00')
 
+    def test_excavator_shift_percent_is_converted_and_saved_as_liters(self):
+        EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
+        self.excavator.garage_number = '1'
+        self.excavator.save(update_fields=['garage_number'])
+
+        screen = self.client.get(reverse('excavator_work'))
+        self.assertEqual(screen.context['shift_fuel_limit'], Decimal('7450'))
+        self.assertContains(screen, 'data-eo-shift-fuel-capacity="7450"')
+        self.assertContains(screen, 'Бак 7450 л')
+
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'open',
+                'client_action_id': 'shift-open-percent-73',
+                'fuel_percent': '73',
+                'fuel': '1',
+                'engine_hours': '1210',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        shift = EmployeeShift.objects.get(id=response.json()['shift_id'])
+        self.assertEqual(shift.start_fuel, Decimal('5439'))
+
+    def test_excavator_fuel_capacity_depends_on_garage_number(self):
+        expected_capacities = {
+            '1': Decimal('7450'),
+            '8': Decimal('7450'),
+            '2': Decimal('5700'),
+            '3': Decimal('5700'),
+            '4': Decimal('5700'),
+            '5': Decimal('5700'),
+            '6': Decimal('5700'),
+            '7': Decimal('5700'),
+            '9': Decimal('0'),
+            '99': Decimal('0'),
+        }
+        for garage_number, capacity in expected_capacities.items():
+            with self.subTest(garage_number=garage_number):
+                self.excavator.garage_number = garage_number
+                self.excavator.save(update_fields=['garage_number'])
+                response = self.client.get(reverse('excavator_work'))
+                self.assertEqual(response.context['shift_fuel_limit'], capacity)
+
+    def test_excavator_shift_percent_rejects_values_over_100(self):
+        EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
+        self.excavator.garage_number = '8'
+        self.excavator.save(update_fields=['garage_number'])
+
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'open',
+                'client_action_id': 'shift-open-percent-101',
+                'fuel_percent': '101',
+                'engine_hours': '1210',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['field_errors']['fuel'], 'Укажите значение от 0 до 100%.')
+
     def test_excavator_shift_open_inherits_previous_equipment_meter_values_when_blank(self):
+        self.excavator.garage_number = '2'
+        self.excavator.save(update_fields=['garage_number'])
         previous_shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
-        previous_shift.end_fuel = '87.50'
+        previous_shift.end_fuel = '4161.00'
         previous_shift.end_mileage = '1234.00'
         previous_shift.end_engine_hours = '1208.25'
         previous_shift.closed_at = timezone.now()
@@ -2103,7 +2172,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         screen = self.client.get(reverse('excavator_work'))
 
         self.assertEqual(screen.status_code, 200)
-        self.assertEqual(screen.context['shift_fuel_display'], '88')
+        self.assertEqual(screen.context['shift_fuel_display'], '73')
         self.assertEqual(screen.context['shift_engine_hours_display'], '1208')
 
         response = self.client.post(
@@ -2112,7 +2181,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
                 'action': 'open',
                 'client_action_id': 'shift-open-inherit-meters',
                 'excavator_id': self.excavator.id,
-                'fuel': '88',
+                'fuel_percent': '73',
                 'engine_hours': '1208',
             }),
             content_type='application/json',
@@ -2120,7 +2189,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         shift = EmployeeShift.objects.get(id=response.json()['shift_id'])
-        self.assertEqual(str(shift.start_fuel), '88.00')
+        self.assertEqual(str(shift.start_fuel), '4161.00')
         self.assertIsNone(shift.start_mileage)
         self.assertEqual(str(shift.start_engine_hours), '1208.00')
 
@@ -2594,7 +2663,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         ).read_text(encoding='utf-8')
         self.assertIn('.mobile-downtime.is-shift-inactive .mobile-downtime__reasons', downtime_css)
 
-    def test_excavator_shift_soft_block_keeps_button_pressable_for_feedback(self):
+    def test_excavator_shift_does_not_depend_on_model_fuel_limit(self):
         EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
         self.excavator_model.fuel_capacity_limit_l = None
         self.excavator_model.save(update_fields=['fuel_capacity_limit_l'])
@@ -2603,24 +2672,17 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         html = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.context['shift_action_block_message'],
-            'Для модели не настроен допустимый объём топлива.',
-        )
+        self.assertEqual(response.context['shift_action_block_message'], '')
+        self.assertEqual(response.context['shift_fuel_limit'], Decimal('0'))
         shift_marker_index = html.index('data-eo-shift-button')
         shift_tag = html[html.rfind('<button', 0, shift_marker_index):html.index('>', shift_marker_index) + 1]
         self.assertIn('data-eo-shift-action="open"', shift_tag)
-        self.assertIn('data-eo-shift-server-blocked="true"', shift_tag)
-        self.assertIn(
-            'data-eo-shift-block-message="Для модели не настроен допустимый объём топлива."',
-            shift_tag,
-        )
-        self.assertIn('aria-disabled="true"', shift_tag)
-        self.assertIn('aria-label="Для модели не настроен допустимый объём топлива."', shift_tag)
+        self.assertIn('data-eo-shift-server-blocked="false"', shift_tag)
+        self.assertNotIn('Для модели не настроен допустимый объём топлива.', html)
         self.assertNotIn(' disabled', shift_tag)
         self.assertContains(response, 'data-mobile-shift-field="fuel_limit"')
         self.assertContains(response, 'mobile-shift__field--reference')
-        self.assertContains(response, '<strong>—</strong><em>л</em>', html=True)
+        self.assertContains(response, 'Бак 0 л')
         self.assertContains(response, 'shiftButton.disabled = false;')
         self.assertContains(response, 'showExcavatorNotice(shiftBlockMessage || "Смена сейчас недоступна.");')
 
@@ -2694,7 +2756,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v214', script)
+        self.assertIn('excavator-mobile-shell-v215', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,

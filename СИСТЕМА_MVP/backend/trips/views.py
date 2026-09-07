@@ -63,6 +63,8 @@ from shifts.services import (
     calculate_truck_shift_progress,
     close_excavator_shift,
     equipment_is_truck,
+    excavator_fuel_capacity_l,
+    excavator_fuel_liters_from_percent,
     format_progress_percent,
     plan_status_label,
     progress_cycle_visual_context,
@@ -741,7 +743,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v214";
+const CACHE_NAME = "excavator-mobile-shell-v215";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -1097,6 +1099,20 @@ def format_whole_input_value(value):
     except (InvalidOperation, TypeError, ValueError):
         return str(value)
     return str(int(parsed.to_integral_value(rounding=ROUND_HALF_UP)))
+
+
+def excavator_fuel_percent_from_liters(value, capacity):
+    if value in {None, ''} or not capacity:
+        return ''
+    try:
+        liters = Decimal(value)
+        capacity_value = Decimal(capacity)
+    except (InvalidOperation, TypeError, ValueError):
+        return ''
+    if capacity_value <= 0:
+        return '0'
+    percent = (liters * Decimal('100') / capacity_value).to_integral_value(rounding=ROUND_HALF_UP)
+    return str(max(0, min(100, int(percent))))
 
 
 def format_whole_value_with_unit(value, unit):
@@ -4345,11 +4361,19 @@ def excavator_shift_action_view(request):
 
     try:
         if action == 'close':
+            fuel_value = payload.get('fuel')
+            fuel_limit_override = None
+            if 'fuel_percent' in payload and open_shift:
+                fuel_value, _, fuel_limit_override = excavator_fuel_liters_from_percent(
+                    open_shift.equipment,
+                    payload.get('fuel_percent'),
+                )
             response_payload = close_excavator_shift(
                 employee=access.employee,
-                fuel_value=payload.get('fuel'),
+                fuel_value=fuel_value,
                 engine_hours_value=payload.get('engine_hours'),
                 client_action_id=client_action_id,
+                fuel_limit_override=fuel_limit_override,
             )
             return JsonResponse(response_payload)
 
@@ -4357,13 +4381,21 @@ def excavator_shift_action_view(request):
         assignment_state = work_assignment_state(access.employee, work_assignment)
         if assignment_state not in {'assigned', 'assignment_conflict'}:
             return JsonResponse({'ok': False, 'error': work_assignment_error_message(assignment_state), 'assignment_state': assignment_state}, status=409)
+        fuel_value = payload.get('fuel')
+        fuel_limit_override = None
+        if 'fuel_percent' in payload:
+            fuel_value, _, fuel_limit_override = excavator_fuel_liters_from_percent(
+                work_assignment.equipment,
+                payload.get('fuel_percent'),
+            )
         response_payload = open_excavator_shift(
             employee=access.employee,
             equipment=work_assignment.equipment,
             shift_type=work_assignment.shift_type,
-            fuel_value=payload.get('fuel'),
+            fuel_value=fuel_value,
             engine_hours_value=payload.get('engine_hours'),
             client_action_id=client_action_id,
+            fuel_limit_override=fuel_limit_override,
         )
         return JsonResponse(response_payload)
     except ExcavatorShiftError as error:
@@ -4407,19 +4439,13 @@ def excavator_work_view(request):
             .order_by('-opened_at')
             .first()
         )
-    shift_fuel_limit = getattr(
-        getattr(shift_start_excavator, 'model', None),
-        'fuel_capacity_limit_l',
-        None,
-    )
+    shift_fuel_limit = excavator_fuel_capacity_l(shift_start_excavator) if shift_start_excavator else Decimal('0')
     shift_action_block_message = ''
     if not open_shift:
         if assignment_state != 'assigned':
             shift_action_block_message = work_assignment_error_message(assignment_state)
         elif equipment_open_shift:
             shift_action_block_message = 'Техника занята в другой смене.'
-        elif not shift_fuel_limit:
-            shift_action_block_message = 'Для модели не настроен допустимый объём топлива.'
     previous_equipment_shift = None if open_shift or equipment_open_shift else get_previous_closed_equipment_shift(shift_start_excavator)
 
     legacy_trip_client_action_id = (
@@ -5126,6 +5152,10 @@ def excavator_work_view(request):
             'shift_action_block_message': shift_action_block_message,
             'shift_previous_readings': bool(previous_equipment_shift),
             'shift_start_fuel_display': format_whole_input_value(open_shift.start_fuel if open_shift else None),
+            'shift_start_fuel_percent_display': excavator_fuel_percent_from_liters(
+                open_shift.start_fuel if open_shift else None,
+                shift_fuel_limit,
+            ),
             'shift_start_engine_hours_display': format_whole_input_value(open_shift.start_engine_hours if open_shift else None),
             'shift_plan_percent': shift_plan_percent,
             'shift_plan_visual': shift_plan_visual,
@@ -5139,8 +5169,9 @@ def excavator_work_view(request):
             'shift_fact_label': shift_fact_label,
             'shift_fact_value': shift_fact_value,
             'shift_fact_meta': shift_fact_meta,
-            'shift_fuel_display': format_whole_input_value(
-                open_shift.end_fuel if open_shift else getattr(previous_equipment_shift, 'end_fuel', None)
+            'shift_fuel_display': excavator_fuel_percent_from_liters(
+                open_shift.end_fuel if open_shift else getattr(previous_equipment_shift, 'end_fuel', None),
+                shift_fuel_limit,
             ),
             'shift_engine_hours_display': format_whole_input_value(
                 open_shift.end_engine_hours if open_shift else getattr(previous_equipment_shift, 'end_engine_hours', None)

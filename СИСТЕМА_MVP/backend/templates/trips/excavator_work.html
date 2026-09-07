@@ -6,15 +6,15 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v214">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v214">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v214">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v214">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v214">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v214">
-<link rel="stylesheet" href="{% static 'css/excavator-destination-distances-v1.css' %}?v=excavator-mobile-shell-v214">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v214" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v214" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v215">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v215">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v215">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v215">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v215">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v215">
+<link rel="stylesheet" href="{% static 'css/excavator-destination-distances-v1.css' %}?v=excavator-mobile-shell-v215">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v215" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v215" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -409,7 +409,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v214";
+var excavatorShellVersion = "excavator-mobile-shell-v215";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -887,6 +887,7 @@ window.initExcavatorWorkShell = function () {
     var shiftScroll = shell.querySelector("[data-eo-shift-scroll]");
     var shiftInputs = shell.querySelector("[data-eo-shift-inputs]");
     var shiftFuelInput = shell.querySelector("[data-eo-shift-fuel]");
+    var shiftFuelLiters = shell.querySelector("[data-eo-shift-fuel-liters]");
     var shiftHoursInput = shell.querySelector("[data-eo-shift-engine-hours]");
     var shiftFormError = shell.querySelector("[data-eo-shift-form-error]");
     var faceScreen = shell.querySelector('[data-eo-screen="face"]');
@@ -2980,15 +2981,30 @@ window.initExcavatorWorkShell = function () {
         });
     }
 
+    function calculatedShiftFuelLiters() {
+        var percent = parseShiftNumber(shiftFuelInput && shiftFuelInput.value);
+        var capacity = parseShiftNumber(shiftFuelInput && shiftFuelInput.dataset.eoFuelCapacity);
+        if (percent === null || Number.isNaN(percent) || capacity === null || Number.isNaN(capacity)) {
+            return null;
+        }
+        return Math.round(capacity * percent / 100);
+    }
+
+    function updateShiftFuelLiters() {
+        if (!shiftFuelLiters) return;
+        var liters = calculatedShiftFuelLiters();
+        shiftFuelLiters.textContent = liters === null ? "—" : String(liters);
+    }
+
     function validateShiftReadings(showErrors) {
         var errors = {};
         var fuel = parseShiftNumber(shiftFuelInput && shiftFuelInput.value);
         var hours = parseShiftNumber(shiftHoursInput && shiftHoursInput.value);
-        var fuelLimit = parseShiftNumber(shiftFuelInput && shiftFuelInput.dataset.eoFuelLimit);
         var startHours = parseShiftNumber(shiftHoursInput && shiftHoursInput.dataset.eoStartEngineHours);
         if (fuel === null || Number.isNaN(fuel)) errors.fuel = "Укажите корректное число.";
         else if (fuel < 0) errors.fuel = "Значение не может быть меньше нуля.";
-        else if (fuelLimit !== null && !Number.isNaN(fuelLimit) && fuel > fuelLimit) errors.fuel = "Максимум для этой модели: " + fuelLimit + " л.";
+        else if (!Number.isInteger(fuel)) errors.fuel = "Укажите целое количество процентов.";
+        else if (fuel > 100) errors.fuel = "Укажите значение от 0 до 100%.";
         if (hours === null || Number.isNaN(hours)) errors.engine_hours = "Укажите корректное число.";
         else if (hours < 0) errors.engine_hours = "Значение не может быть меньше нуля.";
         if (isShiftCloseAction() && !errors.engine_hours && startHours !== null && !Number.isNaN(startHours)) {
@@ -2999,7 +3015,7 @@ window.initExcavatorWorkShell = function () {
             if (Object.keys(errors).length) showShiftErrors("Проверьте показания.", errors);
             else clearShiftErrors();
         }
-        return { valid: Object.keys(errors).length === 0, fuel: fuel, hours: hours, startHours: startHours, errors: errors };
+        return { valid: Object.keys(errors).length === 0, fuel: fuel, fuelLiters: calculatedShiftFuelLiters(), hours: hours, startHours: startHours, errors: errors };
     }
 
     function updateShiftActionState() {
@@ -3027,10 +3043,12 @@ window.initExcavatorWorkShell = function () {
         input.addEventListener("input", function () {
             if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "true";
             clearShiftErrors();
+            updateShiftFuelLiters();
             updateShiftActionState();
         });
     });
 
+    updateShiftFuelLiters();
     updateShiftActionState();
 
     var shiftPendingActionKey = "";
@@ -3068,7 +3086,8 @@ window.initExcavatorWorkShell = function () {
             action: action,
             client_action_id: shiftPendingActionId,
             excavator_id: shell.dataset.eoShiftExcavatorId || shell.dataset.eoCurrentExcavatorId || "",
-            fuel: shell.querySelector("[data-eo-shift-fuel]") ? shell.querySelector("[data-eo-shift-fuel]").value : "",
+            fuel_percent: shell.querySelector("[data-eo-shift-fuel]") ? shell.querySelector("[data-eo-shift-fuel]").value : "",
+            fuel: validation.fuelLiters === null ? "" : String(validation.fuelLiters),
             engine_hours: shell.querySelector("[data-eo-shift-engine-hours]") ? shell.querySelector("[data-eo-shift-engine-hours]").value : ""
         };
         resetShiftHold();
