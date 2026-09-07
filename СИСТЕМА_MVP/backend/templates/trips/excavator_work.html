@@ -6,14 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v216">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v216">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v216">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v216">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v216">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v216">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v216" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v216" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v217">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v217">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v217">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v217">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v217">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v217">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v217" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v217" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -165,6 +165,7 @@
                                 data-eo-dashboard-truck
                                 data-assignment-id="{{ card.assignment.id }}"
                                 data-truck-id="{{ card.assignment.truck.id }}"
+                                data-eo-truck-number="{{ card.number }}"
                                 data-eo-truck-detail-id="{{ card.detail_card_id }}"
                                 data-eo-equipment-state="{{ card.equipment_state_code }}"
                                 data-eo-can-load="{% if open_shift and card.can_load %}1{% else %}0{% endif %}"
@@ -397,7 +398,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v216";
+var excavatorShellVersion = "excavator-mobile-shell-v217";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -470,13 +471,36 @@ function playExcavatorVoice(cue, voice, options) {
     });
 }
 
-function playExcavatorAssignmentAlert(voice, eventVersion) {
+function playExcavatorEquipmentVoice(action, equipmentNumber, options) {
+    options = options || {};
+    if (!window.MobileOperationalSounds || typeof window.MobileOperationalSounds.announceEquipment !== "function") {
+        return playExcavatorVoice(
+            String(options.cue || "truck_assigned"),
+            String(options.fallbackVoice || "voice_truck_assigned"),
+            options
+        );
+    }
+    return window.MobileOperationalSounds.announceEquipment({
+        cue: String(options.cue || "truck_assigned"),
+        action: String(action || ""),
+        equipmentNumber: String(equipmentNumber || ""),
+        dumpPointId: Number(options.dumpPointId || 0),
+        dumpPointName: String(options.dumpPointName || ""),
+        fallbackVoice: String(options.fallbackVoice || "voice_truck_assigned"),
+        eventVersion: Number(options.eventVersion || 0),
+        eventKey: String(options.eventKey || "")
+    });
+}
+
+function playExcavatorAssignmentAlert(action, truckNumber, voice, eventVersion) {
     if (navigator.vibrate) {
         try {
             navigator.vibrate([180, 90, 180]);
         } catch (error) {}
     }
-    playExcavatorVoice("truck_assigned", voice || "voice_truck_assigned", {
+    playExcavatorEquipmentVoice(action, truckNumber, {
+        cue: "truck_assigned",
+        fallbackVoice: voice || "voice_truck_assigned",
         eventVersion: Number(eventVersion || 0),
         eventKey: "excavator_operator_assignment"
     });
@@ -551,6 +575,8 @@ function announceExcavatorAssignmentChanges(previousSnapshot, nextSnapshot, even
         );
     }
     playExcavatorAssignmentAlert(
+        addedNumbers.length ? "excavator_truck_assigned" : "excavator_truck_removed",
+        addedNumbers.length ? addedNumbers[0] : removedNumbers[0],
         addedNumbers.length ? "voice_truck_assigned" : "voice_truck_removed",
         eventVersion
     );
@@ -2026,6 +2052,9 @@ window.initExcavatorWorkShell = function () {
         var snapshot = snapshotTruckCard(card);
         var optimisticBadge = null;
         var truckId = card.dataset.truckId || "";
+        var truckNumber = card.dataset.eoTruckNumber || (card.querySelector("strong") ? card.querySelector("strong").textContent.trim() : "");
+        var dumpPointId = Number(dumpTarget.dataset.eoDumpTarget || 0);
+        var dumpPointName = dumpTarget.dataset.eoDumpName || (dumpTarget.querySelector("strong") ? dumpTarget.querySelector("strong").textContent.trim() : "");
         var loadActionKey = [
             truckId,
             dumpTarget.dataset.eoDumpTarget || "",
@@ -2072,7 +2101,14 @@ window.initExcavatorWorkShell = function () {
                 return data;
             });
         }).then(function (data) {
-            playExcavatorVoice("action_ok", "voice_truck_sent");
+            playExcavatorEquipmentVoice("excavator_truck_sent", truckNumber, {
+                cue: "action_ok",
+                fallbackVoice: "voice_truck_sent",
+                dumpPointId: dumpPointId,
+                dumpPointName: dumpPointName,
+                eventVersion: Number(data.version || 0),
+                eventKey: "excavator_operator_truck_sent"
+            });
             delete card.dataset.eoLoadActionKey;
             delete card.dataset.eoLoadActionId;
             if (data.refresh_required) {

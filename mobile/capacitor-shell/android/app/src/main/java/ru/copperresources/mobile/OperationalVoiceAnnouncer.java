@@ -19,6 +19,27 @@ public final class OperationalVoiceAnnouncer {
             boolean showNotification,
             String notificationTitle,
             String notificationBody) {
+        return announceSequence(
+            context,
+            cueName,
+            new String[] {voiceName},
+            eventVersion,
+            eventKey,
+            showNotification,
+            notificationTitle,
+            notificationBody
+        );
+    }
+
+    public static synchronized Result announceSequence(
+            Context context,
+            String cueName,
+            String[] voiceNames,
+            long eventVersion,
+            String eventKey,
+            boolean showNotification,
+            String notificationTitle,
+            String notificationBody) {
         Context appContext = context.getApplicationContext();
         String normalizedKey = eventKey == null ? "" : eventKey.trim();
         SharedPreferences preferences = appContext.getSharedPreferences(
@@ -40,10 +61,10 @@ public final class OperationalVoiceAnnouncer {
             notificationTitle,
             notificationBody
         );
-        boolean queued = OperationalVoicePlayer.play(
+        boolean queued = OperationalVoicePlayer.playSequence(
             appContext,
             cueName,
-            voiceName,
+            voiceNames,
             !notificationShown,
             notificationShown
                 ? BuildConfig.ALERT_CUE_DURATION_MS + BuildConfig.VOICE_AFTER_CUE_DELAY_MS

@@ -1,0 +1,687 @@
+{
+  "schemaVersion": 1,
+  "description": "Записанная пользователем озвучка номеров техники и подтверждений назначения.",
+  "format": {
+    "container": "M4A",
+    "codec": "AAC",
+    "sampleRateHz": 48000,
+    "channels": 1
+  },
+  "batches": {
+    "excavatorCommon": {
+      "source": "1. Общие фразы экскаваторщика.mp3",
+      "sourceSha256": "744fecc77873bf66243c7e36c538a2c0f817e1e2443a088cec639025b53f646c",
+      "profile": "excavator",
+      "segments": [
+        {
+          "index": 1,
+          "resource": "excavator_voice_truck_assigned_prefix.m4a",
+          "startSeconds": 0.0,
+          "endSeconds": 2.015,
+          "peakDbfs": -0.8,
+          "sha256": "0cde1ee3eb04a18a1a6828751bfdd063be5792b591412c44ddb9ee45df02a2b6"
+        },
+        {
+          "index": 2,
+          "resource": "excavator_voice_truck_removed_prefix.m4a",
+          "startSeconds": 2.015,
+          "endSeconds": 4.235,
+          "peakDbfs": -1.9,
+          "sha256": "92f4e82dac111cdc3f652d82968d7ef802ad00b9d33de8bf491a91104db6954a"
+        },
+        {
+          "index": 3,
+          "resource": "excavator_voice_truck_number_prefix.m4a",
+          "startSeconds": 4.235,
+          "endSeconds": 5.52,
+          "peakDbfs": -2.2,
+          "sha256": "9dddc668a879d47051ed6c9e4e86c55aadea0a0d0fb91308f39f625efa92e133"
+        }
+      ]
+    },
+    "excavatorDestinations": {
+      "source": "2. Подтверждение отправки на разгрузку.mp3",
+      "sourceSha256": "6af293358ddc2e72b75a6634545b68f6d442c11f463fc81bc752ccd8afd87d2a",
+      "profile": "excavator",
+      "segments": [
+        {
+          "index": 1,
+          "resource": "excavator_voice_truck_sent_bufernyi_sklad.m4a",
+          "startSeconds": 0.0,
+          "endSeconds": 1.7,
+          "peakDbfs": -1.0,
+          "sha256": "ce3094f4286c50e934638b3a7a9f31ef761c4f6aed5c88114c97fa57c9962eb2"
+        },
+        {
+          "index": 2,
+          "resource": "excavator_voice_truck_sent_kkd.m4a",
+          "startSeconds": 1.7,
+          "endSeconds": 3.69,
+          "peakDbfs": -2.0,
+          "sha256": "f5777a63aa3de1d20c38dbcc450519383325e5290d88f7744a9d6f09aba4eb1f"
+        },
+        {
+          "index": 3,
+          "resource": "excavator_voice_truck_sent_otval.m4a",
+          "startSeconds": 3.69,
+          "endSeconds": 5.125,
+          "peakDbfs": -1.3,
+          "sha256": "8533f6513cd21d2bd1e839e278001b6c7e622898ca3c6e2b5a2378fdc7c89b22"
+        },
+        {
+          "index": 4,
+          "resource": "excavator_voice_truck_sent_podsypka.m4a",
+          "startSeconds": 5.125,
+          "endSeconds": 6.745,
+          "peakDbfs": -1.6,
+          "sha256": "4389d2295c50ff8a9e9159a6c2edd6f09e3f5cf6eaa8a5ac9404f6479f797f92"
+        },
+        {
+          "index": 5,
+          "resource": "excavator_voice_truck_sent_svh.m4a",
+          "startSeconds": 6.745,
+          "endSeconds": 8.685,
+          "peakDbfs": -1.2,
+          "sha256": "ddac9df46a214e21b331b0620a7d87eb89908bc69e16c33917e1a35452a41e94"
+        },
+        {
+          "index": 6,
+          "resource": "excavator_voice_truck_sent_skdr.m4a",
+          "startSeconds": 8.685,
+          "endSeconds": 10.95,
+          "peakDbfs": -2.4,
+          "sha256": "3e0dcd4ffea664501bfd5f819e4afcf9ea68aa28cb24c795d74c7369548253f7"
+        },
+        {
+          "index": 7,
+          "resource": "excavator_voice_truck_sent_sklad_negabarita.m4a",
+          "startSeconds": 10.95,
+          "endSeconds": 12.855,
+          "peakDbfs": -2.6,
+          "sha256": "287e19da79fbae14b1e9d4605b7ebeb47862357905d2b568d2f764f775275bb6"
+        },
+        {
+          "index": 8,
+          "resource": "excavator_voice_truck_sent_sklad_okislennoy_rudy.m4a",
+          "startSeconds": 12.855,
+          "endSeconds": 15.12,
+          "peakDbfs": -2.3,
+          "sha256": "4f5f64b8fa71dc7f6314048e95ac20450156d30458a07617941ef571d7482e85"
+        }
+      ]
+    },
+    "truckNumbers": {
+      "source": "3. Номера самосвалов.mp3",
+      "sourceSha256": "aa72a0a7dd4c13e5c9d80afbac2d8c51cfd59933cb5841f88c33d66c6c06310c",
+      "profile": "excavator",
+      "segments": [
+        {
+          "index": 1,
+          "resource": "excavator_voice_truck_number_10.m4a",
+          "startSeconds": 0.0,
+          "endSeconds": 0.605,
+          "peakDbfs": -5.7,
+          "sha256": "f99109a4c5fce48d805149009656726f186067b0ed0ca74ff89113784d3ff535"
+        },
+        {
+          "index": 2,
+          "resource": "excavator_voice_truck_number_11.m4a",
+          "startSeconds": 0.605,
+          "endSeconds": 1.51,
+          "peakDbfs": -1.4,
+          "sha256": "887a7fc66008bc9239102a4e49a179954254e0c3872aa53cfb74e0af275480bb"
+        },
+        {
+          "index": 3,
+          "resource": "excavator_voice_truck_number_12.m4a",
+          "startSeconds": 1.51,
+          "endSeconds": 2.435,
+          "peakDbfs": -3.5,
+          "sha256": "09d9e6e7b29adaf9b69f4f35b3888545bb403bee9f09df3e4881f757b28a0ebb"
+        },
+        {
+          "index": 4,
+          "resource": "excavator_voice_truck_number_13.m4a",
+          "startSeconds": 2.435,
+          "endSeconds": 3.3,
+          "peakDbfs": -0.9,
+          "sha256": "1acb3a8943de8f4ab18afc7b67763fbcc84a641a0810250df7aa3a3d21f12cd1"
+        },
+        {
+          "index": 5,
+          "resource": "excavator_voice_truck_number_14.m4a",
+          "startSeconds": 3.3,
+          "endSeconds": 4.3,
+          "peakDbfs": -3.6,
+          "sha256": "e8ee8abc0767f5d0d6df8be1fb720245fb3ff2368c669c8959c66293f4acbfd6"
+        },
+        {
+          "index": 6,
+          "resource": "excavator_voice_truck_number_15.m4a",
+          "startSeconds": 4.3,
+          "endSeconds": 5.18,
+          "peakDbfs": -1.8,
+          "sha256": "1e02e35399acd8184e4b85495f788b8c7a5bdc07ccb24572cd047984c5bec9d0"
+        },
+        {
+          "index": 7,
+          "resource": "excavator_voice_truck_number_16.m4a",
+          "startSeconds": 5.18,
+          "endSeconds": 6.205,
+          "peakDbfs": -3.6,
+          "sha256": "d8fcb6763ca5de2187beb21eda3dea9ec4249fc76ea0652dadd563ab82e53c3b"
+        },
+        {
+          "index": 8,
+          "resource": "excavator_voice_truck_number_17.m4a",
+          "startSeconds": 6.205,
+          "endSeconds": 7.2,
+          "peakDbfs": -3.5,
+          "sha256": "2825246aa114a069af1865c4cc37e665cb014cf5ca27441a003a7f85a194cfb5"
+        },
+        {
+          "index": 9,
+          "resource": "excavator_voice_truck_number_18.m4a",
+          "startSeconds": 7.2,
+          "endSeconds": 8.385,
+          "peakDbfs": -2.8,
+          "sha256": "668236f0f8a5eab86f76ed8c7960aedce9e24ea2ed75ce8e8ca67441010a7b98"
+        },
+        {
+          "index": 10,
+          "resource": "excavator_voice_truck_number_19.m4a",
+          "startSeconds": 8.385,
+          "endSeconds": 9.645,
+          "peakDbfs": -3.2,
+          "sha256": "85a6a5bf643042831611b93be62f3215902109ef6916ab674de807cd7adf2e1d"
+        },
+        {
+          "index": 11,
+          "resource": "excavator_voice_truck_number_20.m4a",
+          "startSeconds": 9.645,
+          "endSeconds": 10.735,
+          "peakDbfs": -2.6,
+          "sha256": "5b46f6c27f321fb5538e78d688711f076b51563c376f6dcd44a9927b999243a4"
+        },
+        {
+          "index": 12,
+          "resource": "excavator_voice_truck_number_21.m4a",
+          "startSeconds": 10.735,
+          "endSeconds": 12.105,
+          "peakDbfs": -4.4,
+          "sha256": "27648cb6e7aeede3f14b3de09fa63c4cf36601724030c22373ac58b9d5990235"
+        },
+        {
+          "index": 13,
+          "resource": "excavator_voice_truck_number_22.m4a",
+          "startSeconds": 12.105,
+          "endSeconds": 13.295,
+          "peakDbfs": -4.1,
+          "sha256": "44534540c3db7fdcec9ec4443e2e97d9cf85fb3489e1a068546c849c18c91115"
+        },
+        {
+          "index": 14,
+          "resource": "excavator_voice_truck_number_23.m4a",
+          "startSeconds": 13.295,
+          "endSeconds": 14.425,
+          "peakDbfs": -3.8,
+          "sha256": "fe0432e640c1e6d5ace52ea77c8bda37f9412b529bf40e9288750deb07f8886e"
+        },
+        {
+          "index": 15,
+          "resource": "excavator_voice_truck_number_24.m4a",
+          "startSeconds": 14.425,
+          "endSeconds": 15.72,
+          "peakDbfs": -2.1,
+          "sha256": "95e392dfb4f70307061a6af96930a4705a618e326b6732248217a168385cc8db"
+        },
+        {
+          "index": 16,
+          "resource": "excavator_voice_truck_number_25.m4a",
+          "startSeconds": 15.72,
+          "endSeconds": 16.875,
+          "peakDbfs": -1.7,
+          "sha256": "4e7c89fefaf37313abcab0f11f319c8826f35e73d3271c4409bd2067242a083e"
+        },
+        {
+          "index": 17,
+          "resource": "excavator_voice_truck_number_26.m4a",
+          "startSeconds": 16.875,
+          "endSeconds": 18.055,
+          "peakDbfs": -1.9,
+          "sha256": "99ebdc958a240ee82f79d297178586d1dca3ae9d11ef19ba6a313e15e64b3d61"
+        },
+        {
+          "index": 18,
+          "resource": "excavator_voice_truck_number_27.m4a",
+          "startSeconds": 18.055,
+          "endSeconds": 19.275,
+          "peakDbfs": -2.4,
+          "sha256": "b1b590a24ebe020b7881873500e6b595cbe8686bf0cfa7df81d30b7c73f4e20d"
+        },
+        {
+          "index": 19,
+          "resource": "excavator_voice_truck_number_28.m4a",
+          "startSeconds": 19.275,
+          "endSeconds": 20.57,
+          "peakDbfs": -2.6,
+          "sha256": "9f448b3a0d3bdc9b41470c375fa5332b06886984a5fa4d8bb1deec0fd8850225"
+        },
+        {
+          "index": 20,
+          "resource": "excavator_voice_truck_number_29.m4a",
+          "startSeconds": 20.57,
+          "endSeconds": 21.785,
+          "peakDbfs": -2.8,
+          "sha256": "a35b4ab0f35694704856d21e300e3b3a7afd7fdfcd2f48921b7a8b44318cb1c4"
+        },
+        {
+          "index": 21,
+          "resource": "excavator_voice_truck_number_30.m4a",
+          "startSeconds": 21.785,
+          "endSeconds": 22.675,
+          "peakDbfs": -3.6,
+          "sha256": "d2cc24ec842dfb4441d6c3b5702c6b6373965425005cf6ce99e616bc3fcbc8d2"
+        },
+        {
+          "index": 22,
+          "resource": "excavator_voice_truck_number_31.m4a",
+          "startSeconds": 22.675,
+          "endSeconds": 23.84,
+          "peakDbfs": -3.0,
+          "sha256": "d031930e37fd0df74c9364526a0a07a75c0ab27a4332c1cca542cad68f369079"
+        },
+        {
+          "index": 23,
+          "resource": "excavator_voice_truck_number_32.m4a",
+          "startSeconds": 23.84,
+          "endSeconds": 24.92,
+          "peakDbfs": -1.8,
+          "sha256": "3eecb8ab77144536ceb1b5f66817970f39bf372e51fc3b44f394ffb4536eb68f"
+        },
+        {
+          "index": 24,
+          "resource": "excavator_voice_truck_number_33.m4a",
+          "startSeconds": 24.92,
+          "endSeconds": 26.015,
+          "peakDbfs": -0.2,
+          "sha256": "d511ea07d31f17453a4c2971827c78bae79ee37319f5ae5d0542c3cb3ea25e3b"
+        },
+        {
+          "index": 25,
+          "resource": "excavator_voice_truck_number_34.m4a",
+          "startSeconds": 26.015,
+          "endSeconds": 27.245,
+          "peakDbfs": -2.2,
+          "sha256": "8089ba08ebf774d02f7eba712f9d2580ca22f2789e15e56d68568c6de51c381e"
+        },
+        {
+          "index": 26,
+          "resource": "excavator_voice_truck_number_35.m4a",
+          "startSeconds": 27.245,
+          "endSeconds": 28.335,
+          "peakDbfs": -3.3,
+          "sha256": "bd047f1684901959d234f2cff8779480e9cb77f2b2f344854cefa2a69c1656b7"
+        },
+        {
+          "index": 27,
+          "resource": "excavator_voice_truck_number_36.m4a",
+          "startSeconds": 28.335,
+          "endSeconds": 29.475,
+          "peakDbfs": -3.0,
+          "sha256": "f17390236a519a266a27c317eb6357ae8631529095445a69a0ab9977a03ed3fe"
+        },
+        {
+          "index": 28,
+          "resource": "excavator_voice_truck_number_37.m4a",
+          "startSeconds": 29.475,
+          "endSeconds": 30.62,
+          "peakDbfs": -2.6,
+          "sha256": "f5e9cb0e886518bdd479d3bcb5efb323f1a6ae5366246a67c9bd13ddff771627"
+        },
+        {
+          "index": 29,
+          "resource": "excavator_voice_truck_number_38.m4a",
+          "startSeconds": 30.62,
+          "endSeconds": 31.72,
+          "peakDbfs": -2.7,
+          "sha256": "e4a990a12ead0cc40de7bd38227403e7e61cd315729ff668fb731253b8096d67"
+        },
+        {
+          "index": 30,
+          "resource": "excavator_voice_truck_number_39.m4a",
+          "startSeconds": 31.72,
+          "endSeconds": 32.855,
+          "peakDbfs": -2.5,
+          "sha256": "f8dcd4cc4641ba00394f657ae887bd5a9a22ae2f9109ba9b458457197be89e13"
+        },
+        {
+          "index": 31,
+          "resource": "excavator_voice_truck_number_40.m4a",
+          "startSeconds": 32.855,
+          "endSeconds": 33.63,
+          "peakDbfs": -0.9,
+          "sha256": "a8942e1a6b6ce7653a4e3ef6ebd2f12c4b546e9dc9d4fd493c2f91d9d4e505b1"
+        },
+        {
+          "index": 32,
+          "resource": "excavator_voice_truck_number_41.m4a",
+          "startSeconds": 33.63,
+          "endSeconds": 34.74,
+          "peakDbfs": -1.4,
+          "sha256": "3250f76ecf85daf9cf3355dd5ac484cc84950e301108518a11f219602eb31229"
+        },
+        {
+          "index": 33,
+          "resource": "excavator_voice_truck_number_42.m4a",
+          "startSeconds": 34.74,
+          "endSeconds": 35.735,
+          "peakDbfs": -2.2,
+          "sha256": "601ef6e0af20450b3a0869accede27249eefad8d26c91a03bfa622dfa391eaa5"
+        },
+        {
+          "index": 34,
+          "resource": "excavator_voice_truck_number_43.m4a",
+          "startSeconds": 35.735,
+          "endSeconds": 36.77,
+          "peakDbfs": -1.2,
+          "sha256": "8b1b3d24c443e4b051f3072a45f374312191457098d1d6658feed027e0bba63b"
+        },
+        {
+          "index": 35,
+          "resource": "excavator_voice_truck_number_44.m4a",
+          "startSeconds": 36.77,
+          "endSeconds": 37.88,
+          "peakDbfs": -2.0,
+          "sha256": "253c94baabcfb6d3e475de1a545e98226152a6acfa8864697778189678105162"
+        },
+        {
+          "index": 36,
+          "resource": "excavator_voice_truck_number_45.m4a",
+          "startSeconds": 37.88,
+          "endSeconds": 38.85,
+          "peakDbfs": -1.8,
+          "sha256": "1d5a094bd8ec8cb455b9440d392a8d6f97f5102ef60f7faae8f9e29c183c8746"
+        },
+        {
+          "index": 37,
+          "resource": "excavator_voice_truck_number_46.m4a",
+          "startSeconds": 38.85,
+          "endSeconds": 39.82,
+          "peakDbfs": -2.7,
+          "sha256": "92e12a520b93733c6cb2606c02deb8b682635919c0f55544e8ba7a70106a3671"
+        },
+        {
+          "index": 38,
+          "resource": "excavator_voice_truck_number_47.m4a",
+          "startSeconds": 39.82,
+          "endSeconds": 40.87,
+          "peakDbfs": -1.5,
+          "sha256": "0d93d3d8b3493718840c8165f227b318ba0cfec3b80f8725d0ece119796421f6"
+        },
+        {
+          "index": 39,
+          "resource": "excavator_voice_truck_number_48.m4a",
+          "startSeconds": 40.87,
+          "endSeconds": 41.97,
+          "peakDbfs": -2.7,
+          "sha256": "171c9ee35b0bd9bed146b95b01832f6b418cca2f30a1ccae1c6c2491f0e9da68"
+        },
+        {
+          "index": 40,
+          "resource": "excavator_voice_truck_number_49.m4a",
+          "startSeconds": 41.97,
+          "endSeconds": 42.98,
+          "peakDbfs": -1.7,
+          "sha256": "d929311a4dcb3ba50a173c19e57be3bb89c2fcaf3d67aaf05e602f81f1701a2a"
+        },
+        {
+          "index": 41,
+          "resource": "excavator_voice_truck_number_50.m4a",
+          "startSeconds": 42.98,
+          "endSeconds": 44.01,
+          "peakDbfs": -4.7,
+          "sha256": "86d0bd5daba5c04fc7e2e0c23b3043b9bd68f2775cdb3816d968af6de3a9c816"
+        },
+        {
+          "index": 42,
+          "resource": "excavator_voice_truck_number_51.m4a",
+          "startSeconds": 44.01,
+          "endSeconds": 45.4,
+          "peakDbfs": -3.3,
+          "sha256": "cf5555d9673f7fae7ef575db76847619db61a7df8bcfb022dec2d4f255eba5ef"
+        },
+        {
+          "index": 43,
+          "resource": "excavator_voice_truck_number_52.m4a",
+          "startSeconds": 45.4,
+          "endSeconds": 46.555,
+          "peakDbfs": -4.8,
+          "sha256": "cd185cb06960ca93f28e012aaf68b54ea122f7cdfdadf627a3a2b8bf1268bfdf"
+        },
+        {
+          "index": 44,
+          "resource": "excavator_voice_truck_number_54.m4a",
+          "startSeconds": 46.555,
+          "endSeconds": 47.845,
+          "peakDbfs": -4.8,
+          "sha256": "738975d78510395ca825897cb652d3e47aca0603332a77e04d6c528029be7f2b"
+        },
+        {
+          "index": 45,
+          "resource": "excavator_voice_truck_number_55.m4a",
+          "startSeconds": 47.845,
+          "endSeconds": 49.06,
+          "peakDbfs": -3.0,
+          "sha256": "e7040e1bff4d2bfad1102cb44ee1f49385e9f4e580a7eec29877b961e6f36488"
+        },
+        {
+          "index": 46,
+          "resource": "excavator_voice_truck_number_56.m4a",
+          "startSeconds": 49.06,
+          "endSeconds": 50.31,
+          "peakDbfs": -4.4,
+          "sha256": "d466a716ee5f7afdf2e3474ad02a9ef59e2ee1a63a61e8972f7444a2243dedf7"
+        },
+        {
+          "index": 47,
+          "resource": "excavator_voice_truck_number_57.m4a",
+          "startSeconds": 50.31,
+          "endSeconds": 51.555,
+          "peakDbfs": -4.8,
+          "sha256": "7a901eae8dd3934d6247053ac94b146df12cdfaa28417431dcf8651254f7b80f"
+        },
+        {
+          "index": 48,
+          "resource": "excavator_voice_truck_number_58.m4a",
+          "startSeconds": 51.555,
+          "endSeconds": 52.88,
+          "peakDbfs": -4.2,
+          "sha256": "539909c1f17777980745a0d9529959c5d809fc69373347198cbc70d1df3901d8"
+        },
+        {
+          "index": 49,
+          "resource": "excavator_voice_truck_number_59.m4a",
+          "startSeconds": 52.88,
+          "endSeconds": 54.105,
+          "peakDbfs": -3.8,
+          "sha256": "c544d1a0284121b4df35490a90a6ee53418c5caee438a7bf8e42d9eb989fc61c"
+        },
+        {
+          "index": 50,
+          "resource": "excavator_voice_truck_number_60.m4a",
+          "startSeconds": 54.105,
+          "endSeconds": 55.155,
+          "peakDbfs": -4.8,
+          "sha256": "3c0888277464de79e515cdb1f31318ba05735188afa66b25a073f0cfce07ce67"
+        },
+        {
+          "index": 51,
+          "resource": "excavator_voice_truck_number_61.m4a",
+          "startSeconds": 55.155,
+          "endSeconds": 56.59,
+          "peakDbfs": -2.5,
+          "sha256": "db563022f06787f8920d66fead7674ed68451687fcff46b2b21cce1e1e2a02a9"
+        },
+        {
+          "index": 52,
+          "resource": "excavator_voice_truck_number_62.m4a",
+          "startSeconds": 56.59,
+          "endSeconds": 57.82,
+          "peakDbfs": -4.2,
+          "sha256": "2300390fd6773151198231bf5de318d5ec1acbe636abef330bf06d4f1164b26c"
+        },
+        {
+          "index": 53,
+          "resource": "excavator_voice_truck_number_63.m4a",
+          "startSeconds": 57.82,
+          "endSeconds": 59.11,
+          "peakDbfs": -3.3,
+          "sha256": "d1a61a50bcc84d7b34c9204c111e68554d6461b35bf88840923cda4ac62dff6c"
+        },
+        {
+          "index": 54,
+          "resource": "excavator_voice_truck_number_test_1.m4a",
+          "startSeconds": 59.11,
+          "endSeconds": 60.16,
+          "peakDbfs": -2.5,
+          "sha256": "1639f6bb553cffaa95c9c92431b0fc5f27139a96ed9db032bbae62d0f4561d80"
+        }
+      ]
+    },
+    "driverAssignments": {
+      "source": "4. Назначения для водителей.mp3",
+      "sourceSha256": "73dbd6da1dc95d8d30034a24c3fb05485ee495fa36e9b7c45eaca37047a6e26c",
+      "profile": "driver",
+      "segments": [
+        {
+          "index": 1,
+          "resource": "driver_voice_excavator_assignment_1.m4a",
+          "startSeconds": 0.0,
+          "endSeconds": 2.91,
+          "peakDbfs": -2.4,
+          "sha256": "364f106c8e77a373516d1830bb9b134a1982c5b8a514962aa14d7de9347e0729"
+        },
+        {
+          "index": 2,
+          "resource": "driver_voice_excavator_assignment_2.m4a",
+          "startSeconds": 2.91,
+          "endSeconds": 5.935,
+          "peakDbfs": -2.8,
+          "sha256": "2081b2dced0e648a1f052cc30e6a36d2c3be672912afd60a2262a310d8f61cc3"
+        },
+        {
+          "index": 3,
+          "resource": "driver_voice_excavator_assignment_3.m4a",
+          "startSeconds": 5.935,
+          "endSeconds": 9.055,
+          "peakDbfs": -2.9,
+          "sha256": "9a1649ce1f394f42f5653d97c186d99fa045d6602bbbafc92c963a27f4ef86d8"
+        },
+        {
+          "index": 4,
+          "resource": "driver_voice_excavator_assignment_4.m4a",
+          "startSeconds": 9.055,
+          "endSeconds": 12.205,
+          "peakDbfs": -3.8,
+          "sha256": "725a4edee5fa7e0bbc250ea084075eb121cc3e7e4bb5cc0c8ba062d94d026bd3"
+        },
+        {
+          "index": 5,
+          "resource": "driver_voice_excavator_assignment_5.m4a",
+          "startSeconds": 12.205,
+          "endSeconds": 15.325,
+          "peakDbfs": -3.0,
+          "sha256": "21c6e0a28a5aa1ac4cfec6e3c293334c2ddbc2087c8309c1cd852d51f7b5e389"
+        },
+        {
+          "index": 6,
+          "resource": "driver_voice_excavator_assignment_6.m4a",
+          "startSeconds": 15.325,
+          "endSeconds": 18.385,
+          "peakDbfs": -2.6,
+          "sha256": "247a3f48edebc128c6e254fecd92420439f4e59166fb66786acf162d6ce5161a"
+        },
+        {
+          "index": 7,
+          "resource": "driver_voice_excavator_assignment_7.m4a",
+          "startSeconds": 18.385,
+          "endSeconds": 21.68,
+          "peakDbfs": -3.0,
+          "sha256": "90f844e1f881a2fce688d1630aaa13fb7060221e0258f1708d3c45e156565e60"
+        },
+        {
+          "index": 8,
+          "resource": "driver_voice_excavator_assignment_8.m4a",
+          "startSeconds": 21.68,
+          "endSeconds": 24.665,
+          "peakDbfs": -3.0,
+          "sha256": "cb7b725ed50e97a7cd7d976a6a339609288a3c07796dcd5a77c0fece5ecb3e03"
+        },
+        {
+          "index": 9,
+          "resource": "driver_voice_excavator_assignment_9.m4a",
+          "startSeconds": 24.665,
+          "endSeconds": 28.13,
+          "peakDbfs": -2.4,
+          "sha256": "5e0d9dbfc200982d3f509d70451b04ad1e9eea831c3af97d2f27fe37b4018ed4"
+        },
+        {
+          "index": 10,
+          "resource": "driver_voice_excavator_assignment_99.m4a",
+          "startSeconds": 28.13,
+          "endSeconds": 32.095,
+          "peakDbfs": -2.4,
+          "sha256": "ba21bf7b30b9818ce5a79a6e34ec29d3b7c427aab30b9117f07e24952c1dfcb1"
+        },
+        {
+          "index": 11,
+          "resource": "driver_voice_excavator_assignment_528.m4a",
+          "startSeconds": 32.095,
+          "endSeconds": 36.44,
+          "peakDbfs": -2.0,
+          "sha256": "a20db5d6b1182916900fafed588be2fea90dc8f7258c5d78645eca2bcff7c37b"
+        },
+        {
+          "index": 12,
+          "resource": "driver_voice_excavator_assignment_530.m4a",
+          "startSeconds": 36.44,
+          "endSeconds": 40.115,
+          "peakDbfs": -1.9,
+          "sha256": "990b7d94de311baecbaecd8883368cfcdc86b94e288b320060437930324a3c4c"
+        },
+        {
+          "index": 13,
+          "resource": "driver_voice_excavator_assignment_tvi_4.m4a",
+          "startSeconds": 40.115,
+          "endSeconds": 44.24,
+          "peakDbfs": -2.0,
+          "sha256": "728942ae7873268f74d444940087f0e1b6fc4f652c080d0f8151cd0b749c2544"
+        }
+      ]
+    },
+    "driverReserveAssignments": {
+      "source": "5. Дополнительно для резерва и тестирования.mp3",
+      "sourceSha256": "ce5b0289cf2e9eac9ffcdf6336150ec587d960a5dce51f1e3c1a1f53549d4f2e",
+      "profile": "driver",
+      "segments": [
+        {
+          "index": 1,
+          "resource": "driver_voice_excavator_assignment_2_reserve.m4a",
+          "startSeconds": 0.0,
+          "endSeconds": 2.97,
+          "peakDbfs": -0.9,
+          "sha256": "1dd05082e1cdd27fa66156a0f7aca87e0e093fd150adf9d03ac6152e1da93db5"
+        },
+        {
+          "index": 2,
+          "resource": "driver_voice_excavator_assignment_test_e99.m4a",
+          "startSeconds": 2.97,
+          "endSeconds": 6.88,
+          "peakDbfs": -1.0,
+          "sha256": "df5647ac7395153f2f35fe42dfc5a2df1105460e5729331968205059bf2ff3c7"
+        }
+      ]
+    }
+  }
+}

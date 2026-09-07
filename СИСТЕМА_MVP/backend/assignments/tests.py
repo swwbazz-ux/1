@@ -7,6 +7,7 @@ from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from core.models import OperationalStateEvent
 from core.production_time import production_shift_bounds, production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentState, EquipmentType, RockType
@@ -1089,6 +1090,16 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(accepted.status, AssignmentStatus.ACCEPTED)
         self.assertIsNone(accepted.ended_at)
         self.assertEqual(pending.status, AssignmentStatus.PENDING)
+
+        event = OperationalStateEvent.objects.filter(
+            event_type='assignment_changed',
+            reason='HaulAssignment:assignment_pending',
+        ).latest('version')
+        self.assertEqual(event.payload['truck_number'], self.assigned_truck.garage_number)
+        self.assertEqual(
+            event.payload['target_excavator_number'],
+            self.other_excavator.garage_number,
+        )
 
         apply_pending_haul_assignment(pending.id)
 
