@@ -81,6 +81,20 @@
                 </select>
             </div>
             <div class="field select-field">
+                <label for="employee-employment-type">Тип сотрудника</label>
+                <select id="employee-employment-type" name="employment_type">
+                    <option value="">Все сотрудники</option>
+                    {% for value, label in employment_types %}<option value="{{ value }}" {% if selected_employment_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="field select-field">
+                <label for="employee-contractor">Подрядчик</label>
+                <select id="employee-contractor" name="contractor_organization">
+                    <option value="">Все организации</option>
+                    {% for organization in contractor_organizations %}<option value="{{ organization.id }}" {% if selected_contractor_organization == organization.id|stringformat:"s" %}selected{% endif %}>{{ organization }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="field select-field">
                 <label for="employee-status">Статус сотрудника</label>
                 <select id="employee-status" name="status">
                     <option value="">Все статусы</option>

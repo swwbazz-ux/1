@@ -129,6 +129,7 @@ from .forms import (
 from .models import (
     AdminActionLog,
     AdminConflict,
+    ContractorOrganization,
     DriverPrimaryRegistration,
     Employee,
     EmployeeAccess,
@@ -1612,6 +1613,27 @@ def system_admin_references_view(request):
 
 def get_system_admin_reference_configs():
     return {
+        'contractor-organizations': {
+            'title': 'Организации подрядчиков',
+            'section': 'Сотрудники и доступы',
+            'model': ContractorOrganization,
+            'description': 'Юридические лица подрядчиков, сроки договоров и общий допуск к производственным работам.',
+            'fields': [
+                'name',
+                'short_name',
+                'contract_number',
+                'contract_valid_from',
+                'contract_valid_until',
+                'contact_person',
+                'contact_phone',
+                'comment',
+                'is_active',
+            ],
+            'search_fields': ['name', 'short_name', 'contract_number', 'contact_person', 'contact_phone'],
+            'preview_fields': ['short_name', 'contract_number', 'contract_valid_from', 'contract_valid_until', 'is_active'],
+            'initial': {'is_active': True},
+            'admin_url': '/admin/users/contractororganization/',
+        },
         'personnel-departments': {
             'title': 'Подразделения',
             'section': 'Сотрудники и доступы',
@@ -1732,12 +1754,16 @@ def get_system_admin_reference_configs():
             'title': 'Техника',
             'section': 'Техника',
             'model': Equipment,
-            'description': 'Отдельные единицы техники. Сначала добавьте марку в справочник «Модели техники», затем выберите ее здесь. Для подрядной техники снимите флажок «Собственная техника».',
+            'description': 'Отдельные единицы техники. Для подрядной техники снимите флажок «Собственная техника» и выберите организацию-владельца.',
+            'fields': ['equipment_type', 'model', 'garage_number', 'vin', 'is_own', 'contractor_organization', 'is_active'],
             'labels': {'is_own': 'Собственная техника'},
-            'help_texts': {'is_own': 'Снимите флажок, если техника принадлежит подрядчику.'},
-            'search_fields': ['garage_number', 'vin', 'equipment_type__name', 'model__name'],
-            'preview_fields': ['equipment_type', 'garage_number', 'model', 'vin'],
-            'select_related': ['equipment_type', 'model'],
+            'help_texts': {
+                'is_own': 'Снимите флажок, если техника принадлежит подрядчику.',
+                'contractor_organization': 'Для подрядной техники организация обязательна.',
+            },
+            'search_fields': ['garage_number', 'vin', 'equipment_type__name', 'model__name', 'contractor_organization__name'],
+            'preview_fields': ['equipment_type', 'garage_number', 'model', 'contractor_organization', 'vin'],
+            'select_related': ['equipment_type', 'model', 'contractor_organization'],
             'admin_url': '/admin/references/equipment/',
         },
         'equipment-states': {
@@ -2544,7 +2570,7 @@ def system_admin_employees_view(request):
 
     employees = (
         Employee.objects
-        .select_related('personnel_position')
+        .select_related('personnel_position', 'contractor_organization')
         .prefetch_related('accesses__role')
         .order_by('full_name')
     )
@@ -2552,6 +2578,8 @@ def system_admin_employees_view(request):
     access_status = request.GET.get('access_status', '').strip()
     role_id = request.GET.get('role', '').strip()
     personnel_position = request.GET.get('personnel_position', '').strip()
+    employment_type = request.GET.get('employment_type', '').strip()
+    contractor_organization = request.GET.get('contractor_organization', '').strip()
     query = request.GET.get('q', '').strip()
     if status:
         employees = employees.filter(status=status)
@@ -2559,6 +2587,10 @@ def system_admin_employees_view(request):
         employees = employees.filter(accesses__status=access_status).distinct()
     if role_id.isdigit():
         employees = employees.filter(accesses__role_id=int(role_id)).distinct()
+    if employment_type in Employee.EmploymentType.values:
+        employees = employees.filter(employment_type=employment_type)
+    if contractor_organization.isdigit():
+        employees = employees.filter(contractor_organization_id=int(contractor_organization))
     # Разметка фильтра по должности была на месте, а данные в неё не приходили:
     # список открывался пустым, и выбор в нём ничего не менял.
     if personnel_position == EMPLOYEES_WITHOUT_POSITION:
@@ -2580,6 +2612,8 @@ def system_admin_employees_view(request):
             'personnel_positions': (
                 PersonnelPosition.objects.filter(is_active=True).order_by('name')
             ),
+            'employment_types': Employee.EmploymentType.choices,
+            'contractor_organizations': ContractorOrganization.objects.filter(is_active=True).order_by('name'),
             # Отдельной строкой — те, у кого должность не проставлена: при разборе
             # выгрузки из отдела кадров их надо находить в первую очередь.
             'personnel_position_groups': [
@@ -2589,6 +2623,8 @@ def system_admin_employees_view(request):
             'selected_access_status': access_status,
             'selected_role': role_id,
             'selected_personnel_position': personnel_position,
+            'selected_employment_type': employment_type,
+            'selected_contractor_organization': contractor_organization,
             'query': query,
         },
     )
@@ -2808,6 +2844,7 @@ def system_admin_employee_detail_view(request, employee_id):
                 and work_assignment_role.code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES
             ),
             'effective_specialization': effective_employee_specialization,
+            'employee_start_url': request.build_absolute_uri(reverse('universal_start')),
             'temporary_work_transfers': (
                 employee.temporary_work_transfers
                 .select_related(

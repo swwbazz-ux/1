@@ -6,6 +6,7 @@ from .models import (
     ActiveApplicationSession,
     AdminActionLog,
     AdminConflict,
+    ContractorOrganization,
     DriverPrimaryRegistration,
     Employee,
     EmployeeAccess,
@@ -73,6 +74,8 @@ class EmployeeAdmin(admin.ModelAdmin):
     form = EmployeeAdminForm
     list_display = (
         'full_name',
+        'employment_type',
+        'contractor_organization',
         'sex',
         'personnel_department',
         'personnel_position',
@@ -89,11 +92,20 @@ class EmployeeAdmin(admin.ModelAdmin):
         'is_active',
         'sex',
         'work_category',
+        'employment_type',
+        'contractor_organization',
         'personnel_department',
         'work_schedule',
         'brigade_number',
         'watch_composition',
     )
+
+
+@admin.register(ContractorOrganization)
+class ContractorOrganizationAdmin(admin.ModelAdmin):
+    list_display = ('name', 'contract_number', 'contract_valid_from', 'contract_valid_until', 'is_active')
+    search_fields = ('name', 'short_name', 'contract_number', 'contact_person', 'contact_phone')
+    list_filter = ('is_active',)
 
 
 @admin.register(PersonnelDepartment)

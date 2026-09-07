@@ -144,7 +144,9 @@ def _crew_plan_equipment(equipment):
     if isinstance(equipment, Equipment):
         return equipment
     try:
-        return Equipment.objects.select_related('equipment_type', 'model').get(pk=equipment)
+        return Equipment.objects.select_related(
+            'equipment_type', 'model', 'contractor_organization'
+        ).get(pk=equipment)
     except Equipment.DoesNotExist as error:
         raise ValidationError('Техника не найдена.', code='equipment_not_found') from error
 
@@ -189,6 +191,27 @@ def _validate_crew_employee(employee, role):
         raise ValidationError(
             'Сотрудник уже назначен по другой рабочей роли.',
             code='assignment_conflict',
+        )
+
+
+def validate_employee_equipment_organization(employee, equipment):
+    """Подрядчик может работать только на технике своей организации."""
+    if employee.employment_type != Employee.EmploymentType.CONTRACTOR:
+        return
+    if not employee.contractor_access_is_valid():
+        raise ValidationError(
+            'Допуск сотрудника подрядчика не действует.',
+            code='contractor_access_expired',
+        )
+    if not equipment.contractor_organization_id:
+        raise ValidationError(
+            'Сотрудника подрядчика можно назначить только на подрядную технику его организации.',
+            code='contractor_equipment_required',
+        )
+    if equipment.contractor_organization_id != employee.contractor_organization_id:
+        raise ValidationError(
+            'Организация сотрудника не совпадает с владельцем техники.',
+            code='contractor_organization_mismatch',
         )
 
 
@@ -308,8 +331,13 @@ def update_crew_draft_slot(
 
     employee = _crew_plan_employee(employee)
     if employee:
-        employee = Employee.objects.select_for_update().get(pk=employee.pk)
+        employee = (
+            Employee.objects.select_for_update()
+            .select_related('contractor_organization')
+            .get(pk=employee.pk)
+        )
         _validate_crew_employee(employee, role)
+        validate_employee_equipment_organization(employee, equipment)
     if target_slot.employee_id == getattr(employee, 'id', None):
         return locked_plan
 
@@ -324,6 +352,11 @@ def update_crew_draft_slot(
 
     if source_slot:
         displaced_employee_id = target_slot.employee_id
+        if displaced_employee_id:
+            displaced_employee = Employee.objects.select_related('contractor_organization').get(
+                pk=displaced_employee_id
+            )
+            validate_employee_equipment_organization(displaced_employee, source_slot.equipment)
         slot_ids = [source_slot.id, target_slot.id]
         # Clearing both rows first keeps swaps portable across SQLite and PostgreSQL.
         CrewPlanSlot.objects.filter(id__in=slot_ids).update(employee=None)
@@ -383,6 +416,7 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
         _validate_crew_equipment(slot.equipment, role)
         if slot.employee_id:
             _validate_crew_employee(slot.employee, role)
+            validate_employee_equipment_organization(slot.employee, slot.equipment)
             if slot.employee_id in target_employee_ids:
                 raise ValidationError(
                     'Сотрудник назначен более чем в один слот.',
@@ -401,6 +435,7 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
             if slot.employee_id:
                 slot.employee = refreshed_employees[slot.employee_id]
                 _validate_crew_employee(slot.employee, role)
+                validate_employee_equipment_organization(slot.employee, slot.equipment)
 
     current_role_assignments = list(
         EquipmentAssignment.objects.select_for_update()
@@ -653,7 +688,7 @@ def equipment_queryset_for_work_role(role_code):
             equipment_type__is_active=True,
             equipment_type__name__iexact=equipment_type_name,
         )
-        .select_related('equipment_type', 'model')
+        .select_related('equipment_type', 'model', 'contractor_organization')
         .distinct()
         .order_by('garage_number')
     )
@@ -692,6 +727,7 @@ def validate_work_assignment(*, employee, role, equipment, shift_type, exclude_a
         raise ValidationError('Производственная специализация сотрудника не соответствует выбранной роли.')
     if not equipment_queryset_for_work_role(role.code).filter(id=equipment.id).exists():
         raise ValidationError('Выбранная техника не соответствует рабочей роли или неактивна.')
+    validate_employee_equipment_organization(employee, equipment)
 
     conflict = EquipmentAssignment.objects.filter(
         equipment=equipment,

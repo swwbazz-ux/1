@@ -394,6 +394,12 @@ def _employee_payload(employee):
             photo_url = ''
     initials = ''.join(part[0] for part in (employee.full_name or '').split()[:2]).upper() or '—'
     brigade_code = _employee_brigade_code(employee)
+    contractor_label = (
+        str(employee.contractor_organization)
+        if employee.employment_type == Employee.EmploymentType.CONTRACTOR
+        and employee.contractor_organization_id
+        else ''
+    )
     return {
         'id': employee.id,
         'full_name': employee.full_name or '',
@@ -408,6 +414,13 @@ def _employee_payload(employee):
         'photo_url': photo_url,
         'initials': initials,
         'status_label': employee.get_status_display(),
+        'employment_type': employee.employment_type,
+        'employment_label': employee.get_employment_type_display(),
+        'contractor_label': contractor_label,
+        'contractor_access_until_label': (
+            employee.contractor_access_until.strftime('%d.%m.%Y')
+            if employee.contractor_access_until else ''
+        ),
         'rotation_label': (
             employee.work_schedule.name
             if getattr(employee, 'work_schedule_id', None)
@@ -415,7 +428,7 @@ def _employee_payload(employee):
         ),
         'brigade_code': brigade_code,
         'brigade_label': f'Бригада {brigade_code}' if brigade_code else 'Не указана',
-        'search': f'{employee.full_name} {employee.personnel_number}'.strip().lower(),
+        'search': f'{employee.full_name} {employee.personnel_number} {contractor_label}'.strip().lower(),
     }
 
 
@@ -444,12 +457,19 @@ def _slot_issue(slot, eligible_employee_ids, other_role_assignment_employee_ids)
         return ''
     if not employee.is_active or employee.status != Employee.Status.ACTIVE:
         return 'Сотрудник неактивен'
+    if not employee.contractor_access_is_valid():
+        return 'Допуск подрядчика не действует'
     if employee.id not in eligible_employee_ids:
         return 'Не соответствует производственной специализации'
     if employee.id in other_role_assignment_employee_ids:
         return 'Назначен по другой роли'
     if not slot.equipment.is_active:
         return 'Техника недоступна'
+    if (
+        employee.employment_type == Employee.EmploymentType.CONTRACTOR
+        and employee.contractor_organization_id != slot.equipment.contractor_organization_id
+    ):
+        return 'Подрядчик другой организации'
     return ''
 
 
@@ -488,9 +508,12 @@ def build_crew_plan_payload(plan, *, request=None):
             'employee',
             'employee__personnel_position',
             'employee__work_schedule',
+            'employee__contractor_organization',
             'baseline_employee',
             'baseline_employee__personnel_position',
             'baseline_employee__work_schedule',
+            'baseline_employee__contractor_organization',
+            'equipment__contractor_organization',
         )
         .order_by('equipment__garage_number', 'shift_type')
     )
@@ -517,7 +540,7 @@ def build_crew_plan_payload(plan, *, request=None):
     if editable:
         eligible_employees = list(
             Employee.objects.filter(id__in=eligible_employee_ids)
-            .select_related('personnel_position', 'work_schedule')
+            .select_related('personnel_position', 'work_schedule', 'contractor_organization')
             .exclude(id__in=assigned_employee_ids)
             .exclude(id__in=other_role_assignment_employee_ids)
             .order_by('full_name')
@@ -530,10 +553,14 @@ def build_crew_plan_payload(plan, *, request=None):
             effective_to__gte=timezone.localdate(),
         ).values_list('employee_id', flat=True)
         transfer_candidates = list(
-            Employee.objects.filter(is_active=True, status=Employee.Status.ACTIVE)
+            Employee.objects.filter(
+                Employee.work_eligibility_q(),
+                is_active=True,
+                status=Employee.Status.ACTIVE,
+            )
             .exclude(id__in=eligible_employee_ids)
             .exclude(id__in=transfer_pending_employee_ids)
-            .select_related('personnel_position', 'work_schedule')
+            .select_related('personnel_position', 'work_schedule', 'contractor_organization')
             .order_by('full_name')
         )
         transfer_specializations = list(

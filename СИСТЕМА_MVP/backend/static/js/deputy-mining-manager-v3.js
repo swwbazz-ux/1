@@ -131,9 +131,15 @@
     }
 
     function employeeMeta(employee) {
-        return textValue(employee && (
+        var position = textValue(employee && (
             employee.position_label || employee.role_label || employee.position || employee.meta
         ));
+        var contractor = textValue(employee && employee.contractor_label);
+        var until = textValue(employee && employee.contractor_access_until_label);
+        if (!contractor) return position;
+        return [position, "Подрядчик: " + contractor + (until ? " · допуск по " + until : "")]
+            .filter(Boolean)
+            .join(" · ");
     }
 
     function employeePhoto(employee) {
