@@ -6,15 +6,15 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v210">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v210">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v210">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v210">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v210">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v210">
-<link rel="stylesheet" href="{% static 'css/excavator-destination-distances-v1.css' %}?v=excavator-mobile-shell-v210">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v210" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v210" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v211">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v211">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v211">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v211">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v211">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v211">
+<link rel="stylesheet" href="{% static 'css/excavator-destination-distances-v1.css' %}?v=excavator-mobile-shell-v211">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v211" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v211" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -29,6 +29,7 @@
     data-eo-active-tab="trucks"
     data-eo-current-excavator-id="{% if current_excavator %}{{ current_excavator.id }}{% endif %}"
     data-eo-shift-excavator-id="{% if shift_start_excavator %}{{ shift_start_excavator.id }}{% endif %}"
+    data-native-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}"
     data-eo-settings-url="{% url 'excavator_work_settings' %}"
     data-eo-shift-url="{% url 'excavator_shift_action' %}"
     data-eo-truck-loaded-url="{% url 'excavator_truck_loaded' %}"
@@ -409,7 +410,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v210";
+var excavatorShellVersion = "excavator-mobile-shell-v211";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -3092,7 +3093,13 @@ window.initExcavatorWorkShell = function () {
                 logoutButton.classList.add("is-pending");
                 logoutButton.disabled = true;
                 if (logoutLabel) logoutLabel.textContent = "Выходим";
-                window.location.href = logoutButton.dataset.eoLogoutUrl || "/logout/";
+                var stopPromise = window.NativeBackgroundConnection
+                    && typeof window.NativeBackgroundConnection.stop === "function"
+                    ? window.NativeBackgroundConnection.stop()
+                    : null;
+                Promise.resolve(stopPromise).finally(function () {
+                    window.location.href = logoutButton.dataset.eoLogoutUrl || "/logout/";
+                });
             }
         });
     }

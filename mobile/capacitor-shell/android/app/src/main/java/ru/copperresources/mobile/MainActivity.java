@@ -44,6 +44,7 @@ public class MainActivity extends BridgeActivity {
         if ("excavator".equals(BuildConfig.APP_PROFILE_ID)
                 || "driver".equals(BuildConfig.APP_PROFILE_ID)) {
             registerPlugin(NativeSoundPlugin.class);
+            registerPlugin(BackgroundConnectionPlugin.class);
         }
         CookieManager.getInstance().setAcceptCookie(true);
         bridgeBuilder.addWebViewListener(new WebViewListener() {
@@ -156,7 +157,6 @@ public class MainActivity extends BridgeActivity {
         }
         nativeCoverReady = true;
         AppNotifications.createChannels(this);
-        ConnectivityForegroundService.start(this);
         requestNotificationPermissionThenBatteryExemption();
     }
 
@@ -226,7 +226,7 @@ public class MainActivity extends BridgeActivity {
         AppVisibility.setForeground(true);
         // Activity могла пережить перезапуск сервиса производителем Android.
         // Повторный start безопасен и возвращает heartbeat в рабочее состояние.
-        ConnectivityForegroundService.start(this);
+        ConnectivityForegroundService.reconcileFromForeground(this);
     }
 
     @Override

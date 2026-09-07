@@ -27,10 +27,14 @@
     var activeSource = null;
     var lastConnectionState = "";
 
-    function nativeSoundPlugin() {
+    function capacitorNativeSoundPlugin() {
         var capacitor = window.Capacitor;
         var plugins = capacitor && capacitor.Plugins;
-        var plugin = plugins && plugins.NativeSound;
+        return plugins && plugins.NativeSound ? plugins.NativeSound : null;
+    }
+
+    function nativeSoundPlugin() {
+        var plugin = capacitorNativeSoundPlugin();
         return plugin && typeof plugin.play === "function" ? plugin : null;
     }
 
@@ -138,6 +142,69 @@
         return playWebSound(name);
     }
 
+    function announceDumpPoint(details) {
+        var plugin = capacitorNativeSoundPlugin();
+        if (!plugin || typeof plugin.announceDumpPoint !== "function") {
+            return Promise.resolve({supported: false, announced: false});
+        }
+        return Promise.resolve(plugin.announceDumpPoint(details || {})).then(function (result) {
+            return {
+                supported: true,
+                announced: !!(result && result.announced === true),
+                reason: result && result.reason ? String(result.reason) : ""
+            };
+        }).catch(function (error) {
+            return {
+                supported: true,
+                announced: false,
+                reason: "bridge_error",
+                error: error && error.message ? String(error.message) : ""
+            };
+        });
+    }
+
+    function announceOperational(details) {
+        details = details || {};
+        var plugin = capacitorNativeSoundPlugin();
+        if (!plugin || typeof plugin.announceOperational !== "function") {
+            return play(String(details.cue || "action_ok")).then(function (played) {
+                return {supported: false, announced: played};
+            });
+        }
+        return Promise.resolve(plugin.announceOperational({
+            cue: String(details.cue || "action_ok"),
+            voice: String(details.voice || ""),
+            eventVersion: Number(details.eventVersion || 0),
+            eventKey: String(details.eventKey || "")
+        })).then(function (result) {
+            return {
+                supported: true,
+                announced: !!(result && result.announced === true),
+                reason: result && result.reason ? String(result.reason) : ""
+            };
+        }).catch(function () {
+            return play(String(details.cue || "action_ok")).then(function (played) {
+                return {supported: true, announced: played, reason: "bridge_error"};
+            });
+        });
+    }
+    function diagnostics() {
+        var plugin = capacitorNativeSoundPlugin();
+        if (!plugin || typeof plugin.getDiagnostics !== "function") {
+            return Promise.resolve({supported: false});
+        }
+        return Promise.resolve(plugin.getDiagnostics()).then(function (result) {
+            result = result || {};
+            result.supported = true;
+            return result;
+        }).catch(function (error) {
+            return {
+                supported: true,
+                error: error && error.message ? String(error.message) : "bridge_error"
+            };
+        });
+    }
+
     function unlock() {
         var context = getAudioContext();
         if (!context) return;
@@ -176,6 +243,9 @@
         profile: profile,
         files: soundFiles,
         play: play,
+        announceDumpPoint: announceDumpPoint,
+        announceOperational: announceOperational,
+        diagnostics: diagnostics,
         preload: unlock
     });
 })();

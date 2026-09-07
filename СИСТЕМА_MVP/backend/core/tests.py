@@ -3,9 +3,11 @@ from tempfile import TemporaryDirectory
 
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
 from references.models import Equipment, EquipmentType
+from shifts.models import EmployeeShift
 from users.models import Employee, EmployeeAccess, Role
 
 from .checks import media_storage_writable_check
@@ -95,6 +97,76 @@ class OperationalStateVersionViewTests(TestCase):
         self.assertEqual(payload['session_role_code'], 'dispatcher')
         self.assertEqual(payload['role_app_code'], 'dispatcher')
         self.assertTrue(payload['role_shell_version'].startswith('dispatcher-'))
+
+    def test_driver_background_connection_is_required_only_during_open_driver_shift(self):
+        driver_role = Role.objects.create(code='driver', name='Водитель', is_active=True)
+        self.access.role = driver_role
+        self.access.save(update_fields=['role'])
+        self.authorize()
+
+        inactive = self.client.get(
+            self.url,
+            {'include_events': '0', 'role_app_code': 'driver'},
+            HTTP_HOST='localhost',
+        ).json()
+        self.assertFalse(inactive['has_active_shift'])
+        self.assertEqual(inactive['active_shift_id'], '')
+        self.assertFalse(inactive['background_connection_required'])
+
+        shift = EmployeeShift.objects.create(
+            employee=self.employee,
+            shift_type='day',
+            workplace_code='driver',
+            opened_at=timezone.now(),
+            opened_by=self.employee,
+        )
+        active = self.client.get(
+            self.url,
+            {'include_events': '0', 'role_app_code': 'driver'},
+            HTTP_HOST='localhost',
+        ).json()
+        self.assertTrue(active['role_active'])
+        self.assertTrue(active['has_active_shift'])
+        self.assertEqual(active['active_shift_id'], str(shift.id))
+        self.assertTrue(active['background_connection_required'])
+
+        shift.closed_at = timezone.now()
+        shift.closed_by = self.employee
+        shift.save(update_fields=['closed_at', 'closed_by'])
+        closed = self.client.get(
+            self.url,
+            {'include_events': '0', 'role_app_code': 'driver'},
+            HTTP_HOST='localhost',
+        ).json()
+        self.assertFalse(closed['background_connection_required'])
+
+    def test_excavator_background_connection_rejects_another_workplace_shift(self):
+        excavator_role = Role.objects.create(
+            code='excavator_operator',
+            name='Машинист экскаватора',
+            is_active=True,
+        )
+        self.access.role = excavator_role
+        self.access.save(update_fields=['role'])
+        self.authorize()
+        EmployeeShift.objects.create(
+            employee=self.employee,
+            shift_type='day',
+            workplace_code='driver',
+            opened_at=timezone.now(),
+            opened_by=self.employee,
+        )
+
+        payload = self.client.get(
+            self.url,
+            {'include_events': '0', 'role_app_code': 'excavator'},
+            HTTP_HOST='localhost',
+        ).json()
+
+        self.assertTrue(payload['role_active'])
+        self.assertEqual(payload['role_app_code'], 'excavator_operator')
+        self.assertFalse(payload['has_active_shift'])
+        self.assertFalse(payload['background_connection_required'])
 
     def test_old_dispatcher_screen_is_readonly_after_session_role_changes(self):
         admin_role = Role.objects.create(

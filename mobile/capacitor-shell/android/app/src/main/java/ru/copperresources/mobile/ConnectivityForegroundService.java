@@ -26,8 +26,6 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.text.DateFormat;
-import java.util.Date;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -39,8 +37,12 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class ConnectivityForegroundService extends Service {
-    public static final String ACTION_TEST_ALERT = "ru.copperresources.mobile.action.TEST_ALERT";
-    private static final String PREFS_NAME = "native_connectivity";
+    public static final String ACTION_STOP_CONNECTION = "ru.copperresources.mobile.action.STOP_CONNECTION";
+    private static final String ACTION_RECONCILE = "ru.copperresources.mobile.action.RECONCILE_CONNECTION";
+    private static final String ACTION_ACTIVE_SHIFT = "ru.copperresources.mobile.action.ACTIVE_SHIFT";
+    static final String PREFS_NAME = ConnectionState.PREFS_NAME;
+    static final String LAST_DRIVER_DUMP_POINT_ALERT_VERSION = "last_driver_dump_point_alert_version";
+    private static final String CONNECTION_LOSS_ANNOUNCED = "connection_loss_announced";
     private static final long MAX_BACKOFF_MS = 60_000L;
     private static final int MAX_CAPTURED_RESPONSE_BYTES = 64 * 1024;
 
@@ -50,43 +52,70 @@ public class ConnectivityForegroundService extends Service {
     private ScheduledFuture<?> pendingHeartbeat;
     private ConnectivityManager connectivityManager;
     private ConnectivityManager.NetworkCallback networkCallback;
-    private DriverVoicePlayer driverVoicePlayer;
     private int consecutiveFailures;
+    private boolean foregroundStarted;
+    private String publishedStatus = "";
 
     public static void start(Context context) {
-        ContextCompat.startForegroundService(
+        reconcileFromForeground(context);
+    }
+
+    public static void reconcileFromForeground(Context context) {
+        if (!ConnectionState.isDesired(context)) {
+            return;
+        }
+        Intent intent = new Intent(context, ConnectivityForegroundService.class)
+            .setAction(ACTION_RECONCILE);
+        startSafely(context, intent);
+    }
+
+    public static void startForActiveShift(Context context) {
+        startSafely(
             context,
-            new Intent(context, ConnectivityForegroundService.class)
+            new Intent(context, ConnectivityForegroundService.class).setAction(ACTION_ACTIVE_SHIFT)
         );
+    }
+
+    private static void startSafely(Context context, Intent intent) {
+        try {
+            ContextCompat.startForegroundService(context, intent);
+        } catch (RuntimeException error) {
+            Log.w("ConnectivityForegroundService", "Foreground heartbeat start was rejected", error);
+        }
     }
 
     public static void stop(Context context) {
         context.stopService(new Intent(context, ConnectivityForegroundService.class));
+        try {
+            NotificationManagerCompat.from(context).cancel(AppNotifications.FOREGROUND_NOTIFICATION_ID);
+        } catch (SecurityException ignored) {}
     }
 
     @Override
     public void onCreate() {
         super.onCreate();
         AppNotifications.createChannels(this);
-        if (BuildConfig.DRIVER_VOICE_ALERTS_ENABLED) {
-            driverVoicePlayer = new DriverVoicePlayer(this);
-        }
         executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "native-server-heartbeat");
             thread.setDaemon(true);
             return thread;
         });
-        startAsForeground("Подключаемся к серверу…");
-        registerNetworkCallback();
-        scheduleHeartbeat(0L);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_TEST_ALERT.equals(intent.getAction())) {
-            AppNotifications.showTestAlert(this);
+        String action = intent == null ? "" : String.valueOf(intent.getAction());
+        if (ACTION_STOP_CONNECTION.equals(action)) {
+            ConnectionState.disable(this, "notification_stop");
+            stopServiceAndRemoveNotification();
+            return START_NOT_STICKY;
+        }
+        if (!ConnectionState.isDesired(this)) {
+            stopServiceAndRemoveNotification();
+            return START_NOT_STICKY;
         }
         startAsForeground(currentStatusText());
+        registerNetworkCallback();
         scheduleHeartbeat(0L);
         // Если Android освободил процесс под давлением памяти, он должен
         // восстановить рабочую связь без повторного открытия приложения.
@@ -114,19 +143,14 @@ public class ConnectivityForegroundService extends Service {
         if (executor != null) {
             executor.shutdownNow();
         }
-        if (driverVoicePlayer != null) {
-            driverVoicePlayer.shutdown();
-            driverVoicePlayer = null;
-        }
         super.onDestroy();
     }
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        // Смахивание карточки из списка последних приложений не равно выходу
-        // из рабочей смены. Оставляем foreground-service и его уведомление.
-        Log.i("ConnectivityForegroundService", "Task removed; keeping heartbeat service active");
-        scheduleHeartbeat(0L);
+        ConnectionState.disable(this, "task_removed");
+        Log.i("ConnectivityForegroundService", "Task removed; heartbeat service stopped");
+        stopServiceAndRemoveNotification();
         super.onTaskRemoved(rootIntent);
     }
 
@@ -140,9 +164,14 @@ public class ConnectivityForegroundService extends Service {
             AppNotifications.foregroundNotification(this, statusText),
             serviceType
         );
+        foregroundStarted = true;
+        publishedStatus = statusText;
     }
 
     private void registerNetworkCallback() {
+        if (networkCallback != null) {
+            return;
+        }
         connectivityManager = getSystemService(ConnectivityManager.class);
         if (connectivityManager == null) {
             return;
@@ -187,8 +216,37 @@ public class ConnectivityForegroundService extends Service {
                 wakeLock.acquire(20_000L);
             }
             HeartbeatResult result = requestHeartbeat();
+            if (result.statusCode == 401 || result.statusCode == 403) {
+                stopBecauseConnectionIsNotRequired("authentication_ended");
+                return;
+            }
+            if (result.statusCode < 200 || result.statusCode >= 300) {
+                throw new IllegalStateException("Heartbeat HTTP " + result.statusCode);
+            }
+            JSONObject response = new JSONObject(result.body);
+            if (!response.optBoolean("authenticated", true)) {
+                stopBecauseConnectionIsNotRequired("authentication_ended");
+                return;
+            }
+            if (response.has("background_connection_required")) {
+                boolean connectionRequired = response.optBoolean("background_connection_required", false);
+                String shiftId = response.optString("active_shift_id", "");
+                ConnectionState.applyServerRequirement(this, connectionRequired, shiftId);
+                if (!connectionRequired) {
+                    stopBecauseConnectionIsNotRequired(
+                        response.optBoolean("has_active_shift", false)
+                            ? "role_inactive"
+                            : "shift_inactive"
+                    );
+                    return;
+                }
+            } else if (!ConnectionState.isDesired(this)) {
+                stopBecauseConnectionIsNotRequired("server_contract_missing");
+                return;
+            }
             consecutiveFailures = 0;
             SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            boolean connectionLossWasAnnounced = preferences.getBoolean(CONNECTION_LOSS_ANNOUNCED, false);
             long previousVersion = preferences.getLong("last_server_version", 0L);
             long serverVersion = readServerVersion(result.body);
             boolean relevant = readRelevantFlag(result.body);
@@ -197,24 +255,54 @@ public class ConnectivityForegroundService extends Service {
                 .putInt("last_http_status", result.statusCode)
                 .putString("last_response", result.body)
                 .putLong("last_server_version", serverVersion > 0L ? serverVersion : previousVersion)
+                .putBoolean(CONNECTION_LOSS_ANNOUNCED, false)
                 .apply();
-            if (previousVersion > 0L
-                    && serverVersion > previousVersion
-                    && relevant
-                    && !AppVisibility.isForeground()) {
-                boolean specificAlertShown = showLatestDriverDumpPointAlert(result.body, preferences);
-                if (!specificAlertShown) {
-                    AppNotifications.showOperationalAlert(this, "На сервере появились новые данные смены");
+            ConnectionState.recordAlive(this, System.currentTimeMillis());
+            if (connectionLossWasAnnounced) {
+                OperationalVoicePlayer.play(
+                    this,
+                    "connection_restored",
+                    "voice_connection_restored",
+                    true,
+                    0L
+                );
+            }
+            if (previousVersion > 0L && serverVersion > previousVersion && relevant) {
+                boolean appIsForeground = AppVisibility.isForeground();
+                boolean dumpPointAnnounced = showLatestDriverDumpPointAlert(
+                    result.body,
+                    preferences,
+                    !appIsForeground
+                );
+                if (!dumpPointAnnounced) {
+                    showLatestAssignmentAlert(
+                        result.body,
+                        !appIsForeground
+                    );
                 }
             }
-            publishStatus("Сервер доступен • " + DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date()));
+            publishStatus("Связь работает во время смены");
             scheduleHeartbeat(BuildConfig.HEARTBEAT_INTERVAL_MS);
         } catch (Exception error) {
             consecutiveFailures += 1;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            boolean shouldAnnounceConnectionLoss = consecutiveFailures >= 2
+                && !preferences.getBoolean(CONNECTION_LOSS_ANNOUNCED, false);
+            preferences.edit()
                 .putLong("last_failure_at", System.currentTimeMillis())
                 .putString("last_error", error.getClass().getSimpleName() + ": " + String.valueOf(error.getMessage()))
+                .putBoolean(CONNECTION_LOSS_ANNOUNCED, shouldAnnounceConnectionLoss
+                    || preferences.getBoolean(CONNECTION_LOSS_ANNOUNCED, false))
                 .apply();
+            if (shouldAnnounceConnectionLoss) {
+                OperationalVoicePlayer.play(
+                    this,
+                    "connection_lost",
+                    "voice_connection_lost",
+                    true,
+                    0L
+                );
+            }
             publishStatus("Связь восстанавливается…");
             long multiplier = 1L << Math.min(consecutiveFailures, 3);
             scheduleHeartbeat(Math.min(MAX_BACKOFF_MS, BuildConfig.HEARTBEAT_INTERVAL_MS * multiplier));
@@ -302,11 +390,15 @@ public class ConnectivityForegroundService extends Service {
     }
 
     private void publishStatus(String text) {
+        if (text.equals(publishedStatus)) {
+            return;
+        }
         try {
             NotificationManagerCompat.from(this).notify(
                 AppNotifications.FOREGROUND_NOTIFICATION_ID,
                 AppNotifications.foregroundNotification(this, text)
             );
+            publishedStatus = text;
         } catch (SecurityException ignored) {
             // Foreground service remains active even if Android 13+ notification permission is denied.
         }
@@ -328,7 +420,10 @@ public class ConnectivityForegroundService extends Service {
         }
     }
 
-    private boolean showLatestDriverDumpPointAlert(String body, SharedPreferences preferences) {
+    private boolean showLatestDriverDumpPointAlert(
+            String body,
+            SharedPreferences preferences,
+            boolean showNotification) {
         if (!BuildConfig.DRIVER_VOICE_ALERTS_ENABLED) {
             return false;
         }
@@ -337,7 +432,7 @@ public class ConnectivityForegroundService extends Service {
             if (events == null) {
                 return false;
             }
-            long lastAnnouncedVersion = preferences.getLong("last_driver_dump_point_alert_version", 0L);
+            long lastAnnouncedVersion = preferences.getLong(LAST_DRIVER_DUMP_POINT_ALERT_VERSION, 0L);
             long selectedVersion = lastAnnouncedVersion;
             long selectedTripId = 0L;
             long selectedDumpPointId = 0L;
@@ -380,36 +475,165 @@ public class ConnectivityForegroundService extends Service {
                 return false;
             }
 
-            preferences.edit()
-                .putLong("last_driver_dump_point_alert_version", selectedVersion)
-                .putLong("last_driver_dump_point_alert_trip_id", selectedTripId)
-                .putLong("last_driver_dump_point_alert_dump_point_id", selectedDumpPointId)
-                .apply();
-
-            boolean notificationShown = AppNotifications.showOperationalAlert(
+            DriverDumpPointAnnouncer.Result result = DriverDumpPointAnnouncer.announce(
                 this,
-                "Новая точка разгрузки",
-                displayName
+                selectedVersion,
+                selectedTripId,
+                selectedDumpPointId,
+                displayName,
+                showNotification,
+                true
             );
-            if (notificationShown && driverVoicePlayer != null) {
-                long voiceDelayMs = BuildConfig.ALERT_CUE_DURATION_MS
-                    + BuildConfig.VOICE_AFTER_CUE_DELAY_MS;
-                driverVoicePlayer.announce(selectedDumpPointId, displayName, voiceDelayMs);
-            }
-            return true;
+            return result.announced;
         } catch (Exception error) {
             Log.w("ConnectivityForegroundService", "Driver dump-point alert was not parsed", error);
             return false;
         }
     }
 
-    private String currentStatusText() {
-        SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        long lastSuccessAt = preferences.getLong("last_transport_success_at", 0L);
-        if (lastSuccessAt <= 0L) {
-            return "Подключаемся к серверу…";
+    private boolean showLatestAssignmentAlert(String body, boolean showNotification) {
+        try {
+            JSONObject root = new JSONObject(body);
+            JSONArray events = root.optJSONArray("events");
+            if (events == null) {
+                return false;
+            }
+            String roleCode = root.optString("role_app_code", BuildConfig.APP_PROFILE_ID);
+            JSONArray workerEquipmentIds = root.optJSONArray("worker_equipment_ids");
+            long selectedVersion = 0L;
+            String selectedVoice = "";
+            String selectedTitle = "";
+            String selectedBody = "";
+
+            for (int index = 0; index < events.length(); index += 1) {
+                JSONObject event = events.optJSONObject(index);
+                if (event == null || !"assignment_changed".equals(event.optString("type"))) {
+                    continue;
+                }
+                long version = event.optLong("version", 0L);
+                if (version <= selectedVersion) {
+                    continue;
+                }
+                JSONObject payload = event.optJSONObject("payload");
+                if (payload == null) {
+                    continue;
+                }
+                String action = payload.optString("action", "");
+                String voice = "";
+                String title = "";
+                String message = "";
+
+                if ("driver".equals(roleCode)) {
+                    if ("assignment_pending".equals(action)) {
+                        JSONArray excavatorIds = payload.optJSONArray("excavator_ids");
+                        voice = excavatorIds != null && excavatorIds.length() > 1
+                            ? "voice_excavator_changed"
+                            : "voice_excavator_assigned";
+                        title = "Новое назначение";
+                        message = "Проверьте назначенный экскаватор.";
+                    } else if ("release_applied".equals(action)) {
+                        voice = "voice_assignment_removed";
+                        title = "Назначение снято";
+                        message = "Ожидайте нового экскаватора.";
+                    }
+                } else if ("excavator_operator".equals(roleCode)) {
+                    long targetExcavatorId = payload.optLong("target_excavator_id", 0L);
+                    JSONArray excavatorIds = payload.optJSONArray("excavator_ids");
+                    boolean isTarget = targetExcavatorId > 0L
+                        && jsonArrayContains(workerEquipmentIds, targetExcavatorId);
+                    boolean wasRelated = jsonArraysIntersect(workerEquipmentIds, excavatorIds);
+                    if ("assignment_applied".equals(action) && isTarget) {
+                        voice = "voice_truck_assigned";
+                        title = "Назначен самосвал";
+                        message = "Проверьте номер на экране.";
+                    } else if (
+                        ("assignment_applied".equals(action) || "release_applied".equals(action))
+                        && wasRelated
+                    ) {
+                        voice = "voice_truck_removed";
+                        title = "Самосвал снят";
+                        message = "Назначение самосвала изменено.";
+                    }
+                }
+
+                if (!voice.isEmpty()) {
+                    selectedVersion = version;
+                    selectedVoice = voice;
+                    selectedTitle = title;
+                    selectedBody = message;
+                }
+            }
+
+            if (selectedVersion <= 0L || selectedVoice.isEmpty()) {
+                return false;
+            }
+            OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announce(
+                this,
+                "truck_assigned",
+                selectedVoice,
+                selectedVersion,
+                roleCode + "_assignment",
+                showNotification,
+                selectedTitle,
+                selectedBody
+            );
+            return result.announced;
+        } catch (Exception error) {
+            Log.w("ConnectivityForegroundService", "Assignment voice was not parsed", error);
+            return false;
         }
-        return "Сервер доступен • " + DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date(lastSuccessAt));
+    }
+
+    private static boolean jsonArrayContains(JSONArray values, long expected) {
+        if (values == null || expected <= 0L) {
+            return false;
+        }
+        for (int index = 0; index < values.length(); index += 1) {
+            if (values.optLong(index, 0L) == expected) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean jsonArraysIntersect(JSONArray left, JSONArray right) {
+        if (left == null || right == null) {
+            return false;
+        }
+        for (int index = 0; index < right.length(); index += 1) {
+            if (jsonArrayContains(left, right.optLong(index, 0L))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String currentStatusText() {
+        return ConnectionState.lastAliveAt(this) > 0L
+            ? "Связь работает во время смены"
+            : "Проверяем связь с сервером…";
+    }
+
+    private void stopBecauseConnectionIsNotRequired(String reason) {
+        ConnectionState.disable(this, reason);
+        stopServiceAndRemoveNotification();
+    }
+
+    private void stopServiceAndRemoveNotification() {
+        synchronized (scheduleLock) {
+            if (pendingHeartbeat != null) {
+                pendingHeartbeat.cancel(true);
+                pendingHeartbeat = null;
+            }
+        }
+        if (foregroundStarted) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE);
+            foregroundStarted = false;
+        }
+        try {
+            NotificationManagerCompat.from(this).cancel(AppNotifications.FOREGROUND_NOTIFICATION_ID);
+        } catch (SecurityException ignored) {}
+        stopSelf();
     }
 
     private static final class HeartbeatResult {

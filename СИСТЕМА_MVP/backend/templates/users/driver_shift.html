@@ -4051,7 +4051,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 
     <section class="driver-panel driver-tab {% if active_tab == 'shift' %}is-active{% endif %}" data-driver-tab-panel="shift">
         {% if open_shift %}
-            <form method="post" action="{% url 'driver_close_shift' %}" class="mobile-shift-host" data-driver-shift-close-form data-driver-in-place="shift-close">
+            <form method="post" action="{% url 'driver_close_shift' %}" class="mobile-shift-host" data-driver-shift-close-form data-native-shift-id="{{ open_shift.id }}" data-driver-in-place="shift-close">
                 {% csrf_token %}
                 {{ close_form.client_action_id }}
                 {% include "includes/mobile_shift_screen.html" with mobile_shift_role="driver" mobile_shift_state="open" mobile_shift_form=close_form mobile_shift_previous=False %}
@@ -5477,7 +5477,13 @@ window.bindDriverMobileShell = function () {
                 onComplete: function () {
                     var logoutLabel = logoutButton.querySelector("[data-driver-logout-label]");
                     if (logoutLabel) logoutLabel.textContent = "Выходим";
-                    window.location.href = logoutButton.dataset.driverLogoutUrl;
+                    var stopPromise = window.NativeBackgroundConnection
+                        && typeof window.NativeBackgroundConnection.stop === "function"
+                        ? window.NativeBackgroundConnection.stop()
+                        : null;
+                    Promise.resolve(stopPromise).finally(function () {
+                        window.location.href = logoutButton.dataset.driverLogoutUrl;
+                    });
                 }
             });
         }

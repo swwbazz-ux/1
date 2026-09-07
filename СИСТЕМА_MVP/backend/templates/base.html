@@ -1575,6 +1575,7 @@
     <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v6"></script>
     {% if observer_mode %}<script src="{% static 'js/observer-mode.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% if role_session_authenticated and not observer_mode %}<script src="{% static 'js/application-session-heartbeat.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
+    {% if is_native_app and role_session_authenticated and not observer_mode %}<script src="{% static 'js/native-background-connection-v1.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     <script src="{% static 'js/client-error-report.js' %}?v={{ static_asset_release }}" defer></script>
     {% if role_session_authenticated and not observer_mode and role_app %}<script src="{% static 'js/push-notifications.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% block extra_head %}{% endblock %}
@@ -1737,6 +1738,18 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
     var logoutPath = "{% url 'logout' %}";
+    function navigateAfterNativeConnectionStop(url) {
+        var stopPromise = null;
+        try {
+            stopPromise = window.NativeBackgroundConnection
+                && typeof window.NativeBackgroundConnection.stop === "function"
+                ? window.NativeBackgroundConnection.stop()
+                : null;
+        } catch (error) {}
+        Promise.resolve(stopPromise).finally(function () {
+            window.location.href = url;
+        });
+    }
     var roleHomePath = "{% url 'role_home' %}";
     var linkedReportsHomePath = "{% if access.role.code == 'dispatcher' %}{% url 'dispatcher_reports' %}{% elif access.role.code == 'mechanic' %}{% url 'mechanic_dashboard' %}{% else %}{% url 'management_dashboard' %}{% endif %}";
     var confirmModal = document.getElementById("app-confirm-modal");
@@ -2043,7 +2056,7 @@ document.addEventListener("DOMContentLoaded", function () {
             && window.isAppRoleReadonly()
         ) {
             event.preventDefault();
-            window.location.href = link.href;
+            navigateAfterNativeConnectionStop(link.href);
             return;
         }
         var message = link.dataset.confirm;
@@ -2057,6 +2070,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 acceptLabel = "ОК, " + acceptLabel;
             }
             openConfirmDialog(message, function () {
+                if (isLogoutLink) {
+                    navigateAfterNativeConnectionStop(link.href);
+                    return;
+                }
                 window.location.href = link.href;
             }, link.dataset.confirmDelay || 0, acceptLabel, link.dataset || {});
         }

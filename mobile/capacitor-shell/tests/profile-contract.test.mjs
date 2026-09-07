@@ -24,8 +24,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "27",
-    versionName: "0.1.19",
+    versionCode: "33",
+    versionName: "0.1.21",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -35,8 +35,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "15",
-    versionName: "0.1.12",
+    versionCode: "33",
+    versionName: "0.1.21",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -46,8 +46,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver.qa",
     appName: "Водитель QA",
-    versionCode: "2",
-    versionName: "1.0.1-qa",
+    versionCode: "3",
+    versionName: "1.0.2-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -57,8 +57,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "17",
-    versionName: "0.1.12",
+    versionCode: "35",
+    versionName: "0.1.21",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -68,8 +68,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "16",
-    versionName: "0.1.12-rc",
+    versionCode: "34",
+    versionName: "0.1.21-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -79,8 +79,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator.qa",
     appName: "Экскаваторщик QA",
-    versionCode: "6",
-    versionName: "1.0.5-qa",
+    versionCode: "7",
+    versionName: "1.0.6-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -90,8 +90,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "29",
-    versionName: "0.1.19",
+    versionCode: "35",
+    versionName: "0.1.21",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -101,8 +101,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "28",
-    versionName: "0.1.19-rc",
+    versionCode: "34",
+    versionName: "0.1.21-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -325,11 +325,12 @@ test("background service announces only a fresh driver truck_loaded event", () =
   const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
   const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
   const player = readFileSync(resolve(javaRoot, "DriverVoicePlayer.java"), "utf8");
+  const announcer = readFileSync(resolve(javaRoot, "DriverDumpPointAnnouncer.java"), "utf8");
   const catalog = readFileSync(resolve(javaRoot, "DriverVoiceCatalog.java"), "utf8");
   assert.match(service, /"trip_changed"\.equals\(event\.optString\("type"\)\)/);
   assert.match(service, /"truck_loaded"\.equals\(payload\.optString\("action"\)\)/);
   assert.match(service, /last_driver_dump_point_alert_version/);
-  assert.match(service, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
+  assert.match(announcer, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
   assert.match(player, /AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK/);
   assert.match(player, /DriverVoiceCatalog\.resourceNameFor/);
   for (const [id, resource] of [
@@ -344,6 +345,98 @@ test("background service announces only a fresh driver truck_loaded event", () =
   }
   assert.match(catalog, /normalized\.equals\("свх"\)[\s\S]*?voice_edem_na_svh/);
   assert.match(catalog, /normalized\.equals\("буферный склад"\)[\s\S]*?voice_na_bufernyi_sklad/);
+});
+
+test("both production profiles package every approved operational voice phrase", () => {
+  const common = [
+    "voice_shift_opened",
+    "voice_shift_closed",
+    "voice_downtime_started",
+    "voice_downtime_finished",
+    "voice_action_failed",
+    "voice_connection_lost",
+    "voice_connection_restored",
+  ];
+  const byRole = {
+    driver: [
+      "voice_excavator_assigned",
+      "voice_excavator_changed",
+      "voice_assignment_removed",
+      "voice_trip_finished",
+      "voice_trip_finish_failed",
+    ],
+    excavator: [
+      "voice_truck_assigned",
+      "voice_truck_removed",
+      "voice_face_settings_saved",
+      "voice_truck_sent",
+      "voice_truck_send_failed",
+    ],
+  };
+  for (const role of Object.keys(byRole)) {
+    const rawRoot = resolve(root, "profiles", role, "res", "raw");
+    for (const suffix of [...common, ...byRole[role]]) {
+      const resource = resolve(rawRoot, `${role}_${suffix}.m4a`);
+      assert.ok(statSync(resource).size > 8_000, `${resource} must contain real audio`);
+      assert.match(
+        readFileSync(resource).subarray(0, 32).toString("latin1"),
+        /ftyp/,
+        `${resource} must be an MPEG-4 audio resource`
+      );
+    }
+  }
+
+  const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
+  const plugin = readFileSync(resolve(javaRoot, "NativeSoundPlugin.java"), "utf8");
+  const player = readFileSync(resolve(javaRoot, "OperationalVoicePlayer.java"), "utf8");
+  const announcer = readFileSync(resolve(javaRoot, "OperationalVoiceAnnouncer.java"), "utf8");
+  const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  assert.match(plugin, /public void announceOperational\(PluginCall call\)/);
+  assert.match(player, /VOICE_AFTER_CUE_DELAY_MS/);
+  assert.match(player, /AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK/);
+  assert.match(announcer, /last_operational_voice_/);
+  assert.match(service, /showLatestAssignmentAlert/);
+  assert.match(service, /CONNECTION_LOSS_ANNOUNCED/);
+});
+
+test("foreground driver screen uses the same deduplicated recorded voice bridge", () => {
+  const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
+  const plugin = readFileSync(resolve(javaRoot, "NativeSoundPlugin.java"), "utf8");
+  const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  const player = readFileSync(resolve(javaRoot, "DriverVoicePlayer.java"), "utf8");
+  const sounds = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "static", "js", "mobile-operational-sounds-v1.js"), "utf8");
+  const driverTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "users", "driver_shift.html"), "utf8");
+
+  assert.match(plugin, /@PluginMethod\s+public void announceDumpPoint\(PluginCall call\)/);
+  assert.match(plugin, /call\.getData\(\)\.opt\(name\)/);
+  assert.match(plugin, /static long numericLong\(Object value\)[\s\S]*?value instanceof Number[\s\S]*?longValue\(\)/);
+  assert.doesNotMatch(plugin, /call\.getLong\("(?:eventVersion|tripId|dumpPointId)"/);
+  const announcer = readFileSync(resolve(javaRoot, "DriverDumpPointAnnouncer.java"), "utf8");
+  assert.match(plugin, /DriverDumpPointAnnouncer\.announce/);
+  assert.match(announcer, /private static DriverVoicePlayer sharedPlayer/);
+  assert.match(announcer, /lastScheduledTripId/);
+  assert.match(announcer, /last_driver_dump_point_alert_trip_id[\s\S]*?tripId == persistedTripId[\s\S]*?tripId == lastScheduledTripId/);
+  assert.match(announcer, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS[\s\S]*?sharedPlayer\.announce/);
+  assert.match(announcer, /sharedPlayer\.announce\([\s\S]*?preferences\.edit\(\)/);
+  assert.match(plugin, /result\.announced[\s\S]*?cuePlayed/);
+  assert.match(plugin, /dumpPointName,[\s\S]*?false,[\s\S]*?true/);
+  assert.match(service, /displayName,[\s\S]*?showNotification,[\s\S]*?true/);
+  assert.match(player, /void announce\([\s\S]*?boolean playCue\)[\s\S]*?playAlertCue\(\)/);
+  assert.match(service, /DriverDumpPointAnnouncer\.announce/);
+  assert.doesNotMatch(service, /private DriverVoicePlayer driverVoicePlayer/);
+  assert.doesNotMatch(plugin, /private DriverVoicePlayer driverVoicePlayer/);
+  assert.match(player, /recordStage\([\s\S]*?"queued"/);
+  assert.match(sounds, /announceDumpPoint: announceDumpPoint/);
+  assert.match(sounds, /diagnostics: diagnostics/);
+  assert.match(driverTemplate, /operational-state-refresh-applied/);
+  assert.match(driverTemplate, /event\.type !== "trip_changed"/);
+  assert.match(driverTemplate, /payload\.action !== "truck_loaded"/);
+  assert.match(driverTemplate, /oldShell\.dataset\.driverHasLoadedTrip !== "true"/);
+  assert.match(driverTemplate, /freshShell\.dataset\.driverHasLoadedTrip === "true"/);
+  assert.match(driverTemplate, /becameLoaded[\s\S]*?playDriverDumpPointAlert/);
+  assert.match(plugin, /@PluginMethod\s+public void getDiagnostics\(PluginCall call\)/);
+  assert.match(player, /recordStage\("cue_started"/);
+  assert.match(player, /recordStage\("voice_started"/);
 });
 
 test("WebView cookies are accepted and flushed at every persistence boundary", () => {
@@ -369,7 +462,7 @@ test("Android backup cannot export persisted WebView sessions", () => {
   assert.doesNotMatch(manifest, /android:allowBackup="true"/);
 });
 
-test("native heartbeat survives task removal and reports the exact APK version", () => {
+test("native heartbeat follows the active-shift lifecycle and reports the exact APK version", () => {
   const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
   const activity = readFileSync(resolve(javaRoot, "MainActivity.java"), "utf8");
   const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
@@ -379,18 +472,37 @@ test("native heartbeat survives task removal and reports the exact APK version",
   );
 
   assert.match(service, /return START_STICKY;/);
-  assert.doesNotMatch(service, /return START_NOT_STICKY;/);
-  assert.match(service, /onTaskRemoved\(Intent rootIntent\)[\s\S]*?scheduleHeartbeat\(0L\)/);
-  assert.doesNotMatch(service, /onTaskRemoved\(Intent rootIntent\)[\s\S]*?stopSelf\(\)/);
+  assert.match(service, /return START_NOT_STICKY;/);
+  assert.match(service, /onTaskRemoved\(Intent rootIntent\)[\s\S]*?ConnectionState\.disable\(this, "task_removed"\)/);
+  assert.match(service, /onTaskRemoved\(Intent rootIntent\)[\s\S]*?stopServiceAndRemoveNotification\(\)/);
+  assert.match(service, /background_connection_required/);
+  assert.match(service, /ConnectionState\.applyServerRequirement/);
+  assert.match(service, /reconcileFromForeground\(Context context\)[\s\S]*?!ConnectionState\.isDesired\(context\)[\s\S]*?return;/);
+  assert.doesNotMatch(service, /allow_foreground_probe/);
+  assert.match(service, /ACTION_STOP_CONNECTION/);
   assert.match(service, /MAX_BACKOFF_MS = 60_000L/);
   assert.match(service, /CopperResourcesNative\/" \+ BuildConfig\.APP_PROFILE_ID[\s\S]*?BuildConfig\.VERSION_NAME/);
   assert.match(manifest, /android:stopWithTask="false"/);
   assert.doesNotMatch(manifest, /android:stopWithTask="true"/);
-  assert.match(activity, /onStart\(\)[\s\S]*?ConnectivityForegroundService\.start\(this\)/);
+  assert.match(activity, /registerPlugin\(BackgroundConnectionPlugin\.class\)/);
+  assert.match(activity, /onStart\(\)[\s\S]*?ConnectivityForegroundService\.reconcileFromForeground\(this\)/);
   assert.doesNotMatch(activity, /onDestroy\(\)[\s\S]*?ConnectivityForegroundService\.stop\(this\)/);
   assert.match(activity, /BATTERY_PROMPT_COOLDOWN_MS/);
   assert.match(activity, /BuildConfig\.VERSION_NAME\.equals\(promptedVersion\)/);
   assert.match(activity, /ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS/);
+
+  const connectionState = readFileSync(resolve(javaRoot, "ConnectionState.java"), "utf8");
+  const connectionPlugin = readFileSync(resolve(javaRoot, "BackgroundConnectionPlugin.java"), "utf8");
+  const notifications = readFileSync(resolve(javaRoot, "AppNotifications.java"), "utf8");
+  assert.match(connectionState, /putBoolean\(CONNECTION_DESIRED, true\)/);
+  assert.match(connectionState, /putBoolean\(CONNECTION_DESIRED, false\)/);
+  assert.match(connectionState, /\.commit\(\)/);
+  assert.match(connectionPlugin, /@CapacitorPlugin\(name = "BackgroundConnection"\)/);
+  assert.match(connectionPlugin, /public void sync\(PluginCall call\)/);
+  assert.match(connectionPlugin, /public void stop\(PluginCall call\)/);
+  assert.match(notifications, /Остановить связь/);
+  assert.doesNotMatch(notifications, /Тест сигнала/);
+  assert.match(notifications, /\.setSilent\(true\)/);
 });
 
 test("native implementation reads role data only from BuildConfig", () => {

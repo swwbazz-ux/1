@@ -1,6 +1,7 @@
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 
+from shifts.models import EmployeeShift
 from users.models import EmployeeAccess
 from users.active_role import role_session_state
 from users.context_processors import parse_native_app_marker
@@ -12,7 +13,7 @@ from users.role_apps import (
 )
 
 from .models import OperationalStateEvent, OperationalStateVersion
-from .realtime import relevant_event_delta
+from .realtime import relevant_event_delta, worker_equipment_ids_for_access
 
 
 def parse_positive_int(value, default, maximum=None):
@@ -61,6 +62,27 @@ def operational_state_version_view(request):
     role_is_active_for_app = role_state['is_active'] and (
         role_app is None or session_role_code == role_app.role_code
     )
+    background_role = role_app is not None and role_app.role_code in {
+        'driver',
+        'excavator_operator',
+    }
+    active_shift = None
+    if background_role and role_is_active_for_app:
+        active_shift = (
+            EmployeeShift.objects
+            .filter(
+                employee_id=access.employee_id,
+                workplace_code=role_app.role_code,
+                closed_at__isnull=True,
+            )
+            .order_by('-opened_at', '-id')
+            .only('id')
+            .first()
+        )
+    has_active_shift = active_shift is not None
+    background_connection_required = bool(
+        background_role and role_is_active_for_app and has_active_shift
+    )
 
     if role_is_active_for_app:
         native_app, native_version = parse_native_app_marker(request)
@@ -99,6 +121,9 @@ def operational_state_version_view(request):
     payload = {
         'authenticated': True,
         'role_active': role_is_active_for_app,
+        'has_active_shift': has_active_shift,
+        'active_shift_id': str(active_shift.id) if active_shift else '',
+        'background_connection_required': background_connection_required,
         'active_role_code': role_state.get('active_role_code', ''),
         'active_role_changed_at': (
             role_state['active_role_changed_at'].isoformat()
@@ -110,6 +135,11 @@ def operational_state_version_view(request):
         'app_contract_version': APP_CONTRACT_VERSION,
         'role_shell_version': role_app.shell_version if role_app else '',
         'role_app_code': role_app.role_code if role_app else access.role.code,
+        'worker_equipment_ids': (
+            sorted(worker_equipment_ids_for_access(access))
+            if role_is_active_for_app and access.role.code in {'driver', 'excavator_operator'}
+            else []
+        ),
         'key': 'production',
         'version': state_version,
         'events': events,
