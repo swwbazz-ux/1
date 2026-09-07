@@ -257,6 +257,82 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertNotContains(response, 'mm-mobile-clock')
         self.assertNotContains(response, 'mm-mobile-icon-button')
 
+    def test_mining_master_mobile_equipment_cards_use_double_tap_targets(self):
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'data-mm-mobile-home-truck-id="{self.assigned_truck.id}"',
+        )
+        self.assertContains(response, 'var infoDoubleTapWindowMs = 340;')
+        self.assertContains(response, 'key: "truck:" + (truck.dataset.mmMobileHomeTruckId || "")')
+        self.assertContains(response, 'key: "excavator:" + (card.dataset.mmMobileExcavatorId || "")')
+        self.assertContains(response, 'openEquipmentCard(target.cardId);')
+        self.assertContains(response, 'function miningMasterOperationalDetailRows(data)')
+        self.assertContains(response, '"VIN/серийный N"')
+        self.assertContains(response, 'detailList.hidden = detailRows.length === 0;')
+        self.assertNotContains(response, 'mobileLongTapTimer')
+        self.assertNotContains(response, '}, 520);')
+
+    def test_mining_master_shift_plan_detail_breaks_total_percent_down_by_dump_point(self):
+        rock_type = RockType.objects.create(name='Порода плана')
+        kkd = DumpPoint.objects.create(name='ККД')
+        skdr = DumpPoint.objects.create(name='СКДР')
+        dump = DumpPoint.objects.create(name='Отвал')
+        now = timezone.now()
+        for point, tonnage in ((kkd, '84000.00'), (skdr, '84000.00'), (dump, '42000.00')):
+            Trip.objects.create(
+                truck=self.assigned_truck,
+                excavator=self.excavator,
+                rock_type=rock_type,
+                dump_point=point,
+                actual_dump_point=point,
+                tonnage=tonnage,
+                status=TripStatus.COMPLETED,
+                completed_at=now,
+            )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        detail = response.context['dispatcher_dashboard']['shift_plan_detail']
+        contribution_by_point = {
+            point['name']: point['contribution_percent']
+            for point in detail['points']
+        }
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(detail['completion_percent'], 50)
+        self.assertEqual(contribution_by_point, {'ККД': 20, 'СКДР': 20, 'Отвал': 10})
+        self.assertEqual(sum(contribution_by_point.values()), detail['completion_percent'])
+        self.assertContains(response, 'data-mm-open-shift-plan-detail')
+        self.assertContains(response, 'data-mm-shift-plan-detail')
+        self.assertContains(response, 'Вклад точек разгрузки в общий результат')
+        self.assertContains(response, 'var previousTapAt = 0;')
+
+    def test_mining_master_complex_truck_card_includes_open_shift_driver(self):
+        driver = Employee.objects.create(
+            full_name='Водитель Самосвала Тест',
+            phone='79000000411',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        EmployeeShift.objects.create(
+            employee=driver,
+            workplace_code='driver',
+            shift_type='day',
+            equipment=self.assigned_truck,
+            opened_at=timezone.now(),
+            opened_by=driver,
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        equipment_card = response.context['dispatcher_dashboard']['equipment_cards'][str(self.assigned_truck.id)]
+
+        self.assertEqual(equipment_card['employee']['name'], driver.full_name)
+        self.assertEqual(equipment_card['employee']['phone'], driver.phone)
+        self.assertEqual(equipment_card['status_label'], 'Ожидает')
+        self.assertContains(response, 'detailStatus.textContent = "Состояние: "')
+
     def test_mining_master_mobile_complex_status_chip_uses_downtime_reason_label(self):
         reason = DowntimeReason.objects.create(
             name='Заправка экскаватора',
@@ -357,7 +433,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v139')
+        self.assertContains(response, 'mining-master-mobile-shell-v140')
         self.assertNotContains(response, '>v116<')
         self.assertContains(response, 'function hasMiningMasterRelevantEvents')
         self.assertContains(response, 'return Array.isArray(events) && events.length > 0;')
@@ -427,7 +503,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v139', script)
+        self.assertIn('mining-master-mobile-shell-v140', script)
         self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)

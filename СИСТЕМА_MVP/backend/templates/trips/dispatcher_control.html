@@ -165,9 +165,9 @@
                 <h1>{{ dispatcher_header.active_dispatcher_short_name|default:"Смена не открыта" }}</h1>
             </div>
             <div class="mm-mobile-header-actions">
-                <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
+                <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Двойной тап — детализация">
                     {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                </div>
+                </button>
                 {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
             </div>
         </header>
@@ -248,9 +248,9 @@
                     <h1>Экскаваторы</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Двойной тап — детализация">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                    </div>
+                    </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
@@ -302,9 +302,9 @@
                     <h1>Самосвалы</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Двойной тап — детализация">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                    </div>
+                    </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
@@ -355,9 +355,9 @@
                     <h1>Отчеты</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Двойной тап — детализация">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                    </div>
+                    </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
@@ -468,9 +468,9 @@
                             <h1>Набор самосвалов</h1>
                         </div>
                         <div class="mm-mobile-header-actions">
-                            <div class="mm-mobile-plan-ring" data-connection-indicator style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" role="img" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%, состояние связи показывает цвет кольца">
+                            <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Двойной тап — детализация">
                                 {{ dispatcher_dashboard.completion_percent|default:0 }}%
-                            </div>
+                            </button>
                             {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                         </div>
                     </header>
@@ -510,6 +510,43 @@
                 </section>
             {% endif %}
         {% endfor %}
+
+        <div class="gd-equipment-detail mm-equipment-detail mm-shift-plan-detail" data-mm-shift-plan-detail hidden>
+            <div class="mm-equipment-detail-backdrop" data-mm-shift-plan-detail-close></div>
+            <section class="mm-equipment-detail-panel mm-shift-plan-panel" role="dialog" aria-modal="true" aria-labelledby="mm-shift-plan-title">
+                <button type="button" class="mm-detail-close" data-mm-shift-plan-detail-close aria-label="Закрыть детализацию плана">×</button>
+                <header class="mm-shift-plan-head">
+                    <span>План смены</span>
+                    <h2 id="mm-shift-plan-title">Выполнено {{ dispatcher_dashboard.shift_plan_detail.completion_percent|default:0 }}%</h2>
+                    <p>Вклад точек разгрузки в общий результат</p>
+                </header>
+                <div class="mm-shift-plan-summary" aria-label="Факт и план смены">
+                    <div>
+                        <span>Факт</span>
+                        <strong>{{ dispatcher_dashboard.shift_plan_detail.fact_tons|default:"0" }} т</strong>
+                    </div>
+                    <div>
+                        <span>План</span>
+                        <strong>{{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} т</strong>
+                    </div>
+                </div>
+                <div class="mm-shift-plan-points" aria-label="Выполнение по точкам разгрузки">
+                    {% for point in dispatcher_dashboard.shift_plan_detail.points %}
+                        <article class="mm-shift-plan-point" style="--mm-shift-plan-point-percent: {{ point.contribution_percent }}%;">
+                            <div class="mm-shift-plan-point-copy">
+                                <strong>{{ point.name }}</strong>
+                                <span>{{ point.fact_tons }} т · {{ point.trip_count_label }}</span>
+                            </div>
+                            <b>{{ point.contribution_percent }}%</b>
+                            <i aria-hidden="true"><span></span></i>
+                        </article>
+                    {% empty %}
+                        <div class="mm-shift-plan-empty">Разгрузки в этой смене пока не зафиксированы</div>
+                    {% endfor %}
+                </div>
+                <p class="mm-shift-plan-note">Проценты показывают вклад каждой точки в общий круг выполнения.</p>
+            </section>
+        </div>
     </section>
     {% endif %}
 
@@ -1029,7 +1066,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v139";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v140";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -1471,7 +1508,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (document.body.classList.contains("modal-open")) {
             return true;
         }
-        if (document.querySelector(".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), .mm-mobile-update-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden])")) {
+        if (document.querySelector(".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), .mm-mobile-update-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden]), [data-mm-shift-plan-detail]:not([hidden])")) {
             return true;
         }
         if (mobileShell.querySelector(".is-dragging, .is-hold-pending, .is-hold-ready, .is-work-swiping, .is-swiping, .is-truck-swiping, .is-fill-swiping, .is-create-swiping, .is-activating, .is-removing, .is-releasing, .is-releasing-trucks")) {
@@ -1557,7 +1594,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (document.body.classList.contains("modal-open")) {
             return true;
         }
-        if (document.querySelector(".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), .mm-mobile-update-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden])")) {
+        if (document.querySelector(".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), .mm-mobile-update-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden]), [data-mm-shift-plan-detail]:not([hidden])")) {
             return true;
         }
         if (document.querySelector(".dispatcher-dragging, .dispatcher-drop-target, .is-dragging")) {
@@ -2236,6 +2273,16 @@ document.addEventListener("DOMContentLoaded", function () {
         return dispatcherEquipmentStateColor(legacyCodes[status] || status || "inactive");
     }
 
+    function pulseMiningMasterInfoTarget(node) {
+        if (!node) return;
+        node.classList.remove("is-mobile-tap-feedback");
+        void node.offsetWidth;
+        node.classList.add("is-mobile-tap-feedback");
+        window.setTimeout(function () {
+            node.classList.remove("is-mobile-tap-feedback");
+        }, 260);
+    }
+
     function cleanDetailTile(tile) {
         tile.classList.remove("is-assigned", "is-placeholder", "dispatcher-dragging");
         tile.classList.add("gd-detail-slot-clone");
@@ -2529,6 +2576,26 @@ document.addEventListener("DOMContentLoaded", function () {
         detailShiftReport.hidden = metrics.length === 0 && charts.length === 0;
     }
 
+    function miningMasterOperationalDetailRows(data) {
+        var rows = (data && data.details) || [];
+        if (!isMiningMasterMobilePage()) return rows;
+        var hiddenLabels = [
+            "Гаражный N",
+            "VIN/серийный N",
+            "Модель",
+            "ГП, т",
+            "Кузов/ковш, м3",
+            "Комплекс",
+            "Состояние"
+        ];
+        var emptyOperationalValues = ["Забой не указан", "не указан", "не указана"];
+        return rows.filter(function (row) {
+            if (!row || !row.value) return false;
+            if (hiddenLabels.indexOf(String(row.label || "")) !== -1) return false;
+            return emptyOperationalValues.indexOf(String(row.value || "").trim()) === -1;
+        });
+    }
+
     function openEquipmentCard(cardId) {
         var data = equipmentCards[String(cardId || "")];
         if (!data || !detailLayer) return false;
@@ -2536,7 +2603,10 @@ document.addEventListener("DOMContentLoaded", function () {
         renderDetailGarageIcon(cardId, data);
         if (detailType) detailType.textContent = data.type || "";
         if (detailTitle) detailTitle.textContent = data.label || "";
-        if (detailStatus) detailStatus.textContent = data.status_label || "";
+        if (detailStatus) {
+            detailStatus.className = "status-" + normalizeTileStatus(data.status_key);
+            detailStatus.textContent = "Состояние: " + (data.status_label || "не определено");
+        }
         if (detailZone) detailZone.textContent = data.zone || "";
         if (detailEmployee) {
             var employee = data.employee || {};
@@ -2571,7 +2641,8 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         if (detailList) {
             detailList.innerHTML = "";
-            (data.details || []).forEach(function (row) {
+            var detailRows = miningMasterOperationalDetailRows(data);
+            detailRows.forEach(function (row) {
                 if (!row || !row.value) return;
                 var term = document.createElement("dt");
                 var value = document.createElement("dd");
@@ -2580,6 +2651,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 detailList.appendChild(term);
                 detailList.appendChild(value);
             });
+            detailList.hidden = detailRows.length === 0;
         }
         renderDetailShiftReport(data.shift_report || {});
         detailLayer.hidden = false;
@@ -2607,6 +2679,91 @@ document.addEventListener("DOMContentLoaded", function () {
         var home = shell.querySelector("[data-mm-mobile-view='home']");
         var tabPanels = Array.from(shell.querySelectorAll("[data-mm-mobile-panel]"));
         var fillScreens = Array.from(shell.querySelectorAll("[data-mm-mobile-fill]"));
+        var shiftPlanDetail = shell.querySelector("[data-mm-shift-plan-detail]");
+        var shiftPlanReturnFocus = null;
+        function closeShiftPlanDetail() {
+            if (!shiftPlanDetail) return;
+            shiftPlanDetail.hidden = true;
+            if (shiftPlanReturnFocus && shiftPlanReturnFocus.isConnected) {
+                shiftPlanReturnFocus.focus({preventScroll: true});
+            }
+            shiftPlanReturnFocus = null;
+        }
+        function openShiftPlanDetail(trigger) {
+            if (!shiftPlanDetail) return;
+            shiftPlanReturnFocus = trigger || null;
+            shiftPlanDetail.hidden = false;
+            var closeButton = shiftPlanDetail.querySelector("[data-mm-shift-plan-detail-close]");
+            if (closeButton) closeButton.focus({preventScroll: true});
+        }
+        function bindShiftPlanDetailTrigger(ring) {
+            if (!ring || ring.dataset.mmShiftPlanDetailBound === "true") return;
+            ring.dataset.mmShiftPlanDetailBound = "true";
+            var previousTapAt = 0;
+            var previousTapX = 0;
+            var previousTapY = 0;
+            var activePointerId = null;
+            var pointerStartedAt = 0;
+            var pointerStartX = 0;
+            var pointerStartY = 0;
+            var pointerMoved = false;
+            ring.addEventListener("click", function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                pulseMiningMasterInfoTarget(ring);
+            });
+            ring.addEventListener("dblclick", function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                previousTapAt = 0;
+                openShiftPlanDetail(ring);
+            });
+            ring.addEventListener("pointerdown", function (event) {
+                if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+                activePointerId = event.pointerId;
+                pointerStartedAt = Date.now();
+                pointerStartX = event.clientX;
+                pointerStartY = event.clientY;
+                pointerMoved = false;
+            });
+            ring.addEventListener("pointermove", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                if (Math.hypot(event.clientX - pointerStartX, event.clientY - pointerStartY) > 10) {
+                    pointerMoved = true;
+                }
+            });
+            ring.addEventListener("pointerup", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                activePointerId = null;
+                if (pointerMoved || Date.now() - pointerStartedAt > 360) return;
+                var now = Date.now();
+                var distance = Math.hypot(event.clientX - previousTapX, event.clientY - previousTapY);
+                if (previousTapAt && now - previousTapAt <= 340 && distance <= 24) {
+                    previousTapAt = 0;
+                    openShiftPlanDetail(ring);
+                } else {
+                    previousTapAt = now;
+                    previousTapX = event.clientX;
+                    previousTapY = event.clientY;
+                    pulseMiningMasterInfoTarget(ring);
+                }
+            });
+            ring.addEventListener("pointercancel", function () {
+                activePointerId = null;
+                pointerMoved = false;
+            });
+            ring.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                previousTapAt = 0;
+                openShiftPlanDetail(ring);
+            });
+        }
+        if (shiftPlanDetail) {
+            shiftPlanDetail.querySelectorAll("[data-mm-shift-plan-detail-close]").forEach(function (button) {
+                button.addEventListener("click", closeShiftPlanDetail);
+            });
+        }
         function isMiningMasterMobileReadonly() {
             return (
                 (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly())
@@ -2718,9 +2875,9 @@ document.addEventListener("DOMContentLoaded", function () {
                         '<button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>',
                         '<div class="mm-mobile-detail-title mm-mobile-fill-title"><h1>Набор самосвалов</h1></div>',
                         {% if is_native_app %}
-                        '<div class="mm-mobile-header-actions"><div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: 0%;" role="img" aria-label="Выполнение плана смены 0%">0%</div></div>',
+                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Двойной тап — детализация">0%</button></div>',
                         {% else %}
-                        '<div class="mm-mobile-header-actions"><div class="mm-mobile-plan-ring" style="--mm-mobile-plan-progress: 0%;" role="img" aria-label="Выполнение плана смены 0%">0%</div><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
+                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Двойной тап — детализация">0%</button><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
                         {% endif %}
                     '</header>',
                     '<div class="mm-mobile-fill-save-overlay" aria-hidden="true">Сохранить</div>',
@@ -2780,6 +2937,7 @@ document.addEventListener("DOMContentLoaded", function () {
             screen.querySelectorAll("[data-mm-mobile-fill-drop]").forEach(bindMobileFillFinishSwipe);
             shell.appendChild(screen);
             fillScreens.push(screen);
+            screen.querySelectorAll("[data-mm-open-shift-plan-detail]").forEach(bindShiftPlanDetailTrigger);
             return screen;
         }
         function updateMobileFillAssignedLayout(screenOrAssigned) {
@@ -5024,18 +5182,84 @@ document.addEventListener("DOMContentLoaded", function () {
             bindMobileComplexSwipe(card);
             if (card.dataset.mmMobileComplexOpenBound === "true") return;
             card.dataset.mmMobileComplexOpenBound = "true";
+            var previousInfoTapAt = 0;
+            var previousInfoTapKey = "";
+            var previousInfoTapX = 0;
+            var previousInfoTapY = 0;
+            var infoDoubleTapWindowMs = 340;
+            var infoDoubleTapDistancePx = 24;
+
+            function infoTargetFromEvent(event) {
+                var overflow = event.target && event.target.closest
+                    ? event.target.closest(".mm-mobile-truck-mini.is-more")
+                    : null;
+                if (overflow && card.contains(overflow)) return null;
+                var truck = event.target && event.target.closest
+                    ? event.target.closest("[data-mm-mobile-home-truck-id]")
+                    : null;
+                if (truck && card.contains(truck)) {
+                    if (truck.dataset.mmMobileIgnoreDoubleTap === "true") return null;
+                    return {
+                        key: "truck:" + (truck.dataset.mmMobileHomeTruckId || ""),
+                        cardId: truck.dataset.mmMobileHomeTruckId || "",
+                        node: truck
+                    };
+                }
+                return {
+                    key: "excavator:" + (card.dataset.mmMobileExcavatorId || ""),
+                    cardId: card.dataset.mmMobileExcavatorId || "",
+                    node: card
+                };
+            }
+
+            function resetPreviousInfoTap() {
+                previousInfoTapAt = 0;
+                previousInfoTapKey = "";
+                previousInfoTapX = 0;
+                previousInfoTapY = 0;
+            }
+
             card.addEventListener("click", function (event) {
                 if (card.dataset.mmMobileSwipeIgnoreClick === "true" || card.classList.contains("is-releasing") || card.classList.contains("is-releasing-trucks")) {
                     event.preventDefault();
                     event.stopPropagation();
+                    resetPreviousInfoTap();
                     return;
                 }
                 event.preventDefault();
                 event.stopPropagation();
-                openFill(card.dataset.mmMobileOpenComplex);
+                var target = infoTargetFromEvent(event);
+                if (!target || !target.cardId) {
+                    resetPreviousInfoTap();
+                    return;
+                }
+                var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
+                var distance = Math.hypot(event.clientX - previousInfoTapX, event.clientY - previousInfoTapY);
+                if (
+                    previousInfoTapKey === target.key &&
+                    now - previousInfoTapAt <= infoDoubleTapWindowMs &&
+                    distance <= infoDoubleTapDistancePx
+                ) {
+                    resetPreviousInfoTap();
+                    openEquipmentCard(target.cardId);
+                    return;
+                }
+                previousInfoTapAt = now;
+                previousInfoTapKey = target.key;
+                previousInfoTapX = event.clientX;
+                previousInfoTapY = event.clientY;
+                pulseMiningMasterInfoTarget(target.node);
             });
             card.addEventListener("keydown", function (event) {
                 if (event.key !== "Enter" && event.key !== " ") return;
+                var truck = event.target && event.target.closest
+                    ? event.target.closest("[data-mm-mobile-home-truck-id]")
+                    : null;
+                if (truck && card.contains(truck) && openEquipmentCard(truck.dataset.mmMobileHomeTruckId)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
                 event.preventDefault();
                 openFill(card.dataset.mmMobileOpenComplex);
             });
@@ -5137,6 +5361,7 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         });
         shell.querySelectorAll("[data-mm-mobile-panel='trucks'] .mm-mobile-truck-card[data-equipment-card-id]").forEach(bindEquipmentCardTrigger);
+        shell.querySelectorAll("[data-mm-open-shift-plan-detail]").forEach(bindShiftPlanDetailTrigger);
         shell.querySelectorAll("[data-mm-mobile-fill-back]").forEach(function (button) {
             button.addEventListener("click", function (event) {
                 event.preventDefault();
@@ -5190,6 +5415,10 @@ document.addEventListener("DOMContentLoaded", function () {
         syncMobileGarageNavState();
         scheduleMobileLocalLayoutReconcile();
         document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && shiftPlanDetail && !shiftPlanDetail.hidden) {
+                closeShiftPlanDetail();
+                return;
+            }
             if (event.key === "Escape" && shell.dataset.mobileScreen === "fill") {
                 closeDetails();
             }
@@ -5791,8 +6020,13 @@ document.addEventListener("DOMContentLoaded", function () {
         var mobileTapPointerId = null;
         var mobileTapStartX = 0;
         var mobileTapStartY = 0;
-        var mobileLongTapTimer = null;
-        var mobileLongTapOpened = false;
+        var mobileTapStartedAt = 0;
+        var mobilePreviousTapAt = 0;
+        var mobilePreviousTapX = 0;
+        var mobilePreviousTapY = 0;
+        var mobileDoubleTapWindowMs = 340;
+        var mobileDoubleTapDistancePx = 24;
+        var mobileTapMaxDurationMs = 360;
         var shouldUsePointerTap = Boolean(node.closest(".mm-mobile-shell")) && (
             node.classList.contains("mm-mobile-truck-card") ||
             node.classList.contains("mm-mobile-garage-excavator")
@@ -5802,18 +6036,13 @@ document.addEventListener("DOMContentLoaded", function () {
             return node.classList.contains("is-placeholder") ||
                 Boolean(control && control !== node);
         }
-        function clearMobileLongTapTimer() {
-            if (!mobileLongTapTimer) return;
-            window.clearTimeout(mobileLongTapTimer);
-            mobileLongTapTimer = null;
+        function resetMobilePreviousTap() {
+            mobilePreviousTapAt = 0;
+            mobilePreviousTapX = 0;
+            mobilePreviousTapY = 0;
         }
         function pulseMobileEquipmentCard() {
-            node.classList.remove("is-mobile-tap-feedback");
-            void node.offsetWidth;
-            node.classList.add("is-mobile-tap-feedback");
-            window.setTimeout(function () {
-                node.classList.remove("is-mobile-tap-feedback");
-            }, 260);
+            pulseMiningMasterInfoTarget(node);
         }
         function openMobileEquipmentCard(event) {
             if (!openEquipmentCard(node.dataset.equipmentCardId)) return false;
@@ -5829,38 +6058,48 @@ document.addEventListener("DOMContentLoaded", function () {
                 mobileTapPointerId = event.pointerId;
                 mobileTapStartX = event.clientX;
                 mobileTapStartY = event.clientY;
-                mobileLongTapOpened = false;
-                clearMobileLongTapTimer();
-                mobileLongTapTimer = window.setTimeout(function () {
-                    if (mobileTapPointerId !== event.pointerId) return;
-                    mobileLongTapOpened = openMobileEquipmentCard(event);
-                }, 520);
+                mobileTapStartedAt = window.performance && window.performance.now ? window.performance.now() : Date.now();
             });
             node.addEventListener("pointermove", function (event) {
                 if (mobileTapPointerId === null || event.pointerId !== mobileTapPointerId) return;
                 var dx = event.clientX - mobileTapStartX;
                 var dy = event.clientY - mobileTapStartY;
                 if (Math.hypot(dx, dy) > 10) {
-                    clearMobileLongTapTimer();
+                    mobileTapPointerId = null;
+                    resetMobilePreviousTap();
                 }
             });
             node.addEventListener("pointerup", function (event) {
                 if (mobileTapPointerId === null || event.pointerId !== mobileTapPointerId) return;
                 var dx = event.clientX - mobileTapStartX;
                 var dy = event.clientY - mobileTapStartY;
-                clearMobileLongTapTimer();
+                var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
+                var tapDuration = now - mobileTapStartedAt;
                 mobileTapPointerId = null;
-                if (Math.hypot(dx, dy) > 10 || isEquipmentCardTapBlocked(event)) return;
-                if (!mobileLongTapOpened) {
-                    pulseMobileEquipmentCard();
-                    event.preventDefault();
-                    event.stopPropagation();
+                if (Math.hypot(dx, dy) > 10 || tapDuration > mobileTapMaxDurationMs || isEquipmentCardTapBlocked(event)) {
+                    resetMobilePreviousTap();
+                    return;
                 }
+                event.preventDefault();
+                event.stopPropagation();
+                var previousDistance = Math.hypot(event.clientX - mobilePreviousTapX, event.clientY - mobilePreviousTapY);
+                if (mobilePreviousTapAt && now - mobilePreviousTapAt <= mobileDoubleTapWindowMs && previousDistance <= mobileDoubleTapDistancePx) {
+                    resetMobilePreviousTap();
+                    openMobileEquipmentCard(event);
+                    return;
+                }
+                mobilePreviousTapAt = now;
+                mobilePreviousTapX = event.clientX;
+                mobilePreviousTapY = event.clientY;
+                pulseMobileEquipmentCard();
             });
             node.addEventListener("pointercancel", function () {
-                clearMobileLongTapTimer();
                 mobileTapPointerId = null;
-                mobileLongTapOpened = false;
+                resetMobilePreviousTap();
+            });
+            node.addEventListener("dblclick", function (event) {
+                if (isEquipmentCardTapBlocked(event)) return;
+                openMobileEquipmentCard(event);
             });
         }
         node.addEventListener("click", function (event) {
