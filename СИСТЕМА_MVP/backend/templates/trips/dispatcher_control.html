@@ -165,7 +165,7 @@
                 <h1>{{ dispatcher_header.active_dispatcher_short_name|default:"Смена не открыта" }}</h1>
             </div>
             <div class="mm-mobile-header-actions">
-                <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Двойной тап — детализация">
+                <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
                     {{ dispatcher_dashboard.completion_percent|default:0 }}%
                 </button>
                 {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
@@ -257,7 +257,7 @@
                     <h1>Экскаваторы</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Двойной тап — детализация">
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
@@ -311,7 +311,7 @@
                     <h1>Самосвалы</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Двойной тап — детализация">
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
@@ -364,7 +364,7 @@
                     <h1>Отчеты</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Двойной тап — детализация">
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
                         {{ dispatcher_dashboard.completion_percent|default:0 }}%
                     </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
@@ -477,7 +477,7 @@
                             <h1>Набор самосвалов</h1>
                         </div>
                         <div class="mm-mobile-header-actions">
-                            <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Двойной тап — детализация">
+                            <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
                                 {{ dispatcher_dashboard.completion_percent|default:0 }}%
                             </button>
                             {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
@@ -525,26 +525,43 @@
             <section class="mm-equipment-detail-panel mm-shift-plan-panel" role="dialog" aria-modal="true" aria-labelledby="mm-shift-plan-title">
                 <button type="button" class="mm-detail-close" data-mm-shift-plan-detail-close aria-label="Закрыть детализацию плана">×</button>
                 <header class="mm-shift-plan-head">
-                    <span>План смены</span>
-                    <h2 id="mm-shift-plan-title">Выполнено {{ dispatcher_dashboard.shift_plan_detail.completion_percent|default:0 }}%</h2>
-                    <p>Вклад точек разгрузки в общий результат</p>
+                    <span>Отчёт за текущую смену</span>
+                    <h2 id="mm-shift-plan-title">Куда вывезен объём</h2>
                 </header>
-                <div class="mm-shift-plan-summary" aria-label="Факт и план смены">
-                    <div><span>Факт</span><strong>{{ dispatcher_dashboard.shift_plan_detail.fact_tons|default:"0" }} т</strong></div>
-                    <div><span>План</span><strong>{{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} т</strong></div>
+                <div class="mm-shift-plan-total" aria-label="Общее выполнение плана">
+                    <div class="mm-shift-plan-total-ring" style="--mm-shift-plan-total-percent: {{ dispatcher_dashboard.shift_plan_detail.completion_percent|default:0 }}%;">
+                        <strong>{{ dispatcher_dashboard.shift_plan_detail.completion_percent|default:0 }}%</strong>
+                        <span>плана</span>
+                    </div>
+                    <div class="mm-shift-plan-total-copy">
+                        <span>Факт / план</span>
+                        <strong>{{ dispatcher_dashboard.shift_plan_detail.fact_tons|default:"0" }} / {{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</strong>
+                        <small>Круги ниже в сумме дают этот общий процент</small>
+                    </div>
                 </div>
+                <h3 class="mm-shift-plan-section-title">По точкам разгрузки</h3>
                 <div class="mm-shift-plan-points" aria-label="Выполнение по точкам разгрузки">
                     {% for point in dispatcher_dashboard.shift_plan_detail.points %}
                         <article class="mm-shift-plan-point" style="--mm-shift-plan-point-percent: {{ point.contribution_percent }}%;">
-                            <div class="mm-shift-plan-point-copy"><strong>{{ point.name }}</strong><span>{{ point.fact_tons }} т · {{ point.trip_count_label }}</span></div>
-                            <b>{{ point.contribution_percent }}%</b>
-                            <i aria-hidden="true"><span></span></i>
+                            <div class="mm-shift-plan-point-ring"><strong>{{ point.contribution_percent }}%</strong><span>плана</span></div>
+                            <div class="mm-shift-plan-point-copy"><strong>{{ point.name }}</strong><span>{{ point.fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ point.trip_count_label }}</span><small>{{ point.fact_share_percent }}% текущего факта</small></div>
                         </article>
                     {% empty %}
-                        <div class="mm-shift-plan-empty">Разгрузки в этой смене пока не зафиксированы</div>
+                        <div class="mm-shift-plan-empty">Нет рейсов с точкой разгрузки в текущей смене</div>
                     {% endfor %}
                 </div>
-                <p class="mm-shift-plan-note">Проценты показывают вклад каждой точки в общий круг выполнения.</p>
+                {% if dispatcher_dashboard.shift_plan_detail.routes %}
+                    <h3 class="mm-shift-plan-section-title">Откуда → куда</h3>
+                    <div class="mm-shift-plan-routes" aria-label="Маршруты текущей смены">
+                        {% for route in dispatcher_dashboard.shift_plan_detail.routes %}
+                            <article class="mm-shift-plan-route">
+                                <strong><span>{{ route.source }}</span><i aria-hidden="true">→</i><span>{{ route.destination }}</span></strong>
+                                <small>{{ route.fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ route.trip_count_label }}</small>
+                                <b>{{ route.contribution_percent }}%</b>
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% endif %}
             </section>
         </div>
     </section>
@@ -1102,7 +1119,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v141";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v142";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -2736,63 +2753,68 @@ document.addEventListener("DOMContentLoaded", function () {
         function bindShiftPlanDetailTrigger(ring) {
             if (!ring || ring.dataset.mmShiftPlanDetailBound === "true") return;
             ring.dataset.mmShiftPlanDetailBound = "true";
-            var previousTapAt = 0;
-            var previousTapX = 0;
-            var previousTapY = 0;
+            var holdDelayMs = 620;
+            var holdTimer = null;
             var activePointerId = null;
-            var pointerStartedAt = 0;
             var pointerStartX = 0;
             var pointerStartY = 0;
-            var pointerMoved = false;
+            var suppressNextClick = false;
+            function cancelHold() {
+                if (holdTimer !== null) {
+                    window.clearTimeout(holdTimer);
+                    holdTimer = null;
+                }
+                ring.classList.remove("is-hold-pending");
+            }
             ring.addEventListener("click", function (event) {
                 event.preventDefault();
                 event.stopPropagation();
+                if (suppressNextClick) {
+                    suppressNextClick = false;
+                    return;
+                }
                 pulseMiningMasterInfoTarget(ring);
             });
-            ring.addEventListener("dblclick", function (event) {
-                event.preventDefault();
-                event.stopPropagation();
-                previousTapAt = 0;
-                openShiftPlanDetail(ring);
-            });
             ring.addEventListener("pointerdown", function (event) {
-                if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+                if (event.button !== undefined && event.button !== 0) return;
+                cancelHold();
                 activePointerId = event.pointerId;
-                pointerStartedAt = Date.now();
                 pointerStartX = event.clientX;
                 pointerStartY = event.clientY;
-                pointerMoved = false;
+                ring.classList.add("is-hold-pending");
+                holdTimer = window.setTimeout(function () {
+                    holdTimer = null;
+                    ring.classList.remove("is-hold-pending");
+                    ring.classList.add("is-hold-ready");
+                    window.setTimeout(function () {
+                        ring.classList.remove("is-hold-ready");
+                    }, 180);
+                    suppressNextClick = true;
+                    openShiftPlanDetail(ring);
+                }, holdDelayMs);
             });
             ring.addEventListener("pointermove", function (event) {
                 if (activePointerId === null || event.pointerId !== activePointerId) return;
                 if (Math.hypot(event.clientX - pointerStartX, event.clientY - pointerStartY) > 10) {
-                    pointerMoved = true;
+                    cancelHold();
                 }
             });
             ring.addEventListener("pointerup", function (event) {
                 if (activePointerId === null || event.pointerId !== activePointerId) return;
                 activePointerId = null;
-                if (pointerMoved || Date.now() - pointerStartedAt > 360) return;
-                var now = Date.now();
-                var distance = Math.hypot(event.clientX - previousTapX, event.clientY - previousTapY);
-                if (previousTapAt && now - previousTapAt <= 340 && distance <= 24) {
-                    previousTapAt = 0;
-                    openShiftPlanDetail(ring);
-                } else {
-                    previousTapAt = now;
-                    previousTapX = event.clientX;
-                    previousTapY = event.clientY;
-                    pulseMiningMasterInfoTarget(ring);
-                }
+                cancelHold();
             });
             ring.addEventListener("pointercancel", function () {
                 activePointerId = null;
-                pointerMoved = false;
+                cancelHold();
+            });
+            ring.addEventListener("contextmenu", function (event) {
+                event.preventDefault();
             });
             ring.addEventListener("keydown", function (event) {
                 if (event.key !== "Enter" && event.key !== " ") return;
                 event.preventDefault();
-                previousTapAt = 0;
+                cancelHold();
                 openShiftPlanDetail(ring);
             });
         }
@@ -2912,9 +2934,9 @@ document.addEventListener("DOMContentLoaded", function () {
                         '<button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>',
                         '<div class="mm-mobile-detail-title mm-mobile-fill-title"><h1>Набор самосвалов</h1></div>',
                         {% if is_native_app %}
-                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Двойной тап — детализация">0%</button></div>',
+                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Удерживайте для отчёта">0%</button></div>',
                         {% else %}
-                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Двойной тап — детализация">0%</button><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
+                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Удерживайте для отчёта">0%</button><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
                         {% endif %}
                     '</header>',
                     '<div class="mm-mobile-fill-save-overlay" aria-hidden="true">Сохранить</div>',
