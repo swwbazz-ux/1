@@ -11,7 +11,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Prefetch, Q, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -22,6 +22,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from assignments.models import (
     AssignmentStatus,
     EquipmentAssignment,
+    ExcavatorDumpPointSetting,
     ExcavatorPlacement,
     HaulAssignment,
     HaulAssignmentAction,
@@ -34,7 +35,7 @@ from assignments.services import (
     work_assignment_state,
 )
 from core.db_locks import lock_idempotency_key
-from core.models import OperationalStateVersion, bump_operational_state
+from core.models import OperationalStateVersion, bump_operational_state, lock_production_state
 from core.operational_fragments import operational_fragment_response
 from core.production_time import (
     production_shift_bounds,
@@ -93,6 +94,7 @@ logger = logging.getLogger(__name__)
 TRUCK_POST_UNLOAD_COOLDOWN = timedelta(
     seconds=getattr(settings, 'TRUCK_POST_UNLOAD_COOLDOWN_SECONDS', 600)
 )
+TRUCK_POST_UNLOAD_ZERO_COOLDOWN_GARAGE_NUMBERS = frozenset({'ТЕСТ-1'})
 
 
 def truck_waiting_loading_downtime(event):
@@ -102,6 +104,9 @@ def truck_waiting_loading_downtime(event):
 
 def truck_post_unload_cooldown(truck, *, completed_at=None, now=None):
     if not truck:
+        return None
+    garage_number = str(getattr(truck, 'garage_number', '') or '').strip().upper()
+    if garage_number in TRUCK_POST_UNLOAD_ZERO_COOLDOWN_GARAGE_NUMBERS:
         return None
     if completed_at is None:
         completed_at = (
@@ -557,7 +562,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v57";
+const CACHE_NAME = "dispatcher-desktop-shell-v61";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -736,7 +741,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v209";
+const CACHE_NAME = "excavator-mobile-shell-v210";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -756,6 +761,7 @@ const CORE_ASSETS = [
   "/static/css/mobile-shift-unified-v1.css",
   "/static/css/mobile-face-unified-v1.css",
   "/static/css/mobile-downtime-unified-v1.css",
+  "/static/css/excavator-destination-distances-v1.css",
   "/static/css/mobile-role-login-v1.css",
   "/static/js/mobile-shift-unified-v1.js",
   "/static/js/mobile-operational-sounds-v1.js",
@@ -984,7 +990,7 @@ def dispatcher_truck_garage_number(truck, fallback_index):
     return None
 
 
-def dispatcher_employee_badge(employee):
+def dispatcher_employee_badge(employee, *, presence_label='В смене'):
     if not employee:
         return None
     photo_url = ''
@@ -1000,6 +1006,64 @@ def dispatcher_employee_badge(employee):
         'position': employee.position or '',
         'photo': photo_url,
         'initials': initials or '??',
+        'presence_label': presence_label,
+    }
+
+
+def excavator_configured_destinations(placement):
+    if not placement:
+        return []
+    prefetched = getattr(placement, '_prefetched_objects_cache', {}).get('dump_point_settings')
+    settings_rows = (
+        list(prefetched)
+        if prefetched is not None
+        else list(
+            placement.dump_point_settings
+            .filter(dump_point__is_active=True)
+            .select_related('dump_point')
+            .order_by('position', 'id')
+        )
+    )
+    return [
+        {
+            'dump_point': row.dump_point,
+            'transport_distance_km': row.transport_distance_km,
+        }
+        for row in settings_rows
+        if row.dump_point and row.dump_point.is_active
+    ]
+
+
+def dispatcher_excavator_settings(equipment, placement, *, rock_types, dump_points):
+    if not equipment or equipment.equipment_type.name != 'Экскаватор':
+        return None
+    destination_rows = excavator_configured_destinations(placement)
+    if not destination_rows and placement and placement.work_dump_point_id:
+        destination_rows = [{
+            'dump_point': placement.work_dump_point,
+            'transport_distance_km': placement.transport_distance_km,
+        }]
+    return {
+        'editable': True,
+        'title': 'Настройки работы',
+        'hint': 'Общие для диспетчера и машиниста экскаватора.',
+        'loading_horizon': getattr(placement, 'loading_horizon', '') or '',
+        'loading_block': getattr(placement, 'loading_block', '') or '',
+        'rock_type_id': getattr(placement, 'work_rock_type_id', None),
+        'destinations': [
+            {
+                'dump_point_id': row['dump_point'].id,
+                'name': str(row['dump_point']),
+                'transport_distance_km': (
+                    format(row['transport_distance_km'], 'f')
+                    if row['transport_distance_km'] is not None
+                    else ''
+                ),
+            }
+            for row in destination_rows
+        ],
+        'rock_types': [{'id': item.id, 'name': str(item)} for item in rock_types],
+        'dump_points': [{'id': item.id, 'name': str(item)} for item in dump_points],
     }
 
 
@@ -1458,20 +1522,21 @@ def build_dispatcher_equipment_card(
     zone='',
     percent=0,
     employee=None,
+    employee_presence_label='В смене',
     details=None,
     shift_report=None,
     category='equipment',
     plan=None,
+    settings=None,
+    include_equipment_metadata=True,
 ):
     card_details = []
     seen_labels = set()
-    if equipment:
+    if equipment and include_equipment_metadata:
         type_name = type_name or equipment.equipment_type.name
         number = number or equipment_short_name(equipment)
         model = equipment.model
         add_dispatcher_detail(card_details, seen_labels, 'Гаражный N', equipment.garage_number)
-        if equipment.vin:
-            add_dispatcher_detail(card_details, seen_labels, 'VIN/серийный N', equipment.vin)
         add_dispatcher_detail(card_details, seen_labels, 'Модель', model.name if model else 'не указана')
         if model and model.payload_tons:
             add_dispatcher_detail(card_details, seen_labels, 'ГП, т', format_dispatcher_decimal(model.payload_tons))
@@ -1489,11 +1554,12 @@ def build_dispatcher_equipment_card(
         'status_label': status_label,
         'zone': zone,
         'percent': percent,
-        'employee': dispatcher_employee_badge(employee),
+        'employee': dispatcher_employee_badge(employee, presence_label=employee_presence_label),
         'details': card_details,
         'shift_report': shift_report or {},
         'category': category,
         'plan': dispatcher_plan_api_payload(plan),
+        'settings': settings,
     }
 
 
@@ -1510,6 +1576,7 @@ def build_dispatcher_dashboard_context(
     excavators,
     recent_dispatcher_actions,
     equipment_card_ids=None,
+    equipment_work_assignments=(),
 ):
     active_trips_list = list(active_trips)
     pending_assignments_list = list(pending_assignments)
@@ -1563,6 +1630,20 @@ def build_dispatcher_dashboard_context(
     for shift in open_shifts:
         if shift.equipment_id and shift.equipment_id not in open_shift_by_equipment_id:
             open_shift_by_equipment_id[shift.equipment_id] = shift
+    work_assignment_by_equipment_id = {
+        assignment.equipment_id: assignment
+        for assignment in equipment_work_assignments
+        if assignment.equipment_id
+    }
+
+    def dispatcher_employee_for_equipment(equipment_id):
+        open_shift = open_shift_by_equipment_id.get(equipment_id)
+        if open_shift:
+            return open_shift.employee, 'В смене'
+        work_assignment = work_assignment_by_equipment_id.get(equipment_id)
+        if work_assignment:
+            return work_assignment.employee, f'Назначен на {work_assignment.get_shift_type_display().lower()}'
+        return None, 'Сотрудник не назначен'
     truck_equipment_ids = {truck.id for truck in trucks_list}
     excavator_equipment_ids = {excavator.id for excavator in excavators_list}
     selected_equipment_shifts = list(open_shift_by_equipment_id.values())
@@ -1805,6 +1886,25 @@ def build_dispatcher_dashboard_context(
         .filter(zone=ExcavatorPlacement.Zone.ACTIVE, excavator__in=excavators_list)
         .values_list('excavator_id', flat=True)
     )
+    placement_by_excavator_id = {
+        placement.excavator_id: placement
+        for placement in (
+            ExcavatorPlacement.objects
+            .filter(excavator__in=excavators_list)
+            .select_related('work_rock_type', 'work_dump_point')
+            .prefetch_related(Prefetch(
+                'dump_point_settings',
+                queryset=(
+                    ExcavatorDumpPointSetting.objects
+                    .filter(dump_point__is_active=True)
+                    .select_related('dump_point')
+                    .order_by('position', 'id')
+                ),
+            ))
+        )
+    }
+    dispatcher_rock_types = list(RockType.objects.filter(is_active=True).order_by('name'))
+    dispatcher_dump_points = list(DumpPoint.objects.filter(is_active=True).order_by('name'))
     active_excavator_ids = set(active_placement_ids)
     active_excavator_ids.update(
         assignment.excavator_id
@@ -1855,8 +1955,9 @@ def build_dispatcher_dashboard_context(
         status_label = downtime_reason_label_for(excavator.id) or status_label
 
         complex_trips = trips_by_excavator_id.get(excavator.id, [])
-        current_horizon = ''
-        current_block = ''
+        placement = placement_by_excavator_id.get(excavator.id)
+        current_horizon = f'Гор. {placement.loading_horizon}' if placement and placement.loading_horizon else ''
+        current_block = f'Блок {placement.loading_block}' if placement and placement.loading_block else ''
         rock_values = []
         unload_totals = defaultdict(Decimal)
         truck_rows = []
@@ -1922,7 +2023,11 @@ def build_dispatcher_dashboard_context(
                 'plan_has_plan': truck_plan['has_plan'],
             })
         forecast = fact
-        current_rock = rock_values[0] if rock_values else ''
+        current_rock = (
+            str(placement.work_rock_type)
+            if placement and placement.work_rock_type_id
+            else (rock_values[0] if rock_values else '')
+        )
         complex_cards.append({
             'id': f'K-{index}',
             'excavator_slot': index,
@@ -2337,6 +2442,7 @@ def build_dispatcher_dashboard_context(
                 {'label': 'Простой', 'value': downtime.reason},
                 {'label': 'С начала', 'value': format_dispatcher_datetime(downtime.started_at)},
             ])
+        equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(equipment.id)
         equipment_cards[str(tile['card_id'])] = build_dispatcher_equipment_card(
             card_id=tile['card_id'],
             equipment=equipment,
@@ -2346,7 +2452,8 @@ def build_dispatcher_dashboard_context(
             status_label=status_label_for(tile.get('status'), tile.get('label')),
             zone=tile.get('complex') or 'гараж',
             percent=tile.get('percent', 0),
-            employee=getattr(open_shift_by_equipment_id.get(equipment.id), 'employee', None),
+            employee=equipment_employee,
+            employee_presence_label=employee_presence_label,
             details=details,
             shift_report=dispatcher_shift_report_for_equipment(
                 equipment,
@@ -2354,6 +2461,12 @@ def build_dispatcher_dashboard_context(
                 shift_trips=shift_trips,
             ),
             plan=tile.get('plan'),
+            settings=dispatcher_excavator_settings(
+                equipment,
+                placement_by_excavator_id.get(equipment.id),
+                rock_types=dispatcher_rock_types,
+                dump_points=dispatcher_dump_points,
+            ),
         )
 
     for card in complex_cards:
@@ -2361,29 +2474,26 @@ def build_dispatcher_dashboard_context(
             continue
         complex_report = dispatcher_complex_shift_report(card)
         details = [
-            {'label': 'Экскаватор', 'value': card.get('excavator_name')},
-            {'label': 'Текущий состав', 'value': ', '.join(complex_report.get('current_trucks') or [])},
-            {'label': 'Выведены из состава', 'value': ', '.join(complex_report.get('removed_trucks') or [])},
-            {'label': 'Порода', 'value': card.get('material')},
-            {'label': 'Самосвалы', 'value': f'{card.get("assigned", 0)} / {card.get("need", 0)}'},
-            {'label': 'Баланс транспорта', 'value': f'+{card["assigned"] - card["need"]}' if card['assigned'] > card['need'] else str(card['assigned'] - card['need'])},
-            {'label': 'Прогноз', 'value': f'{card.get("forecast_tons")} т'},
+            {
+                'label': 'Экскаватор',
+                'value': ' · '.join(part for part in [
+                    card.get('excavator_name'),
+                    str(getattr(getattr(card.get('excavator'), 'model', None), 'name', '') or ''),
+                ] if part),
+            },
+            {'label': 'В составе', 'value': ', '.join(complex_report.get('current_trucks') or [])},
         ]
-        details.extend(dispatcher_plan_details(card.get('plan')))
         if card.get('status_key') == 'yellow':
-            details.append({'label': 'Причина', 'value': 'дефицит транспорта / риск выполнения'})
-            details.append({'label': 'Действие', 'value': 'добавить самосвалы'})
+            details.append({'label': 'Требует внимания', 'value': 'Дефицит транспорта — добавить самосвалы'})
         elif card.get('status_key') in {'orange', 'red'}:
-            details.append({'label': 'Причина', 'value': card.get('status_label') or 'комплекс остановлен'})
-            details.append({'label': 'Действие', 'value': 'ремонт, простой или расформирование'})
+            details.append({'label': 'Требует внимания', 'value': card.get('status_label') or 'Комплекс остановлен'})
         elif card.get('status_key') == 'blue':
-            details.append({'label': 'Причина', 'value': 'комплекс назначен без активной операции'})
-            details.append({'label': 'Действие', 'value': 'контроль запуска работы'})
-        else:
-            details.append({'label': 'Причина', 'value': 'без отклонений'})
-            details.append({'label': 'Действие', 'value': 'контроль нормы'})
+            details.append({'label': 'Требует внимания', 'value': 'Комплекс назначен без активной операции'})
+        complex_excavator = card.get('excavator')
+        equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(complex_excavator.id)
         equipment_cards[str(card['card_id'])] = build_dispatcher_equipment_card(
             card_id=card['card_id'],
+            equipment=complex_excavator,
             type_name='Комплекс',
             number=card.get('id'),
             icon=card.get('excavator_icon'),
@@ -2395,6 +2505,15 @@ def build_dispatcher_dashboard_context(
             shift_report=complex_report,
             category='complex',
             plan=card.get('plan'),
+            employee=equipment_employee,
+            employee_presence_label=employee_presence_label,
+            settings=dispatcher_excavator_settings(
+                complex_excavator,
+                placement_by_excavator_id.get(complex_excavator.id),
+                rock_types=dispatcher_rock_types,
+                dump_points=dispatcher_dump_points,
+            ),
+            include_equipment_metadata=False,
         )
 
     for complex_card in complex_cards:
@@ -2408,10 +2527,6 @@ def build_dispatcher_dashboard_context(
                 continue
             equipment = truck_by_id.get(int(card_id)) if card_id.isdigit() else None
             status_label = status_label_for(tile.get('status'), tile.get('label'))
-            current_employee = None
-            if equipment:
-                current_employee = getattr(open_shift_by_equipment_id.get(equipment.id), 'employee', None)
-                current_employee = current_employee or getattr(active_trip_by_truck_id.get(equipment.id), 'driver', None)
             details = [
                 {'label': 'Гаражный N', 'value': tile.get('name')},
                 {'label': 'Комплекс', 'value': complex_card.get('id')},
@@ -2431,7 +2546,11 @@ def build_dispatcher_dashboard_context(
                 status_label=status_label,
                 zone=f'{complex_card.get("id")} / в составе',
                 percent=tile.get('percent', 0),
-                employee=current_employee,
+                employee=dispatcher_employee_for_equipment(equipment.id)[0] if equipment else None,
+                employee_presence_label=(
+                    dispatcher_employee_for_equipment(equipment.id)[1]
+                    if equipment else 'Сотрудник не назначен'
+                ),
                 details=details,
                 shift_report=dispatcher_shift_report_for_equipment(
                     equipment,
@@ -2477,6 +2596,7 @@ def build_dispatcher_dashboard_context(
                     {'label': 'Простой', 'value': downtime.reason},
                     {'label': 'С начала', 'value': format_dispatcher_datetime(downtime.started_at)},
                 ])
+            equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(equipment.id)
             card = build_dispatcher_equipment_card(
                 card_id=tile['card_id'],
                 equipment=equipment,
@@ -2486,7 +2606,8 @@ def build_dispatcher_dashboard_context(
                 status_label=status_label,
                 zone='гараж',
                 percent=tile.get('percent', 0),
-                employee=getattr(open_shift_by_equipment_id.get(equipment.id), 'employee', None),
+                employee=equipment_employee,
+                employee_presence_label=employee_presence_label,
                 details=details,
                 shift_report=dispatcher_shift_report_for_equipment(
                     equipment,
@@ -3192,17 +3313,89 @@ def excavator_work_context_changed(
     ))
 
 
-def save_excavator_work_context(*, current_excavator, actor, rock_type, dump_points, loading_horizon, loading_block):
+_EXCAVATOR_DISTANCE_UNSET = object()
+_EXCAVATOR_DESTINATIONS_UNSET = object()
+
+
+def parse_excavator_destinations(payload, dump_point_queryset):
+    dump_by_id = {str(point.id): point for point in dump_point_queryset}
+    raw_destinations = payload.get('destinations')
+    if not isinstance(raw_destinations, list):
+        raw_ids = payload.get('dump_point_ids')
+        if not isinstance(raw_ids, list):
+            raw_ids = [payload.get('dump_point_id') or payload.get('dump_point')]
+        raw_distances = payload.get('dump_point_distances')
+        if not isinstance(raw_distances, dict):
+            raw_distances = {}
+        raw_destinations = [
+            {
+                'dump_point_id': raw_id,
+                'transport_distance_km': (
+                    raw_distances.get(str(raw_id), '')
+                    if raw_distances
+                    else payload.get('transport_distance_km', '')
+                ),
+            }
+            for raw_id in raw_ids
+        ]
+
+    destinations = []
+    seen_dump_ids = set()
+    for raw_row in raw_destinations:
+        if not isinstance(raw_row, dict):
+            continue
+        dump_id = str(raw_row.get('dump_point_id') or raw_row.get('id') or '')
+        if dump_id not in dump_by_id or dump_id in seen_dump_ids:
+            continue
+        distance = parse_excavator_shift_decimal(
+            raw_row.get('transport_distance_km'),
+            'Плечо',
+        )
+        if distance is not None and distance > Decimal('999999.99'):
+            raise ValueError('invalid_transport_distance')
+        destinations.append({
+            'dump_point': dump_by_id[dump_id],
+            'transport_distance_km': distance,
+        })
+        seen_dump_ids.add(dump_id)
+    return destinations
+
+
+def save_excavator_work_context(
+    *,
+    current_excavator,
+    actor,
+    rock_type,
+    dump_points,
+    loading_horizon,
+    loading_block,
+    transport_distance_km=_EXCAVATOR_DISTANCE_UNSET,
+    destination_settings=_EXCAVATOR_DESTINATIONS_UNSET,
+):
     if not current_excavator:
         return None
     placement, _ = ExcavatorPlacement.objects.get_or_create(excavator=current_excavator)
+    configured_destinations_exist = bool(
+        placement.pk and placement.dump_point_settings.exists()
+    )
+    if destination_settings is not _EXCAVATOR_DESTINATIONS_UNSET:
+        dump_points = [row['dump_point'] for row in destination_settings]
+        placement.work_dump_point = dump_points[0] if dump_points else None
+        placement.transport_distance_km = (
+            destination_settings[0]['transport_distance_km']
+            if destination_settings
+            else None
+        )
+    elif not configured_destinations_exist:
+        placement.work_dump_point = dump_points[0] if dump_points else None
+        if transport_distance_km is not _EXCAVATOR_DISTANCE_UNSET:
+            placement.transport_distance_km = transport_distance_km
     placement.work_rock_type = rock_type
-    placement.work_dump_point = dump_points[0] if dump_points else None
     placement.loading_horizon = loading_horizon
     placement.loading_block = loading_block
     placement.work_context_updated_at = timezone.now()
     placement.changed_by = actor
-    placement.save(update_fields=[
+    update_fields = [
         'work_rock_type',
         'work_dump_point',
         'loading_horizon',
@@ -3210,7 +3403,31 @@ def save_excavator_work_context(*, current_excavator, actor, rock_type, dump_poi
         'work_context_updated_at',
         'changed_by',
         'changed_at',
-    ])
+    ]
+    if (
+        transport_distance_km is not _EXCAVATOR_DISTANCE_UNSET
+        or destination_settings is not _EXCAVATOR_DESTINATIONS_UNSET
+    ):
+        update_fields.append('transport_distance_km')
+    placement.save(update_fields=update_fields)
+    if destination_settings is not _EXCAVATOR_DESTINATIONS_UNSET:
+        selected_dump_ids = [row['dump_point'].id for row in destination_settings]
+        placement.dump_point_settings.exclude(dump_point_id__in=selected_dump_ids).delete()
+        existing_rows = {
+            row.dump_point_id: row
+            for row in placement.dump_point_settings.select_for_update()
+        }
+        for position, row in enumerate(destination_settings):
+            setting = existing_rows.get(row['dump_point'].id)
+            if setting is None:
+                setting = ExcavatorDumpPointSetting(
+                    placement=placement,
+                    dump_point=row['dump_point'],
+                )
+            setting.transport_distance_km = row['transport_distance_km']
+            setting.position = position
+            setting.changed_by = actor
+            setting.save()
     return placement
 
 
@@ -3253,7 +3470,7 @@ def excavator_work_settings_from_session(request, current_excavator, form):
     raw_rock_id = str(raw_settings.get('rock_type_id') or '')
     default_rock_id = str(form['rock_type'].value() or '')
     placement_rock_id = str(getattr(placement, 'work_rock_type_id', '') or '')
-    persisted_rock_id = raw_rock_id or placement_rock_id
+    persisted_rock_id = placement_rock_id or raw_rock_id
     persisted_rock = rock_by_id.get(persisted_rock_id)
     current_rock = (
         persisted_rock
@@ -3261,7 +3478,17 @@ def excavator_work_settings_from_session(request, current_excavator, form):
         or (rock_choices[0] if rock_choices else None)
     )
 
-    raw_dump_ids = raw_settings.get('dump_point_ids')
+    configured_destinations = excavator_configured_destinations(placement)
+    configured_dump_ids = [row['dump_point'].id for row in configured_destinations]
+    destination_distance_values = {
+        str(row['dump_point'].id): (
+            format(row['transport_distance_km'], 'f')
+            if row['transport_distance_km'] is not None
+            else ''
+        )
+        for row in configured_destinations
+    }
+    raw_dump_ids = configured_dump_ids or raw_settings.get('dump_point_ids')
     if not isinstance(raw_dump_ids, list):
         raw_dump_ids = []
     if not raw_dump_ids and getattr(placement, 'work_dump_point_id', None):
@@ -3274,7 +3501,7 @@ def excavator_work_settings_from_session(request, current_excavator, form):
             selected_dump_points.append(dump_by_id[dump_id])
             seen_dump_ids.add(dump_id)
 
-    persisted_dump_point_ids = [point.id for point in selected_dump_points]
+    persisted_dump_point_ids = configured_dump_ids or [point.id for point in selected_dump_points]
 
     form_dump_id = str(form['dump_point'].value() or '')
     if not selected_dump_points and form_dump_id in dump_by_id:
@@ -3283,14 +3510,14 @@ def excavator_work_settings_from_session(request, current_excavator, form):
         selected_dump_points.append(dump_point_choices[0])
 
     face_horizon = normalize_excavator_numeric_setting(
-        raw_settings.get('loading_horizon')
-        if 'loading_horizon' in raw_settings
-        else (getattr(placement, 'loading_horizon', '') or form['loading_horizon'].value())
+        (getattr(placement, 'loading_horizon', '') if placement else '')
+        or raw_settings.get('loading_horizon')
+        or form['loading_horizon'].value()
     )
     face_block = normalize_excavator_numeric_setting(
-        raw_settings.get('loading_block')
-        if 'loading_block' in raw_settings
-        else (getattr(placement, 'loading_block', '') or form['loading_block'].value())
+        (getattr(placement, 'loading_block', '') if placement else '')
+        or raw_settings.get('loading_block')
+        or form['loading_block'].value()
     )
 
     selected_dump_ids = [point.id for point in selected_dump_points]
@@ -3302,6 +3529,7 @@ def excavator_work_settings_from_session(request, current_excavator, form):
             or placement.work_dump_point_id
             or placement.loading_horizon
             or placement.loading_block
+            or placement.transport_distance_km is not None
         )
     )
     return {
@@ -3320,15 +3548,29 @@ def excavator_work_settings_from_session(request, current_excavator, form):
         'selected_dump_points': selected_dump_points,
         'selected_dump_point_ids': selected_dump_ids,
         'persisted_dump_point_ids': persisted_dump_point_ids,
+        'destination_distance_values': destination_distance_values,
         'default_dump_point': selected_dump_ids[0] if selected_dump_ids else '',
+        'transport_distance_km': (
+            placement.transport_distance_km
+            if placement and placement.transport_distance_km is not None
+            else form['transport_distance_km'].value()
+        ),
         'face_horizon': face_horizon,
         'face_block': face_block,
     }
 
 
-def build_excavator_dump_cards(points, *, selected_ids=None, persisted_ids=None, include_all=False):
+def build_excavator_dump_cards(
+    points,
+    *,
+    selected_ids=None,
+    persisted_ids=None,
+    distance_values=None,
+    include_all=False,
+):
     selected_ids = {str(point_id) for point_id in (selected_ids or [])}
     persisted_ids = {str(point_id) for point_id in (persisted_ids or [])}
+    distance_values = distance_values or {}
     cards = []
     for index, point in enumerate(points):
         is_selected = str(point.id) in selected_ids if include_all else True
@@ -3345,6 +3587,7 @@ def build_excavator_dump_cards(points, *, selected_ids=None, persisted_ids=None,
             'is_default': index == 0 and is_selected,
             'is_selected': is_selected,
             'is_persisted': include_all and str(point.id) in persisted_ids,
+            'transport_distance_km': distance_values.get(str(point.id), ''),
         })
     return cards
 
@@ -3607,6 +3850,17 @@ def excavator_truck_loaded_view(request):
         rock_type = get_object_or_404(RockType.objects.filter(is_active=True), id=rock_type_id)
         loading_horizon = normalize_excavator_numeric_setting(payload.get('loading_horizon'))
         loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
+        transport_distance_km = payload.get('transport_distance_km')
+        if transport_distance_km in {None, ''}:
+            transport_distance_km = (
+                ExcavatorDumpPointSetting.objects
+                .filter(
+                    placement__excavator=current_excavator,
+                    dump_point=dump_point,
+                )
+                .values_list('transport_distance_km', flat=True)
+                .first()
+            )
         try:
             trip = create_loaded_waiting_unload_trip(
                 assignment=assignment,
@@ -3617,7 +3871,11 @@ def excavator_truck_loaded_view(request):
                 planned_volume_m3=payload.get('planned_volume_m3') or None,
                 loading_horizon=loading_horizon,
                 loading_block=loading_block,
-                transport_distance_km=payload.get('transport_distance_km') or None,
+                transport_distance_km=(
+                    transport_distance_km
+                    if transport_distance_km not in {None, ''}
+                    else None
+                ),
                 downtime_text=payload.get('downtime_text'),
                 note=payload.get('note'),
             )
@@ -3637,6 +3895,7 @@ def excavator_truck_loaded_view(request):
             dump_points=[dump_point],
             loading_horizon=loading_horizon,
             loading_block=loading_block,
+            transport_distance_km=trip.transport_distance_km,
         )
         TripClientAction.objects.create(
             action_type='truck_loaded',
@@ -3848,19 +4107,13 @@ def excavator_work_settings_view(request):
     if not rock_type:
         return JsonResponse({'ok': False, 'error': 'Порода недоступна в справочнике.'}, status=400)
 
-    raw_dump_ids = payload.get('dump_point_ids')
-    if not isinstance(raw_dump_ids, list):
-        raw_dump_ids = [payload.get('dump_point_id') or payload.get('dump_point')]
-    dump_points = []
-    seen_dump_ids = set()
-    dump_by_id = {str(point.id): point for point in dump_point_queryset}
-    for raw_id in raw_dump_ids:
-        dump_id = str(raw_id or '')
-        if dump_id in dump_by_id and dump_id not in seen_dump_ids:
-            dump_points.append(dump_by_id[dump_id])
-            seen_dump_ids.add(dump_id)
-    if not dump_points:
+    try:
+        destinations = parse_excavator_destinations(payload, dump_point_queryset)
+    except ValueError:
+        return JsonResponse({'ok': False, 'error': 'Плечо должно быть числом не меньше нуля.'}, status=400)
+    if not destinations:
         return JsonResponse({'ok': False, 'error': 'Выберите хотя бы одну точку разгрузки из справочника.'}, status=400)
+    dump_points = [row['dump_point'] for row in destinations]
 
     loading_horizon = normalize_excavator_numeric_setting(payload.get('loading_horizon'))
     loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
@@ -3884,6 +4137,17 @@ def excavator_work_settings_view(request):
         'client_action_id': str(payload.get('client_action_id') or ''),
         'rock_type_id': rock_type.id,
         'dump_point_ids': [point.id for point in dump_points],
+        'destinations': [
+            {
+                'dump_point_id': row['dump_point'].id,
+                'transport_distance_km': (
+                    str(row['transport_distance_km'])
+                    if row['transport_distance_km'] is not None
+                    else ''
+                ),
+            }
+            for row in destinations
+        ],
         'loading_horizon': loading_horizon,
         'loading_block': loading_block,
         'updated_at': timezone.now().isoformat(),
@@ -3898,6 +4162,7 @@ def excavator_work_settings_view(request):
             dump_points=dump_points,
             loading_horizon=loading_horizon,
             loading_block=loading_block,
+            destination_settings=destinations,
         )
         active_downtime = None
         if face_position_changed:
@@ -3918,6 +4183,7 @@ def excavator_work_settings_view(request):
             'excavator_id': current_excavator.id,
             'rock_type_id': rock_type.id,
             'dump_point_ids': [point.id for point in dump_points],
+            'destinations': session_settings[setting_key]['destinations'],
             'loading_horizon': loading_horizon,
             'loading_block': loading_block,
             'face_position_changed': face_position_changed,
@@ -3931,6 +4197,7 @@ def excavator_work_settings_view(request):
         'rock_type': str(rock_type),
         'dump_point_ids': [point.id for point in dump_points],
         'dump_points': [{'id': point.id, 'name': str(point)} for point in dump_points],
+        'destinations': session_settings[setting_key]['destinations'],
         'loading_horizon': loading_horizon,
         'loading_block': loading_block,
         'work_context_changed': work_context_changed,
@@ -4326,13 +4593,14 @@ def excavator_work_view(request):
                 status=TripStatus.COMPLETED,
                 completed_at__gt=cooldown_cutoff,
             )
-            .only('truck_id', 'completed_at')
+            .select_related('truck')
+            .only('truck_id', 'truck__garage_number', 'completed_at')
             .order_by('truck_id', '-completed_at')
         ):
             post_unload_cooldown_by_truck_id.setdefault(
                 completed_trip.truck_id,
                 truck_post_unload_cooldown(
-                    completed_trip.truck_id,
+                    completed_trip.truck,
                     completed_at=completed_trip.completed_at,
                 ),
             )
@@ -4522,12 +4790,18 @@ def excavator_work_view(request):
         })
 
     work_settings = excavator_work_settings_from_session(request, current_excavator, form)
+    if not form.is_bound and work_settings['transport_distance_km'] not in {None, ''}:
+        form.fields['transport_distance_km'].initial = work_settings['transport_distance_km']
     dump_points = work_settings['selected_dump_points']
-    dump_cards = build_excavator_dump_cards(dump_points)
+    dump_cards = build_excavator_dump_cards(
+        dump_points,
+        distance_values=work_settings['destination_distance_values'],
+    )
     dump_choice_cards = build_excavator_dump_cards(
         work_settings['dump_point_choices'],
         selected_ids=work_settings['selected_dump_point_ids'],
         persisted_ids=work_settings['persisted_dump_point_ids'],
+        distance_values=work_settings['destination_distance_values'],
         include_all=True,
     )
     rock_choices = work_settings['rock_choices']
@@ -5004,13 +5278,19 @@ def dispatcher_equipment_detail_error(code, *, status):
     ))
 
 
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def dispatcher_equipment_detail_view(request, category, equipment_id):
     access_id = request.session.get('employee_access_id')
     access = (
         EmployeeAccess.objects
         .select_related('employee', 'role')
-        .filter(id=access_id, is_active=True)
+        .filter(
+            id=access_id,
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+            role__is_active=True,
+            employee__is_active=True,
+        )
         .first()
         if access_id
         else None
@@ -5021,12 +5301,14 @@ def dispatcher_equipment_detail_view(request, category, equipment_id):
         return dispatcher_equipment_detail_error('forbidden', status=403)
     if category not in {'equipment', 'complex'}:
         return dispatcher_equipment_detail_error('card_not_found', status=404)
-    try:
-        state_version = int(request.GET.get('state_version', ''))
-    except (TypeError, ValueError):
-        state_version = -1
-    if state_version < 0:
-        return dispatcher_equipment_detail_error('invalid_state_version', status=400)
+    state_version = None
+    if request.method == 'GET':
+        try:
+            state_version = int(request.GET.get('state_version', ''))
+        except (TypeError, ValueError):
+            state_version = -1
+        if state_version < 0:
+            return dispatcher_equipment_detail_error('invalid_state_version', status=400)
 
     equipment = (
         Equipment.objects
@@ -5049,6 +5331,97 @@ def dispatcher_equipment_detail_view(request, category, equipment_id):
         card_key = f'complex-K-{int(match.group(0))}'
     else:
         card_key = str(equipment.pk)
+
+    if request.method == 'POST':
+        if equipment.equipment_type.name != 'Экскаватор':
+            return dispatcher_equipment_detail_error('settings_not_available', status=400)
+        if not role_session_state(request, access)['is_active']:
+            return dispatcher_equipment_detail_error('inactive_role', status=409)
+        if not get_active_dispatcher_shift(access):
+            return dispatcher_equipment_detail_error('dispatcher_shift_required', status=409)
+
+        payload = excavator_json_payload(request)
+        try:
+            requested_version = int(payload.get('state_version', -1))
+        except (TypeError, ValueError):
+            requested_version = -1
+        if requested_version < 0:
+            return dispatcher_equipment_detail_error('invalid_state_version', status=400)
+
+        rock_type = RockType.objects.filter(
+            id=payload.get('rock_type_id'),
+            is_active=True,
+        ).first()
+        try:
+            destinations = parse_excavator_destinations(
+                payload,
+                list(DumpPoint.objects.filter(is_active=True).order_by('name')),
+            )
+        except ValueError:
+            return dispatcher_equipment_detail_error('invalid_transport_distance', status=400)
+        if not rock_type or not destinations:
+            return dispatcher_equipment_detail_error('invalid_work_settings', status=400)
+        dump_points = [row['dump_point'] for row in destinations]
+        loading_horizon = normalize_excavator_numeric_setting(payload.get('loading_horizon'))
+        loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
+
+        with transaction.atomic():
+            state = lock_production_state()
+            if state.version != requested_version:
+                return dispatcher_equipment_detail_error('stale_board', status=409)
+            equipment = (
+                Equipment.objects
+                .select_for_update()
+                .select_related('equipment_type')
+                .get(pk=equipment.pk)
+            )
+            placement = save_excavator_work_context(
+                current_excavator=equipment,
+                actor=access.employee,
+                rock_type=rock_type,
+                dump_points=dump_points,
+                loading_horizon=loading_horizon,
+                loading_block=loading_block,
+                destination_settings=destinations,
+            )
+            state = bump_operational_state(
+                'Dispatcher:excavator_work_settings',
+                event_type='equipment_changed',
+                object_type='Equipment',
+                object_id=equipment.id,
+                payload={
+                    'action': 'dispatcher_excavator_work_settings',
+                    'actor_id': access.employee_id,
+                    'excavator_id': equipment.id,
+                    'rock_type_id': rock_type.id,
+                    'dump_point_ids': [point.id for point in dump_points],
+                    'destinations': [
+                        {
+                            'dump_point_id': row['dump_point'].id,
+                            'transport_distance_km': (
+                                str(row['transport_distance_km'])
+                                if row['transport_distance_km'] is not None
+                                else ''
+                            ),
+                        }
+                        for row in destinations
+                    ],
+                    'loading_horizon': loading_horizon,
+                    'loading_block': loading_block,
+                },
+            )
+        return protect_dispatcher_equipment_detail_response(JsonResponse({
+            'ok': True,
+            'contract': 'dispatcher-equipment-settings-v2',
+            'equipment_id': equipment.id,
+            'version': state.version,
+            'settings': dispatcher_excavator_settings(
+                equipment,
+                placement,
+                rock_types=RockType.objects.filter(is_active=True).order_by('name'),
+                dump_points=DumpPoint.objects.filter(is_active=True).order_by('name'),
+            ),
+        }))
 
     return dispatcher_control_view(
         request,
@@ -5187,6 +5560,20 @@ def dispatcher_control_view(
         )
         .order_by('-completed_at')
     )
+    equipment_work_assignments = list(
+        EquipmentAssignment.objects
+        .filter(
+            status=AssignmentStatus.ACCEPTED,
+            ended_at__isnull=True,
+            shift__isnull=True,
+            shift_type=production_context.shift_type,
+            employee__is_active=True,
+            equipment__is_active=True,
+            role__code__in={'driver', 'excavator_operator'},
+        )
+        .select_related('employee', 'equipment', 'role')
+        .order_by('equipment_id', '-assigned_at', '-id')
+    )
     if not dispatcher_shift:
         recent_completed_trips = recent_completed_trips.none()
     if truck_id:
@@ -5273,6 +5660,7 @@ def dispatcher_control_view(
         excavators=excavators,
         recent_dispatcher_actions=recent_dispatcher_actions,
         equipment_card_ids=equipment_card_ids,
+        equipment_work_assignments=equipment_work_assignments,
     )
 
     operational_state_version = get_operational_state_version()
@@ -5376,6 +5764,11 @@ def dispatcher_toggle_shift_view(request):
                 messages.error(request, reauth_error)
                 return redirect(redirect_url)
             access = reauth_access
+            # Повторная авторизация обновляет last_login_at и метку активной
+            # роли в сессии. Проверять загруженный до неё session_access нельзя:
+            # для того же диспетчера он уже содержит устаревшую метку и ложно
+            # переводит только что авторизованную роль в режим просмотра.
+            session_access = access
         else:
             access = active_access_for_employee_role(access.employee, 'dispatcher')
             if not access:

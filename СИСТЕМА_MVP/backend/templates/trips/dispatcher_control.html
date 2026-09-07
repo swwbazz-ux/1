@@ -45,7 +45,7 @@
 >
     <h1 class="dispatcher-compat-title">{% if dispatcher_compat_title %}{{ dispatcher_compat_title }}{% else %}Диспетчерский пульт{% endif %}</h1>
     {% if messages %}
-        <div class="dispatcher-messages">
+        <div class="dispatcher-messages" role="status" aria-live="polite">
             {% for message in messages %}
                 <div class="message {% if message.tags %}{{ message.tags }}{% else %}success{% endif %}">{{ message }}</div>
             {% endfor %}
@@ -521,22 +521,13 @@
                     <p>Вклад точек разгрузки в общий результат</p>
                 </header>
                 <div class="mm-shift-plan-summary" aria-label="Факт и план смены">
-                    <div>
-                        <span>Факт</span>
-                        <strong>{{ dispatcher_dashboard.shift_plan_detail.fact_tons|default:"0" }} т</strong>
-                    </div>
-                    <div>
-                        <span>План</span>
-                        <strong>{{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} т</strong>
-                    </div>
+                    <div><span>Факт</span><strong>{{ dispatcher_dashboard.shift_plan_detail.fact_tons|default:"0" }} т</strong></div>
+                    <div><span>План</span><strong>{{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} т</strong></div>
                 </div>
                 <div class="mm-shift-plan-points" aria-label="Выполнение по точкам разгрузки">
                     {% for point in dispatcher_dashboard.shift_plan_detail.points %}
                         <article class="mm-shift-plan-point" style="--mm-shift-plan-point-percent: {{ point.contribution_percent }}%;">
-                            <div class="mm-shift-plan-point-copy">
-                                <strong>{{ point.name }}</strong>
-                                <span>{{ point.fact_tons }} т · {{ point.trip_count_label }}</span>
-                            </div>
+                            <div class="mm-shift-plan-point-copy"><strong>{{ point.name }}</strong><span>{{ point.fact_tons }} т · {{ point.trip_count_label }}</span></div>
                             <b>{{ point.contribution_percent }}%</b>
                             <i aria-hidden="true"><span></span></i>
                         </article>
@@ -865,11 +856,47 @@
                     <span data-gd-detail-employee-initials></span>
                 </div>
                 <div class="mm-detail-employee-info">
-                    <span>В смене</span>
+                    <span data-gd-detail-employee-presence>В смене</span>
                     <strong data-gd-detail-employee-name></strong>
                     <a data-gd-detail-employee-phone href=""></a>
                 </div>
             </div>
+            <section class="gd-detail-settings" data-gd-detail-settings hidden>
+                <div class="gd-detail-settings-head">
+                    <div>
+                        <strong data-gd-detail-settings-title>Рабочие параметры комплекса</strong>
+                        <span data-gd-detail-settings-hint></span>
+                    </div>
+                    <span class="gd-detail-settings-status" data-gd-detail-settings-status role="status" aria-live="polite"></span>
+                </div>
+                <div class="gd-detail-settings-face">
+                    <label>
+                        <span>Горизонт</span>
+                        <input type="text" inputmode="numeric" maxlength="16" data-gd-setting-horizon>
+                    </label>
+                    <label>
+                        <span>Блок</span>
+                        <input type="text" inputmode="numeric" maxlength="16" data-gd-setting-block>
+                    </label>
+                    <label>
+                        <span>Порода</span>
+                        <select data-gd-setting-rock></select>
+                    </label>
+                </div>
+                <div class="gd-detail-destinations">
+                    <div class="gd-detail-destinations-head">
+                        <div>
+                            <strong>Точки разгрузки</strong>
+                            <span data-gd-destination-count></span>
+                        </div>
+                        <button type="button" class="gd-detail-destination-add" data-gd-destination-add>+ Добавить точку</button>
+                    </div>
+                    <div class="gd-detail-destination-list" data-gd-destination-list></div>
+                </div>
+                <div class="gd-detail-settings-actions">
+                    <button type="button" class="gd-detail-settings-save" data-gd-setting-save>Сохранить настройки</button>
+                </div>
+            </section>
             <dl class="mm-detail-list" data-gd-detail-list></dl>
             <div class="gd-detail-load-state" data-gd-detail-load-state hidden>
                 <span data-gd-detail-load-message>Загружаю свежие данные…</span>
@@ -6187,15 +6214,43 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!draggedTile || draggedTile.dataset.dispatcherDrag !== "complex") return;
             var inactiveComplexCard = draggedTile;
             var inactiveExcavatorId = inactiveComplexCard.dataset.equipmentId;
-            dispatcherPost(dispatcherMoveExcavatorUrl, {
-                excavator_id: inactiveExcavatorId,
-                zone: "inactive"
-            }).then(function (response) {
-                return refreshDesktopBoardAfterStructuralAction(response, function () {
-                    moveDesktopComplexToExcavatorGarage(inactiveComplexCard);
-                });
-            }).catch(handleDesktopOptimisticBoardError);
+            var inactiveComplexName = (inactiveComplexCard.dataset.equipmentName || "комплекс").trim();
+            var inactiveTruckCount = inactiveComplexCard.querySelectorAll("[data-complex-truck='true']").length;
+            requestDispatcherDesktopDangerConfirmation({
+                title: "Расформировать комплекс?",
+                message: "Экскаватор " + inactiveComplexName + " уйдет в гараж экскаваторов, а все самосвалы " +
+                    "комплекса (" + inactiveTruckCount + " шт.) — в гараж самосвалов через 5 минут.",
+                acceptLabel: "Расформировать",
+                action: function () {
+                    dispatcherPost(dispatcherMoveExcavatorUrl, {
+                        excavator_id: inactiveExcavatorId,
+                        zone: "inactive"
+                    }).then(function (response) {
+                        return refreshDesktopBoardAfterStructuralAction(response, function () {
+                            moveDesktopComplexToExcavatorGarage(inactiveComplexCard);
+                        });
+                    }).catch(handleDesktopOptimisticBoardError);
+                }
+            });
         });
+    }
+    function requestDispatcherDesktopDangerConfirmation(options) {
+        options = options || {};
+        if (typeof options.action !== "function") return;
+        if (typeof window.openAppConfirmDialog !== "function") {
+            showDispatcherDnDError(new Error("Подтверждение действия недоступно. Обновите страницу."));
+            return;
+        }
+        window.openAppConfirmDialog(
+            options.message || "Подтвердить опасное действие?",
+            options.action,
+            0,
+            options.acceptLabel || "Подтвердить",
+            {
+                confirmTitle: options.title || "Опасное действие",
+                confirmDescription: options.message || "Подтвердите действие."
+            }
+        );
     }
     function bindDispatcherTruckGarageDrop(garage) {
         if (!garage || garage.dataset.dispatcherDropBound === "true") return;
@@ -6214,15 +6269,25 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!draggedTile) return;
             if (draggedTile.dataset.dispatcherDrag === "complex") {
                 var complexCard = draggedTile;
-                dispatcherPost(dispatcherAssignTruckUrl, {
-                    action: "release_complex",
-                    excavator_id: complexCard.dataset.equipmentId
-                }).then(function (response) {
-                    return applyDesktopTruckAction(response, {
-                        type: "release_complex",
-                        complexCard: complexCard
-                    });
-                }).catch(showDispatcherDnDError);
+                var complexName = (complexCard.dataset.equipmentName || "комплекса").trim();
+                var truckCount = complexCard.querySelectorAll("[data-complex-truck='true']").length;
+                requestDispatcherDesktopDangerConfirmation({
+                    title: "Снять все самосвалы?",
+                    message: "Снять все самосвалы комплекса " + complexName + " (" + truckCount +
+                        " шт.)? Экскаватор останется на месте, самосвалы уйдут в гараж через 5 минут.",
+                    acceptLabel: "Снять самосвалы",
+                    action: function () {
+                        dispatcherPost(dispatcherAssignTruckUrl, {
+                            action: "release_complex",
+                            excavator_id: complexCard.dataset.equipmentId
+                        }).then(function (response) {
+                            return applyDesktopTruckAction(response, {
+                                type: "release_complex",
+                                complexCard: complexCard
+                            });
+                        }).catch(showDispatcherDnDError);
+                    }
+                });
                 return;
             }
             if (draggedTile.dataset.complexTruck !== "true") return;
@@ -6257,6 +6322,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v61" defer></script>
 {% endif %}
 {% endblock %}

@@ -322,11 +322,27 @@ class CrewPlanSlot(models.Model):
         null=True,
         blank=True,
     )
+    secondary_employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Дополнительный участник экипажа',
+        on_delete=models.SET_NULL,
+        related_name='secondary_crew_plan_slots',
+        null=True,
+        blank=True,
+    )
     baseline_employee = models.ForeignKey(
         'users.Employee',
         verbose_name='Сотрудник в базовой расстановке',
         on_delete=models.SET_NULL,
         related_name='baseline_crew_plan_slots',
+        null=True,
+        blank=True,
+    )
+    baseline_secondary_employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Дополнительный участник в базовой расстановке',
+        on_delete=models.SET_NULL,
+        related_name='baseline_secondary_crew_plan_slots',
         null=True,
         blank=True,
     )
@@ -344,6 +360,19 @@ class CrewPlanSlot(models.Model):
                 fields=['plan', 'employee'],
                 condition=models.Q(employee__isnull=False),
                 name='unique_crew_plan_employee',
+            ),
+            models.UniqueConstraint(
+                fields=['plan', 'secondary_employee'],
+                condition=models.Q(secondary_employee__isnull=False),
+                name='unique_crew_plan_secondary_employee',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(employee__isnull=True)
+                    | models.Q(secondary_employee__isnull=True)
+                    | ~models.Q(employee=models.F('secondary_employee'))
+                ),
+                name='crew_plan_slot_distinct_employees',
             ),
         ]
 
@@ -400,6 +429,13 @@ class ExcavatorPlacement(models.Model):
     )
     loading_horizon = models.CharField('Горизонт погрузки', max_length=64, blank=True)
     loading_block = models.CharField('Блок погрузки', max_length=64, blank=True)
+    transport_distance_km = models.DecimalField(
+        'Рабочее плечо до разгрузки, км',
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     work_context_updated_at = models.DateTimeField('Контекст забоя обновлен', null=True, blank=True)
     changed_by = models.ForeignKey(
         'users.Employee',
@@ -417,6 +453,51 @@ class ExcavatorPlacement(models.Model):
 
     def __str__(self):
         return f'{self.excavator} / {self.get_zone_display()}'
+
+
+class ExcavatorDumpPointSetting(models.Model):
+    placement = models.ForeignKey(
+        ExcavatorPlacement,
+        verbose_name='Размещение экскаватора',
+        on_delete=models.CASCADE,
+        related_name='dump_point_settings',
+    )
+    dump_point = models.ForeignKey(
+        'references.DumpPoint',
+        verbose_name='Точка разгрузки',
+        on_delete=models.CASCADE,
+        related_name='excavator_work_settings',
+    )
+    transport_distance_km = models.DecimalField(
+        'Плечо до точки разгрузки, км',
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    position = models.PositiveSmallIntegerField('Порядок', default=0)
+    changed_by = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Кто изменил',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+    changed_at = models.DateTimeField('Изменено', auto_now=True)
+
+    class Meta:
+        verbose_name = 'Рабочая точка разгрузки экскаватора'
+        verbose_name_plural = 'Рабочие точки разгрузки экскаваторов'
+        ordering = ['position', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['placement', 'dump_point'],
+                name='assignments_unique_excavator_dump_point',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.placement.excavator} → {self.dump_point}'
 
 
 # Create your models here.
