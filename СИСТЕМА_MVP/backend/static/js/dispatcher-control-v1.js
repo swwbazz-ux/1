@@ -118,7 +118,13 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
     var dispatcherSyncPendingCount = 0;
-    var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v1";
+    var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v2";
+    try {
+        // Очередь v1 не содержала версии назначения. Повторять такие команды
+        // после обновления опасно: они могли быть сформированы до более нового
+        // решения диспетчера.
+        window.localStorage.removeItem("mining-master-mobile-sync-queue-v1");
+    } catch (error) {}
     var dispatcherSyncQueueFlushing = false;
     var dispatcherSyncFlushTimer = null;
     var dispatcherMobileSyncFlushDelayMs = 300;
@@ -193,11 +199,20 @@ document.addEventListener("DOMContentLoaded", function () {
             return false;
         }
         var queue = readDispatcherSyncQueue();
-        queue.push(Object.assign({
+        var queuedRequest = Object.assign({
             id: "sync-" + Date.now() + "-" + Math.random().toString(16).slice(2),
             createdAt: Date.now(),
             attempts: 0
-        }, request || {}));
+        }, request || {});
+        var replaceIndex = queuedRequest.coalesceKey ? queue.findIndex(function (item, index) {
+            return item.coalesceKey === queuedRequest.coalesceKey && !(dispatcherSyncQueueFlushing && index === 0);
+        }) : -1;
+        if (replaceIndex >= 0) {
+            queuedRequest.createdAt = queue[replaceIndex].createdAt || queuedRequest.createdAt;
+            queue[replaceIndex] = queuedRequest;
+        } else {
+            queue.push(queuedRequest);
+        }
         writeDispatcherSyncQueue(queue);
         scheduleDispatcherSyncFlush(delayMs);
         return true;
@@ -238,6 +253,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 return response.json().catch(function () { return {}; }).then(function (payload) {
                     var error = new Error(payload.error || "Действие не выполнено.");
                     error.isServerResponse = true;
+                    error.code = payload.code || "";
+                    error.conflict = Boolean(payload.conflict);
+                    error.status = response.status;
                     throw error;
                 });
             }
@@ -332,11 +350,12 @@ document.addEventListener("DOMContentLoaded", function () {
             flushDispatcherSyncQueue();
         }, typeof delayMs === "number" ? delayMs : 80);
     }
-    function dispatcherPost(url, data) {
+    function dispatcherPost(url, data, options) {
         if (dispatcherRoleIsReadonly()) {
             return Promise.reject(dispatcherInactiveRoleError());
         }
         var payload = Object.assign({}, data || {});
+        options = options || {};
         if (!payload.client_action_id) {
             payload.client_action_id = "mm-" + Date.now() + "-" + Math.random().toString(16).slice(2);
         }
@@ -348,6 +367,7 @@ document.addEventListener("DOMContentLoaded", function () {
         setDispatcherSyncPending(true);
         return sendDispatcherSyncRequest(request).catch(function (error) {
             if (error && error.isServerResponse) throw error;
+            if (options.queueOnNetworkFailure === false) throw error;
             enqueueDispatcherSyncRequest(request);
             return { queued: true };
         }).finally(function () {
@@ -366,11 +386,42 @@ document.addEventListener("DOMContentLoaded", function () {
             kind: "json",
             url: url,
             data: payload,
+            coalesceKey: payload.truck_id ? "haul-truck-" + String(payload.truck_id) : "",
             refreshMobileBoard: true
         }, typeof delayMs === "number" ? delayMs : dispatcherMobileSyncFlushDelayMs)) {
             return Promise.reject(dispatcherInactiveRoleError());
         }
         return Promise.resolve({ queued: true });
+    }
+    function haulAssignmentStateId(node) {
+        var value = node && node.dataset ? node.dataset.haulAssignmentStateId : "";
+        return /^\d+$/.test(String(value || "")) ? String(value) : "0";
+    }
+    function collectComplexAssignmentStates(complexCard) {
+        var states = {};
+        if (!complexCard) return states;
+        complexCard.querySelectorAll(
+            "[data-complex-truck='true'][data-equipment-id], " +
+            "[data-mm-mobile-home-truck-id]"
+        ).forEach(function (truck) {
+            var truckId = truck.dataset.equipmentId || truck.dataset.mmMobileHomeTruckId || "";
+            if (truckId) states[String(truckId)] = haulAssignmentStateId(truck);
+        });
+        return states;
+    }
+    function applyHaulAssignmentState(response, truckNode) {
+        if (!response || !truckNode || response.assignment_state_id === undefined) return;
+        truckNode.dataset.haulAssignmentStateId = String(response.assignment_state_id || 0);
+    }
+    function applyHaulAssignmentStates(response, root) {
+        var states = response && response.assignment_state_ids;
+        if (!states || !root) return;
+        root.querySelectorAll("[data-equipment-id], [data-mm-mobile-home-truck-id]").forEach(function (node) {
+            var truckId = node.dataset.equipmentId || node.dataset.mmMobileHomeTruckId || "";
+            if (truckId && Object.prototype.hasOwnProperty.call(states, truckId)) {
+                node.dataset.haulAssignmentStateId = String(states[truckId] || 0);
+            }
+        });
     }
     window.addEventListener("focus", scheduleDispatcherSyncFlush);
     window.addEventListener("pageshow", scheduleDispatcherSyncFlush);
@@ -960,6 +1011,10 @@ document.addEventListener("DOMContentLoaded", function () {
         var message = error && error.message ? error.message : "Действие не выполнено.";
         if (!showDispatcherNotice(message)) {
             console.warn(message);
+        }
+        if (error && error.conflict) {
+            Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
+            Promise.resolve(refreshDispatcherDesktopBoardFromServer()).catch(function () {});
         }
     }
     var miningMasterUpdateModal = document.querySelector("[data-mm-pwa-update-modal]");
@@ -2430,6 +2485,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 mini.dataset.mmMobileHomeTruckNumber = source.dataset.mmMobileAssignedTruckNumber || source.textContent || "";
                 mini.dataset.mmMobileHomeSourceExcavatorId = excavatorId;
                 mini.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+                mini.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
                 mini.textContent = mini.dataset.mmMobileHomeTruckNumber || "";
                 syncMobilePlanVisual(source, mini);
                 preview.appendChild(mini);
@@ -2582,6 +2638,7 @@ document.addEventListener("DOMContentLoaded", function () {
             card.style.display = "";
             card.dataset.mmMobileTruckSort = truckNumber;
             card.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+            card.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
             var image = card.querySelector("img");
             if (image) image.src = getMobileGarageTruckIcon(source);
             var title = card.querySelector("strong");
@@ -2635,6 +2692,7 @@ document.addEventListener("DOMContentLoaded", function () {
             button.dataset.mmMobileFillTruckNumber = truckNumber;
             button.dataset.mmMobileTruckSort = button.dataset.mmMobileFillTruckNumber || "";
             button.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+            button.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
             var img = document.createElement("img");
             img.src = getMobileGarageTruckIcon(source);
             img.alt = "";
@@ -2664,6 +2722,7 @@ document.addEventListener("DOMContentLoaded", function () {
             mini.dataset.mmMobileAssignedTruckId = homeTruck.dataset.mmMobileHomeTruckId || "";
             mini.dataset.mmMobileAssignedTruckNumber = homeTruck.dataset.mmMobileHomeTruckNumber || homeTruck.textContent || "";
             mini.dataset.mmMobileEquipmentState = homeTruck.dataset.mmMobileEquipmentState || "";
+            mini.dataset.haulAssignmentStateId = haulAssignmentStateId(homeTruck);
             mini.dataset.mmMobileFillOriginal = "true";
             mini.textContent = mini.dataset.mmMobileAssignedTruckNumber || "";
             syncMobilePlanVisual(homeTruck, mini);
@@ -2725,7 +2784,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 dispatcherPostQueued(dispatcherAssignTruckUrl, {
                     action: "assign",
                     truck_id: truckId,
-                    excavator_id: excavatorId
+                    excavator_id: excavatorId,
+                    expected_assignment_state_id: haulAssignmentStateId(mini)
                 }).catch(showDispatcherDnDError);
             });
             Array.from(screen.querySelectorAll(".mm-mobile-fill-truck[data-mm-mobile-fill-was-assigned='true']")).forEach(function (button) {
@@ -2733,7 +2793,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (!truckId) return;
                 dispatcherPostQueued(dispatcherAssignTruckUrl, {
                     action: "release",
-                    truck_id: truckId
+                    truck_id: truckId,
+                    expected_assignment_state_id: haulAssignmentStateId(button)
                 }).catch(showDispatcherDnDError);
                 delete button.dataset.mmMobileFillWasAssigned;
             });
@@ -3047,13 +3108,17 @@ document.addEventListener("DOMContentLoaded", function () {
                 var sourceExcavatorId = mini.dataset.mmMobileHomeSourceExcavatorId || "";
                 var payload = null;
                 if (currentDropMode === "garage") {
-                    payload = { action: "release", truck_id: truckId, expected_source_excavator_id: sourceExcavatorId };
+                    payload = {
+                        action: "release",
+                        truck_id: truckId,
+                        expected_assignment_state_id: haulAssignmentStateId(mini)
+                    };
                 } else if (currentDropMode === "complex" && currentTargetCard) {
                     payload = {
                         action: "assign",
                         truck_id: truckId,
                         excavator_id: currentTargetCard.dataset.mmMobileExcavatorId,
-                        expected_source_excavator_id: sourceExcavatorId
+                        expected_assignment_state_id: haulAssignmentStateId(mini)
                     };
                 }
                 if (!payload || !truckId) {
@@ -3333,10 +3398,11 @@ document.addEventListener("DOMContentLoaded", function () {
                 } catch (error) {}
             }
             preserveExcavatorReturnPanel();
-            dispatcherPostQueued(dispatcherMoveExcavatorUrl, {
+            dispatcherPost(dispatcherMoveExcavatorUrl, {
                 excavator_id: excavatorId,
-                zone: "active"
-            }).catch(function (error) {
+                zone: "active",
+                expected_zone: "inactive"
+            }, { queueOnNetworkFailure: false }).catch(function (error) {
                 if (!existingCard && createdCard && createdCard.parentNode) {
                     createdCard.remove();
                 }
@@ -3515,6 +3581,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (isMiningMasterMobileReadonly()) return;
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing")) return;
+            var expectedAssignmentStates = collectComplexAssignmentStates(card);
             card.classList.remove("is-swiping", "is-swipe-ready");
             card.classList.add("is-releasing");
             shell.classList.add("is-excavator-garage-peeking");
@@ -3534,10 +3601,12 @@ document.addEventListener("DOMContentLoaded", function () {
                 var grid = shell.querySelector(".mm-mobile-complex-grid");
                 if (grid) grid.scrollTop = 0;
             }, Math.min(260, flightTime));
-            dispatcherPostQueued(dispatcherMoveExcavatorUrl, {
+            dispatcherPost(dispatcherMoveExcavatorUrl, {
                 excavator_id: excavatorId,
-                zone: "inactive"
-            })
+                zone: "inactive",
+                expected_zone: "active",
+                expected_assignment_states: expectedAssignmentStates
+            }, { queueOnNetworkFailure: false })
                 .then(function () {
                     window.setTimeout(function () {
                         shell.classList.remove("is-truck-garage-peeking");
@@ -3643,6 +3712,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (isMiningMasterMobileReadonly()) return;
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing-trucks")) return;
+            var expectedAssignmentStates = collectComplexAssignmentStates(card);
             card.classList.remove("is-truck-swiping", "is-truck-swipe-ready");
             card.classList.add("is-releasing-trucks");
             shell.classList.add("is-truck-garage-peeking");
@@ -3660,10 +3730,11 @@ document.addEventListener("DOMContentLoaded", function () {
             ensureMobileTruckPreviewEmpty(preview);
             updateMobileHomeTruckPreviewLayout(preview);
             scheduleMobileLocalLayoutReconcile();
-            dispatcherPostQueued(dispatcherAssignTruckUrl, {
+            dispatcherPost(dispatcherAssignTruckUrl, {
                 action: "release_complex",
-                excavator_id: excavatorId
-            })
+                excavator_id: excavatorId,
+                expected_assignment_states: expectedAssignmentStates
+            }, { queueOnNetworkFailure: false })
                 .then(function () {
                     window.setTimeout(function () {
                         resetMobileComplexTruckSwipe(card);
@@ -3696,6 +3767,7 @@ document.addEventListener("DOMContentLoaded", function () {
             mini.dataset.mmMobileAssignedTruckId = truckButton.dataset.mmMobileFillTruckId || "";
             mini.dataset.mmMobileAssignedTruckNumber = truckButton.dataset.mmMobileFillTruckNumber || (truckButton.querySelector("strong") && truckButton.querySelector("strong").textContent) || "";
             mini.dataset.mmMobileEquipmentState = stateCode;
+            mini.dataset.haulAssignmentStateId = haulAssignmentStateId(truckButton);
             if (truckButton.dataset.mmMobileFillWasAssigned === "true") {
                 mini.dataset.mmMobileFillOriginal = "true";
             } else {
@@ -5241,6 +5313,8 @@ document.addEventListener("DOMContentLoaded", function () {
     function applyDesktopTruckAction(response, action) {
         if (response && response.queued) return response;
         if (!action || !action.type) return response;
+        if (action.truckTile) applyHaulAssignmentState(response, action.truckTile);
+        if (action.complexCard) applyHaulAssignmentStates(response, action.complexCard);
         var applied = false;
         if (action.type === "assign") {
             applied = moveDesktopTruckToComplex(action.truckTile, action.complexCard);
@@ -5416,8 +5490,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 var targetComplexCard = zone;
                 dispatcherPost(dispatcherMoveExcavatorUrl, {
                     excavator_id: activatedExcavatorTile.dataset.equipmentId,
-                    zone: "active"
-                }).then(function (response) {
+                    zone: "active",
+                    expected_zone: "inactive"
+                }, { queueOnNetworkFailure: false }).then(function (response) {
                     return refreshDesktopBoardAfterStructuralAction(response, function () {
                         activateDesktopComplexFromExcavatorTile(activatedExcavatorTile, targetComplexCard);
                     });
@@ -5433,7 +5508,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 dispatcherPost(dispatcherAssignTruckUrl, {
                     action: "assign",
                     truck_id: assignedTruckTile.dataset.equipmentId,
-                    excavator_id: zone.dataset.equipmentId
+                    excavator_id: zone.dataset.equipmentId,
+                    expected_assignment_state_id: haulAssignmentStateId(assignedTruckTile)
                 }).then(function (response) {
                     return applyDesktopTruckAction(response, {
                         type: "assign",
@@ -5472,8 +5548,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 action: function () {
                     dispatcherPost(dispatcherMoveExcavatorUrl, {
                         excavator_id: inactiveExcavatorId,
-                        zone: "inactive"
-                    }).then(function (response) {
+                        zone: "inactive",
+                        expected_zone: "active",
+                        expected_assignment_states: collectComplexAssignmentStates(inactiveComplexCard)
+                    }, { queueOnNetworkFailure: false }).then(function (response) {
                         return refreshDesktopBoardAfterStructuralAction(response, function () {
                             moveDesktopComplexToExcavatorGarage(inactiveComplexCard);
                         });
@@ -5541,8 +5619,9 @@ document.addEventListener("DOMContentLoaded", function () {
                     action: function () {
                         dispatcherPost(dispatcherAssignTruckUrl, {
                             action: "release_complex",
-                            excavator_id: complexCard.dataset.equipmentId
-                        }).then(function (response) {
+                            excavator_id: complexCard.dataset.equipmentId,
+                            expected_assignment_states: collectComplexAssignmentStates(complexCard)
+                        }, { queueOnNetworkFailure: false }).then(function (response) {
                             return applyDesktopTruckAction(response, {
                                 type: "release_complex",
                                 complexCard: complexCard
@@ -5556,7 +5635,8 @@ document.addEventListener("DOMContentLoaded", function () {
             var releasedTruckTile = draggedTile;
             dispatcherPost(dispatcherAssignTruckUrl, {
                 action: "release",
-                truck_id: releasedTruckTile.dataset.equipmentId
+                truck_id: releasedTruckTile.dataset.equipmentId,
+                expected_assignment_state_id: haulAssignmentStateId(releasedTruckTile)
             }).then(function (response) {
                 return applyDesktopTruckAction(response, {
                     type: "release",

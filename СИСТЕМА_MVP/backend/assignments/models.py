@@ -395,6 +395,24 @@ class HaulAssignment(models.Model):
         verbose_name = 'Назначение самосвала под экскаватор'
         verbose_name_plural = 'Назначения самосвалов под экскаваторы'
         ordering = ['-assigned_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['truck'],
+                condition=models.Q(
+                    status=AssignmentStatus.ACCEPTED,
+                    ended_at__isnull=True,
+                ),
+                name='uniq_open_accepted_haul_truck',
+            ),
+            models.UniqueConstraint(
+                fields=['truck'],
+                condition=models.Q(
+                    status=AssignmentStatus.PENDING,
+                    ended_at__isnull=True,
+                ),
+                name='uniq_open_pending_haul_truck',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.truck} под {self.excavator}'

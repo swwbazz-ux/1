@@ -28,11 +28,20 @@ from assignments.models import (
     HaulAssignmentAction,
 )
 from assignments.services import (
+    HaulAssignmentStateConflict,
     get_active_equipment_assignment,
+    projected_haul_assignments_for_excavator,
     reconcile_due_haul_assignments,
     schedule_haul_assignment,
     schedule_haul_release,
+    validate_projected_excavator_state,
     work_assignment_state,
+)
+from assignments.command_guards import (
+    ClientActionPayloadConflict,
+    ClientActionRequired,
+    begin_client_action,
+    complete_client_action,
 )
 from core.db_locks import lock_idempotency_key
 from core.models import OperationalStateVersion, bump_operational_state, lock_production_state
@@ -2109,6 +2118,11 @@ def build_dispatcher_dashboard_context(
                 'plan_percent_label': truck_plan['percent_label'],
                 'plan_unit': truck_plan['unit'],
                 'plan_has_plan': truck_plan['has_plan'],
+                'assignment_state_id': (
+                    assignment_by_truck[truck_id].id
+                    if truck_id in assignment_by_truck
+                    else 0
+                ),
                 'transfer_pending': transfer_pending,
                 'transfer_source_label': (
                     f'К-{garage_number_int(transfer_source_excavator)}'
@@ -2276,6 +2290,7 @@ def build_dispatcher_dashboard_context(
                 'plan_percent_label': row.get('plan_percent_label') or 'Не назначен',
                 'plan_unit': row.get('plan_unit') or '',
                 'plan_has_plan': bool(row.get('plan_has_plan')),
+                'assignment_state_id': row.get('assignment_state_id') or 0,
                 'transfer_pending': bool(row.get('transfer_pending')),
                 'transfer_source_label': row.get('transfer_source_label') or '',
             })
@@ -2478,6 +2493,11 @@ def build_dispatcher_dashboard_context(
             'plan_unit': truck_plan['unit'],
             'plan_has_plan': truck_plan['has_plan'],
             'card_id': str(truck.id),
+            'assignment_state_id': (
+                assignment_by_truck[truck.id].id
+                if truck.id in assignment_by_truck
+                else 0
+            ),
         })
     mobile_truck_garage_tiles = []
     mobile_truck_sort_source = sorted(trucks_list, key=garage_number_int)
@@ -2512,6 +2532,11 @@ def build_dispatcher_dashboard_context(
             'plan_unit': truck_plan['unit'],
             'plan_has_plan': truck_plan['has_plan'],
             'card_id': str(truck.id),
+            'assignment_state_id': (
+                assignment_by_truck[truck.id].id
+                if truck.id in assignment_by_truck
+                else 0
+            ),
         })
 
     for tile in excavator_tiles:
@@ -2889,6 +2914,41 @@ def dispatcher_json_payload(request):
         return {}
 
 
+def dispatcher_client_action_error(payload, error, *, code='stale_client'):
+    return JsonResponse(
+        {
+            'ok': False,
+            'error': '; '.join(error.messages) if isinstance(error, ValidationError) else str(error),
+            'code': code,
+            'conflict': True,
+            'client_action_id': str((payload or {}).get('client_action_id') or ''),
+        },
+        status=409,
+    )
+
+
+def required_assignment_state_id(payload):
+    if 'expected_assignment_state_id' not in payload:
+        raise ClientActionRequired(
+            'Экран открыт в старой версии. Обновите пульт перед изменением расстановки.'
+        )
+    try:
+        value = int(payload.get('expected_assignment_state_id'))
+    except (TypeError, ValueError):
+        raise ClientActionRequired('Некорректная версия назначения. Обновите пульт.')
+    if value < 0:
+        raise ClientActionRequired('Некорректная версия назначения. Обновите пульт.')
+    return value
+
+
+def required_projected_assignment_states(payload):
+    if 'expected_assignment_states' not in payload:
+        raise ClientActionRequired(
+            'Экран открыт в старой версии. Обновите пульт перед массовым действием.'
+        )
+    return payload.get('expected_assignment_states')
+
+
 def close_haul_assignments(queryset, now, *, action='bulk_close_assignments', source='dispatcher'):
     assignments = list(queryset)
     for assignment in assignments:
@@ -2931,6 +2991,16 @@ def dispatcher_move_excavator_view(request):
     if shift_error:
         return shift_error
     payload = dispatcher_json_payload(request)
+    try:
+        client_action_id, signature, repeated_response = begin_client_action(
+            employee=access.employee,
+            action_type='dispatcher_move_excavator',
+            payload=payload,
+        )
+    except (ClientActionRequired, ClientActionPayloadConflict) as error:
+        return dispatcher_client_action_error(payload, error)
+    if repeated_response is not None:
+        return JsonResponse(repeated_response)
     excavator = get_object_or_404(
         Equipment.objects.select_for_update().select_related('equipment_type'),
         id=payload.get('excavator_id'),
@@ -2941,28 +3011,61 @@ def dispatcher_move_excavator_view(request):
     if zone not in {ExcavatorPlacement.Zone.ACTIVE, ExcavatorPlacement.Zone.INACTIVE}:
         return JsonResponse({'ok': False, 'error': 'Некорректная зона экскаватора.'}, status=400)
 
-    placement, _ = ExcavatorPlacement.objects.get_or_create(excavator=excavator)
+    placement = (
+        ExcavatorPlacement.objects.select_for_update()
+        .filter(excavator=excavator)
+        .first()
+    )
+    actual_zone = placement.zone if placement else ExcavatorPlacement.Zone.INACTIVE
+    expected_zone = str(payload.get('expected_zone') or '').strip()
+    if not expected_zone:
+        return dispatcher_client_action_error(
+            payload,
+            ClientActionRequired('Экран открыт в старой версии. Обновите пульт.'),
+        )
+    if expected_zone != actual_zone:
+        return dispatcher_client_action_error(
+            payload,
+            HaulAssignmentStateConflict(
+                expected_state_id=expected_zone,
+                actual_state_id=actual_zone,
+            ),
+            code='state_conflict',
+        )
+    if not placement:
+        placement = ExcavatorPlacement.objects.create(excavator=excavator)
+
+    scheduled_assignments = []
+    if zone == ExcavatorPlacement.Zone.INACTIVE:
+        try:
+            expected_states = required_projected_assignment_states(payload)
+            current_assignments = projected_haul_assignments_for_excavator(
+                excavator,
+                for_update=True,
+            )
+            validate_projected_excavator_state(current_assignments, expected_states)
+            now = timezone.now()
+            for current_assignment in current_assignments:
+                assignment, _ = schedule_haul_release(
+                    truck=current_assignment.truck,
+                    assigned_by=access.employee,
+                    now=now,
+                    expected_state_id=current_assignment.id,
+                )
+                if assignment:
+                    scheduled_assignments.append(assignment)
+        except (ClientActionRequired, HaulAssignmentStateConflict) as error:
+            return dispatcher_client_action_error(payload, error, code='state_conflict')
+
     placement.zone = zone
     placement.changed_by = access.employee
     placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
 
     if zone == ExcavatorPlacement.Zone.INACTIVE:
-        now = timezone.now()
-        current_assignments = list(
-            HaulAssignment.objects
-            .select_for_update()
-            .filter(excavator=excavator, ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED)
-            .select_related('truck')
-            .order_by('truck_id', 'id')
-        )
-        trucks = {assignment.truck_id: assignment.truck for assignment in current_assignments}
-        scheduled = sum(
-            bool(schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)[0])
-            for truck in trucks.values()
-        )
+        scheduled = len(scheduled_assignments)
         summary = f'{equipment_short_name(excavator)} возвращен в гараж, снятие назначений ожидает ({scheduled} самосв.)'
     else:
+        scheduled = 0
         summary = f'{equipment_short_name(excavator)} переведен в активную смену'
 
     log_dispatcher_action(
@@ -2970,7 +3073,23 @@ def dispatcher_move_excavator_view(request):
         action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
         target_summary=summary,
     )
-    return JsonResponse({'ok': True})
+    response_payload = {
+        'ok': True,
+        'scheduled': scheduled,
+        'assignment_state_ids': {
+            str(item.truck_id): item.id for item in scheduled_assignments
+        },
+        'client_action_id': client_action_id,
+    }
+    complete_client_action(
+        employee=access.employee,
+        shift=get_active_dispatcher_shift(access),
+        action_type='dispatcher_move_excavator',
+        client_action_id=client_action_id,
+        signature=signature,
+        response_payload=response_payload,
+    )
+    return JsonResponse(response_payload)
 
 
 @require_POST
@@ -2995,6 +3114,16 @@ def dispatcher_assign_truck_view(request):
     payload = dispatcher_json_payload(request)
     action = payload.get('action')
     now = timezone.now()
+    try:
+        client_action_id, signature, repeated_response = begin_client_action(
+            employee=access.employee,
+            action_type='dispatcher_assign_truck',
+            payload=payload,
+        )
+    except (ClientActionRequired, ClientActionPayloadConflict) as error:
+        return dispatcher_client_action_error(payload, error)
+    if repeated_response is not None:
+        return JsonResponse(repeated_response)
 
     if action == 'release_complex':
         excavator = get_object_or_404(
@@ -3003,25 +3132,48 @@ def dispatcher_assign_truck_view(request):
             equipment_type__name__icontains='Экскаватор',
             is_active=True,
         )
-        current_assignments = list(
-            HaulAssignment.objects
-            .select_for_update()
-            .filter(excavator=excavator, ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED)
-            .select_related('truck')
-            .order_by('truck_id', 'id')
-        )
-        trucks = {assignment.truck_id: assignment.truck for assignment in current_assignments}
-        scheduled = sum(
-            bool(schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)[0])
-            for truck in trucks.values()
-        )
+        try:
+            expected_states = required_projected_assignment_states(payload)
+            current_assignments = projected_haul_assignments_for_excavator(
+                excavator,
+                for_update=True,
+            )
+            validate_projected_excavator_state(current_assignments, expected_states)
+            scheduled_assignments = []
+            for current_assignment in current_assignments:
+                assignment, _ = schedule_haul_release(
+                    truck=current_assignment.truck,
+                    assigned_by=access.employee,
+                    now=now,
+                    expected_state_id=current_assignment.id,
+                )
+                if assignment:
+                    scheduled_assignments.append(assignment)
+        except (ClientActionRequired, HaulAssignmentStateConflict) as error:
+            return dispatcher_client_action_error(payload, error, code='state_conflict')
+        scheduled = len(scheduled_assignments)
         log_dispatcher_action(
             actor=access.employee,
             action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
             target_summary=f'{equipment_short_name(excavator)}: снятие назначений ожидает ({scheduled})',
         )
-        return JsonResponse({'ok': True, 'scheduled': scheduled})
+        response_payload = {
+            'ok': True,
+            'scheduled': scheduled,
+            'assignment_state_ids': {
+                str(item.truck_id): item.id for item in scheduled_assignments
+            },
+            'client_action_id': client_action_id,
+        }
+        complete_client_action(
+            employee=access.employee,
+            shift=get_active_dispatcher_shift(access),
+            action_type='dispatcher_assign_truck',
+            client_action_id=client_action_id,
+            signature=signature,
+            response_payload=response_payload,
+        )
+        return JsonResponse(response_payload)
 
     truck = get_object_or_404(
         Equipment.objects.select_for_update().select_related('equipment_type'),
@@ -3029,19 +3181,41 @@ def dispatcher_assign_truck_view(request):
         equipment_type__name__icontains='Самосвал',
         is_active=True,
     )
-    active_assignments = (
-        HaulAssignment.objects
-        .filter(truck=truck, ended_at__isnull=True)
-        .exclude(status=AssignmentStatus.CANCELLED)
-    )
+    try:
+        expected_state_id = required_assignment_state_id(payload)
+    except ClientActionRequired as error:
+        return dispatcher_client_action_error(payload, error)
     if action == 'release':
-        assignment, created = schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)
+        try:
+            assignment, created = schedule_haul_release(
+                truck=truck,
+                assigned_by=access.employee,
+                now=now,
+                expected_state_id=expected_state_id,
+            )
+        except HaulAssignmentStateConflict as error:
+            return dispatcher_client_action_error(payload, error, code='state_conflict')
         log_dispatcher_action(
             actor=access.employee,
             action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
             target_summary=f'{equipment_short_name(truck)} снят с комплекса и возвращен в гараж',
         )
-        return JsonResponse({'ok': True, 'assignment_id': assignment.id if assignment else None, 'created': created})
+        response_payload = {
+            'ok': True,
+            'assignment_id': assignment.id if assignment else None,
+            'assignment_state_id': assignment.id if assignment else 0,
+            'created': created,
+            'client_action_id': client_action_id,
+        }
+        complete_client_action(
+            employee=access.employee,
+            shift=get_active_dispatcher_shift(access),
+            action_type='dispatcher_assign_truck',
+            client_action_id=client_action_id,
+            signature=signature,
+            response_payload=response_payload,
+        )
+        return JsonResponse(response_payload)
 
     if action != 'assign':
         return JsonResponse({'ok': False, 'error': 'Некорректное действие с самосвалом.'}, status=400)
@@ -3058,19 +3232,38 @@ def dispatcher_assign_truck_view(request):
         placement.changed_by = access.employee
         placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
 
-    assignment, created = schedule_haul_assignment(
-        truck=truck,
-        excavator=excavator,
-        assigned_by=access.employee,
-        now=now,
-    )
+    try:
+        assignment, created = schedule_haul_assignment(
+            truck=truck,
+            excavator=excavator,
+            assigned_by=access.employee,
+            now=now,
+            expected_state_id=expected_state_id,
+        )
+    except HaulAssignmentStateConflict as error:
+        return dispatcher_client_action_error(payload, error, code='state_conflict')
     log_dispatcher_action(
         actor=access.employee,
         action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
         target_summary=f'{equipment_short_name(truck)} назначен под {equipment_short_name(excavator)}',
         haul_assignment=assignment,
     )
-    return JsonResponse({'ok': True, 'assignment_id': assignment.id, 'created': created})
+    response_payload = {
+        'ok': True,
+        'assignment_id': assignment.id,
+        'assignment_state_id': assignment.id,
+        'created': created,
+        'client_action_id': client_action_id,
+    }
+    complete_client_action(
+        employee=access.employee,
+        shift=get_active_dispatcher_shift(access),
+        action_type='dispatcher_assign_truck',
+        client_action_id=client_action_id,
+        signature=signature,
+        response_payload=response_payload,
+    )
+    return JsonResponse(response_payload)
 
 
 def excavator_access_from_request(request):

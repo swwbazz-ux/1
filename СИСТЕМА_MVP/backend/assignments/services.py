@@ -1159,12 +1159,106 @@ def _cancel_assignments(assignments, now):
     return changed
 
 
+class HaulAssignmentStateConflict(Exception):
+    """Команда была сформирована по уже устаревшему состоянию самосвала."""
+
+    def __init__(self, *, expected_state_id, actual_state_id):
+        self.expected_state_id = expected_state_id
+        self.actual_state_id = actual_state_id
+        super().__init__('Состояние назначения самосвала изменилось.')
+
+
+def haul_assignment_state_id(assignments):
+    """Возвращает версию текущего диспетчерского решения по самосвалу.
+
+    Открытая ожидающая команда новее принятого назначения и поэтому является
+    состоянием, которое видит диспетчер. При равном времени порядок стабилен по
+    первичному ключу.
+    """
+    latest = max(
+        assignments,
+        key=lambda item: (item.assigned_at, item.id or 0),
+        default=None,
+    )
+    return latest.id if latest else 0
+
+
+def _validate_haul_assignment_state(open_assignments, expected_state_id):
+    if expected_state_id is None:
+        return
+    try:
+        expected_state_id = int(expected_state_id)
+    except (TypeError, ValueError):
+        raise HaulAssignmentStateConflict(
+            expected_state_id=expected_state_id,
+            actual_state_id=haul_assignment_state_id(open_assignments),
+        )
+    actual_state_id = haul_assignment_state_id(open_assignments)
+    if expected_state_id != actual_state_id:
+        raise HaulAssignmentStateConflict(
+            expected_state_id=expected_state_id,
+            actual_state_id=actual_state_id,
+        )
+
+
+def projected_haul_assignments(*, for_update=False):
+    """Одна целевая диспетчерская позиция на каждый самосвал.
+
+    Это не активный рейс и не обязательно принятое водителем назначение. Здесь
+    намеренно выбирается последняя открытая команда: ASSIGN показывает целевой
+    комплекс сразу, RELEASE показывает гараж сразу.
+    """
+    queryset = (
+        HaulAssignment.objects
+        .filter(ended_at__isnull=True)
+        .exclude(status=AssignmentStatus.CANCELLED)
+        .select_related('truck', 'excavator')
+        .order_by('truck_id', '-assigned_at', '-id')
+    )
+    if for_update:
+        queryset = queryset.select_for_update()
+    projected = {}
+    for assignment in queryset:
+        projected.setdefault(assignment.truck_id, assignment)
+    return projected
+
+
+def projected_haul_assignments_for_excavator(excavator, *, for_update=False):
+    return [
+        assignment
+        for assignment in projected_haul_assignments(for_update=for_update).values()
+        if (
+            assignment.action == HaulAssignmentAction.ASSIGN
+            and assignment.excavator_id == excavator.id
+        )
+    ]
+
+
+def validate_projected_excavator_state(assignments, expected_states):
+    """Проверяет, что массовое действие применяется к видимому составу."""
+    actual = {str(item.truck_id): item.id for item in assignments}
+    try:
+        expected = {
+            str(int(truck_id)): int(state_id)
+            for truck_id, state_id in (expected_states or {}).items()
+        }
+    except (AttributeError, TypeError, ValueError):
+        expected = None
+    if expected is None or expected != actual:
+        raise HaulAssignmentStateConflict(
+            expected_state_id=expected,
+            actual_state_id=actual,
+        )
+
+
 @transaction.atomic
 # select_for_update требует активную транзакцию. У соседней schedule_haul_release
 # декоратор уже стоял, а здесь его не было — молчало, пока действие «Назначить
 # самосвал» не сработало на редком стечении данных, и тогда падало 500-й ошибкой
 # ровно на той кнопке, которой горный мастер и диспетчер пользуются каждый день.
-def schedule_haul_assignment(*, truck, excavator, assigned_by=None, now=None):
+def schedule_haul_assignment(
+    *, truck, excavator, assigned_by=None, now=None, expected_state_id=None,
+):
     now = now or timezone.now()
     truck = Equipment.objects.select_for_update().get(pk=truck.pk)
     open_assignments = list(
@@ -1173,6 +1267,7 @@ def schedule_haul_assignment(*, truck, excavator, assigned_by=None, now=None):
         .exclude(status=AssignmentStatus.CANCELLED)
         .order_by('-assigned_at', '-id')
     )
+    _validate_haul_assignment_state(open_assignments, expected_state_id)
     accepted = next((item for item in open_assignments if item.status == AssignmentStatus.ACCEPTED), None)
     current_pending = next((item for item in open_assignments if item.status == AssignmentStatus.PENDING), None)
     if (
@@ -1213,7 +1308,7 @@ def schedule_haul_assignment(*, truck, excavator, assigned_by=None, now=None):
 
 
 @transaction.atomic
-def schedule_haul_release(*, truck, assigned_by=None, now=None):
+def schedule_haul_release(*, truck, assigned_by=None, now=None, expected_state_id=None):
     now = now or timezone.now()
     open_assignments = list(
         HaulAssignment.objects.select_for_update(of=('self',))
@@ -1222,6 +1317,7 @@ def schedule_haul_release(*, truck, assigned_by=None, now=None):
         .select_related('excavator')
         .order_by('-assigned_at', '-id')
     )
+    _validate_haul_assignment_state(open_assignments, expected_state_id)
     accepted = next((item for item in open_assignments if item.status == AssignmentStatus.ACCEPTED), None)
     pending = [item for item in open_assignments if item.status == AssignmentStatus.PENDING]
     current_pending = pending[0] if pending else None
