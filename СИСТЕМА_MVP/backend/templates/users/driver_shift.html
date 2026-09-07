@@ -4824,6 +4824,7 @@ window.applyOperationalStateRefresh = function (context) {
         if (typeof window.checkAchievementPrize === "function") {
             window.checkAchievementPrize(context);
         }
+        /* Свежий fragment является серверной истиной даже при потере delta. */
         if (becameLoaded) {
             playDriverDumpPointAlert({events: [{
                 version: targetVersion,
