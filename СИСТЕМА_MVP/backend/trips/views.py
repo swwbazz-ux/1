@@ -741,7 +741,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v210";
+const CACHE_NAME = "excavator-mobile-shell-v212";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -1581,6 +1581,9 @@ def build_dispatcher_dashboard_context(
     active_trips_list = list(active_trips)
     pending_assignments_list = list(pending_assignments)
     accepted_assignments_list = list(accepted_assignments)
+    accepted_source_assignment_by_truck_id = {}
+    for assignment in accepted_assignments_list:
+        accepted_source_assignment_by_truck_id.setdefault(assignment.truck_id, assignment)
     assignment_by_truck = {}
     for assignment in accepted_assignments_list + pending_assignments_list:
         current = assignment_by_truck.get(assignment.truck_id)
@@ -1976,6 +1979,10 @@ def build_dispatcher_dashboard_context(
 
         current_assignments = [assignment for assignment in accepted_assignments_list + pending_assignments_list if assignment.excavator_id == excavator.id]
         current_truck_ids = {assignment.truck_id for assignment in current_assignments}
+        current_assignment_by_truck_id = {
+            assignment.truck_id: assignment
+            for assignment in current_assignments
+        }
         volume_by_truck = defaultdict(Decimal)
         target_by_truck = {}
         rock_by_truck = {}
@@ -1993,6 +2000,20 @@ def build_dispatcher_dashboard_context(
             truck = truck_by_id.get(truck_id)
             if not truck:
                 continue
+            current_assignment = current_assignment_by_truck_id.get(truck_id)
+            source_assignment = accepted_source_assignment_by_truck_id.get(truck_id)
+            transfer_pending = bool(
+                current_assignment
+                and current_assignment.status == AssignmentStatus.PENDING
+                and current_assignment.action == HaulAssignmentAction.ASSIGN
+                and source_assignment
+                and source_assignment.excavator_id != current_assignment.excavator_id
+            )
+            transfer_source_excavator = (
+                excavator_by_id.get(source_assignment.excavator_id)
+                if transfer_pending
+                else None
+            )
             truck_status, truck_state_label, truck_state_code = truck_current_state(truck)
             truck_volume = volume_by_truck.get(truck_id, Decimal('0'))
             truck_plan = dispatcher_plan_for_equipment(truck)
@@ -2021,6 +2042,12 @@ def build_dispatcher_dashboard_context(
                 'plan_percent_label': truck_plan['percent_label'],
                 'plan_unit': truck_plan['unit'],
                 'plan_has_plan': truck_plan['has_plan'],
+                'transfer_pending': transfer_pending,
+                'transfer_source_label': (
+                    f'К-{garage_number_int(transfer_source_excavator)}'
+                    if transfer_source_excavator
+                    else ''
+                ),
             })
         forecast = fact
         current_rock = (
@@ -2182,7 +2209,10 @@ def build_dispatcher_dashboard_context(
                 'plan_percent_label': row.get('plan_percent_label') or 'Не назначен',
                 'plan_unit': row.get('plan_unit') or '',
                 'plan_has_plan': bool(row.get('plan_has_plan')),
+                'transfer_pending': bool(row.get('transfer_pending')),
+                'transfer_source_label': row.get('transfer_source_label') or '',
             })
+        pending_transfer_tile = next((tile for tile in truck_tiles if tile.get('transfer_pending')), None)
         unload_totals = {}
         for row in current_truck_rows:
             target = row.get('target')
@@ -2222,7 +2252,12 @@ def build_dispatcher_dashboard_context(
             'truck_column_count': 6,
             'truck_preview': current_trucks[:6],
             'truck_overflow': max(len(current_trucks) - 6, 0),
-            'mobile_truck_overflow': max(len(current_trucks) - 16, 0),
+            'mobile_truck_overflow': max(len(truck_tiles) - 3, 0),
+            'mobile_transfer_notice': (
+                f'№{pending_transfer_tile.get("name")} из {pending_transfer_tile.get("transfer_source_label")} · до 5 мин'
+                if pending_transfer_tile
+                else ''
+            ),
             'current_face': dispatcher_complex_face_label(card),
             'current_horizon': current_horizon,
             'current_block': current_block,
@@ -2975,8 +3010,17 @@ def excavator_access_from_request(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return None
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code != 'excavator_operator':
+    access = (
+        EmployeeAccess.objects
+        .select_related('employee', 'employee__contractor_organization', 'role')
+        .filter(id=access_id, is_active=True)
+        .first()
+    )
+    if (
+        not access
+        or access.role.code != 'excavator_operator'
+        or not role_session_state(request, access)['is_active']
+    ):
         return None
     return access
 

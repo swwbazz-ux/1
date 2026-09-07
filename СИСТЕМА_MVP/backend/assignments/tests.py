@@ -275,6 +275,72 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertNotContains(response, 'mobileLongTapTimer')
         self.assertNotContains(response, '}, 520);')
 
+    def test_mining_master_mobile_compacts_trucks_and_offers_direct_transfer_mode(self):
+        for number in range(103, 107):
+            truck = Equipment.objects.create(
+                equipment_type=self.assigned_truck.equipment_type,
+                model=self.assigned_truck.model,
+                garage_number=str(number),
+                is_active=True,
+            )
+            HaulAssignment.objects.create(
+                truck=truck,
+                excavator=self.excavator,
+                assigned_by=self.master,
+                status=AssignmentStatus.PENDING,
+            )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        complex_card = next(
+            card
+            for card in response.context['dispatcher_dashboard']['mobile_complex_zones']
+            if card.get('equipment_card_id') == str(self.excavator.id)
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(complex_card['active_truck_tiles']), 5)
+        self.assertEqual(complex_card['mobile_truck_overflow'], 2)
+        self.assertContains(response, 'data-mm-truck-transfer-bar')
+        self.assertContains(response, 'data-mm-mobile-open-truck-list')
+        self.assertContains(response, 'var visibleLimit = 3;')
+        self.assertContains(response, 'function beginMobileTruckTransfer(node)')
+        self.assertContains(response, 'function completeMobileTruckTransfer(targetCard)')
+        self.assertContains(response, 'expected_source_excavator_id: transfer.sourceExcavatorId')
+        self.assertContains(response, '[data-mm-mobile-home-truck-id], [data-mm-mobile-open-truck-list]')
+        self.assertContains(response, '}, 460);')
+
+    def test_mining_master_mobile_marks_pending_cross_complex_transfer(self):
+        HaulAssignment.objects.filter(truck=self.assigned_truck).delete()
+        HaulAssignment.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            assigned_by=self.master,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        schedule_haul_assignment(
+            truck=self.assigned_truck,
+            excavator=self.other_excavator,
+            assigned_by=self.master,
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        target_card = next(
+            card
+            for card in response.context['dispatcher_dashboard']['mobile_complex_zones']
+            if card.get('equipment_card_id') == str(self.other_excavator.id)
+        )
+        truck_tile = next(
+            tile
+            for tile in target_card['active_truck_tiles']
+            if tile.get('card_id') == str(self.assigned_truck.id)
+        )
+
+        self.assertTrue(truck_tile['transfer_pending'])
+        self.assertEqual(truck_tile['transfer_source_label'], 'К-1')
+        self.assertIn('до 5 мин', target_card['mobile_transfer_notice'])
+        self.assertContains(response, 'is-transfer-pending')
+        self.assertContains(response, 'data-mm-transfer-notice=')
+
     def test_mining_master_shift_plan_detail_breaks_total_percent_down_by_dump_point(self):
         rock_type = RockType.objects.create(name='Порода плана')
         kkd = DumpPoint.objects.create(name='ККД')
@@ -433,7 +499,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v140')
+        self.assertContains(response, 'mining-master-mobile-shell-v141')
         self.assertNotContains(response, '>v116<')
         self.assertContains(response, 'function hasMiningMasterRelevantEvents')
         self.assertContains(response, 'return Array.isArray(events) && events.length > 0;')
@@ -503,7 +569,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v140', script)
+        self.assertIn('mining-master-mobile-shell-v141', script)
         self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)

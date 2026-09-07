@@ -27863,12 +27863,62 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         background: rgba(158, 177, 187, .35);
     }
 
+    .mm-mobile-truck-transfer-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        min-height: 48px;
+        padding: 7px 9px;
+        border: 1px solid rgba(88, 223, 82, .74);
+        border-radius: 8px;
+        background: rgba(7, 32, 25, .96);
+        box-shadow: 0 0 20px rgba(88, 223, 82, .18);
+    }
+
+    .mm-mobile-truck-transfer-bar[hidden] {
+        display: none !important;
+    }
+
+    .mm-mobile-truck-transfer-bar > div {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+    }
+
+    .mm-mobile-truck-transfer-bar span {
+        color: #92aaa5;
+        font-size: 9px;
+        font-weight: 800;
+        text-transform: uppercase;
+    }
+
+    .mm-mobile-truck-transfer-bar strong {
+        overflow: hidden;
+        color: #f0f8f4;
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .mm-mobile-truck-transfer-bar button {
+        flex: 0 0 auto;
+        min-height: 32px;
+        padding: 0 10px;
+        border: 1px solid rgba(255, 255, 255, .24);
+        border-radius: 7px;
+        color: #eef6f2;
+        background: rgba(255, 255, 255, .07);
+        font-size: 11px;
+        font-weight: 800;
+    }
+
     .mm-mobile-complex-grid {
         position: relative;
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        grid-template-rows: repeat(3, minmax(0, 1fr));
-        grid-auto-rows: minmax(124px, 1fr);
+        grid-template-rows: none;
+        grid-auto-rows: 112px;
         gap: 6px;
         min-height: 0;
         overflow-x: hidden;
@@ -28082,6 +28132,56 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         box-shadow: inset 0 0 34px rgba(88, 223, 82, .16), 0 0 26px rgba(88, 223, 82, .32), 0 18px 28px rgba(0, 0, 0, .34);
         filter: brightness(1.12) saturate(1.08);
         z-index: 22;
+    }
+
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-grid {
+        grid-auto-rows: 78px;
+    }
+
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: 1fr;
+        align-items: center;
+        border-color: rgba(88, 223, 82, .72);
+        touch-action: manipulation;
+    }
+
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card .mm-mobile-complex-visual,
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card .mm-mobile-truck-preview,
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card .mm-mobile-status-chip,
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card .mm-mobile-complex-plan-ring {
+        display: none !important;
+    }
+
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card.is-transfer-target {
+        background: rgba(12, 48, 35, .94);
+        box-shadow: inset 0 0 24px rgba(88, 223, 82, .12), 0 0 14px rgba(88, 223, 82, .14);
+    }
+
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card.is-transfer-target::after {
+        content: "Выбрать";
+        position: static;
+        display: inline-flex;
+        width: auto;
+        height: 24px;
+        margin-left: auto;
+        padding: 0 7px;
+        align-items: center;
+        border: 1px solid rgba(88, 223, 82, .62);
+        border-radius: 6px;
+        color: #8ff18a;
+        background: rgba(88, 223, 82, .09);
+        font-size: 9px;
+        font-weight: 900;
+        opacity: 1;
+        pointer-events: none;
+        transform: none;
+    }
+
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card.is-transfer-source {
+        border-color: rgba(149, 167, 176, .38);
+        filter: grayscale(.65);
+        opacity: .48;
     }
 
     .mm-mobile-complex-card.is-fill-swiping,
@@ -28377,6 +28477,19 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         margin-left: auto;
     }
 
+    .mm-mobile-complex-truck-count {
+        flex: 0 0 auto;
+        color: #9eb1ba;
+        font-size: 9px;
+        font-weight: 800;
+        white-space: nowrap;
+    }
+
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-truck-count {
+        color: #d5e3de;
+        font-size: 10px;
+    }
+
     .mm-mobile-complex-head-meta .mm-mobile-status-chip {
         max-width: 74px;
         overflow: hidden;
@@ -28590,6 +28703,48 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         transition: transform .16s ease, filter .16s ease;
     }
 
+    .mm-mobile-truck-preview[data-mm-transfer-notice]::after {
+        content: attr(data-mm-transfer-notice);
+        position: absolute;
+        right: 4px;
+        bottom: 2px;
+        left: 4px;
+        z-index: 5;
+        overflow: hidden;
+        padding: 2px 4px;
+        border: 1px solid rgba(255, 210, 0, .48);
+        border-radius: 4px;
+        color: #ffe66b;
+        background: rgba(30, 27, 8, .94);
+        font-size: 8px;
+        font-weight: 800;
+        line-height: 1.2;
+        text-align: center;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        pointer-events: none;
+    }
+
+    .mm-mobile-truck-transfer-handle {
+        position: absolute;
+        right: 4px;
+        bottom: 4px;
+        z-index: 8;
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        border: 1px solid rgba(88, 223, 82, .72);
+        border-radius: 6px;
+        color: #8ff18a;
+        background: rgba(5, 30, 21, .94);
+        font-size: 15px;
+        font-weight: 900;
+        line-height: 1;
+        touch-action: manipulation;
+    }
+
     .mm-mobile-truck-preview[data-mm-mobile-truck-count="0"] {
         --mm-mobile-preview-columns: 1;
         --mm-mobile-preview-tile: 100%;
@@ -28643,6 +28798,10 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         overflow: hidden;
         touch-action: none;
         transition: opacity .14s ease, transform .18s ease, filter .16s ease;
+    }
+
+    .mm-mobile-truck-mini[hidden] {
+        display: none !important;
     }
 
     .mm-mobile-complex-card.is-trucks-flying .mm-mobile-truck-mini:not(.is-more) {
@@ -28747,7 +28906,16 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     }
 
     .mm-mobile-truck-mini.is-more {
+        appearance: none;
+        padding: 0;
         color: #58df52;
+        font: inherit;
+        cursor: pointer;
+    }
+
+    .mm-mobile-truck-mini.is-transfer-pending {
+        --mm-mobile-truck-accent: #ffd200;
+        color: #ffe66b;
     }
 
     .status-risk .mm-mobile-truck-mini,

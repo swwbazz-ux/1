@@ -236,7 +236,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v210',
+        shell_version='excavator-mobile-shell-v212',
     ),
     RoleApp(
         role_code='mining_master',
@@ -253,7 +253,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v140',
+        shell_version='mining-master-mobile-shell-v141',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
