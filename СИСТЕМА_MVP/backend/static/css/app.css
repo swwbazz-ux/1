@@ -26212,8 +26212,7 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     border-radius: 12px;
     background: var(--mm-report-surface);
     color: var(--mm-report-text);
-    font-size: 29px;
-    font-weight: 500;
+    font-size: 0;
     line-height: 1;
     box-shadow: none;
 }
@@ -28022,15 +28021,6 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         overflow-y: auto;
         padding: 20px 16px calc(18px + env(safe-area-inset-bottom));
         border-radius: 18px 18px 0 0;
-    }
-
-    .mm-mobile-plan-ring.is-hold-pending {
-        filter: brightness(1.18);
-        transform: scale(.94);
-    }
-
-    .mm-mobile-plan-ring.is-hold-ready {
-        box-shadow: 0 0 0 4px rgba(88, 223, 82, .2), 0 0 22px rgba(88, 223, 82, .5);
     }
 
     .mm-shift-plan-head {

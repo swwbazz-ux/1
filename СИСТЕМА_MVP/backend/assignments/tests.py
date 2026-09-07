@@ -396,7 +396,13 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'Выполнение плана')
         self.assertContains(response, 'Куда вывезено')
         self.assertContains(response, 'Основные маршруты')
-        self.assertContains(response, 'var holdDelayMs = 620;')
+        self.assertContains(response, 'openShiftPlanDetail(ring);')
+        self.assertNotContains(response, 'var holdDelayMs = 620;')
+        self.assertContains(response, 'Нажмите, чтобы открыть отчёт')
+        self.assertContains(
+            response,
+            'data-mm-shift-plan-detail-close aria-label="Закрыть детализацию плана"></button>',
+        )
 
     def test_mining_master_shift_plan_keeps_early_shift_progress_visible(self):
         rock_type = RockType.objects.create(name='Порода начала смены')
@@ -596,7 +602,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v143')
+        self.assertContains(response, 'mining-master-mobile-shell-v144')
         self.assertNotContains(response, '>v116<')
         self.assertContains(response, 'function hasMiningMasterRelevantEvents')
         self.assertContains(response, 'return Array.isArray(events) && events.length > 0;')
@@ -666,7 +672,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v143', script)
+        self.assertIn('mining-master-mobile-shell-v144', script)
         self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
