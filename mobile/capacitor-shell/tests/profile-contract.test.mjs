@@ -57,8 +57,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "17",
-    versionName: "0.1.12",
+    versionCode: "28",
+    versionName: "0.1.19",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -68,8 +68,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "16",
-    versionName: "0.1.12-rc",
+    versionCode: "27",
+    versionName: "0.1.19-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -325,11 +325,12 @@ test("background service announces only a fresh driver truck_loaded event", () =
   const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
   const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
   const player = readFileSync(resolve(javaRoot, "DriverVoicePlayer.java"), "utf8");
+  const announcer = readFileSync(resolve(javaRoot, "DriverDumpPointAnnouncer.java"), "utf8");
   const catalog = readFileSync(resolve(javaRoot, "DriverVoiceCatalog.java"), "utf8");
   assert.match(service, /"trip_changed"\.equals\(event\.optString\("type"\)\)/);
   assert.match(service, /"truck_loaded"\.equals\(payload\.optString\("action"\)\)/);
   assert.match(service, /last_driver_dump_point_alert_version/);
-  assert.match(service, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
+  assert.match(announcer, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
   assert.match(player, /AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK/);
   assert.match(player, /DriverVoiceCatalog\.resourceNameFor/);
   for (const [id, resource] of [

@@ -4800,6 +4800,10 @@ window.applyOperationalStateRefresh = function (context) {
             previousDowntimeFlow === "waiting_loading"
             && freshShell.dataset.driverHasLoadedTrip === "true"
         );
+        var becameLoaded = (
+            oldShell.dataset.driverHasLoadedTrip !== "true"
+            && freshShell.dataset.driverHasLoadedTrip === "true"
+        );
         if (movedFromLoadingWaitToWork) {
             activeTab = "work";
         }
@@ -4819,6 +4823,19 @@ window.applyOperationalStateRefresh = function (context) {
         }
         if (typeof window.checkAchievementPrize === "function") {
             window.checkAchievementPrize(context);
+        }
+        /* Свежий fragment является серверной истиной даже при потере delta. */
+        if (becameLoaded) {
+            playDriverDumpPointAlert({events: [{
+                version: targetVersion,
+                type: "trip_changed",
+                payload: {
+                    action: "truck_loaded",
+                    trip_id: Number(freshShell.dataset.driverActiveTripId || 0),
+                    assigned_dump_point_id: Number(freshShell.dataset.driverAssignedDumpPointId || 0),
+                    dump_point_name: String(freshShell.dataset.driverAssignedDumpPointName || "")
+                }
+            }]});
         }
         if (nextAssignmentKey && nextAssignmentKey !== previousAssignmentKey) {
             playDriverAssignmentAlert(targetVersion);

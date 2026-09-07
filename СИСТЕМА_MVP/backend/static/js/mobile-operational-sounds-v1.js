@@ -27,10 +27,14 @@
     var activeSource = null;
     var lastConnectionState = "";
 
-    function nativeSoundPlugin() {
+    function capacitorNativeSoundPlugin() {
         var capacitor = window.Capacitor;
         var plugins = capacitor && capacitor.Plugins;
-        var plugin = plugins && plugins.NativeSound;
+        return plugins && plugins.NativeSound ? plugins.NativeSound : null;
+    }
+
+    function nativeSoundPlugin() {
+        var plugin = capacitorNativeSoundPlugin();
         return plugin && typeof plugin.play === "function" ? plugin : null;
     }
 

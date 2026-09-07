@@ -52,7 +52,6 @@ public class ConnectivityForegroundService extends Service {
     private ScheduledFuture<?> pendingHeartbeat;
     private ConnectivityManager connectivityManager;
     private ConnectivityManager.NetworkCallback networkCallback;
-    private DriverVoicePlayer driverVoicePlayer;
     private int consecutiveFailures;
 
     public static void start(Context context) {
@@ -70,9 +69,6 @@ public class ConnectivityForegroundService extends Service {
     public void onCreate() {
         super.onCreate();
         AppNotifications.createChannels(this);
-        if (BuildConfig.DRIVER_VOICE_ALERTS_ENABLED) {
-            driverVoicePlayer = new DriverVoicePlayer(this);
-        }
         executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "native-server-heartbeat");
             thread.setDaemon(true);
@@ -115,10 +111,6 @@ public class ConnectivityForegroundService extends Service {
         }
         if (executor != null) {
             executor.shutdownNow();
-        }
-        if (driverVoicePlayer != null) {
-            driverVoicePlayer.shutdown();
-            driverVoicePlayer = null;
         }
         super.onDestroy();
     }
@@ -360,7 +352,10 @@ public class ConnectivityForegroundService extends Service {
         }
     }
 
-    private boolean showLatestDriverDumpPointAlert(String body, SharedPreferences preferences) {
+    private boolean showLatestDriverDumpPointAlert(
+            String body,
+            SharedPreferences preferences,
+            boolean showNotification) {
         if (!BuildConfig.DRIVER_VOICE_ALERTS_ENABLED) {
             return false;
         }
@@ -369,7 +364,7 @@ public class ConnectivityForegroundService extends Service {
             if (events == null) {
                 return false;
             }
-            long lastAnnouncedVersion = preferences.getLong("last_driver_dump_point_alert_version", 0L);
+            long lastAnnouncedVersion = preferences.getLong(LAST_DRIVER_DUMP_POINT_ALERT_VERSION, 0L);
             long selectedVersion = lastAnnouncedVersion;
             long selectedTripId = 0L;
             long selectedDumpPointId = 0L;
@@ -412,23 +407,16 @@ public class ConnectivityForegroundService extends Service {
                 return false;
             }
 
-            preferences.edit()
-                .putLong("last_driver_dump_point_alert_version", selectedVersion)
-                .putLong("last_driver_dump_point_alert_trip_id", selectedTripId)
-                .putLong("last_driver_dump_point_alert_dump_point_id", selectedDumpPointId)
-                .apply();
-
-            boolean notificationShown = AppNotifications.showOperationalAlert(
+            DriverDumpPointAnnouncer.Result result = DriverDumpPointAnnouncer.announce(
                 this,
-                "Новая точка разгрузки",
-                displayName
+                selectedVersion,
+                selectedTripId,
+                selectedDumpPointId,
+                displayName,
+                showNotification,
+                true
             );
-            if (notificationShown && driverVoicePlayer != null) {
-                long voiceDelayMs = BuildConfig.ALERT_CUE_DURATION_MS
-                    + BuildConfig.VOICE_AFTER_CUE_DELAY_MS;
-                driverVoicePlayer.announce(selectedDumpPointId, displayName, voiceDelayMs);
-            }
-            return true;
+            return result.announced;
         } catch (Exception error) {
             Log.w("ConnectivityForegroundService", "Driver dump-point alert was not parsed", error);
             return false;
