@@ -775,6 +775,7 @@ const CORE_ASSETS = [
   "/static/css/mobile-shift-unified-v1.css",
   "/static/css/mobile-face-unified-v1.css",
   "/static/css/mobile-downtime-unified-v1.css",
+  "/static/css/excavator-destination-distances-v1.css",
   "/static/css/mobile-role-login-v1.css",
   "/static/js/mobile-shift-unified-v1.js",
   "/static/js/mobile-operational-sounds-v1.js",
@@ -1227,6 +1228,20 @@ def dispatcher_shift_plan_detail(
     by_dump_point = defaultdict(lambda: {'fact': Decimal('0'), 'trip_count': 0})
     by_route = defaultdict(lambda: {'fact': Decimal('0'), 'trip_count': 0})
 
+    def decimal_percent(value, *, places=1):
+        quantum = Decimal('1').scaleb(-places)
+        rounded = value.quantize(quantum, rounding=ROUND_HALF_UP)
+        return format(rounded, 'f').rstrip('0').rstrip('.') or '0'
+
+    plan_value = Decimal(str(plan_tons or 0))
+    fact_value = Decimal(str(fact_tons or 0))
+    exact_completion = (
+        max(Decimal('0'), min(Decimal('100'), (fact_value / plan_value) * 100))
+        if plan_value
+        else Decimal('0')
+    )
+    completion_percent_css = decimal_percent(exact_completion)
+
     def add_trip(trip, amount):
         amount = amount or Decimal('0')
         if amount <= 0:
@@ -1263,16 +1278,34 @@ def dispatcher_shift_plan_detail(
                 else Decimal('0')
             )
             whole_percent = int(exact_percent)
+            exact_fact_share = (row['fact'] / total) * 100 if total else Decimal('0')
+            whole_fact_share = int(exact_fact_share)
             allocations.append({
                 **row,
                 'index': index,
                 'contribution_percent': whole_percent,
                 'remainder': exact_percent - whole_percent,
-                'fact_share_percent': int(round((row['fact'] / total) * 100)) if total else 0,
+                'fact_share_percent': whole_fact_share,
+                'fact_share_remainder': exact_fact_share - whole_fact_share,
+                'plan_percent_label': (
+                    decimal_percent((row['fact'] / plan_value) * 100, places=2)
+                    if plan_value
+                    else '0'
+                ),
             })
         unallocated = visible_percent - sum(row['contribution_percent'] for row in allocations)
         for row in sorted(allocations, key=lambda item: (-item['remainder'], item['index']))[:unallocated]:
             row['contribution_percent'] += 1
+        unallocated_fact_share = (
+            (100 if total else 0)
+            - sum(row['fact_share_percent'] for row in allocations)
+        )
+        ordered_fact_shares = sorted(
+            allocations,
+            key=lambda item: (-item['fact_share_remainder'], item['index']),
+        )
+        for row in ordered_fact_shares[:unallocated_fact_share]:
+            row['fact_share_percent'] += 1
         return allocations
 
     visible_percent = max(0, int(completion_percent or 0))
@@ -1303,8 +1336,11 @@ def dispatcher_shift_plan_detail(
 
     return {
         'completion_percent': visible_percent,
+        'completion_percent_css': completion_percent_css,
+        'completion_percent_label': completion_percent_css.replace('.', ','),
         'fact_tons': format_dispatcher_number(fact_tons),
         'plan_tons': format_dispatcher_number(plan_tons),
+        'trip_count_label': dispatcher_trip_count_label(len(completed_trips) + len(active_trips)),
         'unit_label': unit_label,
         'points': [
             {
@@ -1313,6 +1349,7 @@ def dispatcher_shift_plan_detail(
                 'trip_count_label': dispatcher_trip_count_label(row['trip_count']),
                 'contribution_percent': row['contribution_percent'],
                 'fact_share_percent': row['fact_share_percent'],
+                'plan_percent_label': row['plan_percent_label'].replace('.', ','),
             }
             for row in point_allocations
         ],
@@ -1323,6 +1360,8 @@ def dispatcher_shift_plan_detail(
                 'fact_tons': format_dispatcher_number(row['fact']),
                 'trip_count_label': dispatcher_trip_count_label(row['trip_count']),
                 'contribution_percent': row['contribution_percent'],
+                'fact_share_percent': row['fact_share_percent'],
+                'plan_percent_label': row['plan_percent_label'].replace('.', ','),
             }
             for row in route_allocations
         ],

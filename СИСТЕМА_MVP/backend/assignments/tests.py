@@ -7,7 +7,7 @@ from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.production_time import production_work_date
+from core.production_time import production_shift_bounds, production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentState, EquipmentType, RockType
 from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanCalculationMode, ShiftClientAction
@@ -264,6 +264,251 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertNotContains(response, 'mm-mobile-clock')
         self.assertNotContains(response, 'mm-mobile-icon-button')
 
+    def test_mining_master_mobile_equipment_cards_use_double_tap_targets(self):
+        response = self.client.get(reverse('mining_master_assignments'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'data-mm-mobile-home-truck-id="{self.assigned_truck.id}"',
+        )
+        self.assertContains(response, 'var infoDoubleTapWindowMs = 340;')
+        self.assertContains(response, 'key: "truck:" + (truck.dataset.mmMobileHomeTruckId || "")')
+        self.assertContains(response, 'key: "excavator:" + (card.dataset.mmMobileExcavatorId || "")')
+        self.assertContains(response, 'openEquipmentCard(target.cardId);')
+        self.assertContains(response, 'function miningMasterOperationalDetailRows(data)')
+        self.assertContains(response, '"VIN/серийный N"')
+        self.assertContains(response, 'detailList.hidden = detailRows.length === 0;')
+        self.assertNotContains(response, 'mobileLongTapTimer')
+        self.assertNotContains(response, '}, 520);')
+
+    def test_mining_master_mobile_compacts_trucks_and_offers_direct_transfer_mode(self):
+        for number in range(103, 107):
+            truck = Equipment.objects.create(
+                equipment_type=self.assigned_truck.equipment_type,
+                model=self.assigned_truck.model,
+                garage_number=str(number),
+                is_active=True,
+            )
+            HaulAssignment.objects.create(
+                truck=truck,
+                excavator=self.excavator,
+                assigned_by=self.master,
+                status=AssignmentStatus.PENDING,
+            )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        complex_card = next(
+            card
+            for card in response.context['dispatcher_dashboard']['mobile_complex_zones']
+            if card.get('equipment_card_id') == str(self.excavator.id)
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(complex_card['active_truck_tiles']), 5)
+        self.assertEqual(complex_card['mobile_truck_overflow'], 2)
+        self.assertContains(response, 'data-mm-truck-transfer-bar')
+        self.assertContains(response, 'data-mm-mobile-open-truck-list')
+        self.assertContains(response, 'var visibleLimit = 3;')
+        self.assertContains(response, 'function beginMobileTruckTransfer(node)')
+        self.assertContains(response, 'function completeMobileTruckTransfer(targetCard)')
+        self.assertContains(response, 'expected_assignment_state_id: transfer.assignmentStateId')
+        self.assertContains(response, '[data-mm-mobile-home-truck-id], [data-mm-mobile-open-truck-list]')
+        self.assertContains(response, '}, 460);')
+
+    def test_mining_master_mobile_marks_pending_cross_complex_transfer(self):
+        HaulAssignment.objects.filter(truck=self.assigned_truck).delete()
+        HaulAssignment.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            assigned_by=self.master,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        schedule_haul_assignment(
+            truck=self.assigned_truck,
+            excavator=self.other_excavator,
+            assigned_by=self.master,
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        target_card = next(
+            card
+            for card in response.context['dispatcher_dashboard']['mobile_complex_zones']
+            if card.get('equipment_card_id') == str(self.other_excavator.id)
+        )
+        truck_tile = next(
+            tile
+            for tile in target_card['active_truck_tiles']
+            if tile.get('card_id') == str(self.assigned_truck.id)
+        )
+
+        self.assertTrue(truck_tile['transfer_pending'])
+        self.assertEqual(truck_tile['transfer_source_label'], 'K-1')
+        self.assertIn('до 5 мин', target_card['mobile_transfer_notice'])
+        self.assertContains(response, 'is-transfer-pending')
+        self.assertContains(response, 'data-mm-transfer-notice=')
+
+    def test_mining_master_shift_plan_detail_breaks_total_percent_down_by_dump_point(self):
+        rock_type = RockType.objects.create(name='Порода плана')
+        kkd = DumpPoint.objects.create(name='ККД')
+        skdr = DumpPoint.objects.create(name='СКДР')
+        dump = DumpPoint.objects.create(name='Отвал')
+        now = timezone.now()
+        shift_start, _ = production_shift_bounds(
+            production_work_date(self.shift.opened_at),
+            self.shift.shift_type,
+        )
+        point_tonnages = ((kkd, '84000.00'), (skdr, '84000.00'), (dump, '42000.00'))
+        for index, (point, tonnage) in enumerate(point_tonnages):
+            trip = Trip.objects.create(
+                truck=self.assigned_truck,
+                excavator=self.excavator,
+                rock_type=rock_type,
+                dump_point=point,
+                actual_dump_point=point,
+                tonnage=tonnage,
+                status=TripStatus.COMPLETED,
+                completed_at=now,
+            )
+            Trip.objects.filter(pk=trip.pk).update(
+                created_at=shift_start + timedelta(minutes=index + 1),
+            )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        detail = response.context['dispatcher_dashboard']['shift_plan_detail']
+        contribution_by_point = {
+            point['name']: point['contribution_percent']
+            for point in detail['points']
+        }
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(detail['completion_percent'], 50)
+        self.assertEqual(detail['completion_percent_label'], '50')
+        self.assertEqual(detail['completion_percent_css'], '50')
+        self.assertEqual(detail['trip_count_label'], '3 рейса')
+        self.assertEqual(contribution_by_point, {'ККД': 20, 'СКДР': 20, 'Отвал': 10})
+        self.assertEqual(sum(contribution_by_point.values()), detail['completion_percent'])
+        self.assertEqual(sum(point['fact_share_percent'] for point in detail['points']), 100)
+        self.assertEqual(detail['unit_label'], 'т')
+        self.assertEqual(
+            {(route['source'], route['destination']) for route in detail['routes']},
+            {('К-1', 'ККД'), ('К-1', 'СКДР'), ('К-1', 'Отвал')},
+        )
+        self.assertEqual(
+            sum(route['contribution_percent'] for route in detail['routes']),
+            detail['completion_percent'],
+        )
+        self.assertContains(response, 'data-mm-open-shift-plan-detail')
+        self.assertContains(response, 'data-mm-shift-plan-detail')
+        self.assertContains(response, 'Выполнение плана')
+        self.assertContains(response, 'Куда вывезено')
+        self.assertContains(response, 'Основные маршруты')
+        self.assertContains(response, 'openShiftPlanDetail(ring);')
+        self.assertNotContains(response, 'var holdDelayMs = 620;')
+        self.assertContains(response, 'Нажмите, чтобы открыть отчёт')
+        self.assertContains(
+            response,
+            'data-mm-shift-plan-detail-close aria-label="Закрыть детализацию плана"></button>',
+        )
+
+    def test_mining_master_shift_plan_keeps_early_shift_progress_visible(self):
+        rock_type = RockType.objects.create(name='Порода начала смены')
+        points = (
+            (DumpPoint.objects.create(name='ККД'), '2055.00'),
+            (DumpPoint.objects.create(name='СКДР'), '899.00'),
+            (DumpPoint.objects.create(name='Отвал'), '385.00'),
+        )
+        now = timezone.now()
+        shift_start, _ = production_shift_bounds(
+            production_work_date(self.shift.opened_at),
+            self.shift.shift_type,
+        )
+        for index, (point, tonnage) in enumerate(points):
+            trip = Trip.objects.create(
+                truck=self.assigned_truck,
+                excavator=self.excavator,
+                rock_type=rock_type,
+                dump_point=point,
+                actual_dump_point=point,
+                tonnage=tonnage,
+                status=TripStatus.COMPLETED,
+                completed_at=now,
+            )
+            Trip.objects.filter(pk=trip.pk).update(
+                created_at=shift_start + timedelta(minutes=index + 1),
+            )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        detail = response.context['dispatcher_dashboard']['shift_plan_detail']
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(detail['completion_percent'], 0)
+        self.assertEqual(detail['completion_percent_label'], '0,8')
+        self.assertEqual(detail['completion_percent_css'], '0.8')
+        self.assertEqual(detail['trip_count_label'], '3 рейса')
+        self.assertEqual(
+            {point['name']: point['fact_share_percent'] for point in detail['points']},
+            {'ККД': 62, 'СКДР': 27, 'Отвал': 11},
+        )
+        self.assertEqual(
+            {point['name']: point['plan_percent_label'] for point in detail['points']},
+            {'ККД': '0,49', 'СКДР': '0,21', 'Отвал': '0,09'},
+        )
+        self.assertEqual(sum(route['fact_share_percent'] for route in detail['routes']), 100)
+        self.assertContains(response, '0,8%')
+        self.assertContains(response, '62%')
+
+    def test_mining_master_shift_plan_uses_full_production_shift_window(self):
+        rock_type = RockType.objects.create(name='Порода до входа мастера')
+        kkd = DumpPoint.objects.create(name='ККД до входа')
+        shift_start, _ = production_shift_bounds(
+            production_work_date(self.shift.opened_at),
+            self.shift.shift_type,
+        )
+        trip = Trip.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            rock_type=rock_type,
+            dump_point=kkd,
+            actual_dump_point=kkd,
+            tonnage='42000.00',
+            status=TripStatus.COMPLETED,
+            completed_at=self.shift.opened_at,
+        )
+        Trip.objects.filter(pk=trip.pk).update(created_at=shift_start + timedelta(minutes=10))
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        detail = response.context['dispatcher_dashboard']['shift_plan_detail']
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(detail['completion_percent'], 10)
+        self.assertEqual(detail['points'][0]['name'], 'ККД до входа')
+        self.assertEqual(detail['routes'][0]['source'], 'К-1')
+
+    def test_mining_master_complex_truck_card_includes_open_shift_driver(self):
+        driver = Employee.objects.create(
+            full_name='Водитель Самосвала Тест',
+            phone='79000000411',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        EmployeeShift.objects.create(
+            employee=driver,
+            workplace_code='driver',
+            shift_type='day',
+            equipment=self.assigned_truck,
+            opened_at=timezone.now(),
+            opened_by=driver,
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        equipment_card = response.context['dispatcher_dashboard']['equipment_cards'][str(self.assigned_truck.id)]
+
+        self.assertEqual(equipment_card['employee']['name'], driver.full_name)
+        self.assertEqual(equipment_card['employee']['phone'], driver.phone)
+        self.assertEqual(equipment_card['status_label'], 'Ожидает')
+        self.assertContains(response, 'detailStatus.textContent = "Состояние: "')
+
     def test_mining_master_mobile_complex_status_chip_uses_downtime_reason_label(self):
         reason = DowntimeReason.objects.create(
             name='Заправка экскаватора',
@@ -364,7 +609,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v143')
+        self.assertContains(response, 'mining-master-mobile-shell-v144')
         self.assertContains(response, 'mining-master-mobile-sync-queue-v3')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v1")')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v2")')
@@ -440,7 +685,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v143', script)
+        self.assertIn('mining-master-mobile-shell-v144', script)
         self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
