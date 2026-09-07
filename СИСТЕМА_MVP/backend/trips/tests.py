@@ -576,6 +576,34 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(dashboard['equipment_state_ui']['free']['color_group'], 'gray')
         self.assertEqual(dashboard['equipment_state_ui']['garage']['color_group'], 'gray')
 
+    def test_pending_release_stays_in_truck_garage_after_realtime_refresh(self):
+        HaulAssignment.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            assigned_by=self.dispatcher,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now() - timedelta(minutes=10),
+        )
+        HaulAssignment.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            assigned_by=self.dispatcher,
+            action=HaulAssignmentAction.RELEASE,
+            status=AssignmentStatus.PENDING,
+            effective_at=timezone.now() + timedelta(minutes=5),
+        )
+
+        dashboard = self.build_dashboard()
+
+        garage_names = {str(tile['name']) for tile in dashboard['truck_garage_tiles']}
+        complex_names = {
+            str(tile['name'])
+            for card in dashboard['complex_cards']
+            for tile in card['active_truck_tiles']
+        }
+        self.assertIn('13', garage_names)
+        self.assertNotIn('13', complex_names)
+
     def test_carryover_trip_is_visible_but_not_counted_in_new_shift_kpi(self):
         old_operator = Employee.objects.create(full_name='Машинист старой смены')
         old_loading_shift = EmployeeShift.objects.create(

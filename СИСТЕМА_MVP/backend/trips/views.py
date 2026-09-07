@@ -1594,7 +1594,10 @@ def build_dispatcher_dashboard_context(
     active_assignments_list = list(assignment_by_truck.values())
     pending_assignments_list = [
         assignment for assignment in active_assignments_list
-        if assignment.status == AssignmentStatus.PENDING
+        if (
+            assignment.status == AssignmentStatus.PENDING
+            and assignment.action != HaulAssignmentAction.RELEASE
+        )
     ]
     accepted_assignments_list = [
         assignment for assignment in active_assignments_list
