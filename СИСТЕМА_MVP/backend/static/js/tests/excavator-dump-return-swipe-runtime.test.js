@@ -106,12 +106,54 @@ test("direct return resolves the explicitly marked newest truck and submits once
     assert.equal(classes.has("is-return-pending"), false);
 });
 
+test("successful swipe restarts and clears the dump-card rebound", () => {
+    const reboundSource = extractBraceBlock(
+        templateSource,
+        "function playDumpReturnRebound",
+        "dump return rebound"
+    );
+    const classes = new Set(["is-return-rebounding"]);
+    const timers = [];
+    let layoutReads = 0;
+    const target = {
+        classList: {
+            add(value) { classes.add(value); },
+            remove(value) { classes.delete(value); },
+        },
+        get offsetWidth() {
+            layoutReads += 1;
+            return 120;
+        },
+    };
+    const context = {
+        window: {
+            setTimeout(callback, delay) {
+                timers.push({callback, delay});
+            },
+        },
+    };
+    vm.runInNewContext(`${reboundSource}; this.run = playDumpReturnRebound;`, context);
+
+    context.run(target);
+    assert.equal(layoutReads, 1);
+    assert.equal(classes.has("is-return-rebounding"), true);
+    assert.equal(timers.length, 1);
+    assert.equal(timers[0].delay, 620);
+
+    timers[0].callback();
+    assert.equal(classes.has("is-return-rebounding"), false);
+});
+
 test("gesture, fallback queue and realtime safety contracts stay wired", () => {
     assert.match(templateSource, /target\.addEventListener\("pointerup"[\s\S]*returnLastTruckFromDump\(target\)/);
+    assert.match(templateSource, /target\.addEventListener\("pointerup"[\s\S]*playDumpReturnRebound\(target\)[\s\S]*returnLastTruckFromDump\(target\)/);
     assert.match(templateSource, /window\.setTimeout\(function \(\) \{[\s\S]*openDumpQueueModal\(target\)[\s\S]*\}, 560\)/);
     assert.match(templateSource, /\.eo-dashboard-unload-card\.is-return-swiping/);
+    assert.match(shiftCss, /\.eo-dashboard-unload-card\.is-return-swiping[\s\S]*--eo-return-swipe-progress[\s\S]*-14px/);
+    assert.match(shiftCss, /\.eo-dashboard-unload-card\.is-return-rebounding[\s\S]*animation: eo-dump-return-rebound \.58s/);
+    assert.match(shiftCss, /@keyframes eo-dump-return-rebound[\s\S]*translate3d\(0, 3px[\s\S]*translate3d\(0, -5px[\s\S]*translate3d\(0, 1\.5px[\s\S]*translate3d\(0, -2px/);
     assert.match(templateSource, /\.eo-dashboard-unload-card\.is-return-pending/);
     assert.match(shiftCss, /touch-action: pan-x !important;/);
     assert.match(shiftCss, /\[data-eo-last-sent-truck="true"\]/);
-    assert.match(shiftCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.is-returned-from-dump/);
+    assert.match(shiftCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.is-return-rebounding[\s\S]*animation: none !important/);
 });
