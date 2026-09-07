@@ -129,6 +129,11 @@ def _worker_equipment_ids(access):
     return equipment_ids
 
 
+def worker_equipment_ids_for_access(access):
+    """Return the same scoped equipment set used by realtime relevance checks."""
+    return _worker_equipment_ids(access)
+
+
 def _personal_access_event(event_type, payload, access):
     employee_ids = _event_employee_ids(payload)
     access_ids = _event_access_ids(payload)
