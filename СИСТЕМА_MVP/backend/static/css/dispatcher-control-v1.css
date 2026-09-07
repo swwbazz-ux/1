@@ -8906,10 +8906,10 @@ body.management-dynamics-chart-modal-open {
 
 .complex-state-chip {
     display: inline-flex;
+    flex: 0 1 auto;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
-    max-width: clamp(72px, 8vw, 128px);
+    max-width: min(190px, calc(100% - 64px));
     min-height: 20px;
     padding: 2px 8px;
     border: 1px solid color-mix(in srgb, var(--complex-accent) 68%, transparent);
@@ -8918,10 +8918,11 @@ body.management-dynamics-chart-modal-open {
     color: var(--complex-accent);
     font-size: clamp(9px, .62vw, 11px);
     font-weight: 900;
-    line-height: 1;
-    text-overflow: ellipsis;
+    line-height: 1.1;
+    overflow-wrap: normal;
+    text-align: center;
     text-transform: uppercase;
-    white-space: nowrap;
+    white-space: normal;
 }
 
 .complex-context {
