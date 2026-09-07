@@ -110,6 +110,8 @@ function createExcavatorRefreshRuntime() {
     let currentShell = null;
     let requestCount = 0;
     let replacementCount = 0;
+    let assignmentSyncCount = 0;
+    let assignmentStoreCount = 0;
     const shiftPendingButton = {
         matches(selector) {
             return selector === "[data-eo-shift-button]";
@@ -172,7 +174,8 @@ function createExcavatorRefreshRuntime() {
     const source = [
         "var excavatorWorkMutationGeneration = 0;",
         "function readExcavatorAssignmentSnapshot() { return {}; }",
-        "function syncExcavatorAssignmentSnapshot() {}",
+        "function syncExcavatorAssignmentSnapshot() { context.assignmentSyncCount += 1; }",
+        "function storeExcavatorAssignments() { context.assignmentStoreCount += 1; }",
         "function scheduleExcavatorViewportHeightSync() {}",
         extractBraceBlock(
             EXCAVATOR_TEMPLATE_SOURCE,
@@ -186,7 +189,13 @@ function createExcavatorRefreshRuntime() {
         ),
         "context.refresh = refreshExcavatorWorkFromServer;",
     ].join("\n");
-    const context = {context: {}, document, window, Promise, Array};
+    const context = {
+        context: {assignmentSyncCount, assignmentStoreCount},
+        document,
+        window,
+        Promise,
+        Array,
+    };
     vm.runInNewContext(source, context, {
         filename: "templates/trips/excavator_work.html#shift-fragment-refresh",
     });
@@ -197,6 +206,12 @@ function createExcavatorRefreshRuntime() {
         },
         replacementCount() {
             return replacementCount;
+        },
+        assignmentSyncCount() {
+            return context.context.assignmentSyncCount;
+        },
+        assignmentStoreCount() {
+            return context.context.assignmentStoreCount;
         },
     };
 }
@@ -470,10 +485,16 @@ test("Excavator fragment refresh admits only its scoped pending Shift owner", as
     assert.equal(runtime.requestCount(), 0);
     assert.equal(runtime.replacementCount(), 0);
 
-    const applied = await runtime.refresh({preserveTab: true, pendingOwner: "shift"});
+    const applied = await runtime.refresh({
+        preserveTab: true,
+        pendingOwner: "shift",
+        suppressAssignmentAlert: true,
+    });
     assert.equal(applied, true);
     assert.equal(runtime.requestCount(), 1);
     assert.equal(runtime.replacementCount(), 1);
+    assert.equal(runtime.assignmentSyncCount(), 0);
+    assert.equal(runtime.assignmentStoreCount(), 1);
 });
 
 
@@ -518,6 +539,7 @@ test("successful Excavator Shift save clears its draft before owned fragment rec
     assert.equal(clearCalls, 1);
     assert.equal(refreshCalls.length, 1);
     assert.equal(refreshCalls[0].pendingOwner, "shift");
+    assert.equal(refreshCalls[0].suppressAssignmentAlert, true);
     assert.equal(reloadCalls, 0);
 });
 

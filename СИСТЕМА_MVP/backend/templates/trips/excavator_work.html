@@ -6,15 +6,15 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v213">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v213">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v213">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v213">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v213">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v213">
-<link rel="stylesheet" href="{% static 'css/excavator-destination-distances-v1.css' %}?v=excavator-mobile-shell-v213">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v213" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v213" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v214">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v214">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v214">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v214">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v214">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v214">
+<link rel="stylesheet" href="{% static 'css/excavator-destination-distances-v1.css' %}?v=excavator-mobile-shell-v214">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v214" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v214" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -409,7 +409,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v213";
+var excavatorShellVersion = "excavator-mobile-shell-v214";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -803,7 +803,13 @@ function refreshExcavatorWorkFromServer(options) {
         if (typeof window.checkAchievementPrize === "function") {
             window.checkAchievementPrize(options.achievementContext);
         }
-        syncExcavatorAssignmentSnapshot(newShell, previousAssignments, Number(options.version || 0));
+        if (options.suppressAssignmentAlert === true) {
+            /* Открытие и закрытие смены меняют видимый список карточек, но это
+               не является реальным назначением или снятием самосвала. */
+            storeExcavatorAssignments(newShell, readExcavatorAssignmentSnapshot(newShell));
+        } else {
+            syncExcavatorAssignmentSnapshot(newShell, previousAssignments, Number(options.version || 0));
+        }
         scheduleExcavatorViewportHeightSync();
         return true;
     }).catch(function () {
@@ -3104,7 +3110,11 @@ window.initExcavatorWorkShell = function () {
                     /* Сервер уже сохранил смену; realtime только ускоряет обновление. */
                 }
             }
-            return refreshExcavatorWorkFromServer({ preserveTab: true, pendingOwner: "shift" }).then(function (applied) {
+            return refreshExcavatorWorkFromServer({
+                preserveTab: true,
+                pendingOwner: "shift",
+                suppressAssignmentAlert: true
+            }).then(function (applied) {
                 if (!applied) {
                     window.location.reload();
                 }

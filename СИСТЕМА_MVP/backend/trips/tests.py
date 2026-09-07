@@ -950,11 +950,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v213')
+        self.assertContains(response, 'excavator-mobile-shell-v214')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 213')
+        self.assertContains(response, 'Версия 214')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
@@ -1224,7 +1224,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-pwa-update-modal')
         self.assertContains(response, 'data-eo-pwa-update-badge')
         self.assertNotContains(response, 'data-eo-refresh-work')
-        self.assertContains(response, 'refreshExcavatorWorkFromServer({ preserveTab: true, pendingOwner: "shift" })')
+        self.assertContains(response, 'pendingOwner: "shift"')
+        self.assertContains(response, 'suppressAssignmentAlert: true')
         self.assertContains(response, 'shiftScreen.dataset.eoShiftDirty = "false"')
         self.assertContains(response, 'class="eo-dashboard-head"')
         self.assertContains(response, 'class="eo-dashboard-main-zone"')
@@ -2693,7 +2694,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v213', script)
+        self.assertIn('excavator-mobile-shell-v214', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
