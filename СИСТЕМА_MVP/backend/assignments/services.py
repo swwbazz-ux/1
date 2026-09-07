@@ -472,7 +472,7 @@ def update_crew_draft_slot(
     employee = _crew_plan_employee(employee)
     if employee:
         employee = (
-            Employee.objects.select_for_update()
+            Employee.objects.select_for_update(of=('self',))
             .select_related('contractor_organization')
             .get(pk=employee.pk)
         )
