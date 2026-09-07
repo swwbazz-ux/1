@@ -253,7 +253,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v141',
+        shell_version='mining-master-mobile-shell-v142',
     ),
     RoleApp(
         role_code='deputy_mining_manager',

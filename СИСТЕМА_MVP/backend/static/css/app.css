@@ -27670,9 +27670,19 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
 
     .gd-equipment-detail .mm-shift-plan-panel {
         width: min(430px, 100%);
-        max-height: min(82dvh, 680px);
+        max-height: min(90dvh, 760px);
+        overflow-y: auto;
         padding: 20px 16px calc(18px + env(safe-area-inset-bottom));
         border-radius: 18px 18px 0 0;
+    }
+
+    .mm-mobile-plan-ring.is-hold-pending {
+        filter: brightness(1.18);
+        transform: scale(.94);
+    }
+
+    .mm-mobile-plan-ring.is-hold-ready {
+        box-shadow: 0 0 0 4px rgba(88, 223, 82, .2), 0 0 22px rgba(88, 223, 82, .5);
     }
 
     .mm-shift-plan-head {
@@ -27707,59 +27717,125 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         line-height: 1.25;
     }
 
-    .mm-shift-plan-summary {
+    .mm-shift-plan-total {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 8px;
+        grid-template-columns: 78px minmax(0, 1fr);
+        gap: 14px;
+        align-items: center;
         margin-top: 16px;
+        padding: 13px;
+        border: 1px solid rgba(88, 223, 82, .28);
+        border-radius: 13px;
+        background: rgba(88, 223, 82, .07);
     }
 
-    .mm-shift-plan-summary > div {
-        min-width: 0;
-        padding: 10px 12px;
-        border: 1px solid var(--gd-detail-line);
-        border-radius: 9px;
-        background: rgba(142, 158, 166, .08);
+    .mm-shift-plan-total-ring,
+    .mm-shift-plan-point-ring {
+        position: relative;
+        display: grid;
+        place-content: center;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        text-align: center;
     }
 
-    .mm-shift-plan-summary span,
-    .mm-shift-plan-summary strong {
-        display: block;
+    .mm-shift-plan-total-ring {
+        width: 78px;
+        height: 78px;
+        background: conic-gradient(#58df52 var(--mm-shift-plan-total-percent, 0%), rgba(120, 139, 147, .2) 0);
     }
 
-    .mm-shift-plan-summary span {
+    .mm-shift-plan-total-ring::after,
+    .mm-shift-plan-point-ring::after {
+        position: absolute;
+        content: "";
+        border-radius: inherit;
+        background: var(--gd-detail-panel);
+    }
+
+    .mm-shift-plan-total-ring::after {
+        inset: 6px;
+    }
+
+    .mm-shift-plan-total-ring > *,
+    .mm-shift-plan-point-ring > * {
+        position: relative;
+        z-index: 1;
+    }
+
+    .mm-shift-plan-total-ring strong {
+        color: var(--gd-detail-ink);
+        font-size: 22px;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .mm-shift-plan-total-ring span,
+    .mm-shift-plan-point-ring span {
+        margin-top: 3px;
         color: var(--gd-detail-muted);
-        font-size: 10px;
+        font-size: 9px;
         font-weight: 900;
         line-height: 1;
         text-transform: uppercase;
     }
 
-    .mm-shift-plan-summary strong {
-        margin-top: 5px;
-        overflow: hidden;
+    .mm-shift-plan-total-copy {
+        min-width: 0;
+    }
+
+    .mm-shift-plan-total-copy > * {
+        display: block;
+    }
+
+    .mm-shift-plan-total-copy > span,
+    .mm-shift-plan-total-copy > small {
+        color: var(--gd-detail-muted);
+    }
+
+    .mm-shift-plan-total-copy > span {
+        font-size: 10px;
+        font-weight: 900;
+        text-transform: uppercase;
+    }
+
+    .mm-shift-plan-total-copy > strong {
+        margin-top: 4px;
         color: var(--gd-detail-ink);
         font-size: 18px;
+        line-height: 1.15;
+    }
+
+    .mm-shift-plan-total-copy > small {
+        margin-top: 5px;
+        font-size: 10px;
+        line-height: 1.25;
+    }
+
+    .mm-shift-plan-section-title {
+        margin: 16px 2px 8px;
+        color: var(--gd-detail-muted);
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: .05em;
         line-height: 1;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        text-transform: uppercase;
     }
 
     .mm-shift-plan-points {
         display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
-        margin-top: 14px;
     }
 
     .mm-shift-plan-point {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 8px 12px;
+        display: flex;
+        gap: 9px;
         align-items: center;
         min-width: 0;
-        padding: 10px 11px;
+        padding: 9px;
         border: 1px solid var(--gd-detail-line);
-        border-radius: 9px;
+        border-radius: 11px;
         background: rgba(8, 18, 24, .28);
     }
 
@@ -27772,7 +27848,8 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     }
 
     .mm-shift-plan-point-copy strong,
-    .mm-shift-plan-point-copy span {
+    .mm-shift-plan-point-copy span,
+    .mm-shift-plan-point-copy small {
         display: block;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -27781,40 +27858,94 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
 
     .mm-shift-plan-point-copy strong {
         color: var(--gd-detail-ink);
-        font-size: 16px;
+        font-size: 14px;
         line-height: 1.05;
     }
 
     .mm-shift-plan-point-copy span {
         margin-top: 4px;
         color: var(--gd-detail-muted);
-        font-size: 11px;
+        font-size: 10px;
         line-height: 1;
     }
 
-    .mm-shift-plan-point > b {
-        color: var(--gd-green);
-        font-size: 21px;
+    .mm-shift-plan-point-copy small {
+        margin-top: 4px;
+        color: rgba(88, 223, 82, .86);
+        font-size: 9px;
+        line-height: 1;
+    }
+
+    .mm-shift-plan-point-ring {
+        width: 54px;
+        height: 54px;
+        background: conic-gradient(#58df52 var(--mm-shift-plan-point-percent, 0%), rgba(120, 139, 147, .2) 0);
+    }
+
+    .mm-shift-plan-point-ring::after {
+        inset: 5px;
+    }
+
+    .mm-shift-plan-point-ring strong {
+        color: var(--gd-detail-ink);
+        font-size: 15px;
         line-height: 1;
         font-variant-numeric: tabular-nums;
     }
 
-    .mm-shift-plan-point > i {
-        grid-column: 1 / -1;
-        display: block;
-        height: 5px;
-        overflow: hidden;
-        border-radius: 999px;
-        background: rgba(142, 158, 166, .18);
+    .mm-shift-plan-routes {
+        display: grid;
+        gap: 6px;
     }
 
-    .mm-shift-plan-point > i > span {
-        display: block;
-        width: min(100%, var(--mm-shift-plan-point-percent, 0%));
-        height: 100%;
-        border-radius: inherit;
-        background: linear-gradient(90deg, #58df52, #84f17f);
-        box-shadow: 0 0 10px rgba(88, 223, 82, .34);
+    .mm-shift-plan-route {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 3px 10px;
+        align-items: center;
+        min-width: 0;
+        padding: 9px 11px;
+        border: 1px solid var(--gd-detail-line);
+        border-radius: 10px;
+        background: rgba(8, 18, 24, .22);
+    }
+
+    .mm-shift-plan-route > strong {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        min-width: 0;
+        color: var(--gd-detail-ink);
+        font-size: 13px;
+        line-height: 1;
+    }
+
+    .mm-shift-plan-route > strong span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .mm-shift-plan-route > strong i {
+        flex: 0 0 auto;
+        color: var(--gd-green);
+        font-style: normal;
+    }
+
+    .mm-shift-plan-route > small {
+        grid-column: 1;
+        color: var(--gd-detail-muted);
+        font-size: 10px;
+        line-height: 1;
+    }
+
+    .mm-shift-plan-route > b {
+        grid-column: 2;
+        grid-row: 1 / 3;
+        color: var(--gd-green);
+        font-size: 17px;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
     }
 
     .mm-shift-plan-empty {
@@ -27827,11 +27958,10 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         text-align: center;
     }
 
-    .mm-shift-plan-note {
-        margin: 12px 2px 0;
-        color: var(--gd-detail-muted);
-        font-size: 11px;
-        line-height: 1.3;
+    @media (max-width: 345px) {
+        .mm-shift-plan-points {
+            grid-template-columns: 1fr;
+        }
     }
 
     .mm-mobile-garage-excavator.is-work-swiping:active,

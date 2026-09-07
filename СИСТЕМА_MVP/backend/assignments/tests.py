@@ -6,7 +6,7 @@ from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.production_time import production_work_date
+from core.production_time import production_shift_bounds, production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentState, EquipmentType, RockType
 from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanCalculationMode
@@ -370,10 +370,47 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(detail['completion_percent'], 50)
         self.assertEqual(contribution_by_point, {'ККД': 20, 'СКДР': 20, 'Отвал': 10})
         self.assertEqual(sum(contribution_by_point.values()), detail['completion_percent'])
+        self.assertEqual(detail['unit_label'], 'т')
+        self.assertEqual(
+            {(route['source'], route['destination']) for route in detail['routes']},
+            {('К-1', 'ККД'), ('К-1', 'СКДР'), ('К-1', 'Отвал')},
+        )
+        self.assertEqual(
+            sum(route['contribution_percent'] for route in detail['routes']),
+            detail['completion_percent'],
+        )
         self.assertContains(response, 'data-mm-open-shift-plan-detail')
         self.assertContains(response, 'data-mm-shift-plan-detail')
-        self.assertContains(response, 'Вклад точек разгрузки в общий результат')
-        self.assertContains(response, 'var previousTapAt = 0;')
+        self.assertContains(response, 'По точкам разгрузки')
+        self.assertContains(response, 'Откуда → куда')
+        self.assertContains(response, 'var holdDelayMs = 620;')
+
+    def test_mining_master_shift_plan_uses_full_production_shift_window(self):
+        rock_type = RockType.objects.create(name='Порода до входа мастера')
+        kkd = DumpPoint.objects.create(name='ККД до входа')
+        shift_start, _ = production_shift_bounds(
+            production_work_date(self.shift.opened_at),
+            self.shift.shift_type,
+        )
+        trip = Trip.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            rock_type=rock_type,
+            dump_point=kkd,
+            actual_dump_point=kkd,
+            tonnage='42000.00',
+            status=TripStatus.COMPLETED,
+            completed_at=self.shift.opened_at,
+        )
+        Trip.objects.filter(pk=trip.pk).update(created_at=shift_start + timedelta(minutes=10))
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        detail = response.context['dispatcher_dashboard']['shift_plan_detail']
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(detail['completion_percent'], 10)
+        self.assertEqual(detail['points'][0]['name'], 'ККД до входа')
+        self.assertEqual(detail['routes'][0]['source'], 'К-1')
 
     def test_mining_master_complex_truck_card_includes_open_shift_driver(self):
         driver = Employee.objects.create(
@@ -499,7 +536,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v141')
+        self.assertContains(response, 'mining-master-mobile-shell-v142')
         self.assertNotContains(response, '>v116<')
         self.assertContains(response, 'function hasMiningMasterRelevantEvents')
         self.assertContains(response, 'return Array.isArray(events) && events.length > 0;')
@@ -569,7 +606,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v141', script)
+        self.assertIn('mining-master-mobile-shell-v142', script)
         self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
