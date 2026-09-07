@@ -1,4 +1,5 @@
 ﻿import json
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -949,18 +950,18 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v207')
+        self.assertContains(response, 'excavator-mobile-shell-v208')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 207')
+        self.assertContains(response, 'Версия 208')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
         self.assertContains(response, 'playExcavatorSound("truck_assigned")')
         self.assertContains(response, 'playExcavatorSound(action === "close" ? "shift_end" : "shift_start")')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
-        self.assertContains(response, 'item.dataset.eoCancelActionId')
+        self.assertContains(response, 'actionOwner.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
         self.assertContains(response, 'data-eo-shift-scroll')
         self.assertContains(response, 'data-eo-shift-inputs')
@@ -2692,7 +2693,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v207', script)
+        self.assertIn('excavator-mobile-shell-v208', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3157,6 +3158,47 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         last_sent_cards = [card for card in response.context['dump_cards'] if card['is_last_sent']]
         self.assertEqual([card['point'].id for card in last_sent_cards], [second_dump.id])
         self.assertContains(response, 'is-last-dump')
+
+    def test_excavator_dump_queue_marks_newest_open_trip_for_direct_swipe_return(self):
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        older_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            loading_shift=shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+        newest_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.other_truck,
+            excavator_operator=self.operator,
+            loading_shift=shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        dump_card = next(card for card in response.context['dump_cards'] if card['point'].id == self.dump_point.id)
+        self.assertEqual(
+            [truck['trip_id'] for truck in dump_card['pending_trucks']],
+            [newest_trip.id, older_trip.id],
+        )
+        self.assertEqual(
+            [truck['is_last_sent'] for truck in dump_card['pending_trucks']],
+            [True, False],
+        )
+        self.assertContains(response, 'data-eo-has-pending-trucks="true"')
+        html = response.content.decode('utf-8')
+        self.assertEqual(len(re.findall(r'<b[^>]*data-eo-last-sent-truck="true"[^>]*>', html)), 1)
+        self.assertEqual(len(re.findall(r'<b[^>]*data-eo-last-sent-truck="false"[^>]*>', html)), 1)
+        self.assertContains(response, 'function isDumpReturnSwipe')
+        self.assertContains(response, 'returnLastTruckFromDump(target)')
 
     def post_truck_loaded(self, *, client_action_id='load-1', truck=None, dump_point=None, rock=None):
         return self.client.post(

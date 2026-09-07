@@ -736,7 +736,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v207";
+const CACHE_NAME = "excavator-mobile-shell-v208";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -4174,7 +4174,7 @@ def excavator_work_view(request):
         Trip.objects
         .filter(status__in=OPEN_TRIP_STATUSES)
         .select_related('truck', 'excavator', 'rock_type', 'dump_point')
-        .order_by('-created_at')
+        .order_by('-created_at', '-id')
     )
     if current_excavator:
         active_trips_queryset = active_trips_queryset.filter(excavator=current_excavator)
@@ -4632,14 +4632,16 @@ def excavator_work_view(request):
         point_id = card['point'].id
         card['completed_count'] = completed_by_dump_id[point_id]
         card['is_last_sent'] = point_id == last_sent_dump_point_id
+        pending_trips = active_trips_by_dump_id.get(point_id, [])
         card['pending_trucks'] = [
             {
                 'truck_id': trip.truck_id,
                 'trip_id': trip.id,
                 'number': equipment_number(trip.truck),
                 'status_key': 'green',
+                'is_last_sent': index == 0,
             }
-            for trip in active_trips_by_dump_id.get(point_id, [])
+            for index, trip in enumerate(pending_trips)
         ]
 
     def form_value_as_text(field_name):

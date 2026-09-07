@@ -928,6 +928,7 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-card {
+    --eo-return-swipe-progress: 0;
     position: relative !important;
     z-index: 5 !important;
     width: auto !important;
@@ -937,6 +938,61 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
     transform-origin: center center !important;
     transition: flex-grow .18s cubic-bezier(.2, .8, .2, 1), height .18s cubic-bezier(.2, .8, .2, 1), width .18s cubic-bezier(.2, .8, .2, 1), opacity .16s ease, filter .16s ease, border-color .16s ease, box-shadow .16s ease !important;
     will-change: flex-grow, height, width, opacity, filter !important;
+    touch-action: pan-x !important;
+    user-select: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card[data-eo-has-pending-trucks="true"]::after {
+    content: "↑";
+    position: absolute;
+    right: 8px;
+    bottom: 6px;
+    z-index: 4;
+    color: currentColor;
+    font-size: 18px;
+    font-weight: 900;
+    line-height: 1;
+    opacity: .5;
+    pointer-events: none;
+    transform: translateY(0);
+    transition: opacity .14s ease, transform .14s ease !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card [data-eo-last-sent-truck="true"] {
+    position: relative;
+    z-index: 3;
+    transform: translate3d(0, calc(var(--eo-return-swipe-progress, 0) * -20px), 0);
+    transition: transform .12s ease, opacity .12s ease, box-shadow .12s ease !important;
+    will-change: transform;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card.is-return-swiping {
+    border-color: rgba(255, 214, 41, .98) !important;
+    box-shadow: inset 0 0 0 2px rgba(255, 214, 41, .52), 0 0 20px rgba(255, 214, 41, .24) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card.is-return-swiping::after {
+    opacity: 1;
+    transform: translateY(-5px);
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card.is-return-armed [data-eo-last-sent-truck="true"] {
+    opacity: .62;
+    box-shadow: 0 0 14px rgba(255, 214, 41, .52);
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card.is-return-pending {
+    pointer-events: none;
+    opacity: .68 !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-returned-from-dump {
+    animation: eo-returned-truck-arrive .48s cubic-bezier(.18, .9, .28, 1) both !important;
+}
+
+@keyframes eo-returned-truck-arrive {
+    0% { transform: translateY(18px) scale(.94); filter: brightness(1.32); }
+    100% { transform: translateY(0) scale(1); filter: brightness(1); }
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-card.is-drop-ready {
@@ -1001,6 +1057,7 @@ body.excavator-operator-screen .eo-dashboard-unload-card.is-last-dump:not(.is-dr
 @media (prefers-reduced-motion: reduce) {
     body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview,
     body.excavator-operator-screen .eo-truck-card.is-drag-preview,
+    body.excavator-operator-screen .eo-dashboard-truck-card.is-returned-from-dump,
     body.excavator-operator-screen .eo-dashboard-unload-card.is-last-dump:not(.is-drop-ready) {
         animation: none !important;
     }

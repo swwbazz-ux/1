@@ -6,14 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v207">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v207">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v207">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v207">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v207">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v207">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v207" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v207" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v208">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v208">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v208">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v208">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v208">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v208">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v208" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v208" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -202,7 +202,7 @@
             <div class="eo-dashboard-dump-zone">
                 <div class="eo-unload-grid eo-unload-grid-work eo-dashboard-unload-grid is-count-{{ dump_cards|length }}{% if dump_cards|length == 1 %} is-single{% endif %}" aria-label="Точки разгрузки">
                     {% for card in dump_cards %}
-                        <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_last_sent %} is-last-dump{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% endif %}>
+                        <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_last_sent %} is-last-dump{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}" data-eo-has-pending-trucks="{% if card.pending_trucks %}true{% else %}false{% endif %}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% endif %}>
                             <span class="eo-dashboard-unload-top">
                                 <strong>{{ card.name }}</strong>
                                 <small>{{ card.completed_count|default:0 }}</small>
@@ -210,7 +210,7 @@
                             <span class="eo-dashboard-unload-label">Разгружено</span>
                             <span class="eo-dashboard-unload-badges" aria-label="Назначены, не разгружены">
                                 {% for truck in card.pending_trucks %}
-                                    <b class="status-{{ truck.status_key }}" data-eo-queue-truck data-truck-id="{{ truck.truck_id }}" data-trip-id="{{ truck.trip_id }}" data-eo-truck-number="{{ truck.number }}">{{ truck.number }}</b>
+                                    <b class="status-{{ truck.status_key }}{% if truck.is_last_sent %} is-last-sent-truck{% endif %}" data-eo-queue-truck data-truck-id="{{ truck.truck_id }}" data-trip-id="{{ truck.trip_id }}" data-eo-truck-number="{{ truck.number }}" data-eo-last-sent-truck="{% if truck.is_last_sent %}true{% else %}false{% endif %}">{{ truck.number }}</b>
                                 {% empty %}
                                     <b class="is-muted">нет</b>
                                 {% endfor %}
@@ -393,7 +393,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v207";
+var excavatorShellVersion = "excavator-mobile-shell-v208";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -696,7 +696,7 @@ function isExcavatorRefreshUnsafe(options) {
     )) {
         return true;
     }
-    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden])")) {
+    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .eo-dashboard-unload-card.is-return-swiping, .eo-dashboard-unload-card.is-return-pending, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden])")) {
         return true;
     }
     return Array.prototype.some.call(
@@ -1340,6 +1340,26 @@ window.initExcavatorWorkShell = function () {
         }
     }
 
+    function markLatestPendingTruckBadge(list, latestBadge) {
+        if (!list) return null;
+        var badges = Array.prototype.slice.call(list.querySelectorAll("[data-eo-queue-truck]"));
+        var latest = latestBadge && badges.indexOf(latestBadge) !== -1 ? latestBadge : (badges[0] || null);
+        badges.forEach(function (badge) {
+            var isLatest = badge === latest;
+            badge.classList.toggle("is-last-sent-truck", isLatest);
+            badge.dataset.eoLastSentTruck = isLatest ? "true" : "false";
+        });
+        var dumpTarget = list.closest ? list.closest("[data-eo-dump-target]") : null;
+        if (dumpTarget) dumpTarget.dataset.eoHasPendingTrucks = latest ? "true" : "false";
+        return latest;
+    }
+
+    function latestPendingTruckBadge(dumpTarget) {
+        if (!dumpTarget) return null;
+        var marked = dumpTarget.querySelector('[data-eo-queue-truck][data-eo-last-sent-truck="true"]');
+        return marked || dumpTarget.querySelector("[data-eo-queue-truck]");
+    }
+
     function addPendingTruckBadge(dumpTarget, card, tripId) {
         var list = pendingBadgeList(dumpTarget);
         if (!list || !card) return null;
@@ -1356,6 +1376,7 @@ window.initExcavatorWorkShell = function () {
         badge.dataset.eoTruckNumber = card.querySelector("strong") ? card.querySelector("strong").textContent.trim() : "";
         badge.textContent = badge.dataset.eoTruckNumber || truckId;
         list.appendChild(badge);
+        markLatestPendingTruckBadge(list, badge);
         return badge;
     }
 
@@ -1368,6 +1389,7 @@ window.initExcavatorWorkShell = function () {
             var sameTrip = tripId && item.dataset.tripId === String(tripId);
             if (sameTruck || sameTrip) item.remove();
         });
+        markLatestPendingTruckBadge(list);
         ensureMutedPendingBadge(list);
     }
 
@@ -1395,6 +1417,10 @@ window.initExcavatorWorkShell = function () {
         if (status) status.textContent = data.status_label || "назначена";
         var targetText = card.querySelector("em");
         if (targetText) targetText.remove();
+        card.classList.add("is-returned-from-dump");
+        window.setTimeout(function () {
+            card.classList.remove("is-returned-from-dump");
+        }, 520);
         selectTruck(card);
     }
 
@@ -1579,21 +1605,31 @@ window.initExcavatorWorkShell = function () {
         if (parts.dialog) parts.dialog.classList.remove("is-return-armed");
     }
 
-    function cancelLoadedTripFromQueue(item) {
-        if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
-            showQueueNote("Роль неактивна — доступен только просмотр.", true);
+    function showLoadedCancelStatus(options, text, isError) {
+        if (options && options.direct) {
+            showExcavatorNotice(text || "");
             return;
+        }
+        showQueueNote(text, isError);
+    }
+
+    function cancelLoadedTripFromQueue(item, options) {
+        options = options || {};
+        if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
+            showLoadedCancelStatus(options, "Роль неактивна — доступен только просмотр.", true);
+            return Promise.resolve(false);
         }
         if (!truckLoadedCancelUrl || !item || !item.dataset.tripId) {
             playExcavatorSound("action_error");
-            showQueueNote("Серверная отмена для этого рейса недоступна.", true);
-            return;
+            showLoadedCancelStatus(options, "Серверная отмена для этого рейса недоступна.", true);
+            return Promise.resolve(false);
         }
-        var cancelActionId = item.dataset.eoCancelActionId || generateClientActionId("truck-loaded-cancel");
-        item.dataset.eoCancelActionId = cancelActionId;
+        var actionOwner = options.actionOwner || item;
+        var cancelActionId = actionOwner.dataset.eoCancelActionId || generateClientActionId("truck-loaded-cancel");
+        actionOwner.dataset.eoCancelActionId = cancelActionId;
         item.disabled = true;
-        showQueueNote("Отменяю назначение на сервере...", false);
-        fetch(truckLoadedCancelUrl, {
+        showLoadedCancelStatus(options, options.direct ? "Возвращаю последний самосвал..." : "Отменяю назначение на сервере...", false);
+        return fetch(truckLoadedCancelUrl, {
             method: "POST",
             credentials: "same-origin",
             headers: {
@@ -1621,17 +1657,51 @@ window.initExcavatorWorkShell = function () {
             removePendingTruckBadge(dumpTarget, data.truck_id || item.dataset.truckId, data.trip_id || item.dataset.tripId);
             restoreTruckAfterLoadedCancel(cardByTruckId(data.truck_id || item.dataset.truckId), data);
             item.remove();
-            showQueueNote("Самосвал возвращен в назначенные.", false);
+            showLoadedCancelStatus(
+                options,
+                options.direct
+                    ? "Самосвал " + (item.dataset.truckNumber || "") + " возвращен. Выберите новую точку разгрузки."
+                    : "Самосвал возвращен в назначенные.",
+                false
+            );
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                 window.AppRealtime.wake("truck_loaded_cancel");
             }
+            return true;
         }).catch(function (error) {
             playExcavatorSound("action_error");
             item.disabled = false;
-            showQueueNote(error.message || "Назначение не отменено", true);
+            showLoadedCancelStatus(options, error.message || "Назначение не отменено", true);
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                 window.AppRealtime.wake("truck_loaded_cancel_error");
             }
+            return false;
+        }).then(function (result) {
+            if (options.dumpTarget) options.dumpTarget.classList.remove("is-return-pending");
+            if (options.actionOwner) options.actionOwner.classList.remove("is-returning");
+            return result;
+        });
+    }
+
+    function returnLastTruckFromDump(dumpTarget) {
+        if (!dumpTarget || dumpTarget.classList.contains("is-return-pending")) return Promise.resolve(false);
+        var badge = latestPendingTruckBadge(dumpTarget);
+        if (!badge) {
+            playExcavatorSound("action_error");
+            showExcavatorNotice("На этой точке нет самосвала для возврата.");
+            return Promise.resolve(false);
+        }
+        var item = queueItemFromBadge(badge, dumpTarget);
+        dumpTarget.classList.add("is-return-pending");
+        badge.classList.add("is-returning");
+        return cancelLoadedTripFromQueue(item, {
+            direct: true,
+            dumpTarget: dumpTarget,
+            actionOwner: badge
+        }).then(function (result) {
+            dumpTarget.classList.remove("is-return-pending");
+            badge.classList.remove("is-returning");
+            return result;
         });
     }
 
@@ -2309,36 +2379,98 @@ window.initExcavatorWorkShell = function () {
         });
     }
 
+    function isDumpReturnSwipe(deltaX, deltaY) {
+        return deltaY <= -48 && Math.abs(deltaY) >= Math.max(48, Math.abs(deltaX) * 1.25);
+    }
+
     shell.querySelectorAll("[data-eo-dump-target]").forEach(function (target) {
         var queueHoldTimer = null;
-        var queueHoldX = 0;
-        var queueHoldY = 0;
+        var dumpSwipe = null;
         function clearQueueHold() {
             if (queueHoldTimer) {
                 window.clearTimeout(queueHoldTimer);
                 queueHoldTimer = null;
             }
         }
+        function clearDumpSwipe() {
+            clearQueueHold();
+            target.classList.remove("is-return-swiping", "is-return-armed");
+            target.style.removeProperty("--eo-return-swipe-progress");
+            var releasedSwipe = dumpSwipe;
+            dumpSwipe = null;
+            if (releasedSwipe && target.releasePointerCapture) {
+                try {
+                    target.releasePointerCapture(releasedSwipe.pointerId);
+                } catch (error) {}
+            }
+        }
         target.addEventListener("pointerdown", function (event) {
             if (event.button !== undefined && event.button !== 0) return;
-            queueHoldX = event.clientX;
-            queueHoldY = event.clientY;
+            if (target.classList.contains("is-return-pending") || shell.classList.contains("is-truck-drag-active")) return;
+            dumpSwipe = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                deltaX: 0,
+                deltaY: 0
+            };
+            if (target.setPointerCapture) {
+                try {
+                    target.setPointerCapture(event.pointerId);
+                } catch (error) {}
+            }
             clearQueueHold();
             queueHoldTimer = window.setTimeout(function () {
                 target.dataset.eoSuppressClick = "1";
                 openDumpQueueModal(target);
+                clearDumpSwipe();
                 window.setTimeout(function () {
                     delete target.dataset.eoSuppressClick;
                 }, 450);
             }, 560);
         });
         target.addEventListener("pointermove", function (event) {
-            if (Math.abs(event.clientX - queueHoldX) > 8 || Math.abs(event.clientY - queueHoldY) > 8) {
+            if (!dumpSwipe || event.pointerId !== dumpSwipe.pointerId) return;
+            dumpSwipe.deltaX = event.clientX - dumpSwipe.startX;
+            dumpSwipe.deltaY = event.clientY - dumpSwipe.startY;
+            if (Math.abs(dumpSwipe.deltaX) > 8 || Math.abs(dumpSwipe.deltaY) > 8) {
                 clearQueueHold();
             }
+            var upwardDominant = dumpSwipe.deltaY < -8 && Math.abs(dumpSwipe.deltaY) > Math.abs(dumpSwipe.deltaX) * 1.1;
+            if (!upwardDominant) {
+                target.classList.remove("is-return-swiping", "is-return-armed");
+                target.style.removeProperty("--eo-return-swipe-progress");
+                return;
+            }
+            event.preventDefault();
+            var progress = Math.min(1, Math.abs(dumpSwipe.deltaY) / 56);
+            target.style.setProperty("--eo-return-swipe-progress", String(progress));
+            target.classList.add("is-return-swiping");
+            target.classList.toggle("is-return-armed", isDumpReturnSwipe(dumpSwipe.deltaX, dumpSwipe.deltaY));
         });
-        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
-            target.addEventListener(eventName, clearQueueHold);
+        target.addEventListener("pointerup", function (event) {
+            if (!dumpSwipe || event.pointerId !== dumpSwipe.pointerId) return;
+            if (Number.isFinite(event.clientX) && Number.isFinite(event.clientY)) {
+                dumpSwipe.deltaX = event.clientX - dumpSwipe.startX;
+                dumpSwipe.deltaY = event.clientY - dumpSwipe.startY;
+            }
+            var shouldReturn = isDumpReturnSwipe(dumpSwipe.deltaX, dumpSwipe.deltaY);
+            if (shouldReturn) {
+                event.preventDefault();
+                target.dataset.eoSuppressClick = "1";
+            }
+            clearDumpSwipe();
+            if (shouldReturn) {
+                returnLastTruckFromDump(target);
+                window.setTimeout(function () {
+                    delete target.dataset.eoSuppressClick;
+                }, 450);
+            }
+        });
+        target.addEventListener("pointercancel", clearDumpSwipe);
+        target.addEventListener("lostpointercapture", clearDumpSwipe);
+        target.addEventListener("pointerleave", function () {
+            clearQueueHold();
         });
         target.addEventListener("dragover", function (event) {
             event.preventDefault();
