@@ -1,11 +1,19 @@
+from importlib import import_module
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from django.apps import apps
 from django.core.management import call_command
 from django.test import TestCase
 
 from references.equipment_states import upsert_default_equipment_states
-from references.models import EquipmentModel, EquipmentState, RockType, TruckCapacityRule
+from references.models import (
+    EquipmentModel,
+    EquipmentState,
+    EquipmentType,
+    RockType,
+    TruckCapacityRule,
+)
 
 
 class EquipmentStateTests(TestCase):
@@ -112,4 +120,39 @@ class ReferenceLoadTests(TestCase):
         self.assertEqual(
             TruckCapacityRule.objects.get(equipment_model=nhl, rock_type__name='Негабарит').volume_m3,
             TruckCapacityRule.objects.get(equipment_model=nhl, rock_type__name='Руда').volume_m3,
+        )
+        self.assertEqual(
+            TruckCapacityRule.objects.get(equipment_model=belaz, rock_type__name='Рыхлая').volume_m3,
+            TruckCapacityRule.objects.get(equipment_model=belaz, rock_type__name='Рыхлая порода').volume_m3,
+        )
+        self.assertEqual(
+            TruckCapacityRule.objects.get(equipment_model=nhl, rock_type__name='Окисленная').volume_m3,
+            TruckCapacityRule.objects.get(equipment_model=nhl, rock_type__name='Окисленная руда').volume_m3,
+        )
+
+    def test_legacy_rock_capacity_migration_copies_configured_alias_rules(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал миграция')
+        model = EquipmentModel.objects.create(
+            equipment_type=truck_type,
+            name='Самосвал миграция',
+        )
+        configured = RockType.objects.create(name='Окисленная руда', density='1.9100')
+        alias = RockType.objects.create(name='Окисленная', density='2.4000')
+        TruckCapacityRule.objects.create(
+            equipment_model=model,
+            rock_type=configured,
+            volume_m3='57.00',
+        )
+
+        migration = import_module(
+            'references.migrations.0009_link_legacy_rock_capacity_rules'
+        )
+        migration.link_legacy_rock_capacity_rules(apps, None)
+
+        self.assertEqual(
+            TruckCapacityRule.objects.get(
+                equipment_model=model,
+                rock_type=alias,
+            ).volume_m3,
+            57,
         )

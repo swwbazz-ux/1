@@ -63,7 +63,7 @@ from downtimes.driver_workflow import (
 )
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import DEFAULT_EQUIPMENT_STATES
-from references.models import DumpPoint, Equipment, EquipmentState, RockType
+from references.models import DumpPoint, Equipment, EquipmentState, RockType, TruckCapacityRule
 from shifts.models import EmployeeShift, ShiftClientAction
 from shifts.models import PlanAssignmentStatus, PlanCalculationMode
 from shifts.services import (
@@ -755,7 +755,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v215";
+const CACHE_NAME = "excavator-mobile-shell-v216";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -775,7 +775,6 @@ const CORE_ASSETS = [
   "/static/css/mobile-shift-unified-v1.css",
   "/static/css/mobile-face-unified-v1.css",
   "/static/css/mobile-downtime-unified-v1.css",
-  "/static/css/excavator-destination-distances-v1.css",
   "/static/css/mobile-role-login-v1.css",
   "/static/js/mobile-shift-unified-v1.js",
   "/static/js/mobile-operational-sounds-v1.js",
@@ -3351,6 +3350,22 @@ def restrict_excavator_trip_form(form, current_excavator, current_shift=None):
         )
     else:
         form.fields['assignment'].queryset = form.fields['assignment'].queryset.none()
+
+    rock_queryset = form.fields['rock_type'].queryset.filter(density__isnull=False)
+    assigned_model_rows = list(
+        form.fields['assignment'].queryset
+        .exclude(truck__model_id__isnull=True)
+        .values_list('truck__model_id', 'truck__model__body_volume_m3')
+        .distinct()
+    )
+    for model_id, body_volume_m3 in assigned_model_rows:
+        if body_volume_m3:
+            continue
+        supported_rock_ids = TruckCapacityRule.objects.filter(
+            equipment_model_id=model_id,
+        ).values('rock_type_id')
+        rock_queryset = rock_queryset.filter(pk__in=supported_rock_ids)
+    form.fields['rock_type'].queryset = rock_queryset.order_by('name')
     return form
 
 
@@ -3707,6 +3722,47 @@ def parse_excavator_destinations(payload, dump_point_queryset):
         destinations.append({
             'dump_point': dump_by_id[dump_id],
             'transport_distance_km': distance,
+        })
+        seen_dump_ids.add(dump_id)
+    return destinations
+
+
+def parse_excavator_operator_destinations(payload, dump_point_queryset, placement):
+    """Select destinations while preserving dispatcher-owned haul distances."""
+    dump_by_id = {str(point.id): point for point in dump_point_queryset}
+    raw_ids = payload.get('dump_point_ids')
+    if not isinstance(raw_ids, list):
+        raw_destinations = payload.get('destinations')
+        if isinstance(raw_destinations, list):
+            raw_ids = [
+                row.get('dump_point_id') or row.get('id')
+                for row in raw_destinations
+                if isinstance(row, dict)
+            ]
+        else:
+            raw_ids = [payload.get('dump_point_id') or payload.get('dump_point')]
+
+    distance_by_dump_id = {
+        row['dump_point'].id: row['transport_distance_km']
+        for row in excavator_configured_destinations(placement)
+    }
+    if (
+        placement
+        and placement.work_dump_point_id
+        and placement.work_dump_point_id not in distance_by_dump_id
+    ):
+        distance_by_dump_id[placement.work_dump_point_id] = placement.transport_distance_km
+
+    destinations = []
+    seen_dump_ids = set()
+    for raw_id in raw_ids:
+        dump_id = str(raw_id or '')
+        if dump_id not in dump_by_id or dump_id in seen_dump_ids:
+            continue
+        dump_point = dump_by_id[dump_id]
+        destinations.append({
+            'dump_point': dump_point,
+            'transport_distance_km': distance_by_dump_id.get(dump_point.id),
         })
         seen_dump_ids.add(dump_id)
     return destinations
@@ -4437,12 +4493,23 @@ def excavator_work_settings_view(request):
     rock_type_id = payload.get('rock_type_id') or payload.get('rock_type')
     rock_type = rock_queryset.filter(id=rock_type_id).first()
     if not rock_type:
+        if RockType.objects.filter(id=rock_type_id, is_active=True).exists():
+            return JsonResponse(
+                {
+                    'ok': False,
+                    'error': 'Для выбранной породы не настроены плотность или кубатура назначенных самосвалов.',
+                    'code': 'rock_reference_incomplete',
+                },
+                status=409,
+            )
         return JsonResponse({'ok': False, 'error': 'Порода недоступна в справочнике.'}, status=400)
 
-    try:
-        destinations = parse_excavator_destinations(payload, dump_point_queryset)
-    except ValueError:
-        return JsonResponse({'ok': False, 'error': 'Плечо должно быть числом не меньше нуля.'}, status=400)
+    placement = get_excavator_work_placement(current_excavator)
+    destinations = parse_excavator_operator_destinations(
+        payload,
+        dump_point_queryset,
+        placement,
+    )
     if not destinations:
         return JsonResponse({'ok': False, 'error': 'Выберите хотя бы одну точку разгрузки из справочника.'}, status=400)
     dump_points = [row['dump_point'] for row in destinations]
@@ -4451,7 +4518,6 @@ def excavator_work_settings_view(request):
     loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
     session_settings = request.session.get(EXCAVATOR_WORK_SETTINGS_SESSION_KEY, {})
     setting_key = excavator_work_settings_key(current_excavator)
-    placement = get_excavator_work_placement(current_excavator)
     work_context_changed = excavator_work_context_changed(
         placement,
         session_settings.get(setting_key),
@@ -4731,6 +4797,17 @@ def excavator_work_view(request):
             current_excavator,
             open_shift,
         )
+        submitted_rock_type_id = request.POST.get('rock_type')
+        if (
+            submitted_rock_type_id
+            and RockType.objects.filter(id=submitted_rock_type_id, is_active=True).exists()
+            and not form.fields['rock_type'].queryset.filter(id=submitted_rock_type_id).exists()
+        ):
+            form.add_error(
+                None,
+                'Для выбранной породы не настроены плотность или кубатура '
+                'назначенных самосвалов.',
+            )
         if not legacy_trip_client_action_id:
             form.add_error(None, 'Не передан client_action_id. Обновите экран и повторите погрузку.')
         else:

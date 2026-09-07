@@ -1,6 +1,7 @@
 ﻿import json
 import re
 from datetime import datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -13,6 +14,7 @@ from django.utils import timezone
 from assignments.models import (
     AssignmentStatus,
     EquipmentAssignment,
+    ExcavatorDumpPointSetting,
     ExcavatorPlacement,
     HaulAssignment,
     HaulAssignmentAction,
@@ -892,6 +894,15 @@ class DispatcherGarageCurrentStateTests(TestCase):
 
 
 class ExcavatorWorkServerIntegrationTests(TestCase):
+    def create_configured_rock(self, name='Негабарит', *, density='2.6000', volume_m3='49.40'):
+        rock = RockType.objects.create(name=name, density=density)
+        TruckCapacityRule.objects.create(
+            equipment_model=self.truck_model,
+            rock_type=rock,
+            volume_m3=volume_m3,
+        )
+        return rock
+
     def create_registered_driver_shift(self, truck, *, full_name='Петров П.П.', access_code='200000'):
         driver_role, _ = Role.objects.get_or_create(
             code='driver',
@@ -1030,11 +1041,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v211')
+        self.assertContains(response, 'excavator-mobile-shell-v216')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 211')
+        self.assertContains(response, 'Версия 216')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
@@ -1663,7 +1674,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
     def test_excavator_work_renders_face_settings_from_server_references(self):
         second_dump = DumpPoint.objects.create(name='Отвал')
-        second_rock = RockType.objects.create(name='Негабарит')
+        second_rock = self.create_configured_rock()
 
         response = self.client.get(reverse('excavator_work'))
 
@@ -1680,9 +1691,67 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             {self.dump_point.id, second_dump.id},
         )
 
+    def test_excavator_work_hides_rock_without_capacity_for_assigned_truck_model(self):
+        incomplete_rock = RockType.objects.create(
+            name='Порода без кубатуры',
+            density='2.4000',
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'<option value="{self.rock.id}"', html=False)
+        self.assertNotContains(response, f'<option value="{incomplete_rock.id}"', html=False)
+
+    def test_excavator_work_settings_reject_incomplete_rock_reference(self):
+        incomplete_rock = RockType.objects.create(
+            name='Порода без кубатуры',
+            density='2.4000',
+        )
+
+        response = self.client.post(
+            reverse('excavator_work_settings'),
+            data=json.dumps({
+                'client_action_id': 'settings-incomplete-rock',
+                'rock_type_id': incomplete_rock.id,
+                'dump_point_ids': [self.dump_point.id],
+                'loading_horizon': '75',
+                'loading_block': '52',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'rock_reference_incomplete')
+        self.assertIn('не настроены плотность или кубатура', response.json()['error'])
+        self.assertFalse(
+            ExcavatorPlacement.objects.filter(
+                excavator=self.excavator,
+                work_rock_type=incomplete_rock,
+            ).exists()
+        )
+
     def test_excavator_work_settings_save_selected_reference_values(self):
         second_dump = DumpPoint.objects.create(name='Отвал')
-        second_rock = RockType.objects.create(name='Негабарит')
+        second_rock = self.create_configured_rock()
+        placement = ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            work_rock_type=self.rock,
+            work_dump_point=self.dump_point,
+            transport_distance_km='5.75',
+        )
+        ExcavatorDumpPointSetting.objects.create(
+            placement=placement,
+            dump_point=self.dump_point,
+            transport_distance_km='5.75',
+            position=0,
+        )
+        ExcavatorDumpPointSetting.objects.create(
+            placement=placement,
+            dump_point=second_dump,
+            transport_distance_km='3.20',
+            position=1,
+        )
 
         response = self.client.post(
             reverse('excavator_work_settings'),
@@ -1690,6 +1759,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
                 'client_action_id': 'settings-1',
                 'rock_type_id': second_rock.id,
                 'dump_point_ids': [second_dump.id, self.dump_point.id],
+                'destinations': [
+                    {'dump_point_id': second_dump.id, 'transport_distance_km': '99'},
+                    {'dump_point_id': self.dump_point.id, 'transport_distance_km': '88'},
+                ],
                 'loading_horizon': '75a',
                 'loading_block': '52-1',
             }),
@@ -1706,11 +1779,23 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(payload['dump_point_ids'], [second_dump.id, self.dump_point.id])
         self.assertEqual(payload['loading_horizon'], '75')
         self.assertEqual(payload['loading_block'], '521')
-        placement = ExcavatorPlacement.objects.get(excavator=self.excavator)
+        placement.refresh_from_db()
         self.assertEqual(placement.work_rock_type, second_rock)
         self.assertEqual(placement.work_dump_point, second_dump)
         self.assertEqual(placement.loading_horizon, '75')
         self.assertEqual(placement.loading_block, '521')
+        self.assertEqual(placement.transport_distance_km, Decimal('3.20'))
+        self.assertEqual(
+            list(
+                placement.dump_point_settings
+                .order_by('position')
+                .values_list('dump_point_id', 'transport_distance_km')
+            ),
+            [
+                (second_dump.id, Decimal('3.20')),
+                (self.dump_point.id, Decimal('5.75')),
+            ],
+        )
         self.assertTrue(
             OperationalStateEvent.objects.filter(
                 event_type='equipment_changed',
@@ -1729,6 +1814,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(screen, f'data-eo-dump-target="{second_dump.id}"')
         self.assertContains(screen, f'data-eo-dump-target="{self.dump_point.id}"')
         self.assertContains(screen, f'value="{second_rock.id}" selected')
+        self.assertNotContains(screen, 'mobile-face__destination-distance')
+        self.assertNotContains(screen, 'aria-label="Плечо до точки')
 
         self.assertFalse(DowntimeEvent.objects.filter(equipment=self.excavator, ended_at__isnull=True).exists())
 
@@ -1774,7 +1861,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
     def test_excavator_work_settings_rock_and_dump_changes_preserve_manual_downtime(self):
         second_dump = DumpPoint.objects.create(name='Отвал')
-        second_rock = RockType.objects.create(name='Негабарит')
+        second_rock = self.create_configured_rock()
         ExcavatorPlacement.objects.create(
             excavator=self.excavator,
             work_rock_type=self.rock,
@@ -2773,7 +2860,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v215', script)
+        self.assertIn('excavator-mobile-shell-v216', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3736,7 +3823,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.json()['errors']['__all__'],
-            ['Для выбранных модели самосвала и породы не настроена кубатура.'],
+            ['Для выбранной породы не настроены плотность или кубатура '
+             'назначенных самосвалов.'],
         )
         self.assertFalse(Trip.objects.exists())
         self.assertFalse(

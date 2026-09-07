@@ -6,15 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v211">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v211">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v211">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v211">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v211">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v211">
-<link rel="stylesheet" href="{% static 'css/excavator-destination-distances-v1.css' %}?v=excavator-mobile-shell-v211">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v211" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v211" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v216">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v216">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v216">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v216">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v216">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v216">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v216" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v216" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -123,19 +122,6 @@
                             >
                                 <strong>{{ card.name }}</strong>
                             </button>
-                            <label class="mobile-face__destination-distance">
-                                <span>км</span>
-                                <input
-                                    type="text"
-                                    inputmode="decimal"
-                                    maxlength="12"
-                                    value="{{ card.transport_distance_km }}"
-                                    placeholder="—"
-                                    data-eo-dump-distance="{{ card.point.id }}"
-                                    aria-label="Плечо до точки {{ card.name }}, км"
-                                    {% if not open_shift or not card.is_selected %}disabled aria-disabled="true"{% endif %}
-                                >
-                            </label>
                         </div>
                     {% empty %}
                         <div class="eo-empty-state eo-empty-state-compact mobile-face__empty">
@@ -411,7 +397,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v211";
+var excavatorShellVersion = "excavator-mobile-shell-v216";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1770,15 +1756,7 @@ window.initExcavatorWorkShell = function () {
         button.setAttribute("aria-pressed", selected ? "true" : "false");
         button.setAttribute("aria-label", name + ". " + stateLabel + ".");
         var row = button.closest("[data-eo-dump-row]");
-        if (row) {
-            row.classList.toggle("is-selected", selected);
-            var distanceInput = row.querySelector("[data-eo-dump-distance]");
-            if (distanceInput) {
-                var isAvailable = !!(faceContent && faceContent.dataset.eoFaceSettingsAvailable === "true");
-                distanceInput.disabled = faceSettingsPending || !isAvailable || !selected;
-                distanceInput.setAttribute("aria-disabled", distanceInput.disabled ? "true" : "false");
-            }
-        }
+        if (row) row.classList.toggle("is-selected", selected);
     }
 
     function renderDumpChoiceStates() {
@@ -1814,24 +1792,6 @@ window.initExcavatorWorkShell = function () {
             }
         });
         return ids;
-    }
-
-    function selectedDestinationSettings() {
-        return selectedDumpPointIds().map(function (id) {
-            var distanceInput = shell.querySelector('[data-eo-dump-distance="' + id + '"]');
-            return {
-                dump_point_id: id,
-                transport_distance_km: distanceInput ? distanceInput.value : ""
-            };
-        });
-    }
-
-    function replaceDestinationDistances(destinations) {
-        (Array.isArray(destinations) ? destinations : []).forEach(function (row) {
-            var id = String(row && (row.dump_point_id || row.id) || "");
-            var input = id ? shell.querySelector('[data-eo-dump-distance="' + id + '"]') : null;
-            if (input) input.value = String(row.transport_distance_km || "").replace(".", ",");
-        });
     }
 
     function syncDumpPointInputs() {
@@ -1876,12 +1836,7 @@ window.initExcavatorWorkShell = function () {
             rockTypeId: rockSelect ? String(rockSelect.value || "") : "",
             loadingHorizon: normalizeFaceSetting(horizonInput ? horizonInput.value : ""),
             loadingBlock: normalizeFaceSetting(blockInput ? blockInput.value : ""),
-            destinations: selectedDestinationSettings().map(function (row) {
-                return {
-                    dumpPointId: String(row.dump_point_id),
-                    distanceKm: String(row.transport_distance_km || "").trim().replace(",", ".")
-                };
-            })
+            dumpPointIds: selectedDumpPointIds()
         });
     }
 
@@ -1903,12 +1858,6 @@ window.initExcavatorWorkShell = function () {
         });
         shell.querySelectorAll("[data-eo-face-horizon], [data-eo-face-block], [data-eo-rock-select]").forEach(function (control) {
             control.disabled = faceSettingsPending || !isAvailable;
-            control.setAttribute("aria-disabled", control.disabled ? "true" : "false");
-        });
-        shell.querySelectorAll("[data-eo-dump-distance]").forEach(function (control) {
-            var row = control.closest("[data-eo-dump-row]");
-            var selected = !!(row && row.classList.contains("is-selected"));
-            control.disabled = faceSettingsPending || !isAvailable || !selected;
             control.setAttribute("aria-disabled", control.disabled ? "true" : "false");
         });
     }
@@ -2700,10 +2649,6 @@ window.initExcavatorWorkShell = function () {
             input.addEventListener("input", markFaceDraftChanged);
             input.addEventListener("change", markFaceDraftChanged);
         });
-        shell.querySelectorAll("[data-eo-dump-distance]").forEach(function (input) {
-            input.addEventListener("input", markFaceDraftChanged);
-            input.addEventListener("change", markFaceDraftChanged);
-        });
         var settingsRockSelect = shell.querySelector("[data-eo-rock-select]");
         if (settingsRockSelect) {
             settingsRockSelect.addEventListener("change", markFaceDraftChanged);
@@ -2738,7 +2683,6 @@ window.initExcavatorWorkShell = function () {
                 client_action_id: generateClientActionId("excavator-settings"),
                 rock_type_id: rockSelect.value || "",
                 dump_point_ids: ids,
-                destinations: selectedDestinationSettings(),
                 loading_horizon: horizonInput ? horizonInput.value : "",
                 loading_block: blockInput ? blockInput.value : ""
             };
@@ -2770,7 +2714,6 @@ window.initExcavatorWorkShell = function () {
                 var savedIds = normalizeDumpPointIds(data.dump_point_ids || ids);
                 replaceDraftDumpPointIds(savedIds);
                 replacePersistedDumpPointIds(savedIds);
-                replaceDestinationDistances(data.destinations || payload.destinations);
                 syncDumpPointInputs();
                 faceDraftTouched = false;
                 appliedExcavatorSettingsSnapshot = currentExcavatorSettingsSnapshot();
