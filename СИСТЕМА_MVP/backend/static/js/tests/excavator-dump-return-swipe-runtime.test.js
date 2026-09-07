@@ -223,5 +223,10 @@ test("gesture, fallback queue and realtime safety contracts stay wired", () => {
     assert.match(templateSource, /\.eo-dashboard-unload-card\.is-return-pending/);
     assert.match(shiftCss, /data-eo-has-pending-trucks="true"[\s\S]*touch-action: none !important;/);
     assert.match(shiftCss, /\[data-eo-last-sent-truck="true"\]/);
-    assert.match(shiftCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.is-return-rebounding[\s\S]*animation: none !important/);
+    const reducedMotionBlock = shiftCss.slice(
+        shiftCss.indexOf("@media (prefers-reduced-motion: reduce)"),
+        shiftCss.indexOf("@media (max-width: 480px)")
+    );
+    assert.doesNotMatch(reducedMotionBlock, /\.is-return-swiping/);
+    assert.doesNotMatch(reducedMotionBlock, /\.is-return-rebounding/);
 });

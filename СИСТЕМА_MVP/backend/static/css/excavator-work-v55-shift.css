@@ -1121,17 +1121,6 @@ body.excavator-operator-screen .eo-dashboard-unload-card.is-return-rebounding.is
     body.excavator-operator-screen .eo-dashboard-unload-card.is-last-dump:not(.is-drop-ready) {
         animation: none !important;
     }
-
-    body.excavator-operator-screen .eo-dashboard-unload-card.is-return-swiping {
-        transform: none !important;
-        transition: none !important;
-    }
-
-    body.excavator-operator-screen .eo-dashboard-unload-card.is-return-rebounding,
-    body.excavator-operator-screen .eo-dashboard-unload-card.is-return-rebounding.is-last-dump:not(.is-drop-ready) {
-        animation: none !important;
-        transform: none !important;
-    }
 }
 
 @media (max-width: 480px) {
