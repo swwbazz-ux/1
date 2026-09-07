@@ -599,6 +599,7 @@ test("realtime waiting_loading to loaded-trip transition opens Work from server 
                 return false;
             },
             playDriverAssignmentAlert() {},
+            playDriverDumpPointAlert() {},
             window: runtimeWindow,
         },
         {filename: "templates/users/driver_shift.html#operational-refresh"}

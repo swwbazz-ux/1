@@ -39,9 +39,10 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 public class ConnectivityForegroundService extends Service {
-    public static final String ACTION_TEST_ALERT = "ru.copperresources.mobile.action.TEST_ALERT";
-    private static final String PREFS_NAME = "native_connectivity";
-    private static final long MAX_BACKOFF_MS = 60_000L;
+    static final String PREFS_NAME = "native_connectivity";
+    static final String LAST_DRIVER_DUMP_POINT_ALERT_VERSION = "last_driver_dump_point_alert_version";
+    private static final String CONNECTION_LOSS_ANNOUNCED = "connection_loss_announced";
+    private static final long MAX_BACKOFF_MS = 120_000L;
     private static final int MAX_CAPTURED_RESPONSE_BYTES = 64 * 1024;
 
     private final Object scheduleLock = new Object();
@@ -189,6 +190,7 @@ public class ConnectivityForegroundService extends Service {
             HeartbeatResult result = requestHeartbeat();
             consecutiveFailures = 0;
             SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            boolean connectionLossWasAnnounced = preferences.getBoolean(CONNECTION_LOSS_ANNOUNCED, false);
             long previousVersion = preferences.getLong("last_server_version", 0L);
             long serverVersion = readServerVersion(result.body);
             boolean relevant = readRelevantFlag(result.body);
@@ -197,24 +199,53 @@ public class ConnectivityForegroundService extends Service {
                 .putInt("last_http_status", result.statusCode)
                 .putString("last_response", result.body)
                 .putLong("last_server_version", serverVersion > 0L ? serverVersion : previousVersion)
+                .putBoolean(CONNECTION_LOSS_ANNOUNCED, false)
                 .apply();
-            if (previousVersion > 0L
-                    && serverVersion > previousVersion
-                    && relevant
-                    && !AppVisibility.isForeground()) {
-                boolean specificAlertShown = showLatestDriverDumpPointAlert(result.body, preferences);
-                if (!specificAlertShown) {
-                    AppNotifications.showOperationalAlert(this, "На сервере появились новые данные смены");
+            if (connectionLossWasAnnounced) {
+                OperationalVoicePlayer.play(
+                    this,
+                    "connection_restored",
+                    "voice_connection_restored",
+                    true,
+                    0L
+                );
+            }
+            if (previousVersion > 0L && serverVersion > previousVersion && relevant) {
+                boolean appIsForeground = AppVisibility.isForeground();
+                boolean dumpPointAnnounced = showLatestDriverDumpPointAlert(
+                    result.body,
+                    preferences,
+                    !appIsForeground
+                );
+                if (!dumpPointAnnounced) {
+                    showLatestAssignmentAlert(
+                        result.body,
+                        !appIsForeground
+                    );
                 }
             }
             publishStatus("Сервер доступен • " + DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date()));
             scheduleHeartbeat(BuildConfig.HEARTBEAT_INTERVAL_MS);
         } catch (Exception error) {
             consecutiveFailures += 1;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            boolean shouldAnnounceConnectionLoss = consecutiveFailures >= 2
+                && !preferences.getBoolean(CONNECTION_LOSS_ANNOUNCED, false);
+            preferences.edit()
                 .putLong("last_failure_at", System.currentTimeMillis())
                 .putString("last_error", error.getClass().getSimpleName() + ": " + String.valueOf(error.getMessage()))
+                .putBoolean(CONNECTION_LOSS_ANNOUNCED, shouldAnnounceConnectionLoss
+                    || preferences.getBoolean(CONNECTION_LOSS_ANNOUNCED, false))
                 .apply();
+            if (shouldAnnounceConnectionLoss) {
+                OperationalVoicePlayer.play(
+                    this,
+                    "connection_lost",
+                    "voice_connection_lost",
+                    true,
+                    0L
+                );
+            }
             publishStatus("Связь восстанавливается…");
             long multiplier = 1L << Math.min(consecutiveFailures, 3);
             scheduleHeartbeat(Math.min(MAX_BACKOFF_MS, BuildConfig.HEARTBEAT_INTERVAL_MS * multiplier));
@@ -401,6 +432,123 @@ public class ConnectivityForegroundService extends Service {
             Log.w("ConnectivityForegroundService", "Driver dump-point alert was not parsed", error);
             return false;
         }
+    }
+
+    private boolean showLatestAssignmentAlert(String body, boolean showNotification) {
+        try {
+            JSONObject root = new JSONObject(body);
+            JSONArray events = root.optJSONArray("events");
+            if (events == null) {
+                return false;
+            }
+            String roleCode = root.optString("role_app_code", BuildConfig.APP_PROFILE_ID);
+            JSONArray workerEquipmentIds = root.optJSONArray("worker_equipment_ids");
+            long selectedVersion = 0L;
+            String selectedVoice = "";
+            String selectedTitle = "";
+            String selectedBody = "";
+
+            for (int index = 0; index < events.length(); index += 1) {
+                JSONObject event = events.optJSONObject(index);
+                if (event == null || !"assignment_changed".equals(event.optString("type"))) {
+                    continue;
+                }
+                long version = event.optLong("version", 0L);
+                if (version <= selectedVersion) {
+                    continue;
+                }
+                JSONObject payload = event.optJSONObject("payload");
+                if (payload == null) {
+                    continue;
+                }
+                String action = payload.optString("action", "");
+                String voice = "";
+                String title = "";
+                String message = "";
+
+                if ("driver".equals(roleCode)) {
+                    if ("assignment_pending".equals(action)) {
+                        JSONArray excavatorIds = payload.optJSONArray("excavator_ids");
+                        voice = excavatorIds != null && excavatorIds.length() > 1
+                            ? "voice_excavator_changed"
+                            : "voice_excavator_assigned";
+                        title = "Новое назначение";
+                        message = "Проверьте назначенный экскаватор.";
+                    } else if ("release_applied".equals(action)) {
+                        voice = "voice_assignment_removed";
+                        title = "Назначение снято";
+                        message = "Ожидайте нового экскаватора.";
+                    }
+                } else if ("excavator_operator".equals(roleCode)) {
+                    long targetExcavatorId = payload.optLong("target_excavator_id", 0L);
+                    JSONArray excavatorIds = payload.optJSONArray("excavator_ids");
+                    boolean isTarget = targetExcavatorId > 0L
+                        && jsonArrayContains(workerEquipmentIds, targetExcavatorId);
+                    boolean wasRelated = jsonArraysIntersect(workerEquipmentIds, excavatorIds);
+                    if ("assignment_applied".equals(action) && isTarget) {
+                        voice = "voice_truck_assigned";
+                        title = "Назначен самосвал";
+                        message = "Проверьте номер на экране.";
+                    } else if (
+                        ("assignment_applied".equals(action) || "release_applied".equals(action))
+                        && wasRelated
+                    ) {
+                        voice = "voice_truck_removed";
+                        title = "Самосвал снят";
+                        message = "Назначение самосвала изменено.";
+                    }
+                }
+
+                if (!voice.isEmpty()) {
+                    selectedVersion = version;
+                    selectedVoice = voice;
+                    selectedTitle = title;
+                    selectedBody = message;
+                }
+            }
+
+            if (selectedVersion <= 0L || selectedVoice.isEmpty()) {
+                return false;
+            }
+            OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announce(
+                this,
+                "truck_assigned",
+                selectedVoice,
+                selectedVersion,
+                roleCode + "_assignment",
+                showNotification,
+                selectedTitle,
+                selectedBody
+            );
+            return result.announced;
+        } catch (Exception error) {
+            Log.w("ConnectivityForegroundService", "Assignment voice was not parsed", error);
+            return false;
+        }
+    }
+
+    private static boolean jsonArrayContains(JSONArray values, long expected) {
+        if (values == null || expected <= 0L) {
+            return false;
+        }
+        for (int index = 0; index < values.length(); index += 1) {
+            if (values.optLong(index, 0L) == expected) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean jsonArraysIntersect(JSONArray left, JSONArray right) {
+        if (left == null || right == null) {
+            return false;
+        }
+        for (int index = 0; index < right.length(); index += 1) {
+            if (jsonArrayContains(left, right.optLong(index, 0L))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String currentStatusText() {

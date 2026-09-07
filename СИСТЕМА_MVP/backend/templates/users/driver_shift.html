@@ -4609,25 +4609,151 @@ function playDriverSound(name) {
     return window.MobileOperationalSounds.play(name);
 }
 
-function playDriverAssignmentAlert() {
+function playDriverVoice(cue, voice, options) {
+    options = options || {};
+    if (!window.MobileOperationalSounds || typeof window.MobileOperationalSounds.announceOperational !== "function") {
+        return playDriverSound(cue);
+    }
+    return window.MobileOperationalSounds.announceOperational({
+        cue: cue,
+        voice: voice,
+        eventVersion: Number(options.eventVersion || 0),
+        eventKey: String(options.eventKey || "")
+    });
+}
+
+function playDriverAssignmentAlert(eventVersion) {
     if (navigator.vibrate) {
         try { navigator.vibrate([180, 90, 180]); } catch (error) {}
     }
-    playDriverSound("truck_assigned");
+    playDriverVoice("truck_assigned", "voice_excavator_assigned", {
+        eventVersion: Number(eventVersion || 0),
+        eventKey: "driver_assignment"
+    });
 }
 
-function driverAppliedActionSound(actionKind, freshShell) {
+function reportDriverAudioDiagnostic(stage, details, extra) {
+    if (!document.body || document.body.dataset.nativeApp !== "true" || !window.fetch) return;
+    var payload = {
+        message: "driver_audio:" + String(stage || "unknown"),
+        source: "driver-audio",
+        stack: JSON.stringify({details: details || {}, extra: extra || {}}),
+        screen: "driver",
+        role: "driver",
+        appVersion: document.body.dataset.appShellVersion || ""
+    };
+    try {
+        window.fetch("/client-error/", {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            keepalive: true,
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+        }).catch(function () {});
+    } catch (error) {}
+}
+
+var driverLastDumpPointAlertVersion = 0;
+
+function latestDriverDumpPointEvent(context) {
+    var selected = null;
+    var events = context && Array.isArray(context.events) ? context.events : [];
+    events.forEach(function (event) {
+        var payload = event && event.payload ? event.payload : null;
+        var version = Number(event && event.version || 0);
+        if (
+            !payload
+            || event.type !== "trip_changed"
+            || payload.action !== "truck_loaded"
+            || version <= driverLastDumpPointAlertVersion
+            || (selected && version <= selected.eventVersion)
+        ) {
+            return;
+        }
+        var tripId = Number(payload.trip_id || 0);
+        var dumpPointId = Number(payload.assigned_dump_point_id || payload.dump_point_id || 0);
+        var dumpPointName = String(payload.dump_point_name || "").trim();
+        if (!tripId || (!dumpPointId && !dumpPointName)) return;
+        selected = {
+            eventVersion: version,
+            tripId: tripId,
+            dumpPointId: dumpPointId,
+            dumpPointName: dumpPointName
+        };
+    });
+    return selected;
+}
+
+function playDriverDumpPointAlert(context) {
+    var details = latestDriverDumpPointEvent(context);
+    if (!details) return;
+    reportDriverAudioDiagnostic("trigger", details, {
+        capacitor: !!window.Capacitor,
+        nativeSound: !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeSound)
+    });
+    var sounds = window.MobileOperationalSounds;
+    var announce = sounds && typeof sounds.announceDumpPoint === "function"
+        ? sounds.announceDumpPoint(details)
+        : Promise.resolve({supported: false, announced: false});
+    Promise.resolve(announce).then(function (nativeResult) {
+        nativeResult = nativeResult || {supported: false, announced: false};
+        reportDriverAudioDiagnostic("result", details, nativeResult);
+        if (sounds && typeof sounds.diagnostics === "function") {
+            window.setTimeout(function () {
+                sounds.diagnostics().then(function (diagnostics) {
+                    reportDriverAudioDiagnostic("playback", details, diagnostics);
+                });
+            }, 1600);
+        }
+        /* Новая APK сама проигрывает всю цепочку «сигнал → голос» и защищает
+           событие от повтора между открытым экраном и фоновым сервисом. */
+        if (nativeResult.supported && nativeResult.announced) {
+            driverLastDumpPointAlertVersion = details.eventVersion;
+            return;
+        }
+        if (nativeResult.supported && nativeResult.reason === "already_announced") {
+            driverLastDumpPointAlertVersion = details.eventVersion;
+            return;
+        }
+        /* При реальной ошибке bridge не оставляем водителя в полной тишине. */
+        if (nativeResult.supported) {
+            driverLastDumpPointAlertVersion = details.eventVersion;
+            playDriverSound("truck_assigned");
+            return;
+        }
+        if (document.body && document.body.dataset.nativeApp === "true" && !nativeResult.supported) {
+            driverLastDumpPointAlertVersion = details.eventVersion;
+            playDriverSound("truck_assigned");
+            return;
+        }
+        driverLastDumpPointAlertVersion = details.eventVersion;
+        if (navigator.vibrate) {
+            try { navigator.vibrate([180, 90, 180]); } catch (error) {}
+        }
+        playDriverSound("truck_assigned");
+    });
+}
+
+window.addEventListener("operational-state-refresh-applied", function (event) {
+    playDriverDumpPointAlert(event && event.detail ? event.detail : null);
+});
+
+function driverAppliedActionVoice(actionKind, freshShell) {
     if (actionKind === "shift-open") {
         return freshShell.querySelector("[data-driver-shift-close-button]")
-            ? "shift_start"
-            : "action_error";
+            ? {cue: "shift_start", voice: "voice_shift_opened"}
+            : {cue: "action_error", voice: "voice_action_failed"};
     }
     if (actionKind === "shift-close") {
         return freshShell.querySelector("[data-driver-shift-close-button]")
-            ? "action_error"
-            : "shift_end";
+            ? {cue: "action_error", voice: "voice_action_failed"}
+            : {cue: "shift_end", voice: "voice_shift_closed"};
     }
-    return "action_ok";
+    if (actionKind === "complete-trip") {
+        return {cue: "action_ok", voice: "voice_trip_finished"};
+    }
+    return {cue: "action_ok", voice: ""};
 }
 
 function syncDriverTabMarkup(shell, tab) {
@@ -4695,7 +4821,7 @@ window.applyOperationalStateRefresh = function (context) {
             window.checkAchievementPrize(context);
         }
         if (nextAssignmentKey && nextAssignmentKey !== previousAssignmentKey) {
-            playDriverAssignmentAlert();
+            playDriverAssignmentAlert(targetVersion);
         }
         return {applied: true};
     }).catch(function () {
@@ -4734,7 +4860,7 @@ window.submitDriverFormInPlace = function (form, options) {
         var freshShell = window.AppOperationalFragment.parseRoot(result.html, "[data-driver-shell]");
         var oldShell = document.querySelector("[data-driver-shell]");
         if (!freshShell || !oldShell) throw new Error("driver shell missing");
-        var soundName = driverAppliedActionSound(actionKind, freshShell);
+        var actionVoice = driverAppliedActionVoice(actionKind, freshShell);
         oldShell.replaceWith(freshShell);
         if (result.url && window.history && window.history.replaceState) {
             var responseUrl = new URL(result.url, window.location.href);
@@ -4749,10 +4875,17 @@ window.submitDriverFormInPlace = function (form, options) {
         if (typeof window.bindDriverMobileShell === "function") {
             window.bindDriverMobileShell();
         }
-        playDriverSound(soundName);
+        if (actionVoice.voice) {
+            playDriverVoice(actionVoice.cue, actionVoice.voice);
+        } else {
+            playDriverSound(actionVoice.cue);
+        }
         return true;
     }).catch(function () {
-        playDriverSound("action_error");
+        playDriverVoice(
+            "action_error",
+            actionKind === "complete-trip" ? "voice_trip_finish_failed" : "voice_action_failed"
+        );
         if (options.fallbackToNavigation !== false) {
             form.submit();
             return false;
@@ -5931,7 +6064,7 @@ window.bindDriverMobileShell = function () {
                 reason_id: button.dataset.driverDowntimeReasonId,
                 client_action_id: generateClientActionId("driver-downtime")
             }).then(function (payload) {
-                playDriverSound("action_ok");
+                playDriverVoice("action_ok", "voice_downtime_started");
                 if (applyDriverActiveDowntime(payload)) {
                     openDriverTab("work");
                 }
@@ -5939,7 +6072,7 @@ window.bindDriverMobileShell = function () {
                     window.AppRealtime.wake("driver_downtime_saved");
                 }
             }).catch(function (error) {
-                playDriverSound("action_error");
+                playDriverVoice("action_error", "voice_action_failed");
                 showDriverToast(error.message || "Простой не сохранен");
                 button.classList.remove("is-selected");
             }).finally(function () {
@@ -5963,13 +6096,13 @@ window.bindDriverMobileShell = function () {
                 action: "close",
                 client_action_id: generateClientActionId("driver-downtime-close")
             }).then(function (payload) {
-                playDriverSound("action_ok");
+                playDriverVoice("action_ok", "voice_downtime_finished");
                 clearDriverActiveDowntime(payload);
                 if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                     window.AppRealtime.wake("driver_downtime_closed");
                 }
             }).catch(function (error) {
-                playDriverSound("action_error");
+                playDriverVoice("action_error", "voice_action_failed");
                 showDriverToast(error.message || "Простой не завершен");
                 downtimeClose.disabled = false;
                 downtimeClose.classList.remove("is-disabled");
