@@ -179,7 +179,7 @@
         <div class="mm-mobile-truck-transfer-bar" data-mm-truck-transfer-bar hidden role="status" aria-live="polite">
             <div>
                 <span data-mm-truck-transfer-caption>Перестановка самосвала</span>
-                <strong data-mm-truck-transfer-title>Выберите комплекс</strong>
+                <strong data-mm-truck-transfer-title>Отпустите на нужном экскаваторе</strong>
             </div>
             <button type="button" data-mm-truck-transfer-cancel aria-label="Отменить перестановку">Отмена</button>
         </div>
@@ -474,7 +474,8 @@
                     <header class="mm-mobile-detail-header">
                         <button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>
                         <div class="mm-mobile-detail-title mm-mobile-fill-title">
-                            <h1>Набор самосвалов</h1>
+                            <h1>Комплекс {{ complex.id|cut:"K-"|cut:"К-" }}</h1>
+                            <span>Самосвал в сторону — переставить</span>
                         </div>
                         <div class="mm-mobile-header-actions">
                             <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
@@ -1124,7 +1125,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v144";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v145";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -2878,7 +2879,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 screen.innerHTML = [
                     '<header class="mm-mobile-detail-header">',
                         '<button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>',
-                        '<div class="mm-mobile-detail-title mm-mobile-fill-title"><h1>Набор самосвалов</h1></div>',
+                        '<div class="mm-mobile-detail-title mm-mobile-fill-title"><h1>Комплекс</h1><span>Самосвал в сторону — переставить</span></div>',
                         {% if is_native_app %}
                         '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Нажмите, чтобы открыть отчёт">0%</button></div>',
                         {% else %}
@@ -2908,9 +2909,11 @@ document.addEventListener("DOMContentLoaded", function () {
                 });
             }
             var title = screen.querySelector(".mm-mobile-fill-zone-head strong");
+            var screenTitle = screen.querySelector(".mm-mobile-fill-title h1");
             if (title) {
                 var number = String(complexTitle || "").replace(/[^\d]+/g, "");
                 title.textContent = number ? "Комплекс - " + number : "Комплекс";
+                if (screenTitle) screenTitle.textContent = number ? "Комплекс " + number : "Комплекс";
             }
             var drop = screen.querySelector("[data-mm-mobile-fill-drop]");
             if (drop) {
@@ -3847,14 +3850,21 @@ document.addEventListener("DOMContentLoaded", function () {
 
         function clearMobileTruckTransferTargets() {
             shell.classList.remove("is-truck-transfer-mode");
+            if (home) home.classList.remove("is-transfer-overlay");
             shell.querySelectorAll(".mm-mobile-complex-card.is-transfer-source, .mm-mobile-complex-card.is-transfer-target").forEach(function (card) {
-                card.classList.remove("is-transfer-source", "is-transfer-target");
+                card.classList.remove("is-transfer-source", "is-transfer-target", "is-transfer-hover");
             });
         }
 
         function finishMobileTruckTransferUi(message) {
+            var transfer = mobileTruckTransfer;
+            var returnToFill = !message && transfer && transfer.sourceFillScreen;
             clearMobileTruckTransferTargets();
             mobileTruckTransfer = null;
+            if (returnToFill && home) {
+                home.hidden = true;
+                transfer.sourceFillScreen.hidden = false;
+            }
             if (!mobileTruckTransferBar) return;
             if (mobileTruckTransferNoticeTimer) window.clearTimeout(mobileTruckTransferNoticeTimer);
             if (!message) {
@@ -3903,9 +3913,13 @@ document.addEventListener("DOMContentLoaded", function () {
             if (isMiningMasterMobileReadonly() || !node || node.classList.contains("is-transfer-pending")) return false;
             var transfer = mobileTruckTransferSource(node);
             if (!transfer || !transfer.sourceCard) return false;
+            transfer.sourceFillScreen = node.closest("[data-mm-mobile-fill]");
             if (mobileTruckTransferNoticeTimer) window.clearTimeout(mobileTruckTransferNoticeTimer);
             mobileTruckTransfer = transfer;
-            if (node.closest("[data-mm-mobile-fill]")) closeDetails();
+            if (transfer.sourceFillScreen && home) {
+                home.hidden = false;
+                home.classList.add("is-transfer-overlay");
+            }
             shell.classList.add("is-truck-transfer-mode");
             shell.querySelectorAll(".mm-mobile-complex-card:not(.status-empty)").forEach(function (card) {
                 var isSource = card.dataset.mmMobileExcavatorId === transfer.sourceExcavatorId;
@@ -3913,7 +3927,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 card.classList.toggle("is-transfer-target", !isSource);
             });
             if (mobileTruckTransferCaption) mobileTruckTransferCaption.textContent = "Перестановка самосвала";
-            if (mobileTruckTransferTitle) mobileTruckTransferTitle.textContent = "№" + transfer.truckNumber + " из " + transfer.sourceLabel + " — выберите комплекс";
+            if (mobileTruckTransferTitle) mobileTruckTransferTitle.textContent = "№" + transfer.truckNumber + " из " + transfer.sourceLabel + " — отпустите на экскаваторе";
             if (mobileTruckTransferCancel) mobileTruckTransferCancel.hidden = false;
             if (mobileTruckTransferBar) mobileTruckTransferBar.hidden = false;
             if (window.navigator && typeof window.navigator.vibrate === "function") window.navigator.vibrate(35);
@@ -3934,6 +3948,10 @@ document.addEventListener("DOMContentLoaded", function () {
             if (pendingTile) {
                 pendingTile.classList.add("is-transfer-pending");
                 pendingTile.dataset.mmTransferLabel = "из " + transfer.sourceLabel + " · до 5 мин";
+            }
+            if (transfer.sourceFillScreen && home) {
+                transfer.sourceFillScreen.hidden = true;
+                home.hidden = false;
             }
             finishMobileTruckTransferUi("№" + transfer.truckNumber + " → " + targetLabel + " · до 5 мин");
             dispatcherPostQueued(dispatcherAssignTruckUrl, {
@@ -3969,94 +3987,215 @@ document.addEventListener("DOMContentLoaded", function () {
             }, true);
         }
 
-        function bindMobileHomeTruckDrag(mini) {
-            if (!mini || mini.dataset.mmMobileHomeTruckBound === "true") return;
-            mini.dataset.mmMobileHomeTruckBound = "true";
+        function bindMobileTruckTransferDrag(mini) {
+            if (!mini || mini.dataset.mmTruckTransferDragBound === "true") return;
+            mini.dataset.mmTruckTransferDragBound = "true";
             mini.setAttribute("role", "button");
             mini.setAttribute("tabindex", "0");
-            mini.setAttribute("aria-label", "Самосвал " + (mini.dataset.mmMobileHomeTruckNumber || mini.textContent || "") + ". Удерживайте для перестановки, двойной тап — карточка");
-            var holdTimer = null;
+            var truckNumber = mini.dataset.mmMobileHomeTruckNumber || mini.dataset.mmMobileAssignedTruckNumber || mini.textContent || "";
+            mini.setAttribute("aria-label", "Самосвал " + String(truckNumber).trim() + ". Нажмите для карточки или потяните в сторону для перестановки");
             var startX = 0;
             var startY = 0;
             var activeTouchId = null;
             var activePointerId = null;
-            var transferStarted = false;
-            function clearHold() {
-                if (holdTimer) window.clearTimeout(holdTimer);
-                holdTimer = null;
-                mini.classList.remove("is-hold-pending", "is-hold-ready");
+            var scrollIntent = false;
+            var dragging = false;
+            var ghost = null;
+            var hoverTarget = null;
+
+            function trackedTouch(event) {
+                var touches = event.changedTouches || event.touches || [];
+                for (var index = 0; index < touches.length; index += 1) {
+                    if (touches[index].identifier === activeTouchId) return touches[index];
+                }
+                return null;
             }
-            function scheduleHold() {
-                clearHold();
-                transferStarted = false;
-                mini.classList.add("is-hold-pending");
-                holdTimer = window.setTimeout(function () {
-                    holdTimer = null;
-                    mini.classList.remove("is-hold-pending");
-                    mini.classList.add("is-hold-ready");
-                    transferStarted = beginMobileTruckTransfer(mini);
-                }, 460);
+
+            function clearHoverTarget() {
+                if (hoverTarget) hoverTarget.classList.remove("is-transfer-hover");
+                hoverTarget = null;
             }
+
+            function findTransferTarget(clientX, clientY) {
+                var nodes = document.elementsFromPoint(clientX, clientY);
+                for (var index = 0; index < nodes.length; index += 1) {
+                    var card = nodes[index].closest && nodes[index].closest(".mm-mobile-complex-card.is-transfer-target");
+                    if (card && shell.contains(card)) return card;
+                }
+                return null;
+            }
+
+            function updateTransferDrag(clientX, clientY) {
+                if (ghost) {
+                    ghost.style.left = clientX + "px";
+                    ghost.style.top = clientY + "px";
+                    ghost.style.setProperty("--mm-mobile-home-truck-ghost-rotate", Math.max(-10, Math.min(10, (clientX - startX) * .08)) + "deg");
+                }
+                var nextTarget = findTransferTarget(clientX, clientY);
+                if (nextTarget === hoverTarget) return;
+                clearHoverTarget();
+                hoverTarget = nextTarget;
+                if (hoverTarget) {
+                    hoverTarget.classList.add("is-transfer-hover");
+                    if (window.navigator && typeof window.navigator.vibrate === "function") window.navigator.vibrate(12);
+                }
+            }
+
+            function startTransferDrag(clientX, clientY) {
+                if (dragging || scrollIntent || isMiningMasterMobileReadonly()) return false;
+                var rect = mini.getBoundingClientRect();
+                ghost = mini.cloneNode(true);
+                ghost.querySelectorAll("button").forEach(function (button) { button.remove(); });
+                ghost.removeAttribute("id");
+                ghost.classList.add("mm-mobile-home-truck-ghost", "mm-mobile-transfer-truck-ghost");
+                ghost.style.width = rect.width + "px";
+                ghost.style.height = rect.height + "px";
+                ghost.style.left = clientX + "px";
+                ghost.style.top = clientY + "px";
+                if (!beginMobileTruckTransfer(mini)) {
+                    ghost = null;
+                    return false;
+                }
+                dragging = true;
+                mini.classList.add("is-dragging");
+                document.body.classList.add("mm-mobile-transfer-dragging");
+                document.body.appendChild(ghost);
+                updateTransferDrag(clientX, clientY);
+                return true;
+            }
+
+            function suppressTransferClick(card) {
+                if (!card) return;
+                card.dataset.mmMobileSwipeIgnoreClick = "true";
+                window.setTimeout(function () {
+                    delete card.dataset.mmMobileSwipeIgnoreClick;
+                }, 500);
+            }
+
+            function resetTransferDrag() {
+                clearHoverTarget();
+                mini.classList.remove("is-dragging");
+                document.body.classList.remove("mm-mobile-transfer-dragging");
+                if (ghost) ghost.remove();
+                ghost = null;
+                activeTouchId = null;
+                activePointerId = null;
+                scrollIntent = false;
+                dragging = false;
+            }
+
+            function finishTransferDrag(clientX, clientY, cancelled, event) {
+                if (!dragging) {
+                    resetTransferDrag();
+                    return;
+                }
+                if (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                var target = hoverTarget;
+                var pointTarget = findTransferTarget(clientX, clientY);
+                if (pointTarget) target = pointTarget;
+                suppressTransferClick(mobileTruckTransfer && mobileTruckTransfer.sourceCard);
+                suppressTransferClick(target);
+                if (ghost) ghost.classList.add("is-dropping");
+                if (!cancelled && target) {
+                    completeMobileTruckTransfer(target);
+                } else {
+                    cancelMobileTruckTransfer();
+                }
+                window.setTimeout(resetTransferDrag, 150);
+            }
+
             mini.addEventListener("touchstart", function (event) {
                 if (isMiningMasterMobileReadonly() || !event.changedTouches || !event.changedTouches.length) return;
                 var touch = event.changedTouches[0];
                 activeTouchId = touch.identifier;
                 startX = touch.clientX;
                 startY = touch.clientY;
-                scheduleHold();
+                scrollIntent = false;
+                dragging = false;
             }, { passive: true });
             mini.addEventListener("touchmove", function (event) {
                 if (activeTouchId === null) return;
-                var touch = Array.from(event.changedTouches || event.touches || []).find(function (item) { return item.identifier === activeTouchId; });
+                var touch = trackedTouch(event);
                 if (!touch) return;
-                if (!transferStarted && Math.hypot(touch.clientX - startX, touch.clientY - startY) > 10) clearHold();
-                if (transferStarted) event.preventDefault();
+                var dx = touch.clientX - startX;
+                var dy = touch.clientY - startY;
+                if (!dragging) {
+                    if (Math.abs(dy) >= 12 && Math.abs(dy) > Math.abs(dx)) {
+                        scrollIntent = true;
+                        return;
+                    }
+                    if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy) * 1.05) return;
+                    if (!startTransferDrag(touch.clientX, touch.clientY)) return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                updateTransferDrag(touch.clientX, touch.clientY);
             }, { passive: false });
             mini.addEventListener("touchend", function (event) {
                 if (activeTouchId === null) return;
-                activeTouchId = null;
-                if (transferStarted) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                }
-                clearHold();
-                transferStarted = false;
+                var touch = trackedTouch(event) || (event.changedTouches && event.changedTouches[0]);
+                finishTransferDrag(touch ? touch.clientX : startX, touch ? touch.clientY : startY, false, event);
             }, { passive: false });
-            mini.addEventListener("touchcancel", function () {
-                activeTouchId = null;
-                clearHold();
-                transferStarted = false;
-            });
+            mini.addEventListener("touchcancel", function (event) {
+                if (activeTouchId === null) return;
+                var touch = trackedTouch(event);
+                finishTransferDrag(touch ? touch.clientX : startX, touch ? touch.clientY : startY, true, event);
+            }, { passive: false });
             mini.addEventListener("pointerdown", function (event) {
                 if (event.pointerType === "touch" || isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
                 activePointerId = event.pointerId;
                 startX = event.clientX;
                 startY = event.clientY;
-                scheduleHold();
+                scrollIntent = false;
+                dragging = false;
+                if (mini.setPointerCapture) {
+                    try { mini.setPointerCapture(activePointerId); } catch (error) {}
+                }
             });
             mini.addEventListener("pointermove", function (event) {
                 if (activePointerId === null || event.pointerId !== activePointerId) return;
-                if (!transferStarted && Math.hypot(event.clientX - startX, event.clientY - startY) > 10) clearHold();
+                var dx = event.clientX - startX;
+                var dy = event.clientY - startY;
+                if (!dragging) {
+                    if (Math.abs(dy) >= 12 && Math.abs(dy) > Math.abs(dx)) {
+                        scrollIntent = true;
+                        return;
+                    }
+                    if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy) * 1.05) return;
+                    if (!startTransferDrag(event.clientX, event.clientY)) return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                updateTransferDrag(event.clientX, event.clientY);
             });
             mini.addEventListener("pointerup", function (event) {
                 if (activePointerId === null || event.pointerId !== activePointerId) return;
-                activePointerId = null;
-                clearHold();
-                transferStarted = false;
+                finishTransferDrag(event.clientX, event.clientY, false, event);
             });
-            mini.addEventListener("pointercancel", function () {
-                activePointerId = null;
-                clearHold();
-                transferStarted = false;
+            mini.addEventListener("pointercancel", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                finishTransferDrag(event.clientX, event.clientY, true, event);
             });
-            mini.addEventListener("contextmenu", function (event) {
+            mini.addEventListener("click", function (event) {
+                if (!mini.dataset.mmMobileAssignedTruckId || dragging || mini.closest(".mm-mobile-complex-card")) return;
                 event.preventDefault();
+                event.stopPropagation();
+                openEquipmentCard(mini.dataset.mmMobileAssignedTruckId);
             });
             mini.addEventListener("mm-mobile-complex-swipe-takeover", function () {
-                clearHold();
-                transferStarted = false;
+                if (dragging) cancelMobileTruckTransfer();
+                resetTransferDrag();
             });
+        }
+
+        function bindMobileHomeTruckDrag(mini) {
+            if (!mini || mini.dataset.mmMobileHomeTruckBound === "true") return;
+            mini.dataset.mmMobileHomeTruckBound = "true";
+            bindMobileTruckTransferDrag(mini);
         }
 
         function openTabPanel(panelName) {
@@ -4646,7 +4785,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         function bindMobileFillAssignedTruckRelease(mini) {
             if (!mini) return;
-            ensureMobileTruckTransferHandle(mini);
+            bindMobileTruckTransferDrag(mini);
             if (!window.PointerEvent || mini.dataset.mmMobileReleaseBound === "true") return;
             mini.dataset.mmMobileReleaseBound = "true";
             var startX = 0;
@@ -4814,6 +4953,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 var dy = event.clientY - startY;
                 var dx = event.clientX - startX;
                 if (!dragging) {
+                    if (mini.classList.contains("is-dragging") || (Math.abs(dx) >= 14 && Math.abs(dx) > Math.abs(dy) * 1.05)) {
+                        clearHoldState();
+                        return;
+                    }
                     if (Math.abs(dy) < 8) return;
                     dragging = true;
                     if (!holdReady) {
@@ -5407,6 +5550,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (isMiningMasterMobileReadonly()) return;
                 if (activeTouchId !== null || card.classList.contains("is-releasing")) return;
                 if (!event.changedTouches || !event.changedTouches.length) return;
+                var truckControl = event.target && event.target.closest
+                    ? event.target.closest("[data-mm-mobile-home-truck-id], [data-mm-mobile-open-truck-list]")
+                    : null;
+                if (truckControl && card.contains(truckControl)) return;
                 var touch = event.changedTouches[0];
                 activeTouchId = touch.identifier;
                 activePointerId = null;
@@ -5444,12 +5591,6 @@ document.addEventListener("DOMContentLoaded", function () {
             bindMobileComplexSwipe(card);
             if (card.dataset.mmMobileComplexOpenBound === "true") return;
             card.dataset.mmMobileComplexOpenBound = "true";
-            var previousInfoTapAt = 0;
-            var previousInfoTapKey = "";
-            var previousInfoTapX = 0;
-            var previousInfoTapY = 0;
-            var infoDoubleTapWindowMs = 340;
-            var infoDoubleTapDistancePx = 24;
 
             function infoTargetFromEvent(event) {
                 var overflow = event.target && event.target.closest
@@ -5476,48 +5617,27 @@ document.addEventListener("DOMContentLoaded", function () {
                 };
             }
 
-            function resetPreviousInfoTap() {
-                previousInfoTapAt = 0;
-                previousInfoTapKey = "";
-                previousInfoTapX = 0;
-                previousInfoTapY = 0;
-            }
-
             card.addEventListener("click", function (event) {
                 if (card.dataset.mmMobileSwipeIgnoreClick === "true" || card.classList.contains("is-releasing") || card.classList.contains("is-releasing-trucks")) {
                     event.preventDefault();
                     event.stopPropagation();
-                    resetPreviousInfoTap();
                     return;
                 }
                 event.preventDefault();
                 event.stopPropagation();
                 var target = infoTargetFromEvent(event);
                 if (target && target.openTruckList) {
-                    resetPreviousInfoTap();
                     openFill(card.dataset.mmMobileOpenComplex);
                     return;
                 }
                 if (!target || !target.cardId) {
-                    resetPreviousInfoTap();
                     return;
                 }
-                var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
-                var distance = Math.hypot(event.clientX - previousInfoTapX, event.clientY - previousInfoTapY);
-                if (
-                    previousInfoTapKey === target.key &&
-                    now - previousInfoTapAt <= infoDoubleTapWindowMs &&
-                    distance <= infoDoubleTapDistancePx
-                ) {
-                    resetPreviousInfoTap();
+                if (target.key.indexOf("truck:") === 0) {
                     openEquipmentCard(target.cardId);
                     return;
                 }
-                previousInfoTapAt = now;
-                previousInfoTapKey = target.key;
-                previousInfoTapX = event.clientX;
-                previousInfoTapY = event.clientY;
-                pulseMiningMasterInfoTarget(target.node);
+                openFill(card.dataset.mmMobileOpenComplex);
             });
             card.addEventListener("keydown", function (event) {
                 if (event.key !== "Enter" && event.key !== " ") return;
