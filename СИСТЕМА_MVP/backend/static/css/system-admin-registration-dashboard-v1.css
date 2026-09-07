@@ -13,6 +13,13 @@
    управленческой витрины. Алиасы сохраняют единое оформление компонентов без
    копирования всей таблицы и графиков во второй набор стилей. */
 .management-registration-shell {
+    /* Общий диспетчерский fallback уменьшает любой landscape-экран до
+       виртуальных 1400x800. Этот отчёт уже адаптивный, поэтому ему нужна
+       фактическая ширина окна без transform-масштабирования. */
+    width: 100%;
+    height: 100dvh;
+    transform: none;
+    --gd-header-h: clamp(108px, 11vh, 126px);
     --admin-panel: var(--gd-panel);
     --admin-panel-soft: var(--gd-panel-soft);
     --admin-ink: var(--gd-ink);
@@ -39,6 +46,12 @@
 
 .management-registration-page .adoption-filter-form .admin-button {
     font-family: inherit;
+}
+
+@media (min-width: 1181px) and (max-width: 1500px) {
+    .management-registration-shell .management-dashboard-header-title h1 {
+        font-size: 25px;
+    }
 }
 
 @supports not (zoom: 1) {
