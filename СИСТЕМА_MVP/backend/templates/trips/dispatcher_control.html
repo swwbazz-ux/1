@@ -96,44 +96,42 @@
                     {% if complex.is_empty %}
                         <div class="complex-empty" aria-hidden="true"></div>
                     {% else %}
-                        <div class="complex-work-head">
-                            <div class="complex-title-state">
-                                <h2>{{ complex.id }}</h2>
-                                {% if not mining_master_mobile_enabled and complex.active_downtime.active %}
-                                    <span class="complex-downtime-status" title="{{ complex.active_downtime.reason }}">
-                                        <span>{{ complex.active_downtime.reason }}</span>
-                                        <time
-                                            datetime="{{ complex.active_downtime.started_at }}"
-                                            data-gd-downtime-timer
-                                            data-started-at="{{ complex.active_downtime.started_at }}"
-                                        >{{ complex.active_downtime.elapsed_label }}</time>
-                                    </span>
-                                {% else %}
-                                    <span class="complex-state-chip">{{ complex.status_label }}</span>
-                                {% endif %}
-                            </div>
-                            <div class="complex-context">
-                                <span class="complex-info-chip chip-horizon">{{ complex.current_horizon|default:"Гор. -" }}</span>
-                                <span class="complex-info-chip chip-block">{{ complex.current_block|default:"Блок -" }}</span>
-                                <span class="complex-info-chip chip-rock">{{ complex.current_rock|default:"порода не указана" }}</span>
-                                {% if complex.unload_points %}
-                                    <div class="complex-unload-points">
-                                    {% for point in complex.unload_points %}
-                                        <span class="complex-info-chip chip-unload">{{ point.name }} {{ point.percent }}%</span>
-                                    {% endfor %}
-                                    </div>
-                                {% endif %}
-                                <div class="dispatcher-plan-strip{% if not complex.plan_has_plan %} is-plan-missing{% endif %}" data-plan-status="{{ complex.plan_status|default:'plan_not_assigned' }}">
-                                    <strong>{{ complex.plan_percent_label|default:"Не назначен" }}</strong>
-                                    <span>{{ complex.plan_fact_label|default:"План не назначен" }}</span>
-                                    {% if complex.plan_group_name %}<em>{{ complex.plan_group_name }}</em>{% endif %}
-                                    {% if complex.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ complex.plan_visual.completed_loops }}">×{{ complex.plan_visual.completed_loops }}</b>{% endif %}
+                        <div class="complex-title-state">
+                            <h2>{{ complex.id }}</h2>
+                            {% if not mining_master_mobile_enabled and complex.active_downtime.active %}
+                                <span class="complex-downtime-status" title="{{ complex.active_downtime.reason }}" data-card-single-line-badge>
+                                    <span>{{ complex.active_downtime.reason }}</span>
+                                    <time
+                                        datetime="{{ complex.active_downtime.started_at }}"
+                                        data-gd-downtime-timer
+                                        data-started-at="{{ complex.active_downtime.started_at }}"
+                                    >{{ complex.active_downtime.elapsed_label }}</time>
+                                </span>
+                            {% else %}
+                                <span class="complex-state-chip" data-card-single-line-badge>{{ complex.status_label }}</span>
+                            {% endif %}
+                        </div>
+                        <div class="complex-context">
+                            <span class="complex-info-chip chip-horizon" data-card-single-line-badge>{{ complex.current_horizon|default:"Гор. -" }}</span>
+                            <span class="complex-info-chip chip-block" data-card-single-line-badge>{{ complex.current_block|default:"Блок -" }}</span>
+                            <span class="complex-info-chip chip-rock" data-card-single-line-badge>{{ complex.current_rock|default:"порода не указана" }}</span>
+                            {% if complex.unload_points %}
+                                <div class="complex-unload-points">
+                                {% for point in complex.unload_points %}
+                                    <span class="complex-info-chip chip-unload" data-card-single-line-badge>{{ point.name }} {{ point.percent }}%</span>
+                                {% endfor %}
                                 </div>
+                            {% endif %}
+                            <div class="dispatcher-plan-strip{% if not complex.plan_has_plan %} is-plan-missing{% endif %}" data-plan-status="{{ complex.plan_status|default:'plan_not_assigned' }}">
+                                <strong>{{ complex.plan_percent_label|default:"Не назначен" }}</strong>
+                                <span>{{ complex.plan_fact_label|default:"План не назначен" }}</span>
+                                {% if complex.plan_group_name %}<em>{{ complex.plan_group_name }}</em>{% endif %}
+                                {% if complex.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ complex.plan_visual.completed_loops }}">×{{ complex.plan_visual.completed_loops }}</b>{% endif %}
                             </div>
                         </div>
-                        <div class="complex-assigned-trucks {{ complex.truck_scale_class }}" style="--complex-truck-cols: {{ complex.truck_column_count|default:1 }};" aria-label="Активные самосвалы комплекса">
+                        <div class="complex-assigned-trucks {{ complex.truck_scale_class }}" aria-label="Активные самосвалы комплекса">
                             {% for truck in complex.active_truck_tiles %}
-                                <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-complex-truck="true" data-assigned-zone="{{ complex.zone_key }}" data-plan-status="{{ truck.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ truck.percent|default:0 }}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" data-plan-mode="{{ truck.plan_calculation_mode|default:'' }}" data-plan-value="{{ truck.plan_value|default:'' }}" data-plan-fact="{{ truck.plan_fact_value|default:'' }}" data-plan-unit="{{ truck.plan_unit|default:'' }}" data-plan-group="{{ truck.plan_group_name|default:'' }}">
+                                <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-truck-tile data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-complex-truck="true" data-assigned-zone="{{ complex.zone_key }}" data-plan-status="{{ truck.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ truck.percent|default:0 }}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" data-plan-mode="{{ truck.plan_calculation_mode|default:'' }}" data-plan-value="{{ truck.plan_value|default:'' }}" data-plan-fact="{{ truck.plan_fact_value|default:'' }}" data-plan-unit="{{ truck.plan_unit|default:'' }}" data-plan-group="{{ truck.plan_group_name|default:'' }}">
                                     <strong>{{ truck.name }}</strong>
                                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                                     <span>{{ truck.label }}</span>
@@ -6183,38 +6181,21 @@ document.addEventListener("DOMContentLoaded", function () {
             empty.textContent = "самосвалы не назначены";
             rack.appendChild(empty);
         }
-        rack.classList.remove("truck-fill-1", "truck-fill-2", "truck-fill-3", "truck-fill-4");
-        rack.classList.add(tiles.length <= 6 ? "truck-fill-1" : tiles.length <= 12 ? "truck-fill-2" : tiles.length <= 18 ? "truck-fill-3" : "truck-fill-4");
-        var columns = tiles.length === 0 ? 6 : Math.min(6, Math.max(1, tiles.length));
-        if (tiles.length > 6) columns = 6;
-        var gap = tiles.length > 10 ? 5 : 6;
-        var garageTiles = Array.from(document.querySelectorAll("[data-garage-item='truck']"));
-        var garageRect = null;
-        garageTiles.some(function (garageTile) {
-            var rect = garageTile.getBoundingClientRect();
-            if (rect.width > 20 && rect.height > 20) {
-                garageRect = rect;
-                return true;
-            }
-            return false;
-        });
-        var boardStyles = getComputedStyle(document.querySelector(".dispatcher-board") || document.documentElement);
-        var cssGarageWidth = parseFloat(boardStyles.getPropertyValue("--gd-truck-slot-w")) || 74;
-        var cssGarageHeight = parseFloat(boardStyles.getPropertyValue("--gd-truck-slot-h")) || 74;
-        var garageWidth = garageRect ? garageRect.width : cssGarageWidth;
-        var garageHeight = garageRect ? garageRect.height : cssGarageHeight;
-        var rackWidth = rack.clientWidth || rack.getBoundingClientRect().width || 1;
-        var fittedWidth = Math.floor((rackWidth - (gap * (columns - 1))) / columns);
-        var stepWidth = tiles.length <= 6 ? garageWidth : tiles.length <= 12 ? Math.min(garageWidth, 66) : tiles.length <= 18 ? Math.min(garageWidth, 58) : Math.min(garageWidth, 50);
-        var width = Math.max(24, Math.min(garageWidth, stepWidth, fittedWidth));
-        var scale = garageWidth > 0 ? width / garageWidth : 1;
-        var height = Math.max(24, Math.min(garageHeight, Math.floor(garageHeight * scale)));
-        var justify = tiles.length >= 5 ? "space-between" : "start";
-        rack.style.setProperty("--complex-truck-cols", String(columns));
-        rack.style.setProperty("--complex-truck-gap", gap + "px");
-        rack.style.setProperty("--complex-truck-w", width + "px");
-        rack.style.setProperty("--complex-truck-h", height + "px");
-        rack.style.setProperty("--complex-truck-justify", justify);
+        var gap = 6;
+        var rackWidth = rack.clientWidth || 1;
+        var naturalTile = 92;
+        var naturalColumns = Math.max(1, Math.floor((rackWidth + gap) / (naturalTile + gap)));
+        var targetColumns = Math.max(1, Math.min(7, tiles.length || naturalColumns));
+        var needsCompactTiles = tiles.length > naturalColumns;
+        var fittedTile = Math.floor((rackWidth - (gap * (targetColumns - 1))) / targetColumns);
+        var tile = needsCompactTiles
+            ? Math.max(44, Math.min(naturalTile - 4, fittedTile))
+            : Math.max(44, Math.min(naturalTile, fittedTile));
+        var renderedColumns = Math.max(1, Math.floor((rackWidth + gap) / (tile + gap)));
+        var renderedRows = tiles.length ? Math.ceil(tiles.length / renderedColumns) : 0;
+
+        rack.style.setProperty("--tile", tile + "px");
+        rack.dataset.truckRows = String(renderedRows);
         if (empty) empty.hidden = tiles.length > 0;
     }
     function refreshAllComplexTruckRacks() {
@@ -6235,6 +6216,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!garage || !tile) return false;
         removeDuplicateDesktopTruckTiles(tile.dataset.equipmentId, tile);
         tile.classList.remove("complex-truck-tile", "dispatcher-dragging");
+        tile.removeAttribute("data-truck-tile");
         setDispatcherNodeEquipmentState(tile, "free", "truck");
         tile.dataset.dispatcherDrag = "truck";
         tile.dataset.garageItem = "truck";
@@ -6260,6 +6242,7 @@ document.addEventListener("DOMContentLoaded", function () {
         var zoneId = complexCard.dataset.zoneId || "";
         removeDuplicateDesktopTruckTiles(tile.dataset.equipmentId, tile);
         tile.classList.add("complex-truck-tile");
+        tile.setAttribute("data-truck-tile", "");
         tile.classList.remove("dispatcher-dragging", "is-placeholder");
         setDispatcherNodeEquipmentState(tile, "assigned", "truck");
         tile.dataset.dispatcherDrag = "truck";
@@ -6395,18 +6378,16 @@ document.addEventListener("DOMContentLoaded", function () {
         targetCard.setAttribute("tabindex", "0");
         targetCard.setAttribute("draggable", "true");
         targetCard.innerHTML =
-            '<div class="complex-work-head">' +
-                '<div class="complex-title-state">' +
-                    "<h2>" + escapeHtml(zoneLabel) + "</h2>" +
-                    '<span class="complex-state-chip">' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
-                '</div>' +
-                '<div class="complex-context">' +
-                    '<span class="complex-info-chip chip-horizon">Гор. -</span>' +
-                    '<span class="complex-info-chip chip-block">Блок -</span>' +
-                    '<span class="complex-info-chip chip-rock">порода не указана</span>' +
-                "</div>" +
+            '<div class="complex-title-state">' +
+                "<h2>" + escapeHtml(zoneLabel) + "</h2>" +
+                '<span class="complex-state-chip" data-card-single-line-badge>' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
+            '</div>' +
+            '<div class="complex-context">' +
+                '<span class="complex-info-chip chip-horizon" data-card-single-line-badge>Гор. -</span>' +
+                '<span class="complex-info-chip chip-block" data-card-single-line-badge>Блок -</span>' +
+                '<span class="complex-info-chip chip-rock" data-card-single-line-badge>порода не указана</span>' +
             "</div>" +
-            '<div class="complex-assigned-trucks truck-fill-1" style="--complex-truck-cols: 6;" aria-label="Активные самосвалы комплекса">' +
+            '<div class="complex-assigned-trucks truck-fill-1" aria-label="Активные самосвалы комплекса">' +
                 '<em class="complex-truck-empty">самосвалы не назначены</em>' +
             "</div>";
         tile.remove();
@@ -6803,6 +6784,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v63" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v65" defer></script>
 {% endif %}
 {% endblock %}

@@ -12479,6 +12479,213 @@ body.dispatcher-fit-screen .dispatcher-excavator-garage-tile img {
     height: 32px;
 }
 
+/* Карточка комплекса: три независимые строки без абсолютных наложений. */
+body.dispatcher-fit-screen .dispatcher-zone-grid {
+    grid-auto-rows: minmax(max-content, 1fr);
+    align-content: start;
+}
+
+body.dispatcher-fit-screen .dispatcher-complex-card:not(.status-empty) {
+    --tile: 80px;
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(min-content, 1fr);
+    align-content: start;
+    gap: 8px;
+    box-sizing: border-box;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    min-height: 300px;
+    padding: 16px;
+    overflow: visible;
+}
+
+body.dispatcher-fit-screen .dispatcher-complex-card:not(.status-empty):has(.complex-truck-tile:hover) {
+    overflow: visible;
+}
+
+body.dispatcher-fit-screen .dispatcher-complex-card > .complex-title-state {
+    grid-row: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    align-content: start;
+    gap: 8px;
+    min-width: 0;
+}
+
+body.dispatcher-fit-screen .dispatcher-complex-card > .complex-title-state h2 {
+    flex: 0 0 auto;
+    min-width: max-content;
+    margin: 0;
+    overflow: visible;
+    color: var(--gd-ink);
+    font-size: 42px;
+    font-weight: 800;
+    line-height: .92;
+    text-overflow: clip;
+    white-space: nowrap;
+}
+
+body.dispatcher-fit-screen .complex-state-chip,
+body.dispatcher-fit-screen .complex-downtime-status,
+body.dispatcher-fit-screen .complex-info-chip {
+    flex: 0 0 auto;
+    width: max-content;
+    min-width: max-content;
+    max-width: none;
+    overflow: visible;
+    word-break: normal;
+    overflow-wrap: normal;
+    text-overflow: clip;
+    white-space: nowrap;
+}
+
+body.dispatcher-fit-screen .complex-state-chip {
+    font-size: 11px;
+    line-height: 1;
+}
+
+body.dispatcher-fit-screen .complex-downtime-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+body.dispatcher-fit-screen .complex-downtime-status > span {
+    flex: 0 0 auto;
+    min-width: max-content;
+    overflow: visible;
+    font-size: 11px;
+    line-height: 1;
+    word-break: normal;
+    overflow-wrap: normal;
+    white-space: nowrap;
+}
+
+body.dispatcher-fit-screen .complex-downtime-status > time {
+    flex: 0 0 auto;
+    font-size: 12px;
+}
+
+body.dispatcher-fit-screen .dispatcher-complex-card > .complex-context {
+    grid-row: 2;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    align-content: start;
+    justify-content: flex-end;
+    justify-self: stretch;
+    gap: 4px;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    text-align: right;
+}
+
+body.dispatcher-fit-screen .dispatcher-complex-card > .complex-context > * {
+    flex: 0 0 auto;
+}
+
+body.dispatcher-fit-screen .complex-info-chip {
+    font-size: 12px;
+    line-height: 1;
+}
+
+body.dispatcher-fit-screen .complex-info-chip.chip-horizon,
+body.dispatcher-fit-screen .complex-info-chip.chip-block {
+    font-size: 13px;
+}
+
+body.dispatcher-fit-screen .complex-info-chip.chip-unload {
+    font-size: 11px;
+}
+
+body.dispatcher-fit-screen .complex-unload-points {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: flex-end;
+    gap: 3px;
+    width: auto;
+    max-width: 100%;
+    max-height: none;
+    overflow: visible;
+}
+
+body.dispatcher-fit-screen .dispatcher-plan-strip {
+    position: relative;
+    flex: 0 0 auto;
+    width: max-content;
+    min-width: max-content;
+    max-width: 100%;
+    overflow: visible;
+}
+
+body.dispatcher-fit-screen .dispatcher-plan-strip strong {
+    font-size: 16px;
+}
+
+body.dispatcher-fit-screen .dispatcher-plan-strip span,
+body.dispatcher-fit-screen .dispatcher-plan-strip em {
+    overflow: visible;
+    text-overflow: clip;
+    word-break: normal;
+    overflow-wrap: normal;
+    white-space: nowrap;
+}
+
+body.dispatcher-fit-screen .dispatcher-plan-strip span {
+    font-size: 12px;
+}
+
+body.dispatcher-fit-screen .dispatcher-plan-strip em {
+    font-size: 10px;
+}
+
+body.dispatcher-fit-screen .dispatcher-complex-card > .complex-assigned-trucks {
+    grid-row: 3;
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--tile), 1fr));
+    grid-auto-flow: row;
+    grid-auto-rows: max-content;
+    align-content: start;
+    justify-content: stretch;
+    gap: 6px;
+    min-width: 0;
+    min-height: min-content;
+    max-height: none;
+    padding: 0;
+    overflow: visible;
+}
+
+body.dispatcher-fit-screen .complex-assigned-trucks .complex-truck-tile {
+    box-sizing: border-box;
+    width: auto;
+    height: auto;
+    min-width: 44px;
+    min-height: 44px;
+    aspect-ratio: 1;
+}
+
+body.dispatcher-fit-screen .complex-truck-tile strong {
+    font-size: 11px;
+}
+
+body.dispatcher-fit-screen .complex-truck-tile span {
+    font-size: 8px;
+}
+
+body.dispatcher-fit-screen .complex-truck-empty {
+    grid-column: 1 / -1;
+    align-self: center;
+    justify-self: center;
+}
+
 @media print {
     body.dispatcher-control-screen {
         background: #ffffff;
