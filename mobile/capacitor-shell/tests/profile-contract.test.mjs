@@ -25,8 +25,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "34",
-    versionName: "0.1.22",
+    versionCode: "37",
+    versionName: "0.1.23",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -80,8 +80,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator.qa",
     appName: "Экскаваторщик QA",
-    versionCode: "7",
-    versionName: "1.0.6-qa",
+    versionCode: "8",
+    versionName: "1.0.7-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -91,8 +91,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "36",
-    versionName: "0.1.22",
+    versionCode: "39",
+    versionName: "0.1.23",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -102,8 +102,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "35",
-    versionName: "0.1.22-rc",
+    versionCode: "38",
+    versionName: "0.1.23-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -120,7 +120,7 @@ for (const [profileName, expected] of Object.entries(expectedProfiles)) {
     assert.equal(config.appName, expected.appName);
     assert.match(config.applicationId, /^[a-z][a-z0-9_.]+$/);
     assert.ok(config.heartbeatUrl.startsWith(config.serverUrl));
-    if (profileName.startsWith("driver")) {
+    if (profileName.startsWith("driver") || profileName.startsWith("excavator")) {
       assert.equal(config.heartbeatIntervalSeconds, "10");
     } else {
       assert.ok(Number(config.heartbeatIntervalSeconds) >= 15);
@@ -430,25 +430,43 @@ test("recorded equipment numbers are packaged and routed through native sequence
   const catalog = readFileSync(resolve(javaRoot, "EquipmentVoiceCatalog.java"), "utf8");
   const plugin = readFileSync(resolve(javaRoot, "NativeSoundPlugin.java"), "utf8");
   const player = readFileSync(resolve(javaRoot, "OperationalVoicePlayer.java"), "utf8");
+  const announcer = readFileSync(resolve(javaRoot, "OperationalVoiceAnnouncer.java"), "utf8");
   const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
   const sounds = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "static", "js", "mobile-operational-sounds-v1.js"), "utf8");
   const driverTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "users", "driver_shift.html"), "utf8");
   const excavatorTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "trips", "excavator_work.html"), "utf8");
 
   assert.match(plugin, /public void announceEquipment\(PluginCall call\)/);
+  assert.match(plugin, /public void announceEquipmentBatch\(PluginCall call\)/);
   assert.match(player, /playSequence\([\s\S]*?playVoiceSegment/);
+  assert.match(announcer, /public static synchronized Result announceOperations\(/);
+  assert.match(announcer, /announced_operational_voice_operations/);
   assert.match(catalog, /case "528":[\s\S]*?voice_excavator_assignment_" \+ normalized/);
   assert.match(catalog, /number >= 10 && number <= 52/);
   assert.match(catalog, /number >= 54 && number <= 63/);
   assert.match(catalog, /voice_truck_sent_sklad_okislennoy_rudy/);
   assert.match(service, /target_excavator_number/);
   assert.match(service, /truck_number/);
+  assert.match(service, /showLatestExcavatorAssignmentAlerts/);
+  assert.match(service, /excavator-assignment:/);
+  assert.match(service, /"HaulAssignment"\.equals\(event\.optString\("object_type", ""\)\)/);
+  assert.match(service, /payload\.optJSONArray\("truck_ids"\)/);
   assert.match(sounds, /announceEquipment: announceEquipment/);
+  assert.match(sounds, /announceEquipmentBatch: announceEquipmentBatch/);
   assert.match(driverTemplate, /driver_excavator_assigned/);
   assert.match(driverTemplate, /data-driver-excavator-number/);
   assert.match(excavatorTemplate, /excavator_truck_assigned/);
   assert.match(excavatorTemplate, /excavator_truck_removed/);
   assert.match(excavatorTemplate, /excavator_truck_sent/);
+  const excavatorShellVersion = excavatorTemplate.match(
+    /var excavatorShellVersion = "(excavator-mobile-shell-v\d+)";/
+  )?.[1];
+  assert.equal(excavatorShellVersion, "excavator-mobile-shell-v220");
+  const excavatorAssetVersions = [
+    ...excavatorTemplate.matchAll(/\?v=(excavator-mobile-shell-v\d+)/g),
+  ].map((match) => match[1]);
+  assert.ok(excavatorAssetVersions.length > 0);
+  assert.ok(excavatorAssetVersions.every((version) => version === excavatorShellVersion));
 });
 
 test("foreground driver screen uses the same deduplicated recorded voice bridge", () => {

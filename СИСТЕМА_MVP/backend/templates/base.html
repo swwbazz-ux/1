@@ -2429,7 +2429,7 @@ window.AppRealtimeConfig = {
         {name: "dispatcher-shift-report", role: "dispatcher", mode: "custom", path: "^/dispatcher/shift-reports/(?:trucks|excavation|hourly)/?$", customRefresh: true},
         {name: "dispatcher-reports", role: "dispatcher", mode: "manual", path: "^/dispatcher/"},
         {name: "mining-master", role: "mining_master", mode: "custom", path: "^/mining-master/", customRefresh: true},
-        {name: "excavator", role: "excavator_operator", mode: "custom", path: "^/excavator/work/?$", customRefresh: true, foregroundReconcile: true},
+        {name: "excavator", role: "excavator_operator", mode: "custom", path: "^/excavator/work/?$", customRefresh: true, foregroundReconcile: true, pollIntervalMs: 2000},
         {name: "driver", role: "driver", mode: "custom", path: "^/driver/(?:shift(?:/close)?/?)?$", customRefresh: true, foregroundReconcile: true, pollIntervalMs: 2000},
         {name: "system-admin", role: "system_admin", mode: "observer", path: "^/system-admin/"},
         {name: "management-shift-analytics", role: "management", mode: "custom", path: "^/reports/shift-analytics/?$", customRefresh: true},
