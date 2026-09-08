@@ -27784,6 +27784,132 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         white-space: nowrap;
     }
 
+    .mm-mobile-report-content {
+        display: grid;
+        gap: 12px;
+        align-content: start;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+    }
+
+    .mm-mobile-tab-panel[data-mm-mobile-panel="reports"] .mm-mobile-report-grid {
+        grid-auto-rows: minmax(82px, auto);
+        overflow: visible;
+    }
+
+    .mm-mobile-tab-panel[data-mm-mobile-panel="reports"] .mm-mobile-report-grid article {
+        gap: 4px;
+        padding: 10px 8px;
+    }
+
+    .mm-mobile-tab-panel[data-mm-mobile-panel="reports"] .mm-mobile-report-grid strong {
+        font-size: 28px;
+    }
+
+    .mm-mobile-report-grid article > small {
+        overflow: hidden;
+        max-width: 100%;
+        color: rgba(180, 194, 201, .7);
+        font-size: 10px;
+        font-weight: 800;
+        line-height: 1;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .mm-mobile-report-destinations {
+        overflow: hidden;
+        border: 1px solid rgba(139, 159, 170, .38);
+        border-radius: 9px;
+        background: rgba(8, 19, 27, .72);
+    }
+
+    .mm-mobile-report-destinations > header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        min-height: 44px;
+        padding: 6px 8px 6px 12px;
+        border-bottom: 1px solid rgba(139, 159, 170, .26);
+    }
+
+    .mm-mobile-report-destinations > header > span {
+        color: rgba(180, 194, 201, .86);
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: .035em;
+        text-transform: uppercase;
+    }
+
+    .mm-mobile-report-destinations > header > button {
+        min-height: 34px;
+        padding: 0 10px;
+        border: 1px solid rgba(88, 223, 82, .48);
+        border-radius: 7px;
+        background: rgba(88, 223, 82, .1);
+        color: #71e76c;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 900;
+    }
+
+    .mm-mobile-report-destination {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        min-height: 52px;
+        padding: 8px 12px;
+    }
+
+    .mm-mobile-report-destination + .mm-mobile-report-destination {
+        border-top: 1px solid rgba(139, 159, 170, .2);
+    }
+
+    .mm-mobile-report-destination > div {
+        min-width: 0;
+    }
+
+    .mm-mobile-report-destination strong,
+    .mm-mobile-report-destination small {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .mm-mobile-report-destination strong {
+        color: #f3f7f8;
+        font-size: 14px;
+        line-height: 1.1;
+    }
+
+    .mm-mobile-report-destination small {
+        margin-top: 4px;
+        color: rgba(180, 194, 201, .72);
+        font-size: 10px;
+        line-height: 1;
+    }
+
+    .mm-mobile-report-destination > b {
+        color: #39c8ee;
+        font-size: 18px;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+    }
+
+    .mm-mobile-report-destination-list > p {
+        margin: 0;
+        padding: 18px 12px;
+        color: rgba(180, 194, 201, .7);
+        font-size: 12px;
+        text-align: center;
+    }
+
     .mm-mobile-version-strip {
         display: flex;
         align-items: center;
@@ -29268,14 +29394,14 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         z-index: 8;
         display: grid;
         place-items: center;
-        width: 24px;
-        height: 24px;
+        width: 30px;
+        height: 30px;
         padding: 0;
         border: 1px solid rgba(88, 223, 82, .72);
-        border-radius: 6px;
+        border-radius: 8px;
         color: #8ff18a;
         background: rgba(5, 30, 21, .94);
-        font-size: 15px;
+        font-size: 18px;
         font-weight: 900;
         line-height: 1;
         touch-action: manipulation;

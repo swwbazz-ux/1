@@ -2050,7 +2050,7 @@ def build_dispatcher_dashboard_context(
         с реальным экскаватором ``4`` и ломает ключи realtime-фрагмента.
         """
         raw = str(getattr(equipment, 'garage_number', '') or '').strip().upper()
-        ordinary = re.fullmatch(r'(?:ЭКГ|ЭКС|Э)?[\s\-№]*(\d+)', raw)
+        ordinary = re.fullmatch(r'(?:ЭКГ|ЭКС|Э|К|K)?[\s\-№]*(\d+)', raw)
         if ordinary:
             return f'K-{int(ordinary.group(1))}'
         slug = re.sub(r'[^0-9A-ZА-ЯЁ]+', '-', raw).strip('-')
@@ -2614,6 +2614,42 @@ def build_dispatcher_dashboard_context(
             ),
         })
 
+    completed_shift_percent = (
+        int((completed_tons / DISPATCHER_PLAN_TOTAL_TONS) * 100)
+        if DISPATCHER_PLAN_TOTAL_TONS
+        else 0
+    )
+    completed_shift_detail = dispatcher_shift_plan_detail(
+        completed_trips=completed_shift_trips,
+        active_trips=[],
+        completed_use_tonnage=completed_use_tonnage,
+        fact_tons=completed_tons,
+        plan_tons=DISPATCHER_PLAN_TOTAL_TONS,
+        completion_percent=max(0, min(100, completed_shift_percent)),
+    )
+    active_truck_equipment_ids = {
+        truck.id
+        for truck in trucks_list
+        if getattr(truck, 'is_active', True)
+    }
+    report_working_truck_ids = (
+        ((accepted_truck_ids | active_trip_truck_ids) & active_truck_equipment_ids)
+        - downtime_truck_ids
+    )
+    mobile_shift_report = {
+        'completed_trip_count': len(completed_shift_trips),
+        'active_trip_count': len(active_shift_trips),
+        'completed_fact': format_dispatcher_number(completed_tons),
+        'unit_label': completed_shift_detail['unit_label'],
+        'working_trucks': len(report_working_truck_ids),
+        'free_trucks': sum(
+            1
+            for tile in mobile_truck_garage_tiles
+            if tile.get('equipment_state_code') == 'free'
+        ),
+        'points': completed_shift_detail['points'],
+    }
+
     for tile in excavator_tiles:
         equipment = tile.get('equipment')
         if (
@@ -2887,6 +2923,7 @@ def build_dispatcher_dashboard_context(
         },
         'completion_percent': completion_percent,
         'shift_plan_detail': shift_plan_detail,
+        'mobile_shift_report': mobile_shift_report,
         'excavator_tiles': excavator_tiles,
         'excavator_garage_tiles': excavator_garage_tiles,
         'mobile_excavator_garage_tiles': mobile_excavator_garage_tiles,
