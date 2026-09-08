@@ -660,7 +660,55 @@
             if (roleAppCode) {
                 url.searchParams.set("role_app_code", roleAppCode);
             }
-            return url.toString();
+            /* Версия возвращается вместе с адресом: она принадлежит конкретному
+               запросу, а не текущему состоянию клиента, которое к моменту ответа
+               может уйти вперёд. */
+            return {url: url.toString(), afterVersion: afterVersion};
+        }
+
+        /* Рабочее событие уходит на озвучку раньше решения об обновлении экрана.
+           Голос не должен ждать ни занятого интерфейса, ни загрузки фрагмента:
+           это сигнал «смотри сюда», а экран его лишь подтверждает.
+
+           Версия сверяется с той, с которой ушёл именно этот запрос. Поэтому
+           первый ответ без «after» не проигрывает накопленную историю, а ответ,
+           пришедший не по порядку, не озвучивает уже пройденное.
+
+           Усечённую дельту пропускаем сознательно: сервер отдаёт из неё самые
+           старые события, значит нужного, самого свежего, в ней может не быть. */
+        function dispatchOperationalSignals(payload, requestedAfterVersion) {
+            if (typeof window.handleOperationalStateSignals !== "function") {
+                return;
+            }
+            if (!(requestedAfterVersion > 0)) {
+                return;
+            }
+            if (Number(payload.version || 0) <= requestedAfterVersion) {
+                return;
+            }
+            if (payload.relevant === false || payload.events_truncated === true) {
+                return;
+            }
+            if (!Array.isArray(payload.events) || !payload.events.length) {
+                return;
+            }
+            var freshEvents = payload.events.filter(function (event) {
+                return event && Number(event.version || 0) > requestedAfterVersion;
+            });
+            if (!freshEvents.length) {
+                return;
+            }
+            try {
+                window.handleOperationalStateSignals({
+                    events: freshEvents,
+                    stateVersion: Number(payload.version || 0),
+                    requestedAfterVersion: requestedAfterVersion,
+                    screen: screen ? screen.name : null,
+                    role: screen ? screen.role : null
+                });
+            } catch (error) {
+                // Ранний сигнал не имеет права ломать обновление экрана.
+            }
         }
 
         function pollOperationalState(options) {
@@ -692,6 +740,8 @@
                 } catch (error) {}
             }
             var pollGeneration = ++realtimePollGeneration;
+            var pollRequest = buildOperationalStatePollUrl();
+            var capturedAfterVersion = Number(pollRequest.afterVersion || 0);
             realtimePollInFlight = true;
             realtimeLastPollStartedAt = Date.now();
             var pollController = window.AbortController ? new AbortController() : null;
@@ -712,7 +762,7 @@
             if (pollController) {
                 fetchOptions.signal = pollController.signal;
             }
-            window.fetch(buildOperationalStatePollUrl(), fetchOptions)
+            window.fetch(pollRequest.url, fetchOptions)
                 .then(function (response) {
                     if (pollGeneration !== realtimePollGeneration) {
                         return null;
@@ -752,6 +802,7 @@
                             return;
                         }
                     }
+                    dispatchOperationalSignals(payload, capturedAfterVersion);
                     if (reconcileForeground) {
                         if (pendingVersion !== version) {
                             pendingVersionSince = Date.now();
