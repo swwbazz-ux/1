@@ -331,7 +331,7 @@ class DriverShiftLifecycleTests(TestCase):
         shift = self.open_shift()
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='ЭКС-1')
-        rock = RockType.objects.create(name='Руда', density='2.50')
+        rock = RockType.objects.create(name='Скальная порода', density='2.50', loosening_factor='1.5000')
         point = DumpPoint.objects.create(name='ККД')
         trip = Trip.objects.create(
             truck=self.truck,
@@ -766,7 +766,7 @@ class ShiftPlanServiceTests(TestCase):
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
         dump_point = DumpPoint.objects.create(name='ККД')
-        rock_type = RockType.objects.create(name='Руда')
+        rock_type = RockType.objects.create(name='Скальная порода', density='2.6000', loosening_factor='1.5000')
         shift = self.create_shift_with_snapshot(truck, employee_name='Водитель snapshot')
         loading_shift = EmployeeShift.objects.create(
             employee=operator,
@@ -883,7 +883,7 @@ class ShiftPlanServiceTests(TestCase):
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='4')
         driver = Employee.objects.create(full_name='Водитель')
         operator = Employee.objects.create(full_name='Машинист')
-        rock_type = RockType.objects.create(name='Руда', density='2.4000')
+        rock_type = RockType.objects.create(name='Скальная порода', density='2.4000', loosening_factor='1.5000')
         dump_point = DumpPoint.objects.create(name='ККД')
         production_date = production_work_date()
         opened_at = production_day_bounds(production_date)[0] + timedelta(hours=3)

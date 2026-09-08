@@ -210,7 +210,7 @@ class ReportSemanticsRegressionTests(TestCase):
             equipment_type=self.truck_type,
             garage_number='10',
         )
-        self.rock = RockType.objects.create(name='Руда')
+        self.rock = RockType.objects.create(name='Скальная порода', density='2.6000', loosening_factor='1.5000')
         self.dump_point = DumpPoint.objects.create(name='ККД')
         self.selected_date = timezone.localdate()
         self.event_at = timezone.make_aware(
@@ -344,7 +344,7 @@ class ShiftAnalyticsReportTests(TestCase):
         self.truck = Equipment.objects.create(equipment_type=self.truck_type, model=self.truck_model, garage_number='25')
         self.open_truck = Equipment.objects.create(equipment_type=self.truck_type, model=self.truck_model, garage_number='26')
         self.excavator = Equipment.objects.create(equipment_type=self.excavator_type, model=self.excavator_model, garage_number='4')
-        self.rock = RockType.objects.create(name='Руда', density=Decimal('2.0000'))
+        self.rock = RockType.objects.create(name='Скальная порода', density=Decimal('2.0000'), loosening_factor=Decimal('1.5000'))
         self.dump_point = DumpPoint.objects.create(name='ККД')
         TruckCapacityRule.objects.create(equipment_model=self.truck_model, rock_type=self.rock, volume_m3=Decimal('38.00'))
 
@@ -466,7 +466,7 @@ class ShiftAnalyticsReportTests(TestCase):
         self.assertEqual(analytics['excavator_rows'][0]['loaded_count'], 2)
         self.assertEqual(analytics['truck_rows'][0]['unloaded_count'], 1)
         self.assertEqual(analytics['employee_rows'][0]['label'], 'Машинист')
-        self.assertEqual(analytics['rock_rows'][0]['label'], 'Руда')
+        self.assertEqual(analytics['rock_rows'][0]['label'], 'Скальная порода')
         self.assertEqual(analytics['face_rows'][0]['label'], '75 / 52')
 
     def test_shift_analytics_uses_authoritative_shift_production_date(self):

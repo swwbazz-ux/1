@@ -1251,7 +1251,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertIn(self.other_excavator.id, inactive_ids)
 
     def test_mining_master_can_reassign_truck_with_active_trip(self):
-        rock_type = RockType.objects.create(name='Руда')
+        rock_type = RockType.objects.create(name='Скальная порода', density='2.6000', loosening_factor='1.5000')
         dump_point = DumpPoint.objects.create(name='Отвал тест')
         Trip.objects.create(
             truck=self.assigned_truck,

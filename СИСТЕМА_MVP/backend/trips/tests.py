@@ -486,7 +486,7 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.active_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='11')
         self.downtime_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='12')
         self.assigned_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='13')
-        self.rock = RockType.objects.create(name='Руда')
+        self.rock = RockType.objects.create(name='Скальная порода', density='2.6000', loosening_factor='1.5000')
         self.dump_point = DumpPoint.objects.create(name='ККД')
         self.reason = DowntimeReason.objects.create(
             name='Аварийный простой',
