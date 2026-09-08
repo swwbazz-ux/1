@@ -28871,30 +28871,32 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     }
 
     .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card.is-transfer-source {
-        border-color: rgba(149, 167, 176, .38);
-        filter: grayscale(.65);
-        opacity: .48;
+        border: 2px solid #9edfff;
+        background: rgba(16, 43, 57, .98);
+        box-shadow: inset 0 0 22px rgba(92, 192, 236, .12), 0 0 18px rgba(92, 192, 236, .2);
+        filter: none;
+        opacity: 1;
     }
 
     .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card.is-transfer-source::after {
-        content: "Сейчас";
+        content: "Оставить";
         position: static;
         display: inline-flex;
         box-sizing: border-box;
         grid-column: 2;
         grid-row: 1;
         justify-self: end;
-        min-width: 44px;
+        min-width: 58px;
         width: auto;
         height: 24px;
         margin: 0;
         padding: 0 7px;
         align-items: center;
         justify-content: center;
-        border: 1px solid rgba(149, 167, 176, .36);
+        border: 1px solid rgba(158, 223, 255, .72);
         border-radius: 6px;
-        color: #9aabb3;
-        background: rgba(149, 167, 176, .07);
+        color: #d9f4ff;
+        background: rgba(92, 192, 236, .13);
         font-size: 9px;
         font-weight: 900;
         opacity: 1;

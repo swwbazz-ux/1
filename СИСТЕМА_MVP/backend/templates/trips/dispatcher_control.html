@@ -1157,7 +1157,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v150";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v151";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -3946,6 +3946,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (home) home.classList.remove("is-transfer-overlay");
             shell.querySelectorAll(".mm-mobile-complex-card.is-transfer-source, .mm-mobile-complex-card.is-transfer-target").forEach(function (card) {
                 card.classList.remove("is-transfer-source", "is-transfer-target", "is-transfer-hover");
+                card.style.removeProperty("order");
             });
         }
 
@@ -4003,7 +4004,35 @@ document.addEventListener("DOMContentLoaded", function () {
             };
         }
 
-        function beginMobileTruckTransfer(node) {
+        function pinMobileTruckTransferSourceAtPoint(sourceCard, clientX, clientY) {
+            var grid = home && home.querySelector(".mm-mobile-complex-grid");
+            if (!grid || !sourceCard || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+            var cards = Array.from(grid.querySelectorAll(".mm-mobile-complex-card:not(.status-empty)")).filter(function (card) {
+                return !card.hidden && card.style.display !== "none";
+            });
+            var sourceIndex = cards.indexOf(sourceCard);
+            if (sourceIndex < 0 || cards.length < 2) return;
+            cards.forEach(function (card, index) {
+                card.style.order = String(index);
+            });
+            var rect = grid.getBoundingClientRect();
+            if (!rect.width || !rect.height) return;
+            var gridStyle = window.getComputedStyle(grid);
+            var columnGap = parseFloat(gridStyle.columnGap) || 0;
+            var rowGap = parseFloat(gridStyle.rowGap) || 0;
+            var rowCount = Math.max(1, Math.ceil(cards.length / 2));
+            var columnWidth = Math.max(1, (rect.width - columnGap) / 2);
+            var rowHeight = Math.max(1, (rect.height - rowGap * (rowCount - 1)) / rowCount);
+            var column = clientX >= rect.left + columnWidth + columnGap / 2 ? 1 : 0;
+            var row = Math.max(0, Math.min(rowCount - 1, Math.floor((clientY - rect.top) / (rowHeight + rowGap))));
+            var slotIndex = Math.min(cards.length - 1, row * 2 + column);
+            if (slotIndex === sourceIndex) return;
+            var slotCard = cards[slotIndex];
+            sourceCard.style.order = String(slotIndex);
+            slotCard.style.order = String(sourceIndex);
+        }
+
+        function beginMobileTruckTransfer(node, clientX, clientY) {
             if (isMiningMasterMobileReadonly() || !node || node.classList.contains("is-transfer-pending")) return false;
             var transfer = mobileTruckTransferSource(node);
             if (!transfer || !transfer.sourceCard) return false;
@@ -4022,6 +4051,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 card.classList.toggle("is-transfer-source", isSource);
                 card.classList.toggle("is-transfer-target", !isSource);
             });
+            pinMobileTruckTransferSourceAtPoint(transfer.sourceCard, clientX, clientY);
             if (mobileTruckTransferCaption) mobileTruckTransferCaption.textContent = "Перестановка самосвала";
             if (mobileTruckTransferTitle) mobileTruckTransferTitle.textContent = "№" + transfer.truckNumber + " из " + transfer.sourceLabel + " — отпустите на экскаваторе";
             if (mobileTruckTransferCancel) mobileTruckTransferCancel.hidden = false;
@@ -4148,7 +4178,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 ghost.style.height = rect.height + "px";
                 ghost.style.left = clientX + "px";
                 ghost.style.top = clientY + "px";
-                if (!beginMobileTruckTransfer(mini)) {
+                if (!beginMobileTruckTransfer(mini, clientX, clientY)) {
                     ghost = null;
                     return false;
                 }
@@ -4195,7 +4225,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 suppressTransferClick(mobileTruckTransfer && mobileTruckTransfer.sourceCard);
                 suppressTransferClick(target);
                 if (ghost) ghost.classList.add("is-dropping");
-                if (!cancelled && target) {
+                var travelDistance = Math.hypot(clientX - startX, clientY - startY);
+                if (!cancelled && target && travelDistance >= 36) {
                     completeMobileTruckTransfer(target);
                 } else {
                     cancelMobileTruckTransfer();

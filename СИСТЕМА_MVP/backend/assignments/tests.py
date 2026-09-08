@@ -312,9 +312,12 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'data-mm-truck-transfer-bar')
         self.assertContains(response, 'data-mm-mobile-open-truck-list')
         self.assertContains(response, 'var visibleLimit = 3;')
-        self.assertContains(response, 'function beginMobileTruckTransfer(node)')
+        self.assertContains(response, 'function pinMobileTruckTransferSourceAtPoint(sourceCard, clientX, clientY)')
+        self.assertContains(response, 'function beginMobileTruckTransfer(node, clientX, clientY)')
         self.assertContains(response, 'home.classList.add("is-transfer-overlay")')
         self.assertContains(response, 'transferGrid.scrollTop = 0')
+        self.assertContains(response, 'pinMobileTruckTransferSourceAtPoint(transfer.sourceCard, clientX, clientY)')
+        self.assertContains(response, 'travelDistance >= 36')
         self.assertContains(response, 'function completeMobileTruckTransfer(targetCard)')
         self.assertContains(response, 'expected_assignment_state_id: transfer.assignmentStateId')
         self.assertContains(response, 'function bindMobileTruckTransferDrag(mini)')
@@ -625,7 +628,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v150')
+        self.assertContains(response, 'mining-master-mobile-shell-v151')
         self.assertContains(response, 'mining-master-mobile-sync-queue-v3')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v1")')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v2")')
@@ -701,10 +704,10 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v150', script)
+        self.assertIn('mining-master-mobile-shell-v151', script)
         self.assertEqual(
             response['X-App-Shell-Version'],
-            'mining-master-mobile-shell-v150',
+            'mining-master-mobile-shell-v151',
         )
         self.assertIn(
             f'const CACHE_NAME = "{response["X-App-Shell-Version"]}";',
