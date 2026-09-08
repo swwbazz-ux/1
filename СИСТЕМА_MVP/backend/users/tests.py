@@ -217,6 +217,11 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'encodeURIComponent(text)')
         self.assertContains(response, 'window.location.assign(maxShareUrl)')
         self.assertNotContains(response, 'Отчёт скопирован для отправки')
+        self.assertContains(response, 'grid-auto-rows: minmax(64px, auto);')
+        self.assertContains(response, 'overflow-x: hidden;')
+        self.assertContains(response, 'overflow-y: auto;')
+        self.assertContains(response, 'overscroll-behavior-y: contain;')
+        self.assertContains(response, 'touch-action: pan-y;')
         self.assertContains(response, 'Событий в текущей смене пока нет')
 
     def test_shared_shift_hold_distinguishes_soft_and_native_disabled_actions(self):

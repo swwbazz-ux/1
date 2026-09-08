@@ -3540,23 +3540,33 @@ body.driver-mobile-screen .driver-report-actions button {
 body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="timeline"].is-active,
 body.driver-mobile-screen .driver-timeline {
     min-height: 0;
-    height: 100%;
-    overflow: hidden;
 }
 
 body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="timeline"].is-active {
-    display: grid;
+    display: block;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 12px;
 }
 
 body.driver-mobile-screen .driver-timeline {
     display: grid;
-    grid-auto-rows: minmax(0, 1fr);
-    align-content: stretch;
+    width: 100%;
+    height: auto;
+    grid-auto-rows: minmax(64px, auto);
+    align-content: start;
+    overflow: visible;
 }
 
 body.driver-mobile-screen .driver-timeline-row {
-    min-height: 0;
-    height: 100%;
+    width: 100%;
+    min-height: 64px;
+    height: auto;
+    box-sizing: border-box;
 }
 
 body.driver-mobile-screen .driver-shell-version {
