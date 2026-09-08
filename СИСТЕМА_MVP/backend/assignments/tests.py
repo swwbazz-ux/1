@@ -15,7 +15,7 @@ from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentSta
 from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanCalculationMode, ShiftClientAction
 from shifts.services import assign_shift_plan_snapshot
 from trips.models import Trip, TripStatus
-from users.models import Employee, EmployeeAccess, Role
+from users.models import ActiveApplicationSession, Employee, EmployeeAccess, Role
 
 from .models import AssignmentStatus, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
 from .services import (
@@ -290,6 +290,152 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertIn('.mm-mobile-complex-card.has-plan-progress::before', css)
         self.assertIn('touch-action: pan-y;', css)
         self.assertIn('Вертикальное движение принадлежит сетке', html)
+
+    def test_mining_master_marks_current_worker_presence_on_equipment(self):
+        driver_role = Role.objects.create(code='driver', name='Водитель')
+        driver = Employee.objects.create(
+            full_name='Водитель Онлайн',
+            phone='79000000402',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        driver_access = EmployeeAccess.objects.create(
+            employee=driver,
+            role=driver_role,
+            access_code='400002',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        now = timezone.now()
+        EmployeeShift.objects.create(
+            employee=driver,
+            workplace_code='driver',
+            shift_type='day',
+            equipment=self.assigned_truck,
+            opened_at=now - timedelta(minutes=30),
+            opened_by=driver,
+        )
+        ActiveApplicationSession.objects.create(
+            session_key='driver-online-presence',
+            access=driver_access,
+            role_code='driver',
+            app_code='driver',
+            path='/driver/',
+            client_kind=ActiveApplicationSession.ClientKind.ANDROID_PWA,
+            last_seen_at=now,
+            foreground_seen_at=now,
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        complex_card = next(
+            card
+            for card in response.context['dispatcher_dashboard']['complex_zones']
+            if card['id'] == 'K-1'
+        )
+        truck_tile = next(
+            tile
+            for tile in complex_card['active_truck_tiles']
+            if tile['card_id'] == str(self.assigned_truck.id)
+        )
+        equipment_card = response.context['dispatcher_dashboard']['equipment_cards'][str(self.assigned_truck.id)]
+
+        self.assertTrue(truck_tile['has_current_shift'])
+        self.assertEqual(truck_tile['presence_status'], 'online')
+        self.assertEqual(equipment_card['employee']['name'], 'Водитель Онлайн')
+        self.assertEqual(equipment_card['employee']['presence_status'], 'online')
+        self.assertContains(response, 'data-application-presence="online"')
+        self.assertContains(response, 'mm-mobile-presence-dot is-online')
+
+    def test_mining_master_marks_excavator_background_presence_on_complex(self):
+        excavator_role = Role.objects.create(code='excavator', name='Машинист экскаватора')
+        operator = Employee.objects.create(
+            full_name='Машинист на фоновой связи',
+            phone='79000000404',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        operator_access = EmployeeAccess.objects.create(
+            employee=operator,
+            role=excavator_role,
+            access_code='400004',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        now = timezone.now()
+        EmployeeShift.objects.create(
+            employee=operator,
+            workplace_code='excavator',
+            shift_type='day',
+            equipment=self.excavator,
+            opened_at=now - timedelta(minutes=30),
+            opened_by=operator,
+        )
+        ActiveApplicationSession.objects.create(
+            session_key='excavator-background-presence',
+            access=operator_access,
+            role_code='excavator',
+            app_code='excavator',
+            path='/excavator/',
+            client_kind=ActiveApplicationSession.ClientKind.ANDROID_PWA,
+            last_seen_at=now,
+            foreground_seen_at=now - timedelta(minutes=5),
+            background_seen_at=now,
+        )
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        complex_card = next(
+            card
+            for card in response.context['dispatcher_dashboard']['complex_zones']
+            if card['id'] == 'K-1'
+        )
+        equipment_card = response.context['dispatcher_dashboard']['equipment_cards'][
+            f'complex-equipment-{self.excavator.id}'
+        ]
+
+        self.assertTrue(complex_card['has_current_shift'])
+        self.assertEqual(complex_card['presence_status'], 'background')
+        self.assertEqual(equipment_card['employee']['name'], 'Машинист на фоновой связи')
+        self.assertEqual(equipment_card['employee']['presence_status'], 'background')
+        self.assertContains(response, 'data-application-presence="background"')
+        self.assertContains(response, 'mm-mobile-presence-dot is-background')
+
+    def test_mining_master_excludes_stale_open_shift_from_plan_and_presence(self):
+        driver = Employee.objects.create(
+            full_name='Водитель Старой Смены',
+            phone='79000000403',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        group = EquipmentPlanGroup.objects.create(
+            name='План старой смены',
+            code='stale-truck-shift-plan',
+            calculation_mode=PlanCalculationMode.TRIPS,
+            plan_value='20.00',
+            is_active=True,
+            active_from=production_work_date(),
+        )
+        group.equipment.add(self.free_truck)
+        stale_shift = EmployeeShift.objects.create(
+            employee=driver,
+            workplace_code='driver',
+            shift_type='day',
+            equipment=self.free_truck,
+            opened_at=timezone.now() - timedelta(hours=20),
+            opened_by=driver,
+        )
+        assign_shift_plan_snapshot(stale_shift)
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        garage_tile = next(
+            tile
+            for tile in response.context['dispatcher_dashboard']['mobile_truck_garage_tiles']
+            if tile['card_id'] == str(self.free_truck.id)
+        )
+
+        self.assertFalse(garage_tile['has_current_shift'])
+        self.assertFalse(garage_tile['plan_has_plan'])
+        self.assertGreaterEqual(response.context['dispatcher_dashboard']['stale_equipment_shift_count'], 1)
+        self.assertContains(response, 'Старая незакрытая смена · на пульте не учитывается')
 
     def test_mining_master_truck_plan_overrun_uses_progress_cycle_contract(self):
         excavator_group = EquipmentPlanGroup.objects.create(
@@ -793,7 +939,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v160')
+        self.assertContains(response, 'mining-master-mobile-shell-v161')
         self.assertContains(response, 'mining-master-mobile-sync-queue-v3')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v1")')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v2")')
@@ -813,7 +959,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>')
-        self.assertContains(response, '>версия v160</span>')
+        self.assertContains(response, '>версия v161</span>')
         self.assertNotContains(response, '<div class="mm-mobile-version-strip" aria-label="Версия приложения">')
         self.assertContains(response, '<div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>')
         self.assertContains(response, '<span class="mm-mobile-update-badge" data-mm-pwa-update-badge')
@@ -870,10 +1016,10 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v160', script)
+        self.assertIn('mining-master-mobile-shell-v161', script)
         self.assertEqual(
             response['X-App-Shell-Version'],
-            'mining-master-mobile-shell-v160',
+            'mining-master-mobile-shell-v161',
         )
         self.assertIn(
             f'const CACHE_NAME = "{response["X-App-Shell-Version"]}";',

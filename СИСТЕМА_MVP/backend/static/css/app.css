@@ -29148,6 +29148,8 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     }
 
     .mm-mobile-complex-card h2 {
+        display: inline-flex;
+        align-items: center;
         margin: 0;
         color: #f3f7f8;
         font-size: 28px;
@@ -29156,6 +29158,47 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         letter-spacing: 0;
         text-transform: uppercase;
         white-space: nowrap;
+    }
+
+    .mm-mobile-presence-dot {
+        --mm-mobile-presence-color: #95a7b0;
+        display: block;
+        box-sizing: border-box;
+        width: 8px;
+        height: 8px;
+        flex: 0 0 8px;
+        border: 1px solid rgba(3, 14, 18, .92);
+        border-radius: 999px;
+        background: var(--mm-mobile-presence-color);
+        box-shadow: 0 0 6px color-mix(in srgb, var(--mm-mobile-presence-color) 72%, transparent);
+        pointer-events: none;
+    }
+
+    .mm-mobile-presence-dot.is-online {
+        --mm-mobile-presence-color: #58df52;
+    }
+
+    .mm-mobile-presence-dot.is-background {
+        --mm-mobile-presence-color: #38bdf8;
+    }
+
+    .mm-mobile-presence-dot.is-recent {
+        --mm-mobile-presence-color: #ffd166;
+    }
+
+    .mm-mobile-presence-dot.is-offline {
+        --mm-mobile-presence-color: #ff8a24;
+    }
+
+    .mm-mobile-presence-dot.is-not_registered {
+        --mm-mobile-presence-color: #95a7b0;
+        box-shadow: none;
+    }
+
+    .mm-mobile-complex-card h2 .mm-mobile-presence-dot {
+        position: relative;
+        z-index: 5;
+        margin-left: 5px;
     }
 
     .mm-mobile-status-chip {
@@ -29312,6 +29355,28 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         pointer-events: none;
         -webkit-mask: none;
         mask: none;
+    }
+
+    .mm-mobile-truck-mini .mm-mobile-truck-number {
+        position: relative;
+        z-index: 4;
+        display: grid;
+        place-items: center;
+        width: 100%;
+        height: 100%;
+        color: inherit;
+        font: inherit;
+        line-height: 1;
+        pointer-events: none;
+    }
+
+    .mm-mobile-truck-mini > .mm-mobile-presence-dot,
+    .mm-mobile-truck-card > .mm-mobile-presence-dot,
+    .mm-mobile-garage-excavator > .mm-mobile-presence-dot {
+        position: absolute;
+        top: 3px;
+        right: 3px;
+        z-index: 6;
     }
 
     .mm-mobile-truck-mini.is-plan-overrun .mm-mobile-plan-ring-layer,
@@ -29555,14 +29620,7 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     }
 
     .mm-mobile-truck-mini::before {
-        content: "";
-        position: absolute;
-        inset: 0 auto 0 0;
-        width: 3px;
-        border-radius: 5px 0 0 5px;
-        background: var(--mm-mobile-truck-accent);
-        box-shadow: 0 0 10px var(--mm-mobile-truck-accent);
-        opacity: .95;
+        display: none;
     }
 
     .mm-mobile-flying-truck {
@@ -29961,6 +30019,30 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     .mm-mobile-truck-preview {
         gap: 3px;
     }
+}
+
+.dispatcher-stale-shift-label {
+    display: block;
+    margin-top: 4px;
+    color: #d38a31;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.gd-equipment-detail .mm-detail-employee-info span.is-online {
+    color: #58df52;
+}
+
+.gd-equipment-detail .mm-detail-employee-info span.is-background {
+    color: #38bdf8;
+}
+
+.gd-equipment-detail .mm-detail-employee-info span.is-recent {
+    color: #ffd166;
+}
+
+.gd-equipment-detail .mm-detail-employee-info span.is-offline {
+    color: #ff8a24;
 }
 
 .admin-employee-detail-shell .employee-detail-page {

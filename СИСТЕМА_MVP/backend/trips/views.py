@@ -1009,6 +1009,36 @@ def dispatcher_truck_garage_number(truck, fallback_index):
     return None
 
 
+MINING_MASTER_EQUIPMENT_SHIFT_MAX_AGE = timedelta(hours=16)
+MINING_MASTER_FRESH_SHIFT_GRACE = timedelta(hours=3)
+MINING_MASTER_LIVE_PRESENCE_CODES = frozenset({'online', 'background', 'recent'})
+
+
+def mining_master_equipment_shift_is_current(shift, *, now=None):
+    """Отделяет текущую работу техники от старой незакрытой смены.
+
+    У ранних и стандартных комплексов разные часы пересменки, поэтому в
+    окнах 06:00-08:00 и 18:00-20:00 допустимы обе смены. Свежий heartbeat
+    сохраняет смену видимой при задержке сотрудника, но запись старше 16
+    часов всё равно считается служебным хвостом и не даёт плановый контур.
+    """
+    if not shift or not shift.equipment_id or not shift.opened_at:
+        return False
+    now = now or timezone.now()
+    age = now - shift.opened_at
+    if age > MINING_MASTER_EQUIPMENT_SHIFT_MAX_AGE:
+        return False
+    if age <= MINING_MASTER_FRESH_SHIFT_GRACE:
+        return True
+    presence = getattr(shift, 'application_presence', None) or {}
+    if presence.get('status_code') in MINING_MASTER_LIVE_PRESENCE_CODES:
+        return True
+    local_hour = timezone.localtime(now).hour
+    if 6 <= local_hour < 8 or 18 <= local_hour < 20:
+        return True
+    return shift.shift_type == production_shift_type(now)
+
+
 def dispatcher_employee_badge(employee, *, presence_label='В смене'):
     if not employee:
         return None
@@ -1019,6 +1049,13 @@ def dispatcher_employee_badge(employee, *, presence_label='В смене'):
         except ValueError:
             photo_url = ''
     initials = ''.join(part[0] for part in (employee.full_name or '').split()[:2]).upper()
+    presence = getattr(employee, 'application_presence', None) or {}
+    client_labels = []
+    for badge in presence.get('client_badges') or []:
+        label = badge.get('label') or ''
+        version = badge.get('version') or ''
+        if label:
+            client_labels.append(f'{label} · {version}' if version else label)
     return {
         'name': employee.full_name or '',
         'phone': employee.phone or '',
@@ -1026,6 +1063,9 @@ def dispatcher_employee_badge(employee, *, presence_label='В смене'):
         'photo': photo_url,
         'initials': initials or '??',
         'presence_label': presence_label,
+        'presence_status': presence.get('status_code') or '',
+        'last_seen_label': format_dispatcher_datetime(presence.get('last_seen_at')),
+        'client_label': ', '.join(client_labels),
     }
 
 
@@ -1842,10 +1882,33 @@ def build_dispatcher_dashboard_context(
             'truck': reporting_plan_facts_by_equipment('truck'),
             'excavator': reporting_plan_facts_by_equipment('excavator'),
         }
-    open_shift_by_equipment_id = {}
+    first_open_shift_by_equipment_id = {}
+    latest_open_shift_by_equipment_id = {}
     for shift in open_shifts:
-        if shift.equipment_id and shift.equipment_id not in open_shift_by_equipment_id:
-            open_shift_by_equipment_id[shift.equipment_id] = shift
+        if not shift.equipment_id:
+            continue
+        first_open_shift_by_equipment_id.setdefault(shift.equipment_id, shift)
+        current = latest_open_shift_by_equipment_id.get(shift.equipment_id)
+        if current is None or (shift.opened_at, shift.id) > (current.opened_at, current.id):
+            latest_open_shift_by_equipment_id[shift.equipment_id] = shift
+    dashboard_now = timezone.now()
+    if is_mining_master_reporting_period:
+        open_shift_by_equipment_id = {
+            equipment_id: shift
+            for equipment_id, shift in latest_open_shift_by_equipment_id.items()
+            if mining_master_equipment_shift_is_current(shift, now=dashboard_now)
+        }
+        stale_equipment_shifts = [
+            shift
+            for shift in open_shifts
+            if shift.equipment_id and open_shift_by_equipment_id.get(shift.equipment_id) is not shift
+        ]
+    else:
+        # Диспетчерский пульт сохраняет свой прежний полный список открытых
+        # смен. Правило отсечения хвостов относится только к рабочему экрану
+        # Горного мастера и его периоду ответственности.
+        open_shift_by_equipment_id = first_open_shift_by_equipment_id
+        stale_equipment_shifts = []
     work_assignment_by_equipment_id = {
         assignment.equipment_id: assignment
         for assignment in equipment_work_assignments
@@ -1855,11 +1918,28 @@ def build_dispatcher_dashboard_context(
     def dispatcher_employee_for_equipment(equipment_id):
         open_shift = open_shift_by_equipment_id.get(equipment_id)
         if open_shift:
-            return open_shift.employee, 'В смене'
+            presence = getattr(open_shift, 'application_presence', None) or {}
+            presence_label = presence.get('status_label') or 'Нет связи'
+            return open_shift.employee, f'В смене · {presence_label}'
         work_assignment = work_assignment_by_equipment_id.get(equipment_id)
         if work_assignment:
             return work_assignment.employee, f'Назначен на {work_assignment.get_shift_type_display().lower()}'
         return None, 'Сотрудник не назначен'
+
+    def equipment_presence_fields(equipment_id):
+        shift = open_shift_by_equipment_id.get(equipment_id)
+        if not shift:
+            return {
+                'has_current_shift': False,
+                'presence_status': '',
+                'presence_label': '',
+            }
+        presence = getattr(shift, 'application_presence', None) or {}
+        return {
+            'has_current_shift': True,
+            'presence_status': presence.get('status_code') or 'not_registered',
+            'presence_label': presence.get('status_label') or 'Не подключался',
+        }
     truck_equipment_ids = {truck.id for truck in trucks_list}
     excavator_equipment_ids = {excavator.id for excavator in excavators_list}
     selected_equipment_shifts = list(open_shift_by_equipment_id.values())
@@ -2017,10 +2097,22 @@ def build_dispatcher_dashboard_context(
         shift = open_shift_by_equipment_id.get(equipment.id) if equipment else None
         if not shift:
             return []
-        return [
+        presence = getattr(shift, 'application_presence', None) or {}
+        details = [
             {'label': 'Смена', 'value': shift.get_shift_type_display()},
             {'label': 'Смена открыта', 'value': format_dispatcher_datetime(shift.opened_at)},
+            {'label': 'Связь', 'value': presence.get('status_label') or 'Не подключался'},
         ]
+        if presence.get('last_seen_at'):
+            details.append({'label': 'Последняя связь', 'value': format_dispatcher_datetime(presence['last_seen_at'])})
+        client_labels = [
+            badge.get('label')
+            for badge in presence.get('client_badges') or []
+            if badge.get('label')
+        ]
+        if client_labels:
+            details.append({'label': 'Приложение', 'value': ', '.join(dict.fromkeys(client_labels))})
+        return details
 
     completed_tons = Decimal('0')
     completed_use_tonnage = False
@@ -2302,6 +2394,7 @@ def build_dispatcher_dashboard_context(
                     if transfer_source_excavator
                     else ''
                 ),
+                **equipment_presence_fields(truck.id),
             })
         forecast = fact
         current_rock = (
@@ -2345,6 +2438,7 @@ def build_dispatcher_dashboard_context(
             'current_horizon': current_horizon,
             'current_block': current_block,
             'current_rock': current_rock,
+            **equipment_presence_fields(excavator.id),
         })
 
     excavator_tiles = []
@@ -2377,6 +2471,7 @@ def build_dispatcher_dashboard_context(
             'icon': equipment_icon_key(excavator, status),
             'card_id': str(excavator.id) if excavator else '',
             'board_number': board_number,
+            **equipment_presence_fields(excavator.id),
         })
 
     excavator_garage_tiles = []
@@ -2471,6 +2566,9 @@ def build_dispatcher_dashboard_context(
                 'assignment_state_id': row.get('assignment_state_id') or 0,
                 'transfer_pending': bool(row.get('transfer_pending')),
                 'transfer_source_label': row.get('transfer_source_label') or '',
+                'has_current_shift': bool(row.get('has_current_shift')),
+                'presence_status': row.get('presence_status') or '',
+                'presence_label': row.get('presence_label') or '',
             })
         pending_transfer_tile = next((tile for tile in truck_tiles if tile.get('transfer_pending')), None)
         unload_totals = {}
@@ -2685,6 +2783,7 @@ def build_dispatcher_dashboard_context(
                 if truck.id in assignment_by_truck
                 else 0
             ),
+            **equipment_presence_fields(truck.id),
         })
     mobile_truck_garage_tiles = []
     mobile_truck_sort_source = sorted(trucks_list, key=garage_number_int)
@@ -2724,6 +2823,7 @@ def build_dispatcher_dashboard_context(
                 if truck.id in assignment_by_truck
                 else 0
             ),
+            **equipment_presence_fields(truck.id),
         })
 
     completed_shift_percent = (
@@ -2833,7 +2933,8 @@ def build_dispatcher_dashboard_context(
         if not equipment_card_requested(card['card_id']):
             continue
         complex_report = dispatcher_complex_shift_report(card)
-        details = [
+        complex_excavator = card.get('excavator')
+        details = shift_details(complex_excavator) + [
             {
                 'label': 'Экскаватор',
                 'value': ' · '.join(part for part in [
@@ -2849,7 +2950,6 @@ def build_dispatcher_dashboard_context(
             details.append({'label': 'Требует внимания', 'value': card.get('status_label') or 'Комплекс остановлен'})
         elif card.get('status_key') == 'blue':
             details.append({'label': 'Требует внимания', 'value': 'Комплекс назначен без активной операции'})
-        complex_excavator = card.get('excavator')
         equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(complex_excavator.id)
         equipment_cards[str(card['card_id'])] = build_dispatcher_equipment_card(
             card_id=card['card_id'],
@@ -2887,7 +2987,7 @@ def build_dispatcher_dashboard_context(
                 continue
             equipment = truck_by_id.get(int(card_id)) if card_id.isdigit() else None
             status_label = status_label_for(tile.get('status'), tile.get('label'))
-            details = [
+            details = shift_details(equipment) + [
                 {'label': 'Гаражный N', 'value': tile.get('name')},
                 {'label': 'Комплекс', 'value': complex_card.get('id')},
                 {'label': 'Состояние', 'value': tile.get('label')},
@@ -2999,6 +3099,14 @@ def build_dispatcher_dashboard_context(
             'title': f'{equipment_short_name(first_downtime.equipment)} {first_downtime_state["label"]}',
             'action': 'контроль состояния',
         })
+    if stale_equipment_shifts:
+        action_items.append({
+            'priority': 3,
+            'status': 'warning',
+            'title': f'Незакрытые старые смены: {len(stale_equipment_shifts)}',
+            'meta': 'Не участвуют в текущем плане и статусе связи',
+            'action': 'закрыть служебно с причиной',
+        })
     action_items = action_items[:4]
 
     event_rows = []
@@ -3046,6 +3154,8 @@ def build_dispatcher_dashboard_context(
         'completion_percent': completion_percent,
         'shift_plan_detail': shift_plan_detail,
         'mobile_shift_report': mobile_shift_report,
+        'current_equipment_shift_count': len(open_shift_by_equipment_id),
+        'stale_equipment_shift_count': len(stale_equipment_shifts),
         'excavator_tiles': excavator_tiles,
         'excavator_garage_tiles': excavator_garage_tiles,
         'mobile_excavator_garage_tiles': mobile_excavator_garage_tiles,
@@ -6252,6 +6362,11 @@ def dispatcher_control_view(
     for shift in open_shifts:
         shift.role_name = role_by_employee_id.get(shift.employee_id, '-')
         shift.application_presence = presence_by_employee_id.get(shift.employee_id)
+        shift.is_dashboard_stale = bool(
+            (context_overrides or {}).get('mining_master_mobile_enabled')
+            and shift.equipment_id
+            and not mining_master_equipment_shift_is_current(shift)
+        )
 
     trucks = (
         Equipment.objects
