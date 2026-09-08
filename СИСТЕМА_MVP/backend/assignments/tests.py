@@ -189,6 +189,94 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(report['completed_fact'], '400')
         self.assertEqual(report['completed_trip_count'], 1)
 
+    def test_mining_master_plan_contours_restart_with_master_reporting_period(self):
+        """Старый факт техники не должен заполнять контур новой смены мастера."""
+        base_time = timezone.now()
+        self.shift.opened_at = base_time
+        self.shift.save(update_fields=['opened_at'])
+        excavator_group = EquipmentPlanGroup.objects.create(
+            name='Экскаватор периода мастера',
+            code='mm-reporting-period-excavator',
+            calculation_mode=PlanCalculationMode.TRIPS,
+            plan_value='4.00',
+            is_active=True,
+            active_from=production_work_date(),
+        )
+        excavator_group.equipment.add(self.excavator)
+        truck_group = EquipmentPlanGroup.objects.create(
+            name='Самосвал периода мастера',
+            code='mm-reporting-period-truck',
+            calculation_mode=PlanCalculationMode.TRIPS,
+            plan_value='4.00',
+            is_active=True,
+            active_from=production_work_date(),
+        )
+        truck_group.equipment.add(self.assigned_truck)
+        operator = Employee.objects.create(full_name='Машинист периода мастера')
+        driver = Employee.objects.create(full_name='Водитель периода мастера')
+        excavator_shift = EmployeeShift.objects.create(
+            employee=operator,
+            shift_type='day',
+            equipment=self.excavator,
+            opened_at=base_time - timedelta(hours=2),
+            opened_by=operator,
+        )
+        truck_shift = EmployeeShift.objects.create(
+            employee=driver,
+            shift_type='day',
+            equipment=self.assigned_truck,
+            opened_at=base_time - timedelta(hours=2),
+            opened_by=driver,
+        )
+        assign_shift_plan_snapshot(excavator_shift)
+        assign_shift_plan_snapshot(truck_shift)
+        rock = RockType.objects.create(name='Руда периода мастера')
+        dump = DumpPoint.objects.create(name='ККД периода мастера')
+
+        def completed_trip(*, completed_at):
+            return Trip.objects.create(
+                excavator=self.excavator,
+                truck=self.assigned_truck,
+                loading_shift=excavator_shift,
+                unloading_shift=truck_shift,
+                rock_type=rock,
+                dump_point=dump,
+                volume_m3='10.00',
+                status=TripStatus.COMPLETED,
+                created_at=completed_at - timedelta(minutes=5),
+                completed_at=completed_at,
+            )
+
+        completed_trip(completed_at=base_time - timedelta(minutes=30))
+        response = self.client.get(reverse('mining_master_assignments'))
+        complex_card = next(
+            card
+            for card in response.context['dispatcher_dashboard']['complex_zones']
+            if card['id'] == 'K-1'
+        )
+        truck_tile = next(
+            tile
+            for tile in complex_card['active_truck_tiles']
+            if tile['card_id'] == str(self.assigned_truck.id)
+        )
+        self.assertEqual(complex_card['percent'], 0)
+        self.assertEqual(truck_tile['percent'], 0)
+
+        completed_trip(completed_at=base_time + timedelta(minutes=10))
+        response = self.client.get(reverse('mining_master_assignments'))
+        complex_card = next(
+            card
+            for card in response.context['dispatcher_dashboard']['complex_zones']
+            if card['id'] == 'K-1'
+        )
+        truck_tile = next(
+            tile
+            for tile in complex_card['active_truck_tiles']
+            if tile['card_id'] == str(self.assigned_truck.id)
+        )
+        self.assertEqual(complex_card['percent'], 25)
+        self.assertEqual(truck_tile['percent'], 25)
+
     def test_mining_master_mobile_plan_uses_card_contour_without_complex_ring(self):
         response = self.client.get(reverse('mining_master_assignments'))
         html = response.content.decode('utf-8')
@@ -702,7 +790,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v156')
+        self.assertContains(response, 'mining-master-mobile-shell-v157')
         self.assertContains(response, 'mining-master-mobile-sync-queue-v3')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v1")')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v2")')
@@ -722,7 +810,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>')
-        self.assertContains(response, '>версия v156</span>')
+        self.assertContains(response, '>версия v157</span>')
         self.assertNotContains(response, '<div class="mm-mobile-version-strip" aria-label="Версия приложения">')
         self.assertContains(response, '<div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>')
         self.assertContains(response, '<span class="mm-mobile-update-badge" data-mm-pwa-update-badge')
@@ -779,10 +867,10 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v156', script)
+        self.assertIn('mining-master-mobile-shell-v157', script)
         self.assertEqual(
             response['X-App-Shell-Version'],
-            'mining-master-mobile-shell-v156',
+            'mining-master-mobile-shell-v157',
         )
         self.assertIn(
             f'const CACHE_NAME = "{response["X-App-Shell-Version"]}";',

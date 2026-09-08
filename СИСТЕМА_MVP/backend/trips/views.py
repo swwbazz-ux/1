@@ -1806,6 +1806,42 @@ def build_dispatcher_dashboard_context(
             .order_by('-created_at')
         )
     shift_trips = list(shift_trip_queryset[:500])
+    reporting_plan_facts = {
+        'truck': {},
+        'excavator': {},
+    }
+    if is_mining_master_reporting_period:
+        # Контур плана на пульте мастера должен считать тот же отрезок,
+        # что и его отчёт. Смены самосвалов и экскаваторов могут начаться
+        # раньше или закончиться позже — они задают только сам план, но не
+        # переносят свой старый факт в новую смену мастера.
+        def reporting_plan_facts_by_equipment(equipment_field):
+            equipment_key = f'{equipment_field}_id'
+            rows = (
+                shift_trip_queryset
+                .filter(status=TripStatus.COMPLETED)
+                .order_by()
+                .values(equipment_key)
+                .annotate(
+                    trip_count=Count('id'),
+                    volume_m3=Sum('volume_m3'),
+                    tonnage=Sum('tonnage'),
+                )
+            )
+            return {
+                row[equipment_key]: {
+                    'trip_count': row['trip_count'],
+                    'volume_m3': row['volume_m3'],
+                    'tonnage': row['tonnage'],
+                }
+                for row in rows
+                if row[equipment_key]
+            }
+
+        reporting_plan_facts = {
+            'truck': reporting_plan_facts_by_equipment('truck'),
+            'excavator': reporting_plan_facts_by_equipment('excavator'),
+        }
     open_shift_by_equipment_id = {}
     for shift in open_shifts:
         if shift.equipment_id and shift.equipment_id not in open_shift_by_equipment_id:
@@ -1827,17 +1863,21 @@ def build_dispatcher_dashboard_context(
     truck_equipment_ids = {truck.id for truck in trucks_list}
     excavator_equipment_ids = {excavator.id for excavator in excavators_list}
     selected_equipment_shifts = list(open_shift_by_equipment_id.values())
-    snapshot_trip_facts = aggregate_completed_trip_facts_by_shift(
-        unloading_shift_ids=(
-            shift.id
-            for shift in selected_equipment_shifts
-            if shift.equipment_id in truck_equipment_ids
-        ),
-        loading_shift_ids=(
-            shift.id
-            for shift in selected_equipment_shifts
-            if shift.equipment_id in excavator_equipment_ids and shift.plan_status
-        ),
+    snapshot_trip_facts = (
+        {'unloading': {}, 'loading': {}}
+        if is_mining_master_reporting_period
+        else aggregate_completed_trip_facts_by_shift(
+            unloading_shift_ids=(
+                shift.id
+                for shift in selected_equipment_shifts
+                if shift.equipment_id in truck_equipment_ids
+            ),
+            loading_shift_ids=(
+                shift.id
+                for shift in selected_equipment_shifts
+                if shift.equipment_id in excavator_equipment_ids and shift.plan_status
+            ),
+        )
     )
     plan_by_equipment_id = {}
 
@@ -1847,7 +1887,13 @@ def build_dispatcher_dashboard_context(
             return plan_progress_display_context(None)
         if equipment_id not in plan_by_equipment_id:
             shift = open_shift_by_equipment_id.get(equipment_id)
-            if shift and equipment_id in truck_equipment_ids:
+            if shift and is_mining_master_reporting_period:
+                equipment_kind = 'truck' if equipment_id in truck_equipment_ids else 'excavator'
+                progress = calculate_progress_from_snapshot_facts(
+                    shift,
+                    reporting_plan_facts[equipment_kind].get(equipment_id),
+                )
+            elif shift and equipment_id in truck_equipment_ids:
                 progress = calculate_progress_from_snapshot_facts(
                     shift,
                     snapshot_trip_facts['unloading'].get(shift.id),
