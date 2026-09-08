@@ -8915,6 +8915,41 @@ body.management-dynamics-chart-modal-open {
     white-space: nowrap;
 }
 
+.complex-downtime-status {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 4px 7px;
+    min-width: 0;
+    max-width: min(210px, 100%);
+    padding: 4px 7px;
+    border: 1px solid color-mix(in srgb, var(--complex-accent) 72%, transparent);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--complex-accent) 16%, transparent);
+    color: var(--complex-accent);
+}
+
+.complex-downtime-status > span {
+    min-width: 0;
+    font-size: clamp(9px, .62vw, 11px);
+    font-weight: 900;
+    line-height: 1.12;
+    overflow-wrap: anywhere;
+    text-transform: uppercase;
+    white-space: normal;
+}
+
+.complex-downtime-status > time {
+    align-self: center;
+    color: var(--gd-ink);
+    font-size: clamp(10px, .7vw, 12px);
+    font-variant-numeric: tabular-nums;
+    font-weight: 900;
+    letter-spacing: .025em;
+    line-height: 1;
+    white-space: nowrap;
+}
+
 .complex-context {
     display: grid;
     justify-self: end;
@@ -9870,6 +9905,112 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     margin-top: 4px;
     font-size: 13px;
     line-height: 1;
+}
+
+.gd-detail-downtime {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 8px 14px;
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid color-mix(in srgb, var(--gd-orange) 58%, var(--gd-detail-line));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--gd-orange) 10%, var(--gd-detail-panel));
+}
+
+.gd-detail-downtime[hidden] {
+    display: none;
+}
+
+.gd-detail-downtime-copy {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+}
+
+.gd-detail-downtime-copy > span,
+.gd-detail-downtime-copy > small {
+    color: var(--gd-detail-muted);
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+.gd-detail-downtime-copy > span {
+    letter-spacing: .045em;
+    text-transform: uppercase;
+}
+
+.gd-detail-downtime-copy > strong {
+    color: var(--gd-detail-ink);
+    font-size: 16px;
+    font-weight: 900;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+}
+
+.gd-detail-downtime > time {
+    min-width: 92px;
+    color: var(--gd-orange);
+    font-size: 21px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 900;
+    letter-spacing: .035em;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.gd-detail-downtime > button {
+    min-height: 38px;
+    padding: 0 14px;
+    border: 1px solid color-mix(in srgb, var(--gd-red) 74%, var(--gd-detail-line));
+    border-radius: 6px;
+    background: var(--gd-red-soft);
+    color: var(--gd-red);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.gd-detail-downtime > button:hover,
+.gd-detail-downtime > button:focus-visible {
+    border-color: var(--gd-red);
+    background: color-mix(in srgb, var(--gd-red-soft) 70%, var(--gd-red) 14%);
+    outline: none;
+}
+
+.gd-detail-downtime > button:disabled {
+    cursor: wait;
+    opacity: .58;
+}
+
+.gd-detail-downtime-result {
+    grid-column: 1 / -1;
+    min-height: 0;
+    color: var(--gd-detail-muted);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.gd-detail-downtime-result:empty {
+    display: none;
+}
+
+@media (max-width: 760px) {
+    .gd-detail-downtime {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .gd-detail-downtime > button {
+        grid-column: 1 / -1;
+        width: 100%;
+    }
 }
 
 .gd-equipment-detail .mm-detail-list {

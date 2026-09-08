@@ -40,6 +40,12 @@ document.addEventListener("DOMContentLoaded", function () {
     var detailEmployeeName = document.querySelector("[data-gd-detail-employee-name]");
     var detailEmployeePhone = document.querySelector("[data-gd-detail-employee-phone]");
     var detailEmployeePresence = document.querySelector("[data-gd-detail-employee-presence]");
+    var detailDowntime = document.querySelector("[data-gd-detail-downtime]");
+    var detailDowntimeReason = document.querySelector("[data-gd-detail-downtime-reason]");
+    var detailDowntimeStarted = document.querySelector("[data-gd-detail-downtime-started]");
+    var detailDowntimeTimer = document.querySelector("[data-gd-detail-downtime-timer]");
+    var detailDowntimeClose = document.querySelector("[data-gd-detail-downtime-close]");
+    var detailDowntimeResult = document.querySelector("[data-gd-detail-downtime-result]");
     var detailSettings = document.querySelector("[data-gd-detail-settings]");
     var detailSettingsTitle = document.querySelector("[data-gd-detail-settings-title]");
     var detailSettingsHint = document.querySelector("[data-gd-detail-settings-hint]");
@@ -72,6 +78,25 @@ document.addEventListener("DOMContentLoaded", function () {
         var input = document.querySelector("[name=csrfmiddlewaretoken]");
         return getCookie("csrftoken") || (input ? input.value : "");
     }
+    function formatDispatcherDowntimeDuration(totalSeconds) {
+        totalSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        return [hours, minutes, seconds].map(function (value) {
+            return String(value).padStart(2, "0");
+        }).join(":");
+    }
+    function updateDispatcherDowntimeTimers() {
+        var now = Date.now();
+        document.querySelectorAll("[data-gd-downtime-timer][data-started-at]").forEach(function (timer) {
+            var startedAt = Date.parse(timer.dataset.startedAt || "");
+            if (!Number.isFinite(startedAt)) return;
+            timer.textContent = formatDispatcherDowntimeDuration((now - startedAt) / 1000);
+        });
+    }
+    updateDispatcherDowntimeTimers();
+    window.setInterval(updateDispatcherDowntimeTimers, 1000);
     function dispatcherEquipmentState(code) {
         var key = code || "inactive";
         return equipmentStates[key] || equipmentStates.inactive || {
@@ -1799,10 +1824,126 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function resetDetailContent() {
         if (detailEmployee) detailEmployee.hidden = true;
+        if (detailDowntime) detailDowntime.hidden = true;
+        if (detailDowntimeTimer) detailDowntimeTimer.removeAttribute("data-started-at");
+        if (detailDowntimeResult) detailDowntimeResult.textContent = "";
+        if (detailDowntimeClose) detailDowntimeClose.disabled = false;
+        if (detailLayer) delete detailLayer.dataset.gdDowntimeEventId;
         if (detailSettings) detailSettings.hidden = true;
         if (detailSettingsStatus) detailSettingsStatus.textContent = "";
         if (detailList) detailList.innerHTML = "";
         if (detailShiftReport) detailShiftReport.hidden = true;
+    }
+
+    function renderDetailDowntime(data) {
+        var downtime = data || {};
+        if (!detailDowntime || !downtime.active) {
+            if (detailDowntime) detailDowntime.hidden = true;
+            if (detailLayer) delete detailLayer.dataset.gdDowntimeEventId;
+            return;
+        }
+        if (detailLayer) detailLayer.dataset.gdDowntimeEventId = String(downtime.event_id || "");
+        if (detailDowntimeReason) detailDowntimeReason.textContent = downtime.reason || "Простой";
+        if (detailDowntimeStarted) {
+            detailDowntimeStarted.textContent = downtime.started_at_label
+                ? "С начала: " + downtime.started_at_label
+                : "";
+        }
+        if (detailDowntimeTimer) {
+            detailDowntimeTimer.dataset.startedAt = downtime.started_at || "";
+            detailDowntimeTimer.textContent = downtime.elapsed_label || "00:00:00";
+        }
+        if (detailDowntimeResult) detailDowntimeResult.textContent = "";
+        if (detailDowntimeClose) {
+            detailDowntimeClose.disabled = dispatcherRoleIsReadonly() || !dispatcherShiftOpen;
+            detailDowntimeClose.textContent = "Завершить простой";
+        }
+        detailDowntime.hidden = false;
+        updateDispatcherDowntimeTimers();
+    }
+
+    function dispatcherDowntimeCloseUrl(eventId) {
+        var template = String(runtimeConfig.dispatcherDowntimeCloseUrlTemplate || "");
+        if (!/^\d+$/.test(String(eventId || "")) || !template) return "";
+        var path = template.replace(/0\/close\/$/, String(eventId) + "/close/");
+        return path === template ? "" : path;
+    }
+
+    function dispatcherDowntimeCloseError(error) {
+        if (error && error.status === 401) return "Сессия завершена. Войдите в систему снова.";
+        if (error && error.status === 403) return "Нет доступа к завершению простоя.";
+        if (error && error.code === "dispatcher_shift_required") return "Смена горного диспетчера закрыта.";
+        if (error && error.code === "inactive_role") return "Роль неактивна — доступен только просмотр.";
+        if (error && error.status === 409) return "Состояние техники уже изменилось. Карточка будет обновлена.";
+        if (error && error.status === 404) return "Этот простой больше не найден.";
+        return "Не удалось завершить простой. Проверьте связь и повторите действие.";
+    }
+
+    function closeDetailDowntime() {
+        if (!detailLayer || !detailDowntimeClose || detailDowntimeClose.disabled) return;
+        var eventId = detailLayer.dataset.gdDowntimeEventId || "";
+        var url = dispatcherDowntimeCloseUrl(eventId);
+        var requestedVersion = Number(detailLayer.dataset.gdRequestedVersion || -1);
+        if (!url || requestedVersion < 0) {
+            if (detailDowntimeResult) detailDowntimeResult.textContent = "Карточка устарела. Откройте её снова.";
+            return;
+        }
+        detailDowntimeClose.disabled = true;
+        detailDowntimeClose.textContent = "Завершаю…";
+        if (detailDowntimeResult) detailDowntimeResult.textContent = "";
+        fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-CSRFToken": getCsrfToken(),
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: JSON.stringify({state_version: requestedVersion})
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+                if (!response.ok || !payload.ok) {
+                    var requestError = new Error("downtime_close_failed");
+                    requestError.status = response.status;
+                    requestError.code = payload.error || "";
+                    throw requestError;
+                }
+                return payload;
+            });
+        }).then(function () {
+            if (detailDowntimeResult) detailDowntimeResult.textContent = "Простой завершён. Обновляем пульт…";
+            detailDowntimeClose.textContent = "Простой завершён";
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("dispatcher_downtime_closed");
+            }
+            window.setTimeout(closeEquipmentCard, 500);
+        }).catch(function (error) {
+            if (detailDowntimeResult) detailDowntimeResult.textContent = dispatcherDowntimeCloseError(error);
+            detailDowntimeClose.disabled = dispatcherRoleIsReadonly() || !dispatcherShiftOpen;
+            detailDowntimeClose.textContent = "Завершить простой";
+            if (error && error.status === 409 && window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("dispatcher_downtime_stale");
+            }
+        });
+    }
+
+    function requestDetailDowntimeClose() {
+        if (!detailLayer || !detailDowntimeClose || detailDowntimeClose.disabled) return;
+        var card = equipmentCards[String(detailLayer.dataset.gdActiveCardId || "")] || {};
+        var downtime = card.downtime || {};
+        var equipmentLabel = card.label || "техника";
+        var duration = detailDowntimeTimer ? detailDowntimeTimer.textContent : downtime.elapsed_label;
+        var message = "Завершить простой " + equipmentLabel + " «" + (downtime.reason || "Простой") + "»? Длительность " + (duration || "00:00:00") + " будет зафиксирована в отчёте.";
+        if (typeof window.openAppConfirmDialog !== "function") {
+            if (detailDowntimeResult) detailDowntimeResult.textContent = "Подтверждение недоступно. Обновите страницу.";
+            return;
+        }
+        window.openAppConfirmDialog(message, closeDetailDowntime, 0, "Завершить", {
+            confirmTitle: "Завершить простой?",
+            confirmDescription: message
+        });
     }
 
     function fillDetailSettingSelect(select, options, selectedId) {
@@ -2050,11 +2191,13 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
             }
         }
+        renderDetailDowntime(data.downtime || null);
         renderDetailSettings(data.settings || null);
         if (detailList) {
             detailList.innerHTML = "";
             (data.details || []).forEach(function (row) {
                 if (!row || !row.value) return;
+                if (data.downtime && data.downtime.active && ["Простой", "С начала"].indexOf(row.label) >= 0) return;
                 var term = document.createElement("dt");
                 var value = document.createElement("dd");
                 term.textContent = row.label || "";
@@ -2188,6 +2331,9 @@ document.addEventListener("DOMContentLoaded", function () {
         detailRetry.addEventListener("click", function () {
             if (typeof detailRetryAction === "function") detailRetryAction();
         });
+    }
+    if (detailDowntimeClose) {
+        detailDowntimeClose.addEventListener("click", requestDetailDowntimeClose);
     }
 
     document.querySelectorAll("[data-gd-detail-close]").forEach(function (node) {

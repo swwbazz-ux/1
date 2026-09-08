@@ -428,6 +428,29 @@ def downtime_event_payload(event, *, action='', closed=False):
     }
 
 
+def dispatcher_downtime_card_payload(event, *, calculated_at=None):
+    if not event:
+        return {'active': False}
+    calculated_at = calculated_at or timezone.now()
+    started_at = event.started_at or calculated_at
+    elapsed_seconds = max(0, int((calculated_at - started_at).total_seconds()))
+    reason = getattr(event, 'reason', None)
+    return {
+        'active': True,
+        'event_id': event.id,
+        'equipment_id': event.equipment_id,
+        'reason': (
+            reason.button_label
+            if reason
+            else 'Простой'
+        ),
+        'started_at': started_at.isoformat(),
+        'started_at_label': format_dispatcher_datetime(started_at),
+        'elapsed_seconds': elapsed_seconds,
+        'elapsed_label': format_duration_label(elapsed_seconds),
+    }
+
+
 def equipment_shift_downtime_seconds_by_reason(equipment, shift, *, until=None):
     if not equipment or not shift or not shift.opened_at:
         return {}
@@ -576,7 +599,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v62";
+const CACHE_NAME = "dispatcher-desktop-shell-v63";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -1637,6 +1660,7 @@ def build_dispatcher_equipment_card(
     category='equipment',
     plan=None,
     settings=None,
+    downtime=None,
     include_equipment_metadata=True,
 ):
     card_details = []
@@ -1669,6 +1693,7 @@ def build_dispatcher_equipment_card(
         'category': category,
         'plan': dispatcher_plan_api_payload(plan),
         'settings': settings,
+        'downtime': dispatcher_downtime_card_payload(downtime),
     }
 
 
@@ -2192,6 +2217,7 @@ def build_dispatcher_dashboard_context(
             if placement and placement.work_rock_type_id
             else (rock_values[0] if rock_values else '')
         )
+        active_downtime = downtime_by_equipment_id.get(excavator.id)
         complex_cards.append({
             'id': complex_label,
             'zone_key': f'equipment-{excavator.id}',
@@ -2228,6 +2254,7 @@ def build_dispatcher_dashboard_context(
             'current_horizon': current_horizon,
             'current_block': current_block,
             'current_rock': current_rock,
+            'active_downtime': dispatcher_downtime_card_payload(active_downtime),
         })
 
     excavator_tiles = []
@@ -2664,6 +2691,7 @@ def build_dispatcher_dashboard_context(
                 rock_types=dispatcher_rock_types,
                 dump_points=dispatcher_dump_points,
             ),
+            downtime=downtime,
         )
 
     for card in complex_cards:
@@ -2710,6 +2738,7 @@ def build_dispatcher_dashboard_context(
                 rock_types=dispatcher_rock_types,
                 dump_points=dispatcher_dump_points,
             ),
+            downtime=downtime_by_equipment_id.get(complex_excavator.id),
             include_equipment_metadata=False,
         )
 
@@ -2723,6 +2752,7 @@ def build_dispatcher_dashboard_context(
             ):
                 continue
             equipment = truck_by_id.get(int(card_id)) if card_id.isdigit() else None
+            downtime = downtime_by_equipment_id.get(equipment.id) if equipment else None
             status_label = status_label_for(tile.get('status'), tile.get('label'))
             details = [
                 {'label': 'Гаражный N', 'value': tile.get('name')},
@@ -2755,6 +2785,7 @@ def build_dispatcher_dashboard_context(
                     shift_trips=shift_trips,
                 ),
                 plan=tile.get('plan'),
+                downtime=downtime,
             )
 
     for tile in truck_garage_tiles + [
@@ -2812,6 +2843,7 @@ def build_dispatcher_dashboard_context(
                     shift_trips=shift_trips,
                 ),
                 plan=tile.get('plan'),
+                downtime=downtime,
             )
         equipment_cards[str(tile['card_id'])] = card
 
@@ -5747,6 +5779,111 @@ def dispatcher_equipment_detail_error(code, *, status):
         },
         status=status,
     ))
+
+
+def dispatcher_downtime_close_response(payload, *, status=200):
+    response_payload = {
+        'contract': 'dispatcher-downtime-close-v1',
+        **payload,
+    }
+    return protect_dispatcher_equipment_detail_response(
+        JsonResponse(response_payload, status=status)
+    )
+
+
+@require_POST
+@transaction.atomic
+def dispatcher_close_downtime_view(request, event_id):
+    access = dispatcher_access_from_request(request)
+    if not access:
+        return dispatcher_downtime_close_response(
+            {'ok': False, 'error': 'forbidden'},
+            status=403,
+        )
+    Employee.objects.select_for_update().get(pk=access.employee_id)
+    if not role_session_state(request, access)['is_active']:
+        return dispatcher_downtime_close_response(
+            {'ok': False, 'error': 'inactive_role'},
+            status=409,
+        )
+    if not get_active_dispatcher_shift(access):
+        return dispatcher_downtime_close_response(
+            {'ok': False, 'error': 'dispatcher_shift_required'},
+            status=409,
+        )
+
+    payload = dispatcher_json_payload(request)
+    try:
+        requested_version = int(payload.get('state_version', -1))
+    except (TypeError, ValueError):
+        requested_version = -1
+    if requested_version < 0:
+        return dispatcher_downtime_close_response(
+            {'ok': False, 'error': 'invalid_state_version'},
+            status=400,
+        )
+
+    state = lock_production_state()
+    event = (
+        DowntimeEvent.objects
+        .select_for_update()
+        .select_related('equipment', 'equipment__equipment_type', 'reason')
+        .filter(
+            pk=event_id,
+            equipment__is_active=True,
+            equipment__equipment_type__name__in={'Самосвал', 'Экскаватор'},
+        )
+        .first()
+    )
+    if not event:
+        return dispatcher_downtime_close_response(
+            {'ok': False, 'error': 'downtime_not_found'},
+            status=404,
+        )
+    if event.ended_at:
+        response_payload = downtime_event_payload(event, action='dispatcher_downtime_already_closed')
+        response_payload.update({
+            'closed': False,
+            'already_closed': True,
+            'version': state.version,
+        })
+        return dispatcher_downtime_close_response(response_payload)
+    if state.version != requested_version:
+        return dispatcher_downtime_close_response(
+            {
+                'ok': False,
+                'error': 'stale_board',
+                'version': state.version,
+            },
+            status=409,
+        )
+
+    event.ended_at = timezone.now()
+    event.save(update_fields=['ended_at'])
+    state = bump_operational_state(
+        'Dispatcher:downtime_closed',
+        event_type='downtime_changed',
+        object_type='DowntimeEvent',
+        object_id=event.id,
+        payload={
+            'action': 'dispatcher_downtime_closed',
+            'actor_id': access.employee_id,
+            'equipment_id': event.equipment_id,
+            'equipment_type': event.equipment.equipment_type.name,
+            'reason_id': event.reason_id,
+            'source': 'dispatcher_override',
+        },
+    )
+    response_payload = downtime_event_payload(
+        event,
+        action='dispatcher_downtime_closed',
+        closed=True,
+    )
+    response_payload.update({
+        'already_closed': False,
+        'version': state.version,
+    })
+    return dispatcher_downtime_close_response(response_payload)
 
 
 @require_http_methods(['GET', 'POST'])

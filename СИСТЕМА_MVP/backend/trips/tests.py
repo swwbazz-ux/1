@@ -951,6 +951,245 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(trucks_by_name['10']['plan_fact_label'], 'План не назначен')
 
 
+class DispatcherDowntimeControlTests(TestCase):
+    def setUp(self):
+        self.dispatcher = Employee.objects.create(
+            full_name='Диспетчер простоев',
+            status=Employee.Status.ACTIVE,
+        )
+        self.dispatcher_role = Role.objects.create(code='dispatcher', name='Горный диспетчер')
+        self.dispatcher_access = EmployeeAccess.objects.create(
+            employee=self.dispatcher,
+            role=self.dispatcher_role,
+            access_code='606060',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+            last_login_at=timezone.now(),
+        )
+        self.dispatcher_shift = EmployeeShift.objects.create(
+            employee=self.dispatcher,
+            shift_type='day',
+            workplace_code='dispatcher',
+            opened_at=timezone.now() - timedelta(hours=1),
+            opened_by=self.dispatcher,
+        )
+        self.truck_type = EquipmentType.objects.create(name='Самосвал')
+        self.excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        self.truck = Equipment.objects.create(
+            equipment_type=self.truck_type,
+            garage_number='50',
+        )
+        self.excavator = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            garage_number='5',
+        )
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+        )
+        self.truck_reason = DowntimeReason.objects.create(
+            name='Ремонт самосвала — тест диспетчера',
+            equipment_type=self.truck_type,
+            is_critical=True,
+        )
+        self.excavator_reason = DowntimeReason.objects.create(
+            name='Ожидание самосвалов — тест диспетчера',
+            short_label='Ожидание самосвалов',
+            equipment_type=self.excavator_type,
+        )
+        session = self.client.session
+        session['employee_access_id'] = self.dispatcher_access.id
+        session['active_role_access_id'] = self.dispatcher_access.id
+        session['active_role_login_at'] = self.dispatcher_access.last_login_at.isoformat()
+        session['active_role_code'] = self.dispatcher_role.code
+        session['device_kind'] = 'personal'
+        session.save()
+
+    def create_downtime(self, equipment, reason, *, minutes=12):
+        subject = Employee.objects.create(
+            full_name=f'Сотрудник {equipment.garage_number}',
+        )
+        return DowntimeEvent.objects.create(
+            equipment=equipment,
+            employee=subject,
+            subject_employee=subject,
+            recorded_by=subject,
+            reason=reason,
+            started_at=timezone.now() - timedelta(minutes=minutes),
+            comment='Исходный комментарий',
+        )
+
+    def close_downtime(self, event, *, version=None):
+        return self.client.post(
+            reverse('dispatcher_close_downtime', kwargs={'event_id': event.id}),
+            data=json.dumps({
+                'state_version': (
+                    get_operational_state_version()
+                    if version is None
+                    else version
+                ),
+            }),
+            content_type='application/json',
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+    def test_dispatcher_closes_downtime_from_matching_excavator_and_truck_cards(self):
+        for equipment, reason in (
+            (self.excavator, self.excavator_reason),
+            (self.truck, self.truck_reason),
+        ):
+            with self.subTest(equipment=equipment.garage_number):
+                downtime = self.create_downtime(equipment, reason)
+                original = {
+                    'started_at': downtime.started_at,
+                    'reason_id': downtime.reason_id,
+                    'employee_id': downtime.employee_id,
+                    'subject_employee_id': downtime.subject_employee_id,
+                    'recorded_by_id': downtime.recorded_by_id,
+                    'source': downtime.source,
+                    'comment': downtime.comment,
+                }
+
+                response = self.close_downtime(downtime)
+
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertEqual(response.json()['contract'], 'dispatcher-downtime-close-v1')
+                self.assertTrue(response.json()['closed'])
+                downtime.refresh_from_db()
+                self.assertIsNotNone(downtime.ended_at)
+                for field, expected in original.items():
+                    self.assertEqual(getattr(downtime, field), expected)
+                audit = OperationalStateEvent.objects.filter(
+                    event_type='downtime_changed',
+                    object_type='DowntimeEvent',
+                    object_id=str(downtime.id),
+                    reason='Dispatcher:downtime_closed',
+                    payload__action='dispatcher_downtime_closed',
+                    payload__actor_id=self.dispatcher.id,
+                    payload__equipment_id=equipment.id,
+                    payload__reason_id=reason.id,
+                    payload__source='dispatcher_override',
+                ).first()
+                self.assertIsNotNone(audit)
+
+    def test_repeated_close_is_idempotent_and_does_not_duplicate_audit(self):
+        downtime = self.create_downtime(self.excavator, self.excavator_reason)
+        requested_version = get_operational_state_version()
+
+        first = self.close_downtime(downtime, version=requested_version)
+        downtime.refresh_from_db()
+        ended_at = downtime.ended_at
+        second = self.close_downtime(downtime, version=requested_version)
+
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertTrue(second.json()['already_closed'])
+        self.assertFalse(second.json()['closed'])
+        downtime.refresh_from_db()
+        self.assertEqual(downtime.ended_at, ended_at)
+        self.assertEqual(
+            OperationalStateEvent.objects.filter(
+                reason='Dispatcher:downtime_closed',
+                object_id=str(downtime.id),
+            ).count(),
+            1,
+        )
+
+    def test_stale_card_does_not_close_current_downtime(self):
+        downtime = self.create_downtime(self.truck, self.truck_reason)
+
+        response = self.close_downtime(
+            downtime,
+            version=get_operational_state_version() + 1,
+        )
+
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(response.json()['error'], 'stale_board')
+        downtime.refresh_from_db()
+        self.assertIsNone(downtime.ended_at)
+        self.assertFalse(
+            OperationalStateEvent.objects.filter(
+                reason='Dispatcher:downtime_closed',
+                object_id=str(downtime.id),
+            ).exists()
+        )
+
+    def test_closed_dispatcher_shift_blocks_downtime_close(self):
+        downtime = self.create_downtime(self.excavator, self.excavator_reason)
+        self.dispatcher_shift.closed_at = timezone.now()
+        self.dispatcher_shift.save(update_fields=['closed_at'])
+
+        response = self.close_downtime(downtime)
+
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(response.json()['error'], 'dispatcher_shift_required')
+        downtime.refresh_from_db()
+        self.assertIsNone(downtime.ended_at)
+
+    def test_unauthenticated_close_is_forbidden(self):
+        downtime = self.create_downtime(self.truck, self.truck_reason)
+
+        response = Client().post(
+            reverse('dispatcher_close_downtime', kwargs={'event_id': downtime.id}),
+            data=json.dumps({'state_version': get_operational_state_version()}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
+        downtime.refresh_from_db()
+        self.assertIsNone(downtime.ended_at)
+
+    def test_dashboard_and_detail_payloads_expose_only_matching_active_downtime(self):
+        excavator_downtime = self.create_downtime(
+            self.excavator,
+            self.excavator_reason,
+            minutes=17,
+        )
+        truck_downtime = self.create_downtime(
+            self.truck,
+            self.truck_reason,
+            minutes=9,
+        )
+        dashboard = build_dispatcher_dashboard_context(
+            dispatcher_shift=self.dispatcher_shift,
+            active_trips=Trip.objects.none(),
+            pending_assignments=HaulAssignment.objects.none(),
+            accepted_assignments=HaulAssignment.objects.none(),
+            recent_completed_trips=Trip.objects.none(),
+            open_shifts=EmployeeShift.objects.filter(closed_at__isnull=True).exclude(pk=self.dispatcher_shift.pk),
+            open_mechanic_downtimes=DowntimeEvent.objects.filter(ended_at__isnull=True).select_related('reason'),
+            trucks=Equipment.objects.filter(equipment_type=self.truck_type),
+            excavators=Equipment.objects.filter(equipment_type=self.excavator_type),
+            recent_dispatcher_actions=[],
+        )
+        complex_card = next(
+            card for card in dashboard['complex_cards']
+            if card['equipment_card_id'] == str(self.excavator.id)
+        )
+
+        self.assertEqual(complex_card['active_downtime']['event_id'], excavator_downtime.id)
+        self.assertEqual(
+            dashboard['equipment_cards'][f'complex-equipment-{self.excavator.id}']['downtime']['event_id'],
+            excavator_downtime.id,
+        )
+        self.assertEqual(
+            dashboard['equipment_cards'][str(self.truck.id)]['downtime']['event_id'],
+            truck_downtime.id,
+        )
+
+    def test_dispatcher_board_renders_excavator_timer_and_card_close_control(self):
+        self.create_downtime(self.excavator, self.excavator_reason)
+
+        response = self.client.get(reverse('dispatcher_control'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="complex-downtime-status"')
+        self.assertContains(response, 'data-gd-downtime-timer')
+        self.assertContains(response, 'data-gd-detail-downtime-close')
+        self.assertContains(response, 'data-dispatcher-downtime-close-url-template=')
+
+
 class ExcavatorWorkServerIntegrationTests(TestCase):
     def create_configured_rock(self, name='Негабарит', *, density='2.6000', volume_m3='49.40'):
         rock = RockType.objects.create(name=name, density=density)

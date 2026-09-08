@@ -392,3 +392,38 @@ test("one changed truck replaces only that keyed tile", () => {
         "runtime-only DOM mutations must not replace an unchanged excavator tile"
     );
 });
+
+test("dispatcher downtime timer formats a live server interval", () => {
+    const durationSource = extractBraceBlock(
+        RUNTIME_SOURCE,
+        "function formatDispatcherDowntimeDuration(totalSeconds)",
+        "Dispatcher downtime duration formatter"
+    );
+    const context = {Math, Number, String};
+    vm.runInNewContext(durationSource, context);
+
+    assert.equal(context.formatDispatcherDowntimeDuration(0), "00:00:00");
+    assert.equal(context.formatDispatcherDowntimeDuration(3661.9), "01:01:01");
+    assert.equal(context.formatDispatcherDowntimeDuration(360005), "100:00:05");
+});
+
+test("dispatcher downtime close is explicit, direct and never queued offline", () => {
+    const closeSource = extractBraceBlock(
+        RUNTIME_SOURCE,
+        "function closeDetailDowntime()",
+        "Dispatcher downtime close"
+    );
+    const confirmSource = extractBraceBlock(
+        RUNTIME_SOURCE,
+        "function requestDetailDowntimeClose()",
+        "Dispatcher downtime confirmation"
+    );
+
+    assert.match(closeSource, /fetch\(url/);
+    assert.match(closeSource, /state_version/);
+    assert.doesNotMatch(closeSource, /dispatcherPost|enqueueDispatcherSyncRequest/);
+    assert.match(confirmSource, /openAppConfirmDialog/);
+    assert.match(confirmSource, /будет зафиксирована в отчёте/);
+    assert.match(TEMPLATE_SOURCE, /data-gd-detail-downtime-close/);
+    assert.match(TEMPLATE_SOURCE, /data-dispatcher-downtime-close-url-template/);
+});

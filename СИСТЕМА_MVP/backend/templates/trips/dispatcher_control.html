@@ -41,6 +41,7 @@
     data-dispatcher-move-url="{{ dispatcher_move_excavator_url }}"
     data-dispatcher-assign-url="{{ dispatcher_assign_truck_url }}"
     data-dispatcher-detail-url-template="{% url 'dispatcher_equipment_detail' category='equipment' equipment_id=0 %}"
+    data-dispatcher-downtime-close-url-template="{% url 'dispatcher_close_downtime' event_id=0 %}"
     data-dispatcher-service-worker-scope="{% if role_app.role_code == 'dispatcher' %}/{% else %}/dispatcher/{% endif %}"
 >
     <h1 class="dispatcher-compat-title">{% if dispatcher_compat_title %}{{ dispatcher_compat_title }}{% else %}Диспетчерский пульт{% endif %}</h1>
@@ -97,7 +98,18 @@
                         <div class="complex-work-head">
                             <div class="complex-title-state">
                                 <h2>{{ complex.id }}</h2>
-                                <span class="complex-state-chip">{{ complex.status_label }}</span>
+                                {% if complex.active_downtime.active %}
+                                    <span class="complex-downtime-status" title="{{ complex.active_downtime.reason }}">
+                                        <span>{{ complex.active_downtime.reason }}</span>
+                                        <time
+                                            datetime="{{ complex.active_downtime.started_at }}"
+                                            data-gd-downtime-timer
+                                            data-started-at="{{ complex.active_downtime.started_at }}"
+                                        >{{ complex.active_downtime.elapsed_label }}</time>
+                                    </span>
+                                {% else %}
+                                    <span class="complex-state-chip">{{ complex.status_label }}</span>
+                                {% endif %}
                             </div>
                             <div class="complex-context">
                                 <span class="complex-info-chip chip-horizon">{{ complex.current_horizon|default:"Гор. -" }}</span>
@@ -893,6 +905,16 @@
                     <a data-gd-detail-employee-phone href=""></a>
                 </div>
             </div>
+            <section class="gd-detail-downtime" data-gd-detail-downtime hidden>
+                <div class="gd-detail-downtime-copy">
+                    <span>Текущий простой</span>
+                    <strong data-gd-detail-downtime-reason></strong>
+                    <small data-gd-detail-downtime-started></small>
+                </div>
+                <time data-gd-detail-downtime-timer data-gd-downtime-timer>00:00:00</time>
+                <button type="button" data-gd-detail-downtime-close>Завершить простой</button>
+                <span class="gd-detail-downtime-result" data-gd-detail-downtime-result role="status" aria-live="polite"></span>
+            </section>
             <section class="gd-detail-settings" data-gd-detail-settings hidden>
                 <div class="gd-detail-settings-head">
                     <div>
@@ -6770,6 +6792,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v62" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v63" defer></script>
 {% endif %}
 {% endblock %}
