@@ -228,6 +228,48 @@ class OperationalStateVersionViewTests(TestCase):
         self.assertEqual(event.object_type, 'Equipment')
         self.assertEqual(event.payload['action'], 'save')
 
+    def test_assignment_event_carries_assignment_id_in_object_id(self):
+        """Экран Водителя склеивает раннее событие и разметку по этому номеру.
+
+        Ранняя озвучка берёт ключ операции из ``object_id`` события, а резервный
+        путь по DOM — из ``data-driver-assignment-id`` формы. Если сервер
+        перестанет класть сюда номер назначения, два пути перестанут узнавать
+        одну операцию и водитель услышит её дважды.
+        """
+        excavator_type = EquipmentType.objects.create(name='Экскаватор погрузки')
+        truck_type = EquipmentType.objects.create(name='Самосвал погрузки')
+        excavator = Equipment.objects.create(
+            equipment_type=excavator_type, garage_number='Э-41', is_active=True
+        )
+        truck = Equipment.objects.create(
+            equipment_type=truck_type, garage_number='С-18', is_active=True
+        )
+        assignment = HaulAssignment.objects.create(
+            truck=truck,
+            excavator=excavator,
+            action='assign',
+            status=AssignmentStatus.PENDING,
+            effective_at=timezone.now(),
+        )
+
+        from assignments.services import _emit_assignment_changed
+
+        _emit_assignment_changed(
+            action='assignment_pending',
+            truck_id=truck.id,
+            excavator_ids=[excavator.id],
+            assignment_id=assignment.id,
+            target_excavator_id=excavator.id,
+        )
+
+        event = OperationalStateEvent.objects.filter(
+            event_type='assignment_changed'
+        ).latest('version')
+        self.assertEqual(event.object_type, 'HaulAssignment')
+        self.assertEqual(event.object_id, str(assignment.id))
+        self.assertEqual(event.payload['action'], 'assignment_pending')
+        self.assertEqual(event.payload['target_excavator_number'], 'Э-41')
+
     def test_employee_save_bumps_operational_state_for_open_workplaces(self):
         after = OperationalStateVersion.objects.get(key='production').version
 
