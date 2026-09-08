@@ -207,7 +207,7 @@
                         </div>
                         <div class="mm-mobile-truck-preview" aria-label="Самосвалы комплекса" data-mm-mobile-truck-count="{{ complex.active_truck_tiles|length }}"{% if complex.mobile_transfer_notice %} data-mm-transfer-notice="{{ complex.mobile_transfer_notice }}"{% endif %}>
                             {% for truck in complex.active_truck_tiles %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}{% if truck.transfer_pending %} is-transfer-pending{% endif %}"{% if forloop.counter > 3 %} hidden{% endif %}{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}"{% if truck.transfer_pending %} data-mm-transfer-label="из {{ truck.transfer_source_label }} · до 5 мин"{% endif %} data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
+                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}{% if truck.transfer_pending %} is-transfer-pending{% endif %}"{% if forloop.counter > 3 %} hidden{% endif %}{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}"{% if truck.transfer_pending %} data-mm-transfer-label="из {{ truck.transfer_source_label }} · до 5 мин"{% endif %} data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}</span>
                             {% endfor %}
                             {% if complex.mobile_truck_overflow %}
                                 <button type="button" class="mm-mobile-truck-mini is-more" data-mm-mobile-open-truck-list data-mm-mobile-ignore-double-tap="true" aria-label="Показать остальные самосвалы комплекса">+{{ complex.mobile_truck_overflow }}</button>
@@ -323,7 +323,6 @@
                         <strong>{{ truck.name }}</strong>
                         <span></span>
                         {% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}
-                        {% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
                     </article>
                 {% empty %}
                     <div class="mm-mobile-detail-empty">самосвалов в гараже нет</div>
@@ -522,7 +521,7 @@
                         </div>
                         <div class="mm-mobile-fill-assigned" data-mm-mobile-fill-assigned aria-label="Самосвалы комплекса">
                             {% for truck in complex.active_truck_tiles|slice:":16" %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-assigned-truck-id="{{ truck.card_id }}" data-mm-mobile-assigned-truck-number="{{ truck.name }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
+                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-assigned-truck-id="{{ truck.card_id }}" data-mm-mobile-assigned-truck-number="{{ truck.name }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}</span>
                             {% endfor %}
                         </div>
                     </div>
@@ -538,7 +537,6 @@
                                     <strong>{{ truck.name }}</strong>
                                     <span></span>
                                     {% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}
-                                    {% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
                                 </button>
                             {% empty %}
                                 <div class="mm-mobile-detail-empty">самосвалов в гараже нет</div>
@@ -1160,7 +1158,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v158";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v159";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -3259,14 +3257,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 ringLayer.remove();
             }
             var badge = target.querySelector(".mm-mobile-plan-loop-badge");
-            if (completedLoops > 0) {
-                if (!badge) {
-                    badge = document.createElement("b");
-                    badge.className = "mm-mobile-plan-loop-badge";
-                    target.appendChild(badge);
-                }
-                badge.textContent = "×" + completedLoops;
-            } else if (badge) {
+            if (badge) {
                 badge.remove();
             }
             return target;

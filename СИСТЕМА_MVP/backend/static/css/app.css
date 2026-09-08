@@ -28668,25 +28668,25 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         display: none;
     }
 
-    /* План идёт внутренним контуром карточки — без отдельного круга и
-       без потери места под состояние комплекса. */
+    /* План смены — заметная полоса по периметру, как на пульте диспетчера.
+       Никаких отдельных кругов, процентов и счётчиков на карточке. */
     .mm-mobile-complex-card.has-plan-progress::before {
         content: "";
         position: absolute;
-        inset: 3px;
-        z-index: 0;
+        inset: 0;
+        z-index: 4;
         display: block;
         width: auto;
         height: auto;
-        padding: 1.5px;
+        padding: 5px;
         border: 0;
-        border-radius: 5px;
+        border-radius: 7px;
         background: conic-gradient(
             from -90deg,
             var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%),
             var(--mm-mobile-plan-track) var(--mm-mobile-plan-progress, 0%) 100%
         );
-        box-shadow: 0 0 8px var(--mm-mobile-plan-glow);
+        box-shadow: 0 0 7px var(--mm-mobile-plan-glow), 0 0 15px var(--mm-mobile-plan-glow);
         filter: none;
         opacity: 1;
         transform: none;
@@ -29290,17 +29290,17 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     .mm-mobile-truck-mini .mm-mobile-plan-ring-layer,
     .mm-mobile-truck-card .mm-mobile-plan-ring-layer {
         position: absolute;
-        inset: 3px;
-        z-index: 1;
+        inset: 0;
+        z-index: 3;
         display: block;
-        padding: 2px;
-        border-radius: 4px;
+        padding: 3px;
+        border-radius: 5px;
         background: conic-gradient(
             from -90deg,
             var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%),
             var(--mm-mobile-plan-track) var(--mm-mobile-plan-progress, 0%) 100%
         );
-        filter: drop-shadow(0 0 4px var(--mm-mobile-plan-glow));
+        filter: drop-shadow(0 0 4px var(--mm-mobile-plan-glow)) drop-shadow(0 0 8px var(--mm-mobile-plan-glow));
         pointer-events: none;
         -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
         -webkit-mask-composite: xor;
@@ -29320,7 +29320,10 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         z-index: 2;
     }
 
+    /* Циклы плана не выводим цифрой: на мобильном экране ориентиром служит
+       только заполняющийся контур. */
     .mm-mobile-plan-loop-badge {
+        display: none !important;
         position: absolute;
         top: 2px;
         right: 2px;
