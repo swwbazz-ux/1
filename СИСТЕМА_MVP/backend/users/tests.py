@@ -214,6 +214,11 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'data-driver-report-share')
         self.assertContains(response, 'buildDriverShiftReportText')
         self.assertContains(response, 'Отчёт водителя за смену')
+        self.assertContains(response, 'grid-auto-rows: minmax(64px, auto);')
+        self.assertContains(response, 'overflow-x: hidden;')
+        self.assertContains(response, 'overflow-y: auto;')
+        self.assertContains(response, 'overscroll-behavior-y: contain;')
+        self.assertContains(response, 'touch-action: pan-y;')
         self.assertContains(response, 'Событий в текущей смене пока нет')
 
     def test_shared_shift_hold_distinguishes_soft_and_native_disabled_actions(self):
@@ -259,7 +264,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v202')
+        self.assertContains(response, 'driver-mobile-shell-v203')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertContains(response, 'playDriverSound("truck_assigned")')
@@ -479,7 +484,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v202', script)
+        self.assertIn('driver-mobile-shell-v203', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3022,7 +3027,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v202')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v203')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
