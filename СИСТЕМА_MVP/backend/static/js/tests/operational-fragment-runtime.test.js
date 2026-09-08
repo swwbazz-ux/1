@@ -523,19 +523,19 @@ test("successful Excavator Shift save clears its draft before owned fragment rec
 });
 
 
-test("Driver uses Shift sounds only after the returned shell confirms the state change", () => {
+test("Driver maps confirmed actions to the required recorded voice announcements", () => {
     const sandbox = {context: {}};
     vm.runInNewContext(
         [
             extractBraceBlock(
                 DRIVER_TEMPLATE_SOURCE,
-                "function driverAppliedActionSound(actionKind, freshShell)",
-                "Driver applied action sound mapper"
+                "function driverAppliedActionVoice(actionKind, freshShell)",
+                "Driver applied action voice mapper"
             ),
-            "context.map = driverAppliedActionSound;",
+            "context.map = driverAppliedActionVoice;",
         ].join("\n"),
         sandbox,
-        {filename: "templates/users/driver_shift.html#applied-action-sound"}
+        {filename: "templates/users/driver_shift.html#applied-action-voice"}
     );
     const openShell = {
         querySelector(selector) {
@@ -544,11 +544,26 @@ test("Driver uses Shift sounds only after the returned shell confirms the state 
     };
     const closedShell = {querySelector() { return null; }};
 
-    assert.equal(sandbox.context.map("shift-open", openShell), "shift_start");
-    assert.equal(sandbox.context.map("shift-open", closedShell), "action_error");
-    assert.equal(sandbox.context.map("shift-close", openShell), "action_error");
-    assert.equal(sandbox.context.map("shift-close", closedShell), "shift_end");
-    assert.equal(sandbox.context.map("complete-trip", closedShell), "action_ok");
+    assert.deepEqual(
+        {...sandbox.context.map("shift-open", openShell)},
+        {cue: "shift_start", voice: "voice_shift_opened"}
+    );
+    assert.deepEqual(
+        {...sandbox.context.map("shift-open", closedShell)},
+        {cue: "action_error", voice: "voice_action_failed"}
+    );
+    assert.deepEqual(
+        {...sandbox.context.map("shift-close", openShell)},
+        {cue: "action_error", voice: "voice_action_failed"}
+    );
+    assert.deepEqual(
+        {...sandbox.context.map("shift-close", closedShell)},
+        {cue: "shift_end", voice: "voice_shift_closed"}
+    );
+    assert.deepEqual(
+        {...sandbox.context.map("complete-trip", closedShell)},
+        {cue: "action_ok", voice: "voice_trip_finished"}
+    );
 });
 
 
