@@ -1,4 +1,5 @@
 from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
@@ -10,7 +11,7 @@ from core.db_locks import lock_idempotency_key
 from core.production_time import (
     production_day_bounds,
     production_shift_type,
-    production_work_date,
+    production_work_date_for_shift,
 )
 from trips.models import Trip, TripStatus
 
@@ -222,12 +223,7 @@ def resolve_published_watch_period_for_shift(
         return None
     if not employee.watch_composition_id:
         return None
-    if shift_type != production_shift_type(opened_at):
-        # Ранние комплексы пока не имеют отдельного структурного признака.
-        # Не угадываем их производственную смену внутри контура рейтинга.
-        return None
-
-    work_date = production_work_date(opened_at)
+    work_date = production_work_date_for_shift(opened_at, shift_type)
     is_published_placement = CrewPlanSlot.objects.filter(
         plan__work_date=work_date,
         plan__role__code=role_code,
@@ -573,15 +569,18 @@ def shift_plan_totals_for_dates(dates):
     snapshot_shifts = (
         EmployeeShift.objects
         .filter(
-            opened_at__gte=production_start,
-            opened_at__lt=production_end,
+            opened_at__gte=production_start - timedelta(days=1),
+            opened_at__lt=production_end + timedelta(days=1),
             plan_status=PlanAssignmentStatus.ASSIGNED,
             plan_value__isnull=False,
         )
     )
     snapshot_dates = set()
     for shift in snapshot_shifts:
-        work_date = production_work_date(shift.opened_at)
+        work_date = production_work_date_for_shift(
+            shift.opened_at,
+            shift.shift_type,
+        )
         if work_date not in totals_by_date:
             continue
         snapshot_dates.add(work_date)
@@ -699,7 +698,10 @@ def assign_shift_plan_snapshot(shift):
         return empty_progress(None, shift=shift)
 
     group = get_equipment_plan_group(shift.equipment)
-    shift_date = production_work_date(shift.opened_at if shift.opened_at else timezone.now())
+    shift_date = production_work_date_for_shift(
+        shift.opened_at if shift.opened_at else timezone.now(),
+        shift.shift_type,
+    )
     shift.plan_assigned_at = timezone.now()
     shift.plan_group = group
     shift.plan_group_name = group.name if group else ''
@@ -810,7 +812,11 @@ def aggregate_completed_trip_facts_by_shift(*, unloading_shift_ids=(), loading_s
 
 def calculate_progress_from_snapshot_facts(shift, facts=None):
     facts = normalize_trip_facts(facts)
-    date = production_work_date(shift.opened_at) if shift and shift.opened_at else None
+    date = (
+        production_work_date_for_shift(shift.opened_at, shift.shift_type)
+        if shift and shift.opened_at
+        else None
+    )
     result = {
         'equipment': shift.equipment if shift else None,
         'date': date,
@@ -936,7 +942,10 @@ def calculate_truck_shift_progress(truck, reference_shift=None):
         return calculate_progress_from_snapshot(truck_shift, trips)
 
     if reference_shift and reference_shift.opened_at and reference_shift.shift_type:
-        date = production_work_date(reference_shift.opened_at)
+        date = production_work_date_for_shift(
+            reference_shift.opened_at,
+            reference_shift.shift_type,
+        )
         return calculate_equipment_shift_progress(truck, date, reference_shift.shift_type)
     return empty_progress(truck, status=PlanAssignmentStatus.NO_PLAN_GROUP)
 
@@ -957,7 +966,7 @@ def calculate_open_shift_progress(open_shift):
 
     return calculate_equipment_shift_progress(
         open_shift.equipment,
-        production_work_date(open_shift.opened_at),
+        production_work_date_for_shift(open_shift.opened_at, open_shift.shift_type),
         open_shift.shift_type,
     )
 

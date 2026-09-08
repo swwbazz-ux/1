@@ -81,7 +81,7 @@ def build_rating_tv_qa_preview():
             'is_active': True,
         },
         'shift_type': 'night',
-        'shift_type_label': 'Ночная',
+        'shift_type_label': 'Вторая смена',
         'available_rating_periods': [
             {
                 'id': -1,

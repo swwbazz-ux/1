@@ -329,8 +329,8 @@ class DriverRatingPeriodMaterializedSnapshot(models.Model):
         'Тип смены',
         max_length=16,
         choices=(
-            ('day', 'Дневная'),
-            ('night', 'Ночная'),
+            ('day', 'Первая смена'),
+            ('night', 'Вторая смена'),
         ),
     )
     formula_version = models.CharField(

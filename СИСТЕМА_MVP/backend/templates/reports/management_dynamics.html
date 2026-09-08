@@ -32,8 +32,8 @@
                     <span>Смена</span>
                     <input type="hidden" name="shift_type" value="{{ shift_type }}" data-management-dynamics-shift-input>
                     <div class="management-dynamics-shift-segments" role="group" aria-label="Смена графика">
-                        <button type="button" class="management-dynamics-segment {% if shift_type == 'day' %}is-active{% endif %}" data-management-dynamics-shift="day" data-active="{% if shift_type == 'day' %}true{% else %}false{% endif %}" aria-pressed="{% if shift_type == 'day' %}true{% else %}false{% endif %}">День</button>
-                        <button type="button" class="management-dynamics-segment {% if shift_type == 'night' %}is-active{% endif %}" data-management-dynamics-shift="night" data-active="{% if shift_type == 'night' %}true{% else %}false{% endif %}" aria-pressed="{% if shift_type == 'night' %}true{% else %}false{% endif %}">Ночь</button>
+                        <button type="button" class="management-dynamics-segment {% if shift_type == 'day' %}is-active{% endif %}" data-management-dynamics-shift="day" data-active="{% if shift_type == 'day' %}true{% else %}false{% endif %}" aria-pressed="{% if shift_type == 'day' %}true{% else %}false{% endif %}">Первая смена</button>
+                        <button type="button" class="management-dynamics-segment {% if shift_type == 'night' %}is-active{% endif %}" data-management-dynamics-shift="night" data-active="{% if shift_type == 'night' %}true{% else %}false{% endif %}" aria-pressed="{% if shift_type == 'night' %}true{% else %}false{% endif %}">Вторая смена</button>
                     </div>
                 </div>
                 <fieldset class="management-dynamics-excavators">

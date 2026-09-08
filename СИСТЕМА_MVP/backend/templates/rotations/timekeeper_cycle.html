@@ -155,8 +155,8 @@
                     <label for="rotation-shift">Смена</label>
                     <select id="rotation-shift" name="shift">
                         <option value="">Все смены</option>
-                        <option value="day" {% if request.GET.shift == 'day' %}selected{% endif %}>День</option>
-                        <option value="night" {% if request.GET.shift == 'night' %}selected{% endif %}>Ночь</option>
+                        <option value="day" {% if request.GET.shift == 'day' %}selected{% endif %}>Первая смена</option>
+                        <option value="night" {% if request.GET.shift == 'night' %}selected{% endif %}>Вторая смена</option>
                         <option value="unknown" {% if request.GET.shift == 'unknown' %}selected{% endif %}>Не указана</option>
                     </select>
                 </div>
