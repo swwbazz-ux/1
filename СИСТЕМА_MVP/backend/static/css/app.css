@@ -27827,6 +27827,21 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         background: rgba(8, 19, 27, .72);
     }
 
+    .mm-mobile-report-destinations.is-in-transit {
+        border-color: rgba(57, 200, 238, .42);
+        background: linear-gradient(135deg, rgba(18, 52, 67, .72), rgba(8, 19, 27, .82));
+    }
+
+    .mm-mobile-report-destinations.is-in-transit > header {
+        min-height: 38px;
+        border-bottom-color: rgba(57, 200, 238, .24);
+    }
+
+    .mm-mobile-report-destinations.is-in-transit > header > span,
+    .mm-mobile-report-destinations.is-in-transit .mm-mobile-report-destination > b {
+        color: #57d5f5;
+    }
+
     .mm-mobile-report-destinations > header {
         display: flex;
         align-items: center;
@@ -28571,7 +28586,7 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         --mm-mobile-truck-swipe-x: 0px;
         --mm-mobile-fill-swipe-y: 0px;
         position: relative;
-        touch-action: none;
+        touch-action: pan-y;
         display: grid;
         grid-template-rows: auto minmax(0, 1fr);
         gap: 4px;
@@ -28585,7 +28600,7 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
             linear-gradient(145deg, rgba(20, 36, 44, .88), rgba(4, 14, 20, .92));
         box-shadow: inset 0 0 28px rgba(255, 255, 255, .025), 0 14px 24px rgba(0, 0, 0, .28);
         cursor: pointer;
-        touch-action: none;
+        touch-action: pan-y;
         transition: transform .16s ease, box-shadow .16s ease, filter .16s ease;
     }
 
@@ -28651,6 +28666,41 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     .mm-mobile-complex-card::before,
     .mm-mobile-complex-card::after {
         display: none;
+    }
+
+    /* План идёт внутренним контуром карточки — без отдельного круга и
+       без потери места под состояние комплекса. */
+    .mm-mobile-complex-card.has-plan-progress::before {
+        content: "";
+        position: absolute;
+        inset: 3px;
+        z-index: 0;
+        display: block;
+        width: auto;
+        height: auto;
+        padding: 1.5px;
+        border: 0;
+        border-radius: 5px;
+        background: conic-gradient(
+            from -90deg,
+            var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%),
+            var(--mm-mobile-plan-track) var(--mm-mobile-plan-progress, 0%) 100%
+        );
+        box-shadow: 0 0 8px var(--mm-mobile-plan-glow);
+        filter: none;
+        opacity: 1;
+        transform: none;
+        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask-composite: exclude;
+        pointer-events: none;
+    }
+
+    .mm-mobile-complex-card.has-plan-progress.is-plan-overrun::before {
+        background:
+            conic-gradient(from -90deg, var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%), transparent var(--mm-mobile-plan-progress, 0%) 100%),
+            conic-gradient(from -90deg, var(--mm-mobile-plan-complete-color) 0 100%, transparent 0 100%),
+            conic-gradient(from -90deg, var(--mm-mobile-plan-track) 0 100%);
     }
 
     .mm-mobile-complex-card.is-swiping {
@@ -28733,6 +28783,10 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         overflow: hidden;
         border-color: rgba(88, 223, 82, .72);
         touch-action: manipulation;
+    }
+
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card.has-plan-progress::before {
+        display: none;
     }
 
     .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card-head {
@@ -28944,7 +28998,7 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         filter: saturate(.62);
         opacity: .74;
         pointer-events: auto;
-        touch-action: none;
+        touch-action: pan-y;
     }
 
     .mm-mobile-complex-grid[data-mm-mobile-active-complex-count="0"] .mm-mobile-complex-card.status-empty {

@@ -1268,6 +1268,18 @@ def dispatcher_shift_plan_detail(
         route['fact'] += amount
         route['trip_count'] += 1
 
+    completed_fact = sum(
+        (
+            (trip.tonnage if completed_use_tonnage else trip.volume_m3)
+            or Decimal('0')
+            for trip in completed_trips
+        ),
+        Decimal('0'),
+    )
+    active_fact = sum(
+        (trip.tonnage or trip.volume_m3 or Decimal('0') for trip in active_trips),
+        Decimal('0'),
+    )
     for trip in completed_trips:
         add_trip(trip, trip.tonnage if completed_use_tonnage else trip.volume_m3)
     for trip in active_trips:
@@ -1344,7 +1356,11 @@ def dispatcher_shift_plan_detail(
         'completion_percent_css': completion_percent_css,
         'completion_percent_label': completion_percent_css.replace('.', ','),
         'fact_tons': format_dispatcher_number(fact_tons),
+        'completed_fact_tons': format_dispatcher_number(completed_fact),
+        'active_fact_tons': format_dispatcher_number(active_fact),
         'plan_tons': format_dispatcher_number(plan_tons),
+        'completed_trip_count': len(completed_trips),
+        'active_trip_count': len(active_trips),
         'trip_count_label': dispatcher_trip_count_label(len(completed_trips) + len(active_trips)),
         'unit_label': unit_label,
         'points': [
@@ -1691,6 +1707,7 @@ def build_dispatcher_dashboard_context(
     recent_dispatcher_actions,
     equipment_card_ids=None,
     equipment_work_assignments=(),
+    reporting_period=None,
 ):
     active_trips_list = list(active_trips)
     pending_assignments_list = list(pending_assignments)
@@ -1728,7 +1745,38 @@ def build_dispatcher_dashboard_context(
     shift_trip_attribution = None
     production_shift_start = None
     production_shift_end = None
-    if dispatcher_shift:
+    reporting_starts_at = (reporting_period or {}).get('starts_at')
+    reporting_ends_at = (reporting_period or {}).get('ends_at')
+    is_mining_master_reporting_period = bool(reporting_starts_at)
+    if is_mining_master_reporting_period:
+        # Смена мастера — период ответственности, а не смена оборудования.
+        # Выполненный рейс входит по времени выгрузки; пока рейс не завершён,
+        # он отдельно отображается как «в пути» только у текущего периода.
+        completed_period_filter = Q(
+            status=TripStatus.COMPLETED,
+            completed_at__gte=reporting_starts_at,
+        )
+        if reporting_ends_at:
+            completed_period_filter &= Q(completed_at__lt=reporting_ends_at)
+        active_period_filter = (
+            Q(status__in=OPEN_TRIP_STATUSES)
+            if not reporting_ends_at
+            else Q(pk__in=[])
+        )
+        shift_trip_queryset = (
+            Trip.objects
+            .filter(completed_period_filter | active_period_filter)
+            .select_related(
+                'truck',
+                'excavator',
+                'rock_type',
+                'dump_point',
+                'assigned_dump_point',
+                'actual_dump_point',
+            )
+            .order_by('-completed_at', '-created_at')
+        )
+    elif dispatcher_shift:
         production_shift_start, production_shift_end = production_shift_bounds(
             production_work_date_for_shift(
                 dispatcher_shift.opened_at,
@@ -1930,7 +1978,15 @@ def build_dispatcher_dashboard_context(
 
     completed_tons = Decimal('0')
     completed_use_tonnage = False
-    if dispatcher_shift:
+    if is_mining_master_reporting_period:
+        completed_tons = (
+            shift_trip_queryset
+            .filter(status=TripStatus.COMPLETED)
+            .aggregate(total=Sum('tonnage'))['total']
+            or Decimal('0')
+        )
+        completed_use_tonnage = completed_tons > 0
+    elif dispatcher_shift:
         completed_tons = (
             Trip.objects
             .filter(status=TripStatus.COMPLETED)
@@ -1939,39 +1995,49 @@ def build_dispatcher_dashboard_context(
             or Decimal('0')
         )
         completed_use_tonnage = completed_tons > 0
-    if dispatcher_shift and completed_tons == 0:
+    if (is_mining_master_reporting_period or dispatcher_shift) and completed_tons == 0:
+        completed_volume_queryset = (
+            shift_trip_queryset
+            if is_mining_master_reporting_period
+            else Trip.objects.filter(shift_trip_attribution)
+        )
         completed_tons = (
-            Trip.objects
+            completed_volume_queryset
             .filter(status=TripStatus.COMPLETED)
-            .filter(shift_trip_attribution)
             .aggregate(total=Sum('volume_m3'))['total']
             or Decimal('0')
         )
-    active_volume = (
-        sum(
+    completed_shift_trips = [trip for trip in shift_trips if trip.status == TripStatus.COMPLETED]
+    active_shift_trips = [trip for trip in shift_trips if trip.status in OPEN_TRIP_STATUSES]
+    if is_mining_master_reporting_period:
+        active_volume = sum(
             (trip.tonnage or trip.volume_m3 or Decimal('0'))
-            for trip in active_trips_list
-            if (
-                (
-                    trip.loading_shift_id
-                    and production_shift_start <= trip.loading_shift.opened_at < production_shift_end
-                )
-                or (
-                    not trip.loading_shift_id
-                    and production_shift_start <= trip.created_at < production_shift_end
+            for trip in active_shift_trips
+        )
+    else:
+        active_volume = (
+            sum(
+                (trip.tonnage or trip.volume_m3 or Decimal('0'))
+                for trip in active_trips_list
+                if (
+                    (
+                        trip.loading_shift_id
+                        and production_shift_start <= trip.loading_shift.opened_at < production_shift_end
+                    )
+                    or (
+                        not trip.loading_shift_id
+                        and production_shift_start <= trip.created_at < production_shift_end
+                    )
                 )
             )
+            if dispatcher_shift
+            else Decimal('0')
         )
-        if dispatcher_shift
-        else Decimal('0')
-    )
     fact_tons = completed_tons + active_volume
     display_fact_tons = fact_tons
     forecast_tons = min(DISPATCHER_PLAN_TOTAL_TONS, display_fact_tons)
     completion_percent = int((display_fact_tons / DISPATCHER_PLAN_TOTAL_TONS) * 100) if DISPATCHER_PLAN_TOTAL_TONS else 0
     completion_percent = max(0, min(99, completion_percent))
-    completed_shift_trips = [trip for trip in shift_trips if trip.status == TripStatus.COMPLETED]
-    active_shift_trips = [trip for trip in shift_trips if trip.status in OPEN_TRIP_STATUSES]
     shift_plan_detail = dispatcher_shift_plan_detail(
         completed_trips=completed_shift_trips,
         active_trips=active_shift_trips,
@@ -1997,7 +2063,7 @@ def build_dispatcher_dashboard_context(
         row = by_excavator[assignment.excavator_id]
         row['accepted'] += 1
         row['trucks'].add(assignment.truck_id)
-    if dispatcher_shift:
+    if dispatcher_shift or is_mining_master_reporting_period:
         for trip in active_trips_list:
             row = by_excavator[trip.excavator_id]
             row['active_trips'] += 1
@@ -2627,6 +2693,14 @@ def build_dispatcher_dashboard_context(
         plan_tons=DISPATCHER_PLAN_TOTAL_TONS,
         completion_percent=max(0, min(100, completed_shift_percent)),
     )
+    active_shift_detail = dispatcher_shift_plan_detail(
+        completed_trips=[],
+        active_trips=active_shift_trips,
+        completed_use_tonnage=completed_use_tonnage,
+        fact_tons=active_volume,
+        plan_tons=DISPATCHER_PLAN_TOTAL_TONS,
+        completion_percent=completion_percent,
+    )
     active_truck_equipment_ids = {
         truck.id
         for truck in trucks_list
@@ -2640,7 +2714,8 @@ def build_dispatcher_dashboard_context(
         'completed_trip_count': len(completed_shift_trips),
         'active_trip_count': len(active_shift_trips),
         'completed_fact': format_dispatcher_number(completed_tons),
-        'unit_label': completed_shift_detail['unit_label'],
+        'active_fact': format_dispatcher_number(active_volume),
+        'unit_label': shift_plan_detail['unit_label'],
         'working_trucks': len(report_working_truck_ids),
         'free_trucks': sum(
             1
@@ -2648,6 +2723,7 @@ def build_dispatcher_dashboard_context(
             if tile.get('equipment_state_code') == 'free'
         ),
         'points': completed_shift_detail['points'],
+        'active_points': active_shift_detail['points'],
     }
 
     for tile in excavator_tiles:
@@ -5979,6 +6055,8 @@ def dispatcher_control_view(
             return dispatcher_equipment_detail_error('stale_board', status=409)
     dispatcher_header = dispatcher_header_override or build_dispatcher_header_context(access, request)
     dispatcher_shift = dispatcher_header.get('active_shift')
+    reporting_period = (context_overrides or {}).get('mining_master_reporting_period')
+    has_mining_master_reporting_period = bool((reporting_period or {}).get('starts_at'))
 
     truck_id = request.GET.get('truck', '').strip()
     excavator_id = request.GET.get('excavator', '').strip()
@@ -6003,7 +6081,7 @@ def dispatcher_control_view(
         )
         .order_by('created_at')
     )
-    if not dispatcher_shift:
+    if not dispatcher_shift and not has_mining_master_reporting_period:
         active_trips = active_trips.none()
     if truck_id:
         active_trips = active_trips.filter(truck_id=truck_id)
@@ -6087,7 +6165,7 @@ def dispatcher_control_view(
         .select_related('employee', 'equipment', 'role')
         .order_by('equipment_id', '-assigned_at', '-id')
     )
-    if not dispatcher_shift:
+    if not dispatcher_shift and not has_mining_master_reporting_period:
         recent_completed_trips = recent_completed_trips.none()
     if truck_id:
         recent_completed_trips = recent_completed_trips.filter(truck_id=truck_id)
@@ -6174,6 +6252,7 @@ def dispatcher_control_view(
         recent_dispatcher_actions=recent_dispatcher_actions,
         equipment_card_ids=equipment_card_ids,
         equipment_work_assignments=equipment_work_assignments,
+        reporting_period=reporting_period,
     )
 
     operational_state_version = get_operational_state_version()

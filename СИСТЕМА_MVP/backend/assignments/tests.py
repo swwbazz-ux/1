@@ -1,5 +1,6 @@
 import json
 from datetime import timedelta
+from pathlib import Path
 
 from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, TransactionTestCase
@@ -131,6 +132,74 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertNotContains(response, 'data-mm-panel')
         self.assertEqual(len(response.context['dispatcher_dashboard']['complex_zones']), 9)
 
+    def test_mining_master_report_owns_result_until_next_master_starts(self):
+        """Закрытая смена не обнуляет результат; его отделяет только сменщик."""
+        base_time = timezone.now() - timedelta(hours=4)
+        self.shift.opened_at = base_time
+        self.shift.closed_at = base_time + timedelta(hours=1)
+        self.shift.save(update_fields=['opened_at', 'closed_at'])
+        rock = RockType.objects.create(name='Руда для отчёта мастера')
+        dump = DumpPoint.objects.create(name='ККД для отчёта мастера')
+
+        def completed_trip(*, volume, completed_at):
+            return Trip.objects.create(
+                excavator=self.excavator,
+                truck=self.assigned_truck,
+                rock_type=rock,
+                dump_point=dump,
+                volume_m3=volume,
+                status=TripStatus.COMPLETED,
+                created_at=completed_at - timedelta(minutes=10),
+                completed_at=completed_at,
+            )
+
+        completed_trip(volume='100.00', completed_at=base_time + timedelta(minutes=30))
+        completed_trip(volume='200.00', completed_at=base_time + timedelta(hours=2))
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        report = response.context['dispatcher_dashboard']['mobile_shift_report']
+        self.assertEqual(report['completed_fact'], '300')
+        self.assertEqual(report['completed_trip_count'], 2)
+
+        next_master = Employee.objects.create(
+            full_name='Следующий горный мастер',
+            phone='79000000401',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=next_master,
+            role=self.master_role,
+            access_code='400001',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        next_opened_at = base_time + timedelta(hours=3)
+        EmployeeShift.objects.create(
+            employee=next_master,
+            workplace_code='mining_master',
+            shift_type='day',
+            opened_at=next_opened_at,
+            opened_by=next_master,
+        )
+        completed_trip(volume='400.00', completed_at=next_opened_at + timedelta(minutes=20))
+
+        response = self.client.get(reverse('mining_master_assignments'))
+        report = response.context['dispatcher_dashboard']['mobile_shift_report']
+        self.assertEqual(report['completed_fact'], '400')
+        self.assertEqual(report['completed_trip_count'], 1)
+
+    def test_mining_master_mobile_plan_uses_card_contour_without_complex_ring(self):
+        response = self.client.get(reverse('mining_master_assignments'))
+        html = response.content.decode('utf-8')
+        css_path = Path(__file__).resolve().parents[1] / 'static' / 'css' / 'app.css'
+        css = css_path.read_text(encoding='utf-8')
+
+        self.assertNotIn('class="mm-mobile-complex-plan-ring"', html)
+        self.assertIn('.mm-mobile-complex-card.has-plan-progress::before', css)
+        self.assertIn('touch-action: pan-y;', css)
+        self.assertIn('Вертикальное движение принадлежит сетке', html)
+
     def test_mining_master_truck_plan_overrun_uses_progress_cycle_contract(self):
         excavator_group = EquipmentPlanGroup.objects.create(
             name='Экскаваторы Горный мастер цикл',
@@ -210,8 +279,9 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'data-plan-progress-phase="amber"')
         self.assertContains(response, 'is-plan-overrun')
         self.assertContains(response, 'dispatcher-plan-loop-badge')
-        self.assertContains(response, 'mm-mobile-complex-plan-ring')
         self.assertContains(response, 'mm-mobile-plan-ring-layer')
+        css = (Path(__file__).resolve().parents[1] / 'static' / 'css' / 'app.css').read_text(encoding='utf-8')
+        self.assertIn('.mm-mobile-complex-card.has-plan-progress::before', css)
         self.assertContains(response, 'function syncMobilePlanVisual(source, target)')
         self.assertContains(response, 'syncMobilePlanVisual(source, mini);')
         html = response.content.decode('utf-8')
@@ -632,7 +702,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v155')
+        self.assertContains(response, 'mining-master-mobile-shell-v156')
         self.assertContains(response, 'mining-master-mobile-sync-queue-v3')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v1")')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v2")')
@@ -652,7 +722,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>')
-        self.assertContains(response, '>версия v155</span>')
+        self.assertContains(response, '>версия v156</span>')
         self.assertNotContains(response, '<div class="mm-mobile-version-strip" aria-label="Версия приложения">')
         self.assertContains(response, '<div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>')
         self.assertContains(response, '<span class="mm-mobile-update-badge" data-mm-pwa-update-badge')
@@ -709,10 +779,10 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v155', script)
+        self.assertIn('mining-master-mobile-shell-v156', script)
         self.assertEqual(
             response['X-App-Shell-Version'],
-            'mining-master-mobile-shell-v155',
+            'mining-master-mobile-shell-v156',
         )
         self.assertIn(
             f'const CACHE_NAME = "{response["X-App-Shell-Version"]}";',

@@ -200,12 +200,6 @@
                                 <span class="mm-mobile-status-chip">
                                     {{ complex.status_label|default:"состояние" }}
                                 </span>
-                                {% if complex.plan_has_plan %}
-                                    <span class="mm-mobile-complex-plan-ring" role="img" aria-label="Выполнение плана {{ complex.percent }}%, завершено циклов: {{ complex.plan_visual.completed_loops }}">
-                                        <span>{{ complex.plan_visual.loop_progress }}%</span>
-                                        {% if complex.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ complex.plan_visual.completed_loops }}</b>{% endif %}
-                                    </span>
-                                {% endif %}
                             </div>
                         </div>
                         <div class="mm-mobile-complex-visual" aria-hidden="true" data-mm-mobile-release-trucks>
@@ -388,9 +382,9 @@
                         <small>{{ dispatcher_dashboard.mobile_shift_report.unit_label|default:"т" }} выгружено</small>
                     </article>
                     <article>
-                        <span>В работе</span>
-                        <strong>{{ dispatcher_dashboard.mobile_shift_report.working_trucks|default:"0" }}</strong>
-                        <small>самосвалов</small>
+                        <span>В пути</span>
+                        <strong>{{ dispatcher_dashboard.mobile_shift_report.active_fact|default:"0" }}</strong>
+                        <small>{{ dispatcher_dashboard.mobile_shift_report.unit_label|default:"т" }} · {{ dispatcher_dashboard.mobile_shift_report.active_trip_count|default:"0" }} рейс.</small>
                     </article>
                     <article>
                         <span>Свободно</span>
@@ -418,6 +412,22 @@
                         {% endfor %}
                     </div>
                 </section>
+                {% if dispatcher_dashboard.mobile_shift_report.active_points %}
+                    <section class="mm-mobile-report-destinations is-in-transit" aria-label="Куда направлены самосвалы в пути">
+                        <header><span>В пути к разгрузке</span></header>
+                        <div class="mm-mobile-report-destination-list">
+                            {% for point in dispatcher_dashboard.mobile_shift_report.active_points|slice:":3" %}
+                                <div class="mm-mobile-report-destination">
+                                    <div>
+                                        <strong>{{ point.name }}</strong>
+                                        <small>{{ point.fact_tons }} {{ dispatcher_dashboard.mobile_shift_report.unit_label }} · {{ point.trip_count_label }}</small>
+                                    </div>
+                                    <b>{{ point.fact_share_percent }}%</b>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </section>
+                {% endif %}
             </div>
 
             {% if dispatcher_header.shift_is_open %}
@@ -556,9 +566,10 @@
                         <span>плана</span>
                     </div>
                     <div class="mm-shift-plan-total-copy">
-                        <span>Выполнено</span>
-                        <strong>{{ dispatcher_dashboard.shift_plan_detail.fact_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</strong>
-                        <small>из {{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ dispatcher_dashboard.shift_plan_detail.trip_count_label }}</small>
+                        <span>Выгружено</span>
+                        <strong>{{ dispatcher_dashboard.shift_plan_detail.completed_fact_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</strong>
+                        <small>из {{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ dispatcher_dashboard.shift_plan_detail.completed_trip_count|default:"0" }} рейс.</small>
+                        {% if dispatcher_dashboard.shift_plan_detail.active_trip_count %}<small class="mm-shift-plan-transit">В пути: {{ dispatcher_dashboard.shift_plan_detail.active_fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ dispatcher_dashboard.shift_plan_detail.active_trip_count }} рейс.</small>{% endif %}
                     </div>
                 </div>
                 <h3 class="mm-shift-plan-section-title">Куда вывезено</h3>
@@ -1149,7 +1160,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v155";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v156";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -5490,6 +5501,7 @@ document.addEventListener("DOMContentLoaded", function () {
             var dragging = false;
             var moved = false;
             var dragMode = "";
+            var verticalPanning = false;
             function getSwipeTouch(event) {
                 var list = event.changedTouches && event.changedTouches.length ? event.changedTouches : event.touches;
                 if (!list) return null;
@@ -5509,6 +5521,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 dragging = false;
                 moved = false;
                 dragMode = "";
+                verticalPanning = false;
                 touchTakeoverSent = false;
                 card.style.setProperty("--mm-mobile-swipe-x", "0px");
                 card.style.setProperty("--mm-mobile-truck-swipe-x", "0px");
@@ -5521,24 +5534,18 @@ document.addEventListener("DOMContentLoaded", function () {
                     var absDx = Math.abs(dx);
                     var absDy = Math.abs(dy);
                     if (absDx + absDy < 10) return false;
-
-                    if (absDy >= absDx * 0.8 && dy < 0) {
-                        dragging = true;
-                        dragMode = "fill";
-                    } else if (absDy >= absDx * 0.8 && dy > 0) {
-                        dragging = true;
-                        dragMode = "create";
-                    } else if (absDx >= absDy * 0.8) {
-                        dragging = true;
-                        dragMode = dx < 0 ? "release" : "release-trucks";
-                    } else if (absDx > absDy) {
-                        dragging = true;
-                        dragMode = dx < 0 ? "release" : "release-trucks";
-                    } else if (absDy > absDx) {
-                        dragging = true;
-                        dragMode = dy < 0 ? "fill" : "create";
-                    } else {
+                    if (absDy >= absDx) {
+                        // Вертикальное движение принадлежит сетке: карточка
+                        // не захватывает его и не мешает прокручивать смену.
+                        verticalPanning = true;
                         return false;
+                    }
+                    dragging = true;
+                    dragMode = dx < 0 ? "release" : "release-trucks";
+                    if (activePointerId !== null && card.setPointerCapture) {
+                        try {
+                            card.setPointerCapture(activePointerId);
+                        } catch (error) {}
                     }
                     sendTouchTakeover();
                 }
@@ -5547,29 +5554,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     event.stopPropagation();
                 }
                 moved = true;
-                if (dragMode === "fill") {
-                    var fillOffset = Math.min(0, Math.max(-118, dy));
-                    card.classList.remove("is-swiping", "is-swipe-ready", "is-create-swiping", "is-create-ready");
-                    card.classList.add("is-fill-swiping");
-                    shell.classList.add("is-fill-target-peeking");
-                    shell.classList.toggle("is-fill-target-ready", Math.abs(fillOffset) >= 72);
-                    shell.classList.remove("is-excavator-garage-peeking", "is-truck-garage-peeking", "is-create-complex-peeking", "is-create-complex-ready");
-                    card.style.setProperty("--mm-mobile-swipe-x", "0px");
-                    card.style.setProperty("--mm-mobile-truck-swipe-x", "0px");
-                    card.style.setProperty("--mm-mobile-fill-swipe-y", fillOffset + "px");
-                    card.classList.toggle("is-fill-ready", Math.abs(fillOffset) >= 72);
-                } else if (dragMode === "create") {
-                    var createOffset = Math.max(0, Math.min(118, dy));
-                    card.classList.remove("is-swiping", "is-swipe-ready", "is-fill-swiping", "is-fill-ready");
-                    card.classList.add("is-create-swiping");
-                    shell.classList.add("is-create-complex-peeking");
-                    shell.classList.toggle("is-create-complex-ready", createOffset >= 72);
-                    shell.classList.remove("is-excavator-garage-peeking", "is-truck-garage-peeking", "is-fill-target-peeking", "is-fill-target-ready");
-                    card.style.setProperty("--mm-mobile-swipe-x", "0px");
-                    card.style.setProperty("--mm-mobile-truck-swipe-x", "0px");
-                    card.style.setProperty("--mm-mobile-fill-swipe-y", createOffset + "px");
-                    card.classList.toggle("is-create-ready", createOffset >= 72);
-                } else if (dragMode === "release-trucks") {
+                if (dragMode === "release-trucks") {
                     var truckOffset = Math.min(dx, card.offsetWidth);
                     var truckThreshold = Math.min(120, Math.max(72, card.offsetWidth * .34));
                     card.classList.remove("is-swiping", "is-swipe-ready", "is-fill-swiping", "is-fill-ready", "is-create-swiping", "is-create-ready");
@@ -5613,6 +5598,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 touchSwipeDeadline = 0;
                 dragging = false;
                 dragMode = "";
+                verticalPanning = false;
                 if (moved) {
                     card.dataset.mmMobileSwipeIgnoreClick = "true";
                     window.setTimeout(function () {
@@ -5676,11 +5662,6 @@ document.addEventListener("DOMContentLoaded", function () {
                 activeTouchId = null;
                 touchTakeoverTarget = null;
                 startSwipe(event.clientX, event.clientY);
-                if (card.setPointerCapture) {
-                    try {
-                        card.setPointerCapture(activePointerId);
-                    } catch (error) {}
-                }
             }, true);
             card.addEventListener("pointermove", function (event) {
                 if (activePointerId === null || event.pointerId !== activePointerId) return;
@@ -5696,7 +5677,7 @@ document.addEventListener("DOMContentLoaded", function () {
             });
             card.addEventListener("touchstart", function (event) {
                 if (isMiningMasterMobileReadonly()) return;
-                if (activeTouchId !== null || card.classList.contains("is-releasing")) return;
+                if (activePointerId !== null || activeTouchId !== null || card.classList.contains("is-releasing")) return;
                 if (!event.changedTouches || !event.changedTouches.length) return;
                 var truckControl = event.target && event.target.closest
                     ? event.target.closest("[data-mm-mobile-home-truck-id], [data-mm-mobile-open-truck-list]")
@@ -5713,6 +5694,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (activeTouchId === null) return;
                 var touch = getSwipeTouch(event);
                 if (!touch) return;
+                if (verticalPanning) return;
                 var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
                 if (!dragging && touchTakeoverTarget && now > touchSwipeDeadline) return;
                 moveSwipe(touch.clientX, touch.clientY, event);
