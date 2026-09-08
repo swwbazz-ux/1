@@ -1157,7 +1157,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v152";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v153";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -4022,7 +4022,11 @@ document.addEventListener("DOMContentLoaded", function () {
             var rowGap = parseFloat(gridStyle.rowGap) || 0;
             var rowCount = Math.max(1, Math.ceil(cards.length / 2));
             var columnWidth = Math.max(1, (rect.width - columnGap) / 2);
-            var rowHeight = Math.max(1, (rect.height - rowGap * (rowCount - 1)) / rowCount);
+            var viewportBottom = window.visualViewport
+                ? window.visualViewport.offsetTop + window.visualViewport.height
+                : window.innerHeight;
+            var stableGridHeight = Math.max(rect.height, viewportBottom - rect.top);
+            var rowHeight = Math.max(1, (stableGridHeight - rowGap * (rowCount - 1)) / rowCount);
             var column = clientX >= rect.left + columnWidth + columnGap / 2 ? 1 : 0;
             var row = Math.max(0, Math.min(rowCount - 1, Math.floor((clientY - rect.top) / (rowHeight + rowGap))));
             var slotIndex = Math.min(cards.length - 1, row * 2 + column);
@@ -4030,6 +4034,15 @@ document.addEventListener("DOMContentLoaded", function () {
             var slotCard = cards[slotIndex];
             sourceCard.style.order = String(slotIndex);
             slotCard.style.order = String(sourceIndex);
+        }
+
+        function schedulePinMobileTruckTransferSourceAtPoint(transfer, clientX, clientY) {
+            window.requestAnimationFrame(function () {
+                window.requestAnimationFrame(function () {
+                    if (mobileTruckTransfer !== transfer) return;
+                    pinMobileTruckTransferSourceAtPoint(transfer.sourceCard, clientX, clientY);
+                });
+            });
         }
 
         function beginMobileTruckTransfer(node) {
@@ -4054,7 +4067,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 card.classList.toggle("is-transfer-source", isSource);
                 card.classList.toggle("is-transfer-target", !isSource);
             });
-            pinMobileTruckTransferSourceAtPoint(transfer.sourceCard, sourceAnchorX, sourceAnchorY);
+            schedulePinMobileTruckTransferSourceAtPoint(transfer, sourceAnchorX, sourceAnchorY);
             if (mobileTruckTransferCaption) mobileTruckTransferCaption.textContent = "Перестановка самосвала";
             if (mobileTruckTransferTitle) mobileTruckTransferTitle.textContent = "№" + transfer.truckNumber + " из " + transfer.sourceLabel + " — отпустите на экскаваторе";
             if (mobileTruckTransferCancel) mobileTruckTransferCancel.hidden = false;
