@@ -6,6 +6,7 @@ from django.apps import apps
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
+from django.utils import timezone
 
 from references.equipment_states import upsert_default_equipment_states
 from references.models import (
@@ -17,7 +18,8 @@ from references.models import (
     RockType,
     TruckCapacityRule,
 )
-from assignments.models import ExcavatorPlacement
+from assignments.models import ExcavatorPlacement, HaulAssignment, HaulAssignmentHandoff
+from shifts.models import EmployeeShift
 from trips.models import DispatcherActionLog, Trip, TripClientAction
 from users.models import Employee
 
@@ -259,6 +261,35 @@ class ReferenceLoadTests(TestCase):
             trip=removed_trip,
             target_summary='Тестовый рейс очистки',
         )
+        source_assignment = HaulAssignment.objects.create(
+            excavator=excavator,
+            truck=removed_trip_truck,
+            status='cancelled',
+            ended_at=timezone.now(),
+        )
+        target_assignment = HaulAssignment.objects.create(
+            excavator=excavator,
+            truck=removed_trip_truck,
+            status='cancelled',
+            ended_at=timezone.now(),
+        )
+        source_shift = EmployeeShift.objects.create(
+            employee=actor,
+            equipment=excavator,
+            shift_type='day',
+            workplace_code='excavator_operator',
+            opened_at=timezone.now(),
+        )
+        handoff = HaulAssignmentHandoff.objects.create(
+            truck=removed_trip_truck,
+            source_assignment=source_assignment,
+            target_assignment=target_assignment,
+            source_excavator=excavator,
+            source_shift=source_shift,
+            status='resolved',
+            resolved_at=timezone.now(),
+            resolved_by_trip=removed_trip,
+        )
         placement = ExcavatorPlacement.objects.create(
             excavator=excavator,
             work_rock_type=obsolete_ore,
@@ -282,6 +313,7 @@ class ReferenceLoadTests(TestCase):
         self.assertIsNone(audit_log.trip)
         self.assertFalse(Trip.objects.filter(pk=removed_trip.pk).exists())
         self.assertFalse(TripClientAction.objects.filter(client_action_id='cleanup-action').exists())
+        self.assertFalse(HaulAssignmentHandoff.objects.filter(pk=handoff.pk).exists())
         self.assertFalse(
             RockType.objects.filter(
                 name__in={'Руда', 'Рыхлая', 'Окисленная', 'Негабарит'}

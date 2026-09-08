@@ -22,6 +22,7 @@ def remove_obsolete_cargo_aliases(apps, schema_editor):
     RockType = apps.get_model('references', 'RockType')
     TruckCapacityRule = apps.get_model('references', 'TruckCapacityRule')
     ExcavatorPlacement = apps.get_model('assignments', 'ExcavatorPlacement')
+    HaulAssignmentHandoff = apps.get_model('assignments', 'HaulAssignmentHandoff')
     Trip = apps.get_model('trips', 'Trip')
     TripClientAction = apps.get_model('trips', 'TripClientAction')
 
@@ -79,6 +80,9 @@ def remove_obsolete_cargo_aliases(apps, schema_editor):
         ambiguous_trip_ids = Trip.objects.filter(
             rock_type_id__in=ambiguous_ids
         ).values_list('id', flat=True)
+        HaulAssignmentHandoff.objects.filter(
+            resolved_by_trip_id__in=ambiguous_trip_ids
+        ).delete()
         TripClientAction.objects.filter(trip_id__in=ambiguous_trip_ids).delete()
         Trip.objects.filter(id__in=ambiguous_trip_ids).delete()
         ExcavatorPlacement.objects.filter(
@@ -110,7 +114,7 @@ def remove_obsolete_cargo_aliases(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [
         ('references', '0009_link_legacy_rock_capacity_rules'),
-        ('assignments', '0010_excavatordumppointsetting'),
+        ('assignments', '0012_haul_assignment_handoff'),
         ('trips', '0008_trip_cancelled_at'),
     ]
 
