@@ -858,6 +858,35 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(report['points'][0]['name'], 'ККД')
         self.assertEqual(report['points'][0]['trip_count_label'], '1 рейс')
         self.assertEqual(report['points'][0]['fact_share_percent'], 100)
+
+    def test_mobile_shift_report_counts_ready_equipment_reserve(self):
+        HaulAssignment.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            assigned_by=self.dispatcher,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.downtime_truck,
+            reason=self.reason,
+            started_at=timezone.now(),
+        )
+        Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.active_truck,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            volume_m3='47.00',
+            status=TripStatus.ACTIVE,
+        )
+
+        report = self.build_dashboard()['mobile_shift_report']
+
+        self.assertEqual(report['reserve_trucks'], 1)
+        self.assertEqual(report['reserve_excavators'], 1)
+        self.assertEqual(report['reserve_total'], 2)
+
     def test_every_active_complex_detail_uses_the_stable_equipment_key(self):
         dispatcher_role = Role.objects.create(code='dispatcher', name='Горный диспетчер')
         dispatcher_access = EmployeeAccess.objects.create(

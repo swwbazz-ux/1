@@ -388,9 +388,9 @@
                         <small>{{ dispatcher_dashboard.mobile_shift_report.unit_label|default:"т" }} · {{ dispatcher_dashboard.mobile_shift_report.active_trip_count|default:"0" }} рейс.</small>
                     </article>
                     <article>
-                        <span>Свободно</span>
-                        <strong>{{ dispatcher_dashboard.mobile_shift_report.free_trucks|default:"0" }}</strong>
-                        <small>готовы в гараже</small>
+                        <span>Резерв техники</span>
+                        <strong>{{ dispatcher_dashboard.mobile_shift_report.reserve_total|default:"0" }}</strong>
+                        <small>{{ dispatcher_dashboard.mobile_shift_report.reserve_trucks|default:"0" }} сам. · {{ dispatcher_dashboard.mobile_shift_report.reserve_excavators|default:"0" }} экс.</small>
                     </article>
                 </div>
 
@@ -1163,7 +1163,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v161";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v162";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");

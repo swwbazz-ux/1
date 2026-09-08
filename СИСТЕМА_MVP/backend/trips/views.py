@@ -2856,6 +2856,16 @@ def build_dispatcher_dashboard_context(
         ((accepted_truck_ids | active_trip_truck_ids) & active_truck_equipment_ids)
         - downtime_truck_ids
     )
+    reserve_trucks = sum(
+        1
+        for truck in trucks_list
+        if truck.id not in assigned_truck_ids and truck_current_state(truck)[2] == 'free'
+    )
+    reserve_excavators = sum(
+        1
+        for excavator in excavators_list
+        if excavator.id not in active_excavator_ids and excavator_current_state(excavator)[2] == 'garage'
+    )
     mobile_shift_report = {
         'completed_trip_count': len(completed_shift_trips),
         'active_trip_count': len(active_shift_trips),
@@ -2863,11 +2873,10 @@ def build_dispatcher_dashboard_context(
         'active_fact': format_dispatcher_number(active_volume),
         'unit_label': shift_plan_detail['unit_label'],
         'working_trucks': len(report_working_truck_ids),
-        'free_trucks': sum(
-            1
-            for tile in mobile_truck_garage_tiles
-            if tile.get('equipment_state_code') == 'free'
-        ),
+        'free_trucks': reserve_trucks,
+        'reserve_trucks': reserve_trucks,
+        'reserve_excavators': reserve_excavators,
+        'reserve_total': reserve_trucks + reserve_excavators,
         'points': completed_shift_detail['points'],
         'active_points': active_shift_detail['points'],
     }
