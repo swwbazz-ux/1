@@ -2647,7 +2647,7 @@ test("QA live reads state then materialized data and renders held placeholders",
     assert.equal(runtime.elements.shiftType.disabled, true);
     assert.equal(runtime.elements.refreshCountdown.textContent, "00:10");
     assert.equal(runtime.elements.qaLiveStep.textContent, "1");
-    assert.equal(runtime.elements.qaLiveShift.textContent, "Ночная");
+    assert.equal(runtime.elements.qaLiveShift.textContent, "Вторая смена");
     assert.equal(runtime.elements.qaLiveRevision.textContent, "7");
     assert.equal(
         runtime.elements.qaLiveSourceFingerprint.textContent,

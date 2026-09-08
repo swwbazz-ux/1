@@ -758,7 +758,7 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
     current_time = production_context.local_datetime.strftime('%H:%M')
     current_date = production_context.production_date.strftime('%d.%m.%Y')
     if current_shift:
-        shift_label = 'Дневная смена' if current_shift.shift_type == ShiftType.DAY else 'Ночная смена'
+        shift_label = 'Первая смена' if current_shift.shift_type == ShiftType.DAY else 'Вторая смена'
         time_range = '07:00-19:00' if current_shift.shift_type == ShiftType.DAY else '19:00-07:00'
         clock_caption = 'в работе'
         shift_status_variant = 'open'
@@ -769,9 +769,9 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
         shift_status_variant = 'blocked'
     else:
         shift_label = (
-            'Дневная смена'
+            'Первая смена'
             if production_context.shift_type == ShiftType.DAY
-            else 'Ночная смена'
+            else 'Вторая смена'
         )
         time_range = production_context.time_range
         clock_caption = ''

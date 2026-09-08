@@ -61,8 +61,8 @@
                 <thead>
                 <tr>
                     <th>Показатель</th>
-                    <th>День</th>
-                    <th>Ночь</th>
+                    <th>Первая смена</th>
+                    <th>Вторая смена</th>
                     <th>Сутки</th>
                 </tr>
                 </thead>
@@ -140,11 +140,11 @@
 
     <section class="dashboard-grid">
         <div class="card">
-            <h2>I смена, дневная</h2>
+            <h2>Первая смена</h2>
             {% include "reports/includes/customer_shift_table.html" with rows=rows_by_shift.day %}
         </div>
         <div class="card">
-            <h2>II смена, ночная</h2>
+            <h2>Вторая смена</h2>
             {% include "reports/includes/customer_shift_table.html" with rows=rows_by_shift.night %}
         </div>
     </section>

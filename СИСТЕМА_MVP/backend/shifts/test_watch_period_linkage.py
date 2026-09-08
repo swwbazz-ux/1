@@ -24,6 +24,7 @@ from core.production_time import (
     production_day_bounds,
     production_shift_type,
     production_work_date,
+    production_work_date_for_shift,
 )
 from references.models import Equipment, EquipmentModel, EquipmentType
 from reports.driver_watch_observation import (
@@ -167,6 +168,15 @@ class DriverWatchPeriodLinkageTests(TestCase):
             actor=self.deputy,
         )
         plan.refresh_from_db()
+        self.assignment = EquipmentAssignment.objects.get(
+            employee=self.driver,
+            role=self.driver_role,
+            equipment=self.truck,
+            shift_type=self.assignment.shift_type,
+            status=AssignmentStatus.ACCEPTED,
+            ended_at__isnull=True,
+            shift__isnull=True,
+        )
         return plan
 
     def create_current_watch_period(
@@ -193,6 +203,10 @@ class DriverWatchPeriodLinkageTests(TestCase):
         employee=None,
         published_at=None,
     ):
+        effective_published_at = published_at or opened_at - timedelta(minutes=1)
+        EmployeeAccess.objects.filter(pk=self.deputy_access.pk).update(
+            created_at=effective_published_at - timedelta(seconds=1),
+        )
         plan = CrewPlan.objects.create(
             work_date=work_date,
             role=self.driver_role,
@@ -201,7 +215,7 @@ class DriverWatchPeriodLinkageTests(TestCase):
             created_by=self.deputy,
             updated_by=self.deputy,
             published_by=self.deputy,
-            published_at=published_at or opened_at - timedelta(minutes=1),
+            published_at=effective_published_at,
         )
         CrewPlanSlot.objects.create(
             plan=plan,
@@ -389,12 +403,12 @@ class DriverWatchPeriodLinkageTests(TestCase):
         self.assertEqual(linkage['linked_to_selected_watch_count'], 1)
         self.assertEqual(linkage['unlinked_shift_count'], 0)
 
-    def test_early_day_shift_without_structural_early_complex_marker_is_unlinked(self):
+    def test_early_first_shift_uses_published_placement_instead_of_clock_bucket(self):
         opened_at = datetime(2026, 8, 10, 6, 0, tzinfo=BUSINESS_TIME_ZONE)
-        work_date = production_work_date(opened_at)
         self.assignment.shift_type = WorkShiftType.SHIFT_1
         self.assignment.save(update_fields=['shift_type'])
-        WatchPeriod.objects.create(
+        work_date = production_work_date_for_shift(opened_at, self.assignment.shift_type)
+        watch_period = WatchPeriod.objects.create(
             name='ТЕСТ_ВАХТА_Ранний комплекс внутри периода',
             watch_composition=self.watch_composition,
             starts_on=work_date - timedelta(days=2),
@@ -410,12 +424,16 @@ class DriverWatchPeriodLinkageTests(TestCase):
         with patch('shifts.services.timezone.now', return_value=opened_at):
             shift = self.open_shift(action='early-day-inside')
 
-        self.assertIsNone(shift.watch_period)
+        self.assertEqual(shift.watch_period, watch_period)
         self.assertEqual(shift.opened_at, opened_at)
 
-    def test_early_day_shift_on_watch_boundary_is_left_unlinked(self):
+    def test_early_first_shift_on_watch_boundary_uses_its_assigned_work_date(self):
         opened_at = datetime(2026, 8, 10, 6, 0, tzinfo=BUSINESS_TIME_ZONE)
         previous_work_date = production_work_date(opened_at)
+        assigned_work_date = production_work_date_for_shift(
+            opened_at,
+            WorkShiftType.SHIFT_1,
+        )
         self.assignment.shift_type = WorkShiftType.SHIFT_1
         self.assignment.save(update_fields=['shift_type'])
         WatchPeriod.objects.create(
@@ -425,7 +443,7 @@ class DriverWatchPeriodLinkageTests(TestCase):
             ends_on=previous_work_date,
             is_active=True,
         )
-        WatchPeriod.objects.create(
+        selected_period = WatchPeriod.objects.create(
             name='ТЕСТ_ВАХТА_Следующая',
             watch_composition=self.watch_composition,
             starts_on=opened_at.date(),
@@ -433,7 +451,7 @@ class DriverWatchPeriodLinkageTests(TestCase):
             is_active=True,
         )
         self.create_published_plan_for(
-            work_date=previous_work_date,
+            work_date=assigned_work_date,
             opened_at=opened_at,
             shift_type=WorkShiftType.SHIFT_1,
         )
@@ -441,7 +459,7 @@ class DriverWatchPeriodLinkageTests(TestCase):
         with patch('shifts.services.timezone.now', return_value=opened_at):
             shift = self.open_shift(action='early-day-boundary')
 
-        self.assertIsNone(shift.watch_period)
+        self.assertEqual(shift.watch_period, selected_period)
         self.assertTrue(
             EmployeeShift.objects.filter(pk=shift.pk, closed_at__isnull=True).exists()
         )

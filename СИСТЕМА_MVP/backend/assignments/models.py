@@ -9,8 +9,8 @@ class AssignmentStatus(models.TextChoices):
 
 
 class WorkShiftType(models.TextChoices):
-    SHIFT_1 = 'day', 'Смена 1 · 07:00–19:00'
-    SHIFT_2 = 'night', 'Смена 2 · 19:00–07:00'
+    SHIFT_1 = 'day', 'Первая смена'
+    SHIFT_2 = 'night', 'Вторая смена'
 
 
 class CrewPlanStatus(models.TextChoices):

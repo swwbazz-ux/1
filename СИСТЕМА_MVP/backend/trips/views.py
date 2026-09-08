@@ -54,6 +54,7 @@ from core.production_time import (
     production_shift_context,
     production_shift_type,
     production_work_date,
+    production_work_date_for_shift,
 )
 from downtimes.driver_workflow import (
     DRIVER_DOWNTIME_FLOW_WAITING_LOADING,
@@ -279,7 +280,11 @@ def dispatcher_empty_snapshot_progress(shift=None, equipment=None):
     equipment = equipment or getattr(shift, 'equipment', None)
     return {
         'equipment': equipment,
-        'date': production_work_date(shift.opened_at) if shift and shift.opened_at else None,
+        'date': (
+            production_work_date_for_shift(shift.opened_at, shift.shift_type)
+            if shift and shift.opened_at
+            else None
+        ),
         'shift_type': shift.shift_type if shift else None,
         'shift': shift,
         'plan': None,
@@ -1750,14 +1755,14 @@ def build_dispatcher_dashboard_context(
     production_shift_end = None
     if dispatcher_shift:
         production_shift_start, production_shift_end = production_shift_bounds(
-            production_work_date(dispatcher_shift.opened_at),
+            production_work_date_for_shift(
+                dispatcher_shift.opened_at,
+                dispatcher_shift.shift_type,
+            ),
             dispatcher_shift.shift_type,
         )
         shift_trip_attribution = (
-            Q(
-                loading_shift__opened_at__gte=production_shift_start,
-                loading_shift__opened_at__lt=production_shift_end,
-            )
+            Q(loading_shift=dispatcher_shift)
             | Q(
                 loading_shift__isnull=True,
                 created_at__gte=production_shift_start,

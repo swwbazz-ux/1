@@ -767,8 +767,8 @@ def build_crew_plan_payload(plan, *, request=None):
                 row_changed = True
             row_slots.append({
                 'shift_type': shift_type,
-                'label': 'День' if shift_type == WorkShiftType.SHIFT_1 else 'Ночь',
-                'time_label': '07:00–19:00' if shift_type == WorkShiftType.SHIFT_1 else '19:00–07:00',
+                'label': 'Первая смена' if shift_type == WorkShiftType.SHIFT_1 else 'Вторая смена',
+                'time_label': 'по расстановке',
                 'employee': _employee_payload(
                     slot.employee,
                     presence=presence_by_employee.get(slot.employee_id),
@@ -1113,7 +1113,7 @@ def build_deputy_crew_plan_workbook(plan, *, actor):
     sheet.row_dimensions[5].height = 24
     sheet.row_dimensions[6].height = 8
 
-    headers = ('Техника', 'Модель', 'День · 07:00–19:00', 'Ночь · 19:00–07:00', 'Примечание')
+    headers = ('Техника', 'Модель', 'Первая смена', 'Вторая смена', 'Примечание')
     for column, header in enumerate(headers, start=1):
         cell = sheet.cell(DEPUTY_XLSX_TABLE_HEADER_ROW, column, header)
         cell.fill = green_fill
