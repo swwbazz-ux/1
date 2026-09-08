@@ -57,7 +57,12 @@ from shifts.models import (
 from shifts.services import assign_shift_plan_snapshot, progress_cycle_visual_context
 from trips.dispatcher_header import open_dispatcher_shift
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
-from trips.views import build_dispatcher_dashboard_context, dispatcher_empty_snapshot_progress, finalize_trip_unloaded
+from trips.views import (
+    build_dispatcher_dashboard_context,
+    dispatcher_empty_snapshot_progress,
+    finalize_trip_unloaded,
+    get_operational_state_version,
+)
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
 
@@ -783,6 +788,59 @@ class DispatcherGarageCurrentStateTests(TestCase):
         )
         zone_keys = [card['zone_key'] for card in dashboard['complex_zones']]
         self.assertEqual(len(zone_keys), len(set(zone_keys)))
+
+    def test_every_active_complex_detail_uses_the_stable_equipment_key(self):
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Горный диспетчер')
+        dispatcher_access = EmployeeAccess.objects.create(
+            employee=self.dispatcher,
+            role=dispatcher_role,
+            access_code='515151',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        session = self.client.session
+        session['employee_access_id'] = dispatcher_access.id
+        session['device_kind'] = 'personal'
+        session.save()
+
+        plain_four = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            garage_number='4',
+        )
+        branded_four = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            garage_number='ТВИ 4',
+        )
+        active_excavators = (self.excavator, plain_four, branded_four)
+        for excavator in active_excavators:
+            ExcavatorPlacement.objects.create(
+                excavator=excavator,
+                zone=ExcavatorPlacement.Zone.ACTIVE,
+            )
+
+        for excavator in active_excavators:
+            response = self.client.get(
+                reverse(
+                    'dispatcher_equipment_detail',
+                    kwargs={
+                        'category': 'complex',
+                        'equipment_id': excavator.id,
+                    },
+                ),
+                {'state_version': get_operational_state_version()},
+                HTTP_ACCEPT='application/json',
+                HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            )
+
+            self.assertEqual(response.status_code, 200, response.content)
+            self.assertEqual(
+                response.json()['card_key'],
+                f'complex-equipment-{excavator.id}',
+            )
+            self.assertEqual(
+                response.json()['card']['id'],
+                f'complex-equipment-{excavator.id}',
+            )
 
     def test_downtime_summaries_use_reason_state_color(self):
         upsert_default_equipment_states()
