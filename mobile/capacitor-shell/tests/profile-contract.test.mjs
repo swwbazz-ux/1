@@ -36,8 +36,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "37",
-    versionName: "0.1.23",
+    versionCode: "40",
+    versionName: "0.1.24",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -47,8 +47,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver.qa",
     appName: "Водитель QA",
-    versionCode: "4",
-    versionName: "1.0.3-qa",
+    versionCode: "5",
+    versionName: "1.0.4-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -58,8 +58,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "39",
-    versionName: "0.1.23",
+    versionCode: "42",
+    versionName: "0.1.24",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -69,8 +69,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "38",
-    versionName: "0.1.23-rc",
+    versionCode: "41",
+    versionName: "0.1.24-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -120,7 +120,11 @@ for (const [profileName, expected] of Object.entries(expectedProfiles)) {
     assert.equal(config.appName, expected.appName);
     assert.match(config.applicationId, /^[a-z][a-z0-9_.]+$/);
     assert.ok(config.heartbeatUrl.startsWith(config.serverUrl));
-    assert.ok(Number(config.heartbeatIntervalSeconds) >= 15);
+    if (profileName.startsWith("driver")) {
+      assert.equal(config.heartbeatIntervalSeconds, "10");
+    } else {
+      assert.ok(Number(config.heartbeatIntervalSeconds) >= 15);
+    }
     if (config.inAppUpdaterEnabled === "false") {
       assert.equal(config.updateManifestUrl, "");
       assert.equal(config.updateApkBaseUrl, "");

@@ -1461,6 +1461,25 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'runManualUpdateCheck')
         self.assertNotContains(response, 'data-eo-refresh-work')
 
+    def test_excavator_work_renders_readonly_instead_of_redirect_loop_for_stale_session(self):
+        active_generation = timezone.now()
+        self.access.last_login_at = active_generation
+        self.access.save(update_fields=['last_login_at'])
+        session = self.client.session
+        session['active_role_access_id'] = self.access.id
+        session['active_role_login_at'] = (
+            active_generation - timedelta(minutes=1)
+        ).isoformat()
+        session['active_role_code'] = 'excavator_operator'
+        session.save()
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-inactive-role-banner')
+        self.assertContains(response, 'data-inactive-role-reclaim')
+        self.assertContains(response, 'Продолжить здесь')
+
     def test_excavator_work_renders_twelve_assigned_trucks_without_hidden_overflow(self):
         for index in range(11):
             truck = Equipment.objects.create(
