@@ -12506,7 +12506,13 @@ body.dispatcher-fit-screen .dispatcher-complex-card:not(.status-empty):has(.comp
     overflow: visible;
 }
 
-body.dispatcher-fit-screen .dispatcher-complex-card > .complex-title-state {
+/* Desktop drag-and-drop can create a card with the legacy work-head wrapper.
+   Let its children participate in the same three-row card grid. */
+body.dispatcher-fit-screen .dispatcher-complex-card > .complex-work-head {
+    display: contents;
+}
+
+body.dispatcher-fit-screen .dispatcher-complex-card .complex-title-state {
     grid-row: 1;
     display: flex;
     flex-wrap: wrap;
@@ -12570,7 +12576,7 @@ body.dispatcher-fit-screen .complex-downtime-status > time {
     font-size: 12px;
 }
 
-body.dispatcher-fit-screen .dispatcher-complex-card > .complex-context {
+body.dispatcher-fit-screen .dispatcher-complex-card .complex-context {
     grid-row: 2;
     display: flex;
     flex-wrap: wrap;

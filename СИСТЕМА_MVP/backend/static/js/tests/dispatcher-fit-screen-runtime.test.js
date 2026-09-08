@@ -14,6 +14,9 @@ const CSS = fs.readFileSync(
     path.join(BACKEND, "static", "css", "dispatcher-control-v1.css"),
     "utf8"
 );
+const FIT_SCRIPT = TEMPLATE.match(
+    /\{% if not mining_master_mobile_enabled %\}\s*<script>([\s\S]*?)<\/script>\s*\{% else %\}/
+)[1];
 
 function fit(width, height) {
     const calculatedZoom = Math.min(width / 2400, height / 1500);
@@ -37,12 +40,13 @@ test("dispatcher desktop uses a fixed 2400 by 1500 CSS canvas", () => {
 });
 
 test("fit is driven by a document ResizeObserver and CSS zoom", () => {
-    assert.match(TEMPLATE, /var root = document\.documentElement;/);
-    assert.match(TEMPLATE, /new ResizeObserver/);
-    assert.match(TEMPLATE, /resizeObserver\.observe\(root\)/);
-    assert.match(TEMPLATE, /shell\.style\.zoom = String\(zoom\);/);
-    assert.doesNotMatch(TEMPLATE, /window\.addEventListener\("resize", fitDispatcherShellToScreen\)/);
-    assert.doesNotMatch(TEMPLATE, /shell\.style\.transform = "scale\(/);
+    assert.match(FIT_SCRIPT, /var root = document\.documentElement;/);
+    assert.match(FIT_SCRIPT, /new ResizeObserver/);
+    assert.match(FIT_SCRIPT, /resizeObserver\.observe\(root\)/);
+    assert.match(FIT_SCRIPT, /shell\.style\.zoom = String\(zoom\);/);
+    assert.doesNotMatch(FIT_SCRIPT, /window\.addEventListener\("resize", fitDispatcherShellToScreen\)/);
+    assert.doesNotMatch(FIT_SCRIPT, /shell\.style\.transform = "scale\(/);
+    assert.match(TEMPLATE, /miningMasterShellVersion = "mining-master-mobile-shell-v155"/);
 });
 
 test("target viewports calculate the requested zoom values", () => {

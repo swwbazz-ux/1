@@ -65,6 +65,7 @@ from downtimes.driver_workflow import (
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import DEFAULT_EQUIPMENT_STATES
 from references.models import DumpPoint, Equipment, EquipmentState, RockType, TruckCapacityRule
+from references.rock_catalog import CANONICAL_ROCK_NAMES
 from shifts.models import EmployeeShift, ShiftClientAction
 from shifts.models import PlanAssignmentStatus, PlanCalculationMode
 from shifts.services import (
@@ -783,7 +784,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v218";
+const CACHE_NAME = "excavator-mobile-shell-v219";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -3427,7 +3428,11 @@ def restrict_excavator_trip_form(form, current_excavator, current_shift=None):
     else:
         form.fields['assignment'].queryset = form.fields['assignment'].queryset.none()
 
-    rock_queryset = form.fields['rock_type'].queryset.filter(density__isnull=False)
+    rock_queryset = form.fields['rock_type'].queryset.filter(
+        name__in=CANONICAL_ROCK_NAMES,
+        density__isnull=False,
+        loosening_factor__isnull=False,
+    )
     assigned_model_rows = list(
         form.fields['assignment'].queryset
         .exclude(truck__model_id__isnull=True)
@@ -4573,7 +4578,10 @@ def excavator_work_settings_view(request):
             return JsonResponse(
                 {
                     'ok': False,
-                    'error': 'Для выбранной породы не настроены плотность или кубатура назначенных самосвалов.',
+                    'error': (
+                        'Для выбранной породы не настроены плотность, коэффициент '
+                        'разрыхления или кубатура назначенных самосвалов.'
+                    ),
                     'code': 'rock_reference_incomplete',
                 },
                 status=409,

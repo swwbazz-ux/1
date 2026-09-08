@@ -96,6 +96,9 @@
                     {% if complex.is_empty %}
                         <div class="complex-empty" aria-hidden="true"></div>
                     {% else %}
+                        {% if mining_master_mobile_enabled %}
+                        <div class="complex-work-head">
+                        {% endif %}
                         <div class="complex-title-state">
                             <h2>{{ complex.id }}</h2>
                             {% if not mining_master_mobile_enabled and complex.active_downtime.active %}
@@ -129,7 +132,10 @@
                                 {% if complex.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ complex.plan_visual.completed_loops }}">×{{ complex.plan_visual.completed_loops }}</b>{% endif %}
                             </div>
                         </div>
-                        <div class="complex-assigned-trucks {{ complex.truck_scale_class }}" aria-label="Активные самосвалы комплекса">
+                        {% if mining_master_mobile_enabled %}
+                        </div>
+                        {% endif %}
+                        <div class="complex-assigned-trucks {{ complex.truck_scale_class }}" style="--complex-truck-cols: {{ complex.truck_column_count|default:1 }};" aria-label="Активные самосвалы комплекса">
                             {% for truck in complex.active_truck_tiles %}
                                 <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-truck-tile data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-complex-truck="true" data-assigned-zone="{{ complex.zone_key }}" data-plan-status="{{ truck.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ truck.percent|default:0 }}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" data-plan-mode="{{ truck.plan_calculation_mode|default:'' }}" data-plan-value="{{ truck.plan_value|default:'' }}" data-plan-fact="{{ truck.plan_fact_value|default:'' }}" data-plan-unit="{{ truck.plan_unit|default:'' }}" data-plan-group="{{ truck.plan_group_name|default:'' }}">
                                     <strong>{{ truck.name }}</strong>
@@ -179,7 +185,7 @@
                 <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
                     {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                 </button>
-                {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
+                {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>версия {{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
             </div>
         </header>
 
@@ -271,7 +277,7 @@
                     <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
                         {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                     </button>
-                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
+                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>версия {{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
 
@@ -325,7 +331,7 @@
                     <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
                         {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                     </button>
-                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
+                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>версия {{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
 
@@ -378,7 +384,7 @@
                     <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
                         {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                     </button>
-                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
+                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>версия {{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
 
@@ -476,14 +482,6 @@
                 {% endif %}
             </form>
 
-            {% if not is_native_app %}
-            <div class="mm-mobile-version-strip" aria-label="Версия приложения">
-                <span>Версия приложения</span>
-                <strong data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</strong>
-                <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
-            </div>
-            {% endif %}
-
             <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="home">
                     <span class="mm-mobile-nav-icon mm-mobile-nav-icon-pult" aria-hidden="true"></span>
@@ -518,7 +516,7 @@
                             <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
                                 {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                             </button>
-                            {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
+                            {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>версия {{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                         </div>
                     </header>
 
@@ -1040,6 +1038,47 @@
     fitDispatcherCanvas();
 })();
 </script>
+{% else %}
+<script>
+(function () {
+    /* Пульт горного мастера на телефоне сохраняет свой отдельный
+       transform-контур: desktop CSS-zoom к нему не применяется. */
+    var DESIGN_HEIGHT = 800;
+    var DESIGN_WIDTH_MIN = 1400;
+
+    function fitDispatcherShellToScreen() {
+        var shell = document.querySelector(".dispatcher-shell");
+        if (!shell) return;
+        var isPhoneLandscape = window.matchMedia(
+            "(orientation: landscape) and (max-width: 1700px)"
+        ).matches;
+        if (!isPhoneLandscape) {
+            shell.style.transform = "";
+            shell.style.width = "";
+            return;
+        }
+        var designWidth = Math.max(
+            DESIGN_WIDTH_MIN,
+            Math.round(DESIGN_HEIGHT * window.innerWidth / window.innerHeight)
+        );
+        var scale = Math.min(
+            window.innerWidth / designWidth,
+            window.innerHeight / DESIGN_HEIGHT
+        );
+        shell.style.width = designWidth + "px";
+        shell.style.transform = "scale(" + scale + ")";
+    }
+
+    fitDispatcherShellToScreen();
+    window.addEventListener("resize", fitDispatcherShellToScreen);
+    window.addEventListener("orientationchange", function () {
+        setTimeout(fitDispatcherShellToScreen, 60);
+    });
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", fitDispatcherShellToScreen);
+    }
+})();
+</script>
 {% endif %}
 
 {{ dispatcher_dashboard.equipment_cards|json_script:"gd-equipment-cards-data" }}
@@ -1157,7 +1196,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v147";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v155";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -2964,7 +3003,7 @@ document.addEventListener("DOMContentLoaded", function () {
                         {% if is_native_app %}
                         '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Нажмите, чтобы открыть отчёт">0%</button></div>',
                         {% else %}
-                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Нажмите, чтобы открыть отчёт">0%</button><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
+                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Нажмите, чтобы открыть отчёт">0%</button><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>версия ' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
                         {% endif %}
                     '</header>',
                     '<div class="mm-mobile-fill-save-overlay" aria-hidden="true">Сохранить</div>',
@@ -3946,6 +3985,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (home) home.classList.remove("is-transfer-overlay");
             shell.querySelectorAll(".mm-mobile-complex-card.is-transfer-source, .mm-mobile-complex-card.is-transfer-target").forEach(function (card) {
                 card.classList.remove("is-transfer-source", "is-transfer-target", "is-transfer-hover");
+                card.style.removeProperty("order");
             });
         }
 
@@ -4003,16 +4043,62 @@ document.addEventListener("DOMContentLoaded", function () {
             };
         }
 
+        function pinMobileTruckTransferSourceAtPoint(sourceCard, clientX, clientY) {
+            var grid = home && home.querySelector(".mm-mobile-complex-grid");
+            if (!grid || !sourceCard || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+            var cards = Array.from(grid.querySelectorAll(".mm-mobile-complex-card:not(.status-empty)")).filter(function (card) {
+                return !card.hidden && card.style.display !== "none";
+            });
+            var sourceIndex = cards.indexOf(sourceCard);
+            if (sourceIndex < 0 || cards.length < 2) return;
+            cards.forEach(function (card, index) {
+                card.style.order = String(index);
+            });
+            var rect = grid.getBoundingClientRect();
+            if (!rect.width || !rect.height) return;
+            var gridStyle = window.getComputedStyle(grid);
+            var columnGap = parseFloat(gridStyle.columnGap) || 0;
+            var rowGap = parseFloat(gridStyle.rowGap) || 0;
+            var rowCount = Math.max(1, Math.ceil(cards.length / 2));
+            var columnWidth = Math.max(1, (rect.width - columnGap) / 2);
+            var viewportBottom = window.visualViewport
+                ? window.visualViewport.offsetTop + window.visualViewport.height
+                : window.innerHeight;
+            var stableGridHeight = Math.max(rect.height, viewportBottom - rect.top);
+            var rowHeight = Math.max(1, (stableGridHeight - rowGap * (rowCount - 1)) / rowCount);
+            var column = clientX >= rect.left + columnWidth + columnGap / 2 ? 1 : 0;
+            var row = Math.max(0, Math.min(rowCount - 1, Math.floor((clientY - rect.top) / (rowHeight + rowGap))));
+            var slotIndex = Math.min(cards.length - 1, row * 2 + column);
+            if (slotIndex === sourceIndex) return;
+            var slotCard = cards[slotIndex];
+            sourceCard.style.order = String(slotIndex);
+            slotCard.style.order = String(sourceIndex);
+        }
+
+        function schedulePinMobileTruckTransferSourceAtPoint(transfer, clientX, clientY) {
+            window.requestAnimationFrame(function () {
+                window.requestAnimationFrame(function () {
+                    if (mobileTruckTransfer !== transfer) return;
+                    pinMobileTruckTransferSourceAtPoint(transfer.sourceCard, clientX, clientY);
+                });
+            });
+        }
+
         function beginMobileTruckTransfer(node) {
             if (isMiningMasterMobileReadonly() || !node || node.classList.contains("is-transfer-pending")) return false;
             var transfer = mobileTruckTransferSource(node);
             if (!transfer || !transfer.sourceCard) return false;
+            var sourceRect = node.getBoundingClientRect();
+            var sourceAnchorX = sourceRect.left + sourceRect.width / 2;
+            var sourceAnchorY = sourceRect.top + sourceRect.height / 2;
             transfer.sourceFillScreen = node.closest("[data-mm-mobile-fill]");
             if (mobileTruckTransferNoticeTimer) window.clearTimeout(mobileTruckTransferNoticeTimer);
             mobileTruckTransfer = transfer;
-            if (transfer.sourceFillScreen && home) {
+            if (home) {
                 home.hidden = false;
                 home.classList.add("is-transfer-overlay");
+                var transferGrid = home.querySelector(".mm-mobile-complex-grid");
+                if (transferGrid) transferGrid.scrollTop = 0;
             }
             shell.classList.add("is-truck-transfer-mode");
             shell.querySelectorAll(".mm-mobile-complex-card:not(.status-empty)").forEach(function (card) {
@@ -4020,6 +4106,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 card.classList.toggle("is-transfer-source", isSource);
                 card.classList.toggle("is-transfer-target", !isSource);
             });
+            schedulePinMobileTruckTransferSourceAtPoint(transfer, sourceAnchorX, sourceAnchorY);
             if (mobileTruckTransferCaption) mobileTruckTransferCaption.textContent = "Перестановка самосвала";
             if (mobileTruckTransferTitle) mobileTruckTransferTitle.textContent = "№" + transfer.truckNumber + " из " + transfer.sourceLabel + " — отпустите на экскаваторе";
             if (mobileTruckTransferCancel) mobileTruckTransferCancel.hidden = false;
@@ -4193,7 +4280,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 suppressTransferClick(mobileTruckTransfer && mobileTruckTransfer.sourceCard);
                 suppressTransferClick(target);
                 if (ghost) ghost.classList.add("is-dropping");
-                if (!cancelled && target) {
+                var travelDistance = Math.hypot(clientX - startX, clientY - startY);
+                if (!cancelled && target && travelDistance >= 36) {
                     completeMobileTruckTransfer(target);
                 } else {
                     cancelMobileTruckTransfer();
@@ -6181,21 +6269,38 @@ document.addEventListener("DOMContentLoaded", function () {
             empty.textContent = "самосвалы не назначены";
             rack.appendChild(empty);
         }
-        var gap = 6;
-        var rackWidth = rack.clientWidth || 1;
-        var naturalTile = 92;
-        var naturalColumns = Math.max(1, Math.floor((rackWidth + gap) / (naturalTile + gap)));
-        var targetColumns = Math.max(1, Math.min(7, tiles.length || naturalColumns));
-        var needsCompactTiles = tiles.length > naturalColumns;
-        var fittedTile = Math.floor((rackWidth - (gap * (targetColumns - 1))) / targetColumns);
-        var tile = needsCompactTiles
-            ? Math.max(44, Math.min(naturalTile - 4, fittedTile))
-            : Math.max(44, Math.min(naturalTile, fittedTile));
-        var renderedColumns = Math.max(1, Math.floor((rackWidth + gap) / (tile + gap)));
-        var renderedRows = tiles.length ? Math.ceil(tiles.length / renderedColumns) : 0;
-
-        rack.style.setProperty("--tile", tile + "px");
-        rack.dataset.truckRows = String(renderedRows);
+        rack.classList.remove("truck-fill-1", "truck-fill-2", "truck-fill-3", "truck-fill-4");
+        rack.classList.add(tiles.length <= 6 ? "truck-fill-1" : tiles.length <= 12 ? "truck-fill-2" : tiles.length <= 18 ? "truck-fill-3" : "truck-fill-4");
+        var columns = tiles.length === 0 ? 6 : Math.min(6, Math.max(1, tiles.length));
+        if (tiles.length > 6) columns = 6;
+        var gap = tiles.length > 10 ? 5 : 6;
+        var garageTiles = Array.from(document.querySelectorAll("[data-garage-item='truck']"));
+        var garageRect = null;
+        garageTiles.some(function (garageTile) {
+            var rect = garageTile.getBoundingClientRect();
+            if (rect.width > 20 && rect.height > 20) {
+                garageRect = rect;
+                return true;
+            }
+            return false;
+        });
+        var boardStyles = getComputedStyle(document.querySelector(".dispatcher-board") || document.documentElement);
+        var cssGarageWidth = parseFloat(boardStyles.getPropertyValue("--gd-truck-slot-w")) || 74;
+        var cssGarageHeight = parseFloat(boardStyles.getPropertyValue("--gd-truck-slot-h")) || 74;
+        var garageWidth = garageRect ? garageRect.width : cssGarageWidth;
+        var garageHeight = garageRect ? garageRect.height : cssGarageHeight;
+        var rackWidth = rack.clientWidth || rack.getBoundingClientRect().width || 1;
+        var fittedWidth = Math.floor((rackWidth - (gap * (columns - 1))) / columns);
+        var stepWidth = tiles.length <= 6 ? garageWidth : tiles.length <= 12 ? Math.min(garageWidth, 66) : tiles.length <= 18 ? Math.min(garageWidth, 58) : Math.min(garageWidth, 50);
+        var width = Math.max(24, Math.min(garageWidth, stepWidth, fittedWidth));
+        var scale = garageWidth > 0 ? width / garageWidth : 1;
+        var height = Math.max(24, Math.min(garageHeight, Math.floor(garageHeight * scale)));
+        var justify = tiles.length >= 5 ? "space-between" : "start";
+        rack.style.setProperty("--complex-truck-cols", String(columns));
+        rack.style.setProperty("--complex-truck-gap", gap + "px");
+        rack.style.setProperty("--complex-truck-w", width + "px");
+        rack.style.setProperty("--complex-truck-h", height + "px");
+        rack.style.setProperty("--complex-truck-justify", justify);
         if (empty) empty.hidden = tiles.length > 0;
     }
     function refreshAllComplexTruckRacks() {
@@ -6216,7 +6321,6 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!garage || !tile) return false;
         removeDuplicateDesktopTruckTiles(tile.dataset.equipmentId, tile);
         tile.classList.remove("complex-truck-tile", "dispatcher-dragging");
-        tile.removeAttribute("data-truck-tile");
         setDispatcherNodeEquipmentState(tile, "free", "truck");
         tile.dataset.dispatcherDrag = "truck";
         tile.dataset.garageItem = "truck";
@@ -6242,7 +6346,6 @@ document.addEventListener("DOMContentLoaded", function () {
         var zoneId = complexCard.dataset.zoneId || "";
         removeDuplicateDesktopTruckTiles(tile.dataset.equipmentId, tile);
         tile.classList.add("complex-truck-tile");
-        tile.setAttribute("data-truck-tile", "");
         tile.classList.remove("dispatcher-dragging", "is-placeholder");
         setDispatcherNodeEquipmentState(tile, "assigned", "truck");
         tile.dataset.dispatcherDrag = "truck";
@@ -6378,16 +6481,18 @@ document.addEventListener("DOMContentLoaded", function () {
         targetCard.setAttribute("tabindex", "0");
         targetCard.setAttribute("draggable", "true");
         targetCard.innerHTML =
-            '<div class="complex-title-state">' +
-                "<h2>" + escapeHtml(zoneLabel) + "</h2>" +
-                '<span class="complex-state-chip" data-card-single-line-badge>' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
-            '</div>' +
-            '<div class="complex-context">' +
-                '<span class="complex-info-chip chip-horizon" data-card-single-line-badge>Гор. -</span>' +
-                '<span class="complex-info-chip chip-block" data-card-single-line-badge>Блок -</span>' +
-                '<span class="complex-info-chip chip-rock" data-card-single-line-badge>порода не указана</span>' +
+            '<div class="complex-work-head">' +
+                '<div class="complex-title-state">' +
+                    "<h2>" + escapeHtml(zoneLabel) + "</h2>" +
+                    '<span class="complex-state-chip">' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
+                '</div>' +
+                '<div class="complex-context">' +
+                    '<span class="complex-info-chip chip-horizon">Гор. -</span>' +
+                    '<span class="complex-info-chip chip-block">Блок -</span>' +
+                    '<span class="complex-info-chip chip-rock">порода не указана</span>' +
+                "</div>" +
             "</div>" +
-            '<div class="complex-assigned-trucks truck-fill-1" aria-label="Активные самосвалы комплекса">' +
+            '<div class="complex-assigned-trucks truck-fill-1" style="--complex-truck-cols: 6;" aria-label="Активные самосвалы комплекса">' +
                 '<em class="complex-truck-empty">самосвалы не назначены</em>' +
             "</div>";
         tile.remove();
