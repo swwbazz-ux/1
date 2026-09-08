@@ -43,6 +43,35 @@ Production, база данных, `.env`, миграции, deploy, collectstat
 - был ли выполнен deploy;
 - где пользователь должен проверять результат.
 
+## Защита от регрессий при работе в нескольких чатах
+
+Каждый параллельный чат, который меняет код, должен работать в отдельной Git-ветке и отдельном worktree. Нельзя переносить целиком файлы из устаревшей ветки поверх актуальных файлов другого чата.
+
+Перед объединением и публикацией изменений нужно создать итоговую release-ветку от фактического commit, указанного на production в `DEPLOYED_COMMIT`, и только затем переносить в неё отдельные проверенные commits. Deploy напрямую из функциональной ветки отдельного чата запрещён.
+
+После объединения всех веток проверки выполняются повторно именно на итоговом release commit. Успешные проверки в исходных ветках не заменяют итоговую проверку.
+
+Для мобильной озвучки критическими файлами считаются:
+
+- `СИСТЕМА_MVP/backend/templates/users/driver_shift.html`;
+- `СИСТЕМА_MVP/backend/templates/trips/excavator_work.html`;
+- `СИСТЕМА_MVP/backend/static/js/mobile-operational-sounds-v1.js`;
+- `mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/`;
+- `mobile/capacitor-shell/profiles/driver/res/raw/`;
+- `mobile/capacitor-shell/profiles/excavator/res/raw/`.
+
+Если итоговое изменение затрагивает любой из этих файлов либо мобильный интерфейс Водителя или Экскаваторщика, перед commit, push и deploy обязательны:
+
+```powershell
+Set-Location mobile/capacitor-shell
+npm test
+Set-Location ../../СИСТЕМА_MVP/backend
+node --test static/js/tests/operational-fragment-runtime.test.js
+& 'C:\Users\swwba\Desktop\Проект учетная система\ПОЕКТ\СИСТЕМА_MVP\.venv\Scripts\python.exe' manage.py test users
+```
+
+Тест `mobile/capacitor-shell/tests/driver-voice-wiring.test.mjs` является блокирующим контрактом. Если он не проходит, публиковать изменения нельзя: это означает, что водительские голосовые вызовы удалены или заменены старой звуковой логикой.
+
 ## Типы задач
 
 ### A — мелкая UI-правка
