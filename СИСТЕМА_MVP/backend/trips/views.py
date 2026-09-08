@@ -2045,7 +2045,7 @@ def build_dispatcher_dashboard_context(
         с реальным экскаватором ``4`` и ломает ключи realtime-фрагмента.
         """
         raw = str(getattr(equipment, 'garage_number', '') or '').strip().upper()
-        ordinary = re.fullmatch(r'(?:ЭКГ|ЭКС|Э)?[\s\-№]*(\d+)', raw)
+        ordinary = re.fullmatch(r'(?:ЭКГ|ЭКС|Э|К|K)?[\s\-№]*(\d+)', raw)
         if ordinary:
             return f'K-{int(ordinary.group(1))}'
         slug = re.sub(r'[^0-9A-ZА-ЯЁ]+', '-', raw).strip('-')

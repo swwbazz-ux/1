@@ -784,6 +784,29 @@ class DispatcherGarageCurrentStateTests(TestCase):
         zone_keys = [card['zone_key'] for card in dashboard['complex_zones']]
         self.assertEqual(len(zone_keys), len(set(zone_keys)))
 
+    def test_complex_label_does_not_duplicate_cyrillic_or_latin_k_prefix(self):
+        cyrillic = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            garage_number='К-21',
+        )
+        latin = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            garage_number='K-22',
+        )
+        ExcavatorPlacement.objects.bulk_create([
+            ExcavatorPlacement(excavator=cyrillic, zone=ExcavatorPlacement.Zone.ACTIVE),
+            ExcavatorPlacement(excavator=latin, zone=ExcavatorPlacement.Zone.ACTIVE),
+        ])
+
+        dashboard = self.build_dashboard()
+        cards = {
+            card['equipment_card_id']: card
+            for card in dashboard['complex_cards']
+        }
+
+        self.assertEqual(cards[str(cyrillic.id)]['id'], 'K-21')
+        self.assertEqual(cards[str(latin.id)]['id'], 'K-22')
+
     def test_downtime_summaries_use_reason_state_color(self):
         upsert_default_equipment_states()
         waiting_state = EquipmentState.objects.get(code='waiting')
