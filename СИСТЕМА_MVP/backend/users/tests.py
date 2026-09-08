@@ -2508,6 +2508,48 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'data-excavator="7" data-dump-point="Отвал 3"')
         self.assertContains(response, 'Заправка')
 
+    def test_driver_manifest_hides_downtime_reasons_shorter_than_one_minute(self):
+        truck = self.create_registered_driver_shift()
+        shift = EmployeeShift.objects.get(employee=self.employee, closed_at__isnull=True)
+        now = timezone.now()
+        shift.opened_at = now - timedelta(minutes=10)
+        shift.save(update_fields=['opened_at'])
+        short_reason = DowntimeReason.objects.create(
+            name='Тест короткий простой',
+            short_label='Короткий',
+            show_for_truck_driver=False,
+        )
+        visible_reason = DowntimeReason.objects.create(
+            name='Тест минутный простой',
+            short_label='Минутный',
+            show_for_truck_driver=False,
+        )
+        DowntimeEvent.objects.create(
+            equipment=truck,
+            employee=self.employee,
+            reason=short_reason,
+            started_at=now - timedelta(minutes=5),
+            ended_at=now - timedelta(minutes=5) + timedelta(seconds=59),
+        )
+        DowntimeEvent.objects.create(
+            equipment=truck,
+            employee=self.employee,
+            reason=visible_reason,
+            started_at=now - timedelta(minutes=3),
+            ended_at=now - timedelta(minutes=3) + timedelta(seconds=61),
+        )
+
+        response = self.client.get('/driver/?tab=manifest', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context['driver_shift_downtime_rows'],
+            [{'reason': 'Минутный', 'seconds': 61, 'duration': '1 мин.'}],
+        )
+        self.assertContains(response, 'data-driver-report-downtime-total="2 мин."')
+        self.assertNotContains(response, 'data-reason="Короткий"')
+        self.assertContains(response, 'data-reason="Минутный"')
+
     def test_driver_sees_assigned_excavator_without_accept_action(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator_type = EquipmentType.objects.create(name='Экскаватор')

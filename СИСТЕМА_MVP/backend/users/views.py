@@ -3869,6 +3869,7 @@ def driver_shift_view(request):
 
     driver_shift_downtime_events = []
     driver_shift_downtime_rows = []
+    shift_downtime_report_total_seconds = 0
     driver_shift_timeline = []
     if report_truck and report_shift:
         shift_period_end = report_shift.closed_at or timezone.now()
@@ -3888,6 +3889,7 @@ def driver_shift_view(request):
             overlap_start = max(event.started_at, report_shift.opened_at)
             overlap_end = min(event.ended_at or shift_period_end, shift_period_end)
             duration_seconds = max(0, int((overlap_end - overlap_start).total_seconds()))
+            shift_downtime_report_total_seconds += duration_seconds
             reason_label = event.reason.button_label
             downtime_totals.setdefault(reason_label, 0)
             downtime_totals[reason_label] += duration_seconds
@@ -3913,6 +3915,7 @@ def driver_shift_view(request):
                 'duration': driver_report_duration_label(seconds),
             }
             for reason, seconds in downtime_totals.items()
+            if seconds >= 60
         ]
 
     for index, trip in enumerate(shift_trips, start=1):
@@ -4071,9 +4074,6 @@ def driver_shift_view(request):
         open_shift,
     )
     shift_downtime_total_label = driver_format_duration_label(shift_downtime_total_seconds)
-    shift_downtime_report_total_seconds = sum(
-        row['seconds'] for row in driver_shift_downtime_rows
-    )
     shift_downtime_report_total_label = driver_report_duration_label(
         shift_downtime_report_total_seconds,
         total=True,
