@@ -1157,7 +1157,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v149";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v150";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -4010,9 +4010,11 @@ document.addEventListener("DOMContentLoaded", function () {
             transfer.sourceFillScreen = node.closest("[data-mm-mobile-fill]");
             if (mobileTruckTransferNoticeTimer) window.clearTimeout(mobileTruckTransferNoticeTimer);
             mobileTruckTransfer = transfer;
-            if (transfer.sourceFillScreen && home) {
+            if (home) {
                 home.hidden = false;
                 home.classList.add("is-transfer-overlay");
+                var transferGrid = home.querySelector(".mm-mobile-complex-grid");
+                if (transferGrid) transferGrid.scrollTop = 0;
             }
             shell.classList.add("is-truck-transfer-mode");
             shell.querySelectorAll(".mm-mobile-complex-card:not(.status-empty)").forEach(function (card) {

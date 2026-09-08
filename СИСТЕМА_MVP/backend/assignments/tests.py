@@ -313,6 +313,8 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'data-mm-mobile-open-truck-list')
         self.assertContains(response, 'var visibleLimit = 3;')
         self.assertContains(response, 'function beginMobileTruckTransfer(node)')
+        self.assertContains(response, 'home.classList.add("is-transfer-overlay")')
+        self.assertContains(response, 'transferGrid.scrollTop = 0')
         self.assertContains(response, 'function completeMobileTruckTransfer(targetCard)')
         self.assertContains(response, 'expected_assignment_state_id: transfer.assignmentStateId')
         self.assertContains(response, 'function bindMobileTruckTransferDrag(mini)')
@@ -623,7 +625,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v149')
+        self.assertContains(response, 'mining-master-mobile-shell-v150')
         self.assertContains(response, 'mining-master-mobile-sync-queue-v3')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v1")')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v2")')
@@ -699,10 +701,10 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v149', script)
+        self.assertIn('mining-master-mobile-shell-v150', script)
         self.assertEqual(
             response['X-App-Shell-Version'],
-            'mining-master-mobile-shell-v149',
+            'mining-master-mobile-shell-v150',
         )
         self.assertIn(
             f'const CACHE_NAME = "{response["X-App-Shell-Version"]}";',
