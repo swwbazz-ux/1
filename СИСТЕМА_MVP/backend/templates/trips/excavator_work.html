@@ -6,14 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v216">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v216">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v216">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v216">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v216">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v216">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v216" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v216" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v217">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v217">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v217">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v217">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v217">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v217">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v217" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v217" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -109,20 +109,18 @@
 
                 <div class="mobile-face__destinations" aria-label="Выбор точек разгрузки">
                     {% for card in dump_choice_cards %}
-                        <div class="mobile-face__destination-row{% if card.is_selected %} is-selected{% endif %}" data-eo-dump-row="{{ card.point.id }}">
-                            <button
-                                class="eo-unload-card mobile-face__destination status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_persisted %} is-dump-applied{% elif card.is_selected %} is-dump-pending{% endif %}"
-                                type="button"
-                                data-eo-dump-select="{{ card.point.id }}"
-                                data-eo-dump-name="{{ card.name }}"
-                                data-eo-dump-persisted="{% if card.is_persisted %}true{% else %}false{% endif %}"
-                                aria-pressed="{% if card.is_selected %}true{% else %}false{% endif %}"
-                                aria-label="{{ card.name }}. {% if card.is_persisted %}Активная точка разгрузки{% elif card.is_selected %}Будет добавлена после применения{% else %}Не выбрана{% endif %}."
-                                {% if not open_shift %}disabled aria-disabled="true"{% endif %}
-                            >
-                                <strong>{{ card.name }}</strong>
-                            </button>
-                        </div>
+                        <button
+                            class="eo-unload-card mobile-face__destination status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_persisted %} is-dump-applied{% elif card.is_selected %} is-dump-pending{% endif %}"
+                            type="button"
+                            data-eo-dump-select="{{ card.point.id }}"
+                            data-eo-dump-name="{{ card.name }}"
+                            data-eo-dump-persisted="{% if card.is_persisted %}true{% else %}false{% endif %}"
+                            aria-pressed="{% if card.is_selected %}true{% else %}false{% endif %}"
+                            aria-label="{{ card.name }}. {% if card.is_persisted %}Активная точка разгрузки{% elif card.is_selected %}Будет добавлена после применения{% else %}Не выбрана{% endif %}."
+                            {% if not open_shift %}disabled aria-disabled="true"{% endif %}
+                        >
+                            <strong>{{ card.name }}</strong>
+                        </button>
                     {% empty %}
                         <div class="eo-empty-state eo-empty-state-compact mobile-face__empty">
                             <strong>Нет точек</strong>
@@ -396,7 +394,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v216";
+var excavatorShellVersion = "excavator-mobile-shell-v217";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1754,8 +1752,6 @@ window.initExcavatorWorkShell = function () {
         button.dataset.eoDumpPersisted = persisted ? "true" : "false";
         button.setAttribute("aria-pressed", selected ? "true" : "false");
         button.setAttribute("aria-label", name + ". " + stateLabel + ".");
-        var row = button.closest("[data-eo-dump-row]");
-        if (row) row.classList.toggle("is-selected", selected);
     }
 
     function renderDumpChoiceStates() {

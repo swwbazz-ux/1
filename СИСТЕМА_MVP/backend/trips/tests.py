@@ -995,11 +995,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v216')
+        self.assertContains(response, 'excavator-mobile-shell-v217')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 216')
+        self.assertContains(response, 'Версия 217')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
@@ -1769,6 +1769,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(screen, f'data-eo-dump-target="{self.dump_point.id}"')
         self.assertContains(screen, f'value="{second_rock.id}" selected')
         self.assertNotContains(screen, 'mobile-face__destination-distance')
+        self.assertNotContains(screen, 'mobile-face__destination-row')
         self.assertNotContains(screen, 'aria-label="Плечо до точки')
 
         self.assertFalse(DowntimeEvent.objects.filter(equipment=self.excavator, ended_at__isnull=True).exists())
@@ -2814,7 +2815,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v216', script)
+        self.assertIn('excavator-mobile-shell-v217', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
