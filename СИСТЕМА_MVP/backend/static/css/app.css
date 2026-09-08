@@ -28033,13 +28033,22 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     }
 
     .mm-mobile-shell-version {
-        color: rgba(184, 204, 210, .62);
-        font-size: 10px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 56px;
+        padding: 3px 5px 2px;
+        border: 1px solid rgba(126, 161, 171, .34);
+        border-radius: 999px;
+        color: rgba(208, 226, 231, .82);
+        background: rgba(11, 28, 36, .72);
+        font-size: 8px;
         font-weight: 800;
         line-height: 1;
         letter-spacing: .04em;
         text-transform: uppercase;
         text-shadow: 0 0 8px rgba(98, 255, 126, .22);
+        white-space: nowrap;
         user-select: none;
     }
 
