@@ -1157,7 +1157,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v151";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v152";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -4032,10 +4032,13 @@ document.addEventListener("DOMContentLoaded", function () {
             slotCard.style.order = String(sourceIndex);
         }
 
-        function beginMobileTruckTransfer(node, clientX, clientY) {
+        function beginMobileTruckTransfer(node) {
             if (isMiningMasterMobileReadonly() || !node || node.classList.contains("is-transfer-pending")) return false;
             var transfer = mobileTruckTransferSource(node);
             if (!transfer || !transfer.sourceCard) return false;
+            var sourceRect = node.getBoundingClientRect();
+            var sourceAnchorX = sourceRect.left + sourceRect.width / 2;
+            var sourceAnchorY = sourceRect.top + sourceRect.height / 2;
             transfer.sourceFillScreen = node.closest("[data-mm-mobile-fill]");
             if (mobileTruckTransferNoticeTimer) window.clearTimeout(mobileTruckTransferNoticeTimer);
             mobileTruckTransfer = transfer;
@@ -4051,7 +4054,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 card.classList.toggle("is-transfer-source", isSource);
                 card.classList.toggle("is-transfer-target", !isSource);
             });
-            pinMobileTruckTransferSourceAtPoint(transfer.sourceCard, clientX, clientY);
+            pinMobileTruckTransferSourceAtPoint(transfer.sourceCard, sourceAnchorX, sourceAnchorY);
             if (mobileTruckTransferCaption) mobileTruckTransferCaption.textContent = "Перестановка самосвала";
             if (mobileTruckTransferTitle) mobileTruckTransferTitle.textContent = "№" + transfer.truckNumber + " из " + transfer.sourceLabel + " — отпустите на экскаваторе";
             if (mobileTruckTransferCancel) mobileTruckTransferCancel.hidden = false;
@@ -4178,7 +4181,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 ghost.style.height = rect.height + "px";
                 ghost.style.left = clientX + "px";
                 ghost.style.top = clientY + "px";
-                if (!beginMobileTruckTransfer(mini, clientX, clientY)) {
+                if (!beginMobileTruckTransfer(mini)) {
                     ghost = null;
                     return false;
                 }
