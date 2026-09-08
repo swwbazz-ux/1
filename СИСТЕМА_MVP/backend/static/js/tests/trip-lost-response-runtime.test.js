@@ -130,7 +130,7 @@ function executeDriverSharedUnloadSubmit(template, recovery, pathLabel, submissi
         "Driver shared unload submit"
     );
     const classNames = new Set(["is-loaded"]);
-    const holdForm = {dataset: {}};
+    const holdForm = {dataset: {}, isConnected: true};
     const holdButton = {
         classList: {
             add(...names) {
@@ -175,6 +175,7 @@ function executeDriverSharedUnloadSubmit(template, recovery, pathLabel, submissi
                         form,
                         path: pathLabel,
                     });
+                    return Promise.resolve(true);
                 },
             },
         },
@@ -337,8 +338,9 @@ test("production Excavator load handler retries a lost successful response with 
             truckId: "7",
             eoCanLoad: "1",
         },
+        querySelector() { return null; },
     };
-    const dumpTarget = {dataset: {eoDumpTarget: "9"}};
+    const dumpTarget = {dataset: {eoDumpTarget: "9"}, querySelector() { return null; }};
     const inputValues = new Map([
         ["select[name='rock_type']", "4"],
         ["input[name='loading_horizon']", "125"],
@@ -391,6 +393,7 @@ test("production Excavator load handler retries a lost successful response with 
             var truckLoadedUrl = "/excavator/truck-loaded/";
             var csrfToken = "csrf";
             var downtimeInput = {value: ""};
+            var transportDistanceInput = {value: "3.5"};
             function canTruckLoad() { return true; }
             function truckLoadBlockReason() { return ""; }
             function snapshotTruckCard() { return {snapshot: true}; }
@@ -407,6 +410,8 @@ test("production Excavator load handler retries a lost successful response with 
             function applyActiveDowntime() {}
             function clearActiveDowntime() {}
             function playExcavatorSound() { return Promise.resolve(true); }
+            function playExcavatorEquipmentVoice() { return Promise.resolve(true); }
+            function playExcavatorVoice() { return Promise.resolve(true); }
             function showExcavatorNotice() {}
             function generateClientActionId() {
                 return context.generateClientActionId();
@@ -473,8 +478,9 @@ test("production Excavator late deduplicated load rolls back optimistic state an
             eoCanLoad: "1",
             eoEquipmentState: "assigned",
         },
+        querySelector() { return null; },
     };
-    const dumpTarget = {dataset: {eoDumpTarget: "9"}};
+    const dumpTarget = {dataset: {eoDumpTarget: "9"}, querySelector() { return null; }};
     const inputValues = new Map([
         ["select[name='rock_type']", "4"],
         ["input[name='loading_horizon']", "125"],
@@ -525,6 +531,7 @@ test("production Excavator late deduplicated load rolls back optimistic state an
             var truckLoadedUrl = "/excavator/truck-loaded/";
             var csrfToken = "csrf";
             var downtimeInput = {value: ""};
+            var transportDistanceInput = {value: "3.5"};
             function canTruckLoad() { return true; }
             function truckLoadBlockReason() { return ""; }
             function snapshotTruckCard(card) {
@@ -553,6 +560,8 @@ test("production Excavator late deduplicated load rolls back optimistic state an
             function applyActiveDowntime() {}
             function clearActiveDowntime() {}
             function playExcavatorSound() { return Promise.resolve(true); }
+            function playExcavatorEquipmentVoice() { return Promise.resolve(true); }
+            function playExcavatorVoice() { return Promise.resolve(true); }
             function showExcavatorNotice() {}
             function generateClientActionId() {
                 return "truck-loaded-terminal-action";

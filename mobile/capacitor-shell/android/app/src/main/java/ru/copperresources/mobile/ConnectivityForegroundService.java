@@ -23,7 +23,9 @@ import androidx.core.content.ContextCompat;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.URLEncoder;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
@@ -61,7 +63,7 @@ public class ConnectivityForegroundService extends Service {
     }
 
     public static void reconcileFromForeground(Context context) {
-        if (!ConnectionState.isDesired(context)) {
+        if (!ConnectionState.isDesired(context) && !PendingDriverShiftClose.hasPending(context)) {
             return;
         }
         Intent intent = new Intent(context, ConnectivityForegroundService.class)
@@ -106,11 +108,17 @@ public class ConnectivityForegroundService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? "" : String.valueOf(intent.getAction());
         if (ACTION_STOP_CONNECTION.equals(action)) {
+            if (PendingDriverShiftClose.hasPending(this)) {
+                startAsForeground("Закрытие смены сохранено — ждём связь");
+                registerNetworkCallback();
+                scheduleHeartbeat(0L);
+                return START_STICKY;
+            }
             ConnectionState.disable(this, "notification_stop");
             stopServiceAndRemoveNotification();
             return START_NOT_STICKY;
         }
-        if (!ConnectionState.isDesired(this)) {
+        if (!ConnectionState.isDesired(this) && !PendingDriverShiftClose.hasPending(this)) {
             stopServiceAndRemoveNotification();
             return START_NOT_STICKY;
         }
@@ -148,6 +156,12 @@ public class ConnectivityForegroundService extends Service {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
+        if (PendingDriverShiftClose.hasPending(this)) {
+            Log.i("ConnectivityForegroundService", "Task removed; pending shift close keeps sync alive");
+            scheduleHeartbeat(0L);
+            super.onTaskRemoved(rootIntent);
+            return;
+        }
         ConnectionState.disable(this, "task_removed");
         Log.i("ConnectivityForegroundService", "Task removed; heartbeat service stopped");
         stopServiceAndRemoveNotification();
@@ -215,6 +229,7 @@ public class ConnectivityForegroundService extends Service {
                 );
                 wakeLock.acquire(20_000L);
             }
+            FlushResult shiftCloseFlush = flushPendingDriverShiftClose();
             HeartbeatResult result = requestHeartbeat();
             if (result.statusCode == 401 || result.statusCode == 403) {
                 stopBecauseConnectionIsNotRequired("authentication_ended");
@@ -233,6 +248,9 @@ public class ConnectivityForegroundService extends Service {
                 String shiftId = response.optString("active_shift_id", "");
                 ConnectionState.applyServerRequirement(this, connectionRequired, shiftId);
                 if (!connectionRequired) {
+                    if (!response.optBoolean("has_active_shift", false)) {
+                        PendingDriverShiftClose.clear(this, null);
+                    }
                     stopBecauseConnectionIsNotRequired(
                         response.optBoolean("has_active_shift", false)
                             ? "role_inactive"
@@ -281,7 +299,11 @@ public class ConnectivityForegroundService extends Service {
                     );
                 }
             }
-            publishStatus("Связь работает во время смены");
+            if (shiftCloseFlush == FlushResult.ATTENTION) {
+                publishStatus("Откройте приложение — проверьте закрытие смены");
+            } else {
+                publishStatus("Связь работает во время смены");
+            }
             scheduleHeartbeat(BuildConfig.HEARTBEAT_INTERVAL_MS);
         } catch (Exception error) {
             consecutiveFailures += 1;
@@ -352,6 +374,110 @@ public class ConnectivityForegroundService extends Service {
         } finally {
             connection.disconnect();
         }
+    }
+
+    private FlushResult flushPendingDriverShiftClose() throws Exception {
+        PendingDriverShiftClose pending = PendingDriverShiftClose.load(this);
+        if (pending == null) {
+            return FlushResult.NONE;
+        }
+        if (pending.requiresAttention) {
+            return FlushResult.ATTENTION;
+        }
+        HeartbeatResult result = requestDriverShiftClose(pending);
+        if (result.statusCode >= 200 && result.statusCode < 300) {
+            JSONObject response = new JSONObject(result.body);
+            if (!response.optBoolean("ok", false)) {
+                throw new IllegalStateException("Shift close response was not acknowledged");
+            }
+            if (!PendingDriverShiftClose.clear(this, pending.clientActionId)) {
+                throw new IllegalStateException("Shift close acknowledgement was not saved");
+            }
+            publishStatus("Закрытие смены отправлено");
+            return FlushResult.APPLIED;
+        }
+        if (result.statusCode >= 400 && result.statusCode < 500
+                && result.statusCode != 401 && result.statusCode != 403) {
+            String message = "Проверьте показания на конец смены.";
+            try {
+                message = new JSONObject(result.body).optString("error", message);
+            } catch (Exception ignored) {}
+            PendingDriverShiftClose.markAttention(this, pending.clientActionId, message);
+            return FlushResult.ATTENTION;
+        }
+        throw new IllegalStateException("Shift close HTTP " + result.statusCode);
+    }
+
+    private HeartbeatResult requestDriverShiftClose(PendingDriverShiftClose pending) throws Exception {
+        URL url = new URL(BuildConfig.APP_SERVER_URL + "driver/shift/close/");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        try {
+            connection.setConnectTimeout(10_000);
+            connection.setReadTimeout(10_000);
+            connection.setRequestMethod("POST");
+            connection.setInstanceFollowRedirects(false);
+            connection.setUseCaches(false);
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+            connection.setRequestProperty("Cache-Control", "no-store");
+            connection.setRequestProperty("X-Requested-With", "XMLHttpRequest");
+            connection.setRequestProperty(
+                "User-Agent",
+                "CopperResourcesNative/" + BuildConfig.APP_PROFILE_ID
+                    + "/" + BuildConfig.VERSION_NAME
+            );
+            String cookie = readWebViewCookie();
+            if (cookie == null || cookie.isBlank()) {
+                throw new IllegalStateException("WebView session cookie is unavailable");
+            }
+            String csrfToken = cookieValue(cookie, "csrftoken");
+            if (csrfToken.isBlank()) {
+                throw new IllegalStateException("CSRF cookie is unavailable");
+            }
+            connection.setRequestProperty("Cookie", cookie);
+            connection.setRequestProperty("X-CSRFToken", csrfToken);
+            connection.setRequestProperty("Origin", Uri.parse(BuildConfig.APP_SERVER_URL).buildUpon().path(null).build().toString());
+            connection.setRequestProperty("Referer", BuildConfig.APP_START_URL);
+            if (!BuildConfig.SYNC_AUTH_TOKEN.isBlank()) {
+                connection.setRequestProperty(BuildConfig.SYNC_AUTH_HEADER, BuildConfig.SYNC_AUTH_TOKEN);
+            }
+
+            String encodedBody = formField("client_action_id", pending.clientActionId)
+                + "&" + formField("shift_id", pending.shiftId)
+                + "&" + formField("end_fuel", pending.endFuel)
+                + "&" + formField("end_mileage", pending.endMileage)
+                + "&" + formField("end_engine_hours", pending.endEngineHours);
+            byte[] body = encodedBody.getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(body.length);
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(body);
+            }
+            int statusCode = connection.getResponseCode();
+            InputStream stream = statusCode >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            return new HeartbeatResult(statusCode, readResponse(stream));
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private static String formField(String name, String value) throws Exception {
+        return URLEncoder.encode(name, StandardCharsets.UTF_8.name())
+            + "=" + URLEncoder.encode(value, StandardCharsets.UTF_8.name());
+    }
+
+    private static String cookieValue(String cookieHeader, String name) {
+        if (cookieHeader == null || name == null) {
+            return "";
+        }
+        for (String part : cookieHeader.split(";")) {
+            String value = part.trim();
+            int separator = value.indexOf('=');
+            if (separator > 0 && name.equals(value.substring(0, separator).trim())) {
+                return value.substring(separator + 1).trim();
+            }
+        }
+        return "";
     }
 
     private String readWebViewCookie() {
@@ -624,6 +750,12 @@ public class ConnectivityForegroundService extends Service {
     }
 
     private String currentStatusText() {
+        PendingDriverShiftClose pending = PendingDriverShiftClose.load(this);
+        if (pending != null) {
+            return pending.requiresAttention
+                ? "Откройте приложение — проверьте закрытие смены"
+                : "Закрытие смены сохранено — ждём связь";
+        }
         return ConnectionState.lastAliveAt(this) > 0L
             ? "Связь работает во время смены"
             : "Проверяем связь с сервером…";
@@ -659,5 +791,11 @@ public class ConnectivityForegroundService extends Service {
             this.statusCode = statusCode;
             this.body = body;
         }
+    }
+
+    private enum FlushResult {
+        NONE,
+        APPLIED,
+        ATTENTION
     }
 }

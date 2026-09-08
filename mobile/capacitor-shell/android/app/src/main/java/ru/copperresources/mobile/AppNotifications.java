@@ -84,7 +84,7 @@ public final class AppNotifications {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
-        return new NotificationCompat.Builder(context, BuildConfig.FOREGROUND_CHANNEL_ID)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BuildConfig.FOREGROUND_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_service)
             .setContentTitle(context.getString(R.string.foreground_notification_title))
             .setContentText(statusText)
@@ -94,9 +94,13 @@ public final class AppNotifications {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .addAction(R.drawable.ic_stat_service, "Остановить связь", stopPendingIntent)
-            .build();
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE);
+        if (PendingDriverShiftClose.hasPending(context)) {
+            builder.addAction(R.drawable.ic_stat_service, "Открыть приложение", openPendingIntent);
+        } else {
+            builder.addAction(R.drawable.ic_stat_service, "Остановить связь", stopPendingIntent);
+        }
+        return builder.build();
     }
 
     public static boolean showOperationalAlert(Context context, String message) {

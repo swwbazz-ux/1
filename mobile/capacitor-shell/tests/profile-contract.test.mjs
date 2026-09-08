@@ -36,8 +36,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "34",
-    versionName: "0.1.22",
+    versionCode: "37",
+    versionName: "0.1.23",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -47,8 +47,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver.qa",
     appName: "Водитель QA",
-    versionCode: "3",
-    versionName: "1.0.2-qa",
+    versionCode: "4",
+    versionName: "1.0.3-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -58,8 +58,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "36",
-    versionName: "0.1.22",
+    versionCode: "39",
+    versionName: "0.1.23",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -69,8 +69,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "35",
-    versionName: "0.1.22-rc",
+    versionCode: "38",
+    versionName: "0.1.23-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -541,6 +541,7 @@ test("native heartbeat follows the active-shift lifecycle and reports the exact 
 
   const connectionState = readFileSync(resolve(javaRoot, "ConnectionState.java"), "utf8");
   const connectionPlugin = readFileSync(resolve(javaRoot, "BackgroundConnectionPlugin.java"), "utf8");
+  const pendingShiftClose = readFileSync(resolve(javaRoot, "PendingDriverShiftClose.java"), "utf8");
   const notifications = readFileSync(resolve(javaRoot, "AppNotifications.java"), "utf8");
   assert.match(connectionState, /putBoolean\(CONNECTION_DESIRED, true\)/);
   assert.match(connectionState, /putBoolean\(CONNECTION_DESIRED, false\)/);
@@ -548,6 +549,15 @@ test("native heartbeat follows the active-shift lifecycle and reports the exact 
   assert.match(connectionPlugin, /@CapacitorPlugin\(name = "BackgroundConnection"\)/);
   assert.match(connectionPlugin, /public void sync\(PluginCall call\)/);
   assert.match(connectionPlugin, /public void stop\(PluginCall call\)/);
+  assert.match(connectionPlugin, /public void queueDriverShiftClose\(PluginCall call\)/);
+  assert.match(connectionPlugin, /public void acknowledgeDriverShiftClose\(PluginCall call\)/);
+  assert.match(connectionPlugin, /PendingDriverShiftClose\.enqueue/);
+  assert.match(pendingShiftClose, /pending_driver_shift_close_v1/);
+  assert.match(pendingShiftClose, /\.commit\(\)/);
+  assert.match(service, /runHeartbeat\(\)[\s\S]*?flushPendingDriverShiftClose\(\)[\s\S]*?requestHeartbeat\(\)/);
+  assert.match(service, /onTaskRemoved\(Intent rootIntent\)[\s\S]*?PendingDriverShiftClose\.hasPending\(this\)[\s\S]*?scheduleHeartbeat\(0L\)/);
+  assert.match(service, /requestDriverShiftClose[\s\S]*?X-CSRFToken[\s\S]*?client_action_id[\s\S]*?shift_id/);
+  assert.match(notifications, /PendingDriverShiftClose\.hasPending\(context\)[\s\S]*?Открыть приложение/);
   assert.match(notifications, /Остановить связь/);
   assert.doesNotMatch(notifications, /Тест сигнала/);
   assert.match(notifications, /\.setSilent\(true\)/);
@@ -600,6 +610,9 @@ test("startup splash is profile-driven and waits for stable rendered layout", ()
   assert.match(overlay, /BuildConfig\.SPLASH_BACKGROUND_COLOR/);
   assert.match(overlay, /BuildConfig\.SPLASH_ACCENT_COLOR/);
   assert.match(overlay, /BuildConfig\.SPLASH_ICON_RESOURCE/);
+  assert.match(overlay, /APPLICATION_DOCUMENT_PROBE/);
+  assert.match(overlay, /hasAttribute\('data-app-contract-ready'\)/);
+  assert.match(overlay, /onPageLoaded\(WebView loadedWebView\)[\s\S]*?APPLICATION_DOCUMENT_PROBE[\s\S]*?enterRecovery\(generation, DiagnosticReason\.ERROR\)/);
   assert.match(overlay, /document\.readyState/);
   assert.match(overlay, /window\.visualViewport/);
   assert.match(overlay, /document\.fonts/);

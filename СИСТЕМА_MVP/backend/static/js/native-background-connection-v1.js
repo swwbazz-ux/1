@@ -104,7 +104,25 @@
             lastSignature = "";
             scheduleSync("manual_sync");
         },
-        stop: stopForLogout
+        stop: stopForLogout,
+        getState: function () {
+            if (typeof plugin.getState !== "function") return Promise.resolve({});
+            return Promise.resolve(plugin.getState()).catch(function () { return {}; });
+        },
+        queueDriverShiftClose: function (payload) {
+            if (roleCode !== "driver" || typeof plugin.queueDriverShiftClose !== "function") {
+                return Promise.reject(new Error("Фоновая очередь недоступна"));
+            }
+            return Promise.resolve(plugin.queueDriverShiftClose(payload || {}));
+        },
+        acknowledgeDriverShiftClose: function (clientActionId) {
+            if (roleCode !== "driver" || typeof plugin.acknowledgeDriverShiftClose !== "function") {
+                return Promise.resolve({});
+            }
+            return Promise.resolve(plugin.acknowledgeDriverShiftClose({
+                clientActionId: String(clientActionId || "")
+            }));
+        }
     };
     scheduleSync("initial_render");
 })();

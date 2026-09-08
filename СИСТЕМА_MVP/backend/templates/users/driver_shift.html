@@ -153,24 +153,79 @@ body.driver-mobile-screen .driver-toast[hidden] {
 }
 
 body.driver-mobile-screen .driver-toast {
-    position: absolute;
-    left: var(--driver-edge);
-    right: var(--driver-edge);
-    bottom: calc(var(--driver-nav-total-h) + 18px);
-    z-index: 6;
-    min-height: 56px;
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    z-index: 180;
+    width: min(360px, calc(100vw - 40px));
+    min-height: 52px;
     border: 1px solid rgba(255, 91, 80, 0.42);
-    border-radius: 8px;
-    padding: 14px 16px;
+    border-radius: 14px;
+    padding: 13px 16px;
     display: grid;
     align-items: center;
+    transform: translate(-50%, -50%);
     color: #ffe7e4;
     background: linear-gradient(145deg, rgba(73, 19, 22, 0.97), rgba(22, 12, 15, 0.97));
     box-shadow: 0 18px 54px rgba(0,0,0,0.45), 0 0 22px rgba(255, 91, 80, 0.18);
-    text-transform: uppercase;
-    font-size: 16px;
-    line-height: 1.12;
-    font-weight: 800;
+    text-align: center;
+    font-size: 15px;
+    line-height: 1.25;
+    font-weight: 700;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending[hidden] {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-shell[data-active-tab="shift"] [data-driver-tab-panel="shift"].is-active .mobile-shift-host.is-sync-pending > .mobile-shift {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending {
+    height: 100%;
+    padding: 26px;
+    display: grid;
+    place-content: center;
+    gap: 12px;
+    text-align: center;
+    color: #f7fbfa;
+    background: radial-gradient(circle at 50% 42%, rgba(255, 196, 61, 0.1), transparent 56%);
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending i {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 4px;
+    justify-self: center;
+    border: 3px solid rgba(255, 196, 61, 0.25);
+    border-top-color: #ffc43d;
+    border-radius: 50%;
+    animation: driver-pending-shift-spin 1.15s linear infinite;
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending strong {
+    font-size: clamp(22px, 7vw, 30px);
+    line-height: 1.05;
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending span {
+    max-width: 330px;
+    color: #b8c7c9;
+    font-size: 15px;
+    line-height: 1.35;
+}
+
+@keyframes driver-pending-shift-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.driver-mobile-screen .driver-shift-sync-pending i {
+        animation: none;
+        border-color: #ffc43d;
+    }
 }
 
 body.driver-mobile-screen .driver-header {
@@ -3927,7 +3982,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
             {% endfor %}
         </div>
     {% endif %}
-    <div class="driver-toast" data-driver-toast hidden role="status" aria-live="polite"></div>
+    <div class="driver-toast" data-driver-toast hidden role="status" aria-live="polite" aria-atomic="true"></div>
 
     <header class="driver-header">
         <div class="driver-header-id{% if not open_shift %} is-inactive{% endif %}" aria-label="{{ driver_header_label }}">
@@ -4053,8 +4108,14 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         {% if open_shift %}
             <form method="post" action="{% url 'driver_close_shift' %}" class="mobile-shift-host" data-driver-shift-close-form data-native-shift-id="{{ open_shift.id }}" data-driver-in-place="shift-close">
                 {% csrf_token %}
+                <input type="hidden" name="shift_id" value="{{ open_shift.id }}">
                 {{ close_form.client_action_id }}
                 {% include "includes/mobile_shift_screen.html" with mobile_shift_role="driver" mobile_shift_state="open" mobile_shift_form=close_form mobile_shift_previous=False %}
+                <div class="driver-shift-sync-pending" data-driver-shift-sync-pending hidden role="status" aria-live="polite">
+                    <i aria-hidden="true"></i>
+                    <strong>Смена закрыта на телефоне</strong>
+                    <span>{% if is_native_app %}Можно свернуть или закрыть приложение. Данные отправятся автоматически, когда появится связь.{% else %}Данные сохранены. Они отправятся автоматически при следующем подключении или открытии приложения.{% endif %}</span>
+                </div>
             </form>
         {% elif form %}
             <form method="post" class="mobile-shift-host driver-shift-opening-form" data-driver-in-place="shift-open">
@@ -4425,6 +4486,7 @@ window.createDriverUnloadRecovery = function (options) {
     return {
         ensureActionId: ensureActionId,
         storageKey: storageKey,
+        recover: recoverPendingUi,
         destroy: function () {
             if (destroyed) {
                 return;
@@ -4869,14 +4931,17 @@ window.applyOperationalStateRefresh = function (context) {
    разбираем сами и меняем только рабочую часть — остальное остаётся на месте.
 
    Повтор действия безопасен: у формы есть свой номер действия, сервер по нему
-   узнаёт уже выполненный рейс. Поэтому при любой осечке спокойно отдаём форму
-   браузеру — действие не потеряется. */
+   узнаёт уже выполненный рейс. При ошибке оставляем рабочий экран на месте:
+   обычная навигация на ответ сервера превращала временный HTTP 500 в чёрный
+   экран WebView без возможности восстановиться. */
 window.submitDriverFormInPlace = function (form, options) {
     options = options || {};
     var actionKind = String(form.dataset.driverInPlace || "");
     if (!actionKind && form.matches("[data-driver-hold-form]")) actionKind = "complete-trip";
     if (!window.fetch || !window.AppOperationalFragment || !window.FormData) {
-        form.submit();
+        if (!options.silentFailure && typeof window.showDriverToast === "function") {
+            window.showDriverToast("Действие не отправлено. Проверьте связь и повторите.");
+        }
         return Promise.resolve(false);
     }
     var body = new window.FormData(form);
@@ -4917,15 +4982,13 @@ window.submitDriverFormInPlace = function (form, options) {
         }
         return true;
     }).catch(function () {
-        playDriverVoice(
-            "action_error",
-            actionKind === "complete-trip" ? "voice_trip_finish_failed" : "voice_action_failed"
-        );
-        if (options.fallbackToNavigation !== false) {
-            form.submit();
-            return false;
+        if (!options.silentFailure) {
+            playDriverVoice(
+                "action_error",
+                actionKind === "complete-trip" ? "voice_trip_finish_failed" : "voice_action_failed"
+            );
         }
-        if (typeof window.showDriverToast === "function") {
+        if (!options.silentFailure && typeof window.showDriverToast === "function") {
             window.showDriverToast("Не удалось обновить экран. Проверяем состояние сервера.");
         }
         if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
@@ -4934,6 +4997,210 @@ window.submitDriverFormInPlace = function (form, options) {
         return false;
     });
 };
+
+/* DRIVER_SHIFT_CLOSE_OUTBOX_START */
+window.DriverShiftCloseOutbox = (function () {
+    var storageKey = "driver-shift-close-pending:v1";
+    var retryInFlight = false;
+
+    function nativeConnection() {
+        return window.NativeBackgroundConnection || null;
+    }
+
+    function readLocal() {
+        try {
+            var value = JSON.parse(window.localStorage.getItem(storageKey) || "null");
+            return value && value.clientActionId ? value : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writeLocal(payload) {
+        try {
+            window.localStorage.setItem(storageKey, JSON.stringify(payload));
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function removeLocal(expectedActionId) {
+        var pending = readLocal();
+        if (pending && expectedActionId && pending.clientActionId !== expectedActionId) {
+            return false;
+        }
+        try {
+            window.localStorage.removeItem(storageKey);
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function payloadFromForm(form) {
+        function field(name) {
+            var input = form.querySelector('[name="' + name + '"]');
+            return input ? String(input.value || "").trim() : "";
+        }
+        return {
+            shiftId: String(form.dataset.nativeShiftId || "").trim(),
+            clientActionId: field("client_action_id"),
+            endFuel: field("end_fuel"),
+            endMileage: field("end_mileage"),
+            endEngineHours: field("end_engine_hours"),
+            createdAt: Date.now()
+        };
+    }
+
+    function fillForm(form, payload) {
+        if (!form || !payload) return;
+        [
+            ["client_action_id", "clientActionId"],
+            ["end_fuel", "endFuel"],
+            ["end_mileage", "endMileage"],
+            ["end_engine_hours", "endEngineHours"]
+        ].forEach(function (mapping) {
+            var input = form.querySelector('[name="' + mapping[0] + '"]');
+            if (input && payload[mapping[1]] !== undefined) {
+                input.value = String(payload[mapping[1]] || "");
+            }
+        });
+    }
+
+    function persist(payload) {
+        var localStored = writeLocal(payload);
+        var native = nativeConnection();
+        if (native && typeof native.queueDriverShiftClose === "function") {
+            return Promise.resolve(native.queueDriverShiftClose(payload)).then(function () {
+                return true;
+            }).catch(function (error) {
+                removeLocal(payload.clientActionId);
+                if (!localStored) throw error;
+                throw new Error("Не удалось включить фоновую отправку. Оставьте приложение открытым и повторите.");
+            });
+        }
+        if (localStored || navigator.onLine !== false) {
+            return Promise.resolve(true);
+        }
+        return Promise.reject(new Error("Не удалось сохранить закрытие смены на телефоне."));
+    }
+
+    function acknowledge(clientActionId) {
+        removeLocal(clientActionId);
+        var native = nativeConnection();
+        if (!native || typeof native.acknowledgeDriverShiftClose !== "function") {
+            return Promise.resolve();
+        }
+        return Promise.resolve(native.acknowledgeDriverShiftClose(clientActionId)).catch(function () {});
+    }
+
+    function showPending(form) {
+        if (!form) return;
+        form.classList.add("is-sync-pending");
+        var panel = form.querySelector("[data-driver-shift-sync-pending]");
+        if (panel) panel.hidden = false;
+        if (document.body) document.body.dataset.driverShiftClosePending = "true";
+        form.querySelectorAll("input, button, select, textarea").forEach(function (control) {
+            control.disabled = true;
+        });
+    }
+
+    function clearPendingUi(form) {
+        if (!form) return;
+        form.classList.remove("is-sync-pending");
+        var panel = form.querySelector("[data-driver-shift-sync-pending]");
+        if (panel) panel.hidden = true;
+        if (document.body) delete document.body.dataset.driverShiftClosePending;
+        form.querySelectorAll("input, button, select, textarea").forEach(function (control) {
+            control.disabled = false;
+        });
+    }
+
+    function sendStored(form, payload, options) {
+        options = options || {};
+        if (!form || retryInFlight) return Promise.resolve(false);
+        retryInFlight = true;
+        clearPendingUi(form);
+        fillForm(form, payload);
+        return window.submitDriverFormInPlace(form, {silentFailure: true, fallbackToNavigation: false})
+            .then(function (applied) {
+                if (!applied) {
+                    showPending(form);
+                    return true;
+                }
+                return acknowledge(payload.clientActionId).then(function () { return true; });
+            }).finally(function () {
+                retryInFlight = false;
+            });
+    }
+
+    function submit(form) {
+        var payload = payloadFromForm(form);
+        return persist(payload).then(function () {
+            return sendStored(form, payload);
+        });
+    }
+
+    function restore(form) {
+        var localPending = readLocal();
+        var native = nativeConnection();
+        if (!form) {
+            if (localPending) acknowledge(localPending.clientActionId);
+            return Promise.resolve(false);
+        }
+        if (!native || typeof native.getState !== "function") {
+            if (!localPending || String(form.dataset.nativeShiftId || "") !== String(localPending.shiftId || "")) {
+                return Promise.resolve(false);
+            }
+            showPending(form);
+            if (navigator.onLine !== false) {
+                return sendStored(form, localPending, {quiet: true});
+            }
+            return Promise.resolve(true);
+        }
+        return Promise.resolve(native.getState()).then(function (state) {
+            var nativePending = state && state.pendingDriverShiftClose;
+            if (!nativePending) {
+                if (localPending) removeLocal(localPending.clientActionId);
+                return false;
+            }
+            var pending = nativePending;
+            if (!pending || String(form.dataset.nativeShiftId || "") !== String(pending.shiftId || "")) {
+                return false;
+            }
+            fillForm(form, pending);
+            if (pending.requiresAttention) {
+                clearPendingUi(form);
+                if (typeof window.showDriverToast === "function") {
+                    window.showDriverToast(pending.attentionMessage || "Проверьте показания на конец смены.");
+                }
+                return false;
+            }
+            showPending(form);
+            return true;
+        }).catch(function () {
+            if (localPending) showPending(form);
+            return !!localPending;
+        });
+    }
+
+    return {
+        submit: submit,
+        restore: restore,
+        readLocal: readLocal,
+        showPending: showPending,
+        acknowledge: acknowledge
+    };
+})();
+window.addEventListener("online", function () {
+    if (window.DriverShiftCloseOutbox) {
+        window.DriverShiftCloseOutbox.restore(
+            document.querySelector("[data-driver-shift-close-form]")
+        );
+    }
+});
+/* DRIVER_SHIFT_CLOSE_OUTBOX_END */
 
 function bindDriverShiftHoldAction(form, button, options) {
     options = options || {};
@@ -5357,7 +5624,7 @@ window.bindDriverMobileShell = function () {
         return (
             typeof window.isAppRoleReadonly === "function"
             && window.isAppRoleReadonly()
-        );
+        ) || (document.body && document.body.dataset.driverShiftClosePending === "true");
     }
     shell.querySelectorAll(".mobile-shift__metric-value input").forEach(function (input) {
         if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
@@ -6219,7 +6486,11 @@ window.bindDriverMobileShell = function () {
                 scheduleDriverDialLabelFit();
             }
             holdButton.disabled = true;
-            window.submitDriverFormInPlace(holdForm);
+            window.submitDriverFormInPlace(holdForm, {fallbackToNavigation: false}).then(function (applied) {
+                if (!applied && holdForm.isConnected) {
+                    unloadRecovery.recover({type: "submit_failed"});
+                }
+            });
             return true;
         }
         unloadHoldGuard = window.createDriverRoleHoldGuard({
@@ -6315,7 +6586,10 @@ window.bindDriverMobileShell = function () {
             if (actionInput && !actionInput.value) {
                 actionInput.value = generateClientActionId(form.dataset.driverInPlace || "driver-action");
             }
-            window.submitDriverFormInPlace(form, {fallbackToNavigation: false}).then(function (applied) {
+            var submitPromise = form.dataset.driverInPlace === "shift-close"
+                ? window.DriverShiftCloseOutbox.submit(form)
+                : window.submitDriverFormInPlace(form, {fallbackToNavigation: false});
+            Promise.resolve(submitPromise).then(function (applied) {
                 if (!applied && form.isConnected) {
                     form.dataset.driverInPlacePending = "false";
                     form.dataset.driverShiftOpeningPending = "false";
@@ -6329,12 +6603,30 @@ window.bindDriverMobileShell = function () {
                     if (closeButton) {
                         closeButton.disabled = false;
                         closeButton.classList.remove("is-pending");
-                        closeButton.textContent = "Закрыть смену";
+                        var closeLabel = closeButton.querySelector("[data-mobile-shift-label]");
+                        if (closeLabel) closeLabel.textContent = "Закрыть смену";
                     }
+                }
+            }).catch(function (error) {
+                if (form.isConnected) {
+                    form.dataset.driverInPlacePending = "false";
+                    var closeButton = form.querySelector("[data-driver-shift-close-button]");
+                    if (closeButton) {
+                        closeButton.disabled = false;
+                        closeButton.classList.remove("is-pending");
+                        var closeLabel = closeButton.querySelector("[data-mobile-shift-label]");
+                        if (closeLabel) closeLabel.textContent = "Закрыть смену";
+                    }
+                }
+                if (typeof window.showDriverToast === "function") {
+                    window.showDriverToast(error && error.message ? error.message : "Не удалось сохранить действие.");
                 }
             });
         });
     });
+    window.DriverShiftCloseOutbox.restore(
+        shell.querySelector("[data-driver-shift-close-form]")
+    );
 
     (function initDriverPwaUpdates() {
         if (!("serviceWorker" in navigator)) {

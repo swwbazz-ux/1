@@ -37,12 +37,55 @@ public class BackgroundConnectionPlugin extends Plugin {
         call.resolve(snapshot());
     }
 
+    @PluginMethod
+    public void queueDriverShiftClose(PluginCall call) {
+        if (!"driver".equals(BuildConfig.APP_PROFILE_ID)) {
+            call.reject("Driver shift close is unavailable for this application");
+            return;
+        }
+        String shiftId = call.getString("shiftId", "");
+        String clientActionId = call.getString("clientActionId", "");
+        boolean stored = PendingDriverShiftClose.enqueue(
+            getContext(),
+            shiftId,
+            clientActionId,
+            call.getString("endFuel", ""),
+            call.getString("endMileage", ""),
+            call.getString("endEngineHours", "")
+        );
+        if (!stored) {
+            call.reject("Driver shift close was not saved");
+            return;
+        }
+        if (!ConnectionState.enableFromUi(getContext(), shiftId)) {
+            PendingDriverShiftClose.clear(getContext(), clientActionId);
+            call.reject("Driver shift close background state was not saved");
+            return;
+        }
+        ConnectivityForegroundService.startForActiveShift(getContext());
+        call.resolve(snapshot());
+    }
+
+    @PluginMethod
+    public void acknowledgeDriverShiftClose(PluginCall call) {
+        if (!PendingDriverShiftClose.clear(
+                getContext(),
+                call.getString("clientActionId", ""))) {
+            call.reject("Another driver shift close is pending");
+            return;
+        }
+        call.resolve(snapshot());
+    }
+
     private JSObject snapshot() {
-        return new JSObject()
+        PendingDriverShiftClose pending = PendingDriverShiftClose.load(getContext());
+        JSObject result = new JSObject()
             .put("desired", ConnectionState.isDesired(getContext()))
             .put("shiftActive", ConnectionState.isShiftActive(getContext()))
             .put("shiftId", ConnectionState.activeShiftId(getContext()))
             .put("lastAliveAt", ConnectionState.lastAliveAt(getContext()))
             .put("lastStopReason", ConnectionState.lastStopReason(getContext()));
+        result.put("pendingDriverShiftClose", pending == null ? null : pending.toJsObject());
+        return result;
     }
 }

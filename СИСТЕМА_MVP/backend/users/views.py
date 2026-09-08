@@ -260,7 +260,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v200'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v201'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -4285,11 +4285,16 @@ def driver_accept_assignment_view(request, assignment_id):
 
 
 def driver_close_shift_view(request):
+    wants_json = driver_wants_json(request)
     access_id = request.session.get('employee_access_id')
     if not access_id:
+        if wants_json:
+            return JsonResponse({'ok': False, 'error': 'Требуется повторный вход.'}, status=401)
         return redirect('login')
     access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     if not access or access.role.code != 'driver':
+        if wants_json:
+            return JsonResponse({'ok': False, 'error': 'Нет доступа к приложению водителя.'}, status=403)
         return redirect('role_home')
 
     client_action_id = request.POST.get('client_action_id', '').strip()
@@ -4299,16 +4304,40 @@ def driver_close_shift_view(request):
         employee=access.employee,
     ).exists()
     if client_action_id and completed_action():
+        if wants_json:
+            return JsonResponse({
+                'ok': True,
+                'status': 'already_applied',
+                'client_action_id': client_action_id,
+            })
         messages.success(request, 'Смена закрыта.')
         return redirect(f"{reverse('driver_work')}?tab=manifest")
 
     open_shift = driver_open_shift_queryset(access.employee).order_by('-opened_at').first()
     if not open_shift:
         if client_action_id and completed_action():
+            if wants_json:
+                return JsonResponse({
+                    'ok': True,
+                    'status': 'already_applied',
+                    'client_action_id': client_action_id,
+                })
             messages.success(request, 'Смена закрыта.')
             return redirect(f"{reverse('driver_work')}?tab=manifest")
+        if wants_json:
+            return JsonResponse({'ok': False, 'error': 'Открытая смена не найдена.'}, status=409)
         messages.error(request, 'Открытая смена не найдена.')
         return redirect('driver_work')
+
+    posted_shift_id = (request.POST.get('shift_id') or '').strip()
+    if posted_shift_id and posted_shift_id != str(open_shift.pk):
+        if wants_json:
+            return JsonResponse({
+                'ok': False,
+                'error': 'Смена на сервере уже изменилась. Откройте приложение и проверьте её состояние.',
+            }, status=409)
+        messages.error(request, 'Смена на сервере уже изменилась. Обновите экран.')
+        return redirect(f"{reverse('driver_work')}?tab=shift")
 
     form = DriverCloseShiftForm(request.POST, instance=open_shift)
     request._driver_close_form = form
@@ -4332,8 +4361,33 @@ def driver_close_shift_view(request):
         except ValidationError as error:
             form.add_error(None, error)
         else:
+            if wants_json:
+                return JsonResponse({
+                    'ok': True,
+                    'status': 'applied',
+                    'shift_id': open_shift.pk,
+                    'client_action_id': form.cleaned_data.get('client_action_id') or client_action_id,
+                })
             messages.success(request, 'Смена закрыта.')
             return redirect(f"{reverse('driver_work')}?tab=manifest")
+    if wants_json:
+        field_errors = {
+            field_name: [str(message) for message in error_list]
+            for field_name, error_list in form.errors.items()
+        }
+        first_error = next(
+            (
+                str(message)
+                for error_list in form.errors.values()
+                for message in error_list
+            ),
+            'Проверьте показания на конец смены.',
+        )
+        return JsonResponse({
+            'ok': False,
+            'error': first_error,
+            'field_errors': field_errors,
+        }, status=422)
     request.GET = request.GET.copy()
     request.GET['tab'] = 'shift'
     return driver_shift_view(request)

@@ -37,6 +37,18 @@ function createRuntime(roleCode) {
             calls.push({method: "stop", options: {...options}});
             return Promise.resolve({desired: false});
         },
+        getState() {
+            calls.push({method: "getState"});
+            return Promise.resolve({pendingDriverShiftClose: null});
+        },
+        queueDriverShiftClose(options) {
+            calls.push({method: "queueDriverShiftClose", options: {...options}});
+            return Promise.resolve({pendingDriverShiftClose: {...options}});
+        },
+        acknowledgeDriverShiftClose(options) {
+            calls.push({method: "acknowledgeDriverShiftClose", options: {...options}});
+            return Promise.resolve({pendingDriverShiftClose: null});
+        },
     };
     const body = {
         dataset: {
@@ -111,6 +123,7 @@ function createRuntime(roleCode) {
         stopForLogout() {
             return context.window.NativeBackgroundConnection.stop();
         },
+        connection: context.window.NativeBackgroundConnection,
     };
 }
 
@@ -154,4 +167,36 @@ test("browser and unrelated native roles never touch the Android plugin", () => 
     assert.match(source, /roleCode !== "driver" && roleCode !== "excavator_operator"/);
     assert.match(source, /\[data-driver-shift-close-form\]/);
     assert.match(source, /\[data-eo-work-available="true"\]/);
+});
+
+test("driver bridge exposes the durable shift-close outbox without widening other roles", async () => {
+    const runtime = createRuntime("driver");
+    await runtime.flush();
+    const payload = {
+        shiftId: "17",
+        clientActionId: "driver-close-17",
+        endFuel: "90",
+        endMileage: "2600",
+        endEngineHours: "712",
+    };
+
+    await runtime.connection.queueDriverShiftClose(payload);
+    await runtime.connection.getState();
+    await runtime.connection.acknowledgeDriverShiftClose(payload.clientActionId);
+
+    assert.deepEqual(runtime.calls.slice(-3), [
+        {method: "queueDriverShiftClose", options: payload},
+        {method: "getState"},
+        {
+            method: "acknowledgeDriverShiftClose",
+            options: {clientActionId: payload.clientActionId},
+        },
+    ]);
+
+    const excavator = createRuntime("excavator_operator");
+    await excavator.flush();
+    await assert.rejects(
+        excavator.connection.queueDriverShiftClose(payload),
+        /Фоновая очередь недоступна/
+    );
 });

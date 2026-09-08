@@ -38,6 +38,8 @@ final class StartupLoadingOverlay {
     private static final long FADE_DURATION_MS = 160L;
     private static final long STARTUP_WATCHDOG_MS = 15_000L;
     private static final long STARTUP_WATCHDOG_RETRY_MS = 3_000L;
+    private static final String APPLICATION_DOCUMENT_PROBE =
+        "(function(){return !!(document.body&&document.body.hasAttribute('data-app-contract-ready'));})()";
 
     private static final String PREPARE_LAYOUT =
         "(function(){" +
@@ -58,6 +60,7 @@ final class StartupLoadingOverlay {
             "var viewport=window.visualViewport;" +
             "var root=document.documentElement;" +
             "var body=document.body;" +
+            "var applicationDocument=!!(body&&body.hasAttribute('data-app-contract-ready'));" +
             "var driverShell=document.querySelector('[data-driver-shell]');" +
             "var excavatorShell=document.querySelector('[data-eo-shell]');" +
             "var roleShell=driverShell||excavatorShell||document.querySelector('main')||body;" +
@@ -87,7 +90,7 @@ final class StartupLoadingOverlay {
             "var shellStyle=roleShell?getComputedStyle(roleShell):null;" +
             "var driverHeight=rootStyle?rootStyle.getPropertyValue('--driver-viewport-h').trim():'';" +
             "var excavatorHeight=rootStyle?rootStyle.getPropertyValue('--eo-app-height').trim():'';" +
-            "var roleReady=visibleBox(roleShell);" +
+            "var roleReady=applicationDocument&&visibleBox(roleShell);" +
             "if(driverShell){roleReady=driverShell.dataset.driverShellBound==='true'&&!!driverHeight" +
                 "&&Math.abs((parseFloat(driverHeight)||0)-driverShell.getBoundingClientRect().height)<=2" +
                 "&&!window.driverViewportFitFrame&&!window.driverDialLabelFitFrame" +
@@ -360,7 +363,23 @@ final class StartupLoadingOverlay {
             return;
         }
         pageLoaded = true;
-        restartProbeIfReady();
+        int generation = pageGeneration;
+        armRecoveryWatchdog(generation, DiagnosticReason.ERROR);
+        try {
+            loadedWebView.evaluateJavascript(APPLICATION_DOCUMENT_PROBE, result -> {
+                cancelRecoveryWatchdog(generation);
+                if (!isCurrentVisibleGeneration(generation)) {
+                    return;
+                }
+                if (!"true".equals(String.valueOf(result))) {
+                    enterRecovery(generation, DiagnosticReason.ERROR);
+                    return;
+                }
+                restartProbeIfReady();
+            });
+        } catch (RuntimeException error) {
+            enterRecovery(generation, DiagnosticReason.ERROR);
+        }
     }
 
     void onPageError(WebView erroredWebView) {

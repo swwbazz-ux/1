@@ -32,7 +32,7 @@ from references.models import (
     TruckCapacityRule,
 )
 from reports.models import PilotFeedback, ReportTemplate, ReportType
-from shifts.models import AchievementPrize, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftPlan
+from shifts.models import AchievementPrize, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftClientAction, ShiftPlan
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
 
 from .forms import AdminEmployeeEditForm
@@ -259,7 +259,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v200')
+        self.assertContains(response, 'driver-mobile-shell-v201')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertContains(response, 'playDriverSound("truck_assigned")')
@@ -479,7 +479,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v200', script)
+        self.assertIn('driver-mobile-shell-v201', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -2324,6 +2324,108 @@ class AccessLoginTests(TestCase):
         self.assertContains(next_open_response, 'value="2600')
         self.assertContains(next_open_response, 'value="712')
 
+    def test_native_driver_can_close_shift_with_json_and_repeat_the_same_action(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10-JSON')
+        self.assign_driver_work(truck)
+        self.client.post('/', {'access_code': '2000'}, follow=True, HTTP_HOST='localhost')
+        self.client.post(
+            '/driver/shift/',
+            {
+                'shift_type': 'day',
+                'truck': truck.id,
+                'start_fuel': '100',
+                'start_mileage': '2500',
+                'start_engine_hours': '700',
+            },
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+        payload = {
+            'shift_id': str(EmployeeShift.objects.get(employee=self.employee, closed_at__isnull=True).pk),
+            'end_fuel': '90',
+            'end_mileage': '2600',
+            'end_engine_hours': '712',
+            'client_action_id': 'native-close-json',
+        }
+
+        response = self.client.post(
+            '/driver/shift/close/',
+            payload,
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
+        repeated = self.client.post(
+            '/driver/shift/close/',
+            payload,
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['status'], 'applied')
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.json()['status'], 'already_applied')
+        self.assertEqual(
+            ShiftClientAction.objects.filter(
+                action_type='driver_shift_closed',
+                client_action_id='native-close-json',
+            ).count(),
+            1,
+        )
+
+    def test_native_driver_shift_close_returns_validation_errors_as_json(self):
+        truck = self.create_registered_driver_shift()
+
+        response = self.client.post(
+            '/driver/shift/close/',
+            {
+                'end_fuel': '',
+                'end_mileage': '12000',
+                'end_engine_hours': '1300',
+                'client_action_id': 'native-close-invalid',
+            },
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(response.json()['ok'])
+        self.assertIn('end_fuel', response.json()['field_errors'])
+        self.assertTrue(EmployeeShift.objects.filter(equipment=truck, closed_at__isnull=True).exists())
+        self.assertFalse(
+            ShiftClientAction.objects.filter(client_action_id='native-close-invalid').exists()
+        )
+
+    def test_native_driver_shift_close_rejects_a_different_shift_id(self):
+        truck = self.create_registered_driver_shift()
+        open_shift = EmployeeShift.objects.get(equipment=truck, closed_at__isnull=True)
+
+        response = self.client.post(
+            '/driver/shift/close/',
+            {
+                'shift_id': str(open_shift.pk + 1000),
+                'end_fuel': '90',
+                'end_mileage': '12000',
+                'end_engine_hours': '1300',
+                'client_action_id': 'native-close-wrong-shift',
+            },
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.json()['ok'])
+        open_shift.refresh_from_db()
+        self.assertIsNone(open_shift.closed_at)
+        self.assertFalse(
+            ShiftClientAction.objects.filter(client_action_id='native-close-wrong-shift').exists()
+        )
+
     def test_driver_shift_rejects_fractional_readings(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10-1')
@@ -2920,7 +3022,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v200')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v201')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
