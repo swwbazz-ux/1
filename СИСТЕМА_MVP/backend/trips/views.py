@@ -5833,10 +5833,7 @@ def dispatcher_equipment_detail_view(request, category, equipment_id):
     if category == 'complex':
         if equipment.equipment_type.name != 'Экскаватор':
             return dispatcher_equipment_detail_error('card_not_found', status=404)
-        match = re.search(r'\d+', str(equipment.garage_number or ''))
-        if not match:
-            return dispatcher_equipment_detail_error('card_not_found', status=404)
-        card_key = f'complex-K-{int(match.group(0))}'
+        card_key = f'complex-equipment-{equipment.id}'
     else:
         card_key = str(equipment.pk)
 
