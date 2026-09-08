@@ -236,7 +236,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v217',
+        shell_version='excavator-mobile-shell-v218',
     ),
     RoleApp(
         role_code='mining_master',
@@ -290,7 +290,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v63',
+        shell_version='dispatcher-desktop-shell-v64',
     ),
     RoleApp(
         role_code='settlement_clerk',

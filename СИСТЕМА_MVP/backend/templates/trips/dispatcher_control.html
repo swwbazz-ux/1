@@ -6208,6 +6208,7 @@ document.addEventListener("DOMContentLoaded", function () {
         var columns = tiles.length === 0 ? 6 : Math.min(6, Math.max(1, tiles.length));
         if (tiles.length > 6) columns = 6;
         var gap = tiles.length > 10 ? 5 : 6;
+        var rows = Math.max(1, Math.ceil(Math.max(1, tiles.length) / columns));
         var garageTiles = Array.from(document.querySelectorAll("[data-garage-item='truck']"));
         var garageRect = null;
         garageTiles.some(function (garageTile) {
@@ -6224,13 +6225,18 @@ document.addEventListener("DOMContentLoaded", function () {
         var garageWidth = garageRect ? garageRect.width : cssGarageWidth;
         var garageHeight = garageRect ? garageRect.height : cssGarageHeight;
         var rackWidth = rack.clientWidth || rack.getBoundingClientRect().width || 1;
+        var rackHeight = rack.clientHeight || rack.getBoundingClientRect().height || garageHeight;
         var fittedWidth = Math.floor((rackWidth - (gap * (columns - 1))) / columns);
+        var fittedHeight = Math.floor((rackHeight - (gap * (rows - 1))) / rows);
         var stepWidth = tiles.length <= 6 ? garageWidth : tiles.length <= 12 ? Math.min(garageWidth, 66) : tiles.length <= 18 ? Math.min(garageWidth, 58) : Math.min(garageWidth, 50);
-        var width = Math.max(24, Math.min(garageWidth, stepWidth, fittedWidth));
-        var scale = garageWidth > 0 ? width / garageWidth : 1;
-        var height = Math.max(24, Math.min(garageHeight, Math.floor(garageHeight * scale)));
+        var widthScale = garageWidth > 0 ? Math.min(1, stepWidth / garageWidth, fittedWidth / garageWidth) : 1;
+        var heightScale = garageHeight > 0 ? Math.min(1, fittedHeight / garageHeight) : 1;
+        var scale = Math.max(0, Math.min(widthScale, heightScale));
+        var width = Math.max(24, Math.floor(garageWidth * scale));
+        var height = Math.max(24, Math.floor(garageHeight * scale));
         var justify = tiles.length >= 5 ? "space-between" : "start";
         rack.style.setProperty("--complex-truck-cols", String(columns));
+        rack.style.setProperty("--complex-truck-rows", String(rows));
         rack.style.setProperty("--complex-truck-gap", gap + "px");
         rack.style.setProperty("--complex-truck-w", width + "px");
         rack.style.setProperty("--complex-truck-h", height + "px");
@@ -6823,6 +6829,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v63" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v64" defer></script>
 {% endif %}
 {% endblock %}

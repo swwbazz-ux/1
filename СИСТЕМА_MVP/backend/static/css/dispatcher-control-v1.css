@@ -12299,6 +12299,148 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     }
 }
 
+/*
+ * Dispatcher desktop density is driven by the available board/card size.
+ * This keeps the control usable at 100% browser zoom on common office screens
+ * instead of relying on one hard-coded monitor width.
+ */
+@media (min-width: 761px) {
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-shell {
+        --gd-header-h: clamp(106px, 10vh, 116px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-unified-topbar {
+        --gd-header-identity-width: clamp(280px, 22vw, 420px);
+        --gd-header-actions-width: clamp(286px, 20.5vw, 394px);
+        --gd-header-clock-width: clamp(146px, 9.5vw, 184px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-command-main {
+        padding-inline: clamp(14px, 1.35vw, 26px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-command-context {
+        grid-template-columns: minmax(170px, 1fr) auto auto auto;
+        gap: 0 clamp(10px, 1vw, 18px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-command-context strong {
+        min-width: 170px;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-zone-grid {
+        grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr));
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card {
+        container-type: inline-size;
+        gap: 6px;
+        padding: clamp(9px, .68vw, 12px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-work-head {
+        grid-template-columns: minmax(0, 1fr) minmax(164px, min(42%, 224px));
+        gap: clamp(8px, .68vw, 12px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-title-state {
+        flex-wrap: wrap;
+        align-content: flex-start;
+        align-items: flex-start;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-work-head h2 {
+        font-size: clamp(28px, 2.15vw, 40px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-state-chip,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-downtime-status {
+        flex: 0 1 auto;
+        min-width: min(120px, 100%);
+        max-width: min(210px, 100%);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-state-chip,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-downtime-status > span {
+        overflow-wrap: normal;
+        word-break: normal;
+        text-wrap: balance;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-context {
+        grid-template-columns: repeat(2, minmax(0, max-content));
+        justify-content: end;
+        width: 100%;
+        max-width: 224px;
+        gap: 3px 4px;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-info-chip.chip-rock,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-unload-points,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-plan-strip {
+        grid-column: 1 / -1;
+        justify-self: end;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-info-chip.chip-rock,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-unload-points {
+        max-width: 100%;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-plan-strip {
+        width: 100%;
+        min-width: 0;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks {
+        width: 100%;
+        max-width: 100%;
+        overflow: hidden;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card:has(.complex-assigned-trucks.truck-fill-3) {
+        min-height: 230px;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card:has(.complex-assigned-trucks.truck-fill-4) {
+        min-height: 260px;
+    }
+}
+
+@media (min-width: 1181px) {
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-board {
+        --gd-equipment-slot-w: clamp(62px, calc(4.9vw - 10px), 82px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-zone-grid {
+        grid-auto-rows: minmax(clamp(190px, 21vh, 220px), auto);
+    }
+}
+
+@container (max-width: 430px) {
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-work-head {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-context {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        justify-self: stretch;
+        justify-content: stretch;
+        width: 100%;
+        max-width: none;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-info-chip {
+        width: 100%;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-info-chip.chip-rock,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-unload-points,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-plan-strip {
+        grid-column: 1 / -1;
+    }
+}
+
 @media print {
     body.dispatcher-control-screen {
         background: #ffffff;
