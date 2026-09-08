@@ -213,7 +213,10 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'data-driver-report-copy')
         self.assertContains(response, 'data-driver-report-share')
         self.assertContains(response, 'buildDriverShiftReportText')
-        self.assertContains(response, 'Отчёт водителя за смену')
+        self.assertContains(response, 'https://max.ru/:share?text=')
+        self.assertContains(response, 'encodeURIComponent(text)')
+        self.assertContains(response, 'window.location.assign(maxShareUrl)')
+        self.assertNotContains(response, 'Отчёт скопирован для отправки')
         self.assertContains(response, 'Событий в текущей смене пока нет')
 
     def test_shared_shift_hold_distinguishes_soft_and_native_disabled_actions(self):

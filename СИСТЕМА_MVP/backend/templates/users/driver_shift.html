@@ -6145,15 +6145,8 @@ window.bindDriverMobileShell = function () {
         var shareReport = manifestPanel.querySelector("[data-driver-report-share]");
         if (shareReport) shareReport.addEventListener("click", function () {
             var text = buildDriverShiftReportText();
-            if (navigator.share) {
-                navigator.share({title: "Отчёт водителя за смену", text: text}).catch(function (error) {
-                    if (error && error.name !== "AbortError") showDriverToast("Не удалось открыть отправку");
-                });
-            } else {
-                navigator.clipboard.writeText(text).then(function () {
-                    showDriverToast("Отчёт скопирован для отправки");
-                });
-            }
+            var maxShareUrl = "https://max.ru/:share?text=" + encodeURIComponent(text);
+            window.location.assign(maxShareUrl);
         });
         shell.querySelectorAll("[name='end_fuel'], [name='end_mileage'], [name='end_engine_hours']").forEach(function (input) {
             input.addEventListener("input", syncDriverReportMetrics);
