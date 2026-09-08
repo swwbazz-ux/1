@@ -51,7 +51,7 @@ class AchievementPrizeApiTests(TestCase):
         self.excavator_type = EquipmentType.objects.create(name='Экскаватор')
         self.truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='10')
         self.excavator = Equipment.objects.create(equipment_type=self.excavator_type, garage_number='1')
-        self.rock = RockType.objects.create(name='Руда')
+        self.rock = RockType.objects.create(name='Первичная сульфидная руда')
         self.dump_point = DumpPoint.objects.create(name='ККД')
         self.prize = AchievementPrize.objects.create(
             title='План выполнен',

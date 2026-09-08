@@ -848,8 +848,19 @@ class DispatcherGarageCurrentStateTests(TestCase):
 
 
 class ExcavatorWorkServerIntegrationTests(TestCase):
-    def create_configured_rock(self, name='Негабарит', *, density='2.6000', volume_m3='49.40'):
-        rock = RockType.objects.create(name=name, density=density)
+    def create_configured_rock(
+        self,
+        name='Переходная руда',
+        *,
+        density='2.0500',
+        loosening_factor='1.5000',
+        volume_m3='49.40',
+    ):
+        rock = RockType.objects.create(
+            name=name,
+            density=density,
+            loosening_factor=loosening_factor,
+        )
         TruckCapacityRule.objects.create(
             equipment_model=self.truck_model,
             rock_type=rock,
@@ -932,7 +943,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.other_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='99')
         self.excavator = Equipment.objects.create(equipment_type=self.excavator_type, model=self.excavator_model, garage_number='12')
         self.other_excavator = Equipment.objects.create(equipment_type=self.excavator_type, model=self.excavator_model, garage_number='13')
-        self.rock = RockType.objects.create(name='Руда', density='2.6000')
+        self.rock = RockType.objects.create(
+            name='Первичная сульфидная руда',
+            density='2.5800',
+            loosening_factor='1.5000',
+        )
         self.capacity_rule = TruckCapacityRule.objects.create(
             equipment_model=self.truck_model,
             rock_type=self.rock,
@@ -995,11 +1010,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v218')
+        self.assertContains(response, 'excavator-mobile-shell-v219')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 218')
+        self.assertContains(response, 'Версия 219')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
@@ -1285,7 +1300,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'class="eo-sun-icon"')
         self.assertContains(response, 'Гор. 125')
         self.assertContains(response, 'Бл. 4')
-        self.assertContains(response, 'class="eo-face-rock">Руда</span>')
+        self.assertContains(response, 'class="eo-face-rock">Первичная сульфидная руда</span>')
         self.assertNotContains(response, 'class="eo-dashboard-info"')
         self.assertNotContains(response, 'Назначенные самосвалы')
         self.assertContains(response, 'data-eo-dashboard-truck')
@@ -1312,7 +1327,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'truck_loaded_cancel')
         self.assertContains(response, 'Ожидание самосвалов')
         self.assertContains(response, 'Дробилка')
-        self.assertContains(response, 'Руда')
+        self.assertContains(response, 'Первичная сульфидная руда')
         self.assertContains(response, '21')
         self.assertEqual([card['number'] for card in response.context['truck_cards']], ['21'])
         self.assertEqual(response.context['truck_cards'][0]['equipment_state_code'], 'assigned')
@@ -1628,7 +1643,15 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
     def test_excavator_work_renders_face_settings_from_server_references(self):
         second_dump = DumpPoint.objects.create(name='Отвал')
-        second_rock = self.create_configured_rock()
+        second_rock = self.create_configured_rock(name='Окисленная руда')
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+            work_rock_type=second_rock,
+            work_dump_point=self.dump_point,
+            loading_horizon='125',
+            loading_block='4',
+        )
 
         response = self.client.get(reverse('excavator_work'))
 
@@ -1649,6 +1672,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         incomplete_rock = RockType.objects.create(
             name='Порода без кубатуры',
             density='2.4000',
+            loosening_factor='1.4000',
         )
 
         response = self.client.get(reverse('excavator_work'))
@@ -1657,10 +1681,46 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, f'<option value="{self.rock.id}"', html=False)
         self.assertNotContains(response, f'<option value="{incomplete_rock.id}"', html=False)
 
+    def test_excavator_work_hides_rock_without_loosening_factor(self):
+        incomplete_rock = RockType.objects.create(
+            name='Порода без коэффициента разрыхления',
+            density='2.4000',
+        )
+        TruckCapacityRule.objects.create(
+            equipment_model=self.truck_model,
+            rock_type=incomplete_rock,
+            volume_m3='49.40',
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'<option value="{self.rock.id}"', html=False)
+        self.assertNotContains(response, f'<option value="{incomplete_rock.id}"', html=False)
+
+    def test_excavator_work_hides_complete_noncanonical_rock(self):
+        obsolete_rock = RockType.objects.create(
+            name='Руда',
+            density='2.6000',
+            loosening_factor='1.5000',
+        )
+        TruckCapacityRule.objects.create(
+            equipment_model=self.truck_model,
+            rock_type=obsolete_rock,
+            volume_m3='49.40',
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'<option value="{self.rock.id}"', html=False)
+        self.assertNotContains(response, f'<option value="{obsolete_rock.id}"', html=False)
+
     def test_excavator_work_settings_reject_incomplete_rock_reference(self):
         incomplete_rock = RockType.objects.create(
             name='Порода без кубатуры',
             density='2.4000',
+            loosening_factor='1.4000',
         )
 
         response = self.client.post(
@@ -1677,7 +1737,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()['code'], 'rock_reference_incomplete')
-        self.assertIn('не настроены плотность или кубатура', response.json()['error'])
+        self.assertIn(
+            'не настроены плотность, коэффициент разрыхления или кубатура',
+            response.json()['error'],
+        )
         self.assertFalse(
             ExcavatorPlacement.objects.filter(
                 excavator=self.excavator,
@@ -2815,7 +2878,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v218', script)
+        self.assertIn('excavator-mobile-shell-v219', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3350,7 +3413,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(trip.loading_horizon, '125')
         self.assertEqual(trip.loading_block, '4')
         self.assertEqual(str(trip.volume_m3), '49.40')
-        self.assertEqual(str(trip.tonnage), '128.44')
+        self.assertEqual(str(trip.tonnage), '127.45')
         self.assertTrue(
             TripClientAction.objects.filter(
                 action_type='truck_loaded',
