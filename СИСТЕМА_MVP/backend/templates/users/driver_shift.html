@@ -2591,20 +2591,79 @@ body.driver-mobile-screen .driver-report-row strong {
 
 body.driver-mobile-screen .driver-report-actions {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: minmax(0, 1fr);
     padding-top: 0;
     background: #030b0e;
 }
 
 body.driver-mobile-screen .driver-report-actions button {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    place-items: center;
+    width: 100%;
     min-height: 48px;
     border: 1px solid #58df52;
     border-radius: 7px;
     color: #58df52;
     background: rgba(12, 38, 22, .84);
+    transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+body.driver-mobile-screen .driver-report-action-copy {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-report-action-title {
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 800;
+    line-height: 1.05;
+}
+
+body.driver-mobile-screen .driver-report-action-hint {
+    color: #9eb0b8;
+    font-size: 10px;
+    font-weight: 650;
+    line-height: 1.05;
+}
+
+body.driver-mobile-screen .driver-report-max-mark {
+    display: none;
+    min-width: 44px;
+    min-height: 28px;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, .58);
+    border-radius: 9px;
+    color: #471aff;
+    background: #fff;
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: -.02em;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    padding-inline: 12px;
+    border-color: #6e1aff;
+    color: #fff;
+    background: linear-gradient(110deg, #471aff 0%, #6e1aff 50%, #9500ff 100%);
+    box-shadow: 0 0 0 1px rgba(0, 191, 255, .2), 0 8px 22px rgba(71, 26, 255, .28);
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready .driver-report-max-mark {
+    display: grid;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready .driver-report-action-copy {
+    justify-self: start;
+    text-align: left;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready .driver-report-action-hint {
+    color: rgba(255, 255, 255, .82);
 }
 
 body.driver-mobile-screen .driver-timeline {
@@ -3472,7 +3531,7 @@ body.driver-mobile-screen .driver-report-scroll {
 }
 
 body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="report"].is-active {
-    grid-template-rows: minmax(0, 1fr) clamp(42px, 5.8dvh, 52px);
+    grid-template-rows: minmax(0, 1fr) clamp(52px, 6.8dvh, 60px);
 }
 
 body.driver-mobile-screen .driver-report-scroll {
@@ -4205,8 +4264,18 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
             </div>
             </div>
             <div class="driver-report-actions">
-                <button type="button" data-driver-report-copy>Скопировать</button>
-                <button type="button" data-driver-report-share>Поделиться</button>
+                <button
+                    type="button"
+                    data-driver-report-delivery
+                    data-driver-report-state="prepare"
+                    data-driver-max-group-url="https://max.ru/join/haXmcD7Efa-2_dVX3_VLqfftNKU1QyMlnVTWgiQSDdE"
+                >
+                    <span class="driver-report-max-mark" aria-hidden="true">MAX</span>
+                    <span class="driver-report-action-copy">
+                        <strong class="driver-report-action-title" data-driver-report-action-title>Подготовить путёвку</strong>
+                        <small class="driver-report-action-hint" data-driver-report-action-hint>для отправки диспетчеру</small>
+                    </span>
+                </button>
             </div>
         </div>
         <div class="driver-manifest-view" data-driver-manifest-view="timeline">
@@ -6335,6 +6404,79 @@ window.bindDriverMobileShell = function () {
         );
         return lines.join("\n");
     }
+    function copyDriverReportText(text) {
+        if (navigator.clipboard && window.isSecureContext && typeof navigator.clipboard.writeText === "function") {
+            return navigator.clipboard.writeText(text);
+        }
+        return new Promise(function (resolve, reject) {
+            var field = document.createElement("textarea");
+            field.value = text;
+            field.setAttribute("readonly", "");
+            field.style.position = "fixed";
+            field.style.opacity = "0";
+            document.body.appendChild(field);
+            field.select();
+            var copied = false;
+            try {
+                copied = Boolean(document.execCommand && document.execCommand("copy"));
+            } catch (error) {}
+            field.remove();
+            if (copied) resolve();
+            else reject(new Error("copy_failed"));
+        });
+    }
+    function openDriverMaxGroup(url) {
+        var link = document.createElement("a");
+        link.href = url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer external";
+        link.hidden = true;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+    }
+    function createDriverReportDeliveryController(options) {
+        var preparedText = "";
+        var copyPending = false;
+        function render(ready) {
+            options.button.classList.toggle("is-max-ready", ready);
+            options.button.dataset.driverReportState = ready ? "max" : "prepare";
+            options.title.textContent = ready ? "Открыть группу в MAX" : "Подготовить путёвку";
+            options.hint.textContent = ready ? "текст уже скопирован" : "для отправки диспетчеру";
+        }
+        function reset() {
+            preparedText = "";
+            render(false);
+        }
+        function handleClick() {
+            if (copyPending) return;
+            var currentText = options.buildText();
+            if (preparedText) {
+                if (currentText !== preparedText) {
+                    reset();
+                    options.notify("Данные изменились. Подготовьте путёвку снова");
+                    return;
+                }
+                options.openGroup(options.groupUrl);
+                return;
+            }
+            copyPending = true;
+            options.button.disabled = true;
+            Promise.resolve(options.copyText(currentText)).then(function () {
+                preparedText = currentText;
+                render(true);
+                options.notify("Путёвка скопирована. Теперь откройте MAX");
+            }).catch(function () {
+                reset();
+                options.notify("Не удалось скопировать путёвку");
+            }).finally(function () {
+                copyPending = false;
+                options.button.disabled = Boolean(options.isReadonly && options.isReadonly());
+            });
+        }
+        render(false);
+        return {handleClick: handleClick, reset: reset};
+    }
     if (manifestPanel) {
         manifestPanel.querySelectorAll("[data-driver-manifest-view-open]").forEach(function (button) {
             button.addEventListener("click", function () {
@@ -6349,29 +6491,27 @@ window.bindDriverMobileShell = function () {
                 });
             });
         });
-        var copyReport = manifestPanel.querySelector("[data-driver-report-copy]");
-        if (copyReport) copyReport.addEventListener("click", function () {
-            navigator.clipboard.writeText(buildDriverShiftReportText()).then(function () {
-                showDriverToast("Отчёт скопирован");
-            }).catch(function () {
-                showDriverToast("Не удалось скопировать отчёт");
+        var reportDeliveryButton = manifestPanel.querySelector("[data-driver-report-delivery]");
+        var reportDelivery = null;
+        if (reportDeliveryButton) {
+            reportDelivery = createDriverReportDeliveryController({
+                button: reportDeliveryButton,
+                title: reportDeliveryButton.querySelector("[data-driver-report-action-title]"),
+                hint: reportDeliveryButton.querySelector("[data-driver-report-action-hint]"),
+                groupUrl: reportDeliveryButton.dataset.driverMaxGroupUrl,
+                buildText: buildDriverShiftReportText,
+                copyText: copyDriverReportText,
+                openGroup: openDriverMaxGroup,
+                notify: showDriverToast,
+                isReadonly: driverRoleIsReadonly
             });
-        });
-        var shareReport = manifestPanel.querySelector("[data-driver-report-share]");
-        if (shareReport) shareReport.addEventListener("click", function () {
-            var text = buildDriverShiftReportText();
-            if (navigator.share) {
-                navigator.share({title: "Отчёт водителя за смену", text: text}).catch(function (error) {
-                    if (error && error.name !== "AbortError") showDriverToast("Не удалось открыть отправку");
-                });
-            } else {
-                navigator.clipboard.writeText(text).then(function () {
-                    showDriverToast("Отчёт скопирован для отправки");
-                });
-            }
-        });
+            reportDeliveryButton.addEventListener("click", reportDelivery.handleClick);
+        }
         shell.querySelectorAll("[name='end_fuel'], [name='end_mileage'], [name='end_engine_hours']").forEach(function (input) {
-            input.addEventListener("input", syncDriverReportMetrics);
+            input.addEventListener("input", function () {
+                syncDriverReportMetrics();
+                if (reportDelivery) reportDelivery.reset();
+            });
         });
         syncDriverReportMetrics();
     }
