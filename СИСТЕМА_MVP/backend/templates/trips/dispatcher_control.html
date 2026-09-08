@@ -30,13 +30,14 @@
         <link rel="apple-touch-icon" href="{% static 'img/pwa/dispatcher-180.png' %}">
     {% endif %}
 {% endblock %}
-{% block body_class %}dispatcher-control-screen{% if mining_master_mobile_enabled %} mining-master-mobile-screen{% endif %}{% endblock %}
+{% block body_class %}dispatcher-control-screen{% if mining_master_mobile_enabled %} mining-master-mobile-screen{% else %} dispatcher-fit-screen{% endif %}{% endblock %}
 
 {% block body %}
 {% spaceless %}
 <main
     class="dispatcher-shell"
     data-dispatcher-theme
+    {% if not mining_master_mobile_enabled %}data-dispatcher-fit-canvas{% endif %}
     data-static-prefix="{% static '' %}"
     data-dispatcher-move-url="{{ dispatcher_move_excavator_url }}"
     data-dispatcher-assign-url="{{ dispatcher_assign_truck_url }}"
@@ -992,77 +993,56 @@
     </div>
 </main>
 {% endspaceless %}
+{% if not mining_master_mobile_enabled %}
 <script>
 (function () {
-    /* Пульт диспетчера на телефоне: масштаб считает JS, а не CSS.
+    "use strict";
 
-       Опорный размер пульта "как на компьютере" — 1400×800 (задан и в
-       app.css, на случай если этот скрипт не выполнится). Сравниваем с
-       innerWidth/innerHeight — реальными пикселями экрана, без vh/vw/dvh.
+    var DESIGN_WIDTH = 2400;
+    var DESIGN_HEIGHT = 1500;
+    var MIN_ZOOM = 0.65;
+    var root = document.documentElement;
+    var shell = document.querySelector("[data-dispatcher-fit-canvas]");
+    var pendingFrame = 0;
 
-       Единицы вьюпорта здесь нарочно не участвуют вообще. Дважды подряд с
-       ними не получалось: (1) vh внутри уже уменьшенной transform-ом
-       оболочки продолжает мерить настоящий экран устройства, а не
-       увеличенную "виртуальную" область — сжатие срабатывало дважды, и
-       часть пульта обрезалась; (2) dvh на живом телефоне при появлении и
-       скрытии системных панелей меняется не сразу — на одном и том же
-       устройстве без перезагрузки страницы то 280px высоты, то 336px, и
-       пересчитанная от старого dvh раскладка переставала совпадать с
-       реальным экраном, оставляя пустое поле снизу. innerWidth/innerHeight
-       читаются один раз по факту в момент вызова — рассинхронизация
-       невозможна в принципе, а не просто маловероятна.
+    if (!shell || typeof ResizeObserver === "undefined") return;
 
-       Высота опорного размера постоянна (800), а ширина считается от
-       пропорции самого экрана. С жёсткими 1400×800 телефон 784×336
-       оказывался по пропорции шире опорного размера, масштаб упирался в
-       высоту, и справа оставалась пустая полоса примерно в четверть
-       экрана. Растянуть отдельно по ширине нельзя — исказятся буквы и
-       значки, поэтому расширяется сам опорный размер: пульт получает
-       столько условных точек ширины, сколько нужно под пропорцию экрана,
-       и раскладка внутри распределяет их сама, как на широком мониторе.
-       Ниже 1400 не опускаемся: у́же раскладка пульта уже не собирается. */
-    var DESIGN_HEIGHT = 800;
-    var DESIGN_WIDTH_MIN = 1400;
-
-    function fitDispatcherShellToScreen() {
-        var shell = document.querySelector(".dispatcher-shell");
-        if (!shell) return;
-        var isPhoneLandscape = window.matchMedia(
-            "(orientation: landscape) and (max-width: 1700px)"
-        ).matches;
-        if (!isPhoneLandscape) {
-            shell.style.transform = "";
-            shell.style.width = "";
-            return;
-        }
-        var designWidth = Math.max(
-            DESIGN_WIDTH_MIN,
-            Math.round(DESIGN_HEIGHT * window.innerWidth / window.innerHeight)
+    function fitDispatcherCanvas() {
+        pendingFrame = 0;
+        var viewportWidth = root.clientWidth || window.innerWidth;
+        var viewportHeight = root.clientHeight || window.innerHeight;
+        var calculatedZoom = Math.min(
+            viewportWidth / DESIGN_WIDTH,
+            viewportHeight / DESIGN_HEIGHT
         );
-        var scale = Math.min(
-            window.innerWidth / designWidth,
-            window.innerHeight / DESIGN_HEIGHT
+        var zoom = Math.max(MIN_ZOOM, calculatedZoom);
+        var isMinimumZoom = calculatedZoom < MIN_ZOOM;
+        var visibleCanvasHeight = isMinimumZoom
+            ? Math.min(DESIGN_HEIGHT, viewportHeight / zoom)
+            : DESIGN_HEIGHT;
+
+        shell.style.setProperty("--dispatcher-fit-zoom", String(zoom));
+        shell.style.setProperty(
+            "--dispatcher-fit-visible-height",
+            visibleCanvasHeight + "px"
         );
-        shell.style.width = designWidth + "px";
-        shell.style.transform = "scale(" + scale + ")";
+        shell.style.zoom = String(zoom);
+        shell.classList.toggle("is-fit-minimum", isMinimumZoom);
+        shell.dataset.dispatcherFitZoom = zoom.toFixed(4);
+        shell.dataset.dispatcherFitOverflow = isMinimumZoom ? "complexes" : "none";
     }
 
-    fitDispatcherShellToScreen();
-    window.addEventListener("resize", fitDispatcherShellToScreen);
-    window.addEventListener("orientationchange", function () {
-        /* Сразу после поворота браузер иногда ещё отчитывается старыми
-           размерами — небольшая пауза перед пересчётом. */
-        setTimeout(fitDispatcherShellToScreen, 60);
-    });
-    if (window.visualViewport) {
-        /* Показ и скрытие адресной строки/системных панелей не считается
-           поворотом экрана и resize документа не всегда вызывает — а
-           именно из-за этого на одном телефоне высота "плавала" между
-           280 и 336 точками без перезагрузки страницы. */
-        window.visualViewport.addEventListener("resize", fitDispatcherShellToScreen);
+    function scheduleDispatcherFit() {
+        if (pendingFrame) cancelAnimationFrame(pendingFrame);
+        pendingFrame = requestAnimationFrame(fitDispatcherCanvas);
     }
+
+    var resizeObserver = new ResizeObserver(scheduleDispatcherFit);
+    resizeObserver.observe(root);
+    fitDispatcherCanvas();
 })();
 </script>
+{% endif %}
 
 {{ dispatcher_dashboard.equipment_cards|json_script:"gd-equipment-cards-data" }}
 {{ dispatcher_dashboard.equipment_state_ui|json_script:"gd-equipment-states-data" }}
