@@ -807,6 +807,53 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(cards[str(cyrillic.id)]['id'], 'K-21')
         self.assertEqual(cards[str(latin.id)]['id'], 'K-22')
 
+    def test_mobile_shift_report_uses_current_shift_facts_and_equipment_states(self):
+        HaulAssignment.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            assigned_by=self.dispatcher,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+        HaulAssignment.objects.create(
+            truck=self.downtime_truck,
+            excavator=self.excavator,
+            assigned_by=self.dispatcher,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+        DowntimeEvent.objects.create(
+            equipment=self.downtime_truck,
+            reason=self.reason,
+            started_at=timezone.now(),
+        )
+        Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.active_truck,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            volume_m3='47.00',
+            status=TripStatus.ACTIVE,
+            created_at=self.shift.opened_at + timedelta(minutes=20),
+        )
+        self.create_completed_trip(
+            truck=self.free_truck,
+            excavator=self.excavator,
+            volume='850.00',
+        )
+
+        report = self.build_dashboard()['mobile_shift_report']
+
+        self.assertEqual(report['completed_trip_count'], 1)
+        self.assertEqual(report['active_trip_count'], 1)
+        self.assertEqual(report['completed_fact'], '850')
+        self.assertEqual(report['unit_label'], 'м³')
+        self.assertEqual(report['working_trucks'], 2)
+        self.assertEqual(report['free_trucks'], 1)
+        self.assertEqual(report['points'][0]['name'], 'ККД')
+        self.assertEqual(report['points'][0]['trip_count_label'], '1 рейс')
+        self.assertEqual(report['points'][0]['fact_share_percent'], 100)
+
     def test_downtime_summaries_use_reason_state_color(self):
         upsert_default_equipment_states()
         waiting_state = EquipmentState.objects.get(code='waiting')
