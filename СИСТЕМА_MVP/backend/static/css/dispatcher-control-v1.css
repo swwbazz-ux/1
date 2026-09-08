@@ -3645,10 +3645,19 @@ th {
 
 .dispatcher-messages {
     position: fixed;
-    right: 18px;
-    bottom: 18px;
+    top: 12px;
+    right: auto;
+    bottom: auto;
+    left: 50%;
     z-index: 20;
-    width: min(460px, calc(100vw - 36px));
+    width: min(420px, calc(100vw - 36px));
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+.dispatcher-messages .message {
+    margin-bottom: 0;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
 }
 
 /* Dispatcher workboard prototype: excavator garage / complex zones / truck garage */
@@ -8897,10 +8906,10 @@ body.management-dynamics-chart-modal-open {
 
 .complex-state-chip {
     display: inline-flex;
+    flex: 0 1 auto;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
-    max-width: clamp(72px, 8vw, 128px);
+    max-width: min(190px, calc(100% - 64px));
     min-height: 20px;
     padding: 2px 8px;
     border: 1px solid color-mix(in srgb, var(--complex-accent) 68%, transparent);
@@ -8909,10 +8918,11 @@ body.management-dynamics-chart-modal-open {
     color: var(--complex-accent);
     font-size: clamp(9px, .62vw, 11px);
     font-weight: 900;
-    line-height: 1;
-    text-overflow: ellipsis;
+    line-height: 1.1;
+    overflow-wrap: normal;
+    text-align: center;
     text-transform: uppercase;
-    white-space: nowrap;
+    white-space: normal;
 }
 
 .complex-downtime-status {
@@ -10033,6 +10043,215 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     font-size: 15px;
     line-height: 1.12;
     text-align: right;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border: 1px solid rgba(38, 198, 218, .38);
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(16, 37, 47, .96), rgba(10, 25, 33, .96));
+    box-shadow: inset 3px 0 0 rgba(38, 198, 218, .72);
+}
+
+.gd-detail-settings[hidden] {
+    display: none;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-head strong,
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-head span {
+    display: block;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-head strong {
+    color: var(--gd-detail-ink);
+    font-size: 14px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-head > div > span {
+    max-width: 720px;
+    margin-top: 4px;
+    color: var(--gd-detail-muted);
+    font-size: 11px;
+    line-height: 1.25;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-status {
+    min-height: 16px;
+    color: var(--gd-green);
+    font-size: 11px;
+    font-weight: 800;
+    text-align: right;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-face {
+    display: grid;
+    grid-template-columns: 110px 110px minmax(190px, 1fr);
+    gap: 8px;
+    align-items: end;
+    margin-top: 10px;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings label,
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings label > span {
+    display: block;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings label > span {
+    margin-bottom: 4px;
+    color: var(--gd-detail-muted);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings input,
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings select,
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings button {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 32px;
+    border: 1px solid rgba(129, 154, 166, .32);
+    border-radius: 6px;
+    background: #101f28;
+    color: #e8f2f5;
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.1;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings input,
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings select {
+    padding: 6px 8px;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings input:focus,
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings select:focus {
+    border-color: var(--gd-blue);
+    outline: 1px solid rgba(38, 198, 218, .28);
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destinations {
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid rgba(129, 154, 166, .18);
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destinations-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destinations-head strong,
+.dispatcher-shell .gd-equipment-detail .gd-detail-destinations-head span {
+    display: inline;
+    font-size: 11px;
+    line-height: 1;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destinations-head strong {
+    color: #dbe8ed;
+    text-transform: uppercase;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destinations-head span {
+    margin-left: 7px;
+    color: var(--gd-detail-muted);
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings .gd-detail-destination-add {
+    width: auto;
+    min-height: 28px;
+    padding: 4px 10px;
+    border-color: rgba(38, 198, 218, .38);
+    color: var(--gd-blue);
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destination-list {
+    display: grid;
+    gap: 6px;
+    margin-top: 7px;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destination-row {
+    display: grid;
+    grid-template-columns: minmax(190px, 1fr) 110px 30px;
+    gap: 7px;
+    align-items: end;
+    padding: 7px;
+    border: 1px solid rgba(129, 154, 166, .18);
+    border-radius: 7px;
+    background: rgba(5, 15, 21, .42);
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destination-row label > span {
+    margin-bottom: 3px;
+    font-size: 9px;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings .gd-detail-destination-remove {
+    width: 30px;
+    min-height: 32px;
+    padding: 0;
+    border-color: rgba(239, 83, 80, .38);
+    color: #ff8a80;
+    font-size: 20px;
+    cursor: pointer;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 9px;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings .gd-detail-settings-save {
+    width: auto;
+    min-width: 180px;
+    min-height: 34px;
+    padding: 6px 14px;
+    border-color: color-mix(in srgb, var(--gd-green) 66%, var(--gd-detail-line));
+    background: rgba(107, 231, 20, .14);
+    color: var(--gd-green);
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings button:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+@media (max-width: 760px) {
+    .dispatcher-shell .gd-equipment-detail .gd-detail-settings-face {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .dispatcher-shell .gd-equipment-detail .gd-detail-settings-face label:last-child {
+        grid-column: 1 / -1;
+    }
+
+    .dispatcher-shell .gd-equipment-detail .gd-detail-destination-row {
+        grid-template-columns: minmax(0, 1fr) 86px 30px;
+    }
+
+    .dispatcher-shell .gd-equipment-detail .gd-detail-settings .gd-detail-settings-save {
+        width: 100%;
+    }
 }
 
 .gd-detail-shift-report {
