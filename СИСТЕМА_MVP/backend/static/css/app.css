@@ -28668,8 +28668,8 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         display: none;
     }
 
-    /* План смены — заметная полоса по периметру, как на пульте диспетчера.
-       Никаких отдельных кругов, процентов и счётчиков на карточке. */
+    /* План смены — четыре прямые полосы по краю карточки. Заполнение идёт
+       по часовой стрелке; нет ни круга, ни серого внутреннего контура. */
     .mm-mobile-complex-card.has-plan-progress::before {
         content: "";
         position: absolute;
@@ -28681,26 +28681,30 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         padding: 5px;
         border: 0;
         border-radius: 7px;
-        background: conic-gradient(
-            from -90deg,
-            var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%),
-            var(--mm-mobile-plan-track) var(--mm-mobile-plan-progress, 0%) 100%
-        );
-        box-shadow: 0 0 7px var(--mm-mobile-plan-glow), 0 0 15px var(--mm-mobile-plan-glow);
-        filter: none;
+        background:
+            linear-gradient(to right, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left top / var(--mm-mobile-plan-edge-top) 5px no-repeat,
+            linear-gradient(to bottom, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right top / 5px var(--mm-mobile-plan-edge-right) no-repeat,
+            linear-gradient(to left, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right bottom / var(--mm-mobile-plan-edge-bottom) 5px no-repeat,
+            linear-gradient(to top, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left bottom / 5px var(--mm-mobile-plan-edge-left) no-repeat;
+        box-shadow: none;
+        filter: drop-shadow(0 0 4px var(--mm-mobile-plan-glow));
         opacity: 1;
         transform: none;
-        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-        -webkit-mask-composite: xor;
-        mask-composite: exclude;
+        -webkit-mask: none;
+        mask: none;
         pointer-events: none;
     }
 
     .mm-mobile-complex-card.has-plan-progress.is-plan-overrun::before {
         background:
-            conic-gradient(from -90deg, var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%), transparent var(--mm-mobile-plan-progress, 0%) 100%),
-            conic-gradient(from -90deg, var(--mm-mobile-plan-complete-color) 0 100%, transparent 0 100%),
-            conic-gradient(from -90deg, var(--mm-mobile-plan-track) 0 100%);
+            linear-gradient(to right, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left top / var(--mm-mobile-plan-edge-top) 5px no-repeat,
+            linear-gradient(to bottom, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right top / 5px var(--mm-mobile-plan-edge-right) no-repeat,
+            linear-gradient(to left, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right bottom / var(--mm-mobile-plan-edge-bottom) 5px no-repeat,
+            linear-gradient(to top, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left bottom / 5px var(--mm-mobile-plan-edge-left) no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) left top / 100% 5px no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) right top / 5px 100% no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) right bottom / 100% 5px no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) left bottom / 5px 100% no-repeat;
     }
 
     .mm-mobile-complex-card.is-swiping {
@@ -29217,6 +29221,10 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         --mm-mobile-plan-glow: rgba(74, 222, 128, .6);
         --mm-mobile-plan-complete-color: rgba(74, 222, 128, .68);
         --mm-mobile-plan-track: rgba(142, 158, 166, .26);
+        --mm-mobile-plan-edge-top: min(100%, calc(var(--mm-mobile-plan-progress, 0%) * 4));
+        --mm-mobile-plan-edge-right: min(100%, max(0%, calc(var(--mm-mobile-plan-progress, 0%) * 4 - 100%)));
+        --mm-mobile-plan-edge-bottom: min(100%, max(0%, calc(var(--mm-mobile-plan-progress, 0%) * 4 - 200%)));
+        --mm-mobile-plan-edge-left: min(100%, max(0%, calc(var(--mm-mobile-plan-progress, 0%) * 4 - 300%)));
     }
 
     .mm-mobile-complex-card[data-plan-progress-phase="amber"],
@@ -29295,24 +29303,28 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         display: block;
         padding: 3px;
         border-radius: 5px;
-        background: conic-gradient(
-            from -90deg,
-            var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%),
-            var(--mm-mobile-plan-track) var(--mm-mobile-plan-progress, 0%) 100%
-        );
+        background:
+            linear-gradient(to right, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left top / var(--mm-mobile-plan-edge-top) 3px no-repeat,
+            linear-gradient(to bottom, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right top / 3px var(--mm-mobile-plan-edge-right) no-repeat,
+            linear-gradient(to left, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right bottom / var(--mm-mobile-plan-edge-bottom) 3px no-repeat,
+            linear-gradient(to top, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left bottom / 3px var(--mm-mobile-plan-edge-left) no-repeat;
         filter: drop-shadow(0 0 4px var(--mm-mobile-plan-glow)) drop-shadow(0 0 8px var(--mm-mobile-plan-glow));
         pointer-events: none;
-        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-        -webkit-mask-composite: xor;
-        mask-composite: exclude;
+        -webkit-mask: none;
+        mask: none;
     }
 
     .mm-mobile-truck-mini.is-plan-overrun .mm-mobile-plan-ring-layer,
     .mm-mobile-truck-card.is-plan-overrun .mm-mobile-plan-ring-layer {
         background:
-            conic-gradient(from -90deg, var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%), transparent var(--mm-mobile-plan-progress, 0%) 100%),
-            conic-gradient(from -90deg, var(--mm-mobile-plan-complete-color) 0 100%, transparent 0 100%),
-            conic-gradient(from -90deg, var(--mm-mobile-plan-track) 0 100%);
+            linear-gradient(to right, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left top / var(--mm-mobile-plan-edge-top) 3px no-repeat,
+            linear-gradient(to bottom, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right top / 3px var(--mm-mobile-plan-edge-right) no-repeat,
+            linear-gradient(to left, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right bottom / var(--mm-mobile-plan-edge-bottom) 3px no-repeat,
+            linear-gradient(to top, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left bottom / 3px var(--mm-mobile-plan-edge-left) no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) left top / 100% 3px no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) right top / 3px 100% no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) right bottom / 100% 3px no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) left bottom / 3px 100% no-repeat;
     }
 
     .mm-mobile-truck-card.has-plan-progress > *:not(.mm-mobile-plan-loop-badge):not(.mm-mobile-plan-ring-layer) {
