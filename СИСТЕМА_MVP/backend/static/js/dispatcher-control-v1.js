@@ -40,6 +40,12 @@ document.addEventListener("DOMContentLoaded", function () {
     var detailEmployeeName = document.querySelector("[data-gd-detail-employee-name]");
     var detailEmployeePhone = document.querySelector("[data-gd-detail-employee-phone]");
     var detailEmployeePresence = document.querySelector("[data-gd-detail-employee-presence]");
+    var detailDowntime = document.querySelector("[data-gd-detail-downtime]");
+    var detailDowntimeReason = document.querySelector("[data-gd-detail-downtime-reason]");
+    var detailDowntimeStarted = document.querySelector("[data-gd-detail-downtime-started]");
+    var detailDowntimeTimer = document.querySelector("[data-gd-detail-downtime-timer]");
+    var detailDowntimeClose = document.querySelector("[data-gd-detail-downtime-close]");
+    var detailDowntimeResult = document.querySelector("[data-gd-detail-downtime-result]");
     var detailSettings = document.querySelector("[data-gd-detail-settings]");
     var detailSettingsTitle = document.querySelector("[data-gd-detail-settings-title]");
     var detailSettingsHint = document.querySelector("[data-gd-detail-settings-hint]");
@@ -72,6 +78,25 @@ document.addEventListener("DOMContentLoaded", function () {
         var input = document.querySelector("[name=csrfmiddlewaretoken]");
         return getCookie("csrftoken") || (input ? input.value : "");
     }
+    function formatDispatcherDowntimeDuration(totalSeconds) {
+        totalSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        return [hours, minutes, seconds].map(function (value) {
+            return String(value).padStart(2, "0");
+        }).join(":");
+    }
+    function updateDispatcherDowntimeTimers() {
+        var now = Date.now();
+        document.querySelectorAll("[data-gd-downtime-timer][data-started-at]").forEach(function (timer) {
+            var startedAt = Date.parse(timer.dataset.startedAt || "");
+            if (!Number.isFinite(startedAt)) return;
+            timer.textContent = formatDispatcherDowntimeDuration((now - startedAt) / 1000);
+        });
+    }
+    updateDispatcherDowntimeTimers();
+    window.setInterval(updateDispatcherDowntimeTimers, 1000);
     function dispatcherEquipmentState(code) {
         var key = code || "inactive";
         return equipmentStates[key] || equipmentStates.inactive || {
@@ -118,7 +143,14 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
     var dispatcherSyncPendingCount = 0;
-    var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v1";
+    var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v3";
+    try {
+        // Очередь v1 не содержала версии назначения. Повторять такие команды
+        // после обновления опасно: они могли быть сформированы до более нового
+        // решения диспетчера.
+        window.localStorage.removeItem("mining-master-mobile-sync-queue-v1");
+        window.localStorage.removeItem("mining-master-mobile-sync-queue-v2");
+    } catch (error) {}
     var dispatcherSyncQueueFlushing = false;
     var dispatcherSyncFlushTimer = null;
     var dispatcherMobileSyncFlushDelayMs = 300;
@@ -127,7 +159,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v139";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v143";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -193,11 +225,20 @@ document.addEventListener("DOMContentLoaded", function () {
             return false;
         }
         var queue = readDispatcherSyncQueue();
-        queue.push(Object.assign({
+        var queuedRequest = Object.assign({
             id: "sync-" + Date.now() + "-" + Math.random().toString(16).slice(2),
             createdAt: Date.now(),
             attempts: 0
-        }, request || {}));
+        }, request || {});
+        var replaceIndex = queuedRequest.coalesceKey ? queue.findIndex(function (item, index) {
+            return item.coalesceKey === queuedRequest.coalesceKey && !(dispatcherSyncQueueFlushing && index === 0);
+        }) : -1;
+        if (replaceIndex >= 0) {
+            queuedRequest.createdAt = queue[replaceIndex].createdAt || queuedRequest.createdAt;
+            queue[replaceIndex] = queuedRequest;
+        } else {
+            queue.push(queuedRequest);
+        }
         writeDispatcherSyncQueue(queue);
         scheduleDispatcherSyncFlush(delayMs);
         return true;
@@ -238,6 +279,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 return response.json().catch(function () { return {}; }).then(function (payload) {
                     var error = new Error(payload.error || "Действие не выполнено.");
                     error.isServerResponse = true;
+                    error.code = payload.code || "";
+                    error.conflict = Boolean(payload.conflict);
+                    error.status = response.status;
                     throw error;
                 });
             }
@@ -332,11 +376,12 @@ document.addEventListener("DOMContentLoaded", function () {
             flushDispatcherSyncQueue();
         }, typeof delayMs === "number" ? delayMs : 80);
     }
-    function dispatcherPost(url, data) {
+    function dispatcherPost(url, data, options) {
         if (dispatcherRoleIsReadonly()) {
             return Promise.reject(dispatcherInactiveRoleError());
         }
         var payload = Object.assign({}, data || {});
+        options = options || {};
         if (!payload.client_action_id) {
             payload.client_action_id = "mm-" + Date.now() + "-" + Math.random().toString(16).slice(2);
         }
@@ -348,6 +393,7 @@ document.addEventListener("DOMContentLoaded", function () {
         setDispatcherSyncPending(true);
         return sendDispatcherSyncRequest(request).catch(function (error) {
             if (error && error.isServerResponse) throw error;
+            if (options.queueOnNetworkFailure === false) throw error;
             enqueueDispatcherSyncRequest(request);
             return { queued: true };
         }).finally(function () {
@@ -366,11 +412,42 @@ document.addEventListener("DOMContentLoaded", function () {
             kind: "json",
             url: url,
             data: payload,
+            coalesceKey: payload.truck_id ? "haul-truck-" + String(payload.truck_id) : "",
             refreshMobileBoard: true
         }, typeof delayMs === "number" ? delayMs : dispatcherMobileSyncFlushDelayMs)) {
             return Promise.reject(dispatcherInactiveRoleError());
         }
         return Promise.resolve({ queued: true });
+    }
+    function haulAssignmentStateId(node) {
+        var value = node && node.dataset ? node.dataset.haulAssignmentStateId : "";
+        return /^\d+$/.test(String(value || "")) ? String(value) : "0";
+    }
+    function collectComplexAssignmentStates(complexCard) {
+        var states = {};
+        if (!complexCard) return states;
+        complexCard.querySelectorAll(
+            "[data-complex-truck='true'][data-equipment-id], " +
+            "[data-mm-mobile-home-truck-id]"
+        ).forEach(function (truck) {
+            var truckId = truck.dataset.equipmentId || truck.dataset.mmMobileHomeTruckId || "";
+            if (truckId) states[String(truckId)] = haulAssignmentStateId(truck);
+        });
+        return states;
+    }
+    function applyHaulAssignmentState(response, truckNode) {
+        if (!response || !truckNode || response.assignment_state_id === undefined) return;
+        truckNode.dataset.haulAssignmentStateId = String(response.assignment_state_id || 0);
+    }
+    function applyHaulAssignmentStates(response, root) {
+        var states = response && response.assignment_state_ids;
+        if (!states || !root) return;
+        root.querySelectorAll("[data-equipment-id], [data-mm-mobile-home-truck-id]").forEach(function (node) {
+            var truckId = node.dataset.equipmentId || node.dataset.mmMobileHomeTruckId || "";
+            if (truckId && Object.prototype.hasOwnProperty.call(states, truckId)) {
+                node.dataset.haulAssignmentStateId = String(states[truckId] || 0);
+            }
+        });
     }
     window.addEventListener("focus", scheduleDispatcherSyncFlush);
     window.addEventListener("pageshow", scheduleDispatcherSyncFlush);
@@ -960,6 +1037,10 @@ document.addEventListener("DOMContentLoaded", function () {
         var message = error && error.message ? error.message : "Действие не выполнено.";
         if (!showDispatcherNotice(message)) {
             console.warn(message);
+        }
+        if (error && error.conflict) {
+            Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
+            Promise.resolve(refreshDispatcherDesktopBoardFromServer()).catch(function () {});
         }
     }
     var miningMasterUpdateModal = document.querySelector("[data-mm-pwa-update-modal]");
@@ -1743,10 +1824,126 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function resetDetailContent() {
         if (detailEmployee) detailEmployee.hidden = true;
+        if (detailDowntime) detailDowntime.hidden = true;
+        if (detailDowntimeTimer) detailDowntimeTimer.removeAttribute("data-started-at");
+        if (detailDowntimeResult) detailDowntimeResult.textContent = "";
+        if (detailDowntimeClose) detailDowntimeClose.disabled = false;
+        if (detailLayer) delete detailLayer.dataset.gdDowntimeEventId;
         if (detailSettings) detailSettings.hidden = true;
         if (detailSettingsStatus) detailSettingsStatus.textContent = "";
         if (detailList) detailList.innerHTML = "";
         if (detailShiftReport) detailShiftReport.hidden = true;
+    }
+
+    function renderDetailDowntime(data) {
+        var downtime = data || {};
+        if (!detailDowntime || !downtime.active) {
+            if (detailDowntime) detailDowntime.hidden = true;
+            if (detailLayer) delete detailLayer.dataset.gdDowntimeEventId;
+            return;
+        }
+        if (detailLayer) detailLayer.dataset.gdDowntimeEventId = String(downtime.event_id || "");
+        if (detailDowntimeReason) detailDowntimeReason.textContent = downtime.reason || "Простой";
+        if (detailDowntimeStarted) {
+            detailDowntimeStarted.textContent = downtime.started_at_label
+                ? "С начала: " + downtime.started_at_label
+                : "";
+        }
+        if (detailDowntimeTimer) {
+            detailDowntimeTimer.dataset.startedAt = downtime.started_at || "";
+            detailDowntimeTimer.textContent = downtime.elapsed_label || "00:00:00";
+        }
+        if (detailDowntimeResult) detailDowntimeResult.textContent = "";
+        if (detailDowntimeClose) {
+            detailDowntimeClose.disabled = dispatcherRoleIsReadonly() || !dispatcherShiftOpen;
+            detailDowntimeClose.textContent = "Завершить простой";
+        }
+        detailDowntime.hidden = false;
+        updateDispatcherDowntimeTimers();
+    }
+
+    function dispatcherDowntimeCloseUrl(eventId) {
+        var template = String(runtimeConfig.dispatcherDowntimeCloseUrlTemplate || "");
+        if (!/^\d+$/.test(String(eventId || "")) || !template) return "";
+        var path = template.replace(/0\/close\/$/, String(eventId) + "/close/");
+        return path === template ? "" : path;
+    }
+
+    function dispatcherDowntimeCloseError(error) {
+        if (error && error.status === 401) return "Сессия завершена. Войдите в систему снова.";
+        if (error && error.status === 403) return "Нет доступа к завершению простоя.";
+        if (error && error.code === "dispatcher_shift_required") return "Смена горного диспетчера закрыта.";
+        if (error && error.code === "inactive_role") return "Роль неактивна — доступен только просмотр.";
+        if (error && error.status === 409) return "Состояние техники уже изменилось. Карточка будет обновлена.";
+        if (error && error.status === 404) return "Этот простой больше не найден.";
+        return "Не удалось завершить простой. Проверьте связь и повторите действие.";
+    }
+
+    function closeDetailDowntime() {
+        if (!detailLayer || !detailDowntimeClose || detailDowntimeClose.disabled) return;
+        var eventId = detailLayer.dataset.gdDowntimeEventId || "";
+        var url = dispatcherDowntimeCloseUrl(eventId);
+        var requestedVersion = Number(detailLayer.dataset.gdRequestedVersion || -1);
+        if (!url || requestedVersion < 0) {
+            if (detailDowntimeResult) detailDowntimeResult.textContent = "Карточка устарела. Откройте её снова.";
+            return;
+        }
+        detailDowntimeClose.disabled = true;
+        detailDowntimeClose.textContent = "Завершаю…";
+        if (detailDowntimeResult) detailDowntimeResult.textContent = "";
+        fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-CSRFToken": getCsrfToken(),
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: JSON.stringify({state_version: requestedVersion})
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+                if (!response.ok || !payload.ok) {
+                    var requestError = new Error("downtime_close_failed");
+                    requestError.status = response.status;
+                    requestError.code = payload.error || "";
+                    throw requestError;
+                }
+                return payload;
+            });
+        }).then(function () {
+            if (detailDowntimeResult) detailDowntimeResult.textContent = "Простой завершён. Обновляем пульт…";
+            detailDowntimeClose.textContent = "Простой завершён";
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("dispatcher_downtime_closed");
+            }
+            window.setTimeout(closeEquipmentCard, 500);
+        }).catch(function (error) {
+            if (detailDowntimeResult) detailDowntimeResult.textContent = dispatcherDowntimeCloseError(error);
+            detailDowntimeClose.disabled = dispatcherRoleIsReadonly() || !dispatcherShiftOpen;
+            detailDowntimeClose.textContent = "Завершить простой";
+            if (error && error.status === 409 && window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("dispatcher_downtime_stale");
+            }
+        });
+    }
+
+    function requestDetailDowntimeClose() {
+        if (!detailLayer || !detailDowntimeClose || detailDowntimeClose.disabled) return;
+        var card = equipmentCards[String(detailLayer.dataset.gdActiveCardId || "")] || {};
+        var downtime = card.downtime || {};
+        var equipmentLabel = card.label || "техника";
+        var duration = detailDowntimeTimer ? detailDowntimeTimer.textContent : downtime.elapsed_label;
+        var message = "Завершить простой " + equipmentLabel + " «" + (downtime.reason || "Простой") + "»? Длительность " + (duration || "00:00:00") + " будет зафиксирована в отчёте.";
+        if (typeof window.openAppConfirmDialog !== "function") {
+            if (detailDowntimeResult) detailDowntimeResult.textContent = "Подтверждение недоступно. Обновите страницу.";
+            return;
+        }
+        window.openAppConfirmDialog(message, closeDetailDowntime, 0, "Завершить", {
+            confirmTitle: "Завершить простой?",
+            confirmDescription: message
+        });
     }
 
     function fillDetailSettingSelect(select, options, selectedId) {
@@ -1994,11 +2191,13 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
             }
         }
+        renderDetailDowntime(data.downtime || null);
         renderDetailSettings(data.settings || null);
         if (detailList) {
             detailList.innerHTML = "";
             (data.details || []).forEach(function (row) {
                 if (!row || !row.value) return;
+                if (data.downtime && data.downtime.active && ["Простой", "С начала"].indexOf(row.label) >= 0) return;
                 var term = document.createElement("dt");
                 var value = document.createElement("dd");
                 term.textContent = row.label || "";
@@ -2132,6 +2331,9 @@ document.addEventListener("DOMContentLoaded", function () {
         detailRetry.addEventListener("click", function () {
             if (typeof detailRetryAction === "function") detailRetryAction();
         });
+    }
+    if (detailDowntimeClose) {
+        detailDowntimeClose.addEventListener("click", requestDetailDowntimeClose);
     }
 
     document.querySelectorAll("[data-gd-detail-close]").forEach(function (node) {
@@ -2430,6 +2632,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 mini.dataset.mmMobileHomeTruckNumber = source.dataset.mmMobileAssignedTruckNumber || source.textContent || "";
                 mini.dataset.mmMobileHomeSourceExcavatorId = excavatorId;
                 mini.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+                mini.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
                 mini.textContent = mini.dataset.mmMobileHomeTruckNumber || "";
                 syncMobilePlanVisual(source, mini);
                 preview.appendChild(mini);
@@ -2582,6 +2785,7 @@ document.addEventListener("DOMContentLoaded", function () {
             card.style.display = "";
             card.dataset.mmMobileTruckSort = truckNumber;
             card.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+            card.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
             var image = card.querySelector("img");
             if (image) image.src = getMobileGarageTruckIcon(source);
             var title = card.querySelector("strong");
@@ -2635,6 +2839,7 @@ document.addEventListener("DOMContentLoaded", function () {
             button.dataset.mmMobileFillTruckNumber = truckNumber;
             button.dataset.mmMobileTruckSort = button.dataset.mmMobileFillTruckNumber || "";
             button.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+            button.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
             var img = document.createElement("img");
             img.src = getMobileGarageTruckIcon(source);
             img.alt = "";
@@ -2664,6 +2869,7 @@ document.addEventListener("DOMContentLoaded", function () {
             mini.dataset.mmMobileAssignedTruckId = homeTruck.dataset.mmMobileHomeTruckId || "";
             mini.dataset.mmMobileAssignedTruckNumber = homeTruck.dataset.mmMobileHomeTruckNumber || homeTruck.textContent || "";
             mini.dataset.mmMobileEquipmentState = homeTruck.dataset.mmMobileEquipmentState || "";
+            mini.dataset.haulAssignmentStateId = haulAssignmentStateId(homeTruck);
             mini.dataset.mmMobileFillOriginal = "true";
             mini.textContent = mini.dataset.mmMobileAssignedTruckNumber || "";
             syncMobilePlanVisual(homeTruck, mini);
@@ -2725,7 +2931,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 dispatcherPostQueued(dispatcherAssignTruckUrl, {
                     action: "assign",
                     truck_id: truckId,
-                    excavator_id: excavatorId
+                    excavator_id: excavatorId,
+                    expected_assignment_state_id: haulAssignmentStateId(mini)
                 }).catch(showDispatcherDnDError);
             });
             Array.from(screen.querySelectorAll(".mm-mobile-fill-truck[data-mm-mobile-fill-was-assigned='true']")).forEach(function (button) {
@@ -2733,7 +2940,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (!truckId) return;
                 dispatcherPostQueued(dispatcherAssignTruckUrl, {
                     action: "release",
-                    truck_id: truckId
+                    truck_id: truckId,
+                    expected_assignment_state_id: haulAssignmentStateId(button)
                 }).catch(showDispatcherDnDError);
                 delete button.dataset.mmMobileFillWasAssigned;
             });
@@ -2873,6 +3081,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 button.className = "mm-mobile-garage-excavator " + statusClass;
                 button.dataset.mmMobileActivateExcavator = excavatorId;
                 button.dataset.equipmentCardId = excavatorId;
+                button.dataset.mmMobileComplexLabel = titleText;
                 button.setAttribute("aria-label", "Вернуть экскаватор " + labelText + " в активную смену");
                 button.innerHTML = '<span></span><img src="' + staticPrefix + 'img/equipment/excavator-gray.png" alt="">';
                 var firstEmpty = grid.querySelector(".mm-mobile-garage-slot.status-empty");
@@ -3047,13 +3256,17 @@ document.addEventListener("DOMContentLoaded", function () {
                 var sourceExcavatorId = mini.dataset.mmMobileHomeSourceExcavatorId || "";
                 var payload = null;
                 if (currentDropMode === "garage") {
-                    payload = { action: "release", truck_id: truckId, expected_source_excavator_id: sourceExcavatorId };
+                    payload = {
+                        action: "release",
+                        truck_id: truckId,
+                        expected_assignment_state_id: haulAssignmentStateId(mini)
+                    };
                 } else if (currentDropMode === "complex" && currentTargetCard) {
                     payload = {
                         action: "assign",
                         truck_id: truckId,
                         excavator_id: currentTargetCard.dataset.mmMobileExcavatorId,
-                        expected_source_excavator_id: sourceExcavatorId
+                        expected_assignment_state_id: haulAssignmentStateId(mini)
                     };
                 }
                 if (!payload || !truckId) {
@@ -3246,7 +3459,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (existing) return existing;
             var labelText = (button.querySelector("span") && button.querySelector("span").textContent || "").trim();
             var numberMatch = labelText.match(/(\d+)/);
-            var complexTitle = numberMatch ? "К-" + numberMatch[1] : labelText.replace(/^Экс\s*/i, "К-") || "К";
+            var complexTitle = button.dataset.mmMobileComplexLabel || (numberMatch ? "К-" + numberMatch[1] : labelText.replace(/^Экс\s*/i, "К-") || "К");
             var targetCard = grid.querySelector(".mm-mobile-complex-card.status-empty:not([hidden])") || grid.querySelector(".mm-mobile-complex-card.status-empty");
             var card = document.createElement("article");
             var stateCode = "assigned";
@@ -3333,10 +3546,11 @@ document.addEventListener("DOMContentLoaded", function () {
                 } catch (error) {}
             }
             preserveExcavatorReturnPanel();
-            dispatcherPostQueued(dispatcherMoveExcavatorUrl, {
+            dispatcherPost(dispatcherMoveExcavatorUrl, {
                 excavator_id: excavatorId,
-                zone: "active"
-            }).catch(function (error) {
+                zone: "active",
+                expected_zone: "inactive"
+            }, { queueOnNetworkFailure: false }).catch(function (error) {
                 if (!existingCard && createdCard && createdCard.parentNode) {
                     createdCard.remove();
                 }
@@ -3515,6 +3729,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (isMiningMasterMobileReadonly()) return;
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing")) return;
+            var expectedAssignmentStates = collectComplexAssignmentStates(card);
             card.classList.remove("is-swiping", "is-swipe-ready");
             card.classList.add("is-releasing");
             shell.classList.add("is-excavator-garage-peeking");
@@ -3534,10 +3749,12 @@ document.addEventListener("DOMContentLoaded", function () {
                 var grid = shell.querySelector(".mm-mobile-complex-grid");
                 if (grid) grid.scrollTop = 0;
             }, Math.min(260, flightTime));
-            dispatcherPostQueued(dispatcherMoveExcavatorUrl, {
+            dispatcherPost(dispatcherMoveExcavatorUrl, {
                 excavator_id: excavatorId,
-                zone: "inactive"
-            })
+                zone: "inactive",
+                expected_zone: "active",
+                expected_assignment_states: expectedAssignmentStates
+            }, { queueOnNetworkFailure: false })
                 .then(function () {
                     window.setTimeout(function () {
                         shell.classList.remove("is-truck-garage-peeking");
@@ -3643,6 +3860,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (isMiningMasterMobileReadonly()) return;
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing-trucks")) return;
+            var expectedAssignmentStates = collectComplexAssignmentStates(card);
             card.classList.remove("is-truck-swiping", "is-truck-swipe-ready");
             card.classList.add("is-releasing-trucks");
             shell.classList.add("is-truck-garage-peeking");
@@ -3660,10 +3878,11 @@ document.addEventListener("DOMContentLoaded", function () {
             ensureMobileTruckPreviewEmpty(preview);
             updateMobileHomeTruckPreviewLayout(preview);
             scheduleMobileLocalLayoutReconcile();
-            dispatcherPostQueued(dispatcherAssignTruckUrl, {
+            dispatcherPost(dispatcherAssignTruckUrl, {
                 action: "release_complex",
-                excavator_id: excavatorId
-            })
+                excavator_id: excavatorId,
+                expected_assignment_states: expectedAssignmentStates
+            }, { queueOnNetworkFailure: false })
                 .then(function () {
                     window.setTimeout(function () {
                         resetMobileComplexTruckSwipe(card);
@@ -3696,6 +3915,7 @@ document.addEventListener("DOMContentLoaded", function () {
             mini.dataset.mmMobileAssignedTruckId = truckButton.dataset.mmMobileFillTruckId || "";
             mini.dataset.mmMobileAssignedTruckNumber = truckButton.dataset.mmMobileFillTruckNumber || (truckButton.querySelector("strong") && truckButton.querySelector("strong").textContent) || "";
             mini.dataset.mmMobileEquipmentState = stateCode;
+            mini.dataset.haulAssignmentStateId = haulAssignmentStateId(truckButton);
             if (truckButton.dataset.mmMobileFillWasAssigned === "true") {
                 mini.dataset.mmMobileFillOriginal = "true";
             } else {
@@ -5162,11 +5382,13 @@ document.addEventListener("DOMContentLoaded", function () {
         var cardId = tile.dataset.equipmentId || tile.dataset.equipmentCardId || "";
         var name = tile.dataset.equipmentName || "";
         var slot = tile.dataset.excavatorSlot || (tile.querySelector("strong") && tile.querySelector("strong").textContent) || "";
+        var zoneLabel = slot ? "K-" + slot : (targetCard.dataset.zoneLabel || "K");
         var stateCode = "assigned";
         targetCard.className = "dispatcher-complex-card " + dispatcherEquipmentStateClass(stateCode) + " is-sync-pending";
         targetCard.style.setProperty("--complex-progress", "0%");
         targetCard.dataset.dispatcherDrop = "complex";
         targetCard.dataset.zoneId = zoneId;
+        targetCard.dataset.zoneLabel = zoneLabel;
         targetCard.dataset.dispatcherDrag = "complex";
         targetCard.dataset.equipmentCardId = cardId;
         targetCard.dataset.sourceEquipmentCardId = cardId;
@@ -5182,7 +5404,7 @@ document.addEventListener("DOMContentLoaded", function () {
         targetCard.innerHTML =
             '<div class="complex-work-head">' +
                 '<div class="complex-title-state">' +
-                    "<h2>" + escapeHtml(zoneId) + "</h2>" +
+                    "<h2>" + escapeHtml(zoneLabel) + "</h2>" +
                     '<span class="complex-state-chip">' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
                 '</div>' +
                 '<div class="complex-context">' +
@@ -5241,6 +5463,8 @@ document.addEventListener("DOMContentLoaded", function () {
     function applyDesktopTruckAction(response, action) {
         if (response && response.queued) return response;
         if (!action || !action.type) return response;
+        if (action.truckTile) applyHaulAssignmentState(response, action.truckTile);
+        if (action.complexCard) applyHaulAssignmentStates(response, action.complexCard);
         var applied = false;
         if (action.type === "assign") {
             applied = moveDesktopTruckToComplex(action.truckTile, action.complexCard);
@@ -5416,8 +5640,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 var targetComplexCard = zone;
                 dispatcherPost(dispatcherMoveExcavatorUrl, {
                     excavator_id: activatedExcavatorTile.dataset.equipmentId,
-                    zone: "active"
-                }).then(function (response) {
+                    zone: "active",
+                    expected_zone: "inactive"
+                }, { queueOnNetworkFailure: false }).then(function (response) {
                     return refreshDesktopBoardAfterStructuralAction(response, function () {
                         activateDesktopComplexFromExcavatorTile(activatedExcavatorTile, targetComplexCard);
                     });
@@ -5433,7 +5658,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 dispatcherPost(dispatcherAssignTruckUrl, {
                     action: "assign",
                     truck_id: assignedTruckTile.dataset.equipmentId,
-                    excavator_id: zone.dataset.equipmentId
+                    excavator_id: zone.dataset.equipmentId,
+                    expected_assignment_state_id: haulAssignmentStateId(assignedTruckTile)
                 }).then(function (response) {
                     return applyDesktopTruckAction(response, {
                         type: "assign",
@@ -5472,8 +5698,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 action: function () {
                     dispatcherPost(dispatcherMoveExcavatorUrl, {
                         excavator_id: inactiveExcavatorId,
-                        zone: "inactive"
-                    }).then(function (response) {
+                        zone: "inactive",
+                        expected_zone: "active",
+                        expected_assignment_states: collectComplexAssignmentStates(inactiveComplexCard)
+                    }, { queueOnNetworkFailure: false }).then(function (response) {
                         return refreshDesktopBoardAfterStructuralAction(response, function () {
                             moveDesktopComplexToExcavatorGarage(inactiveComplexCard);
                         });
@@ -5541,8 +5769,9 @@ document.addEventListener("DOMContentLoaded", function () {
                     action: function () {
                         dispatcherPost(dispatcherAssignTruckUrl, {
                             action: "release_complex",
-                            excavator_id: complexCard.dataset.equipmentId
-                        }).then(function (response) {
+                            excavator_id: complexCard.dataset.equipmentId,
+                            expected_assignment_states: collectComplexAssignmentStates(complexCard)
+                        }, { queueOnNetworkFailure: false }).then(function (response) {
                             return applyDesktopTruckAction(response, {
                                 type: "release_complex",
                                 complexCard: complexCard
@@ -5556,7 +5785,8 @@ document.addEventListener("DOMContentLoaded", function () {
             var releasedTruckTile = draggedTile;
             dispatcherPost(dispatcherAssignTruckUrl, {
                 action: "release",
-                truck_id: releasedTruckTile.dataset.equipmentId
+                truck_id: releasedTruckTile.dataset.equipmentId,
+                expected_assignment_state_id: haulAssignmentStateId(releasedTruckTile)
             }).then(function (response) {
                 return applyDesktopTruckAction(response, {
                     type: "release",

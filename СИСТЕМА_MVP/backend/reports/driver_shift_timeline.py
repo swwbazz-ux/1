@@ -14,9 +14,8 @@ from assignments.models import (
     HaulAssignmentAction,
 )
 from core.production_time import (
-    BUSINESS_TIME_ZONE,
-    DAY_SHIFT_START,
     production_shift_bounds,
+    production_work_date_for_shift,
 )
 from downtimes.models import DowntimeEvent
 from shifts.models import EmployeeShift, ShiftReadingCorrection, ShiftType
@@ -558,13 +557,10 @@ def _union_seconds(spans):
 
 
 def _scheduled_shift_bounds(shift, window_start):
-    local_start = window_start.astimezone(BUSINESS_TIME_ZONE)
-    production_date = local_start.date()
-    if (
-        shift.shift_type == ShiftType.NIGHT
-        and local_start.time().replace(tzinfo=None) < DAY_SHIFT_START
-    ):
-        production_date -= timedelta(days=1)
+    production_date = production_work_date_for_shift(
+        window_start,
+        shift.shift_type,
+    )
     return production_shift_bounds(production_date, shift.shift_type)
 
 

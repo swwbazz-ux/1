@@ -26,8 +26,8 @@
                 <span>Смена</span>
                 <select name="shift_type">
                     <option value="" {% if not filters.shift_type %}selected{% endif %}>Все смены</option>
-                    <option value="day" {% if filters.shift_type == 'day' %}selected{% endif %}>Дневная</option>
-                    <option value="night" {% if filters.shift_type == 'night' %}selected{% endif %}>Ночная</option>
+                    <option value="day" {% if filters.shift_type == 'day' %}selected{% endif %}>Первая смена</option>
+                    <option value="night" {% if filters.shift_type == 'night' %}selected{% endif %}>Вторая смена</option>
                 </select>
             </label>
             <button type="submit">Показать</button>

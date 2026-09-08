@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from core.production_time import (
     business_localtime,
     production_day_bounds,
-    production_work_date,
+    production_work_date_for_shift,
 )
 from django.db.models import F, OuterRef, Q, Subquery
 from django.utils.dateparse import parse_datetime
@@ -508,15 +508,15 @@ def linked_driver_snapshot_scopes(rating_period, *, employee_ids):
         )
         if opened_at is None or closed_at is None:
             continue
-        work_date = production_work_date(opened_at)
+        shift_type = snapshot['manifest_shift_type']
+        if shift_type not in {ShiftType.DAY, ShiftType.NIGHT}:
+            continue
+        work_date = production_work_date_for_shift(opened_at, shift_type)
         if not (
             rating_period.starts_on
             <= work_date
             < rating_period.ends_before
         ):
-            continue
-        shift_type = snapshot['manifest_shift_type']
-        if shift_type not in {ShiftType.DAY, ShiftType.NIGHT}:
             continue
         try:
             watch_composition_id = int(

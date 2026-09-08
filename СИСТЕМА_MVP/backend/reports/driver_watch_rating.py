@@ -13,7 +13,10 @@ from django.db.models.functions import Cast, MD5
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from core.production_time import production_day_bounds, production_work_date
+from core.production_time import (
+    production_day_bounds,
+    production_work_date_for_shift,
+)
 from references.models import Equipment
 from shifts.models import EmployeeShift, ShiftType, WatchPeriod
 from users.models import Employee, WatchComposition, WorkSchedule
@@ -269,7 +272,12 @@ def _snapshot_manifest_is_in_rating_period(snapshot, rating_period):
         opened_at = snapshot.shift.opened_at
     if opened_at is None:
         return False
-    work_date = production_work_date(opened_at)
+    shift_type = (
+        shift_manifest.get('shift_type')
+        if shift_manifest is not None
+        else snapshot.shift.shift_type
+    )
+    work_date = production_work_date_for_shift(opened_at, shift_type)
     return rating_period.starts_on <= work_date < rating_period.ends_before
 
 

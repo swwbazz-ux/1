@@ -4012,7 +4012,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         </div>
 
         {% if driver_new_assignment_label %}
-            <form id="driver-assignment-action" method="post" action="{% url 'driver_accept_assignment' pending_assignment_action.id %}" data-driver-in-place="assignment" hidden>
+            <form id="driver-assignment-action" method="post" action="{% url 'driver_accept_assignment' pending_assignment_action.id %}" data-driver-in-place="assignment" data-driver-assignment-kind="{{ pending_assignment_action.action }}" data-driver-excavator-number="{% if pending_assignment_action.excavator_id %}{{ pending_assignment_action.excavator.garage_number }}{% endif %}" hidden>
                 {% csrf_token %}
             </form>
             <button class="driver-work-assignment" type="submit" form="driver-assignment-action" data-driver-assignment-deadline="{{ driver_assignment_effective_at }}">
@@ -4609,11 +4609,45 @@ function playDriverSound(name) {
     return window.MobileOperationalSounds.play(name);
 }
 
-function playDriverAssignmentAlert() {
+function playDriverVoice(cue, voice, options) {
+    options = options || {};
+    if (!window.MobileOperationalSounds || typeof window.MobileOperationalSounds.announceOperational !== "function") {
+        return playDriverSound(cue);
+    }
+    return window.MobileOperationalSounds.announceOperational({
+        cue: cue,
+        voice: voice,
+        eventVersion: Number(options.eventVersion || 0),
+        eventKey: String(options.eventKey || "")
+    });
+}
+
+function playDriverAssignmentAlert(eventVersion, assignmentKind, excavatorNumber) {
     if (navigator.vibrate) {
         try { navigator.vibrate([180, 90, 180]); } catch (error) {}
     }
-    playDriverSound("truck_assigned");
+    if (assignmentKind !== "assign") {
+        playDriverVoice("truck_assigned", "voice_assignment_removed", {
+            eventVersion: Number(eventVersion || 0),
+            eventKey: "driver_assignment"
+        });
+        return;
+    }
+    if (window.MobileOperationalSounds && typeof window.MobileOperationalSounds.announceEquipment === "function") {
+        window.MobileOperationalSounds.announceEquipment({
+            cue: "truck_assigned",
+            action: "driver_excavator_assigned",
+            equipmentNumber: String(excavatorNumber || ""),
+            fallbackVoice: "voice_excavator_assigned",
+            eventVersion: Number(eventVersion || 0),
+            eventKey: "driver_assignment"
+        });
+        return;
+    }
+    playDriverVoice("truck_assigned", "voice_excavator_assigned", {
+        eventVersion: Number(eventVersion || 0),
+        eventKey: "driver_assignment"
+    });
 }
 
 function reportDriverAudioDiagnostic(stage, details, extra) {
@@ -4815,7 +4849,11 @@ window.applyOperationalStateRefresh = function (context) {
             }]});
         }
         if (nextAssignmentKey && nextAssignmentKey !== previousAssignmentKey) {
-            playDriverAssignmentAlert();
+            playDriverAssignmentAlert(
+                targetVersion,
+                String(nextAssignmentForm.dataset.driverAssignmentKind || ""),
+                String(nextAssignmentForm.dataset.driverExcavatorNumber || "")
+            );
         }
         return {applied: true};
     }).catch(function () {

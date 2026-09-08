@@ -405,6 +405,55 @@ class ShiftAnalyticsReportTests(TestCase):
             started_at=opened_at,
         )
 
+    def test_assigned_early_handover_shifts_stay_in_selected_report_date(self):
+        early_starts = (
+            ('day', time(6, 40), 'Э-РАННЯЯ-1'),
+            ('night', time(18, 40), 'Э-РАННЯЯ-2'),
+        )
+        expected_trip_ids = set()
+        for shift_type, opened_time, garage_number in early_starts:
+            opened_at = timezone.make_aware(
+                datetime.combine(self.date, opened_time),
+                timezone.get_current_timezone(),
+            )
+            equipment = Equipment.objects.create(
+                equipment_type=self.excavator_type,
+                model=self.excavator_model,
+                garage_number=garage_number,
+            )
+            shift = EmployeeShift.objects.create(
+                employee=Employee.objects.create(full_name=f'Машинист {garage_number}'),
+                shift_type=shift_type,
+                equipment=equipment,
+                opened_at=opened_at,
+                closed_at=opened_at + timedelta(hours=12),
+            )
+            trip = Trip.objects.create(
+                excavator=equipment,
+                truck=self.truck,
+                loading_shift=shift,
+                rock_type=self.rock,
+                dump_point=self.dump_point,
+                volume_m3=Decimal('38.00'),
+                status=TripStatus.COMPLETED,
+                completed_at=opened_at + timedelta(minutes=5),
+            )
+            expected_trip_ids.add(trip.id)
+
+        analytics_trip_ids = {
+            trip.id
+            for trip in load_shift_analytics_data(self.date)['loading_trips']
+        }
+        request = RequestFactory().get('/reports/', {'date': self.date.isoformat()})
+        mining_trip_ids = set(
+            dispatcher_mining_trip_queryset(
+                dispatcher_mining_filters(request)
+            ).values_list('id', flat=True)
+        )
+
+        self.assertTrue(expected_trip_ids <= analytics_trip_ids)
+        self.assertTrue(expected_trip_ids <= mining_trip_ids)
+
     def test_shift_analytics_counts_loading_unloading_and_downtimes(self):
         analytics = build_shift_analytics(self.date, 'day')
 

@@ -86,7 +86,7 @@ if (buildType === "release") {
       versionName,
       apkUrl: `${apkBaseUrl}${publicApkName}`,
       sha256: createHash("sha256").update(readFileSync(delivery)).digest("hex"),
-      releaseNotes: "Фоновая связь работает только во время открытой смены и корректно выключается при выходе из приложения.",
+      releaseNotes: "Добавлена озвучка номеров назначенной техники; у экскаваторщика — также подтверждение отправки самосвала на точку разгрузки.",
     };
     const updateManifest = join(root, "dist", `${profile}-update.json`);
     writeFileSync(updateManifest, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

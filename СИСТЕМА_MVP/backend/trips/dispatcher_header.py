@@ -4,7 +4,11 @@ from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
 from core.models import lock_production_state
-from core.production_time import production_shift_context, production_shift_type
+from core.production_time import (
+    production_shift_context,
+    production_shift_label,
+    production_shift_type,
+)
 from shifts.models import EmployeeShift, ShiftType
 from shifts.services import lock_active_employee_for_shift
 from users.active_role import active_access_for_employee_role
@@ -146,7 +150,7 @@ def build_dispatcher_header_context(access, request=None):
     context.update({
         'current_time': production_context.local_datetime.strftime('%H:%M'),
         'current_date': production_context.production_date.strftime('%d.%m.%Y'),
-        'shift_label': 'Дневная' if effective_shift_type == ShiftType.DAY else 'Ночная',
+        'shift_label': production_shift_label(effective_shift_type),
         'dispatcher_header_time_range': '07:00-19:00' if effective_shift_type == ShiftType.DAY else '19:00-07:00',
     })
     return context

@@ -906,8 +906,8 @@
         }
         if (elements.qaLiveShift) {
             elements.qaLiveShift.textContent = qaState.shift_type === "day"
-                ? "Дневная"
-                : "Ночная";
+                ? "Первая смена"
+                : "Вторая смена";
         }
         if (elements.qaLiveStateStatus) {
             elements.qaLiveStateStatus.textContent = (

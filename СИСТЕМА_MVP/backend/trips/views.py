@@ -28,11 +28,23 @@ from assignments.models import (
     HaulAssignmentAction,
 )
 from assignments.services import (
+    HaulAssignmentStateConflict,
+    excavator_load_assignment_queryset,
     get_active_equipment_assignment,
+    open_haul_handoffs_for_shift,
+    projected_haul_assignments_for_excavator,
     reconcile_due_haul_assignments,
+    resolve_excavator_load_authority,
     schedule_haul_assignment,
     schedule_haul_release,
+    validate_projected_excavator_state,
     work_assignment_state,
+)
+from assignments.command_guards import (
+    ClientActionPayloadConflict,
+    ClientActionRequired,
+    begin_client_action,
+    complete_client_action,
 )
 from core.db_locks import lock_idempotency_key
 from core.models import OperationalStateVersion, bump_operational_state, lock_production_state
@@ -42,6 +54,7 @@ from core.production_time import (
     production_shift_context,
     production_shift_type,
     production_work_date,
+    production_work_date_for_shift,
 )
 from downtimes.driver_workflow import (
     DRIVER_DOWNTIME_FLOW_WAITING_LOADING,
@@ -268,7 +281,11 @@ def dispatcher_empty_snapshot_progress(shift=None, equipment=None):
     equipment = equipment or getattr(shift, 'equipment', None)
     return {
         'equipment': equipment,
-        'date': production_work_date(shift.opened_at) if shift and shift.opened_at else None,
+        'date': (
+            production_work_date_for_shift(shift.opened_at, shift.shift_type)
+            if shift and shift.opened_at
+            else None
+        ),
         'shift_type': shift.shift_type if shift else None,
         'shift': shift,
         'plan': None,
@@ -414,6 +431,29 @@ def downtime_event_payload(event, *, action='', closed=False):
         'status_key': state_ui['color_group'],
         'status_label': state_ui['label'],
         'version': get_operational_state_version(),
+    }
+
+
+def dispatcher_downtime_card_payload(event, *, calculated_at=None):
+    if not event:
+        return {'active': False}
+    calculated_at = calculated_at or timezone.now()
+    started_at = event.started_at or calculated_at
+    elapsed_seconds = max(0, int((calculated_at - started_at).total_seconds()))
+    reason = getattr(event, 'reason', None)
+    return {
+        'active': True,
+        'event_id': event.id,
+        'equipment_id': event.equipment_id,
+        'reason': (
+            reason.button_label
+            if reason
+            else 'Простой'
+        ),
+        'started_at': started_at.isoformat(),
+        'started_at_label': format_dispatcher_datetime(started_at),
+        'elapsed_seconds': elapsed_seconds,
+        'elapsed_label': format_duration_label(elapsed_seconds),
     }
 
 
@@ -565,7 +605,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v61";
+const CACHE_NAME = "dispatcher-desktop-shell-v64";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -764,6 +804,7 @@ const CORE_ASSETS = [
   "/static/css/mobile-shift-unified-v1.css",
   "/static/css/mobile-face-unified-v1.css",
   "/static/css/mobile-downtime-unified-v1.css",
+  "/static/css/excavator-destination-distances-v1.css",
   "/static/css/mobile-role-login-v1.css",
   "/static/js/mobile-shift-unified-v1.js",
   "/static/js/mobile-operational-sounds-v1.js",
@@ -1216,6 +1257,20 @@ def dispatcher_shift_plan_detail(
     by_dump_point = defaultdict(lambda: {'fact': Decimal('0'), 'trip_count': 0})
     by_route = defaultdict(lambda: {'fact': Decimal('0'), 'trip_count': 0})
 
+    def decimal_percent(value, *, places=1):
+        quantum = Decimal('1').scaleb(-places)
+        rounded = value.quantize(quantum, rounding=ROUND_HALF_UP)
+        return format(rounded, 'f').rstrip('0').rstrip('.') or '0'
+
+    plan_value = Decimal(str(plan_tons or 0))
+    fact_value = Decimal(str(fact_tons or 0))
+    exact_completion = (
+        max(Decimal('0'), min(Decimal('100'), (fact_value / plan_value) * 100))
+        if plan_value
+        else Decimal('0')
+    )
+    completion_percent_css = decimal_percent(exact_completion)
+
     def add_trip(trip, amount):
         amount = amount or Decimal('0')
         if amount <= 0:
@@ -1252,16 +1307,34 @@ def dispatcher_shift_plan_detail(
                 else Decimal('0')
             )
             whole_percent = int(exact_percent)
+            exact_fact_share = (row['fact'] / total) * 100 if total else Decimal('0')
+            whole_fact_share = int(exact_fact_share)
             allocations.append({
                 **row,
                 'index': index,
                 'contribution_percent': whole_percent,
                 'remainder': exact_percent - whole_percent,
-                'fact_share_percent': int(round((row['fact'] / total) * 100)) if total else 0,
+                'fact_share_percent': whole_fact_share,
+                'fact_share_remainder': exact_fact_share - whole_fact_share,
+                'plan_percent_label': (
+                    decimal_percent((row['fact'] / plan_value) * 100, places=2)
+                    if plan_value
+                    else '0'
+                ),
             })
         unallocated = visible_percent - sum(row['contribution_percent'] for row in allocations)
         for row in sorted(allocations, key=lambda item: (-item['remainder'], item['index']))[:unallocated]:
             row['contribution_percent'] += 1
+        unallocated_fact_share = (
+            (100 if total else 0)
+            - sum(row['fact_share_percent'] for row in allocations)
+        )
+        ordered_fact_shares = sorted(
+            allocations,
+            key=lambda item: (-item['fact_share_remainder'], item['index']),
+        )
+        for row in ordered_fact_shares[:unallocated_fact_share]:
+            row['fact_share_percent'] += 1
         return allocations
 
     visible_percent = max(0, int(completion_percent or 0))
@@ -1292,8 +1365,11 @@ def dispatcher_shift_plan_detail(
 
     return {
         'completion_percent': visible_percent,
+        'completion_percent_css': completion_percent_css,
+        'completion_percent_label': completion_percent_css.replace('.', ','),
         'fact_tons': format_dispatcher_number(fact_tons),
         'plan_tons': format_dispatcher_number(plan_tons),
+        'trip_count_label': dispatcher_trip_count_label(len(completed_trips) + len(active_trips)),
         'unit_label': unit_label,
         'points': [
             {
@@ -1302,6 +1378,7 @@ def dispatcher_shift_plan_detail(
                 'trip_count_label': dispatcher_trip_count_label(row['trip_count']),
                 'contribution_percent': row['contribution_percent'],
                 'fact_share_percent': row['fact_share_percent'],
+                'plan_percent_label': row['plan_percent_label'].replace('.', ','),
             }
             for row in point_allocations
         ],
@@ -1312,6 +1389,8 @@ def dispatcher_shift_plan_detail(
                 'fact_tons': format_dispatcher_number(row['fact']),
                 'trip_count_label': dispatcher_trip_count_label(row['trip_count']),
                 'contribution_percent': row['contribution_percent'],
+                'fact_share_percent': row['fact_share_percent'],
+                'plan_percent_label': row['plan_percent_label'].replace('.', ','),
             }
             for row in route_allocations
         ],
@@ -1587,6 +1666,7 @@ def build_dispatcher_equipment_card(
     category='equipment',
     plan=None,
     settings=None,
+    downtime=None,
     include_equipment_metadata=True,
 ):
     card_details = []
@@ -1619,6 +1699,7 @@ def build_dispatcher_equipment_card(
         'category': category,
         'plan': dispatcher_plan_api_payload(plan),
         'settings': settings,
+        'downtime': dispatcher_downtime_card_payload(downtime),
     }
 
 
@@ -1675,14 +1756,14 @@ def build_dispatcher_dashboard_context(
     production_shift_end = None
     if dispatcher_shift:
         production_shift_start, production_shift_end = production_shift_bounds(
-            production_work_date(dispatcher_shift.opened_at),
+            production_work_date_for_shift(
+                dispatcher_shift.opened_at,
+                dispatcher_shift.shift_type,
+            ),
             dispatcher_shift.shift_type,
         )
         shift_trip_attribution = (
-            Q(
-                loading_shift__opened_at__gte=production_shift_start,
-                loading_shift__opened_at__lt=production_shift_end,
-            )
+            Q(loading_shift=dispatcher_shift)
             | Q(
                 loading_shift__isnull=True,
                 created_at__gte=production_shift_start,
@@ -1987,6 +2068,20 @@ def build_dispatcher_dashboard_context(
         match = re.search(r'\d+', str(getattr(equipment, 'garage_number', '') or ''))
         return int(match.group(0)) if match else 9999
 
+    def dispatcher_complex_label(equipment):
+        """Человекочитаемое и однозначное имя комплекса.
+
+        Обычные номера ``5``/``Э-5``/``ЭКГ-5`` остаются ``K-5``. Маркированный
+        номер вроде ``ТВИ 4`` нельзя сводить к первой цифре: иначе он сливается
+        с реальным экскаватором ``4`` и ломает ключи realtime-фрагмента.
+        """
+        raw = str(getattr(equipment, 'garage_number', '') or '').strip().upper()
+        ordinary = re.fullmatch(r'(?:ЭКГ|ЭКС|Э)?[\s\-№]*(\d+)', raw)
+        if ordinary:
+            return f'K-{int(ordinary.group(1))}'
+        slug = re.sub(r'[^0-9A-ZА-ЯЁ]+', '-', raw).strip('-')
+        return f'K-{slug}' if slug else f'K-ID-{equipment.id}'
+
     def complex_number_int(card):
         match = re.search(r'\d+', str(card.get('id', '') or ''))
         return int(match.group(0)) if match else 9999
@@ -2014,6 +2109,7 @@ def build_dispatcher_dashboard_context(
         if str(excavator.garage_number or '').strip().upper().startswith('ТЕСТ'):
             continue
         index = garage_number_int(excavator)
+        complex_label = dispatcher_complex_label(excavator)
         row = by_excavator[excavator.id]
         need = max(len(row['trucks']), row['accepted'] + row['pending'], 0)
         assigned = row['accepted'] + row['active_trips']
@@ -2109,9 +2205,14 @@ def build_dispatcher_dashboard_context(
                 'plan_percent_label': truck_plan['percent_label'],
                 'plan_unit': truck_plan['unit'],
                 'plan_has_plan': truck_plan['has_plan'],
+                'assignment_state_id': (
+                    assignment_by_truck[truck_id].id
+                    if truck_id in assignment_by_truck
+                    else 0
+                ),
                 'transfer_pending': transfer_pending,
                 'transfer_source_label': (
-                    f'К-{garage_number_int(transfer_source_excavator)}'
+                    dispatcher_complex_label(transfer_source_excavator)
                     if transfer_source_excavator
                     else ''
                 ),
@@ -2122,9 +2223,11 @@ def build_dispatcher_dashboard_context(
             if placement and placement.work_rock_type_id
             else (rock_values[0] if rock_values else '')
         )
+        active_downtime = downtime_by_equipment_id.get(excavator.id)
         complex_cards.append({
-            'id': f'K-{index}',
-            'excavator_slot': index,
+            'id': complex_label,
+            'zone_key': f'equipment-{excavator.id}',
+            'excavator_slot': complex_label[2:],
             'material': current_rock,
             'status_key': status_key,
             'status_label': status_label,
@@ -2151,12 +2254,13 @@ def build_dispatcher_dashboard_context(
             'plan_tons': format_dispatcher_number(plan),
             'fact_tons': format_dispatcher_number(fact),
             'forecast_tons': format_dispatcher_number(forecast),
-            'card_id': f'complex-K-{index}',
+            'card_id': f'complex-equipment-{excavator.id}',
             'equipment_card_id': str(excavator.id) if excavator else '',
             'truck_rows': truck_rows,
             'current_horizon': current_horizon,
             'current_block': current_block,
             'current_rock': current_rock,
+            'active_downtime': dispatcher_downtime_card_payload(active_downtime),
         })
 
     excavator_tiles = []
@@ -2168,7 +2272,8 @@ def build_dispatcher_dashboard_context(
         excavator_tiles.append({
             'equipment': excavator,
             'name': equipment_short_name(excavator),
-            'complex': f'K-{board_number}' if excavator.id in active_excavator_ids else '',
+            'complex': dispatcher_complex_label(excavator) if excavator.id in active_excavator_ids else '',
+            'complex_label': dispatcher_complex_label(excavator),
             'status': status,
             'label': label,
             'equipment_state_code': equipment_state_code,
@@ -2193,11 +2298,14 @@ def build_dispatcher_dashboard_context(
     excavator_garage_tiles = []
     inactive_excavator_tiles = sorted(
         [tile for tile in excavator_tiles if tile.get('equipment') and tile['equipment'].id not in active_excavator_ids],
-        key=lambda tile: tile.get('board_number') or 9999,
+        key=lambda tile: (
+            tile.get('board_number') or 9999,
+            tile.get('complex_label') or '',
+        ),
     )
     for index, tile in enumerate(inactive_excavator_tiles[:12], start=1):
         garage_tile = tile.copy()
-        garage_tile['display_name'] = str(tile.get('board_number') or index)
+        garage_tile['display_name'] = str(tile.get('complex_label') or f'K-{index}')[2:]
         garage_tile['is_placeholder'] = False
         excavator_garage_tiles.append(garage_tile)
     while len(excavator_garage_tiles) < 12:
@@ -2276,6 +2384,7 @@ def build_dispatcher_dashboard_context(
                 'plan_percent_label': row.get('plan_percent_label') or 'Не назначен',
                 'plan_unit': row.get('plan_unit') or '',
                 'plan_has_plan': bool(row.get('plan_has_plan')),
+                'assignment_state_id': row.get('assignment_state_id') or 0,
                 'transfer_pending': bool(row.get('transfer_pending')),
                 'transfer_source_label': row.get('transfer_source_label') or '',
             })
@@ -2352,11 +2461,19 @@ def build_dispatcher_dashboard_context(
         'normal': 4,
         'gray': 5,
     }
-    complex_zones = sorted(complex_cards, key=lambda card: (status_order.get(card['status_key'], 3), complex_number_int(card)))
+    complex_zones = sorted(
+        complex_cards,
+        key=lambda card: (
+            status_order.get(card['status_key'], 3),
+            complex_number_int(card),
+            card.get('id') or '',
+        ),
+    )
     while len(complex_zones) < 9:
         index = len(complex_zones) + 1
         complex_zones.append({
             'id': f'K-{index}',
+            'zone_key': f'empty-{index}',
             'is_empty': True,
             'status_key': 'empty',
             'status_label': 'СВОБОДНАЯ ЗОНА',
@@ -2406,6 +2523,7 @@ def build_dispatcher_dashboard_context(
             index = len(mobile_complex_zones) + 1
             mobile_complex_zones.append({
                 'id': f'K-{index}',
+                'zone_key': f'mobile-empty-{index}',
                 'is_empty': True,
                 'status_key': 'empty',
                 'status_label': 'СВОБОДНАЯ ЗОНА',
@@ -2478,6 +2596,11 @@ def build_dispatcher_dashboard_context(
             'plan_unit': truck_plan['unit'],
             'plan_has_plan': truck_plan['has_plan'],
             'card_id': str(truck.id),
+            'assignment_state_id': (
+                assignment_by_truck[truck.id].id
+                if truck.id in assignment_by_truck
+                else 0
+            ),
         })
     mobile_truck_garage_tiles = []
     mobile_truck_sort_source = sorted(trucks_list, key=garage_number_int)
@@ -2512,6 +2635,11 @@ def build_dispatcher_dashboard_context(
             'plan_unit': truck_plan['unit'],
             'plan_has_plan': truck_plan['has_plan'],
             'card_id': str(truck.id),
+            'assignment_state_id': (
+                assignment_by_truck[truck.id].id
+                if truck.id in assignment_by_truck
+                else 0
+            ),
         })
 
     for tile in excavator_tiles:
@@ -2569,6 +2697,7 @@ def build_dispatcher_dashboard_context(
                 rock_types=dispatcher_rock_types,
                 dump_points=dispatcher_dump_points,
             ),
+            downtime=downtime,
         )
 
     for card in complex_cards:
@@ -2615,6 +2744,7 @@ def build_dispatcher_dashboard_context(
                 rock_types=dispatcher_rock_types,
                 dump_points=dispatcher_dump_points,
             ),
+            downtime=downtime_by_equipment_id.get(complex_excavator.id),
             include_equipment_metadata=False,
         )
 
@@ -2628,6 +2758,7 @@ def build_dispatcher_dashboard_context(
             ):
                 continue
             equipment = truck_by_id.get(int(card_id)) if card_id.isdigit() else None
+            downtime = downtime_by_equipment_id.get(equipment.id) if equipment else None
             status_label = status_label_for(tile.get('status'), tile.get('label'))
             details = [
                 {'label': 'Гаражный N', 'value': tile.get('name')},
@@ -2660,6 +2791,7 @@ def build_dispatcher_dashboard_context(
                     shift_trips=shift_trips,
                 ),
                 plan=tile.get('plan'),
+                downtime=downtime,
             )
 
     for tile in truck_garage_tiles + [
@@ -2717,6 +2849,7 @@ def build_dispatcher_dashboard_context(
                     shift_trips=shift_trips,
                 ),
                 plan=tile.get('plan'),
+                downtime=downtime,
             )
         equipment_cards[str(tile['card_id'])] = card
 
@@ -2889,6 +3022,41 @@ def dispatcher_json_payload(request):
         return {}
 
 
+def dispatcher_client_action_error(payload, error, *, code='stale_client'):
+    return JsonResponse(
+        {
+            'ok': False,
+            'error': '; '.join(error.messages) if isinstance(error, ValidationError) else str(error),
+            'code': code,
+            'conflict': True,
+            'client_action_id': str((payload or {}).get('client_action_id') or ''),
+        },
+        status=409,
+    )
+
+
+def required_assignment_state_id(payload):
+    if 'expected_assignment_state_id' not in payload:
+        raise ClientActionRequired(
+            'Экран открыт в старой версии. Обновите пульт перед изменением расстановки.'
+        )
+    try:
+        value = int(payload.get('expected_assignment_state_id'))
+    except (TypeError, ValueError):
+        raise ClientActionRequired('Некорректная версия назначения. Обновите пульт.')
+    if value < 0:
+        raise ClientActionRequired('Некорректная версия назначения. Обновите пульт.')
+    return value
+
+
+def required_projected_assignment_states(payload):
+    if 'expected_assignment_states' not in payload:
+        raise ClientActionRequired(
+            'Экран открыт в старой версии. Обновите пульт перед массовым действием.'
+        )
+    return payload.get('expected_assignment_states')
+
+
 def close_haul_assignments(queryset, now, *, action='bulk_close_assignments', source='dispatcher'):
     assignments = list(queryset)
     for assignment in assignments:
@@ -2931,6 +3099,17 @@ def dispatcher_move_excavator_view(request):
     if shift_error:
         return shift_error
     payload = dispatcher_json_payload(request)
+    try:
+        client_action_id, signature, repeated_response = begin_client_action(
+            employee=access.employee,
+            action_type='dispatcher_move_excavator',
+            payload=payload,
+        )
+    except (ClientActionRequired, ClientActionPayloadConflict) as error:
+        return dispatcher_client_action_error(payload, error)
+    if repeated_response is not None:
+        return JsonResponse(repeated_response)
+    lock_production_state()
     excavator = get_object_or_404(
         Equipment.objects.select_for_update().select_related('equipment_type'),
         id=payload.get('excavator_id'),
@@ -2941,28 +3120,61 @@ def dispatcher_move_excavator_view(request):
     if zone not in {ExcavatorPlacement.Zone.ACTIVE, ExcavatorPlacement.Zone.INACTIVE}:
         return JsonResponse({'ok': False, 'error': 'Некорректная зона экскаватора.'}, status=400)
 
-    placement, _ = ExcavatorPlacement.objects.get_or_create(excavator=excavator)
+    placement = (
+        ExcavatorPlacement.objects.select_for_update()
+        .filter(excavator=excavator)
+        .first()
+    )
+    actual_zone = placement.zone if placement else ExcavatorPlacement.Zone.INACTIVE
+    expected_zone = str(payload.get('expected_zone') or '').strip()
+    if not expected_zone:
+        return dispatcher_client_action_error(
+            payload,
+            ClientActionRequired('Экран открыт в старой версии. Обновите пульт.'),
+        )
+    if expected_zone != actual_zone:
+        return dispatcher_client_action_error(
+            payload,
+            HaulAssignmentStateConflict(
+                expected_state_id=expected_zone,
+                actual_state_id=actual_zone,
+            ),
+            code='state_conflict',
+        )
+    if not placement:
+        placement = ExcavatorPlacement.objects.create(excavator=excavator)
+
+    scheduled_assignments = []
+    if zone == ExcavatorPlacement.Zone.INACTIVE:
+        try:
+            expected_states = required_projected_assignment_states(payload)
+            current_assignments = projected_haul_assignments_for_excavator(
+                excavator,
+                for_update=True,
+            )
+            validate_projected_excavator_state(current_assignments, expected_states)
+            now = timezone.now()
+            for current_assignment in current_assignments:
+                assignment, _ = schedule_haul_release(
+                    truck=current_assignment.truck,
+                    assigned_by=access.employee,
+                    now=now,
+                    expected_state_id=current_assignment.id,
+                )
+                if assignment:
+                    scheduled_assignments.append(assignment)
+        except (ClientActionRequired, HaulAssignmentStateConflict) as error:
+            return dispatcher_client_action_error(payload, error, code='state_conflict')
+
     placement.zone = zone
     placement.changed_by = access.employee
     placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
 
     if zone == ExcavatorPlacement.Zone.INACTIVE:
-        now = timezone.now()
-        current_assignments = list(
-            HaulAssignment.objects
-            .select_for_update()
-            .filter(excavator=excavator, ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED)
-            .select_related('truck')
-            .order_by('truck_id', 'id')
-        )
-        trucks = {assignment.truck_id: assignment.truck for assignment in current_assignments}
-        scheduled = sum(
-            bool(schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)[0])
-            for truck in trucks.values()
-        )
+        scheduled = len(scheduled_assignments)
         summary = f'{equipment_short_name(excavator)} возвращен в гараж, снятие назначений ожидает ({scheduled} самосв.)'
     else:
+        scheduled = 0
         summary = f'{equipment_short_name(excavator)} переведен в активную смену'
 
     log_dispatcher_action(
@@ -2970,7 +3182,23 @@ def dispatcher_move_excavator_view(request):
         action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
         target_summary=summary,
     )
-    return JsonResponse({'ok': True})
+    response_payload = {
+        'ok': True,
+        'scheduled': scheduled,
+        'assignment_state_ids': {
+            str(item.truck_id): item.id for item in scheduled_assignments
+        },
+        'client_action_id': client_action_id,
+    }
+    complete_client_action(
+        employee=access.employee,
+        shift=get_active_dispatcher_shift(access),
+        action_type='dispatcher_move_excavator',
+        client_action_id=client_action_id,
+        signature=signature,
+        response_payload=response_payload,
+    )
+    return JsonResponse(response_payload)
 
 
 @require_POST
@@ -2995,6 +3223,17 @@ def dispatcher_assign_truck_view(request):
     payload = dispatcher_json_payload(request)
     action = payload.get('action')
     now = timezone.now()
+    try:
+        client_action_id, signature, repeated_response = begin_client_action(
+            employee=access.employee,
+            action_type='dispatcher_assign_truck',
+            payload=payload,
+        )
+    except (ClientActionRequired, ClientActionPayloadConflict) as error:
+        return dispatcher_client_action_error(payload, error)
+    if repeated_response is not None:
+        return JsonResponse(repeated_response)
+    lock_production_state()
 
     if action == 'release_complex':
         excavator = get_object_or_404(
@@ -3003,25 +3242,48 @@ def dispatcher_assign_truck_view(request):
             equipment_type__name__icontains='Экскаватор',
             is_active=True,
         )
-        current_assignments = list(
-            HaulAssignment.objects
-            .select_for_update()
-            .filter(excavator=excavator, ended_at__isnull=True)
-            .exclude(status=AssignmentStatus.CANCELLED)
-            .select_related('truck')
-            .order_by('truck_id', 'id')
-        )
-        trucks = {assignment.truck_id: assignment.truck for assignment in current_assignments}
-        scheduled = sum(
-            bool(schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)[0])
-            for truck in trucks.values()
-        )
+        try:
+            expected_states = required_projected_assignment_states(payload)
+            current_assignments = projected_haul_assignments_for_excavator(
+                excavator,
+                for_update=True,
+            )
+            validate_projected_excavator_state(current_assignments, expected_states)
+            scheduled_assignments = []
+            for current_assignment in current_assignments:
+                assignment, _ = schedule_haul_release(
+                    truck=current_assignment.truck,
+                    assigned_by=access.employee,
+                    now=now,
+                    expected_state_id=current_assignment.id,
+                )
+                if assignment:
+                    scheduled_assignments.append(assignment)
+        except (ClientActionRequired, HaulAssignmentStateConflict) as error:
+            return dispatcher_client_action_error(payload, error, code='state_conflict')
+        scheduled = len(scheduled_assignments)
         log_dispatcher_action(
             actor=access.employee,
             action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
             target_summary=f'{equipment_short_name(excavator)}: снятие назначений ожидает ({scheduled})',
         )
-        return JsonResponse({'ok': True, 'scheduled': scheduled})
+        response_payload = {
+            'ok': True,
+            'scheduled': scheduled,
+            'assignment_state_ids': {
+                str(item.truck_id): item.id for item in scheduled_assignments
+            },
+            'client_action_id': client_action_id,
+        }
+        complete_client_action(
+            employee=access.employee,
+            shift=get_active_dispatcher_shift(access),
+            action_type='dispatcher_assign_truck',
+            client_action_id=client_action_id,
+            signature=signature,
+            response_payload=response_payload,
+        )
+        return JsonResponse(response_payload)
 
     truck = get_object_or_404(
         Equipment.objects.select_for_update().select_related('equipment_type'),
@@ -3029,19 +3291,41 @@ def dispatcher_assign_truck_view(request):
         equipment_type__name__icontains='Самосвал',
         is_active=True,
     )
-    active_assignments = (
-        HaulAssignment.objects
-        .filter(truck=truck, ended_at__isnull=True)
-        .exclude(status=AssignmentStatus.CANCELLED)
-    )
+    try:
+        expected_state_id = required_assignment_state_id(payload)
+    except ClientActionRequired as error:
+        return dispatcher_client_action_error(payload, error)
     if action == 'release':
-        assignment, created = schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)
+        try:
+            assignment, created = schedule_haul_release(
+                truck=truck,
+                assigned_by=access.employee,
+                now=now,
+                expected_state_id=expected_state_id,
+            )
+        except HaulAssignmentStateConflict as error:
+            return dispatcher_client_action_error(payload, error, code='state_conflict')
         log_dispatcher_action(
             actor=access.employee,
             action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
             target_summary=f'{equipment_short_name(truck)} снят с комплекса и возвращен в гараж',
         )
-        return JsonResponse({'ok': True, 'assignment_id': assignment.id if assignment else None, 'created': created})
+        response_payload = {
+            'ok': True,
+            'assignment_id': assignment.id if assignment else None,
+            'assignment_state_id': assignment.id if assignment else 0,
+            'created': created,
+            'client_action_id': client_action_id,
+        }
+        complete_client_action(
+            employee=access.employee,
+            shift=get_active_dispatcher_shift(access),
+            action_type='dispatcher_assign_truck',
+            client_action_id=client_action_id,
+            signature=signature,
+            response_payload=response_payload,
+        )
+        return JsonResponse(response_payload)
 
     if action != 'assign':
         return JsonResponse({'ok': False, 'error': 'Некорректное действие с самосвалом.'}, status=400)
@@ -3058,19 +3342,38 @@ def dispatcher_assign_truck_view(request):
         placement.changed_by = access.employee
         placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
 
-    assignment, created = schedule_haul_assignment(
-        truck=truck,
-        excavator=excavator,
-        assigned_by=access.employee,
-        now=now,
-    )
+    try:
+        assignment, created = schedule_haul_assignment(
+            truck=truck,
+            excavator=excavator,
+            assigned_by=access.employee,
+            now=now,
+            expected_state_id=expected_state_id,
+        )
+    except HaulAssignmentStateConflict as error:
+        return dispatcher_client_action_error(payload, error, code='state_conflict')
     log_dispatcher_action(
         actor=access.employee,
         action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
         target_summary=f'{equipment_short_name(truck)} назначен под {equipment_short_name(excavator)}',
         haul_assignment=assignment,
     )
-    return JsonResponse({'ok': True, 'assignment_id': assignment.id, 'created': created})
+    response_payload = {
+        'ok': True,
+        'assignment_id': assignment.id,
+        'assignment_state_id': assignment.id,
+        'created': created,
+        'client_action_id': client_action_id,
+    }
+    complete_client_action(
+        employee=access.employee,
+        shift=get_active_dispatcher_shift(access),
+        action_type='dispatcher_assign_truck',
+        client_action_id=client_action_id,
+        signature=signature,
+        response_payload=response_payload,
+    )
+    return JsonResponse(response_payload)
 
 
 def excavator_access_from_request(request):
@@ -3106,9 +3409,22 @@ def get_excavator_open_shift(employee):
     )
 
 
-def restrict_excavator_trip_form(form, current_excavator):
-    if current_excavator:
-        form.fields['assignment'].queryset = form.fields['assignment'].queryset.filter(excavator=current_excavator)
+def restrict_excavator_trip_form(form, current_excavator, current_shift=None):
+    if current_excavator and current_shift:
+        form.fields['assignment'].queryset = excavator_load_assignment_queryset(
+            current_shift
+        )
+    elif current_excavator:
+        form.fields['assignment'].queryset = (
+            HaulAssignment.objects
+            .filter(
+                excavator=current_excavator,
+                status=AssignmentStatus.ACCEPTED,
+                ended_at__isnull=True,
+            )
+            .select_related('truck', 'truck__model', 'excavator')
+            .order_by('truck__garage_number', '-assigned_at', '-id')
+        )
     else:
         form.fields['assignment'].queryset = form.fields['assignment'].queryset.none()
 
@@ -3937,6 +4253,7 @@ def excavator_truck_loaded_view(request):
         current_excavator = open_shift.equipment if open_shift else None
         if not current_excavator:
             return JsonResponse({'ok': False, 'error': 'Сначала нужно открыть смену на экскаваторе.'}, status=409)
+        lock_production_state()
 
         try:
             truck_id = int(payload.get('truck_id') or 0)
@@ -3949,24 +4266,10 @@ def excavator_truck_loaded_view(request):
         if excavator_id != current_excavator.id:
             return JsonResponse({'ok': False, 'error': 'Экскаватор в действии не совпадает с текущей сменой.'}, status=409)
 
-        assignment_reference = (
-            HaulAssignment.objects
-            .select_related('truck', 'truck__model', 'excavator')
-            .filter(
-                truck_id=truck_id,
-                excavator=current_excavator,
-                ended_at__isnull=True,
-                status=AssignmentStatus.ACCEPTED,
-            )
-            .first()
-        )
-        if not assignment_reference:
-            return JsonResponse({'ok': False, 'error': 'Самосвал не назначен текущему экскаватору.'}, status=409)
-
         try:
             current_excavator, locked_truck = lock_trip_participant_equipment(
                 excavator_id=current_excavator.pk,
-                truck_id=assignment_reference.truck_id,
+                truck_id=truck_id,
             )
         except ValidationError as error:
             return JsonResponse(
@@ -3978,33 +4281,26 @@ def excavator_truck_loaded_view(request):
                 status=409,
             )
         open_shift.equipment = current_excavator
-        assignment_reference.truck = locked_truck
+        assignment, handoff = resolve_excavator_load_authority(
+            truck_id=locked_truck.id,
+            excavator_id=current_excavator.id,
+            source_shift=open_shift,
+        )
+        if not assignment:
+            return JsonResponse({
+                'ok': False,
+                'error': 'Назначение уже изменилось или право завершить погрузку использовано.',
+            }, status=409)
+        assignment.truck = locked_truck
+        assignment.excavator = current_excavator
         open_trip = (
             Trip.objects
             .select_for_update()
-            .filter(truck_id=assignment_reference.truck_id, status__in=OPEN_TRIP_STATUSES)
+            .filter(truck_id=locked_truck.id, status__in=OPEN_TRIP_STATUSES)
             .first()
         )
         if open_trip:
             return JsonResponse({'ok': False, 'error': 'Самосвал уже находится в незакрытом рейсе.', 'trip_id': open_trip.id}, status=409)
-
-        assignment = (
-            HaulAssignment.objects
-            .select_for_update(of=('self',))
-            .select_related('truck', 'truck__model', 'excavator')
-            .filter(
-                pk=assignment_reference.pk,
-                truck_id=assignment_reference.truck_id,
-                excavator=current_excavator,
-                ended_at__isnull=True,
-                status=AssignmentStatus.ACCEPTED,
-            )
-            .first()
-        )
-        if not assignment:
-            return JsonResponse({'ok': False, 'error': 'Назначение самосвала уже изменилось.'}, status=409)
-        assignment.truck = locked_truck
-        assignment.excavator = current_excavator
         load_block = excavator_truck_load_block(
             assignment,
             current_excavator=current_excavator,
@@ -4270,6 +4566,7 @@ def excavator_work_settings_view(request):
     form = restrict_excavator_trip_form(
         TripCreateForm(excavator_operator=access.employee),
         current_excavator,
+        open_shift,
     )
     rock_queryset = form.fields['rock_type'].queryset
     dump_point_queryset = form.fields['dump_point'].queryset
@@ -4582,6 +4879,7 @@ def excavator_work_view(request):
         form = restrict_excavator_trip_form(
             TripCreateForm(request.POST, excavator_operator=access.employee),
             current_excavator,
+            open_shift,
         )
         submitted_rock_type_id = request.POST.get('rock_type')
         if (
@@ -4638,51 +4936,34 @@ def excavator_work_view(request):
                         )
                         if not locked_shift or not locked_shift.equipment_id:
                             raise ValidationError('Сначала нужно открыть смену на экскаваторе.')
-                        assignment_reference = (
-                            HaulAssignment.objects
-                            .select_related('truck', 'truck__model', 'excavator')
-                            .filter(
-                                pk=form.cleaned_data['assignment'].pk,
-                                excavator_id=locked_shift.equipment_id,
-                                ended_at__isnull=True,
-                                status=AssignmentStatus.ACCEPTED,
-                            )
-                            .first()
-                        )
-                        if not assignment_reference:
-                            raise ValidationError('Самосвал не назначен текущему экскаватору.')
+                        lock_production_state()
+                        requested_assignment = form.cleaned_data['assignment']
                         locked_excavator, locked_truck = lock_trip_participant_equipment(
                             excavator_id=locked_shift.equipment_id,
-                            truck_id=assignment_reference.truck_id,
+                            truck_id=requested_assignment.truck_id,
                         )
                         locked_shift.equipment = locked_excavator
-                        assignment_reference.truck = locked_truck
+                        locked_assignment, handoff = resolve_excavator_load_authority(
+                            truck_id=locked_truck.id,
+                            excavator_id=locked_excavator.id,
+                            source_shift=locked_shift,
+                            requested_assignment_id=requested_assignment.id,
+                        )
+                        if not locked_assignment:
+                            raise ValidationError(
+                                'Назначение уже изменилось или право завершить погрузку использовано.'
+                            )
+                        locked_assignment.truck = locked_truck
+                        locked_assignment.excavator = locked_excavator
                         open_trip = (
                             Trip.objects
                             .select_for_update()
                             .filter(
-                                truck_id=assignment_reference.truck_id,
+                                truck_id=locked_truck.id,
                                 status__in=OPEN_TRIP_STATUSES,
                             )
                             .first()
                         )
-                        locked_assignment = (
-                            HaulAssignment.objects
-                            .select_for_update(of=('self',))
-                            .select_related('truck', 'truck__model', 'excavator')
-                            .filter(
-                                pk=assignment_reference.pk,
-                                truck_id=assignment_reference.truck_id,
-                                excavator=locked_excavator,
-                                ended_at__isnull=True,
-                                status=AssignmentStatus.ACCEPTED,
-                            )
-                            .first()
-                        )
-                        if not locked_assignment:
-                            raise ValidationError('Назначение самосвала уже изменилось.')
-                        locked_assignment.truck = locked_truck
-                        locked_assignment.excavator = locked_excavator
                         block_reason = excavator_truck_load_block_reason(
                             locked_assignment,
                             current_excavator=locked_excavator,
@@ -4751,9 +5032,25 @@ def excavator_work_view(request):
         form = restrict_excavator_trip_form(
             TripCreateForm(excavator_operator=access.employee),
             current_excavator,
+            open_shift,
         )
 
-    available_assignments = list(form.fields['assignment'].queryset)
+    handoff_assignment_ids = set(
+        open_haul_handoffs_for_shift(open_shift)
+        .values_list('source_assignment_id', flat=True)
+    )
+    available_assignments = []
+    visible_assignment_index_by_truck = {}
+    for assignment in form.fields['assignment'].queryset:
+        assignment.is_handoff_completion = assignment.id in handoff_assignment_ids
+        existing_index = visible_assignment_index_by_truck.get(assignment.truck_id)
+        if existing_index is None:
+            visible_assignment_index_by_truck[assignment.truck_id] = len(available_assignments)
+            available_assignments.append(assignment)
+            continue
+        existing = available_assignments[existing_index]
+        if existing.is_handoff_completion and not assignment.is_handoff_completion:
+            available_assignments[existing_index] = assignment
     assignment_truck_ids = [assignment.truck_id for assignment in available_assignments if assignment.truck_id]
     active_trips_queryset = (
         Trip.objects
@@ -4942,7 +5239,10 @@ def excavator_work_view(request):
             if assignment.truck_id in driver_assignment_truck_ids:
                 return 'waiting_for_shift'
             return 'no_driver'
-        if assignment.status in {AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED}:
+        if (
+            getattr(assignment, 'is_handoff_completion', False)
+            or assignment.status in {AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED}
+        ):
             return 'assigned'
         return 'free'
 
@@ -4977,7 +5277,11 @@ def excavator_work_view(request):
                 else (
                     block_reason
                     if load_block_reason_code == 'post_unload_cooldown'
-                    else state_ui['label']
+                    else (
+                        'Завершить погрузку'
+                        if getattr(assignment, 'is_handoff_completion', False)
+                        else state_ui['label']
+                    )
                 )
             ),
             'target_label': target_label,
@@ -4988,6 +5292,7 @@ def excavator_work_view(request):
             'can_drag': can_load,
             'can_load': can_load,
             'is_waiting_for_loading': is_waiting_for_loading,
+            'is_handoff_completion': getattr(assignment, 'is_handoff_completion', False),
             'driver_shift_started': assignment.truck_id in open_truck_shift_equipment_ids,
             'block_reason': block_reason,
             'load_block_reason_code': load_block_reason_code,
@@ -5489,6 +5794,111 @@ def dispatcher_equipment_detail_error(code, *, status):
     ))
 
 
+def dispatcher_downtime_close_response(payload, *, status=200):
+    response_payload = {
+        'contract': 'dispatcher-downtime-close-v1',
+        **payload,
+    }
+    return protect_dispatcher_equipment_detail_response(
+        JsonResponse(response_payload, status=status)
+    )
+
+
+@require_POST
+@transaction.atomic
+def dispatcher_close_downtime_view(request, event_id):
+    access = dispatcher_access_from_request(request)
+    if not access:
+        return dispatcher_downtime_close_response(
+            {'ok': False, 'error': 'forbidden'},
+            status=403,
+        )
+    Employee.objects.select_for_update().get(pk=access.employee_id)
+    if not role_session_state(request, access)['is_active']:
+        return dispatcher_downtime_close_response(
+            {'ok': False, 'error': 'inactive_role'},
+            status=409,
+        )
+    if not get_active_dispatcher_shift(access):
+        return dispatcher_downtime_close_response(
+            {'ok': False, 'error': 'dispatcher_shift_required'},
+            status=409,
+        )
+
+    payload = dispatcher_json_payload(request)
+    try:
+        requested_version = int(payload.get('state_version', -1))
+    except (TypeError, ValueError):
+        requested_version = -1
+    if requested_version < 0:
+        return dispatcher_downtime_close_response(
+            {'ok': False, 'error': 'invalid_state_version'},
+            status=400,
+        )
+
+    state = lock_production_state()
+    event = (
+        DowntimeEvent.objects
+        .select_for_update()
+        .select_related('equipment', 'equipment__equipment_type', 'reason')
+        .filter(
+            pk=event_id,
+            equipment__is_active=True,
+            equipment__equipment_type__name__in={'Самосвал', 'Экскаватор'},
+        )
+        .first()
+    )
+    if not event:
+        return dispatcher_downtime_close_response(
+            {'ok': False, 'error': 'downtime_not_found'},
+            status=404,
+        )
+    if event.ended_at:
+        response_payload = downtime_event_payload(event, action='dispatcher_downtime_already_closed')
+        response_payload.update({
+            'closed': False,
+            'already_closed': True,
+            'version': state.version,
+        })
+        return dispatcher_downtime_close_response(response_payload)
+    if state.version != requested_version:
+        return dispatcher_downtime_close_response(
+            {
+                'ok': False,
+                'error': 'stale_board',
+                'version': state.version,
+            },
+            status=409,
+        )
+
+    event.ended_at = timezone.now()
+    event.save(update_fields=['ended_at'])
+    state = bump_operational_state(
+        'Dispatcher:downtime_closed',
+        event_type='downtime_changed',
+        object_type='DowntimeEvent',
+        object_id=event.id,
+        payload={
+            'action': 'dispatcher_downtime_closed',
+            'actor_id': access.employee_id,
+            'equipment_id': event.equipment_id,
+            'equipment_type': event.equipment.equipment_type.name,
+            'reason_id': event.reason_id,
+            'source': 'dispatcher_override',
+        },
+    )
+    response_payload = downtime_event_payload(
+        event,
+        action='dispatcher_downtime_closed',
+        closed=True,
+    )
+    response_payload.update({
+        'already_closed': False,
+        'version': state.version,
+    })
+    return dispatcher_downtime_close_response(response_payload)
+
+
 @require_http_methods(['GET', 'POST'])
 def dispatcher_equipment_detail_view(request, category, equipment_id):
     access_id = request.session.get('employee_access_id')
@@ -5536,10 +5946,7 @@ def dispatcher_equipment_detail_view(request, category, equipment_id):
     if category == 'complex':
         if equipment.equipment_type.name != 'Экскаватор':
             return dispatcher_equipment_detail_error('card_not_found', status=404)
-        match = re.search(r'\d+', str(equipment.garage_number or ''))
-        if not match:
-            return dispatcher_equipment_detail_error('card_not_found', status=404)
-        card_key = f'complex-K-{int(match.group(0))}'
+        card_key = f'complex-equipment-{equipment.id}'
     else:
         card_key = str(equipment.pk)
 
@@ -6190,6 +6597,7 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
     shift_error = dispatcher_shift_required_redirect(request, access, redirect_url)
     if shift_error:
         return shift_error
+    lock_production_state()
     reason = request.POST.get('reason', '').strip()
 
     assignment = (
@@ -6204,11 +6612,19 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
         return redirect(redirect_url)
 
     if assignment.status == AssignmentStatus.ACCEPTED:
-        pending_release, _ = schedule_haul_release(
-            truck=assignment.truck,
-            assigned_by=access.employee,
-            now=timezone.now(),
-        )
+        try:
+            pending_release, _ = schedule_haul_release(
+                truck=assignment.truck,
+                assigned_by=access.employee,
+                now=timezone.now(),
+                expected_state_id=assignment.id,
+            )
+        except HaulAssignmentStateConflict:
+            messages.error(
+                request,
+                'Назначение уже изменилось. Обновите пульт и повторите действие.',
+            )
+            return redirect(redirect_url)
         logged_assignment = pending_release or assignment
     else:
         assignment.status = AssignmentStatus.CANCELLED

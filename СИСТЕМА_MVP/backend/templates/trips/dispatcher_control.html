@@ -41,6 +41,7 @@
     data-dispatcher-move-url="{{ dispatcher_move_excavator_url }}"
     data-dispatcher-assign-url="{{ dispatcher_assign_truck_url }}"
     data-dispatcher-detail-url-template="{% url 'dispatcher_equipment_detail' category='equipment' equipment_id=0 %}"
+    data-dispatcher-downtime-close-url-template="{% url 'dispatcher_close_downtime' event_id=0 %}"
     data-dispatcher-service-worker-scope="{% if role_app.role_code == 'dispatcher' %}/{% else %}/dispatcher/{% endif %}"
 >
     <h1 class="dispatcher-compat-title">{% if dispatcher_compat_title %}{{ dispatcher_compat_title }}{% else %}Диспетчерский пульт{% endif %}</h1>
@@ -65,7 +66,7 @@
             </div>
             <div class="dispatcher-excavators" aria-label="Экскаваторы">
                 {% for tile in dispatcher_dashboard.excavator_garage_tiles %}
-                    <article class="dispatcher-equipment-tile dispatcher-excavator-garage-tile status-{{ tile.status }}{% if tile.is_placeholder %} is-placeholder{% endif %}{% if tile.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ tile.percent|default:0 }}%;" {% if not tile.is_placeholder %}role="button" tabindex="0" draggable="true" data-dispatcher-drag="excavator" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-excavator-slot="{{ tile.display_name }}" data-garage-item="excavator" data-plan-status="{{ tile.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ tile.percent|default:0 }}" data-plan-loop-percent="{% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ tile.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if tile.plan_has_plan %}{{ tile.plan_visual.phase }}{% endif %}" data-plan-mode="{{ tile.plan_calculation_mode|default:'' }}" data-plan-value="{{ tile.plan_value|default:'' }}" data-plan-fact="{{ tile.plan_fact_value|default:'' }}" data-plan-unit="{{ tile.plan_unit|default:'' }}" data-plan-group="{{ tile.plan_group_name|default:'' }}"{% endif %}>
+                    <article class="dispatcher-equipment-tile dispatcher-excavator-garage-tile status-{{ tile.status }}{% if tile.is_placeholder %} is-placeholder{% endif %}{% if tile.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ tile.percent|default:0 }}%;" {% if not tile.is_placeholder %}role="button" tabindex="0" draggable="true" data-dispatcher-drag="excavator" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-excavator-slot="{{ tile.display_name }}" data-garage-item="excavator" data-placement-zone="inactive" data-plan-status="{{ tile.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ tile.percent|default:0 }}" data-plan-loop-percent="{% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ tile.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if tile.plan_has_plan %}{{ tile.plan_visual.phase }}{% endif %}" data-plan-mode="{{ tile.plan_calculation_mode|default:'' }}" data-plan-value="{{ tile.plan_value|default:'' }}" data-plan-fact="{{ tile.plan_fact_value|default:'' }}" data-plan-unit="{{ tile.plan_unit|default:'' }}" data-plan-group="{{ tile.plan_group_name|default:'' }}"{% endif %}>
                         {% if tile.display_name %}<strong>{{ tile.display_name }}</strong>{% endif %}
                         <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
                         {% if not tile.is_placeholder %}<span>{{ tile.label }}</span>{% endif %}
@@ -90,14 +91,25 @@
             </div>
             <div class="dispatcher-zone-grid">
             {% for complex in dispatcher_dashboard.complex_zones %}
-                <article class="dispatcher-complex-card {% if complex.is_empty %}status-empty{% else %}status-{{ complex.status_key }}{% endif %}{% if complex.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--complex-progress: {% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% else %}0{% endif %}%; --complex-total-progress: {{ complex.percent|default:0 }}%;" data-dispatcher-drop="complex" data-zone-id="{{ complex.id }}"{% if not complex.is_empty %} role="button" tabindex="0" draggable="true" data-dispatcher-drag="complex" data-equipment-card-id="{{ complex.card_id }}" data-source-equipment-card-id="{{ complex.equipment_card_id }}" data-equipment-id="{{ complex.equipment_card_id }}" data-equipment-name="{{ complex.excavator_name }}" data-equipment-state="{{ complex.equipment_state_code }}" data-excavator-slot="{{ complex.excavator_slot }}" data-plan-status="{{ complex.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ complex.percent|default:0 }}" data-plan-loop-percent="{% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ complex.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if complex.plan_has_plan %}{{ complex.plan_visual.phase }}{% endif %}" data-plan-mode="{{ complex.plan_calculation_mode|default:'' }}" data-plan-value="{{ complex.plan_value|default:'' }}" data-plan-fact="{{ complex.plan_fact_value|default:'' }}" data-plan-unit="{{ complex.plan_unit|default:'' }}" data-plan-group="{{ complex.plan_group_name|default:'' }}"{% endif %}>
+                <article class="dispatcher-complex-card {% if complex.is_empty %}status-empty{% else %}status-{{ complex.status_key }}{% endif %}{% if complex.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--complex-progress: {% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% else %}0{% endif %}%; --complex-total-progress: {{ complex.percent|default:0 }}%;" data-dispatcher-drop="complex" data-zone-id="{{ complex.zone_key }}" data-zone-label="{{ complex.id }}"{% if not complex.is_empty %} role="button" tabindex="0" draggable="true" data-dispatcher-drag="complex" data-equipment-card-id="{{ complex.card_id }}" data-source-equipment-card-id="{{ complex.equipment_card_id }}" data-equipment-id="{{ complex.equipment_card_id }}" data-equipment-name="{{ complex.excavator_name }}" data-equipment-state="{{ complex.equipment_state_code }}" data-excavator-slot="{{ complex.excavator_slot }}" data-placement-zone="active" data-plan-status="{{ complex.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ complex.percent|default:0 }}" data-plan-loop-percent="{% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ complex.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if complex.plan_has_plan %}{{ complex.plan_visual.phase }}{% endif %}" data-plan-mode="{{ complex.plan_calculation_mode|default:'' }}" data-plan-value="{{ complex.plan_value|default:'' }}" data-plan-fact="{{ complex.plan_fact_value|default:'' }}" data-plan-unit="{{ complex.plan_unit|default:'' }}" data-plan-group="{{ complex.plan_group_name|default:'' }}"{% endif %}>
                     {% if complex.is_empty %}
                         <div class="complex-empty" aria-hidden="true"></div>
                     {% else %}
                         <div class="complex-work-head">
                             <div class="complex-title-state">
                                 <h2>{{ complex.id }}</h2>
-                                <span class="complex-state-chip">{{ complex.status_label }}</span>
+                                {% if not mining_master_mobile_enabled and complex.active_downtime.active %}
+                                    <span class="complex-downtime-status" title="{{ complex.active_downtime.reason }}">
+                                        <span>{{ complex.active_downtime.reason }}</span>
+                                        <time
+                                            datetime="{{ complex.active_downtime.started_at }}"
+                                            data-gd-downtime-timer
+                                            data-started-at="{{ complex.active_downtime.started_at }}"
+                                        >{{ complex.active_downtime.elapsed_label }}</time>
+                                    </span>
+                                {% else %}
+                                    <span class="complex-state-chip">{{ complex.status_label }}</span>
+                                {% endif %}
                             </div>
                             <div class="complex-context">
                                 <span class="complex-info-chip chip-horizon">{{ complex.current_horizon|default:"Гор. -" }}</span>
@@ -120,7 +132,7 @@
                         </div>
                         <div class="complex-assigned-trucks {{ complex.truck_scale_class }}" style="--complex-truck-cols: {{ complex.truck_column_count|default:1 }};" aria-label="Активные самосвалы комплекса">
                             {% for truck in complex.active_truck_tiles %}
-                                <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-complex-truck="true" data-assigned-zone="{{ complex.id }}" data-plan-status="{{ truck.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ truck.percent|default:0 }}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" data-plan-mode="{{ truck.plan_calculation_mode|default:'' }}" data-plan-value="{{ truck.plan_value|default:'' }}" data-plan-fact="{{ truck.plan_fact_value|default:'' }}" data-plan-unit="{{ truck.plan_unit|default:'' }}" data-plan-group="{{ truck.plan_group_name|default:'' }}">
+                                <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-complex-truck="true" data-assigned-zone="{{ complex.zone_key }}" data-plan-status="{{ truck.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ truck.percent|default:0 }}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" data-plan-mode="{{ truck.plan_calculation_mode|default:'' }}" data-plan-value="{{ truck.plan_value|default:'' }}" data-plan-fact="{{ truck.plan_fact_value|default:'' }}" data-plan-unit="{{ truck.plan_unit|default:'' }}" data-plan-group="{{ truck.plan_group_name|default:'' }}">
                                     <strong>{{ truck.name }}</strong>
                                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                                     <span>{{ truck.label }}</span>
@@ -144,7 +156,7 @@
                 </div>
                 <div class="dispatcher-trucks" aria-label="Самосвалы">
                 {% for tile in dispatcher_dashboard.truck_garage_tiles %}
-                    <article class="dispatcher-truck-tile status-{{ tile.status }}{% if tile.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ tile.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-garage-item="truck" data-plan-status="{{ tile.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ tile.percent|default:0 }}" data-plan-loop-percent="{% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ tile.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if tile.plan_has_plan %}{{ tile.plan_visual.phase }}{% endif %}" data-plan-mode="{{ tile.plan_calculation_mode|default:'' }}" data-plan-value="{{ tile.plan_value|default:'' }}" data-plan-fact="{{ tile.plan_fact_value|default:'' }}" data-plan-unit="{{ tile.plan_unit|default:'' }}" data-plan-group="{{ tile.plan_group_name|default:'' }}">
+                    <article class="dispatcher-truck-tile status-{{ tile.status }}{% if tile.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ tile.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ tile.card_id }}" data-equipment-id="{{ tile.card_id }}" data-equipment-name="{{ tile.name }}" data-equipment-state="{{ tile.equipment_state_code }}" data-haul-assignment-state-id="{{ tile.assignment_state_id|default:0 }}" data-garage-item="truck" data-plan-status="{{ tile.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ tile.percent|default:0 }}" data-plan-loop-percent="{% if tile.plan_has_plan %}{{ tile.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ tile.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if tile.plan_has_plan %}{{ tile.plan_visual.phase }}{% endif %}" data-plan-mode="{{ tile.plan_calculation_mode|default:'' }}" data-plan-value="{{ tile.plan_value|default:'' }}" data-plan-fact="{{ tile.plan_fact_value|default:'' }}" data-plan-unit="{{ tile.plan_unit|default:'' }}" data-plan-group="{{ tile.plan_group_name|default:'' }}">
                         <strong>{{ tile.name }}</strong>
                         <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                         <span>{{ tile.label }}</span>
@@ -165,8 +177,8 @@
                 <h1>{{ dispatcher_header.active_dispatcher_short_name|default:"Смена не открыта" }}</h1>
             </div>
             <div class="mm-mobile-header-actions">
-                <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
-                    {{ dispatcher_dashboard.completion_percent|default:0 }}%
+                <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
+                    {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                 </button>
                 {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
             </div>
@@ -179,7 +191,7 @@
         <div class="mm-mobile-truck-transfer-bar" data-mm-truck-transfer-bar hidden role="status" aria-live="polite">
             <div>
                 <span data-mm-truck-transfer-caption>Перестановка самосвала</span>
-                <strong data-mm-truck-transfer-title>Выберите комплекс</strong>
+                <strong data-mm-truck-transfer-title>Отпустите на нужном экскаваторе</strong>
             </div>
             <button type="button" data-mm-truck-transfer-cancel aria-label="Отменить перестановку">Отмена</button>
         </div>
@@ -213,7 +225,7 @@
                         </div>
                         <div class="mm-mobile-truck-preview" aria-label="Самосвалы комплекса" data-mm-mobile-truck-count="{{ complex.active_truck_tiles|length }}"{% if complex.mobile_transfer_notice %} data-mm-transfer-notice="{{ complex.mobile_transfer_notice }}"{% endif %}>
                             {% for truck in complex.active_truck_tiles %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}{% if truck.transfer_pending %} is-transfer-pending{% endif %}"{% if forloop.counter > 3 %} hidden{% endif %}{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}"{% if truck.transfer_pending %} data-mm-transfer-label="из {{ truck.transfer_source_label }} · до 5 мин"{% endif %} data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
+                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}{% if truck.transfer_pending %} is-transfer-pending{% endif %}"{% if forloop.counter > 3 %} hidden{% endif %}{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}"{% if truck.transfer_pending %} data-mm-transfer-label="из {{ truck.transfer_source_label }} · до 5 мин"{% endif %} data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
                             {% endfor %}
                             {% if complex.mobile_truck_overflow %}
                                 <button type="button" class="mm-mobile-truck-mini is-more" data-mm-mobile-open-truck-list data-mm-mobile-ignore-double-tap="true" aria-label="Показать остальные самосвалы комплекса">+{{ complex.mobile_truck_overflow }}</button>
@@ -257,8 +269,8 @@
                     <h1>Экскаваторы</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
-                        {{ dispatcher_dashboard.completion_percent|default:0 }}%
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
+                        {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                     </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
@@ -273,7 +285,7 @@
             <div class="mm-mobile-detail-trucks mm-mobile-excavator-garage-grid" style="--mm-mobile-garage-rows: {{ dispatcher_dashboard.mobile_excavator_garage_row_count|default:3 }};" aria-label="Гараж экскаваторов">
                 {% for excavator in dispatcher_dashboard.mobile_excavator_garage_tiles %}
                     {% if not excavator.is_placeholder %}
-                        <button type="button" class="mm-mobile-garage-excavator status-{{ excavator.status }}" data-mm-mobile-activate-excavator="{{ excavator.card_id }}" data-equipment-card-id="{{ excavator.card_id }}" data-mm-mobile-excavator-sort="{{ excavator.board_number|default:9999 }}" data-mm-mobile-equipment-state="{{ excavator.equipment_state_code }}" title="{{ excavator.label }}" aria-label="Вернуть экскаватор {{ excavator.display_name }} в активную смену">
+                        <button type="button" class="mm-mobile-garage-excavator status-{{ excavator.status }}" data-mm-mobile-activate-excavator="{{ excavator.card_id }}" data-equipment-card-id="{{ excavator.card_id }}" data-mm-mobile-complex-label="{{ excavator.complex_label }}" data-mm-mobile-excavator-sort="{{ excavator.board_number|default:9999 }}" data-mm-mobile-equipment-state="{{ excavator.equipment_state_code }}" title="{{ excavator.label }}" aria-label="Вернуть экскаватор {{ excavator.display_name }} в активную смену">
                             <span>Экс {{ excavator.display_name }}</span>
                             <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
                         </button>
@@ -311,8 +323,8 @@
                     <h1>Самосвалы</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
-                        {{ dispatcher_dashboard.completion_percent|default:0 }}%
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
+                        {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                     </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
@@ -324,7 +336,7 @@
 
             <div class="mm-mobile-detail-trucks" aria-label="Гараж самосвалов">
                 {% for truck in dispatcher_dashboard.mobile_truck_garage_tiles %}
-                    <article class="mm-mobile-truck-card status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} role="button" tabindex="0" data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
+                    <article class="mm-mobile-truck-card status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} role="button" tabindex="0" data-equipment-card-id="{{ truck.card_id }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
                         <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                         <strong>{{ truck.name }}</strong>
                         <span></span>
@@ -364,8 +376,8 @@
                     <h1>Отчеты</h1>
                 </div>
                 <div class="mm-mobile-header-actions">
-                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
-                        {{ dispatcher_dashboard.completion_percent|default:0 }}%
+                    <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
+                        {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                     </button>
                     {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
@@ -375,23 +387,49 @@
                 <span>Итоги смены</span>
             </div>
 
-            <div class="mm-mobile-report-grid">
-                <article>
-                    <span>Рейсы</span>
-                    <strong>{{ total_trips|default:"0" }}</strong>
-                </article>
-                <article>
-                    <span>Объем</span>
-                    <strong>{{ total_volume|default:"0" }}</strong>
-                </article>
-                <article>
-                    <span>В работе</span>
-                    <strong>{{ active_assignments_count|default:"0" }}</strong>
-                </article>
-                <article>
-                    <span>Свободно</span>
-                    <strong>{{ free_trucks_count|default:"0" }}</strong>
-                </article>
+            <div class="mm-mobile-report-content">
+                <div class="mm-mobile-report-grid">
+                    <article>
+                        <span>Рейсы</span>
+                        <strong>{{ dispatcher_dashboard.mobile_shift_report.completed_trip_count|default:"0" }}</strong>
+                        <small>{% if dispatcher_dashboard.mobile_shift_report.active_trip_count %}+{{ dispatcher_dashboard.mobile_shift_report.active_trip_count }} в пути{% else %}завершено{% endif %}</small>
+                    </article>
+                    <article>
+                        <span>Объем</span>
+                        <strong>{{ dispatcher_dashboard.mobile_shift_report.completed_fact|default:"0" }}</strong>
+                        <small>{{ dispatcher_dashboard.mobile_shift_report.unit_label|default:"т" }} выгружено</small>
+                    </article>
+                    <article>
+                        <span>В работе</span>
+                        <strong>{{ dispatcher_dashboard.mobile_shift_report.working_trucks|default:"0" }}</strong>
+                        <small>самосвалов</small>
+                    </article>
+                    <article>
+                        <span>Свободно</span>
+                        <strong>{{ dispatcher_dashboard.mobile_shift_report.free_trucks|default:"0" }}</strong>
+                        <small>готовы в гараже</small>
+                    </article>
+                </div>
+
+                <section class="mm-mobile-report-destinations" aria-label="Куда вывезено за смену">
+                    <header>
+                        <span>Куда вывезено</span>
+                        <button type="button" data-mm-open-shift-plan-detail>Подробно</button>
+                    </header>
+                    <div class="mm-mobile-report-destination-list">
+                        {% for point in dispatcher_dashboard.mobile_shift_report.points|slice:":3" %}
+                            <div class="mm-mobile-report-destination">
+                                <div>
+                                    <strong>{{ point.name }}</strong>
+                                    <small>{{ point.fact_tons }} {{ dispatcher_dashboard.mobile_shift_report.unit_label }} · {{ point.trip_count_label }}</small>
+                                </div>
+                                <b>{{ point.fact_share_percent }}%</b>
+                            </div>
+                        {% empty %}
+                            <p>Завершенных рейсов пока нет</p>
+                        {% endfor %}
+                    </div>
+                </section>
             </div>
 
             {% if dispatcher_header.shift_is_open %}
@@ -474,11 +512,12 @@
                     <header class="mm-mobile-detail-header">
                         <button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>
                         <div class="mm-mobile-detail-title mm-mobile-fill-title">
-                            <h1>Набор самосвалов</h1>
+                            <h1>Комплекс {{ complex.id|cut:"K-"|cut:"К-" }}</h1>
+                            <span>Тяните самосвал в сторону · ↗ — выбрать экскаватор</span>
                         </div>
                         <div class="mm-mobile-header-actions">
-                            <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.completion_percent|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.completion_percent|default:0 }}%. Удерживайте для отчёта">
-                                {{ dispatcher_dashboard.completion_percent|default:0 }}%
+                            <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
+                                {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                             </button>
                             {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                         </div>
@@ -493,7 +532,7 @@
                         </div>
                         <div class="mm-mobile-fill-assigned" data-mm-mobile-fill-assigned aria-label="Самосвалы комплекса">
                             {% for truck in complex.active_truck_tiles|slice:":16" %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-assigned-truck-id="{{ truck.card_id }}" data-mm-mobile-assigned-truck-number="{{ truck.name }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
+                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-assigned-truck-id="{{ truck.card_id }}" data-mm-mobile-assigned-truck-number="{{ truck.name }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
                             {% endfor %}
                         </div>
                     </div>
@@ -504,7 +543,7 @@
                         </div>
                         <div class="mm-mobile-fill-truck-garage" aria-label="Гараж самосвалов">
                             {% for truck in dispatcher_dashboard.mobile_truck_garage_tiles %}
-                                <button type="button" class="mm-mobile-truck-card mm-mobile-fill-truck status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-number="{{ truck.name }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
+                                <button type="button" class="mm-mobile-truck-card mm-mobile-fill-truck status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-number="{{ truck.name }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
                                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                                     <strong>{{ truck.name }}</strong>
                                     <span></span>
@@ -520,44 +559,49 @@
             {% endif %}
         {% endfor %}
 
+        <style data-mm-shift-plan-critical-v143>
+            .mm-shift-plan-panel{width:min(430px,100%);max-height:min(88dvh,760px);overflow-y:auto}.mm-shift-plan-total{display:grid;grid-template-columns:72px minmax(0,1fr);gap:14px;align-items:center}.mm-shift-plan-total-ring,.mm-shift-plan-point-ring{display:grid;place-content:center;border-radius:50%;text-align:center}.mm-shift-plan-points{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.mm-shift-plan-point{display:flex;min-width:0;flex-direction:column;align-items:center}.mm-shift-plan-route{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;min-width:0}@media(max-width:345px){.mm-shift-plan-points{grid-template-columns:1fr}}
+        </style>
         <div class="gd-equipment-detail mm-equipment-detail mm-shift-plan-detail" data-mm-shift-plan-detail hidden>
             <div class="mm-equipment-detail-backdrop" data-mm-shift-plan-detail-close></div>
             <section class="mm-equipment-detail-panel mm-shift-plan-panel" role="dialog" aria-modal="true" aria-labelledby="mm-shift-plan-title">
-                <button type="button" class="mm-detail-close" data-mm-shift-plan-detail-close aria-label="Закрыть детализацию плана">×</button>
+                <button type="button" class="mm-detail-close" data-mm-shift-plan-detail-close aria-label="Закрыть детализацию плана"></button>
                 <header class="mm-shift-plan-head">
-                    <span>Отчёт за текущую смену</span>
-                    <h2 id="mm-shift-plan-title">Куда вывезен объём</h2>
+                    <span>Текущая смена</span>
+                    <h2 id="mm-shift-plan-title">Выполнение плана</h2>
                 </header>
                 <div class="mm-shift-plan-total" aria-label="Общее выполнение плана">
-                    <div class="mm-shift-plan-total-ring" style="--mm-shift-plan-total-percent: {{ dispatcher_dashboard.shift_plan_detail.completion_percent|default:0 }}%;">
-                        <strong>{{ dispatcher_dashboard.shift_plan_detail.completion_percent|default:0 }}%</strong>
+                    <div class="mm-shift-plan-total-ring" style="--mm-shift-plan-total-percent: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;">
+                        <strong>{{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%</strong>
                         <span>плана</span>
                     </div>
                     <div class="mm-shift-plan-total-copy">
-                        <span>Факт / план</span>
-                        <strong>{{ dispatcher_dashboard.shift_plan_detail.fact_tons|default:"0" }} / {{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</strong>
-                        <small>Круги ниже в сумме дают этот общий процент</small>
+                        <span>Выполнено</span>
+                        <strong>{{ dispatcher_dashboard.shift_plan_detail.fact_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</strong>
+                        <small>из {{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ dispatcher_dashboard.shift_plan_detail.trip_count_label }}</small>
                     </div>
                 </div>
-                <h3 class="mm-shift-plan-section-title">По точкам разгрузки</h3>
+                <h3 class="mm-shift-plan-section-title">Куда вывезено</h3>
                 <div class="mm-shift-plan-points" aria-label="Выполнение по точкам разгрузки">
                     {% for point in dispatcher_dashboard.shift_plan_detail.points %}
-                        <article class="mm-shift-plan-point" style="--mm-shift-plan-point-percent: {{ point.contribution_percent }}%;">
-                            <div class="mm-shift-plan-point-ring"><strong>{{ point.contribution_percent }}%</strong><span>плана</span></div>
-                            <div class="mm-shift-plan-point-copy"><strong>{{ point.name }}</strong><span>{{ point.fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ point.trip_count_label }}</span><small>{{ point.fact_share_percent }}% текущего факта</small></div>
+                        <article class="mm-shift-plan-point" style="--mm-shift-plan-point-percent: {{ point.fact_share_percent }}%;">
+                            <div class="mm-shift-plan-point-ring"><strong>{{ point.fact_share_percent }}%</strong><span>факта</span></div>
+                            <div class="mm-shift-plan-point-copy"><strong>{{ point.name }}</strong><span>{{ point.fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ point.trip_count_label }}</span><small>{{ point.plan_percent_label }}% общего плана</small></div>
                         </article>
                     {% empty %}
                         <div class="mm-shift-plan-empty">Нет рейсов с точкой разгрузки в текущей смене</div>
                     {% endfor %}
                 </div>
                 {% if dispatcher_dashboard.shift_plan_detail.routes %}
-                    <h3 class="mm-shift-plan-section-title">Откуда → куда</h3>
+                    <h3 class="mm-shift-plan-section-title">Основные маршруты</h3>
                     <div class="mm-shift-plan-routes" aria-label="Маршруты текущей смены">
                         {% for route in dispatcher_dashboard.shift_plan_detail.routes %}
                             <article class="mm-shift-plan-route">
-                                <strong><span>{{ route.source }}</span><i aria-hidden="true">→</i><span>{{ route.destination }}</span></strong>
-                                <small>{{ route.fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ route.trip_count_label }}</small>
-                                <b>{{ route.contribution_percent }}%</b>
+                                <div class="mm-shift-plan-route-copy">
+                                    <strong><span>{{ route.source }}</span><i aria-hidden="true">→</i><span>{{ route.destination }}</span></strong>
+                                    <small>{{ route.fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ route.trip_count_label }}</small>
+                                </div>
+                                <b><strong>{{ route.fact_share_percent }}%</strong><span>факта</span></b>
                             </article>
                         {% endfor %}
                     </div>
@@ -887,6 +931,16 @@
                     <a data-gd-detail-employee-phone href=""></a>
                 </div>
             </div>
+            <section class="gd-detail-downtime" data-gd-detail-downtime hidden>
+                <div class="gd-detail-downtime-copy">
+                    <span>Текущий простой</span>
+                    <strong data-gd-detail-downtime-reason></strong>
+                    <small data-gd-detail-downtime-started></small>
+                </div>
+                <time data-gd-detail-downtime-timer data-gd-downtime-timer>00:00:00</time>
+                <button type="button" data-gd-detail-downtime-close>Завершить простой</button>
+                <span class="gd-detail-downtime-result" data-gd-detail-downtime-result role="status" aria-live="polite"></span>
+            </section>
             <section class="gd-detail-settings" data-gd-detail-settings hidden>
                 <div class="gd-detail-settings-head">
                     <div>
@@ -1110,7 +1164,13 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
     var dispatcherSyncPendingCount = 0;
-    var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v1";
+    var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v3";
+    try {
+        // Старые очереди не содержат версии назначения и могут повторить уже
+        // отменённую команду после восстановления связи.
+        window.localStorage.removeItem("mining-master-mobile-sync-queue-v1");
+        window.localStorage.removeItem("mining-master-mobile-sync-queue-v2");
+    } catch (error) {}
     var dispatcherSyncQueueFlushing = false;
     var dispatcherSyncFlushTimer = null;
     var dispatcherMobileSyncFlushDelayMs = 300;
@@ -1119,7 +1179,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v142";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v147";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -1185,11 +1245,20 @@ document.addEventListener("DOMContentLoaded", function () {
             return false;
         }
         var queue = readDispatcherSyncQueue();
-        queue.push(Object.assign({
+        var queuedRequest = Object.assign({
             id: "sync-" + Date.now() + "-" + Math.random().toString(16).slice(2),
             createdAt: Date.now(),
             attempts: 0
-        }, request || {}));
+        }, request || {});
+        var replaceIndex = queuedRequest.coalesceKey ? queue.findIndex(function (item, index) {
+            return item.coalesceKey === queuedRequest.coalesceKey && !(dispatcherSyncQueueFlushing && index === 0);
+        }) : -1;
+        if (replaceIndex >= 0) {
+            queuedRequest.createdAt = queue[replaceIndex].createdAt || queuedRequest.createdAt;
+            queue[replaceIndex] = queuedRequest;
+        } else {
+            queue.push(queuedRequest);
+        }
         writeDispatcherSyncQueue(queue);
         scheduleDispatcherSyncFlush(delayMs);
         return true;
@@ -1230,6 +1299,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 return response.json().catch(function () { return {}; }).then(function (payload) {
                     var error = new Error(payload.error || "Действие не выполнено.");
                     error.isServerResponse = true;
+                    error.code = payload.code || "";
+                    error.conflict = Boolean(payload.conflict);
+                    error.status = response.status;
                     throw error;
                 });
             }
@@ -1324,11 +1396,12 @@ document.addEventListener("DOMContentLoaded", function () {
             flushDispatcherSyncQueue();
         }, typeof delayMs === "number" ? delayMs : 80);
     }
-    function dispatcherPost(url, data) {
+    function dispatcherPost(url, data, options) {
         if (dispatcherRoleIsReadonly()) {
             return Promise.reject(dispatcherInactiveRoleError());
         }
         var payload = Object.assign({}, data || {});
+        options = options || {};
         if (!payload.client_action_id) {
             payload.client_action_id = "mm-" + Date.now() + "-" + Math.random().toString(16).slice(2);
         }
@@ -1340,6 +1413,7 @@ document.addEventListener("DOMContentLoaded", function () {
         setDispatcherSyncPending(true);
         return sendDispatcherSyncRequest(request).catch(function (error) {
             if (error && error.isServerResponse) throw error;
+            if (options.queueOnNetworkFailure === false) throw error;
             enqueueDispatcherSyncRequest(request);
             return { queued: true };
         }).finally(function () {
@@ -1358,11 +1432,42 @@ document.addEventListener("DOMContentLoaded", function () {
             kind: "json",
             url: url,
             data: payload,
+            coalesceKey: payload.truck_id ? "haul-truck-" + String(payload.truck_id) : "",
             refreshMobileBoard: true
         }, typeof delayMs === "number" ? delayMs : dispatcherMobileSyncFlushDelayMs)) {
             return Promise.reject(dispatcherInactiveRoleError());
         }
         return Promise.resolve({ queued: true });
+    }
+    function haulAssignmentStateId(node) {
+        var value = node && node.dataset ? node.dataset.haulAssignmentStateId : "";
+        return /^\d+$/.test(String(value || "")) ? String(value) : "0";
+    }
+    function collectComplexAssignmentStates(complexCard) {
+        var states = {};
+        if (!complexCard) return states;
+        complexCard.querySelectorAll(
+            "[data-complex-truck='true'][data-equipment-id], " +
+            "[data-mm-mobile-home-truck-id]"
+        ).forEach(function (truck) {
+            var truckId = truck.dataset.equipmentId || truck.dataset.mmMobileHomeTruckId || "";
+            if (truckId) states[String(truckId)] = haulAssignmentStateId(truck);
+        });
+        return states;
+    }
+    function applyHaulAssignmentState(response, truckNode) {
+        if (!response || !truckNode || response.assignment_state_id === undefined) return;
+        truckNode.dataset.haulAssignmentStateId = String(response.assignment_state_id || 0);
+    }
+    function applyHaulAssignmentStates(response, root) {
+        var states = response && response.assignment_state_ids;
+        if (!states || !root) return;
+        root.querySelectorAll("[data-equipment-id], [data-mm-mobile-home-truck-id]").forEach(function (node) {
+            var truckId = node.dataset.equipmentId || node.dataset.mmMobileHomeTruckId || "";
+            if (truckId && Object.prototype.hasOwnProperty.call(states, truckId)) {
+                node.dataset.haulAssignmentStateId = String(states[truckId] || 0);
+            }
+        });
     }
     window.addEventListener("focus", scheduleDispatcherSyncFlush);
     window.addEventListener("pageshow", scheduleDispatcherSyncFlush);
@@ -1845,6 +1950,10 @@ document.addEventListener("DOMContentLoaded", function () {
         var message = error && error.message ? error.message : "Действие не выполнено.";
         if (!showDispatcherNotice(message)) {
             console.warn(message);
+        }
+        if (error && error.conflict) {
+            Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
+            Promise.resolve(refreshDispatcherDesktopBoardFromServer()).catch(function () {});
         }
     }
     var miningMasterUpdateModal = document.querySelector("[data-mm-pwa-update-modal]");
@@ -2753,68 +2862,9 @@ document.addEventListener("DOMContentLoaded", function () {
         function bindShiftPlanDetailTrigger(ring) {
             if (!ring || ring.dataset.mmShiftPlanDetailBound === "true") return;
             ring.dataset.mmShiftPlanDetailBound = "true";
-            var holdDelayMs = 620;
-            var holdTimer = null;
-            var activePointerId = null;
-            var pointerStartX = 0;
-            var pointerStartY = 0;
-            var suppressNextClick = false;
-            function cancelHold() {
-                if (holdTimer !== null) {
-                    window.clearTimeout(holdTimer);
-                    holdTimer = null;
-                }
-                ring.classList.remove("is-hold-pending");
-            }
             ring.addEventListener("click", function (event) {
                 event.preventDefault();
                 event.stopPropagation();
-                if (suppressNextClick) {
-                    suppressNextClick = false;
-                    return;
-                }
-                pulseMiningMasterInfoTarget(ring);
-            });
-            ring.addEventListener("pointerdown", function (event) {
-                if (event.button !== undefined && event.button !== 0) return;
-                cancelHold();
-                activePointerId = event.pointerId;
-                pointerStartX = event.clientX;
-                pointerStartY = event.clientY;
-                ring.classList.add("is-hold-pending");
-                holdTimer = window.setTimeout(function () {
-                    holdTimer = null;
-                    ring.classList.remove("is-hold-pending");
-                    ring.classList.add("is-hold-ready");
-                    window.setTimeout(function () {
-                        ring.classList.remove("is-hold-ready");
-                    }, 180);
-                    suppressNextClick = true;
-                    openShiftPlanDetail(ring);
-                }, holdDelayMs);
-            });
-            ring.addEventListener("pointermove", function (event) {
-                if (activePointerId === null || event.pointerId !== activePointerId) return;
-                if (Math.hypot(event.clientX - pointerStartX, event.clientY - pointerStartY) > 10) {
-                    cancelHold();
-                }
-            });
-            ring.addEventListener("pointerup", function (event) {
-                if (activePointerId === null || event.pointerId !== activePointerId) return;
-                activePointerId = null;
-                cancelHold();
-            });
-            ring.addEventListener("pointercancel", function () {
-                activePointerId = null;
-                cancelHold();
-            });
-            ring.addEventListener("contextmenu", function (event) {
-                event.preventDefault();
-            });
-            ring.addEventListener("keydown", function (event) {
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                cancelHold();
                 openShiftPlanDetail(ring);
             });
         }
@@ -2932,11 +2982,11 @@ document.addEventListener("DOMContentLoaded", function () {
                 screen.innerHTML = [
                     '<header class="mm-mobile-detail-header">',
                         '<button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>',
-                        '<div class="mm-mobile-detail-title mm-mobile-fill-title"><h1>Набор самосвалов</h1></div>',
+                        '<div class="mm-mobile-detail-title mm-mobile-fill-title"><h1>Комплекс</h1><span>Самосвал в сторону — переставить</span></div>',
                         {% if is_native_app %}
-                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Удерживайте для отчёта">0%</button></div>',
+                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Нажмите, чтобы открыть отчёт">0%</button></div>',
                         {% else %}
-                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Удерживайте для отчёта">0%</button><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
+                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Нажмите, чтобы открыть отчёт">0%</button><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
                         {% endif %}
                     '</header>',
                     '<div class="mm-mobile-fill-save-overlay" aria-hidden="true">Сохранить</div>',
@@ -2962,9 +3012,11 @@ document.addEventListener("DOMContentLoaded", function () {
                 });
             }
             var title = screen.querySelector(".mm-mobile-fill-zone-head strong");
+            var screenTitle = screen.querySelector(".mm-mobile-fill-title h1");
             if (title) {
                 var number = String(complexTitle || "").replace(/[^\d]+/g, "");
                 title.textContent = number ? "Комплекс - " + number : "Комплекс";
+                if (screenTitle) screenTitle.textContent = number ? "Комплекс " + number : "Комплекс";
             }
             var drop = screen.querySelector("[data-mm-mobile-fill-drop]");
             if (drop) {
@@ -3117,6 +3169,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 mini.dataset.mmMobileHomeTruckNumber = source.dataset.mmMobileAssignedTruckNumber || source.textContent || "";
                 mini.dataset.mmMobileHomeSourceExcavatorId = excavatorId;
                 mini.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+                mini.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
                 mini.textContent = mini.dataset.mmMobileHomeTruckNumber || "";
                 syncMobilePlanVisual(source, mini);
                 preview.appendChild(mini);
@@ -3264,6 +3317,7 @@ document.addEventListener("DOMContentLoaded", function () {
             card.style.display = "";
             card.dataset.mmMobileTruckSort = truckNumber;
             card.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+            card.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
             var image = card.querySelector("img");
             if (image) image.src = getMobileGarageTruckIcon(source);
             var title = card.querySelector("strong");
@@ -3303,6 +3357,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 existing.classList.add(getMobileGarageTruckStatusClass(source));
                 existing.dataset.mmMobileTruckSort = truckNumber;
                 existing.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+                existing.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
                 var existingImage = existing.querySelector("img");
                 if (existingImage) existingImage.src = getMobileGarageTruckIcon(source);
                 existing.hidden = false;
@@ -3317,6 +3372,7 @@ document.addEventListener("DOMContentLoaded", function () {
             button.dataset.mmMobileFillTruckNumber = truckNumber;
             button.dataset.mmMobileTruckSort = button.dataset.mmMobileFillTruckNumber || "";
             button.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
+            button.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
             var img = document.createElement("img");
             img.src = getMobileGarageTruckIcon(source);
             img.alt = "";
@@ -3346,6 +3402,7 @@ document.addEventListener("DOMContentLoaded", function () {
             mini.dataset.mmMobileAssignedTruckId = homeTruck.dataset.mmMobileHomeTruckId || "";
             mini.dataset.mmMobileAssignedTruckNumber = homeTruck.dataset.mmMobileHomeTruckNumber || homeTruck.textContent || "";
             mini.dataset.mmMobileEquipmentState = homeTruck.dataset.mmMobileEquipmentState || "";
+            mini.dataset.haulAssignmentStateId = haulAssignmentStateId(homeTruck);
             mini.dataset.mmMobileFillOriginal = "true";
             mini.textContent = mini.dataset.mmMobileAssignedTruckNumber || "";
             syncMobilePlanVisual(homeTruck, mini);
@@ -3407,7 +3464,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 dispatcherPostQueued(dispatcherAssignTruckUrl, {
                     action: "assign",
                     truck_id: truckId,
-                    excavator_id: excavatorId
+                    excavator_id: excavatorId,
+                    expected_assignment_state_id: haulAssignmentStateId(mini)
                 }).catch(showDispatcherDnDError);
             });
             Array.from(screen.querySelectorAll(".mm-mobile-fill-truck[data-mm-mobile-fill-was-assigned='true']")).forEach(function (button) {
@@ -3415,7 +3473,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (!truckId) return;
                 dispatcherPostQueued(dispatcherAssignTruckUrl, {
                     action: "release",
-                    truck_id: truckId
+                    truck_id: truckId,
+                    expected_assignment_state_id: haulAssignmentStateId(button)
                 }).catch(showDispatcherDnDError);
                 delete button.dataset.mmMobileFillWasAssigned;
             });
@@ -3555,6 +3614,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 button.className = "mm-mobile-garage-excavator " + statusClass;
                 button.dataset.mmMobileActivateExcavator = excavatorId;
                 button.dataset.equipmentCardId = excavatorId;
+                button.dataset.mmMobileComplexLabel = titleText;
                 button.setAttribute("aria-label", "Вернуть экскаватор " + labelText + " в активную смену");
                 button.innerHTML = '<span></span><img src="' + staticPrefix + 'img/equipment/excavator-gray.png" alt="">';
                 var firstEmpty = grid.querySelector(".mm-mobile-garage-slot.status-empty");
@@ -3729,13 +3789,17 @@ document.addEventListener("DOMContentLoaded", function () {
                 var sourceExcavatorId = mini.dataset.mmMobileHomeSourceExcavatorId || "";
                 var payload = null;
                 if (currentDropMode === "garage") {
-                    payload = { action: "release", truck_id: truckId, expected_source_excavator_id: sourceExcavatorId };
+                    payload = {
+                        action: "release",
+                        truck_id: truckId,
+                        expected_assignment_state_id: haulAssignmentStateId(mini)
+                    };
                 } else if (currentDropMode === "complex" && currentTargetCard) {
                     payload = {
                         action: "assign",
                         truck_id: truckId,
                         excavator_id: currentTargetCard.dataset.mmMobileExcavatorId,
-                        expected_source_excavator_id: sourceExcavatorId
+                        expected_assignment_state_id: haulAssignmentStateId(mini)
                     };
                 }
                 if (!payload || !truckId) {
@@ -3901,14 +3965,21 @@ document.addEventListener("DOMContentLoaded", function () {
 
         function clearMobileTruckTransferTargets() {
             shell.classList.remove("is-truck-transfer-mode");
+            if (home) home.classList.remove("is-transfer-overlay");
             shell.querySelectorAll(".mm-mobile-complex-card.is-transfer-source, .mm-mobile-complex-card.is-transfer-target").forEach(function (card) {
-                card.classList.remove("is-transfer-source", "is-transfer-target");
+                card.classList.remove("is-transfer-source", "is-transfer-target", "is-transfer-hover");
             });
         }
 
         function finishMobileTruckTransferUi(message) {
+            var transfer = mobileTruckTransfer;
+            var returnToFill = !message && transfer && transfer.sourceFillScreen;
             clearMobileTruckTransferTargets();
             mobileTruckTransfer = null;
+            if (returnToFill && home) {
+                home.hidden = true;
+                transfer.sourceFillScreen.hidden = false;
+            }
             if (!mobileTruckTransferBar) return;
             if (mobileTruckTransferNoticeTimer) window.clearTimeout(mobileTruckTransferNoticeTimer);
             if (!message) {
@@ -3949,7 +4020,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 sourceExcavatorId: String(sourceExcavatorId),
                 sourceCard: sourceCard,
                 sourceLabel: sourceLabel,
-                homeMini: homeMini
+                homeMini: homeMini,
+                assignmentStateId: haulAssignmentStateId(node)
             };
         }
 
@@ -3957,9 +4029,13 @@ document.addEventListener("DOMContentLoaded", function () {
             if (isMiningMasterMobileReadonly() || !node || node.classList.contains("is-transfer-pending")) return false;
             var transfer = mobileTruckTransferSource(node);
             if (!transfer || !transfer.sourceCard) return false;
+            transfer.sourceFillScreen = node.closest("[data-mm-mobile-fill]");
             if (mobileTruckTransferNoticeTimer) window.clearTimeout(mobileTruckTransferNoticeTimer);
             mobileTruckTransfer = transfer;
-            if (node.closest("[data-mm-mobile-fill]")) closeDetails();
+            if (transfer.sourceFillScreen && home) {
+                home.hidden = false;
+                home.classList.add("is-transfer-overlay");
+            }
             shell.classList.add("is-truck-transfer-mode");
             shell.querySelectorAll(".mm-mobile-complex-card:not(.status-empty)").forEach(function (card) {
                 var isSource = card.dataset.mmMobileExcavatorId === transfer.sourceExcavatorId;
@@ -3967,7 +4043,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 card.classList.toggle("is-transfer-target", !isSource);
             });
             if (mobileTruckTransferCaption) mobileTruckTransferCaption.textContent = "Перестановка самосвала";
-            if (mobileTruckTransferTitle) mobileTruckTransferTitle.textContent = "№" + transfer.truckNumber + " из " + transfer.sourceLabel + " — выберите комплекс";
+            if (mobileTruckTransferTitle) mobileTruckTransferTitle.textContent = "№" + transfer.truckNumber + " из " + transfer.sourceLabel + " — отпустите на экскаваторе";
             if (mobileTruckTransferCancel) mobileTruckTransferCancel.hidden = false;
             if (mobileTruckTransferBar) mobileTruckTransferBar.hidden = false;
             if (window.navigator && typeof window.navigator.vibrate === "function") window.navigator.vibrate(35);
@@ -3989,12 +4065,16 @@ document.addEventListener("DOMContentLoaded", function () {
                 pendingTile.classList.add("is-transfer-pending");
                 pendingTile.dataset.mmTransferLabel = "из " + transfer.sourceLabel + " · до 5 мин";
             }
+            if (transfer.sourceFillScreen && home) {
+                transfer.sourceFillScreen.hidden = true;
+                home.hidden = false;
+            }
             finishMobileTruckTransferUi("№" + transfer.truckNumber + " → " + targetLabel + " · до 5 мин");
             dispatcherPostQueued(dispatcherAssignTruckUrl, {
                 action: "assign",
                 truck_id: transfer.truckId,
                 excavator_id: targetExcavatorId,
-                expected_source_excavator_id: transfer.sourceExcavatorId
+                expected_assignment_state_id: transfer.assignmentStateId
             }).then(function () {
                 if (rollbackOptimisticMove && rollbackOptimisticMove.commit) rollbackOptimisticMove.commit();
             }).catch(function (error) {
@@ -4023,94 +4103,219 @@ document.addEventListener("DOMContentLoaded", function () {
             }, true);
         }
 
-        function bindMobileHomeTruckDrag(mini) {
-            if (!mini || mini.dataset.mmMobileHomeTruckBound === "true") return;
-            mini.dataset.mmMobileHomeTruckBound = "true";
+        function bindMobileTruckTransferDrag(mini) {
+            if (!mini || mini.dataset.mmTruckTransferDragBound === "true") return;
+            mini.dataset.mmTruckTransferDragBound = "true";
             mini.setAttribute("role", "button");
             mini.setAttribute("tabindex", "0");
-            mini.setAttribute("aria-label", "Самосвал " + (mini.dataset.mmMobileHomeTruckNumber || mini.textContent || "") + ". Удерживайте для перестановки, двойной тап — карточка");
-            var holdTimer = null;
+            var truckNumber = mini.dataset.mmMobileHomeTruckNumber || mini.dataset.mmMobileAssignedTruckNumber || mini.textContent || "";
+            mini.setAttribute("aria-label", "Самосвал " + String(truckNumber).trim() + ". Нажмите для карточки или потяните в сторону для перестановки");
             var startX = 0;
             var startY = 0;
             var activeTouchId = null;
             var activePointerId = null;
-            var transferStarted = false;
-            function clearHold() {
-                if (holdTimer) window.clearTimeout(holdTimer);
-                holdTimer = null;
-                mini.classList.remove("is-hold-pending", "is-hold-ready");
+            var scrollIntent = false;
+            var dragging = false;
+            var ghost = null;
+            var hoverTarget = null;
+
+            function trackedTouch(event) {
+                var touches = event.changedTouches || event.touches || [];
+                for (var index = 0; index < touches.length; index += 1) {
+                    if (touches[index].identifier === activeTouchId) return touches[index];
+                }
+                return null;
             }
-            function scheduleHold() {
-                clearHold();
-                transferStarted = false;
-                mini.classList.add("is-hold-pending");
-                holdTimer = window.setTimeout(function () {
-                    holdTimer = null;
-                    mini.classList.remove("is-hold-pending");
-                    mini.classList.add("is-hold-ready");
-                    transferStarted = beginMobileTruckTransfer(mini);
-                }, 460);
+
+            function clearHoverTarget() {
+                if (hoverTarget) hoverTarget.classList.remove("is-transfer-hover");
+                hoverTarget = null;
             }
+
+            function findTransferTarget(clientX, clientY) {
+                var nodes = document.elementsFromPoint(clientX, clientY);
+                for (var index = 0; index < nodes.length; index += 1) {
+                    var card = nodes[index].closest && nodes[index].closest(".mm-mobile-complex-card.is-transfer-target");
+                    if (card && shell.contains(card)) return card;
+                }
+                return null;
+            }
+
+            function updateTransferDrag(clientX, clientY) {
+                if (ghost) {
+                    ghost.style.left = clientX + "px";
+                    ghost.style.top = clientY + "px";
+                    ghost.style.setProperty("--mm-mobile-home-truck-ghost-rotate", Math.max(-10, Math.min(10, (clientX - startX) * .08)) + "deg");
+                }
+                var nextTarget = findTransferTarget(clientX, clientY);
+                if (nextTarget === hoverTarget) return;
+                clearHoverTarget();
+                hoverTarget = nextTarget;
+                if (hoverTarget) {
+                    hoverTarget.classList.add("is-transfer-hover");
+                    if (window.navigator && typeof window.navigator.vibrate === "function") window.navigator.vibrate(12);
+                }
+            }
+
+            function startTransferDrag(clientX, clientY) {
+                if (dragging || scrollIntent || isMiningMasterMobileReadonly()) return false;
+                var rect = mini.getBoundingClientRect();
+                ghost = mini.cloneNode(true);
+                ghost.querySelectorAll("button").forEach(function (button) { button.remove(); });
+                ghost.removeAttribute("id");
+                ghost.classList.add("mm-mobile-home-truck-ghost", "mm-mobile-transfer-truck-ghost");
+                ghost.style.width = rect.width + "px";
+                ghost.style.height = rect.height + "px";
+                ghost.style.left = clientX + "px";
+                ghost.style.top = clientY + "px";
+                if (!beginMobileTruckTransfer(mini)) {
+                    ghost = null;
+                    return false;
+                }
+                dragging = true;
+                mini.classList.add("is-dragging");
+                document.body.classList.add("mm-mobile-transfer-dragging");
+                document.body.appendChild(ghost);
+                updateTransferDrag(clientX, clientY);
+                return true;
+            }
+
+            function suppressTransferClick(card) {
+                if (!card) return;
+                card.dataset.mmMobileSwipeIgnoreClick = "true";
+                window.setTimeout(function () {
+                    delete card.dataset.mmMobileSwipeIgnoreClick;
+                }, 500);
+            }
+
+            function resetTransferDrag() {
+                clearHoverTarget();
+                mini.classList.remove("is-dragging");
+                document.body.classList.remove("mm-mobile-transfer-dragging");
+                if (ghost) ghost.remove();
+                ghost = null;
+                activeTouchId = null;
+                activePointerId = null;
+                scrollIntent = false;
+                dragging = false;
+            }
+
+            function finishTransferDrag(clientX, clientY, cancelled, event) {
+                if (!dragging) {
+                    resetTransferDrag();
+                    return;
+                }
+                if (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                var target = hoverTarget;
+                var pointTarget = findTransferTarget(clientX, clientY);
+                if (pointTarget) target = pointTarget;
+                suppressTransferClick(mobileTruckTransfer && mobileTruckTransfer.sourceCard);
+                suppressTransferClick(target);
+                if (ghost) ghost.classList.add("is-dropping");
+                if (!cancelled && target) {
+                    completeMobileTruckTransfer(target);
+                } else {
+                    cancelMobileTruckTransfer();
+                }
+                window.setTimeout(resetTransferDrag, 150);
+            }
+
             mini.addEventListener("touchstart", function (event) {
+                if (window.PointerEvent) return;
                 if (isMiningMasterMobileReadonly() || !event.changedTouches || !event.changedTouches.length) return;
                 var touch = event.changedTouches[0];
                 activeTouchId = touch.identifier;
                 startX = touch.clientX;
                 startY = touch.clientY;
-                scheduleHold();
+                scrollIntent = false;
+                dragging = false;
             }, { passive: true });
             mini.addEventListener("touchmove", function (event) {
+                if (window.PointerEvent) return;
                 if (activeTouchId === null) return;
-                var touch = Array.from(event.changedTouches || event.touches || []).find(function (item) { return item.identifier === activeTouchId; });
+                var touch = trackedTouch(event);
                 if (!touch) return;
-                if (!transferStarted && Math.hypot(touch.clientX - startX, touch.clientY - startY) > 10) clearHold();
-                if (transferStarted) event.preventDefault();
+                var dx = touch.clientX - startX;
+                var dy = touch.clientY - startY;
+                if (!dragging) {
+                    if (Math.abs(dy) >= 12 && Math.abs(dy) > Math.abs(dx)) {
+                        scrollIntent = true;
+                        return;
+                    }
+                    if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy) * 1.05) return;
+                    if (!startTransferDrag(touch.clientX, touch.clientY)) return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                updateTransferDrag(touch.clientX, touch.clientY);
             }, { passive: false });
             mini.addEventListener("touchend", function (event) {
+                if (window.PointerEvent) return;
                 if (activeTouchId === null) return;
-                activeTouchId = null;
-                if (transferStarted) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                }
-                clearHold();
-                transferStarted = false;
+                var touch = trackedTouch(event) || (event.changedTouches && event.changedTouches[0]);
+                finishTransferDrag(touch ? touch.clientX : startX, touch ? touch.clientY : startY, false, event);
             }, { passive: false });
-            mini.addEventListener("touchcancel", function () {
-                activeTouchId = null;
-                clearHold();
-                transferStarted = false;
-            });
+            mini.addEventListener("touchcancel", function (event) {
+                if (window.PointerEvent) return;
+                if (activeTouchId === null) return;
+                var touch = trackedTouch(event);
+                finishTransferDrag(touch ? touch.clientX : startX, touch ? touch.clientY : startY, true, event);
+            }, { passive: false });
             mini.addEventListener("pointerdown", function (event) {
-                if (event.pointerType === "touch" || isMiningMasterMobileReadonly()) return;
+                if (isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
                 activePointerId = event.pointerId;
                 startX = event.clientX;
                 startY = event.clientY;
-                scheduleHold();
+                scrollIntent = false;
+                dragging = false;
+                if (mini.setPointerCapture) {
+                    try { mini.setPointerCapture(activePointerId); } catch (error) {}
+                }
             });
             mini.addEventListener("pointermove", function (event) {
                 if (activePointerId === null || event.pointerId !== activePointerId) return;
-                if (!transferStarted && Math.hypot(event.clientX - startX, event.clientY - startY) > 10) clearHold();
+                var dx = event.clientX - startX;
+                var dy = event.clientY - startY;
+                if (!dragging) {
+                    if (Math.abs(dy) >= 12 && Math.abs(dy) > Math.abs(dx)) {
+                        scrollIntent = true;
+                        return;
+                    }
+                    if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy) * 1.05) return;
+                    if (!startTransferDrag(event.clientX, event.clientY)) return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                updateTransferDrag(event.clientX, event.clientY);
             });
             mini.addEventListener("pointerup", function (event) {
                 if (activePointerId === null || event.pointerId !== activePointerId) return;
-                activePointerId = null;
-                clearHold();
-                transferStarted = false;
+                finishTransferDrag(event.clientX, event.clientY, false, event);
             });
-            mini.addEventListener("pointercancel", function () {
-                activePointerId = null;
-                clearHold();
-                transferStarted = false;
+            mini.addEventListener("pointercancel", function (event) {
+                if (activePointerId === null || event.pointerId !== activePointerId) return;
+                finishTransferDrag(event.clientX, event.clientY, true, event);
             });
-            mini.addEventListener("contextmenu", function (event) {
+            mini.addEventListener("click", function (event) {
+                if (!mini.dataset.mmMobileAssignedTruckId || dragging || mini.closest(".mm-mobile-complex-card")) return;
                 event.preventDefault();
+                event.stopPropagation();
+                openEquipmentCard(mini.dataset.mmMobileAssignedTruckId);
             });
             mini.addEventListener("mm-mobile-complex-swipe-takeover", function () {
-                clearHold();
-                transferStarted = false;
+                if (dragging) cancelMobileTruckTransfer();
+                resetTransferDrag();
             });
+        }
+
+        function bindMobileHomeTruckDrag(mini) {
+            if (!mini || mini.dataset.mmMobileHomeTruckBound === "true") return;
+            mini.dataset.mmMobileHomeTruckBound = "true";
+            bindMobileTruckTransferDrag(mini);
         }
 
         function openTabPanel(panelName) {
@@ -4149,7 +4354,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (existing) return existing;
             var labelText = (button.querySelector("span") && button.querySelector("span").textContent || "").trim();
             var numberMatch = labelText.match(/(\d+)/);
-            var complexTitle = numberMatch ? "К-" + numberMatch[1] : labelText.replace(/^Экс\s*/i, "К-") || "К";
+            var complexTitle = button.dataset.mmMobileComplexLabel || (numberMatch ? "К-" + numberMatch[1] : labelText.replace(/^Экс\s*/i, "К-") || "К");
             var targetCard = grid.querySelector(".mm-mobile-complex-card.status-empty:not([hidden])") || grid.querySelector(".mm-mobile-complex-card.status-empty");
             var card = document.createElement("article");
             var stateCode = "assigned";
@@ -4239,10 +4444,11 @@ document.addEventListener("DOMContentLoaded", function () {
                 } catch (error) {}
             }
             preserveExcavatorReturnPanel();
-            dispatcherPostQueued(dispatcherMoveExcavatorUrl, {
+            dispatcherPost(dispatcherMoveExcavatorUrl, {
                 excavator_id: excavatorId,
-                zone: "active"
-            }).catch(function (error) {
+                zone: "active",
+                expected_zone: "inactive"
+            }, { queueOnNetworkFailure: false }).catch(function (error) {
                 if (!existingCard && createdCard && createdCard.parentNode) {
                     createdCard.remove();
                 }
@@ -4421,6 +4627,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (isMiningMasterMobileReadonly()) return;
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing")) return;
+            var expectedAssignmentStates = collectComplexAssignmentStates(card);
             card.classList.remove("is-swiping", "is-swipe-ready");
             card.classList.add("is-releasing");
             shell.classList.add("is-excavator-garage-peeking");
@@ -4440,10 +4647,12 @@ document.addEventListener("DOMContentLoaded", function () {
                 var grid = shell.querySelector(".mm-mobile-complex-grid");
                 if (grid) grid.scrollTop = 0;
             }, Math.min(260, flightTime));
-            dispatcherPostQueued(dispatcherMoveExcavatorUrl, {
+            dispatcherPost(dispatcherMoveExcavatorUrl, {
                 excavator_id: excavatorId,
-                zone: "inactive"
-            })
+                zone: "inactive",
+                expected_zone: "active",
+                expected_assignment_states: expectedAssignmentStates
+            }, { queueOnNetworkFailure: false })
                 .then(function () {
                     window.setTimeout(function () {
                         shell.classList.remove("is-truck-garage-peeking");
@@ -4549,6 +4758,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (isMiningMasterMobileReadonly()) return;
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing-trucks")) return;
+            var expectedAssignmentStates = collectComplexAssignmentStates(card);
             card.classList.remove("is-truck-swiping", "is-truck-swipe-ready");
             card.classList.add("is-releasing-trucks");
             shell.classList.add("is-truck-garage-peeking");
@@ -4566,10 +4776,11 @@ document.addEventListener("DOMContentLoaded", function () {
             ensureMobileTruckPreviewEmpty(preview);
             updateMobileHomeTruckPreviewLayout(preview);
             scheduleMobileLocalLayoutReconcile();
-            dispatcherPostQueued(dispatcherAssignTruckUrl, {
+            dispatcherPost(dispatcherAssignTruckUrl, {
                 action: "release_complex",
-                excavator_id: excavatorId
-            })
+                excavator_id: excavatorId,
+                expected_assignment_states: expectedAssignmentStates
+            }, { queueOnNetworkFailure: false })
                 .then(function () {
                     window.setTimeout(function () {
                         resetMobileComplexTruckSwipe(card);
@@ -4602,6 +4813,7 @@ document.addEventListener("DOMContentLoaded", function () {
             mini.dataset.mmMobileAssignedTruckId = truckButton.dataset.mmMobileFillTruckId || "";
             mini.dataset.mmMobileAssignedTruckNumber = truckButton.dataset.mmMobileFillTruckNumber || (truckButton.querySelector("strong") && truckButton.querySelector("strong").textContent) || "";
             mini.dataset.mmMobileEquipmentState = stateCode;
+            mini.dataset.haulAssignmentStateId = haulAssignmentStateId(truckButton);
             if (truckButton.dataset.mmMobileFillWasAssigned === "true") {
                 mini.dataset.mmMobileFillOriginal = "true";
             } else {
@@ -4632,6 +4844,7 @@ document.addEventListener("DOMContentLoaded", function () {
             button.dataset.mmMobileFillTruckNumber = mini.dataset.mmMobileAssignedTruckNumber || mini.textContent || "";
             button.dataset.mmMobileTruckSort = button.dataset.mmMobileFillTruckNumber || "";
             button.dataset.mmMobileEquipmentState = stateCode;
+            button.dataset.haulAssignmentStateId = haulAssignmentStateId(mini);
             if (mini.dataset.mmMobileFillOriginal === "true") {
                 button.dataset.mmMobileFillWasAssigned = "true";
             }
@@ -4700,6 +4913,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         function bindMobileFillAssignedTruckRelease(mini) {
             if (!mini) return;
+            bindMobileTruckTransferDrag(mini);
             ensureMobileTruckTransferHandle(mini);
             if (!window.PointerEvent || mini.dataset.mmMobileReleaseBound === "true") return;
             mini.dataset.mmMobileReleaseBound = "true";
@@ -4868,6 +5082,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 var dy = event.clientY - startY;
                 var dx = event.clientX - startX;
                 if (!dragging) {
+                    if (mini.classList.contains("is-dragging") || (Math.abs(dx) >= 14 && Math.abs(dx) > Math.abs(dy) * 1.05)) {
+                        clearHoldState();
+                        return;
+                    }
                     if (Math.abs(dy) < 8) return;
                     dragging = true;
                     if (!holdReady) {
@@ -5461,6 +5679,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (isMiningMasterMobileReadonly()) return;
                 if (activeTouchId !== null || card.classList.contains("is-releasing")) return;
                 if (!event.changedTouches || !event.changedTouches.length) return;
+                var truckControl = event.target && event.target.closest
+                    ? event.target.closest("[data-mm-mobile-home-truck-id], [data-mm-mobile-open-truck-list]")
+                    : null;
+                if (truckControl && card.contains(truckControl)) return;
                 var touch = event.changedTouches[0];
                 activeTouchId = touch.identifier;
                 activePointerId = null;
@@ -5498,12 +5720,6 @@ document.addEventListener("DOMContentLoaded", function () {
             bindMobileComplexSwipe(card);
             if (card.dataset.mmMobileComplexOpenBound === "true") return;
             card.dataset.mmMobileComplexOpenBound = "true";
-            var previousInfoTapAt = 0;
-            var previousInfoTapKey = "";
-            var previousInfoTapX = 0;
-            var previousInfoTapY = 0;
-            var infoDoubleTapWindowMs = 340;
-            var infoDoubleTapDistancePx = 24;
 
             function infoTargetFromEvent(event) {
                 var overflow = event.target && event.target.closest
@@ -5530,48 +5746,27 @@ document.addEventListener("DOMContentLoaded", function () {
                 };
             }
 
-            function resetPreviousInfoTap() {
-                previousInfoTapAt = 0;
-                previousInfoTapKey = "";
-                previousInfoTapX = 0;
-                previousInfoTapY = 0;
-            }
-
             card.addEventListener("click", function (event) {
                 if (card.dataset.mmMobileSwipeIgnoreClick === "true" || card.classList.contains("is-releasing") || card.classList.contains("is-releasing-trucks")) {
                     event.preventDefault();
                     event.stopPropagation();
-                    resetPreviousInfoTap();
                     return;
                 }
                 event.preventDefault();
                 event.stopPropagation();
                 var target = infoTargetFromEvent(event);
                 if (target && target.openTruckList) {
-                    resetPreviousInfoTap();
                     openFill(card.dataset.mmMobileOpenComplex);
                     return;
                 }
                 if (!target || !target.cardId) {
-                    resetPreviousInfoTap();
                     return;
                 }
-                var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
-                var distance = Math.hypot(event.clientX - previousInfoTapX, event.clientY - previousInfoTapY);
-                if (
-                    previousInfoTapKey === target.key &&
-                    now - previousInfoTapAt <= infoDoubleTapWindowMs &&
-                    distance <= infoDoubleTapDistancePx
-                ) {
-                    resetPreviousInfoTap();
+                if (target.key.indexOf("truck:") === 0) {
                     openEquipmentCard(target.cardId);
                     return;
                 }
-                previousInfoTapAt = now;
-                previousInfoTapKey = target.key;
-                previousInfoTapX = event.clientX;
-                previousInfoTapY = event.clientY;
-                pulseMiningMasterInfoTarget(target.node);
+                openFill(card.dataset.mmMobileOpenComplex);
             });
             card.addEventListener("keydown", function (event) {
                 if (event.key !== "Enter" && event.key !== " ") return;
@@ -6013,6 +6208,7 @@ document.addEventListener("DOMContentLoaded", function () {
         var columns = tiles.length === 0 ? 6 : Math.min(6, Math.max(1, tiles.length));
         if (tiles.length > 6) columns = 6;
         var gap = tiles.length > 10 ? 5 : 6;
+        var rows = Math.max(1, Math.ceil(Math.max(1, tiles.length) / columns));
         var garageTiles = Array.from(document.querySelectorAll("[data-garage-item='truck']"));
         var garageRect = null;
         garageTiles.some(function (garageTile) {
@@ -6029,13 +6225,18 @@ document.addEventListener("DOMContentLoaded", function () {
         var garageWidth = garageRect ? garageRect.width : cssGarageWidth;
         var garageHeight = garageRect ? garageRect.height : cssGarageHeight;
         var rackWidth = rack.clientWidth || rack.getBoundingClientRect().width || 1;
+        var rackHeight = rack.clientHeight || rack.getBoundingClientRect().height || garageHeight;
         var fittedWidth = Math.floor((rackWidth - (gap * (columns - 1))) / columns);
+        var fittedHeight = Math.floor((rackHeight - (gap * (rows - 1))) / rows);
         var stepWidth = tiles.length <= 6 ? garageWidth : tiles.length <= 12 ? Math.min(garageWidth, 66) : tiles.length <= 18 ? Math.min(garageWidth, 58) : Math.min(garageWidth, 50);
-        var width = Math.max(24, Math.min(garageWidth, stepWidth, fittedWidth));
-        var scale = garageWidth > 0 ? width / garageWidth : 1;
-        var height = Math.max(24, Math.min(garageHeight, Math.floor(garageHeight * scale)));
+        var widthScale = garageWidth > 0 ? Math.min(1, stepWidth / garageWidth, fittedWidth / garageWidth) : 1;
+        var heightScale = garageHeight > 0 ? Math.min(1, fittedHeight / garageHeight) : 1;
+        var scale = Math.max(0, Math.min(widthScale, heightScale));
+        var width = Math.max(24, Math.floor(garageWidth * scale));
+        var height = Math.max(24, Math.floor(garageHeight * scale));
         var justify = tiles.length >= 5 ? "space-between" : "start";
         rack.style.setProperty("--complex-truck-cols", String(columns));
+        rack.style.setProperty("--complex-truck-rows", String(rows));
         rack.style.setProperty("--complex-truck-gap", gap + "px");
         rack.style.setProperty("--complex-truck-w", width + "px");
         rack.style.setProperty("--complex-truck-h", height + "px");
@@ -6200,11 +6401,13 @@ document.addEventListener("DOMContentLoaded", function () {
         var cardId = tile.dataset.equipmentId || tile.dataset.equipmentCardId || "";
         var name = tile.dataset.equipmentName || "";
         var slot = tile.dataset.excavatorSlot || (tile.querySelector("strong") && tile.querySelector("strong").textContent) || "";
+        var zoneLabel = slot ? "K-" + slot : (targetCard.dataset.zoneLabel || "K");
         var stateCode = "assigned";
         targetCard.className = "dispatcher-complex-card " + dispatcherEquipmentStateClass(stateCode) + " is-sync-pending";
         targetCard.style.setProperty("--complex-progress", "0%");
         targetCard.dataset.dispatcherDrop = "complex";
         targetCard.dataset.zoneId = zoneId;
+        targetCard.dataset.zoneLabel = zoneLabel;
         targetCard.dataset.dispatcherDrag = "complex";
         targetCard.dataset.equipmentCardId = cardId;
         targetCard.dataset.sourceEquipmentCardId = cardId;
@@ -6220,7 +6423,7 @@ document.addEventListener("DOMContentLoaded", function () {
         targetCard.innerHTML =
             '<div class="complex-work-head">' +
                 '<div class="complex-title-state">' +
-                    "<h2>" + escapeHtml(zoneId) + "</h2>" +
+                    "<h2>" + escapeHtml(zoneLabel) + "</h2>" +
                     '<span class="complex-state-chip">' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
                 '</div>' +
                 '<div class="complex-context">' +
@@ -6279,6 +6482,8 @@ document.addEventListener("DOMContentLoaded", function () {
     function applyDesktopTruckAction(response, action) {
         if (response && response.queued) return response;
         if (!action || !action.type) return response;
+        if (action.truckTile) applyHaulAssignmentState(response, action.truckTile);
+        if (action.complexCard) applyHaulAssignmentStates(response, action.complexCard);
         var applied = false;
         if (action.type === "assign") {
             applied = moveDesktopTruckToComplex(action.truckTile, action.complexCard);
@@ -6464,8 +6669,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 var targetComplexCard = zone;
                 dispatcherPost(dispatcherMoveExcavatorUrl, {
                     excavator_id: activatedExcavatorTile.dataset.equipmentId,
-                    zone: "active"
-                }).then(function (response) {
+                    zone: "active",
+                    expected_zone: "inactive"
+                }, { queueOnNetworkFailure: false }).then(function (response) {
                     return refreshDesktopBoardAfterStructuralAction(response, function () {
                         activateDesktopComplexFromExcavatorTile(activatedExcavatorTile, targetComplexCard);
                     });
@@ -6481,7 +6687,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 dispatcherPost(dispatcherAssignTruckUrl, {
                     action: "assign",
                     truck_id: assignedTruckTile.dataset.equipmentId,
-                    excavator_id: zone.dataset.equipmentId
+                    excavator_id: zone.dataset.equipmentId,
+                    expected_assignment_state_id: haulAssignmentStateId(assignedTruckTile)
                 }).then(function (response) {
                     return applyDesktopTruckAction(response, {
                         type: "assign",
@@ -6520,8 +6727,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 action: function () {
                     dispatcherPost(dispatcherMoveExcavatorUrl, {
                         excavator_id: inactiveExcavatorId,
-                        zone: "inactive"
-                    }).then(function (response) {
+                        zone: "inactive",
+                        expected_zone: "active",
+                        expected_assignment_states: collectComplexAssignmentStates(inactiveComplexCard)
+                    }, { queueOnNetworkFailure: false }).then(function (response) {
                         return refreshDesktopBoardAfterStructuralAction(response, function () {
                             moveDesktopComplexToExcavatorGarage(inactiveComplexCard);
                         });
@@ -6575,8 +6784,9 @@ document.addEventListener("DOMContentLoaded", function () {
                     action: function () {
                         dispatcherPost(dispatcherAssignTruckUrl, {
                             action: "release_complex",
-                            excavator_id: complexCard.dataset.equipmentId
-                        }).then(function (response) {
+                            excavator_id: complexCard.dataset.equipmentId,
+                            expected_assignment_states: collectComplexAssignmentStates(complexCard)
+                        }, { queueOnNetworkFailure: false }).then(function (response) {
                             return applyDesktopTruckAction(response, {
                                 type: "release_complex",
                                 complexCard: complexCard
@@ -6590,7 +6800,8 @@ document.addEventListener("DOMContentLoaded", function () {
             var releasedTruckTile = draggedTile;
             dispatcherPost(dispatcherAssignTruckUrl, {
                 action: "release",
-                truck_id: releasedTruckTile.dataset.equipmentId
+                truck_id: releasedTruckTile.dataset.equipmentId,
+                expected_assignment_state_id: haulAssignmentStateId(releasedTruckTile)
             }).then(function (response) {
                 return applyDesktopTruckAction(response, {
                     type: "release",
@@ -6618,6 +6829,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v61" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v64" defer></script>
 {% endif %}
 {% endblock %}

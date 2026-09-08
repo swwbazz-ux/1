@@ -212,7 +212,7 @@ _BRIGADE_PHASE_UI_POLICIES = {
         'brigade_numbers': (1, 2),
         'phase_counts': {'day': 1, 'night': 0, 'off': 1},
         'phase_choices': (
-            (WatchPeriodBrigadePhaseRow.Phase.DAY, 'Дневная смена'),
+            (WatchPeriodBrigadePhaseRow.Phase.DAY, 'Первая смена'),
             (WatchPeriodBrigadePhaseRow.Phase.OFF, 'Межвахта'),
         ),
     },
@@ -220,8 +220,8 @@ _BRIGADE_PHASE_UI_POLICIES = {
         'brigade_numbers': (1, 2, 3, 4),
         'phase_counts': {'day': 1, 'night': 1, 'off': 2},
         'phase_choices': (
-            (WatchPeriodBrigadePhaseRow.Phase.DAY, 'Дневная смена'),
-            (WatchPeriodBrigadePhaseRow.Phase.NIGHT, 'Ночная смена'),
+            (WatchPeriodBrigadePhaseRow.Phase.DAY, 'Первая смена'),
+            (WatchPeriodBrigadePhaseRow.Phase.NIGHT, 'Вторая смена'),
             (WatchPeriodBrigadePhaseRow.Phase.OFF, 'Межвахта'),
         ),
     },

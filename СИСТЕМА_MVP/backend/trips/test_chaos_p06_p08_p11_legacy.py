@@ -604,7 +604,7 @@ class ChaosP11LegacyReportFallbackRegressionTests(TestCase):
         management_night = next(
             row
             for row in management.context['daily_shift_comparison']
-            if 'ноч' in row['label'].lower()
+            if 'вторая' in row['label'].lower()
         )
 
         transport_book = self._workbook(
@@ -649,8 +649,8 @@ class ChaosP11LegacyReportFallbackRegressionTests(TestCase):
         management_values = self._key_values(management_book['Сводка'])
         management_night_excel = next(
             row
-            for row in management_book['День ночь'].iter_rows(values_only=True)
-            if row and isinstance(row[0], str) and 'ноч' in row[0].lower()
+            for row in management_book['Смены 1 и 2'].iter_rows(values_only=True)
+            if row and isinstance(row[0], str) and 'вторая' in row[0].lower()
         )
 
         return {
@@ -768,14 +768,14 @@ class ChaosP11LegacyReportFallbackRegressionTests(TestCase):
     def test_legacy_trip_has_one_night_date_and_shift_in_html_and_excel(self):
         snapshot = self._night_semantic_snapshot()
 
-        self.assertIn('ноч', snapshot['transport_html'][2].lower())
-        self.assertIn('ноч', snapshot['transport_excel'][0].lower())
+        self.assertIn('вторая', snapshot['transport_html'][2].lower())
+        self.assertIn('вторая', snapshot['transport_excel'][0].lower())
         self.assertEqual(snapshot['daily_html'][0:2], (1, 1))
         self.assertEqual(snapshot['daily_excel'][0:2], (1, 1))
         self.assertEqual(snapshot['analytics_html'][0:2], (1, 1))
         self.assertEqual(snapshot['analytics_excel'][0:2], (1, 1))
         self.assertEqual(snapshot['dispatcher_management_html'][0], 1)
-        self.assertIn('ноч', snapshot['dispatcher_management_html'][3].lower())
+        self.assertIn('вторая', snapshot['dispatcher_management_html'][3].lower())
         self.assertEqual(snapshot['management_html'][0], 1)
         self.assertEqual(snapshot['management_html'][3], 1)
         self.assertEqual(snapshot['management_excel'][0], 1)

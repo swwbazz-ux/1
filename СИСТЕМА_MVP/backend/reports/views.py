@@ -22,10 +22,12 @@ from openpyxl.utils import get_column_letter
 from core.models import OperationalStateVersion
 from core.operational_fragments import operational_fragment_response
 from core.production_time import (
+    assigned_shift_open_bounds,
     production_day_bounds,
     production_shift_bounds,
     production_shift_context,
     production_work_date,
+    production_work_date_for_shift,
 )
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import DumpPoint, Equipment, RockType
@@ -221,8 +223,8 @@ VOLUME_REPORT_FILTER_LABELS = {
 }
 
 SHIFT_TYPE_LABELS = {
-    'day': 'Дневная',
-    'night': 'Ночная',
+    'day': 'Первая смена',
+    'night': 'Вторая смена',
 }
 
 UNLOADING_WAITING_REASONS = {
@@ -2175,6 +2177,8 @@ def dispatcher_mining_filters(request):
 
 def dispatcher_mining_trip_queryset(filters):
     production_start, production_end = production_day_bounds(filters['date'])
+    day_start, day_end = assigned_shift_open_bounds(filters['date'], ShiftType.DAY)
+    night_start, night_end = assigned_shift_open_bounds(filters['date'], ShiftType.NIGHT)
     trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
         'truck',
         'excavator',
@@ -2184,10 +2188,8 @@ def dispatcher_mining_trip_queryset(filters):
         'unloading_shift',
     )
     trips = trips.filter(
-        Q(
-            loading_shift__opened_at__gte=production_start,
-            loading_shift__opened_at__lt=production_end,
-        )
+        Q(loading_shift__shift_type=ShiftType.DAY, loading_shift__opened_at__gte=day_start, loading_shift__opened_at__lt=day_end)
+        | Q(loading_shift__shift_type=ShiftType.NIGHT, loading_shift__opened_at__gte=night_start, loading_shift__opened_at__lt=night_end)
         | Q(
             loading_shift__isnull=True,
             completed_at__gte=production_start,
@@ -2306,21 +2308,28 @@ def dispatcher_mining_context(request, access):
     month_start = filters['date'].replace(day=1)
     month_range_start = production_day_bounds(month_start)[0]
     month_range_end = production_day_bounds(filters['date'])[1]
-    month_trips = list(
+    month_day_start = assigned_shift_open_bounds(month_start, ShiftType.DAY)[0]
+    month_day_end = assigned_shift_open_bounds(filters['date'], ShiftType.DAY)[1]
+    month_night_start = assigned_shift_open_bounds(month_start, ShiftType.NIGHT)[0]
+    month_night_end = assigned_shift_open_bounds(filters['date'], ShiftType.NIGHT)[1]
+    month_candidates = list(
         Trip.objects.filter(
             status=TripStatus.COMPLETED,
         ).filter(
-            Q(
-                loading_shift__opened_at__gte=month_range_start,
-                loading_shift__opened_at__lt=month_range_end,
-            )
+            Q(loading_shift__shift_type=ShiftType.DAY, loading_shift__opened_at__gte=month_day_start, loading_shift__opened_at__lt=month_day_end)
+            | Q(loading_shift__shift_type=ShiftType.NIGHT, loading_shift__opened_at__gte=month_night_start, loading_shift__opened_at__lt=month_night_end)
             | Q(
                 loading_shift__isnull=True,
                 completed_at__gte=month_range_start,
                 completed_at__lt=month_range_end,
             )
-        )
+        ).select_related('loading_shift', 'unloading_shift')
     )
+    month_trips = [
+        trip
+        for trip in month_candidates
+        if month_start <= trip_report_date(trip) <= filters['date']
+    ]
 
     plan_total = decimal_total(trip.planned_volume_m3 for trip in trips)
     volume_total = decimal_total(trip.volume_m3 for trip in trips)
@@ -2351,7 +2360,7 @@ def dispatcher_mining_context(request, access):
         'filters': filters,
         'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
         'current_date': timezone.localdate().strftime('%d.%m.%Y'),
-        'shift_label': 'Дневная' if filters['shift_type'] == 'day' else 'Ночная' if filters['shift_type'] == 'night' else 'Все смены',
+        'shift_label': SHIFT_TYPE_LABELS.get(filters['shift_type'], 'Все смены'),
         'kpis': {
             'plan': format_volume(plan_total),
             'volume': format_volume(volume_total),
@@ -2467,6 +2476,8 @@ def dispatcher_transport_filters(request):
 
 def dispatcher_transport_shift_queryset(filters):
     production_start, production_end = production_day_bounds(filters['date'])
+    day_start, day_end = assigned_shift_open_bounds(filters['date'], ShiftType.DAY)
+    night_start, night_end = assigned_shift_open_bounds(filters['date'], ShiftType.NIGHT)
     shifts = EmployeeShift.objects.select_related(
         'employee',
         'equipment',
@@ -2474,8 +2485,9 @@ def dispatcher_transport_shift_queryset(filters):
         'equipment__model',
     ).filter(
         equipment__equipment_type__name__icontains='Самосвал',
-        opened_at__gte=production_start,
-        opened_at__lt=production_end,
+    ).filter(
+        Q(shift_type=ShiftType.DAY, opened_at__gte=day_start, opened_at__lt=day_end)
+        | Q(shift_type=ShiftType.NIGHT, opened_at__gte=night_start, opened_at__lt=night_end)
     )
     if filters['shift_type']:
         shifts = shifts.filter(shift_type=filters['shift_type'])
@@ -2484,6 +2496,8 @@ def dispatcher_transport_shift_queryset(filters):
 
 def dispatcher_transport_trip_stats(filters):
     production_start, production_end = production_day_bounds(filters['date'])
+    day_start, day_end = assigned_shift_open_bounds(filters['date'], ShiftType.DAY)
+    night_start, night_end = assigned_shift_open_bounds(filters['date'], ShiftType.NIGHT)
     trips = (
         Trip.objects
         .select_related('truck', 'truck__model', 'driver', 'unloading_shift')
@@ -2492,10 +2506,8 @@ def dispatcher_transport_trip_stats(filters):
             truck_id__isnull=False,
         )
         .filter(
-            Q(
-                unloading_shift__opened_at__gte=production_start,
-                unloading_shift__opened_at__lt=production_end,
-            )
+            Q(unloading_shift__shift_type=ShiftType.DAY, unloading_shift__opened_at__gte=day_start, unloading_shift__opened_at__lt=day_end)
+            | Q(unloading_shift__shift_type=ShiftType.NIGHT, unloading_shift__opened_at__gte=night_start, unloading_shift__opened_at__lt=night_end)
             | Q(
                 unloading_shift__isnull=True,
                 completed_at__gte=production_start,
@@ -2503,16 +2515,6 @@ def dispatcher_transport_trip_stats(filters):
             )
         )
     )
-    if filters['shift_type']:
-        shift_start, shift_end = production_shift_bounds(filters['date'], filters['shift_type'])
-        trips = trips.filter(
-            Q(unloading_shift__shift_type=filters['shift_type'])
-            | Q(
-                unloading_shift__isnull=True,
-                completed_at__gte=shift_start,
-                completed_at__lt=shift_end,
-            )
-        )
     grouped = defaultdict(lambda: {
         'trips': 0,
         'volume': Decimal('0'),
@@ -2522,6 +2524,21 @@ def dispatcher_transport_trip_stats(filters):
         'shift_type': '',
     })
     for trip in trips:
+        if trip.unloading_shift_id:
+            trip_date = production_work_date_for_shift(
+                trip.unloading_shift.opened_at,
+                trip.unloading_shift.shift_type,
+            )
+            effective_shift_type = trip.unloading_shift.shift_type
+        else:
+            trip_date = production_work_date(trip.completed_at or trip.created_at)
+            effective_shift_type = production_shift_context(
+                trip.completed_at or trip.created_at
+            ).shift_type
+        if trip_date != filters['date']:
+            continue
+        if filters['shift_type'] and effective_shift_type != filters['shift_type']:
+            continue
         if trip.unloading_shift_id:
             key = ('shift', trip.unloading_shift_id)
         else:
@@ -2660,7 +2677,7 @@ def dispatcher_transport_context(request, access):
         'filters': filters,
         'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
         'current_date': timezone.localdate().strftime('%d.%m.%Y'),
-        'shift_label': 'Дневная' if filters['shift_type'] == 'day' else 'Ночная' if filters['shift_type'] == 'night' else 'Все смены',
+        'shift_label': SHIFT_TYPE_LABELS.get(filters['shift_type'], 'Все смены'),
         'kpis': {
             'shifts': len(rows),
             'closed': sum(1 for row in rows if not row['missing_end']),
@@ -3445,7 +3462,7 @@ def dispatcher_reports_context(request, access):
         'filters': filters,
         'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
         'current_date': timezone.localdate().strftime('%d.%m.%Y'),
-        'shift_label': 'Дневная' if filters['shift_type'] == 'day' else 'Ночная' if filters['shift_type'] == 'night' else 'Все смены',
+        'shift_label': SHIFT_TYPE_LABELS.get(filters['shift_type'], 'Все смены'),
         'query_string': request.GET.urlencode(),
         'query_suffix': query_suffix,
         'kpis': {
@@ -3806,7 +3823,7 @@ def dispatcher_management_context(request, access):
         'filters': filters,
         'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
         'current_date': timezone.localdate().strftime('%d.%m.%Y'),
-        'shift_label': 'Дневная' if filters['shift_type'] == 'day' else 'Ночная' if filters['shift_type'] == 'night' else 'Все смены',
+        'shift_label': SHIFT_TYPE_LABELS.get(filters['shift_type'], 'Все смены'),
         'query_string': request.GET.urlencode(),
         'query_suffix': f"?{request.GET.urlencode()}" if request.GET.urlencode() else '',
         'overall_status': overall_status,
@@ -4810,12 +4827,12 @@ PILOT_REPORT_CHECKLIST_SECTIONS = [
         'title': '1. Витрина руководства',
         'items': [
             {
-                'text': 'Открыть управленческую витрину и проверить суточные KPI, выполнение плана, день/ночь и динамику за 7 дней.',
+                'text': 'Открыть управленческую витрину и проверить суточные KPI, выполнение плана, первую/вторую смену и динамику за 7 дней.',
                 'url': '/reports/management/',
                 'url_text': 'Открыть витрину',
             },
             {
-                'text': 'Выгрузить витрину в Excel и сверить листы: Сводка, Динамика 7 дней, День ночь.',
+                'text': 'Выгрузить витрину в Excel и сверить листы: Сводка, Динамика 7 дней, Смены 1 и 2.',
                 'url': '/reports/management/export/',
                 'url_text': 'Выгрузить Excel',
             },
@@ -5462,12 +5479,18 @@ def parse_customer_report_date(request):
 def trip_report_date(trip):
     if isinstance(trip, dict):
         if trip['loading_shift__opened_at']:
-            return production_work_date(trip['loading_shift__opened_at'])
+            return production_work_date_for_shift(
+                trip['loading_shift__opened_at'],
+                trip['loading_shift__shift_type'],
+            )
         if trip['completed_at']:
             return production_work_date(trip['completed_at'])
         return production_work_date(trip['created_at'])
     if trip.loading_shift:
-        return production_work_date(trip.loading_shift.opened_at)
+        return production_work_date_for_shift(
+            trip.loading_shift.opened_at,
+            trip.loading_shift.shift_type,
+        )
     if trip.completed_at:
         return production_work_date(trip.completed_at)
     return production_work_date(trip.created_at)
@@ -5867,7 +5890,7 @@ def customer_daily_report_export_view(request):
     sheet['A4'] = 'Суточная сводка'
     sheet['A4'].font = Font(bold=True)
     summary_rows = [
-        ['Показатель', 'День', 'Ночь', 'Сутки'],
+        ['Показатель', 'Первая смена', 'Вторая смена', 'Сутки'],
         ['План, м3', context['day_plan_total'], context['night_plan_total'], context['total_plan']],
         ['Факт, м3', context['day_total'], context['night_total'], context['total_volume']],
         ['Отклонение, м3', context['day_deviation'], context['night_deviation'], context['total_deviation']],
@@ -5897,8 +5920,8 @@ def customer_daily_report_export_view(request):
                 cell.font = Font(bold=True, color='FFFFFF')
                 cell.fill = PatternFill('solid', fgColor='17232E')
 
-    day_end_row = append_customer_shift_table(sheet, 'I смена (дневная 07:00 - 19:00)', 13, 1, context['rows_by_shift']['day'])
-    night_end_row = append_customer_shift_table(sheet, 'II смена (ночная 19:00 - 07:00)', 13, 12, context['rows_by_shift']['night'])
+    day_end_row = append_customer_shift_table(sheet, 'Первая смена', 13, 1, context['rows_by_shift']['day'])
+    night_end_row = append_customer_shift_table(sheet, 'Вторая смена', 13, 12, context['rows_by_shift']['night'])
 
     downtime_start_row = max(day_end_row, night_end_row) + 1
     sheet.cell(downtime_start_row, 1, 'Механические простои за дату')
@@ -5979,12 +6002,12 @@ def management_dashboard_context(request, access):
     )
     shift_analytics_shift_cards = [
         {
-            'label': 'День',
+            'label': 'Первая смена',
             'totals': shift_analytics_day['totals'],
             'url': f"{reverse('shift_analytics_report')}?date={selected_date:%Y-%m-%d}&shift_type=day",
         },
         {
-            'label': 'Ночь',
+            'label': 'Вторая смена',
             'totals': shift_analytics_night['totals'],
             'url': f"{reverse('shift_analytics_report')}?date={selected_date:%Y-%m-%d}&shift_type=night",
         },
@@ -5996,8 +6019,8 @@ def management_dashboard_context(request, access):
         completed_trips
         .filter(
             Q(
-                loading_shift__opened_at__gte=trend_period_start,
-                loading_shift__opened_at__lt=trend_period_end,
+                loading_shift__opened_at__gte=trend_period_start - timedelta(days=1),
+                loading_shift__opened_at__lt=trend_period_end + timedelta(days=1),
             )
             | Q(
                 loading_shift__isnull=True,
@@ -6043,7 +6066,7 @@ def management_dashboard_context(request, access):
     daily_plan_source = 'из сменных планов админки' if manual_plan_totals['volume_m3'] else 'по заданиям в рейсах'
     daily_shift_totals = {
         'day': {
-            'label': 'Дневная смена',
+            'label': 'Первая смена',
             'css_class': 'day',
             'volume': Decimal('0'),
             'plan': manual_plan_by_shift['day']['volume_m3'],
@@ -6051,7 +6074,7 @@ def management_dashboard_context(request, access):
             'trip_count': 0,
         },
         'night': {
-            'label': 'Ночная смена',
+            'label': 'Вторая смена',
             'css_class': 'night',
             'volume': Decimal('0'),
             'plan': manual_plan_by_shift['night']['volume_m3'],
@@ -6336,7 +6359,7 @@ def management_dashboard_export_view(request):
             item['tonnage'],
         ])
 
-    shifts_sheet = workbook.create_sheet('День ночь')
+    shifts_sheet = workbook.create_sheet('Смены 1 и 2')
     shifts_sheet.append(['Смена', 'Факт, м3', 'План, м3', 'Отклонение, м3', 'Рейсы', 'Тоннаж, т'])
     for item in context['daily_shift_comparison']:
         shifts_sheet.append([

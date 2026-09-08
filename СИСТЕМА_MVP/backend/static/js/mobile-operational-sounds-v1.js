@@ -188,6 +188,46 @@
             });
         });
     }
+
+    function announceEquipment(details) {
+        details = details || {};
+        var plugin = capacitorNativeSoundPlugin();
+        if (!plugin || typeof plugin.announceEquipment !== "function") {
+            return announceOperational({
+                cue: String(details.cue || "truck_assigned"),
+                voice: String(details.fallbackVoice || "voice_truck_assigned"),
+                eventVersion: Number(details.eventVersion || 0),
+                eventKey: String(details.eventKey || "")
+            });
+        }
+        return Promise.resolve(plugin.announceEquipment({
+            cue: String(details.cue || "truck_assigned"),
+            action: String(details.action || ""),
+            equipmentNumber: String(details.equipmentNumber || ""),
+            dumpPointId: Number(details.dumpPointId || 0),
+            dumpPointName: String(details.dumpPointName || ""),
+            eventVersion: Number(details.eventVersion || 0),
+            eventKey: String(details.eventKey || "")
+        })).then(function (result) {
+            if (result && result.announced === true) {
+                return {supported: true, announced: true, reason: String(result.reason || "")};
+            }
+            return announceOperational({
+                cue: String(details.cue || "truck_assigned"),
+                voice: String(details.fallbackVoice || "voice_truck_assigned"),
+                eventVersion: Number(details.eventVersion || 0),
+                eventKey: String(details.eventKey || "")
+            });
+        }).catch(function () {
+            return announceOperational({
+                cue: String(details.cue || "truck_assigned"),
+                voice: String(details.fallbackVoice || "voice_truck_assigned"),
+                eventVersion: Number(details.eventVersion || 0),
+                eventKey: String(details.eventKey || "")
+            });
+        });
+    }
+
     function diagnostics() {
         var plugin = capacitorNativeSoundPlugin();
         if (!plugin || typeof plugin.getDiagnostics !== "function") {
@@ -245,6 +285,7 @@
         play: play,
         announceDumpPoint: announceDumpPoint,
         announceOperational: announceOperational,
+        announceEquipment: announceEquipment,
         diagnostics: diagnostics,
         preload: unlock
     });

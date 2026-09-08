@@ -24,8 +24,20 @@ from users.models import EmployeeAccess
 from users.role_apps import role_app_manifest_response, role_app_service_worker_response
 from users.session_device import get_session_device_kind, set_session_device_kind
 
+from .command_guards import (
+    ClientActionPayloadConflict,
+    ClientActionRequired,
+    begin_client_action,
+    complete_client_action,
+)
 from .models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
-from .services import schedule_haul_assignment, schedule_haul_release
+from .services import (
+    HaulAssignmentStateConflict,
+    projected_haul_assignments_for_excavator,
+    schedule_haul_assignment,
+    schedule_haul_release,
+    validate_projected_excavator_state,
+)
 
 
 MINING_MASTER_MANIFEST = {
@@ -76,7 +88,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v142";
+const CACHE_NAME = "mining-master-mobile-shell-v148";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -679,6 +691,38 @@ def mining_master_json_ok(payload=None, **extra):
     return JsonResponse(response)
 
 
+def mining_master_client_action_error(payload, error, *, code='stale_client'):
+    return JsonResponse({
+        'ok': False,
+        'error': '; '.join(error.messages) if isinstance(error, ValidationError) else str(error),
+        'code': code,
+        'conflict': True,
+        'client_action_id': str((payload or {}).get('client_action_id') or ''),
+    }, status=409)
+
+
+def mining_master_required_assignment_state_id(payload):
+    if 'expected_assignment_state_id' not in payload:
+        raise ClientActionRequired(
+            'Экран открыт в старой версии. Обновите пульт перед изменением расстановки.'
+        )
+    try:
+        value = int(payload.get('expected_assignment_state_id'))
+    except (TypeError, ValueError):
+        raise ClientActionRequired('Некорректная версия назначения. Обновите пульт.')
+    if value < 0:
+        raise ClientActionRequired('Некорректная версия назначения. Обновите пульт.')
+    return value
+
+
+def mining_master_required_projected_states(payload):
+    if 'expected_assignment_states' not in payload:
+        raise ClientActionRequired(
+            'Экран открыт в старой версии. Обновите пульт перед массовым действием.'
+        )
+    return payload.get('expected_assignment_states')
+
+
 def mining_master_open_shift_or_error(access):
     if access.role.code != 'mining_master':
         return None, 'Изменять пульт Горного мастера может только Горный мастер.'
@@ -714,7 +758,7 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
     current_time = production_context.local_datetime.strftime('%H:%M')
     current_date = production_context.production_date.strftime('%d.%m.%Y')
     if current_shift:
-        shift_label = 'Дневная смена' if current_shift.shift_type == ShiftType.DAY else 'Ночная смена'
+        shift_label = 'Первая смена' if current_shift.shift_type == ShiftType.DAY else 'Вторая смена'
         time_range = '07:00-19:00' if current_shift.shift_type == ShiftType.DAY else '19:00-07:00'
         clock_caption = 'в работе'
         shift_status_variant = 'open'
@@ -725,9 +769,9 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
         shift_status_variant = 'blocked'
     else:
         shift_label = (
-            'Дневная смена'
+            'Первая смена'
             if production_context.shift_type == ShiftType.DAY
-            else 'Ночная смена'
+            else 'Вторая смена'
         )
         time_range = production_context.time_range
         clock_caption = ''
@@ -795,6 +839,7 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
 
 
 @require_POST
+@transaction.atomic
 def mining_master_move_excavator_view(request):
     access = mining_master_access_from_request(request)
     if not access:
@@ -804,8 +849,19 @@ def mining_master_move_excavator_view(request):
         return JsonResponse({'ok': False, 'error': error}, status=400)
 
     payload = mining_master_json_payload(request)
+    try:
+        client_action_id, signature, repeated_response = begin_client_action(
+            employee=access.employee,
+            action_type='mining_master_move_excavator',
+            payload=payload,
+        )
+    except (ClientActionRequired, ClientActionPayloadConflict) as error:
+        return mining_master_client_action_error(payload, error)
+    if repeated_response is not None:
+        return JsonResponse(repeated_response)
+    lock_production_state()
     excavator = get_object_or_404(
-        Equipment.objects.select_related('equipment_type', 'model'),
+        Equipment.objects.select_for_update().select_related('equipment_type', 'model'),
         id=payload.get('excavator_id'),
         equipment_type__name='Экскаватор',
         is_active=True,
@@ -814,21 +870,78 @@ def mining_master_move_excavator_view(request):
     if zone not in {ExcavatorPlacement.Zone.ACTIVE, ExcavatorPlacement.Zone.INACTIVE}:
         return JsonResponse({'ok': False, 'error': 'Некорректная зона экскаватора.'}, status=400)
 
-    placement, _ = ExcavatorPlacement.objects.get_or_create(excavator=excavator)
+    placement = (
+        ExcavatorPlacement.objects.select_for_update()
+        .filter(excavator=excavator)
+        .first()
+    )
+    actual_zone = placement.zone if placement else ExcavatorPlacement.Zone.INACTIVE
+    expected_zone = str(payload.get('expected_zone') or '').strip()
+    if not expected_zone:
+        return mining_master_client_action_error(
+            payload,
+            ClientActionRequired('Экран открыт в старой версии. Обновите пульт.'),
+        )
+    if expected_zone != actual_zone:
+        return mining_master_client_action_error(
+            payload,
+            HaulAssignmentStateConflict(
+                expected_state_id=expected_zone,
+                actual_state_id=actual_zone,
+            ),
+            code='state_conflict',
+        )
+    if not placement:
+        placement = ExcavatorPlacement.objects.create(excavator=excavator)
+
+    scheduled_assignments = []
+    if zone == ExcavatorPlacement.Zone.INACTIVE:
+        try:
+            expected_states = mining_master_required_projected_states(payload)
+            visible_assignments = projected_haul_assignments_for_excavator(
+                excavator,
+                for_update=True,
+            )
+            validate_projected_excavator_state(visible_assignments, expected_states)
+            now = timezone.now()
+            for visible_assignment in visible_assignments:
+                assignment, _ = schedule_haul_release(
+                    truck=visible_assignment.truck,
+                    assigned_by=access.employee,
+                    now=now,
+                    expected_state_id=visible_assignment.id,
+                )
+                if assignment:
+                    scheduled_assignments.append(assignment)
+        except (ClientActionRequired, HaulAssignmentStateConflict) as error:
+            return mining_master_client_action_error(payload, error, code='state_conflict')
+
     placement.zone = zone
     placement.changed_by = access.employee
     placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
 
-    closed_count = 0
-    if zone == ExcavatorPlacement.Zone.INACTIVE:
-        active_assignments = list(get_active_assignments_queryset().filter(excavator=excavator))
-        closed_count = len(active_assignments)
-        close_active_assignments(active_assignments, timezone.now())
-
-    return mining_master_json_ok(payload, closed=closed_count)
+    response_payload = {
+        'ok': True,
+        'closed': 0,
+        'scheduled': len(scheduled_assignments),
+        'assignment_state_ids': {
+            str(item.truck_id): item.id for item in scheduled_assignments
+        },
+        'client_action_id': client_action_id,
+    }
+    complete_client_action(
+        employee=access.employee,
+        shift=current_shift,
+        action_type='mining_master_move_excavator',
+        client_action_id=client_action_id,
+        signature=signature,
+        response_payload=response_payload,
+    )
+    return JsonResponse(response_payload)
 
 
 @require_POST
+@transaction.atomic
 def mining_master_assign_truck_view(request):
     access = mining_master_access_from_request(request)
     if not access:
@@ -840,21 +953,61 @@ def mining_master_assign_truck_view(request):
     payload = mining_master_json_payload(request)
     action = payload.get('action')
     now = timezone.now()
+    try:
+        client_action_id, signature, repeated_response = begin_client_action(
+            employee=access.employee,
+            action_type='mining_master_assign_truck',
+            payload=payload,
+        )
+    except (ClientActionRequired, ClientActionPayloadConflict) as error:
+        return mining_master_client_action_error(payload, error)
+    if repeated_response is not None:
+        return JsonResponse(repeated_response)
+    lock_production_state()
 
     if action == 'release_complex':
         excavator = get_object_or_404(
-            Equipment.objects.select_related('equipment_type', 'model'),
+            Equipment.objects.select_for_update().select_related('equipment_type', 'model'),
             id=payload.get('excavator_id'),
             equipment_type__name='Экскаватор',
             is_active=True,
         )
-        assignments = list(get_active_assignments_queryset().filter(excavator=excavator))
-        trucks = {assignment.truck_id: assignment.truck for assignment in assignments}
-        scheduled = sum(
-            bool(schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)[0])
-            for truck in trucks.values()
+        try:
+            expected_states = mining_master_required_projected_states(payload)
+            assignments = projected_haul_assignments_for_excavator(
+                excavator,
+                for_update=True,
+            )
+            validate_projected_excavator_state(assignments, expected_states)
+            scheduled_assignments = []
+            for visible_assignment in assignments:
+                assignment, _ = schedule_haul_release(
+                    truck=visible_assignment.truck,
+                    assigned_by=access.employee,
+                    now=now,
+                    expected_state_id=visible_assignment.id,
+                )
+                if assignment:
+                    scheduled_assignments.append(assignment)
+        except (ClientActionRequired, HaulAssignmentStateConflict) as error:
+            return mining_master_client_action_error(payload, error, code='state_conflict')
+        response_payload = {
+            'ok': True,
+            'scheduled': len(scheduled_assignments),
+            'assignment_state_ids': {
+                str(item.truck_id): item.id for item in scheduled_assignments
+            },
+            'client_action_id': client_action_id,
+        }
+        complete_client_action(
+            employee=access.employee,
+            shift=current_shift,
+            action_type='mining_master_assign_truck',
+            client_action_id=client_action_id,
+            signature=signature,
+            response_payload=response_payload,
         )
-        return mining_master_json_ok(payload, scheduled=scheduled)
+        return JsonResponse(response_payload)
 
     truck = get_object_or_404(
         Equipment.objects.select_related('equipment_type', 'model'),
@@ -862,29 +1015,37 @@ def mining_master_assign_truck_view(request):
         equipment_type__name='Самосвал',
         is_active=True,
     )
-    active_assignments = list(
-        HaulAssignment.objects
-        .filter(truck=truck, ended_at__isnull=True)
-        .exclude(status=AssignmentStatus.CANCELLED)
-        .select_related('excavator')
-        .order_by('-assigned_at')
-    )
-    active_assignment = next(
-        (assignment for assignment in active_assignments if assignment.status == AssignmentStatus.ACCEPTED),
-        active_assignments[0] if active_assignments else None,
-    )
-    expected_source_excavator_id = str(payload.get('expected_source_excavator_id') or '').strip()
-    if expected_source_excavator_id and active_assignment and str(active_assignment.excavator_id) != expected_source_excavator_id:
-        return JsonResponse({
-            'ok': False,
-            'error': 'Данные по самосвалу изменились в системе. Обновите пульт и повторите действие.',
-            'conflict': True,
-            'client_action_id': payload.get('client_action_id') or '',
-        }, status=409)
+    try:
+        expected_state_id = mining_master_required_assignment_state_id(payload)
+    except ClientActionRequired as error:
+        return mining_master_client_action_error(payload, error)
 
     if action == 'release':
-        assignment, created = schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)
-        return mining_master_json_ok(payload, assignment_id=assignment.id if assignment else None, created=created)
+        try:
+            assignment, created = schedule_haul_release(
+                truck=truck,
+                assigned_by=access.employee,
+                now=now,
+                expected_state_id=expected_state_id,
+            )
+        except HaulAssignmentStateConflict as error:
+            return mining_master_client_action_error(payload, error, code='state_conflict')
+        response_payload = {
+            'ok': True,
+            'assignment_id': assignment.id if assignment else None,
+            'assignment_state_id': assignment.id if assignment else 0,
+            'created': created,
+            'client_action_id': client_action_id,
+        }
+        complete_client_action(
+            employee=access.employee,
+            shift=current_shift,
+            action_type='mining_master_assign_truck',
+            client_action_id=client_action_id,
+            signature=signature,
+            response_payload=response_payload,
+        )
+        return JsonResponse(response_payload)
 
     if action != 'assign':
         return JsonResponse({'ok': False, 'error': 'Неизвестное действие.'}, status=400)
@@ -898,13 +1059,32 @@ def mining_master_assign_truck_view(request):
     if not ExcavatorPlacement.objects.filter(excavator=excavator, zone=ExcavatorPlacement.Zone.ACTIVE).exists():
         return JsonResponse({'ok': False, 'error': 'Самосвал можно назначить только в активный комплекс.'}, status=400)
 
-    assignment, created = schedule_haul_assignment(
-        truck=truck,
-        excavator=excavator,
-        assigned_by=access.employee,
-        now=now,
+    try:
+        assignment, created = schedule_haul_assignment(
+            truck=truck,
+            excavator=excavator,
+            assigned_by=access.employee,
+            now=now,
+            expected_state_id=expected_state_id,
+        )
+    except HaulAssignmentStateConflict as error:
+        return mining_master_client_action_error(payload, error, code='state_conflict')
+    response_payload = {
+        'ok': True,
+        'assignment_id': assignment.id,
+        'assignment_state_id': assignment.id,
+        'created': created,
+        'client_action_id': client_action_id,
+    }
+    complete_client_action(
+        employee=access.employee,
+        shift=current_shift,
+        action_type='mining_master_assign_truck',
+        client_action_id=client_action_id,
+        signature=signature,
+        response_payload=response_payload,
     )
-    return mining_master_json_ok(payload, assignment_id=assignment.id, created=created)
+    return JsonResponse(response_payload)
 
 
 def handle_bulk_release_action(request, action, current_shift, access):
@@ -1020,12 +1200,23 @@ def mining_master_assignments_view(request):
                     access = reauth_access
                     current_shift, blocking_shift = get_shift_state_for_access(access)
             handle_shift_action(request, action, access, current_shift, blocking_shift)
-        elif action in {'assign', 'release'}:
-            handle_assignment_action(request, action, access, current_shift)
-        elif action in {'release_excavator', 'release_all'}:
-            handle_bulk_release_action(request, action, current_shift, access)
-        elif action in {'activate_excavator', 'deactivate_excavator'}:
-            handle_excavator_placement_action(request, action, access, current_shift)
+        elif action in {
+            'assign',
+            'release',
+            'release_excavator',
+            'release_all',
+            'activate_excavator',
+            'deactivate_excavator',
+        }:
+            # Старые HTML-формы не передавали версию состояния и уникальный
+            # идентификатор команды. После восстановления офлайн-вкладки такой
+            # POST мог молча перезаписать более свежее решение другого экрана.
+            # Все изменения расстановки теперь принимаются только JSON-
+            # обработчиками с optimistic lock и idempotency key.
+            messages.error(
+                request,
+                'Экран открыт в старой версии. Обновите пульт перед изменением расстановки.',
+            )
         else:
             messages.error(request, 'Неизвестное действие.')
         return redirect('mining_master_assignments')

@@ -6,6 +6,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -17,6 +18,16 @@ from assignments.models import (
     ExcavatorPlacement,
     HaulAssignment,
     HaulAssignmentAction,
+    HaulAssignmentHandoff,
+    HaulAssignmentHandoffStatus,
+)
+from assignments.services import (
+    apply_pending_haul_assignment,
+    excavator_load_assignment_queryset,
+    projected_haul_assignments,
+    reconcile_due_haul_assignments,
+    schedule_haul_assignment,
+    schedule_haul_release,
 )
 from core.models import OperationalStateEvent
 from users.role_apps import ROLE_APPS_BY_CODE
@@ -46,7 +57,12 @@ from shifts.models import (
 from shifts.services import assign_shift_plan_snapshot, progress_cycle_visual_context
 from trips.dispatcher_header import open_dispatcher_shift
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
-from trips.views import build_dispatcher_dashboard_context, dispatcher_empty_snapshot_progress, finalize_trip_unloaded
+from trips.views import (
+    build_dispatcher_dashboard_context,
+    dispatcher_empty_snapshot_progress,
+    finalize_trip_unloaded,
+    get_operational_state_version,
+)
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
 
@@ -738,6 +754,94 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(complex_by_id['K-5']['status_key'], 'orange')
         self.assertEqual(complex_by_id['K-5']['equipment_state_code'], 'repair')
 
+    def test_complex_labels_and_realtime_keys_do_not_merge_plain_and_branded_number(self):
+        plain_four = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            garage_number='4',
+        )
+        branded_four = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            garage_number='ТВИ 4',
+        )
+        ExcavatorPlacement.objects.create(
+            excavator=plain_four,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+        )
+        ExcavatorPlacement.objects.create(
+            excavator=branded_four,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+        )
+
+        dashboard = self.build_dashboard()
+        cards = {
+            card['equipment_card_id']: card
+            for card in dashboard['complex_cards']
+        }
+
+        self.assertEqual(cards[str(plain_four.id)]['id'], 'K-4')
+        self.assertEqual(cards[str(branded_four.id)]['id'], 'K-ТВИ-4')
+        self.assertEqual(cards[str(plain_four.id)]['zone_key'], f'equipment-{plain_four.id}')
+        self.assertEqual(cards[str(branded_four.id)]['zone_key'], f'equipment-{branded_four.id}')
+        self.assertNotEqual(
+            cards[str(plain_four.id)]['card_id'],
+            cards[str(branded_four.id)]['card_id'],
+        )
+        zone_keys = [card['zone_key'] for card in dashboard['complex_zones']]
+        self.assertEqual(len(zone_keys), len(set(zone_keys)))
+
+    def test_every_active_complex_detail_uses_the_stable_equipment_key(self):
+        dispatcher_role = Role.objects.create(code='dispatcher', name='Горный диспетчер')
+        dispatcher_access = EmployeeAccess.objects.create(
+            employee=self.dispatcher,
+            role=dispatcher_role,
+            access_code='515151',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        session = self.client.session
+        session['employee_access_id'] = dispatcher_access.id
+        session['device_kind'] = 'personal'
+        session.save()
+
+        plain_four = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            garage_number='4',
+        )
+        branded_four = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            garage_number='ТВИ 4',
+        )
+        active_excavators = (self.excavator, plain_four, branded_four)
+        for excavator in active_excavators:
+            ExcavatorPlacement.objects.create(
+                excavator=excavator,
+                zone=ExcavatorPlacement.Zone.ACTIVE,
+            )
+
+        for excavator in active_excavators:
+            response = self.client.get(
+                reverse(
+                    'dispatcher_equipment_detail',
+                    kwargs={
+                        'category': 'complex',
+                        'equipment_id': excavator.id,
+                    },
+                ),
+                {'state_version': get_operational_state_version()},
+                HTTP_ACCEPT='application/json',
+                HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            )
+
+            self.assertEqual(response.status_code, 200, response.content)
+            self.assertEqual(
+                response.json()['card_key'],
+                f'complex-equipment-{excavator.id}',
+            )
+            self.assertEqual(
+                response.json()['card']['id'],
+                f'complex-equipment-{excavator.id}',
+            )
+
     def test_downtime_summaries_use_reason_state_color(self):
         upsert_default_equipment_states()
         waiting_state = EquipmentState.objects.get(code='waiting')
@@ -845,6 +949,245 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(trucks_by_name['10']['plan_status'], 'plan_not_assigned')
         self.assertIsNone(trucks_by_name['10']['plan']['percent'])
         self.assertEqual(trucks_by_name['10']['plan_fact_label'], 'План не назначен')
+
+
+class DispatcherDowntimeControlTests(TestCase):
+    def setUp(self):
+        self.dispatcher = Employee.objects.create(
+            full_name='Диспетчер простоев',
+            status=Employee.Status.ACTIVE,
+        )
+        self.dispatcher_role = Role.objects.create(code='dispatcher', name='Горный диспетчер')
+        self.dispatcher_access = EmployeeAccess.objects.create(
+            employee=self.dispatcher,
+            role=self.dispatcher_role,
+            access_code='606060',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+            last_login_at=timezone.now(),
+        )
+        self.dispatcher_shift = EmployeeShift.objects.create(
+            employee=self.dispatcher,
+            shift_type='day',
+            workplace_code='dispatcher',
+            opened_at=timezone.now() - timedelta(hours=1),
+            opened_by=self.dispatcher,
+        )
+        self.truck_type = EquipmentType.objects.create(name='Самосвал')
+        self.excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        self.truck = Equipment.objects.create(
+            equipment_type=self.truck_type,
+            garage_number='50',
+        )
+        self.excavator = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            garage_number='5',
+        )
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+        )
+        self.truck_reason = DowntimeReason.objects.create(
+            name='Ремонт самосвала — тест диспетчера',
+            equipment_type=self.truck_type,
+            is_critical=True,
+        )
+        self.excavator_reason = DowntimeReason.objects.create(
+            name='Ожидание самосвалов — тест диспетчера',
+            short_label='Ожидание самосвалов',
+            equipment_type=self.excavator_type,
+        )
+        session = self.client.session
+        session['employee_access_id'] = self.dispatcher_access.id
+        session['active_role_access_id'] = self.dispatcher_access.id
+        session['active_role_login_at'] = self.dispatcher_access.last_login_at.isoformat()
+        session['active_role_code'] = self.dispatcher_role.code
+        session['device_kind'] = 'personal'
+        session.save()
+
+    def create_downtime(self, equipment, reason, *, minutes=12):
+        subject = Employee.objects.create(
+            full_name=f'Сотрудник {equipment.garage_number}',
+        )
+        return DowntimeEvent.objects.create(
+            equipment=equipment,
+            employee=subject,
+            subject_employee=subject,
+            recorded_by=subject,
+            reason=reason,
+            started_at=timezone.now() - timedelta(minutes=minutes),
+            comment='Исходный комментарий',
+        )
+
+    def close_downtime(self, event, *, version=None):
+        return self.client.post(
+            reverse('dispatcher_close_downtime', kwargs={'event_id': event.id}),
+            data=json.dumps({
+                'state_version': (
+                    get_operational_state_version()
+                    if version is None
+                    else version
+                ),
+            }),
+            content_type='application/json',
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+    def test_dispatcher_closes_downtime_from_matching_excavator_and_truck_cards(self):
+        for equipment, reason in (
+            (self.excavator, self.excavator_reason),
+            (self.truck, self.truck_reason),
+        ):
+            with self.subTest(equipment=equipment.garage_number):
+                downtime = self.create_downtime(equipment, reason)
+                original = {
+                    'started_at': downtime.started_at,
+                    'reason_id': downtime.reason_id,
+                    'employee_id': downtime.employee_id,
+                    'subject_employee_id': downtime.subject_employee_id,
+                    'recorded_by_id': downtime.recorded_by_id,
+                    'source': downtime.source,
+                    'comment': downtime.comment,
+                }
+
+                response = self.close_downtime(downtime)
+
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertEqual(response.json()['contract'], 'dispatcher-downtime-close-v1')
+                self.assertTrue(response.json()['closed'])
+                downtime.refresh_from_db()
+                self.assertIsNotNone(downtime.ended_at)
+                for field, expected in original.items():
+                    self.assertEqual(getattr(downtime, field), expected)
+                audit = OperationalStateEvent.objects.filter(
+                    event_type='downtime_changed',
+                    object_type='DowntimeEvent',
+                    object_id=str(downtime.id),
+                    reason='Dispatcher:downtime_closed',
+                    payload__action='dispatcher_downtime_closed',
+                    payload__actor_id=self.dispatcher.id,
+                    payload__equipment_id=equipment.id,
+                    payload__reason_id=reason.id,
+                    payload__source='dispatcher_override',
+                ).first()
+                self.assertIsNotNone(audit)
+
+    def test_repeated_close_is_idempotent_and_does_not_duplicate_audit(self):
+        downtime = self.create_downtime(self.excavator, self.excavator_reason)
+        requested_version = get_operational_state_version()
+
+        first = self.close_downtime(downtime, version=requested_version)
+        downtime.refresh_from_db()
+        ended_at = downtime.ended_at
+        second = self.close_downtime(downtime, version=requested_version)
+
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertTrue(second.json()['already_closed'])
+        self.assertFalse(second.json()['closed'])
+        downtime.refresh_from_db()
+        self.assertEqual(downtime.ended_at, ended_at)
+        self.assertEqual(
+            OperationalStateEvent.objects.filter(
+                reason='Dispatcher:downtime_closed',
+                object_id=str(downtime.id),
+            ).count(),
+            1,
+        )
+
+    def test_stale_card_does_not_close_current_downtime(self):
+        downtime = self.create_downtime(self.truck, self.truck_reason)
+
+        response = self.close_downtime(
+            downtime,
+            version=get_operational_state_version() + 1,
+        )
+
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(response.json()['error'], 'stale_board')
+        downtime.refresh_from_db()
+        self.assertIsNone(downtime.ended_at)
+        self.assertFalse(
+            OperationalStateEvent.objects.filter(
+                reason='Dispatcher:downtime_closed',
+                object_id=str(downtime.id),
+            ).exists()
+        )
+
+    def test_closed_dispatcher_shift_blocks_downtime_close(self):
+        downtime = self.create_downtime(self.excavator, self.excavator_reason)
+        self.dispatcher_shift.closed_at = timezone.now()
+        self.dispatcher_shift.save(update_fields=['closed_at'])
+
+        response = self.close_downtime(downtime)
+
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(response.json()['error'], 'dispatcher_shift_required')
+        downtime.refresh_from_db()
+        self.assertIsNone(downtime.ended_at)
+
+    def test_unauthenticated_close_is_forbidden(self):
+        downtime = self.create_downtime(self.truck, self.truck_reason)
+
+        response = Client().post(
+            reverse('dispatcher_close_downtime', kwargs={'event_id': downtime.id}),
+            data=json.dumps({'state_version': get_operational_state_version()}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
+        downtime.refresh_from_db()
+        self.assertIsNone(downtime.ended_at)
+
+    def test_dashboard_and_detail_payloads_expose_only_matching_active_downtime(self):
+        excavator_downtime = self.create_downtime(
+            self.excavator,
+            self.excavator_reason,
+            minutes=17,
+        )
+        truck_downtime = self.create_downtime(
+            self.truck,
+            self.truck_reason,
+            minutes=9,
+        )
+        dashboard = build_dispatcher_dashboard_context(
+            dispatcher_shift=self.dispatcher_shift,
+            active_trips=Trip.objects.none(),
+            pending_assignments=HaulAssignment.objects.none(),
+            accepted_assignments=HaulAssignment.objects.none(),
+            recent_completed_trips=Trip.objects.none(),
+            open_shifts=EmployeeShift.objects.filter(closed_at__isnull=True).exclude(pk=self.dispatcher_shift.pk),
+            open_mechanic_downtimes=DowntimeEvent.objects.filter(ended_at__isnull=True).select_related('reason'),
+            trucks=Equipment.objects.filter(equipment_type=self.truck_type),
+            excavators=Equipment.objects.filter(equipment_type=self.excavator_type),
+            recent_dispatcher_actions=[],
+        )
+        complex_card = next(
+            card for card in dashboard['complex_cards']
+            if card['equipment_card_id'] == str(self.excavator.id)
+        )
+
+        self.assertEqual(complex_card['active_downtime']['event_id'], excavator_downtime.id)
+        self.assertEqual(
+            dashboard['equipment_cards'][f'complex-equipment-{self.excavator.id}']['downtime']['event_id'],
+            excavator_downtime.id,
+        )
+        self.assertEqual(
+            dashboard['equipment_cards'][str(self.truck.id)]['downtime']['event_id'],
+            truck_downtime.id,
+        )
+
+    def test_dispatcher_board_renders_excavator_timer_and_card_close_control(self):
+        self.create_downtime(self.excavator, self.excavator_reason)
+
+        response = self.client.get(reverse('dispatcher_control'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="complex-downtime-status"')
+        self.assertContains(response, 'data-gd-downtime-timer')
+        self.assertContains(response, 'data-gd-detail-downtime-close')
+        self.assertContains(response, 'data-dispatcher-downtime-close-url-template=')
 
 
 class ExcavatorWorkServerIntegrationTests(TestCase):
@@ -1018,8 +1361,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
-        self.assertContains(response, 'playExcavatorSound("truck_assigned")')
-        self.assertContains(response, 'playExcavatorSound(action === "close" ? "shift_end" : "shift_start")')
+        self.assertContains(response, 'playExcavatorEquipmentVoice(action, truckNumber')
+        self.assertContains(response, 'action === "close" ? "shift_end" : "shift_start"')
+        self.assertContains(response, 'action === "close" ? "voice_shift_closed" : "voice_shift_opened"')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
         self.assertContains(response, 'actionOwner.dataset.eoCancelActionId')
         self.assertContains(response, 'shiftPendingActionId')
@@ -1031,7 +1375,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'mobile-shift__field--reference')
         self.assertContains(response, 'Лимит топлива')
         self.assertContains(response, 'Для этой модели')
-        self.assertContains(response, '<strong>7000</strong><em>л</em>', html=True)
+        self.assertContains(response, '<strong>0</strong><em>л</em>', html=True)
         self.assertContains(response, 'data-mobile-shift-field="engine_hours"')
         self.assertNotContains(response, 'data-mobile-shift-field="mileage"')
         self.assertNotContains(response, 'data-eo-shift-review')
@@ -3400,6 +3744,370 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             content_type='application/json',
         )
 
+    def create_other_excavator_client(self):
+        operator = Employee.objects.create(
+            full_name='Машинист нового комплекса',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        access = EmployeeAccess.objects.create(
+            employee=operator,
+            role=self.role,
+            access_code='300013',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        shift = EmployeeShift.objects.create(
+            employee=operator,
+            shift_type='day',
+            workplace_code='excavator_operator',
+            equipment=self.other_excavator,
+            opened_at=timezone.now(),
+            opened_by=operator,
+        )
+        EquipmentAssignment.objects.create(
+            employee=operator,
+            role=self.role,
+            equipment=self.other_excavator,
+            shift_type='day',
+            assigned_by=operator,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+        client = Client()
+        session = client.session
+        session['employee_access_id'] = access.id
+        session.save()
+        return client, operator, shift
+
+    def apply_reassignment_to_other_excavator(self):
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        pending, created = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
+        self.assertTrue(created)
+        applied = apply_pending_haul_assignment(pending.id)
+        self.assertEqual(applied.id, pending.id)
+        previous.refresh_from_db()
+        pending.refresh_from_db()
+        self.assertEqual(previous.status, AssignmentStatus.CANCELLED)
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+        return previous, pending
+
+    def test_driver_accept_applies_reassignment_and_preserves_old_one_shot(self):
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        pending, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
+        driver_client = Client()
+        driver_session = driver_client.session
+        driver_session['employee_access_id'] = self.driver_access.id
+        driver_session.save()
+
+        accepted = driver_client.post(
+            reverse('driver_accept_assignment', args=[pending.id]),
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(accepted.status_code, 200)
+        self.assertTrue(accepted.json()['ok'])
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+        self.assertTrue(
+            HaulAssignmentHandoff.objects.filter(
+                truck=self.truck,
+                source_assignment=previous,
+                target_assignment=pending,
+                status=HaulAssignmentHandoffStatus.OPEN,
+            ).exists()
+        )
+
+    def test_timer_applies_reassignment_and_preserves_old_one_shot(self):
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        now = timezone.now()
+        pending, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+            now=now - timedelta(minutes=6),
+        )
+
+        applied_count = reconcile_due_haul_assignments(now=now)
+
+        self.assertEqual(applied_count, 1)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+        self.assertTrue(
+            HaulAssignmentHandoff.objects.filter(
+                truck=self.truck,
+                source_assignment=previous,
+                target_assignment=pending,
+                status=HaulAssignmentHandoffStatus.OPEN,
+            ).exists()
+        )
+
+    def test_old_excavator_finishes_loading_after_reassignment_without_extra_action(self):
+        previous, current = self.apply_reassignment_to_other_excavator()
+        handoff = HaulAssignmentHandoff.objects.get(
+            source_assignment=previous,
+            target_assignment=current,
+            status=HaulAssignmentHandoffStatus.OPEN,
+        )
+
+        projected = projected_haul_assignments()
+        self.assertEqual(projected[self.truck.id].id, current.id)
+        self.assertEqual(projected[self.truck.id].excavator_id, self.other_excavator.id)
+
+        old_screen = self.client.get(reverse('excavator_work'))
+        handoff_card = next(
+            card for card in old_screen.context['truck_cards']
+            if card['assignment'].truck_id == self.truck.id
+        )
+        self.assertTrue(handoff_card['is_handoff_completion'])
+        self.assertEqual(handoff_card['status_label'], 'Завершить погрузку')
+        self.assertTrue(handoff_card['can_load'])
+        self.assertContains(old_screen, 'data-eo-handoff-completion="1"')
+
+        loaded = self.post_truck_loaded(client_action_id='old-completes-handoff')
+        self.assertEqual(loaded.status_code, 200)
+        trip = Trip.objects.get(pk=loaded.json()['trip_id'])
+        self.assertEqual(trip.excavator, self.excavator)
+        self.assertEqual(trip.truck, self.truck)
+        handoff.refresh_from_db()
+        self.assertEqual(handoff.status, HaulAssignmentHandoffStatus.RESOLVED)
+        self.assertEqual(handoff.resolved_by_trip, trip)
+        current.refresh_from_db()
+        self.assertEqual(current.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNone(current.ended_at)
+
+        driver_client = Client()
+        driver_session = driver_client.session
+        driver_session['employee_access_id'] = self.driver_access.id
+        driver_session.save()
+        driver_screen = driver_client.get(reverse('driver_work'))
+        self.assertEqual(driver_screen.context['active_trip'], trip)
+        self.assertEqual(
+            driver_screen.context['current_assignment'].excavator_id,
+            self.other_excavator.id,
+        )
+        self.assertEqual(driver_screen.context['driver_excavator_label'], 'ЭКС-12')
+
+    def test_new_excavator_first_trip_atomically_consumes_old_handoff(self):
+        previous, current = self.apply_reassignment_to_other_excavator()
+        handoff = HaulAssignmentHandoff.objects.get(
+            source_assignment=previous,
+            target_assignment=current,
+        )
+        new_client, new_operator, _ = self.create_other_excavator_client()
+
+        new_loaded = new_client.post(
+            reverse('excavator_truck_loaded'),
+            data=json.dumps({
+                'client_action_id': 'new-completes-first',
+                'truck_id': self.truck.id,
+                'excavator_id': self.other_excavator.id,
+                'dump_point_id': self.dump_point.id,
+                'rock_type': self.rock.id,
+                'loading_horizon': '125',
+                'loading_block': '4',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(new_loaded.status_code, 200)
+        trip = Trip.objects.get(pk=new_loaded.json()['trip_id'])
+        self.assertEqual(trip.excavator, self.other_excavator)
+        self.assertEqual(trip.excavator_operator, new_operator)
+        handoff.refresh_from_db()
+        self.assertEqual(handoff.status, HaulAssignmentHandoffStatus.RESOLVED)
+        self.assertEqual(handoff.resolved_by_trip, trip)
+
+        old_retry = self.post_truck_loaded(client_action_id='old-loses-first-write')
+        self.assertEqual(old_retry.status_code, 409)
+        self.assertIn('право завершить погрузку использовано', old_retry.json()['error'])
+        self.assertEqual(
+            Trip.objects.filter(truck=self.truck, status=TripStatus.LOADED_WAITING_UNLOAD).count(),
+            1,
+        )
+
+    def test_active_old_trip_needs_no_handoff_when_reassignment_applies(self):
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+        previous = HaulAssignment.objects.get(truck=self.truck)
+        pending, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
+
+        apply_pending_haul_assignment(pending.id)
+
+        previous.refresh_from_db()
+        pending.refresh_from_db()
+        trip.refresh_from_db()
+        self.assertEqual(previous.status, AssignmentStatus.CANCELLED)
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertEqual(trip.excavator, self.excavator)
+        self.assertFalse(HaulAssignmentHandoff.objects.filter(truck=self.truck).exists())
+
+    def test_release_to_garage_keeps_one_shot_completion_for_old_excavator(self):
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        pending, created = schedule_haul_release(
+            truck=self.truck,
+            assigned_by=self.operator,
+        )
+        self.assertTrue(created)
+        apply_pending_haul_assignment(pending.id)
+
+        self.assertNotIn(self.truck.id, projected_haul_assignments())
+        handoff = HaulAssignmentHandoff.objects.get(
+            source_assignment=previous,
+            target_assignment=pending,
+            status=HaulAssignmentHandoffStatus.OPEN,
+        )
+        loaded = self.post_truck_loaded(client_action_id='old-completes-after-release')
+        self.assertEqual(loaded.status_code, 200)
+        trip = Trip.objects.get(pk=loaded.json()['trip_id'])
+        self.assertEqual(trip.excavator, self.excavator)
+        handoff.refresh_from_db()
+        self.assertEqual(handoff.status, HaulAssignmentHandoffStatus.RESOLVED)
+        self.assertEqual(handoff.resolved_by_trip, trip)
+
+    def test_rapid_reassignments_leave_no_more_than_one_successful_loading(self):
+        first_previous, first_target = self.apply_reassignment_to_other_excavator()
+        other_client, _, _ = self.create_other_excavator_client()
+        second_target, created = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.excavator,
+            assigned_by=self.operator,
+            expected_state_id=first_target.id,
+        )
+        self.assertTrue(created)
+        apply_pending_haul_assignment(second_target.id)
+
+        self.assertEqual(
+            HaulAssignmentHandoff.objects.filter(
+                truck=self.truck,
+                status=HaulAssignmentHandoffStatus.OPEN,
+            ).count(),
+            2,
+        )
+        projected = projected_haul_assignments()
+        self.assertEqual(projected[self.truck.id].id, second_target.id)
+        self.assertEqual(projected[self.truck.id].excavator_id, self.excavator.id)
+        source_shift = EmployeeShift.objects.get(
+            employee=self.operator,
+            closed_at__isnull=True,
+        )
+        visible_load_assignments = excavator_load_assignment_queryset(source_shift)
+        self.assertEqual(
+            list(visible_load_assignments.values_list('id', flat=True)),
+            [second_target.id],
+        )
+
+        current_loaded = self.post_truck_loaded(client_action_id='rapid-current-first')
+        self.assertEqual(current_loaded.status_code, 200)
+        trip = Trip.objects.get(pk=current_loaded.json()['trip_id'])
+        self.assertEqual(trip.excavator, self.excavator)
+        self.assertFalse(
+            HaulAssignmentHandoff.objects.filter(
+                truck=self.truck,
+                status=HaulAssignmentHandoffStatus.OPEN,
+            ).exists()
+        )
+        stale_loaded = other_client.post(
+            reverse('excavator_truck_loaded'),
+            data=json.dumps({
+                'client_action_id': 'rapid-old-loses',
+                'truck_id': self.truck.id,
+                'excavator_id': self.other_excavator.id,
+                'dump_point_id': self.dump_point.id,
+                'rock_type': self.rock.id,
+                'loading_horizon': '125',
+                'loading_block': '4',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(stale_loaded.status_code, 409)
+        self.assertEqual(
+            Trip.objects.filter(
+                truck=self.truck,
+                status__in=(TripStatus.ACTIVE, TripStatus.LOADED_WAITING_UNLOAD),
+            ).count(),
+            1,
+        )
+
+    def test_closing_source_shift_expires_unused_handoff(self):
+        previous, current = self.apply_reassignment_to_other_excavator()
+        handoff = HaulAssignmentHandoff.objects.get(
+            source_assignment=previous,
+            target_assignment=current,
+        )
+
+        closed = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'close',
+                'client_action_id': 'close-source-with-handoff',
+                'fuel': '88',
+                'engine_hours': '1201',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(closed.status_code, 200)
+        handoff.refresh_from_db()
+        self.assertEqual(handoff.status, HaulAssignmentHandoffStatus.EXPIRED)
+        self.assertIsNotNone(handoff.resolved_at)
+        self.assertIsNone(handoff.resolved_by_trip)
+
+    def test_database_rejects_two_open_trips_for_one_truck(self):
+        Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Trip.objects.create(
+                    excavator=self.other_excavator,
+                    truck=self.truck,
+                    rock_type=self.rock,
+                    dump_point=self.dump_point,
+                    assigned_dump_point=self.dump_point,
+                    status=TripStatus.ACTIVE,
+                )
+
     def test_truck_loaded_creates_loaded_waiting_unload_trip(self):
         response = self.post_truck_loaded()
 
@@ -4617,11 +5325,14 @@ class DispatcherAssignmentRealtimeTests(TestCase):
         session.save()
 
     def test_release_complex_emits_assignment_changed_event_without_moving_excavator(self):
+        state_id = HaulAssignment.objects.get(truck=self.truck).id
         response = self.client.post(
             reverse('dispatcher_assign_truck'),
             data=json.dumps({
                 'action': 'release_complex',
                 'excavator_id': self.excavator.id,
+                'expected_assignment_states': {str(self.truck.id): state_id},
+                'client_action_id': 'dispatcher-release-complex',
             }),
             content_type='application/json',
         )
@@ -4651,6 +5362,8 @@ class DispatcherAssignmentRealtimeTests(TestCase):
         ).latest('version')
         self.assertEqual(event.payload['excavator_ids'], [self.excavator.id])
         self.assertEqual(event.payload['truck_ids'], [self.truck.id])
+        self.assertEqual(event.payload['truck_number'], '201')
+        self.assertEqual(event.payload['target_excavator_number'], '')
 
     def test_dispatcher_control_renders_duplicate_active_truck_assignment_once(self):
         HaulAssignment.objects.create(
@@ -4684,6 +5397,8 @@ class DispatcherAssignmentRealtimeTests(TestCase):
                 'action': 'assign',
                 'truck_id': self.truck.id,
                 'excavator_id': self.excavator.id,
+                'expected_assignment_state_id': pending.id,
+                'client_action_id': 'dispatcher-reuse-pending',
             }),
             content_type='application/json',
         )
@@ -4700,3 +5415,216 @@ class DispatcherAssignmentRealtimeTests(TestCase):
         self.assertEqual(response.json()['assignment_id'], pending.id)
         self.assertTrue(active_assignments.filter(status=AssignmentStatus.ACCEPTED).exists())
         self.assertTrue(active_assignments.filter(id=pending.id, status=AssignmentStatus.PENDING).exists())
+
+    def test_dispatcher_assignment_retry_returns_saved_response_without_second_command(self):
+        state_id = HaulAssignment.objects.get(truck=self.truck).id
+        payload = {
+            'action': 'release',
+            'truck_id': self.truck.id,
+            'expected_assignment_state_id': state_id,
+            'client_action_id': 'dispatcher-release-retry',
+        }
+
+        first = self.client.post(
+            reverse('dispatcher_assign_truck'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        second = self.client.post(
+            reverse('dispatcher_assign_truck'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(second.json()['deduplicated'])
+        self.assertEqual(first.json()['assignment_id'], second.json()['assignment_id'])
+        self.assertEqual(
+            HaulAssignment.objects.filter(
+                truck=self.truck,
+                action=HaulAssignmentAction.RELEASE,
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            ShiftClientAction.objects.filter(
+                action_type='dispatcher_assign_truck',
+                client_action_id='dispatcher-release-retry',
+            ).count(),
+            1,
+        )
+
+    def test_dispatcher_rejects_same_action_id_with_different_payload(self):
+        state_id = HaulAssignment.objects.get(truck=self.truck).id
+        first_payload = {
+            'action': 'release',
+            'truck_id': self.truck.id,
+            'expected_assignment_state_id': state_id,
+            'client_action_id': 'dispatcher-payload-conflict',
+        }
+        first = self.client.post(
+            reverse('dispatcher_assign_truck'),
+            data=json.dumps(first_payload),
+            content_type='application/json',
+        )
+        conflict = self.client.post(
+            reverse('dispatcher_assign_truck'),
+            data=json.dumps({**first_payload, 'action': 'assign', 'excavator_id': self.excavator.id}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(conflict.status_code, 409)
+        self.assertTrue(conflict.json()['conflict'])
+        self.assertEqual(
+            HaulAssignment.objects.filter(
+                truck=self.truck,
+                action=HaulAssignmentAction.RELEASE,
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+            ).count(),
+            1,
+        )
+
+    def test_second_stale_tab_cannot_overwrite_newer_dispatcher_assignment(self):
+        state_id = HaulAssignment.objects.get(truck=self.truck).id
+        other_excavator = Equipment.objects.create(
+            equipment_type=self.excavator.equipment_type,
+            model=self.excavator.model,
+            garage_number='Э-202',
+            is_active=True,
+        )
+        ExcavatorPlacement.objects.create(
+            excavator=other_excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+        )
+        first = self.client.post(
+            reverse('dispatcher_assign_truck'),
+            data=json.dumps({
+                'action': 'assign',
+                'truck_id': self.truck.id,
+                'excavator_id': other_excavator.id,
+                'expected_assignment_state_id': state_id,
+                'client_action_id': 'dispatcher-tab-first',
+            }),
+            content_type='application/json',
+        )
+        stale = self.client.post(
+            reverse('dispatcher_assign_truck'),
+            data=json.dumps({
+                'action': 'release',
+                'truck_id': self.truck.id,
+                'expected_assignment_state_id': state_id,
+                'client_action_id': 'dispatcher-tab-stale',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(stale.json()['code'], 'state_conflict')
+        projected = projected_haul_assignments()[self.truck.id]
+        self.assertEqual(projected.id, first.json()['assignment_id'])
+        self.assertEqual(projected.excavator_id, other_excavator.id)
+        self.assertEqual(projected.action, HaulAssignmentAction.ASSIGN)
+
+    def test_repeated_realtime_fragments_keep_pending_truck_on_dispatcher_target(self):
+        state_id = HaulAssignment.objects.get(truck=self.truck).id
+        other_excavator = Equipment.objects.create(
+            equipment_type=self.excavator.equipment_type,
+            model=self.excavator.model,
+            garage_number='Э-203',
+            is_active=True,
+        )
+        ExcavatorPlacement.objects.create(
+            excavator=other_excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+        )
+        moved = self.client.post(
+            reverse('dispatcher_assign_truck'),
+            data=json.dumps({
+                'action': 'assign',
+                'truck_id': self.truck.id,
+                'excavator_id': other_excavator.id,
+                'expected_assignment_state_id': state_id,
+                'client_action_id': 'dispatcher-projected-fragment',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(moved.status_code, 200)
+        pending_state_id = moved.json()['assignment_state_id']
+        target_marker = (
+            f'data-equipment-card-id="{self.truck.id}" '
+            f'data-equipment-id="{self.truck.id}"'
+        )
+        target_zone_marker = f'data-assigned-zone="equipment-{other_excavator.id}"'
+        old_zone_marker = f'data-assigned-zone="equipment-{self.excavator.id}"'
+
+        full = self.client.get(reverse('dispatcher_control')).content.decode('utf-8')
+        fragments = [
+            self.client.get(
+                reverse('dispatcher_control'),
+                {'_operational_fragment': 'dispatcher'},
+            ).json()['html']
+            for _ in range(2)
+        ]
+
+        for html in [full, *fragments]:
+            truck_tag = next(
+                tag for tag in re.findall(r'<article[^>]+>', html)
+                if target_marker in tag
+            )
+            self.assertIn(target_zone_marker, truck_tag)
+            self.assertNotIn(old_zone_marker, truck_tag)
+            self.assertIn(
+                f'data-haul-assignment-state-id="{pending_state_id}"',
+                truck_tag,
+            )
+
+    def test_bulk_release_is_atomic_when_one_visible_state_is_stale(self):
+        second_truck = Equipment.objects.create(
+            equipment_type=self.truck.equipment_type,
+            model=self.truck.model,
+            garage_number='202',
+            is_active=True,
+        )
+        second_assignment = HaulAssignment.objects.create(
+            truck=second_truck,
+            excavator=self.excavator,
+            assigned_by=self.dispatcher,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        first_assignment = HaulAssignment.objects.get(truck=self.truck)
+        response = self.client.post(
+            reverse('dispatcher_assign_truck'),
+            data=json.dumps({
+                'action': 'release_complex',
+                'excavator_id': self.excavator.id,
+                'expected_assignment_states': {
+                    str(self.truck.id): first_assignment.id,
+                    str(second_truck.id): second_assignment.id + 1000,
+                },
+                'client_action_id': 'dispatcher-bulk-stale',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(
+            HaulAssignment.objects.filter(
+                truck_id__in=(self.truck.id, second_truck.id),
+                action=HaulAssignmentAction.RELEASE,
+                ended_at__isnull=True,
+            ).exists()
+        )
+        self.assertEqual(
+            projected_haul_assignments()[self.truck.id].id,
+            first_assignment.id,
+        )
+        self.assertEqual(
+            projected_haul_assignments()[second_truck.id].id,
+            second_assignment.id,
+        )

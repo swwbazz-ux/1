@@ -8,7 +8,7 @@ from django.http import HttpResponse, JsonResponse
 
 
 APP_CONTRACT_VERSION = 'pwa-contract-v1'
-STATIC_ASSET_RELEASE = 'ready-core-traffic-v106'
+STATIC_ASSET_RELEASE = 'ready-core-traffic-v117'
 READY_TRAFFIC_ROLE_CODES = frozenset({
     'admin',
     'oup',
@@ -219,7 +219,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v198',
+        shell_version='driver-mobile-shell-v200',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -253,7 +253,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v139',
+        shell_version='mining-master-mobile-shell-v155',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
@@ -290,7 +290,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v61',
+        shell_version='dispatcher-desktop-shell-v64',
     ),
     RoleApp(
         role_code='settlement_clerk',
@@ -645,8 +645,6 @@ self.addEventListener("message", event => {{
 
 def add_release_static_cache(worker_script, role_code):
     release_static_paths = ['/static/js/realtime-client.js']
-    if role_code in {'driver', 'excavator_operator'}:
-        release_static_paths.append('/static/js/native-background-connection-v1.js')
     if role_code != 'dispatcher':
         release_static_paths.insert(0, '/static/css/app.css')
     release_helper = RELEASE_STATIC_SERVICE_WORKER_JS.replace(

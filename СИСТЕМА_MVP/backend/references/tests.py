@@ -194,6 +194,11 @@ class ReferenceLoadTests(TestCase):
             model=truck_model,
             garage_number='TR-CLEAN',
         )
+        removed_trip_truck = Equipment.objects.create(
+            equipment_type=truck_type,
+            model=truck_model,
+            garage_number='TR-CLEAN-REMOVE',
+        )
         excavator = Equipment.objects.create(
             equipment_type=excavator_type,
             garage_number='EX-CLEAN',
@@ -238,7 +243,7 @@ class ReferenceLoadTests(TestCase):
         )
         removed_trip = Trip.objects.create(
             excavator=excavator,
-            truck=truck,
+            truck=removed_trip_truck,
             rock_type=obsolete_ore,
             dump_point=dump_point,
         )

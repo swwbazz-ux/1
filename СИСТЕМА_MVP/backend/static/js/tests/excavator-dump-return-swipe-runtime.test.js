@@ -107,6 +107,16 @@ test("direct return resolves the explicitly marked newest truck and submits once
 });
 
 test("successful swipe restarts and clears the dump-card rebound", () => {
+    const releaseSource = extractBraceBlock(
+        templateSource,
+        "function setDumpReturnReleaseVector",
+        "dump return release vector"
+    );
+    const clearReleaseSource = extractBraceBlock(
+        templateSource,
+        "function clearDumpReturnReleaseVector",
+        "dump return release cleanup"
+    );
     const reboundSource = extractBraceBlock(
         templateSource,
         "function playDumpReturnRebound",
@@ -120,6 +130,10 @@ test("successful swipe restarts and clears the dump-card rebound", () => {
             add(value) { classes.add(value); },
             remove(value) { classes.delete(value); },
         },
+        style: {
+            setProperty() {},
+            removeProperty() {},
+        },
         get offsetWidth() {
             layoutReads += 1;
             return 120;
@@ -132,13 +146,22 @@ test("successful swipe restarts and clears the dump-card rebound", () => {
             },
         },
     };
-    vm.runInNewContext(`${reboundSource}; this.run = playDumpReturnRebound;`, context);
+    vm.runInNewContext(
+        `${releaseSource}\n${clearReleaseSource}\n${reboundSource}; this.run = playDumpReturnRebound;`,
+        context
+    );
 
-    context.run(target);
+    context.run(target, {
+        elasticX: 12,
+        elasticY: -64,
+        elasticTilt: 2,
+        elasticStretchX: 1.02,
+        elasticStretchY: 1.04,
+    });
     assert.equal(layoutReads, 1);
     assert.equal(classes.has("is-return-rebounding"), true);
     assert.equal(timers.length, 1);
-    assert.equal(timers[0].delay, 620);
+    assert.equal(timers[0].delay, 860);
 
     timers[0].callback();
     assert.equal(classes.has("is-return-rebounding"), false);
@@ -146,7 +169,7 @@ test("successful swipe restarts and clears the dump-card rebound", () => {
 
 test("gesture, fallback queue and realtime safety contracts stay wired", () => {
     assert.match(templateSource, /target\.addEventListener\("pointerup"[\s\S]*returnLastTruckFromDump\(target\)/);
-    assert.match(templateSource, /target\.addEventListener\("pointerup"[\s\S]*playDumpReturnRebound\(target\)[\s\S]*returnLastTruckFromDump\(target\)/);
+    assert.match(templateSource, /target\.addEventListener\("pointerup"[\s\S]*playDumpReturnRebound\(target, releasedSwipe\)[\s\S]*returnLastTruckFromDump\(target\)/);
     assert.match(templateSource, /window\.setTimeout\(function \(\) \{[\s\S]*openDumpQueueModal\(target\)[\s\S]*\}, 560\)/);
     assert.match(templateSource, /\.eo-dashboard-unload-card\.is-return-swiping/);
     assert.match(shiftCss, /\.eo-dashboard-unload-card\.is-return-swiping[\s\S]*--eo-return-swipe-progress[\s\S]*-14px/);

@@ -136,6 +136,82 @@ public class NativeSoundPlugin extends Plugin {
             .put("eventVersion", eventVersion));
     }
 
+    @PluginMethod
+    public void announceEquipment(PluginCall call) {
+        String cueName = call.getString("cue", "truck_assigned");
+        if (!ALLOWED_SOUNDS.contains(cueName)) {
+            call.reject("Unknown equipment cue");
+            return;
+        }
+        String action = call.getString("action", "");
+        String equipmentNumber = call.getString("equipmentNumber", "");
+        long dumpPointId = readNumericLong(call, "dumpPointId");
+        String dumpPointName = call.getString("dumpPointName", "");
+        String[] voices = equipmentVoiceSequence(
+            action,
+            equipmentNumber,
+            dumpPointId,
+            dumpPointName
+        );
+        if (voices.length == 0) {
+            call.resolve(new JSObject()
+                .put("announced", false)
+                .put("reason", OperationalVoiceAnnouncer.REASON_RESOURCE_UNAVAILABLE));
+            return;
+        }
+        long eventVersion = readNumericLong(call, "eventVersion");
+        String eventKey = call.getString("eventKey", "");
+        OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceSequence(
+            getContext(),
+            cueName,
+            voices,
+            eventVersion,
+            eventKey,
+            false,
+            "",
+            ""
+        );
+        call.resolve(new JSObject()
+            .put("announced", result.announced)
+            .put("reason", result.reason)
+            .put("eventVersion", eventVersion));
+    }
+
+    private String[] equipmentVoiceSequence(
+            String action,
+            String equipmentNumber,
+            long dumpPointId,
+            String dumpPointName) {
+        if ("driver".equals(BuildConfig.APP_PROFILE_ID)
+                && "driver_excavator_assigned".equals(action)) {
+            String assignmentVoice = EquipmentVoiceCatalog.driverExcavatorAssignmentVoice(equipmentNumber);
+            return assignmentVoice.isEmpty() ? new String[0] : new String[] {assignmentVoice};
+        }
+        if (!"excavator".equals(BuildConfig.APP_PROFILE_ID)) {
+            return new String[0];
+        }
+        String numberVoice = EquipmentVoiceCatalog.truckNumberVoice(equipmentNumber);
+        if (numberVoice.isEmpty()) {
+            return new String[0];
+        }
+        if ("excavator_truck_assigned".equals(action)) {
+            return new String[] {"voice_truck_assigned_prefix", numberVoice};
+        }
+        if ("excavator_truck_removed".equals(action)) {
+            return new String[] {"voice_truck_removed_prefix", numberVoice};
+        }
+        if ("excavator_truck_sent".equals(action)) {
+            String destinationVoice = EquipmentVoiceCatalog.truckSentDestinationVoice(
+                dumpPointId,
+                dumpPointName
+            );
+            return destinationVoice.isEmpty()
+                ? new String[0]
+                : new String[] {"voice_truck_number_prefix", numberVoice, destinationVoice};
+        }
+        return new String[0];
+    }
+
     /**
      * Capacitor deserializes ordinary JavaScript integer literals as Integer,
      * while PluginCall.getLong() accepts only an actual Long instance. Read

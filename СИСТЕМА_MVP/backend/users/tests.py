@@ -2507,6 +2507,8 @@ class AccessLoginTests(TestCase):
                 'action': 'assign',
                 'truck_id': truck.id,
                 'excavator_id': excavator.id,
+                'expected_assignment_state_id': 0,
+                'client_action_id': 'driver-chain-dispatcher-assign-1',
             }),
             content_type='application/json',
             HTTP_HOST='localhost',
@@ -5437,9 +5439,9 @@ class AccessLoginTests(TestCase):
         values = [cell.value for row in sheet.iter_rows() for cell in row]
         self.assertIn('Hydraulics', values)
         self.assertIn('Replace hose', values)
-        self.assertIn('I смена (дневная 07:00 - 19:00)', values)
-        self.assertIn('II смена (ночная 19:00 - 07:00)', values)
-        self.assertNotIn('I смена (дневная 08:00 - 20:00)', values)
+        self.assertIn('Первая смена', values)
+        self.assertIn('Вторая смена', values)
+        self.assertNotIn('I смена (дневная 07:00 - 19:00)', values)
 
     def test_management_dashboard_shows_open_mechanic_downtimes(self):
         excavator_type = EquipmentType.objects.create(name='Excavator')
@@ -5534,9 +5536,9 @@ class AccessLoginTests(TestCase):
         self.assertContains(dashboard_response, 'План за сутки')
         self.assertContains(dashboard_response, 'Выполнение плана')
         self.assertContains(dashboard_response, 'Отклонение за сутки')
-        self.assertContains(dashboard_response, 'День против ночи')
-        self.assertContains(dashboard_response, 'Дневная смена')
-        self.assertContains(dashboard_response, 'Ночная смена')
+        self.assertContains(dashboard_response, 'Первая и вторая смены')
+        self.assertContains(dashboard_response, 'Первая смена')
+        self.assertContains(dashboard_response, 'Вторая смена')
         self.assertContains(dashboard_response, 'Динамика за 7 дней')
         self.assertContains(dashboard_response, 'Итог за 7 дней')
         self.assertContains(dashboard_response, 'План за 7 дней')
@@ -5563,12 +5565,12 @@ class AccessLoginTests(TestCase):
         workbook = load_workbook(BytesIO(export_response.content))
         self.assertIn('Сводка', workbook.sheetnames)
         self.assertIn('Динамика 7 дней', workbook.sheetnames)
-        self.assertIn('День ночь', workbook.sheetnames)
+        self.assertIn('Смены 1 и 2', workbook.sheetnames)
         values = [cell.value for sheet in workbook.worksheets for row in sheet.iter_rows() for cell in row]
         self.assertIn('Витрина руководства', values)
         self.assertIn('Факт за 7 дней, м3', values)
         self.assertIn('Выполнение за неделю, %', values)
-        self.assertIn('Дневная смена', values)
+        self.assertIn('Первая смена', values)
         self.assertIn(Decimal('79.00'), values)
         self.assertIn(98.8, values)
 
