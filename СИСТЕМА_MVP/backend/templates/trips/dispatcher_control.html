@@ -475,7 +475,7 @@
                         <button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>
                         <div class="mm-mobile-detail-title mm-mobile-fill-title">
                             <h1>Комплекс {{ complex.id|cut:"K-"|cut:"К-" }}</h1>
-                            <span>Самосвал в сторону — переставить</span>
+                            <span>Тяните самосвал в сторону · ↗ — выбрать экскаватор</span>
                         </div>
                         <div class="mm-mobile-header-actions">
                             <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
@@ -1131,7 +1131,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v145";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v146";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -4176,6 +4176,7 @@ document.addEventListener("DOMContentLoaded", function () {
             }
 
             mini.addEventListener("touchstart", function (event) {
+                if (window.PointerEvent) return;
                 if (isMiningMasterMobileReadonly() || !event.changedTouches || !event.changedTouches.length) return;
                 var touch = event.changedTouches[0];
                 activeTouchId = touch.identifier;
@@ -4185,6 +4186,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 dragging = false;
             }, { passive: true });
             mini.addEventListener("touchmove", function (event) {
+                if (window.PointerEvent) return;
                 if (activeTouchId === null) return;
                 var touch = trackedTouch(event);
                 if (!touch) return;
@@ -4203,17 +4205,19 @@ document.addEventListener("DOMContentLoaded", function () {
                 updateTransferDrag(touch.clientX, touch.clientY);
             }, { passive: false });
             mini.addEventListener("touchend", function (event) {
+                if (window.PointerEvent) return;
                 if (activeTouchId === null) return;
                 var touch = trackedTouch(event) || (event.changedTouches && event.changedTouches[0]);
                 finishTransferDrag(touch ? touch.clientX : startX, touch ? touch.clientY : startY, false, event);
             }, { passive: false });
             mini.addEventListener("touchcancel", function (event) {
+                if (window.PointerEvent) return;
                 if (activeTouchId === null) return;
                 var touch = trackedTouch(event);
                 finishTransferDrag(touch ? touch.clientX : startX, touch ? touch.clientY : startY, true, event);
             }, { passive: false });
             mini.addEventListener("pointerdown", function (event) {
-                if (event.pointerType === "touch" || isMiningMasterMobileReadonly()) return;
+                if (isMiningMasterMobileReadonly()) return;
                 if (event.pointerType === "mouse" && event.button !== 0) return;
                 activePointerId = event.pointerId;
                 startX = event.clientX;
@@ -4862,6 +4866,7 @@ document.addEventListener("DOMContentLoaded", function () {
         function bindMobileFillAssignedTruckRelease(mini) {
             if (!mini) return;
             bindMobileTruckTransferDrag(mini);
+            ensureMobileTruckTransferHandle(mini);
             if (!window.PointerEvent || mini.dataset.mmMobileReleaseBound === "true") return;
             mini.dataset.mmMobileReleaseBound = "true";
             var startX = 0;
