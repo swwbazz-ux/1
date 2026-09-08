@@ -465,14 +465,6 @@
                 {% endif %}
             </form>
 
-            {% if not is_native_app %}
-            <div class="mm-mobile-version-strip" aria-label="Версия приложения">
-                <span>Версия приложения</span>
-                <strong data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</strong>
-                <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
-            </div>
-            {% endif %}
-
             <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="home">
                     <span class="mm-mobile-nav-icon mm-mobile-nav-icon-pult" aria-hidden="true"></span>
@@ -1157,7 +1149,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v154";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v155";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
