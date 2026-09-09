@@ -1,16 +1,20 @@
 "use strict";
 
-/* Полоса самосвалов в карточке комплекса.
+/* Раскладка плиток самосвалов в карточках комплексов.
 
-   Раньше размер плитки брался от ГАРАЖНОЙ плитки справа и к доступной высоте
-   карточки отношения не имел: при десяти комплексах плитка 73px заезжала в
-   полосу высотой 10px, и её срезал overflow карточки — на экране оставалась
-   кромка с обрубленными цифрами. Плюс вёрсткой карточки управлял чужой
-   элемент: правка гаража ломала комплексы.
+   Размер считается от размеров САМОГО поля, а не от гаражной плитки справа:
+   раньше плитка 73px заезжала в полосу высотой 10px и её срезал overflow
+   карточки, а вёрсткой карточки управлял чужой элемент.
 
-   Теперь полоса считает себя сама, а самосвал показывается жетоном номера без
-   картинки. Тест сторожит именно это: расчёт от собственных размеров, работу
-   на крайних количествах (одна машина и двадцать) и отсутствие обрезки. */
+   Раскладка подбирается перебором числа колонок, а не по лестнице
+   фиксированных размеров: лестница брала первый подошедший размер и
+   останавливалась, поэтому при двенадцати машинах справа оставалась пустая
+   колонка шириной в целую плитку.
+
+   Размер плитки один на всю доску — по самому загруженному комплексу, но не
+   мельче нижней границы. Иначе рядом оказывались плитки 168px и 70px: поле
+   каждой карточки заполнено, но по размеру плиток уже нельзя на глаз
+   сравнить загрузку комплексов, а диспетчер смотрит на доску целиком. */
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -32,150 +36,180 @@ const CSS = fs.readFileSync(
 );
 
 const GAP = 6;
-/* Полная плитка сохраняет всё, что в неё заложено: номер, картинку и подпись
-   состояния. Жетон остаётся только там, где машин столько, что подпись всё
-   равно стала бы нечитаемой. */
-const RICH = [
-    { w: 72, h: 58 },
-    { w: 66, h: 53 },
-    { w: 60, h: 48 },
-    { w: 54, h: 44 }
-];
-const COMPACT = [
-    { w: 56, h: 28 },
-    { w: 50, h: 26 },
-    { w: 44, h: 24 },
-    { w: 38, h: 22 }
-];
+const MAX = { w: 168, h: 124 };
+const MIN = { w: 34, h: 20 };
+const FLOOR = { w: 88, h: 63 };
+const ASPECT = { min: 1.15, max: 1.55 };
+const RICH_MIN_H = 42;
 
-function capacity(rackWidth, rackHeight, w, h) {
-    const cols = Math.max(1, Math.floor((rackWidth + GAP) / (w + GAP)));
-    const rows = Math.max(1, Math.floor((rackHeight + GAP) / (h + GAP)));
-    return { cols, rows, total: cols * rows };
+/* Те же формулы, что в refreshComplexTruckRack. */
+function tileForGrid(w, h, cols, rows) {
+    const cellW = (w - GAP * (cols - 1)) / cols;
+    const cellH = (h - GAP * (rows - 1)) / rows;
+    if (cellW < MIN.w || cellH < MIN.h) return null;
+    let tw = Math.min(cellW, MAX.w);
+    let th = Math.min(cellH, MAX.h);
+    if (tw / th > ASPECT.max) tw = th * ASPECT.max;
+    if (tw / th < ASPECT.min) th = tw / ASPECT.min;
+    tw = Math.floor(tw);
+    th = Math.floor(th);
+    if (tw < MIN.w || th < MIN.h) return null;
+    return { w: tw, h: th, cols, rows, area: tw * th };
 }
 
-function fitRack(rackWidth, rackHeight, count) {
-    let chosen = null;
-    let rich = false;
-    for (const step of RICH) {
-        const fit = capacity(rackWidth, rackHeight, step.w, step.h);
-        if (fit.total >= count) {
-            chosen = { ...step, ...fit };
-            rich = true;
-            break;
-        }
+function layout(rackW, rackH, count) {
+    let best = null;
+    for (let cols = 1; cols <= count; cols += 1) {
+        const fit = tileForGrid(rackW, rackH, cols, Math.ceil(count / cols));
+        if (!fit) continue;
+        if (!best || fit.area > best.area || (fit.area === best.area && fit.rows < best.rows)) best = fit;
     }
-    if (!chosen) {
-        for (const step of COMPACT) {
-            const fit = capacity(rackWidth, rackHeight, step.w, step.h);
-            chosen = { ...step, ...fit };
-            if (fit.total >= count) break;
-        }
-    }
-    const overflow = Math.max(0, count - chosen.total);
-    const visible = overflow > 0 ? Math.max(0, chosen.total - 1) : count;
-    return { ...chosen, rich, visible, hidden: count - visible };
+    return best;
 }
+
+/* Общий размер доски: самый скромный из нужных, но не мельче границы. */
+function boardTile(rackW, rackH, counts) {
+    let common = null;
+    counts.filter((n) => n > 0).forEach((n) => {
+        const size = layout(rackW, rackH, n) || MIN;
+        if (!common || size.w * size.h < common.w * common.h) common = size;
+    });
+    if (!common) common = MAX;
+    if (common.w * common.h < FLOOR.w * FLOOR.h) common = FLOOR;
+    return common;
+}
+
+function place(rackW, rackH, size, count) {
+    const cols = Math.max(1, Math.floor((rackW + GAP) / (size.w + GAP)));
+    const rows = Math.max(1, Math.floor((rackH + GAP) / (size.h + GAP)));
+    const capacity = cols * rows;
+    const visible = count <= capacity ? count : Math.max(1, capacity - 1);
+    return { cols, rows, capacity, visible, hidden: count - visible };
+}
+
+/* Поле карточки на боевом окне 1536x886: холст 1921x1108, карточка 590x233. */
+const RACK = { w: 372, h: 201 };
 
 function rackFunction(source) {
-    const from = source.indexOf("function refreshComplexTruckRack(rack) {");
-    assert.notEqual(from, -1, "функция расчёта полосы не найдена");
-    const to = source.indexOf("function refreshAllComplexTruckRacks", from);
+    const from = source.indexOf("function complexTileForGrid");
+    assert.notEqual(from, -1, "функция расчёта плитки не найдена");
+    const to = source.indexOf("function watchComplexTruckRacks", from);
     return source.slice(from, to);
 }
 
-test("размер жетона считается от полосы, а не от гаражной плитки", () => {
+test("размер плитки считается от поля, а не от гаражной плитки", () => {
     for (const source of [TEMPLATE, SCRIPT]) {
         const fn = rackFunction(source);
         assert.match(fn, /rack\.clientWidth/);
         assert.match(fn, /rack\.clientHeight/);
-        /* Гараж — чужой элемент; полоса больше не должна о нём знать. */
+        /* Гараж — чужой элемент; поле больше не должно о нём знать. */
         assert.doesNotMatch(fn, /garage/i);
         assert.doesNotMatch(fn, /--gd-truck-slot/);
     }
 });
 
-test("расчёт не выполняется на неразложенной полосе", () => {
+test("расчёт не выполняется на неразложенном поле", () => {
     for (const source of [TEMPLATE, SCRIPT]) {
-        assert.match(source, /rackWidth < COMPLEX_TILE_MIN\.w \|\| rackHeight < COMPLEX_TILE_MIN\.h/);
+        assert.match(source, /width < COMPLEX_TILE_MIN\.w \|\| height < COMPLEX_TILE_MIN\.h/);
     }
 });
 
-test("за размером полосы следит ResizeObserver", () => {
+test("за размером поля следит ResizeObserver", () => {
     for (const source of [TEMPLATE, SCRIPT]) {
         assert.match(source, /complexRackResizeObserver = new ResizeObserver/);
         assert.match(source, /complexRackResizeObserver\.observe\(rack\)/);
     }
 });
 
-test("один самосвал показывается полной плиткой и ничего не растягивает", () => {
-    const fit = fitRack(452, 62, 1);
-    assert.equal(fit.rich, true, "при одной машине подпись и картинка остаются");
-    assert.equal(fit.w, RICH[0].w);
-    assert.equal(fit.h, RICH[0].h);
-    assert.equal(fit.visible, 1);
-    assert.equal(fit.hidden, 0);
+test("раскладка подбирается перебором колонок, а не по лестнице размеров", () => {
     for (const source of [TEMPLATE, SCRIPT]) {
-        assert.match(source, /--complex-truck-justify", "start"/);
+        const fn = rackFunction(source);
+        assert.match(fn, /for \(var cols = 1; cols <= count; cols \+= 1\)/);
+        assert.match(fn, /fit\.area > best\.area/);
+        assert.doesNotMatch(fn, /COMPLEX_TILE_RICH\b/);
     }
 });
 
-test("шесть самосвалов ещё показываются полной плиткой с подписью", () => {
-    const fit = fitRack(452, 62, 6);
-    assert.equal(fit.rich, true);
-    assert.equal(fit.visible, 6);
-    assert.equal(fit.hidden, 0);
+test("пустое место отдаётся плиткам: двенадцать машин заполняют поле по ширине", () => {
+    const fit = layout(RACK.w, RACK.h, 12);
+    const used = fit.cols * fit.w + (fit.cols - 1) * GAP;
+    assert.ok(used / RACK.w > 0.95, `ширина заполнена на ${Math.round((used / RACK.w) * 100)}%`);
+    assert.equal(fit.cols, 4);
+    assert.equal(fit.rows, 3);
 });
 
-test("двенадцать самосвалов переходят на жетон, но помещаются все", () => {
-    const fit = fitRack(452, 62, 12);
-    assert.equal(fit.rich, false, "подпись при таком количестве уже нечитаема");
-    assert.equal(fit.w, COMPACT[0].w);
-    assert.equal(fit.visible, 12);
-    assert.equal(fit.hidden, 0);
-});
-
-test("двадцать самосвалов помещаются, жетон уменьшается на ступень", () => {
-    const fit = fitRack(452, 62, 20);
-    assert.ok(fit.w < COMPACT[0].w, "жетон должен стать мельче");
-    assert.ok(fit.w >= COMPACT[COMPACT.length - 1].w, "не ниже минимума");
-    assert.equal(fit.visible, 20);
-    assert.equal(fit.hidden, 0);
-});
-
-test("непоместившийся хвост сворачивается в счётчик, а не обрезается", () => {
-    const fit = fitRack(150, 30, 40);
-    assert.ok(fit.hidden > 0, "часть машин должна уйти в счётчик");
-    assert.equal(fit.visible + fit.hidden, 40);
-    assert.equal(fit.visible, fit.total - 1, "ячейка счётчика занимает место");
-    for (const source of [TEMPLATE, SCRIPT]) {
-        assert.match(source, /complex-truck-more/);
+test("плитка не становится вертикальной: коридор пропорций соблюдён", () => {
+    for (const n of [1, 2, 3, 4, 5, 6, 8, 12, 16, 20]) {
+        const fit = layout(RACK.w, RACK.h, n);
+        assert.ok(fit, `нет раскладки для ${n}`);
+        const ratio = fit.w / fit.h;
+        assert.ok(ratio >= ASPECT.min - 0.01 && ratio <= ASPECT.max + 0.01,
+            `${n} машин: пропорция ${ratio.toFixed(2)} вне коридора`);
     }
 });
 
-test("подпись и картинка сохраняются, пока плитка полная", () => {
-    /* По умолчанию плитка полная: картинка и подпись видны. Прячутся они
-       только в жетоне, то есть под :not(.is-rich-trucks). */
-    assert.match(CSS, /\.dispatcher-complex-card \.complex-truck-tile img \{[^}]*display: block;/s);
-    assert.match(CSS, /\.dispatcher-complex-card \.complex-truck-tile span \{[^}]*display: block;/s);
+test("размер плитки один на всей доске", () => {
+    for (const source of [TEMPLATE, SCRIPT]) {
+        assert.match(source, /function refreshAllComplexTruckRacks/);
+        assert.match(source, /if \(!common \|\| \(size\.w \* size\.h\) < \(common\.w \* common\.h\)\)/);
+        assert.match(source, /applyComplexTruckLayout\(m\.rack, m\.tiles, m\.empty, common/);
+    }
+});
+
+test("при обычной смене плитки крупные и одинаковые", () => {
+    const counts = [6, 6, 6, 5, 0, 6, 6, 1, 6, 5];   // раздача с боевого экрана
+    const size = boardTile(RACK.w, RACK.h, counts);
+    assert.equal(size.w, 120);
+    assert.equal(size.h, 97);
+    assert.ok(size.h >= RICH_MIN_H, "подпись состояния должна остаться видимой");
+    counts.filter((n) => n > 0).forEach((n) => {
+        assert.equal(place(RACK.w, RACK.h, size, n).hidden, 0, `${n} машин должны поместиться`);
+    });
+});
+
+test("один перегруженный комплекс не мельчит всю доску", () => {
+    const counts = [16, 6, 6, 5, 0, 6, 6, 1, 6, 5];
+    const size = boardTile(RACK.w, RACK.h, counts);
+    assert.equal(size.w, FLOOR.w, "размер не должен уйти ниже границы читаемости");
+    assert.equal(size.h, FLOOR.h);
+    const crowded = place(RACK.w, RACK.h, size, 16);
+    assert.ok(crowded.hidden > 0, "перегруз показывается счётчиком");
+    assert.equal(crowded.visible + crowded.hidden, 16);
+    assert.equal(place(RACK.w, RACK.h, size, 6).hidden, 0, "обычные карточки не режутся");
+});
+
+test("подпись и картинка видны, пока плитка достаточно высокая", () => {
+    for (const source of [TEMPLATE, SCRIPT]) {
+        assert.match(source, /classList\.toggle\("is-rich-trucks", size\.h >= COMPLEX_TILE_RICH_MIN_H\)/);
+    }
+    assert.match(CSS, /:not\(\.is-rich-trucks\) \.complex-truck-tile img,[\s\S]*?display: none;/);
+    assert.match(CSS, /\.complex-truck-tile img \{[^}]*display: block;/s);
+    assert.match(CSS, /\.complex-truck-tile span \{[^}]*display: block;/s);
+});
+
+test("номер не лежит поверх картинки", () => {
     assert.match(
         CSS,
-        /:not\(\.is-rich-trucks\) \.complex-truck-tile img,[\s\S]*?display: none;/
+        /\.complex-truck-tile > strong,[\s\S]*?\.complex-truck-tile > img,[\s\S]*?\.complex-truck-tile > span \{[^}]*position: static;/s
     );
-    for (const source of [TEMPLATE, SCRIPT]) {
-        assert.match(source, /classList\.toggle\("is-rich-trucks", rich\)/);
-    }
 });
 
 test("карточка разделена на столбец информации и поле машин", () => {
-    assert.match(CSS, /grid-template-areas:\s*"head trucks"\s*"info trucks";/);
-    assert.match(CSS, /\.complex-title-state \{[^}]*grid-area: head;/s);
+    assert.match(CSS, /grid-template-areas:\s*\n?\s*"head trucks"\s*\n?\s*"info trucks"/);
+    assert.match(CSS, /\.complex-assigned-trucks \{[^}]*grid-area: trucks;/s);
     assert.match(CSS, /\.complex-context \{[^}]*grid-area: info;/s);
-    assert.match(CSS, /\.complex-assigned-trucks \{[^}]*grid-area: trucks;[^}]*align-self: stretch;/s);
 });
 
-test("длинный текст не выдавливает полосу машин", () => {
-    assert.match(CSS, /\.dispatcher-complex-card \.complex-state-chip[\s\S]*?text-overflow: ellipsis;/);
-    assert.match(CSS, /\.dispatcher-complex-card \.complex-context \{[^}]*overflow: hidden;/s);
+test("разделители не отрываются в начало строки", () => {
+    /* Точка ставится через ::after у предыдущего значения; как ::before у
+       следующего она повисала в начале строки после переноса. */
+    assert.match(CSS, /\.chip-horizon::after \{[^}]*content:/s);
+    assert.match(CSS, /\.chip-unload:not\(:last-child\)::after \{[^}]*content:/s);
+    assert.doesNotMatch(CSS, /\.chip-block::before \{[^}]*content:/s);
+});
+
+test("длинный текст не выдавливает поле машин", () => {
+    assert.match(CSS, /\.complex-state-chip[\s\S]*?text-overflow: ellipsis;/);
+    assert.match(CSS, /\.complex-context \{[^}]*overflow: hidden;/s);
     assert.match(CSS, /\.dispatcher-complex-card:not\(\.status-empty\) > \* \{[^}]*min-height: 0;/s);
 });

@@ -13000,15 +13000,28 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
     border: 1px dashed rgba(142, 158, 166, .28);
 }
 
+/* Подпись пустого поля не должна ужиматься в многоточие: поле — это grid с
+   узкими колонками под плитки, и без grid-column: 1/-1 надпись получала
+   ширину одной ячейки. */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-empty {
     grid-column: 1 / -1;
+    grid-row: 1 / -1;
     place-self: center;
     width: auto;
+    max-width: none;
     padding: 0 12px;
     color: rgba(142, 158, 166, .75);
     font-size: 12px;
     font-weight: 700;
     letter-spacing: .02em;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+/* На время пустого поля колонки не нужны — одна на всю ширину. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks:has(.complex-truck-empty:not([hidden])) {
+    grid-template-columns: minmax(0, 1fr);
 }
 
 /* Полная плитка: номер главный, картинка второстепенная, подпись состояния
