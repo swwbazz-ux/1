@@ -12833,13 +12833,11 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .dispatcher-plan-strip::before { content: "План"; }
 
 /* Блок стоит на одной строке с горизонтом, отделён точкой. */
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-block {
-    margin-left: -4px;
-}
-
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-block::before {
+/* Точка между горизонтом и блоком висит на горизонте: как ::before у блока
+   она отрывалась переносом и повисала в начале следующей строки. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-horizon::after {
     content: "·";
-    margin-right: 6px;
+    margin: 0 2px 0 6px;
     color: rgba(142, 158, 166, .7);
     font-weight: 900;
 }
@@ -12861,21 +12859,28 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
     white-space: normal;
 }
 
+/* Разделитель приклеен к предыдущему значению через ::after, а не поставлен
+   перед следующим: как ::before он отрывался переносом. Значение — inline-block
+   с nowrap, чтобы «ДСК 38%» не разрывалось между названием и процентом. */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-unload-points .chip-unload {
-    display: inline;
+    display: inline-block;
+    max-width: 100%;
     padding: 0;
     border: 0;
     background: transparent;
     color: var(--gd-ink);
     font-size: 12px;
     font-weight: 700;
-    line-height: 1.2;
-    white-space: normal;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: top;
 }
 
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-unload-points .chip-unload + .chip-unload::before {
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-unload-points .chip-unload:not(:last-child)::after {
     content: "·";
-    margin: 0 5px;
+    margin: 0 4px 0 5px;
     color: rgba(142, 158, 166, .7);
 }
 
@@ -12971,13 +12976,19 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
 
 /* --- Поле самосвалов ------------------------------------------------------- */
 
+/* Сетка поля берёт число колонок и размер ячейки из расчёта JS. Колонки
+   распределяются по всей ширине поля, иначе справа оставалась пустая полоса
+   шириной в целую плитку. */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks {
     grid-area: trucks;
     align-self: stretch;
     justify-self: stretch;
     height: auto;
+    grid-template-columns: repeat(var(--complex-truck-cols, 4), var(--complex-truck-w, 72px));
+    grid-auto-rows: var(--complex-truck-h, 58px);
+    gap: var(--complex-truck-gap, 6px);
     align-content: start;
-    justify-content: start;
+    justify-content: var(--complex-truck-justify, start);
     border-radius: 8px;
 }
 

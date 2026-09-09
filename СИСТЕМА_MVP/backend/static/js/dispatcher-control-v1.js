@@ -5179,51 +5179,60 @@ document.addEventListener("DOMContentLoaded", function () {
             grid.appendChild(card);
         });
     }
-    /* Жетоны самосвалов в карточке комплекса.
+    /* Плитки самосвалов в карточке комплекса.
 
-       Раньше размер плитки брался от ГАРАЖНОЙ плитки справа: её ширину
-       подгоняли под полосу, и ту же пропорцию применяли к высоте. Сколько
-       высоты реально осталось в карточке, никто не спрашивал, поэтому при
-       десяти комплексах плитка 73px заезжала в полосу высотой 10px и её
-       срезал overflow карточки — на экране оставалась кромка с обрубленными
-       цифрами. Вдобавок вёрсткой карточки управлял чужой элемент: правка
-       гаража ломала комплексы.
+       Размер считается от размеров САМОГО поля, а не от гаражной плитки
+       справа: раньше плитка 73px заезжала в полосу высотой 10px и её срезал
+       overflow карточки, а вёрсткой карточки управлял чужой элемент.
 
-       Теперь полоса считает себя сама. В карточке самосвал показывается
-       жетоном номера без картинки: под экскаватором стоят только самосвалы,
-       различать их по силуэту не нужно, а картинка съедала всю высоту.
-       Кольцо выполнения плана рисуется по контуру жетона через ::before и
-       места в потоке не занимает.
+       Раскладка подбирается перебором, а не по лестнице фиксированных
+       размеров. Лестница брала первый размер, при котором машины помещаются,
+       и останавливалась — поэтому при двенадцати машинах в поле оставалась
+       пустая колонка справа шириной в целую плитку. Теперь для каждого числа
+       колонок считается своя ячейка, и выигрывает та раскладка, где плитка
+       крупнее всех: диспетчеру нужно попадать по ним мышью и различать номера
+       через комнату, поэтому пустое место всегда отдаётся плиткам.
 
-       Размер подбирается от крупного к мелкому: берём самый большой жетон,
-       при котором все машины влезают в полосу. Не влезли даже минимальным —
-       последняя ячейка становится счётчиком «+N», а не обрезанной плиткой.
-       Скролла внутри карточки нет намеренно: прокручивать десять карточек
-       по отдельности диспетчер не станет. */
+       Пропорция ограничена коридором, иначе при одной машине на всё поле
+       выходил бы вытянутый прямоугольник, а при двадцати — узкая полоска.
+       Ниже COMPLEX_TILE_RICH_MIN_H картинка и подпись состояния всё равно
+       нечитаемы, поэтому там плитка превращается в жетон номера; состояние
+       читается цветом и кольцом плана. Если машин больше, чем ячеек даже при
+       минимальном размере, хвост сворачивается в счётчик «+N». Скролла внутри
+       карточки нет намеренно: прокручивать десять карточек по отдельности
+       диспетчер не станет. */
     var COMPLEX_TILE_GAP = 6;
-    /* Две формы плитки. Пока машины помещаются полной плиткой — показываем всё,
-       что в неё заложено: номер, картинку и подпись состояния. Полная плитка
-       уходит только тогда, когда машин физически много и подпись всё равно
-       стала бы нечитаемой — тогда остаётся жетон номера, а состояние читается
-       цветом и кольцом плана. */
-    var COMPLEX_TILE_RICH = [
-        { w: 72, h: 58 },
-        { w: 66, h: 53 },
-        { w: 60, h: 48 },
-        { w: 54, h: 44 }
-    ];
-    var COMPLEX_TILE_COMPACT = [
-        { w: 56, h: 28 },
-        { w: 50, h: 26 },
-        { w: 44, h: 24 },
-        { w: 38, h: 22 }
-    ];
-    var COMPLEX_TILE_MIN = { w: 38, h: 22 };
+    var COMPLEX_TILE_MAX = { w: 120, h: 96 };
+    var COMPLEX_TILE_MIN = { w: 34, h: 20 };
+    var COMPLEX_TILE_ASPECT = { min: 0.95, max: 1.55 };
+    var COMPLEX_TILE_RICH_MIN_H = 42;
 
-    function complexRackCapacity(rackWidth, rackHeight, w, h) {
-        var cols = Math.max(1, Math.floor((rackWidth + COMPLEX_TILE_GAP) / (w + COMPLEX_TILE_GAP)));
-        var rows = Math.max(1, Math.floor((rackHeight + COMPLEX_TILE_GAP) / (h + COMPLEX_TILE_GAP)));
-        return { cols: cols, rows: rows, total: cols * rows };
+    /* Ячейка при заданном числе колонок и строк, ужатая до коридора пропорций. */
+    function complexTileForGrid(rackWidth, rackHeight, cols, rows) {
+        var cellW = (rackWidth - (COMPLEX_TILE_GAP * (cols - 1))) / cols;
+        var cellH = (rackHeight - (COMPLEX_TILE_GAP * (rows - 1))) / rows;
+        if (cellW < COMPLEX_TILE_MIN.w || cellH < COMPLEX_TILE_MIN.h) return null;
+        var w = Math.min(cellW, COMPLEX_TILE_MAX.w);
+        var h = Math.min(cellH, COMPLEX_TILE_MAX.h);
+        if (w / h > COMPLEX_TILE_ASPECT.max) w = h * COMPLEX_TILE_ASPECT.max;
+        if (w / h < COMPLEX_TILE_ASPECT.min) h = w / COMPLEX_TILE_ASPECT.min;
+        w = Math.floor(w);
+        h = Math.floor(h);
+        if (w < COMPLEX_TILE_MIN.w || h < COMPLEX_TILE_MIN.h) return null;
+        return { w: w, h: h, cols: cols, rows: rows, area: w * h };
+    }
+
+    /* Лучшая раскладка для count машин: максимум площади плитки. */
+    function complexTruckLayout(rackWidth, rackHeight, count) {
+        var best = null;
+        for (var cols = 1; cols <= count; cols += 1) {
+            var fit = complexTileForGrid(rackWidth, rackHeight, cols, Math.ceil(count / cols));
+            if (!fit) continue;
+            if (!best || fit.area > best.area || (fit.area === best.area && fit.rows < best.rows)) {
+                best = fit;
+            }
+        }
+        return best;
     }
 
     function refreshComplexTruckRack(rack) {
@@ -5240,40 +5249,32 @@ document.addEventListener("DOMContentLoaded", function () {
 
         var rackWidth = rack.clientWidth || rack.getBoundingClientRect().width || 0;
         var rackHeight = rack.clientHeight || rack.getBoundingClientRect().height || 0;
-        /* До первой раскладки карточки полоса ещё нулевая. Считать по таким
+        /* До первой раскладки карточки поле ещё нулевое. Считать по таким
            размерам нельзя: ёмкость выходит в одну ячейку и все машины
-           сворачиваются в счётчик, а через кадр пересчёт даёт другое. Ждём
-           реальных размеров — пересчёт всё равно придёт по resize. */
+           сворачиваются в счётчик, а через кадр пересчёт даёт другое.
+           Ждём реальных размеров — ResizeObserver вызовет пересчёт. */
         if (rackWidth < COMPLEX_TILE_MIN.w || rackHeight < COMPLEX_TILE_MIN.h) return;
 
-        var chosen = null;
-        var rich = false;
-        var step;
-        var fit;
-        var i;
-        for (i = 0; i < COMPLEX_TILE_RICH.length; i += 1) {
-            step = COMPLEX_TILE_RICH[i];
-            fit = complexRackCapacity(rackWidth, rackHeight, step.w, step.h);
-            if (fit.total >= tiles.length) {
-                chosen = { w: step.w, h: step.h, cols: fit.cols, rows: fit.rows, total: fit.total };
-                rich = true;
-                break;
-            }
+        if (empty) empty.hidden = tiles.length > 0;
+        if (tiles.length === 0) {
+            rack.classList.remove("is-rich-trucks");
+            var more0 = rack.querySelector(".complex-truck-more");
+            if (more0) more0.hidden = true;
+            return;
         }
-        if (!chosen) {
-            for (i = 0; i < COMPLEX_TILE_COMPACT.length; i += 1) {
-                step = COMPLEX_TILE_COMPACT[i];
-                fit = complexRackCapacity(rackWidth, rackHeight, step.w, step.h);
-                chosen = { w: step.w, h: step.h, cols: fit.cols, rows: fit.rows, total: fit.total };
-                if (fit.total >= tiles.length) break;
-            }
-        }
-        rack.classList.toggle("is-rich-trucks", rich);
 
-        /* Хвост, который не поместился, сворачиваем в счётчик. Сама ячейка
-           счётчика занимает место, поэтому видимых машин на одну меньше. */
-        var overflow = Math.max(0, tiles.length - chosen.total);
-        var visible = overflow > 0 ? Math.max(0, chosen.total - 1) : tiles.length;
+        var chosen = complexTruckLayout(rackWidth, rackHeight, tiles.length);
+        var visible = tiles.length;
+        if (!chosen) {
+            /* Не помещаются даже минимальные — показываем сколько влезает,
+               последнюю ячейку отдаём счётчику. */
+            var maxCols = Math.max(1, Math.floor((rackWidth + COMPLEX_TILE_GAP) / (COMPLEX_TILE_MIN.w + COMPLEX_TILE_GAP)));
+            var maxRows = Math.max(1, Math.floor((rackHeight + COMPLEX_TILE_GAP) / (COMPLEX_TILE_MIN.h + COMPLEX_TILE_GAP)));
+            visible = Math.max(1, (maxCols * maxRows) - 1);
+            chosen = complexTruckLayout(rackWidth, rackHeight, visible + 1)
+                || { w: COMPLEX_TILE_MIN.w, h: COMPLEX_TILE_MIN.h, cols: maxCols, rows: maxRows };
+        }
+
         tiles.forEach(function (tile, index) {
             tile.hidden = index >= visible;
         });
@@ -5294,14 +5295,15 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         rack.classList.remove("truck-fill-1", "truck-fill-2", "truck-fill-3", "truck-fill-4");
+        rack.classList.toggle("is-rich-trucks", chosen.h >= COMPLEX_TILE_RICH_MIN_H);
         rack.style.setProperty("--complex-truck-cols", String(chosen.cols));
         rack.style.setProperty("--complex-truck-gap", COMPLEX_TILE_GAP + "px");
         rack.style.setProperty("--complex-truck-w", chosen.w + "px");
         rack.style.setProperty("--complex-truck-h", chosen.h + "px");
-        rack.style.setProperty("--complex-truck-font", Math.max(10, Math.round(chosen.h * 0.52)) + "px");
-        rack.style.setProperty("--complex-truck-justify", "start");
-        if (empty) empty.hidden = tiles.length > 0;
+        rack.style.setProperty("--complex-truck-font", Math.max(10, Math.round(chosen.h * 0.5)) + "px");
+        rack.style.setProperty("--complex-truck-justify", chosen.cols > 1 ? "space-between" : "start");
     }
+
     function refreshAllComplexTruckRacks() {
         document.querySelectorAll(".complex-assigned-trucks").forEach(refreshComplexTruckRack);
     }
