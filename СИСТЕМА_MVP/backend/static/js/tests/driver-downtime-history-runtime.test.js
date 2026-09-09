@@ -175,6 +175,18 @@ test("Shift, Downtimes and Waybill share the same bottom action rails", () => {
     );
 });
 
+test("Shift, Downtimes and Waybill share one visible action-label typography", () => {
+    assert.match(
+        TEMPLATE_SOURCE,
+        /\.mobile-shift\[data-mobile-shift-role="driver"\] \.mobile-shift__action > \[data-mobile-shift-label\],[\s\S]*?\.driver-downtime-close,[\s\S]*?\.driver-report-action-title\s*\{[\s\S]*?font-family:\s*inherit\s*!important;[\s\S]*?font-size:\s*var\(--driver-footer-action-font-size\)\s*!important;[\s\S]*?font-weight:\s*700\s*!important;[\s\S]*?line-height:\s*1\.15\s*!important;[\s\S]*?letter-spacing:\s*0\s*!important;[\s\S]*?text-transform:\s*uppercase;/
+    );
+    assert.match(
+        TEMPLATE_SOURCE,
+        /\.driver-report-action-hint\s*\{\s*display:\s*none;/
+    );
+    assert.match(TEMPLATE_SOURCE, /ready \? "Открыть группу" : "Подготовить путёвку"/);
+});
+
 test("short landscape keeps two-line downtime reasons readable and vertically scrollable", () => {
     assert.match(
         TEMPLATE_SOURCE,

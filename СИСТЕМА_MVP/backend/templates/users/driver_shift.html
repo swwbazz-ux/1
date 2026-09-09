@@ -4110,22 +4110,51 @@ body.driver-mobile-screen .driver-report-actions button {
     font-family: inherit;
     font-size: var(--driver-footer-action-font-size) !important;
     font-weight: 700 !important;
-    line-height: 1.05 !important;
+    line-height: 1.15 !important;
     letter-spacing: 0;
     box-shadow: inset 0 0 14px rgba(255, 255, 255, .035);
     -webkit-tap-highlight-color: transparent;
 }
 
+/* Every bottom action uses one label contract.  Keep it on the visible text
+   node as well as on the button: the shared Shift component and the MAX
+   delivery state both wrap their captions in child elements. */
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__action > [data-mobile-shift-label],
+body.driver-mobile-screen .driver-downtime-close,
 body.driver-mobile-screen .driver-report-action-title {
-    font-size: var(--driver-footer-action-font-size);
-    font-weight: 700;
-    line-height: 1;
+    font-family: inherit !important;
+    font-size: var(--driver-footer-action-font-size) !important;
+    font-weight: 700 !important;
+    line-height: 1.15 !important;
+    letter-spacing: 0 !important;
     text-transform: uppercase;
 }
 
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__action > [data-mobile-shift-label],
+body.driver-mobile-screen [data-driver-footer-action-label],
+body.driver-mobile-screen .driver-report-action-title {
+    display: block;
+    max-width: 100%;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-report-action-copy {
+    gap: 0;
+    place-items: center;
+}
+
 body.driver-mobile-screen .driver-report-action-hint {
-    font-size: clamp(10px, min(2.8vw, 1.35dvh), 12px);
-    line-height: 1;
+    display: none;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready {
+    grid-template-columns: auto auto;
+    justify-content: center;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready .driver-report-action-copy {
+    justify-self: auto;
+    text-align: center;
 }
 
 body.driver-mobile-screen .driver-downtime-close:not(:disabled),
@@ -4462,7 +4491,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                 <div class="driver-inline-note">Активные причины простоев для самосвалов не найдены.</div>
             {% endfor %}
         </div>
-        <button class="driver-primary-action driver-downtime-close driver-downtime-hold{% if not active_downtime %} is-disabled{% endif %}" type="button" data-driver-close-downtime {% if not active_downtime %}disabled aria-disabled="true"{% else %}aria-label="Завершить простой"{% endif %}>Завершить простой</button>
+        <button class="driver-primary-action driver-downtime-close driver-downtime-hold{% if not active_downtime %} is-disabled{% endif %}" type="button" data-driver-close-downtime {% if not active_downtime %}disabled aria-disabled="true"{% else %}aria-label="Завершить простой"{% endif %}><span data-driver-footer-action-label>Завершить простой</span></button>
     </section>
 
     <section class="driver-panel driver-tab {% if active_tab == 'manifest' %}is-active{% endif %}" data-driver-tab-panel="manifest" data-driver-report-date="{{ driver_shift_report_date }}" data-driver-report-shift="{{ driver_shift_report_shift }}" data-driver-report-driver="{{ driver_shift_report_driver }}" data-driver-report-truck="{{ driver_shift_report_truck }}" data-driver-report-trip-total="{{ shift_trip_count }}" data-driver-report-downtime-total="{{ shift_downtime_report_total_label }}" data-driver-report-end-fuel="{{ driver_shift_report_end_fuel|default_if_none:'' }}" data-driver-report-end-mileage="{{ driver_shift_report_end_mileage|default_if_none:'' }}" data-driver-report-end-engine-hours="{{ driver_shift_report_end_engine_hours|default_if_none:'' }}">
@@ -4515,7 +4544,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                     <span class="driver-report-max-mark" aria-hidden="true">MAX</span>
                     <span class="driver-report-action-copy">
                         <strong class="driver-report-action-title" data-driver-report-action-title>Подготовить путёвку</strong>
-                        <small class="driver-report-action-hint" data-driver-report-action-hint>для отправки диспетчеру</small>
+                        <small class="driver-report-action-hint" data-driver-report-action-hint aria-hidden="true">для отправки диспетчеру</small>
                     </span>
                 </button>
             </div>
@@ -6683,7 +6712,7 @@ window.bindDriverMobileShell = function () {
         function render(ready) {
             options.button.classList.toggle("is-max-ready", ready);
             options.button.dataset.driverReportState = ready ? "max" : "prepare";
-            options.title.textContent = ready ? "Открыть группу в MAX" : "Подготовить путёвку";
+            options.title.textContent = ready ? "Открыть группу" : "Подготовить путёвку";
             options.hint.textContent = ready ? "текст уже скопирован" : "для отправки диспетчеру";
         }
         function reset() {

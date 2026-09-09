@@ -109,7 +109,7 @@ function createFixture({copyFails = false} = {}) {
 test("Driver report uses one two-stage MAX delivery control with the configured group", () => {
     assert.match(TEMPLATE_SOURCE, /data-driver-report-delivery/);
     assert.match(TEMPLATE_SOURCE, /Подготовить путёвку/);
-    assert.match(TEMPLATE_SOURCE, /Открыть группу в MAX/);
+    assert.match(TEMPLATE_SOURCE, /Открыть группу/);
     assert.match(TEMPLATE_SOURCE, /https:\/\/max\.ru\/join\/haXmcD7Efa-2_dVX3_VLqfftNKU1QyMlnVTWgiQSDdE/);
     assert.doesNotMatch(TEMPLATE_SOURCE, /data-driver-report-share/);
     assert.doesNotMatch(TEMPLATE_SOURCE, /navigator\.share/);
@@ -131,7 +131,7 @@ test("first tap copies the report and second tap opens MAX without copying twice
     assert.equal(fixture.button.disabled, false);
     assert.equal(fixture.button.dataset.driverReportState, "max");
     assert.equal(fixture.classList.contains("is-max-ready"), true);
-    assert.equal(fixture.title.textContent, "Открыть группу в MAX");
+    assert.equal(fixture.title.textContent, "Открыть группу");
     assert.equal(fixture.hint.textContent, "текст уже скопирован");
 
     fixture.controller.handleClick();
