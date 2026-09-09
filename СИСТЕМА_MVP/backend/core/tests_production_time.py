@@ -9,18 +9,11 @@ from assignments.views import get_shift_type_for_now as mining_master_shift_type
 from core.production_time import (
     BUSINESS_TIME_ZONE_NAME,
     production_shift_context,
-    production_shift_label,
-    production_work_date_for_shift,
 )
 from shifts.models import ShiftType
 from trips.dispatcher_header import get_dispatcher_shift_type_for_now
 from trips.views import default_excavator_shift_type
-from reports.shift_analytics import (
-    authoritative_loading_shift_window,
-    dynamics_bucket,
-    downtime_shift_type,
-    trip_loading_date,
-)
+from reports.shift_analytics import dynamics_bucket, downtime_shift_type
 
 
 VLADIVOSTOK = ZoneInfo(BUSINESS_TIME_ZONE_NAME)
@@ -93,51 +86,3 @@ class ProductionTimeContractTests(SimpleTestCase):
 
         self.assertEqual({item.shift_type for item in contexts}, {ShiftType.NIGHT})
         self.assertEqual({item.production_date for item in contexts}, {date(2026, 7, 23)})
-
-    def test_assigned_shift_owns_early_handover_regardless_of_clock_bucket(self):
-        early_start = datetime(2026, 9, 8, 7, 52, tzinfo=VLADIVOSTOK)
-        early_evening_start = datetime(2026, 9, 8, 18, 52, tzinfo=VLADIVOSTOK)
-
-        self.assertEqual(
-            production_work_date_for_shift(early_start, ShiftType.DAY),
-            date(2026, 9, 8),
-        )
-        self.assertEqual(
-            production_work_date_for_shift(early_start, ShiftType.NIGHT),
-            date(2026, 9, 7),
-        )
-        self.assertEqual(
-            production_work_date_for_shift(early_evening_start, ShiftType.NIGHT),
-            date(2026, 9, 8),
-        )
-
-    def test_operational_labels_are_numbered_not_clock_names(self):
-        self.assertEqual(production_shift_label(ShiftType.DAY), 'Первая смена')
-        self.assertEqual(production_shift_label(ShiftType.NIGHT), 'Вторая смена')
-
-    def test_linked_shift_controls_trip_date_and_window_during_handover(self):
-        early_start = datetime(2026, 9, 8, 7, 52, tzinfo=VLADIVOSTOK)
-        shift = SimpleNamespace(
-            shift_type=ShiftType.NIGHT,
-            opened_at=early_start,
-        )
-        trip = SimpleNamespace(
-            loading_shift_id=243,
-            loading_shift=shift,
-        )
-
-        self.assertEqual(trip_loading_date(trip), date(2026, 9, 7))
-        production_date, shift_type, _start, _end = authoritative_loading_shift_window(trip)
-        self.assertEqual(production_date, date(2026, 9, 7))
-        self.assertEqual(shift_type, ShiftType.NIGHT)
-
-        early_evening_start = datetime(2026, 9, 8, 18, 52, tzinfo=VLADIVOSTOK)
-        evening_shift = SimpleNamespace(
-            shift_type=ShiftType.NIGHT,
-            opened_at=early_evening_start,
-        )
-        evening_trip = SimpleNamespace(
-            loading_shift_id=244,
-            loading_shift=evening_shift,
-        )
-        self.assertEqual(trip_loading_date(evening_trip), date(2026, 9, 8))

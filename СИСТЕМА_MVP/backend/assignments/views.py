@@ -88,7 +88,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v148";
+const CACHE_NAME = "mining-master-mobile-shell-v162";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -296,6 +296,17 @@ WORKPLACE_ROLE_CODES = {
 
 
 def mining_master_shift_queryset():
+    return mining_master_reporting_shift_queryset().filter(closed_at__isnull=True)
+
+
+def mining_master_reporting_shift_queryset():
+    """Все смены горных мастеров, включая уже закрытые.
+
+    Отчёт мастера не заканчивается вместе с кнопкой «Завершить смену»:
+    ответственность за результат остаётся у него до открытия следующей
+    смены горного мастера. Поэтому для отчётного окна нужна именно полная
+    последовательность смен, а не только открытые строки.
+    """
     mining_master_access = EmployeeAccess.objects.filter(
         employee_id=OuterRef('employee_id'),
         role__code='mining_master',
@@ -313,7 +324,6 @@ def mining_master_shift_queryset():
     return (
         EmployeeShift.objects
         .select_related('employee')
-        .filter(closed_at__isnull=True)
         .annotate(
             has_mining_master_access=Exists(mining_master_access),
             has_other_workplace_access=Exists(other_workplace_access),
@@ -328,6 +338,36 @@ def mining_master_shift_queryset():
             )
         )
     )
+
+
+def mining_master_reporting_period(reference_shift):
+    """Возвращает период ответственности мастера за выполненный объём.
+
+    Начало — открытие его смены. Конец — открытие следующей смены горного
+    мастера, а не закрытие текущей. Для текущего периода ``ends_at`` пустой.
+    """
+    if not reference_shift:
+        return None
+    next_shift = (
+        mining_master_reporting_shift_queryset()
+        .filter(opened_at__gt=reference_shift.opened_at)
+        .order_by('opened_at', 'id')
+        .first()
+    )
+    return {
+        'shift_id': reference_shift.id,
+        'starts_at': reference_shift.opened_at,
+        'ends_at': next_shift.opened_at if next_shift else None,
+    }
+
+
+def mining_master_reporting_shift(current_shift, blocking_shift):
+    """Находит владельца текущего непрерывного отчётного периода."""
+    if current_shift:
+        return current_shift
+    if blocking_shift:
+        return blocking_shift
+    return mining_master_reporting_shift_queryset().order_by('-opened_at', '-id').first()
 
 
 def get_shift_state(employee):
@@ -735,6 +775,7 @@ def mining_master_open_shift_or_error(access):
 
 
 def build_mining_master_dispatcher_header(request, access, current_shift, blocking_shift):
+    reporting_shift = mining_master_reporting_shift(current_shift, blocking_shift)
     active_person = access.employee if current_shift else (blocking_shift.employee if blocking_shift else None)
     active_shift_opened_at = ''
     active_shift_date = ''
@@ -826,6 +867,7 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
             'current_time': current_time,
             'current_date': current_date,
             'mining_master_mobile_enabled': True,
+            'mining_master_reporting_period': mining_master_reporting_period(reporting_shift),
             'dispatcher_move_excavator_url': reverse('mining_master_move_excavator'),
             'dispatcher_assign_truck_url': reverse('mining_master_assign_truck'),
             'dispatcher_nav_items': [

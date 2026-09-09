@@ -5190,38 +5190,21 @@ document.addEventListener("DOMContentLoaded", function () {
             empty.textContent = "самосвалы не назначены";
             rack.appendChild(empty);
         }
-        rack.classList.remove("truck-fill-1", "truck-fill-2", "truck-fill-3", "truck-fill-4");
-        rack.classList.add(tiles.length <= 6 ? "truck-fill-1" : tiles.length <= 12 ? "truck-fill-2" : tiles.length <= 18 ? "truck-fill-3" : "truck-fill-4");
-        var columns = tiles.length === 0 ? 6 : Math.min(6, Math.max(1, tiles.length));
-        if (tiles.length > 6) columns = 6;
-        var gap = tiles.length > 10 ? 5 : 6;
-        var garageTiles = Array.from(document.querySelectorAll("[data-garage-item='truck']"));
-        var garageRect = null;
-        garageTiles.some(function (garageTile) {
-            var rect = garageTile.getBoundingClientRect();
-            if (rect.width > 20 && rect.height > 20) {
-                garageRect = rect;
-                return true;
-            }
-            return false;
-        });
-        var boardStyles = getComputedStyle(document.querySelector(".dispatcher-board") || document.documentElement);
-        var cssGarageWidth = parseFloat(boardStyles.getPropertyValue("--gd-truck-slot-w")) || 74;
-        var cssGarageHeight = parseFloat(boardStyles.getPropertyValue("--gd-truck-slot-h")) || 74;
-        var garageWidth = garageRect ? garageRect.width : cssGarageWidth;
-        var garageHeight = garageRect ? garageRect.height : cssGarageHeight;
-        var rackWidth = rack.clientWidth || rack.getBoundingClientRect().width || 1;
-        var fittedWidth = Math.floor((rackWidth - (gap * (columns - 1))) / columns);
-        var stepWidth = tiles.length <= 6 ? garageWidth : tiles.length <= 12 ? Math.min(garageWidth, 66) : tiles.length <= 18 ? Math.min(garageWidth, 58) : Math.min(garageWidth, 50);
-        var width = Math.max(24, Math.min(garageWidth, stepWidth, fittedWidth));
-        var scale = garageWidth > 0 ? width / garageWidth : 1;
-        var height = Math.max(24, Math.min(garageHeight, Math.floor(garageHeight * scale)));
-        var justify = tiles.length >= 5 ? "space-between" : "start";
-        rack.style.setProperty("--complex-truck-cols", String(columns));
-        rack.style.setProperty("--complex-truck-gap", gap + "px");
-        rack.style.setProperty("--complex-truck-w", width + "px");
-        rack.style.setProperty("--complex-truck-h", height + "px");
-        rack.style.setProperty("--complex-truck-justify", justify);
+        var gap = 6;
+        var rackWidth = rack.clientWidth || 1;
+        var naturalTile = 92;
+        var naturalColumns = Math.max(1, Math.floor((rackWidth + gap) / (naturalTile + gap)));
+        var targetColumns = Math.max(1, Math.min(7, tiles.length || naturalColumns));
+        var needsCompactTiles = tiles.length > naturalColumns;
+        var fittedTile = Math.floor((rackWidth - (gap * (targetColumns - 1))) / targetColumns);
+        var tile = needsCompactTiles
+            ? Math.max(44, Math.min(naturalTile - 4, fittedTile))
+            : Math.max(44, Math.min(naturalTile, fittedTile));
+        var renderedColumns = Math.max(1, Math.floor((rackWidth + gap) / (tile + gap)));
+        var renderedRows = tiles.length ? Math.ceil(tiles.length / renderedColumns) : 0;
+
+        rack.style.setProperty("--tile", tile + "px");
+        rack.dataset.truckRows = String(renderedRows);
         if (empty) empty.hidden = tiles.length > 0;
     }
     function refreshAllComplexTruckRacks() {
@@ -5242,6 +5225,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!garage || !tile) return false;
         removeDuplicateDesktopTruckTiles(tile.dataset.equipmentId, tile);
         tile.classList.remove("complex-truck-tile", "dispatcher-dragging");
+        tile.removeAttribute("data-truck-tile");
         setDispatcherNodeEquipmentState(tile, "free", "truck");
         tile.dataset.dispatcherDrag = "truck";
         tile.dataset.garageItem = "truck";
@@ -5267,6 +5251,7 @@ document.addEventListener("DOMContentLoaded", function () {
         var zoneId = complexCard.dataset.zoneId || "";
         removeDuplicateDesktopTruckTiles(tile.dataset.equipmentId, tile);
         tile.classList.add("complex-truck-tile");
+        tile.setAttribute("data-truck-tile", "");
         tile.classList.remove("dispatcher-dragging", "is-placeholder");
         setDispatcherNodeEquipmentState(tile, "assigned", "truck");
         tile.dataset.dispatcherDrag = "truck";

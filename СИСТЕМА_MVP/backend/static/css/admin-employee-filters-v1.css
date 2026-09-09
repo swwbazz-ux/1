@@ -27,6 +27,26 @@
     cursor: pointer;
 }
 
+.admin-employees-shell .oup-person-avatar {
+    position: relative;
+    overflow: visible;
+}
+
+.admin-employees-shell .employee-presence-dot {
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    width: 11px;
+    height: 11px;
+    border: 2px solid var(--admin-panel, #fff);
+    border-radius: 50%;
+    background: var(--admin-gray, #8a98a6);
+}
+
+.admin-employees-shell .employee-presence-dot.is-online { background: var(--admin-green, #08766C); }
+.admin-employees-shell .employee-presence-dot.is-recent { background: var(--admin-yellow, #d79600); }
+.admin-employees-shell .employee-presence-dot.is-offline { background: var(--admin-red, #c64545); }
+
 .admin-employees-shell .admin-oup-employee-row.is-dragging {
     opacity: .66;
     cursor: grabbing;

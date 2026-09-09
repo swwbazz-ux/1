@@ -929,17 +929,32 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-card {
     --eo-return-swipe-progress: 0;
+    --eo-return-drag-x: 0px;
+    --eo-return-drag-y: 0px;
+    --eo-return-tilt: 0deg;
+    --eo-return-stretch-x: 1;
+    --eo-return-stretch-y: 1;
+    --eo-return-origin-x: 50%;
+    --eo-return-origin-y: 50%;
+    --eo-return-tether-x: 0px;
+    --eo-return-tether-y: 0px;
+    --eo-return-anchor-x: 0px;
+    --eo-return-anchor-y: 0px;
     position: relative !important;
     z-index: 5 !important;
     width: auto !important;
     min-width: 0 !important;
     min-height: var(--eo-dump-card-min-h) !important;
     height: 100% !important;
-    transform-origin: center center !important;
+    transform-origin: var(--eo-return-origin-x) var(--eo-return-origin-y) !important;
     transition: flex-grow .18s cubic-bezier(.2, .8, .2, 1), height .18s cubic-bezier(.2, .8, .2, 1), width .18s cubic-bezier(.2, .8, .2, 1), opacity .16s ease, filter .16s ease, border-color .16s ease, box-shadow .16s ease !important;
     will-change: flex-grow, height, width, opacity, filter, transform !important;
     touch-action: pan-x !important;
     user-select: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card[data-eo-has-pending-trucks="true"] {
+    touch-action: none !important;
 }
 
 body.excavator-operator-screen .eo-dashboard-unload-card[data-eo-has-pending-trucks="true"]::after {
@@ -961,16 +976,26 @@ body.excavator-operator-screen .eo-dashboard-unload-card[data-eo-has-pending-tru
 body.excavator-operator-screen .eo-dashboard-unload-card [data-eo-last-sent-truck="true"] {
     position: relative;
     z-index: 3;
-    transform: translate3d(0, calc(var(--eo-return-swipe-progress, 0) * -20px), 0);
+    transform: none;
     transition: transform .12s ease, opacity .12s ease, box-shadow .12s ease !important;
-    will-change: transform;
 }
 
 body.excavator-operator-screen .eo-dashboard-unload-card.is-return-swiping {
-    transform: translate3d(0, calc(var(--eo-return-swipe-progress, 0) * -14px), 0) scale(1.012) !important;
-    transition: transform .055s linear, border-color .12s ease, box-shadow .12s ease !important;
+    z-index: 45 !important;
+    transform-origin: var(--eo-return-origin-x) var(--eo-return-origin-y) !important;
+    transform: translate3d(var(--eo-return-drag-x), var(--eo-return-drag-y), 0)
+        rotate(var(--eo-return-tilt))
+        scaleX(var(--eo-return-stretch-x))
+        scaleY(var(--eo-return-stretch-y)) !important;
+    transition: border-color .08s ease, filter .08s ease, box-shadow .08s ease !important;
     border-color: rgba(255, 214, 41, .98) !important;
-    box-shadow: inset 0 0 0 2px rgba(255, 214, 41, .52), 0 0 20px rgba(255, 214, 41, .24) !important;
+    filter: brightness(1.09) saturate(1.08) !important;
+    box-shadow:
+        inset 0 0 0 2px rgba(255, 214, 41, .68),
+        var(--eo-return-anchor-x) var(--eo-return-anchor-y) 0 -3px rgba(255, 214, 41, .2),
+        var(--eo-return-tether-x) var(--eo-return-tether-y) 22px -8px rgba(255, 214, 41, .32),
+        var(--eo-return-anchor-x) var(--eo-return-anchor-y) 32px -12px rgba(255, 214, 41, .2),
+        0 14px 30px rgba(0, 0, 0, .42) !important;
 }
 
 body.excavator-operator-screen .eo-dashboard-unload-card.is-return-swiping::after {
@@ -979,8 +1004,8 @@ body.excavator-operator-screen .eo-dashboard-unload-card.is-return-swiping::afte
 }
 
 body.excavator-operator-screen .eo-dashboard-unload-card.is-return-armed [data-eo-last-sent-truck="true"] {
-    opacity: .62;
-    box-shadow: 0 0 14px rgba(255, 214, 41, .52);
+    opacity: .78;
+    box-shadow: 0 0 18px rgba(255, 214, 41, .64);
 }
 
 body.excavator-operator-screen .eo-dashboard-unload-card.is-return-pending {
@@ -1058,16 +1083,35 @@ body.excavator-operator-screen .eo-dashboard-unload-card.is-last-dump:not(.is-dr
 
 body.excavator-operator-screen .eo-dashboard-unload-card.is-return-rebounding,
 body.excavator-operator-screen .eo-dashboard-unload-card.is-return-rebounding.is-last-dump:not(.is-drop-ready) {
-    animation: eo-dump-return-rebound .58s cubic-bezier(.22, .82, .3, 1) both !important;
+    z-index: 45 !important;
+    transform-origin: center center !important;
+    animation: eo-dump-return-rebound .82s cubic-bezier(.2, .76, .22, 1) both !important;
 }
 
 @keyframes eo-dump-return-rebound {
-    0% { transform: translate3d(0, -14px, 0) scale(1.012); }
-    34% { transform: translate3d(0, 3px, 0) scale(.997); }
-    55% { transform: translate3d(0, -5px, 0) scale(1.006); }
-    73% { transform: translate3d(0, 1.5px, 0) scale(.999); }
-    87% { transform: translate3d(0, -2px, 0) scale(1.002); }
-    100% { transform: translate3d(0, 0, 0) scale(1); }
+    0% {
+        transform: translate3d(var(--eo-return-release-x), var(--eo-return-release-y), 0)
+            rotate(var(--eo-return-release-tilt))
+            scaleX(var(--eo-return-release-stretch-x))
+            scaleY(var(--eo-return-release-stretch-y));
+    }
+    30% {
+        transform: translate3d(var(--eo-return-bounce-1-x), var(--eo-return-bounce-1-y), 0)
+            rotate(var(--eo-return-bounce-1-tilt)) scale(.985);
+    }
+    50% {
+        transform: translate3d(var(--eo-return-bounce-2-x), var(--eo-return-bounce-2-y), 0)
+            rotate(var(--eo-return-bounce-2-tilt)) scale(1.009);
+    }
+    68% {
+        transform: translate3d(var(--eo-return-bounce-3-x), var(--eo-return-bounce-3-y), 0)
+            rotate(var(--eo-return-bounce-3-tilt)) scale(.996);
+    }
+    84% {
+        transform: translate3d(var(--eo-return-bounce-4-x), var(--eo-return-bounce-4-y), 0)
+            rotate(var(--eo-return-bounce-4-tilt)) scale(1.002);
+    }
+    100% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1076,17 +1120,6 @@ body.excavator-operator-screen .eo-dashboard-unload-card.is-return-rebounding.is
     body.excavator-operator-screen .eo-dashboard-truck-card.is-returned-from-dump,
     body.excavator-operator-screen .eo-dashboard-unload-card.is-last-dump:not(.is-drop-ready) {
         animation: none !important;
-    }
-
-    body.excavator-operator-screen .eo-dashboard-unload-card.is-return-swiping {
-        transform: translate3d(0, calc(var(--eo-return-swipe-progress, 0) * -3px), 0) !important;
-        transition: none !important;
-    }
-
-    body.excavator-operator-screen .eo-dashboard-unload-card.is-return-rebounding,
-    body.excavator-operator-screen .eo-dashboard-unload-card.is-return-rebounding.is-last-dump:not(.is-drop-ready) {
-        animation: none !important;
-        transform: none !important;
     }
 }
 

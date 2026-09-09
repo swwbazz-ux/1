@@ -27784,73 +27784,145 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         white-space: nowrap;
     }
 
-    .mm-mobile-version-strip {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        min-height: 34px;
-        margin: 0;
-        padding: 0 11px;
-        border: 1px solid rgba(139, 159, 170, .28);
-        border-radius: 7px;
-        background: rgba(8, 19, 27, .46);
-        color: rgba(180, 194, 201, .76);
-        font-size: 11px;
-        font-weight: 900;
-        line-height: 1;
-        text-transform: uppercase;
+    .mm-mobile-report-content {
+        display: grid;
+        gap: 12px;
+        align-content: start;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
     }
 
-    .mm-mobile-version-strip strong {
-        color: rgba(220, 255, 229, .88);
-        font-size: 13px;
-        font-weight: 900;
-        letter-spacing: .04em;
+    .mm-mobile-tab-panel[data-mm-mobile-panel="reports"] .mm-mobile-report-grid {
+        grid-auto-rows: minmax(82px, auto);
+        overflow: visible;
     }
 
-    .mm-mobile-version-strip button {
-        position: relative;
-        min-width: 128px;
-        min-height: 24px;
-        padding: 0 9px;
-        border: 1px solid rgba(91, 255, 122, .42);
-        border-radius: 6px;
-        background: rgba(91, 255, 122, .12);
-        color: rgba(220, 255, 229, .9);
-        font: inherit;
+    .mm-mobile-tab-panel[data-mm-mobile-panel="reports"] .mm-mobile-report-grid article {
+        gap: 4px;
+        padding: 10px 8px;
+    }
+
+    .mm-mobile-tab-panel[data-mm-mobile-panel="reports"] .mm-mobile-report-grid strong {
+        font-size: 28px;
+    }
+
+    .mm-mobile-report-grid article > small {
+        overflow: hidden;
+        max-width: 100%;
+        color: rgba(180, 194, 201, .7);
         font-size: 10px;
-        font-weight: 900;
+        font-weight: 800;
         line-height: 1;
-        text-transform: uppercase;
-        transition: background .16s ease, border-color .16s ease, box-shadow .16s ease, color .16s ease;
+        text-overflow: ellipsis;
         white-space: nowrap;
     }
 
-    .mm-mobile-version-strip button.has-pwa-update {
-        border-color: rgba(239, 68, 68, .9);
-        background: rgba(127, 29, 29, .92);
-        color: #fff7f7;
-        box-shadow: 0 0 0 1px rgba(239, 68, 68, .42), 0 0 18px rgba(239, 68, 68, .46);
-        animation: mm-mobile-update-button-pulse 1.12s ease-in-out infinite;
+    .mm-mobile-report-destinations {
+        overflow: hidden;
+        border: 1px solid rgba(139, 159, 170, .38);
+        border-radius: 9px;
+        background: rgba(8, 19, 27, .72);
     }
 
-    .mm-mobile-version-strip button:disabled {
-        opacity: .48;
-        animation: none;
+    .mm-mobile-report-destinations.is-in-transit {
+        border-color: rgba(57, 200, 238, .42);
+        background: linear-gradient(135deg, rgba(18, 52, 67, .72), rgba(8, 19, 27, .82));
     }
 
-    @keyframes mm-mobile-update-button-pulse {
-        0%,
-        100% {
-            background: rgba(127, 29, 29, .9);
-            box-shadow: 0 0 0 1px rgba(239, 68, 68, .42), 0 0 14px rgba(239, 68, 68, .42);
-        }
+    .mm-mobile-report-destinations.is-in-transit > header {
+        min-height: 38px;
+        border-bottom-color: rgba(57, 200, 238, .24);
+    }
 
-        50% {
-            background: rgba(185, 28, 28, .96);
-            box-shadow: 0 0 0 2px rgba(239, 68, 68, .58), 0 0 24px rgba(239, 68, 68, .72);
-        }
+    .mm-mobile-report-destinations.is-in-transit > header > span,
+    .mm-mobile-report-destinations.is-in-transit .mm-mobile-report-destination > b {
+        color: #57d5f5;
+    }
+
+    .mm-mobile-report-destinations > header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        min-height: 44px;
+        padding: 6px 8px 6px 12px;
+        border-bottom: 1px solid rgba(139, 159, 170, .26);
+    }
+
+    .mm-mobile-report-destinations > header > span {
+        color: rgba(180, 194, 201, .86);
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: .035em;
+        text-transform: uppercase;
+    }
+
+    .mm-mobile-report-destinations > header > button {
+        min-height: 34px;
+        padding: 0 10px;
+        border: 1px solid rgba(88, 223, 82, .48);
+        border-radius: 7px;
+        background: rgba(88, 223, 82, .1);
+        color: #71e76c;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 900;
+    }
+
+    .mm-mobile-report-destination {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        min-height: 52px;
+        padding: 8px 12px;
+    }
+
+    .mm-mobile-report-destination + .mm-mobile-report-destination {
+        border-top: 1px solid rgba(139, 159, 170, .2);
+    }
+
+    .mm-mobile-report-destination > div {
+        min-width: 0;
+    }
+
+    .mm-mobile-report-destination strong,
+    .mm-mobile-report-destination small {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .mm-mobile-report-destination strong {
+        color: #f3f7f8;
+        font-size: 14px;
+        line-height: 1.1;
+    }
+
+    .mm-mobile-report-destination small {
+        margin-top: 4px;
+        color: rgba(180, 194, 201, .72);
+        font-size: 10px;
+        line-height: 1;
+    }
+
+    .mm-mobile-report-destination > b {
+        color: #39c8ee;
+        font-size: 18px;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+    }
+
+    .mm-mobile-report-destination-list > p {
+        margin: 0;
+        padding: 18px 12px;
+        color: rgba(180, 194, 201, .7);
+        font-size: 12px;
+        text-align: center;
     }
 
     .mm-mobile-back-button:active,
@@ -27907,13 +27979,22 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     }
 
     .mm-mobile-shell-version {
-        color: rgba(184, 204, 210, .62);
-        font-size: 10px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 56px;
+        padding: 3px 5px 2px;
+        border: 1px solid rgba(126, 161, 171, .34);
+        border-radius: 999px;
+        color: rgba(208, 226, 231, .82);
+        background: rgba(11, 28, 36, .72);
+        font-size: 8px;
         font-weight: 800;
         line-height: 1;
         letter-spacing: .04em;
         text-transform: uppercase;
         text-shadow: 0 0 8px rgba(98, 255, 126, .22);
+        white-space: nowrap;
         user-select: none;
     }
 
@@ -28505,7 +28586,7 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         --mm-mobile-truck-swipe-x: 0px;
         --mm-mobile-fill-swipe-y: 0px;
         position: relative;
-        touch-action: none;
+        touch-action: pan-y;
         display: grid;
         grid-template-rows: auto minmax(0, 1fr);
         gap: 4px;
@@ -28519,7 +28600,7 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
             linear-gradient(145deg, rgba(20, 36, 44, .88), rgba(4, 14, 20, .92));
         box-shadow: inset 0 0 28px rgba(255, 255, 255, .025), 0 14px 24px rgba(0, 0, 0, .28);
         cursor: pointer;
-        touch-action: none;
+        touch-action: pan-y;
         transition: transform .16s ease, box-shadow .16s ease, filter .16s ease;
     }
 
@@ -28587,6 +28668,45 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         display: none;
     }
 
+    /* План смены — четыре прямые полосы по краю карточки. Заполнение идёт
+       по часовой стрелке; нет ни круга, ни серого внутреннего контура. */
+    .mm-mobile-complex-card.has-plan-progress::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 4;
+        display: block;
+        width: auto;
+        height: auto;
+        padding: 5px;
+        border: 0;
+        border-radius: 7px;
+        background:
+            linear-gradient(to right, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left top / var(--mm-mobile-plan-edge-top) 5px no-repeat,
+            linear-gradient(to bottom, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right top / 5px var(--mm-mobile-plan-edge-right) no-repeat,
+            linear-gradient(to left, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right bottom / var(--mm-mobile-plan-edge-bottom) 5px no-repeat,
+            linear-gradient(to top, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left bottom / 5px var(--mm-mobile-plan-edge-left) no-repeat;
+        box-shadow: none;
+        filter: drop-shadow(0 0 4px var(--mm-mobile-plan-glow));
+        opacity: 1;
+        transform: none;
+        -webkit-mask: none;
+        mask: none;
+        pointer-events: none;
+    }
+
+    .mm-mobile-complex-card.has-plan-progress.is-plan-overrun::before {
+        background:
+            linear-gradient(to right, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left top / var(--mm-mobile-plan-edge-top) 5px no-repeat,
+            linear-gradient(to bottom, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right top / 5px var(--mm-mobile-plan-edge-right) no-repeat,
+            linear-gradient(to left, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right bottom / var(--mm-mobile-plan-edge-bottom) 5px no-repeat,
+            linear-gradient(to top, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left bottom / 5px var(--mm-mobile-plan-edge-left) no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) left top / 100% 5px no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) right top / 5px 100% no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) right bottom / 100% 5px no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) left bottom / 5px 100% no-repeat;
+    }
+
     .mm-mobile-complex-card.is-swiping {
         transition: box-shadow .16s ease, filter .16s ease;
         z-index: 20;
@@ -28617,9 +28737,16 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         grid-template-rows: none !important;
-        grid-auto-rows: 68px !important;
-        align-content: start;
-        gap: 8px;
+        grid-auto-rows: minmax(0, 1fr) !important;
+        align-content: stretch;
+        gap: 6px;
+        overflow-y: hidden;
+        overscroll-behavior: none;
+    }
+
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-grid::before,
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-grid::after {
+        display: none;
     }
 
     .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-home {
@@ -28630,13 +28757,16 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         position: absolute;
         inset: 0;
         z-index: 400;
-        grid-template-rows: auto auto minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
+        gap: 6px;
         padding: max(14px, env(safe-area-inset-top)) 10px max(8px, env(safe-area-inset-bottom));
+        overflow: hidden;
         background: rgba(3, 14, 18, .985);
         box-shadow: 0 0 0 100vmax rgba(3, 14, 18, .82);
     }
 
     .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-home.is-transfer-overlay > .mm-mobile-header,
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-home.is-transfer-overlay > .mm-mobile-section-title,
     .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-home.is-transfer-overlay > .mm-mobile-bottom-nav,
     .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-home.is-transfer-overlay > .mm-mobile-create-complex-target {
         display: none !important;
@@ -28648,10 +28778,48 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
 
     .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card {
         grid-template-columns: minmax(0, 1fr) auto;
-        grid-template-rows: 1fr;
+        grid-template-rows: minmax(0, 1fr);
+        align-content: stretch;
         align-items: center;
+        gap: 5px;
+        min-height: 0;
+        padding: 5px 7px;
+        overflow: hidden;
         border-color: rgba(88, 223, 82, .72);
         touch-action: manipulation;
+    }
+
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card.has-plan-progress::before {
+        display: none;
+    }
+
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto auto;
+        align-content: center;
+        align-items: start;
+        gap: 3px;
+        width: 100%;
+        min-width: 0;
+        padding: 0;
+        border-bottom: 0;
+    }
+
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card-head h2 {
+        min-width: 0;
+        overflow: hidden;
+        color: #f2f7f5;
+        font-size: clamp(21px, 6vw, 25px);
+        line-height: 1;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-head-meta {
+        align-self: start;
+        justify-self: start;
+        margin-left: 0;
     }
 
     .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card .mm-mobile-complex-visual,
@@ -28675,14 +28843,20 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     }
 
     .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card.is-transfer-target::after {
-        content: "Бросить сюда";
+        content: "Сюда";
         position: static;
         display: inline-flex;
+        box-sizing: border-box;
+        grid-column: 2;
+        grid-row: 1;
+        justify-self: end;
+        min-width: 44px;
         width: auto;
         height: 24px;
-        margin-left: auto;
+        margin: 0;
         padding: 0 7px;
         align-items: center;
+        justify-content: center;
         border: 1px solid rgba(88, 223, 82, .62);
         border-radius: 6px;
         color: #8ff18a;
@@ -28695,24 +28869,32 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     }
 
     .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card.is-transfer-source {
-        border-color: rgba(149, 167, 176, .38);
-        filter: grayscale(.65);
-        opacity: .48;
+        border: 2px solid #9edfff;
+        background: rgba(16, 43, 57, .98);
+        box-shadow: inset 0 0 22px rgba(92, 192, 236, .12), 0 0 18px rgba(92, 192, 236, .2);
+        filter: none;
+        opacity: 1;
     }
 
     .mm-mobile-shell.is-truck-transfer-mode .mm-mobile-complex-card.is-transfer-source::after {
-        content: "Исходный";
+        content: "Оставить";
         position: static;
         display: inline-flex;
+        box-sizing: border-box;
+        grid-column: 2;
+        grid-row: 1;
+        justify-self: end;
+        min-width: 58px;
         width: auto;
         height: 24px;
-        margin-left: auto;
+        margin: 0;
         padding: 0 7px;
         align-items: center;
-        border: 1px solid rgba(149, 167, 176, .36);
+        justify-content: center;
+        border: 1px solid rgba(158, 223, 255, .72);
         border-radius: 6px;
-        color: #9aabb3;
-        background: rgba(149, 167, 176, .07);
+        color: #d9f4ff;
+        background: rgba(92, 192, 236, .13);
         font-size: 9px;
         font-weight: 900;
         opacity: 1;
@@ -28820,7 +29002,7 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         filter: saturate(.62);
         opacity: .74;
         pointer-events: auto;
-        touch-action: none;
+        touch-action: pan-y;
     }
 
     .mm-mobile-complex-grid[data-mm-mobile-active-complex-count="0"] .mm-mobile-complex-card.status-empty {
@@ -28966,6 +29148,8 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     }
 
     .mm-mobile-complex-card h2 {
+        display: inline-flex;
+        align-items: center;
         margin: 0;
         color: #f3f7f8;
         font-size: 28px;
@@ -28974,6 +29158,47 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         letter-spacing: 0;
         text-transform: uppercase;
         white-space: nowrap;
+    }
+
+    .mm-mobile-presence-dot {
+        --mm-mobile-presence-color: #95a7b0;
+        display: block;
+        box-sizing: border-box;
+        width: 8px;
+        height: 8px;
+        flex: 0 0 8px;
+        border: 1px solid rgba(3, 14, 18, .92);
+        border-radius: 999px;
+        background: var(--mm-mobile-presence-color);
+        box-shadow: 0 0 6px color-mix(in srgb, var(--mm-mobile-presence-color) 72%, transparent);
+        pointer-events: none;
+    }
+
+    .mm-mobile-presence-dot.is-online {
+        --mm-mobile-presence-color: #58df52;
+    }
+
+    .mm-mobile-presence-dot.is-background {
+        --mm-mobile-presence-color: #38bdf8;
+    }
+
+    .mm-mobile-presence-dot.is-recent {
+        --mm-mobile-presence-color: #ffd166;
+    }
+
+    .mm-mobile-presence-dot.is-offline {
+        --mm-mobile-presence-color: #ff8a24;
+    }
+
+    .mm-mobile-presence-dot.is-not_registered {
+        --mm-mobile-presence-color: #95a7b0;
+        box-shadow: none;
+    }
+
+    .mm-mobile-complex-card h2 .mm-mobile-presence-dot {
+        position: relative;
+        z-index: 5;
+        margin-left: 5px;
     }
 
     .mm-mobile-status-chip {
@@ -29039,6 +29264,10 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         --mm-mobile-plan-glow: rgba(74, 222, 128, .6);
         --mm-mobile-plan-complete-color: rgba(74, 222, 128, .68);
         --mm-mobile-plan-track: rgba(142, 158, 166, .26);
+        --mm-mobile-plan-edge-top: min(100%, calc(var(--mm-mobile-plan-progress, 0%) * 4));
+        --mm-mobile-plan-edge-right: min(100%, max(0%, calc(var(--mm-mobile-plan-progress, 0%) * 4 - 100%)));
+        --mm-mobile-plan-edge-bottom: min(100%, max(0%, calc(var(--mm-mobile-plan-progress, 0%) * 4 - 200%)));
+        --mm-mobile-plan-edge-left: min(100%, max(0%, calc(var(--mm-mobile-plan-progress, 0%) * 4 - 300%)));
     }
 
     .mm-mobile-complex-card[data-plan-progress-phase="amber"],
@@ -29074,11 +29303,11 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         width: 34px;
         height: 34px;
         border-radius: 50%;
-        background: conic-gradient(
-            from -90deg,
-            var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%),
-            var(--mm-mobile-plan-track) var(--mm-mobile-plan-progress, 0%) 100%
-        );
+        background:
+            linear-gradient(to right, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left top / var(--mm-mobile-plan-edge-top) 3px no-repeat,
+            linear-gradient(to bottom, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right top / 3px var(--mm-mobile-plan-edge-right) no-repeat,
+            linear-gradient(to left, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right bottom / var(--mm-mobile-plan-edge-bottom) 3px no-repeat,
+            linear-gradient(to top, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left bottom / 3px var(--mm-mobile-plan-edge-left) no-repeat;
         filter: drop-shadow(0 0 5px var(--mm-mobile-plan-glow));
         pointer-events: none;
     }
@@ -29112,29 +29341,55 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     .mm-mobile-truck-mini .mm-mobile-plan-ring-layer,
     .mm-mobile-truck-card .mm-mobile-plan-ring-layer {
         position: absolute;
-        inset: 3px;
-        z-index: 1;
+        inset: 0;
+        z-index: 3;
         display: block;
-        padding: 2px;
-        border-radius: 4px;
+        padding: 3px;
+        border-radius: 5px;
         background: conic-gradient(
             from -90deg,
             var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%),
             var(--mm-mobile-plan-track) var(--mm-mobile-plan-progress, 0%) 100%
         );
-        filter: drop-shadow(0 0 4px var(--mm-mobile-plan-glow));
+        filter: drop-shadow(0 0 4px var(--mm-mobile-plan-glow)) drop-shadow(0 0 8px var(--mm-mobile-plan-glow));
         pointer-events: none;
-        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-        -webkit-mask-composite: xor;
-        mask-composite: exclude;
+        -webkit-mask: none;
+        mask: none;
+    }
+
+    .mm-mobile-truck-mini .mm-mobile-truck-number {
+        position: relative;
+        z-index: 4;
+        display: grid;
+        place-items: center;
+        width: 100%;
+        height: 100%;
+        color: inherit;
+        font: inherit;
+        line-height: 1;
+        pointer-events: none;
+    }
+
+    .mm-mobile-truck-mini > .mm-mobile-presence-dot,
+    .mm-mobile-truck-card > .mm-mobile-presence-dot,
+    .mm-mobile-garage-excavator > .mm-mobile-presence-dot {
+        position: absolute;
+        top: 3px;
+        right: 3px;
+        z-index: 6;
     }
 
     .mm-mobile-truck-mini.is-plan-overrun .mm-mobile-plan-ring-layer,
     .mm-mobile-truck-card.is-plan-overrun .mm-mobile-plan-ring-layer {
         background:
-            conic-gradient(from -90deg, var(--mm-mobile-plan-color) 0 var(--mm-mobile-plan-progress, 0%), transparent var(--mm-mobile-plan-progress, 0%) 100%),
-            conic-gradient(from -90deg, var(--mm-mobile-plan-complete-color) 0 100%, transparent 0 100%),
-            conic-gradient(from -90deg, var(--mm-mobile-plan-track) 0 100%);
+            linear-gradient(to right, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left top / var(--mm-mobile-plan-edge-top) 3px no-repeat,
+            linear-gradient(to bottom, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right top / 3px var(--mm-mobile-plan-edge-right) no-repeat,
+            linear-gradient(to left, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) right bottom / var(--mm-mobile-plan-edge-bottom) 3px no-repeat,
+            linear-gradient(to top, var(--mm-mobile-plan-color), var(--mm-mobile-plan-color)) left bottom / 3px var(--mm-mobile-plan-edge-left) no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) left top / 100% 3px no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) right top / 3px 100% no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) right bottom / 100% 3px no-repeat,
+            linear-gradient(var(--mm-mobile-plan-complete-color), var(--mm-mobile-plan-complete-color)) left bottom / 3px 100% no-repeat;
     }
 
     .mm-mobile-truck-card.has-plan-progress > *:not(.mm-mobile-plan-loop-badge):not(.mm-mobile-plan-ring-layer) {
@@ -29142,7 +29397,10 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         z-index: 2;
     }
 
+    /* Циклы плана не выводим цифрой: на мобильном экране ориентиром служит
+       только заполняющийся контур. */
     .mm-mobile-plan-loop-badge {
+        display: none !important;
         position: absolute;
         top: 2px;
         right: 2px;
@@ -29268,14 +29526,14 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
         z-index: 8;
         display: grid;
         place-items: center;
-        width: 24px;
-        height: 24px;
+        width: 30px;
+        height: 30px;
         padding: 0;
         border: 1px solid rgba(88, 223, 82, .72);
-        border-radius: 6px;
+        border-radius: 8px;
         color: #8ff18a;
         background: rgba(5, 30, 21, .94);
-        font-size: 15px;
+        font-size: 18px;
         font-weight: 900;
         line-height: 1;
         touch-action: manipulation;
@@ -29362,14 +29620,7 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     }
 
     .mm-mobile-truck-mini::before {
-        content: "";
-        position: absolute;
-        inset: 0 auto 0 0;
-        width: 3px;
-        border-radius: 5px 0 0 5px;
-        background: var(--mm-mobile-truck-accent);
-        box-shadow: 0 0 10px var(--mm-mobile-truck-accent);
-        opacity: .95;
+        display: none;
     }
 
     .mm-mobile-flying-truck {
@@ -29401,13 +29652,16 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     }
 
     .mm-mobile-transfer-truck-ghost {
-        min-width: 54px;
-        min-height: 54px;
-        max-width: 86px;
-        max-height: 86px;
+        width: 46px !important;
+        height: 38px !important;
+        min-width: 46px;
+        min-height: 38px;
+        max-width: 46px;
+        max-height: 38px;
         border-color: #77f071 !important;
         background: rgba(7, 29, 22, .96) !important;
         color: #f5fff5 !important;
+        transform: translate(-50%, -58px) scale(1) rotate(var(--mm-mobile-home-truck-ghost-rotate, -4deg)) !important;
         box-shadow: 0 20px 34px rgba(0, 0, 0, .58), 0 0 28px rgba(88, 223, 82, .5) !important;
     }
 
@@ -29765,6 +30019,30 @@ body.mining-master-mobile-screen .gd-equipment-detail .mm-detail-tags mark.statu
     .mm-mobile-truck-preview {
         gap: 3px;
     }
+}
+
+.dispatcher-stale-shift-label {
+    display: block;
+    margin-top: 4px;
+    color: #d38a31;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.gd-equipment-detail .mm-detail-employee-info span.is-online {
+    color: #58df52;
+}
+
+.gd-equipment-detail .mm-detail-employee-info span.is-background {
+    color: #38bdf8;
+}
+
+.gd-equipment-detail .mm-detail-employee-info span.is-recent {
+    color: #ffd166;
+}
+
+.gd-equipment-detail .mm-detail-employee-info span.is-offline {
+    color: #ff8a24;
 }
 
 .admin-employee-detail-shell .employee-detail-page {
