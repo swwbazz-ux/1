@@ -12,6 +12,11 @@ from .models import Employee, EmployeeAccess, Role
 
 
 REGISTRATION_PERIODS = (7, 14, 30, 90)
+CHART_VIEWBOX_WIDTH = 1000
+CHART_VIEWBOX_HEIGHT = 240
+CHART_PLOT_TOP = 12
+CHART_PLOT_BOTTOM = 228
+CHART_AXIS_PERCENTS = (100, 75, 50, 25, 0)
 REGISTRATION_STATES = {
     'needs_attention': 'Требуют внимания',
     'prepared': 'Доступ подготовлен',
@@ -265,7 +270,55 @@ def _person_status(role_statuses):
     }
 
 
+def _chart_percent(value, total):
+    if not total:
+        return 0
+    return round((value / total) * 100, 2)
+
+
+def _chart_svg_y(value, total):
+    denominator = total or 1
+    plot_height = CHART_PLOT_BOTTOM - CHART_PLOT_TOP
+    return round(
+        CHART_PLOT_BOTTOM - (value / denominator) * plot_height,
+        2,
+    )
+
+
+def _chart_bucket_ranges(start_date, end_date, period_days):
+    if period_days != 90:
+        return [(value, value) for value in (
+            start_date + timedelta(days=offset)
+            for offset in range(period_days)
+        )]
+
+    # Ninety days do not divide into whole seven-day intervals.  Keep the
+    # selected period exact: an explicit six-day partial bucket followed by
+    # twelve rolling seven-day buckets ending today.
+    ranges = []
+    cursor = start_date
+    partial_days = period_days % 7
+    if partial_days:
+        partial_end = cursor + timedelta(days=partial_days - 1)
+        ranges.append((cursor, partial_end))
+        cursor = partial_end + timedelta(days=1)
+    while cursor <= end_date:
+        bucket_end = min(cursor + timedelta(days=6), end_date)
+        ranges.append((cursor, bucket_end))
+        cursor = bucket_end + timedelta(days=1)
+    return ranges
+
+
+def _path_number(value):
+    return str(round(value, 2))
+
+
 def _build_daily_chart(rows, period_days):
+    """Build an exact daily source and a compact, honest display series.
+
+    This is not a historical state snapshot.  It distributes employees who
+    are ready *now* by the date on which their current readiness was reached.
+    """
     end_date = timezone.localdate()
     start_date = end_date - timedelta(days=period_days - 1)
     ready_dates = [row['ready_on'] for row in rows if row['is_ready']]
@@ -276,53 +329,186 @@ def _build_daily_chart(rows, period_days):
     for value in dated_ready:
         new_by_date[value] += 1
 
-    cumulative = undated_ready + sum(1 for value in dated_ready if value < start_date)
-    daily_values = []
+    baseline_count = sum(1 for value in dated_ready if value < start_date)
+    cumulative = baseline_count
+    daily_series = []
     current_date = start_date
     while current_date <= end_date:
         new_count = new_by_date[current_date]
         cumulative += new_count
-        daily_values.append({
+        daily_series.append({
             'date': current_date,
             'date_iso': current_date.isoformat(),
             'label': current_date.strftime('%d.%m'),
             'long_label': current_date.strftime('%d.%m.%Y'),
             'new_count': new_count,
+            'increment_count': new_count,
             'cumulative': cumulative,
+            'cumulative_count': cumulative,
+            'cumulative_percent': _chart_percent(cumulative, len(rows)),
         })
         current_date += timedelta(days=1)
 
-    max_daily = max((item['new_count'] for item in daily_values), default=0) or 1
-    # The line uses the whole selected cohort as its scale.  Normalising by
-    # the highest observed value would make 12 of 20 look like 100% coverage.
-    max_cumulative = len(rows)
-    cumulative_denominator = max_cumulative or 1
-    label_step = max(1, period_days // 6)
+    daily_by_date = {item['date']: item for item in daily_series}
+    granularity = 'week' if period_days == 90 else 'day'
+    bucket_ranges = _chart_bucket_ranges(start_date, end_date, period_days)
+    buckets = []
+    for bucket_start, bucket_end in bucket_ranges:
+        span_days = (bucket_end - bucket_start).days + 1
+        cursor = bucket_start
+        bucket_days = []
+        while cursor <= bucket_end:
+            bucket_days.append(daily_by_date[cursor])
+            cursor += timedelta(days=1)
+        increment_count = sum(item['new_count'] for item in bucket_days)
+        cumulative_count = bucket_days[-1]['cumulative']
+        is_day = bucket_start == bucket_end
+        buckets.append({
+            'key': (
+                f'day:{bucket_start.isoformat()}'
+                if is_day
+                else f'week:{bucket_start.isoformat()}:{bucket_end.isoformat()}'
+            ),
+            'granularity': granularity,
+            'date': bucket_start,
+            'date_iso': bucket_start.isoformat(),
+            'start_date': bucket_start,
+            'end_date': bucket_end,
+            'start_iso': bucket_start.isoformat(),
+            'end_iso': bucket_end.isoformat(),
+            'span_days': span_days,
+            'is_partial': granularity == 'week' and span_days < 7,
+            'label': bucket_start.strftime('%d.%m'),
+            'long_label': (
+                bucket_start.strftime('%d.%m.%Y')
+                if is_day
+                else (
+                    f"{bucket_start.strftime('%d.%m.%Y')} — "
+                    f"{bucket_end.strftime('%d.%m.%Y')}"
+                )
+            ),
+            'new_count': increment_count,
+            'increment_count': increment_count,
+            'cumulative': cumulative_count,
+            'cumulative_count': cumulative_count,
+            'cumulative_percent': _chart_percent(cumulative_count, len(rows)),
+        })
+
+    max_increment = max((item['new_count'] for item in buckets), default=0)
+    increment_denominator = max_increment or 1
+    label_count = min(7, len(buckets))
+    label_indices = (
+        {0}
+        if label_count == 1
+        else {
+            round(position * (len(buckets) - 1) / (label_count - 1))
+            for position in range(label_count)
+        }
+    )
     svg_points = []
-    for index, item in enumerate(daily_values):
-        x = ((index + 0.5) / len(daily_values)) * 1000
-        y = 224 - (item['cumulative'] / cumulative_denominator) * 190
-        item['bar_height'] = round((item['new_count'] / max_daily) * 100, 2)
-        item['cumulative_percent'] = round(
-            (item['cumulative'] / cumulative_denominator) * 100,
+    step_commands = [f'M 0 {_path_number(_chart_svg_y(baseline_count, len(rows)))}']
+    area_commands = [
+        f'M 0 {CHART_PLOT_BOTTOM}',
+        f'L 0 {_path_number(_chart_svg_y(baseline_count, len(rows)))}',
+    ]
+    for index, item in enumerate(buckets):
+        x = ((index + 0.5) / len(buckets)) * CHART_VIEWBOX_WIDTH
+        y = _chart_svg_y(item['cumulative'], len(rows))
+        item['bar_height'] = round(
+            (item['new_count'] / increment_denominator) * 100,
             2,
         )
-        item['show_label'] = index in {0, len(daily_values) - 1} or index % label_step == 0
+        item['bar_percent'] = item['bar_height']
+        item['show_label'] = index in label_indices
         item['show_value'] = item['new_count'] > 0
         item['svg_x'] = round(x, 2)
-        item['svg_y'] = round(y, 2)
+        item['svg_y'] = y
         svg_points.append(f"{item['svg_x']},{item['svg_y']}")
+        step_commands.extend((
+            f'H {_path_number(item["svg_x"])}',
+            f'V {_path_number(item["svg_y"])}',
+        ))
+        area_commands.extend((
+            f'H {_path_number(item["svg_x"])}',
+            f'V {_path_number(item["svg_y"])}',
+        ))
+
+    step_commands.append(f'H {CHART_VIEWBOX_WIDTH}')
+    area_commands.extend((
+        f'H {CHART_VIEWBOX_WIDTH}',
+        f'L {CHART_VIEWBOX_WIDTH} {CHART_PLOT_BOTTOM}',
+        'Z',
+    ))
+    known_ready = len(dated_ready)
+    period_increment = sum(item['new_count'] for item in daily_series)
+    endpoint_count = (
+        buckets[-1]['cumulative_count'] if buckets else baseline_count
+    )
+    axis_ticks = [
+        {
+            'percent': percent,
+            'label': f'{percent}%',
+            'svg_y': round(
+                CHART_PLOT_BOTTOM
+                - (percent / 100) * (CHART_PLOT_BOTTOM - CHART_PLOT_TOP),
+                2,
+            ),
+        }
+        for percent in CHART_AXIS_PERCENTS
+    ]
 
     return {
-        'days': daily_values,
+        'days': buckets,
+        'buckets': buckets,
+        'daily_series': daily_series,
         'polyline': ' '.join(svg_points),
+        'step_path': ' '.join(step_commands),
+        'area_path': ' '.join(area_commands),
         'start_date': start_date,
         'end_date': end_date,
-        'max_daily': max_daily,
-        'max_cumulative': max_cumulative,
-        'scale_total': max_cumulative,
+        'period_days': period_days,
+        'granularity': granularity,
+        'granularity_label': (
+            'По интервалам до 7 дней'
+            if granularity == 'week'
+            else 'По дням'
+        ),
+        'unit_label': 'за интервал' if granularity == 'week' else 'за день',
+        'bucket_count': len(buckets),
+        'max_increment': max_increment,
+        'max_daily': max_increment,
+        'max_cumulative': len(rows),
+        'scale_total': len(rows),
+        'cohort_total': len(rows),
+        'current_ready': len(ready_dates),
+        'known_ready': known_ready,
+        'baseline_count': baseline_count,
+        'period_increment': period_increment,
+        'has_period_increment': period_increment > 0,
+        'endpoint_count': endpoint_count,
+        'endpoint_percent': _chart_percent(endpoint_count, len(rows)),
         'undated_ready': undated_ready,
         'future_ready': future_ready,
+        'viewbox': {
+            'width': CHART_VIEWBOX_WIDTH,
+            'height': CHART_VIEWBOX_HEIGHT,
+            'plot_top': CHART_PLOT_TOP,
+            'plot_bottom': CHART_PLOT_BOTTOM,
+        },
+        'axis_ticks': axis_ticks,
+        'semantics_code': 'current_ready_cohort_by_ready_date',
+        'semantics_title': 'Текущие готовые сотрудники по дате готовности',
+        'semantics_note': (
+            'График распределяет готовых сейчас сотрудников выбранной '
+            'расстановки по дате достижения готовности; это не исторический '
+            'снимок состояния на каждую дату.'
+        ),
+        'cumulative_label': 'Подтверждённая готовность нарастающим итогом',
+        'increment_label': (
+            'Стали готовы за интервал'
+            if granularity == 'week'
+            else 'Стали готовы за день'
+        ),
     }
 
 
@@ -394,6 +580,16 @@ def _query_url(base_query, **updates):
     return f'?{encoded}' if encoded else ''
 
 
+def _query_url_without_ready_filter(base_query, **updates):
+    normalized_updates = {
+        'ready_on': None,
+        'ready_from': None,
+        'ready_to': None,
+    }
+    normalized_updates.update(updates)
+    return _query_url(base_query, **normalized_updates)
+
+
 def _state_matches(row, selected_state):
     if not selected_state:
         return True
@@ -460,6 +656,18 @@ def build_registration_dashboard(params):
         selected_state = ''
     period_days = _parse_period(params.get('period'))
     selected_ready_on = _parse_date(params.get('ready_on', ''))
+    selected_ready_from = _parse_date(params.get('ready_from', ''))
+    selected_ready_to = _parse_date(params.get('ready_to', ''))
+    if selected_ready_on:
+        selected_ready_from = None
+        selected_ready_to = None
+    elif (
+        not selected_ready_from
+        or not selected_ready_to
+        or selected_ready_from > selected_ready_to
+    ):
+        selected_ready_from = None
+        selected_ready_to = None
 
     slots = (
         CrewPlanSlot.objects.filter(
@@ -667,6 +875,9 @@ def build_registration_dashboard(params):
         base_query['state'] = selected_state
     if selected_ready_on:
         base_query['ready_on'] = selected_ready_on.isoformat()
+    elif selected_ready_from and selected_ready_to:
+        base_query['ready_from'] = selected_ready_from.isoformat()
+        base_query['ready_to'] = selected_ready_to.isoformat()
 
     state_counts = {
         'all': total,
@@ -697,7 +908,7 @@ def build_registration_dashboard(params):
         'blocked',
     ):
         state_value = '' if code == 'all' else code
-        url = _query_url(base_query, state=state_value, ready_on=None)
+        url = _query_url_without_ready_filter(base_query, state=state_value)
         state_tabs.append({
             'code': code,
             'label': state_labels[code],
@@ -709,7 +920,7 @@ def build_registration_dashboard(params):
 
     period_links = []
     for value in REGISTRATION_PERIODS:
-        url = _query_url(base_query, period=value, ready_on=None)
+        url = _query_url_without_ready_filter(base_query, period=value)
         period_links.append({
             'days': value,
             'label': f'{value} дней',
@@ -719,19 +930,42 @@ def build_registration_dashboard(params):
         })
 
     for item in role_breakdown:
-        item['url'] = _query_url(base_query, role=item['code'], ready_on=None)
-        item['filter_url'] = item['url']
-    for item in shift_breakdown:
-        item['url'] = _query_url(base_query, shift=item['code'], ready_on=None)
-        item['filter_url'] = item['url']
-    for item in chart['days']:
-        item['url'] = _query_url(
+        item['url'] = _query_url_without_ready_filter(
             base_query,
-            state='ready',
-            ready_on=item['date_iso'],
+            role=item['code'],
         )
         item['filter_url'] = item['url']
-        item['is_selected'] = item['date'] == selected_ready_on
+    for item in shift_breakdown:
+        item['url'] = _query_url_without_ready_filter(
+            base_query,
+            shift=item['code'],
+        )
+        item['filter_url'] = item['url']
+    for item in chart['buckets']:
+        if item['granularity'] == 'week':
+            item['url'] = _query_url_without_ready_filter(
+                base_query,
+                state='ready',
+                ready_from=item['start_iso'],
+                ready_to=item['end_iso'],
+            )
+            item['is_selected'] = (
+                selected_ready_on is None
+                and selected_ready_from == item['start_date']
+                and selected_ready_to == item['end_date']
+            )
+        else:
+            item['url'] = _query_url_without_ready_filter(
+                base_query,
+                state='ready',
+                ready_on=item['date_iso'],
+            )
+            item['is_selected'] = (
+                selected_ready_on == item['date']
+                and selected_ready_from is None
+                and selected_ready_to is None
+            )
+        item['filter_url'] = item['url']
 
     funnel_steps = [
         {
@@ -741,7 +975,7 @@ def build_registration_dashboard(params):
             'percent': 100 if total else 0,
             'loss_count': total - prepared,
             'conversion_percent': _percent(prepared, total),
-            'url': _query_url(base_query, state='', ready_on=None),
+            'url': _query_url_without_ready_filter(base_query, state=''),
         },
         {
             'code': 'prepared',
@@ -750,7 +984,7 @@ def build_registration_dashboard(params):
             'percent': _percent(prepared, total),
             'loss_count': prepared - ready,
             'conversion_percent': _percent(ready, prepared),
-            'url': _query_url(base_query, state='prepared', ready_on=None),
+            'url': _query_url_without_ready_filter(base_query, state='prepared'),
         },
         {
             'code': 'ready',
@@ -759,7 +993,7 @@ def build_registration_dashboard(params):
             'percent': _percent(ready, total),
             'loss_count': 0,
             'conversion_percent': 100 if ready else 0,
-            'url': _query_url(base_query, state='ready', ready_on=None),
+            'url': _query_url_without_ready_filter(base_query, state='ready'),
         },
     ]
 
@@ -770,7 +1004,7 @@ def build_registration_dashboard(params):
             'detail': 'Нужна разблокировка требуемой роли.',
             'count': blocked,
             'tone': 'danger',
-            'url': _query_url(base_query, state='blocked', ready_on=None),
+            'url': _query_url_without_ready_filter(base_query, state='blocked'),
         },
         {
             'code': 'deactivated',
@@ -778,7 +1012,7 @@ def build_registration_dashboard(params):
             'detail': 'Требуемый доступ сейчас не действует.',
             'count': deactivated,
             'tone': 'danger',
-            'url': _query_url(base_query, state='deactivated', ready_on=None),
+            'url': _query_url_without_ready_filter(base_query, state='deactivated'),
         },
         {
             'code': 'missing_access',
@@ -786,7 +1020,7 @@ def build_registration_dashboard(params):
             'detail': 'Для требуемой роли нет рабочего доступа или PIN.',
             'count': missing_access,
             'tone': 'neutral',
-            'url': _query_url(base_query, state='missing_access', ready_on=None),
+            'url': _query_url_without_ready_filter(base_query, state='missing_access'),
         },
         {
             'code': 'inactive_employee',
@@ -794,7 +1028,10 @@ def build_registration_dashboard(params):
             'detail': 'Неактивный сотрудник остался в опубликованной расстановке.',
             'count': inactive_employee,
             'tone': 'danger',
-            'url': _query_url(base_query, state='inactive_employee', ready_on=None),
+            'url': _query_url_without_ready_filter(
+                base_query,
+                state='inactive_employee',
+            ),
         },
         {
             'code': 'awaiting_activation',
@@ -802,7 +1039,10 @@ def build_registration_dashboard(params):
             'detail': 'Доступ ещё не активирован.',
             'count': awaiting_activation,
             'tone': 'warning',
-            'url': _query_url(base_query, state='awaiting_activation', ready_on=None),
+            'url': _query_url_without_ready_filter(
+                base_query,
+                state='awaiting_activation',
+            ),
         },
     ]
     for item in attention_items:
@@ -814,6 +1054,13 @@ def build_registration_dashboard(params):
     if selected_ready_on:
         visible_rows = [
             row for row in visible_rows if row['ready_on'] == selected_ready_on
+        ]
+    elif selected_ready_from and selected_ready_to:
+        visible_rows = [
+            row
+            for row in visible_rows
+            if row['ready_on']
+            and selected_ready_from <= row['ready_on'] <= selected_ready_to
         ]
 
     ready_percent = _percent(ready, total)
@@ -839,7 +1086,16 @@ def build_registration_dashboard(params):
         'state_options': (('', 'Все сотрудники'), *REGISTRATION_STATES.items()),
         'selected_state': selected_state,
         'selected_ready_on': selected_ready_on,
-        'ready_on_clear_url': _query_url(base_query, ready_on=None),
+        'selected_ready_from': selected_ready_from,
+        'selected_ready_to': selected_ready_to,
+        'selected_ready_range_label': (
+            f"{selected_ready_from.strftime('%d.%m.%Y')} — "
+            f"{selected_ready_to.strftime('%d.%m.%Y')}"
+            if selected_ready_from and selected_ready_to
+            else ''
+        ),
+        'ready_filter_clear_url': _query_url_without_ready_filter(base_query),
+        'ready_on_clear_url': _query_url_without_ready_filter(base_query),
         'period_options': REGISTRATION_PERIODS,
         'period_days': period_days,
         'period_links': period_links,

@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import date, timedelta
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from django.test import TestCase
@@ -8,6 +9,7 @@ from assignments.models import CrewPlan, CrewPlanSlot, CrewPlanStatus, WorkShift
 from references.models import Equipment, EquipmentType
 
 from .models import Employee, EmployeeAccess, Role
+from .registration_dashboard import _build_daily_chart
 
 
 class AdminRegistrationDashboardTests(TestCase):
@@ -237,13 +239,44 @@ class AdminRegistrationDashboardTests(TestCase):
             [item['days'] for item in context['period_links']],
             [7, 14, 30, 90],
         )
-        self.assertEqual(sum(item['new_count'] for item in context['chart']['days']), 2)
-        self.assertEqual(context['chart']['days'][-1]['cumulative'], 2)
-        self.assertEqual(context['chart']['days'][-1]['cumulative_percent'], 50)
-        self.assertEqual(context['chart']['max_cumulative'], context['total'])
-        chart_days = context['chart']['days']
+        chart = context['chart']
+        self.assertEqual(chart['granularity'], 'day')
+        self.assertEqual(len(chart['daily_series']), 30)
+        self.assertEqual(len(chart['buckets']), 30)
+        self.assertIs(chart['days'], chart['buckets'])
+        self.assertEqual(sum(item['new_count'] for item in chart['daily_series']), 2)
+        self.assertEqual(sum(item['new_count'] for item in chart['buckets']), 2)
+        self.assertEqual(chart['buckets'][-1]['cumulative'], 2)
+        self.assertEqual(chart['buckets'][-1]['cumulative_percent'], 50)
+        self.assertEqual(chart['max_cumulative'], context['total'])
+        self.assertEqual(chart['cohort_total'], context['total'])
+        self.assertEqual(chart['current_ready'], context['ready'])
+        self.assertEqual(chart['known_ready'], 2)
+        self.assertEqual(chart['baseline_count'], 0)
+        self.assertEqual(chart['period_increment'], 2)
+        self.assertTrue(chart['has_period_increment'])
+        self.assertEqual(chart['endpoint_count'], 2)
+        self.assertEqual(chart['endpoint_percent'], 50)
+        self.assertEqual(
+            chart['known_ready'] + chart['undated_ready'] + chart['future_ready'],
+            chart['current_ready'],
+        )
+        self.assertEqual(
+            [item['percent'] for item in chart['axis_ticks']],
+            [100, 75, 50, 25, 0],
+        )
+        self.assertEqual(
+            [item['svg_y'] for item in chart['axis_ticks']],
+            [12, 66, 120, 174, 228],
+        )
+        self.assertEqual(chart['buckets'][-1]['svg_y'], 120)
+        self.assertNotIn('nan', chart['step_path'].lower())
+        self.assertNotIn('nan', chart['area_path'].lower())
+        self.assertTrue(chart['step_path'].startswith('M 0 228'))
+        self.assertTrue(chart['area_path'].endswith('Z'))
+        chart_days = chart['buckets']
         chart_x = [item['svg_x'] for item in chart_days]
-        self.assertEqual(len(context['chart']['polyline'].split()), len(chart_days))
+        self.assertEqual(len(chart['polyline'].split()), len(chart_days))
         self.assertAlmostEqual(chart_x[0], 500 / len(chart_days), places=2)
         self.assertAlmostEqual(
             chart_x[-1],
@@ -261,6 +294,202 @@ class AdminRegistrationDashboardTests(TestCase):
         waiting_row = self.row_by_name(context, self.driver_waiting.full_name)
         self.assertEqual(waiting_row['waiting_hours'], 30)
         self.assertEqual(waiting_row['waiting_label'], 'Ждёт 1 д')
+
+    def test_chart_uses_daily_buckets_for_short_periods(self):
+        for period_days in (7, 14, 30):
+            with self.subTest(period_days=period_days):
+                chart = self.admin_dashboard(
+                    f'period={period_days}',
+                ).context['chart']
+
+                self.assertEqual(chart['granularity'], 'day')
+                self.assertEqual(len(chart['daily_series']), period_days)
+                self.assertEqual(len(chart['buckets']), period_days)
+                self.assertTrue(
+                    all(item['span_days'] == 1 for item in chart['buckets'])
+                )
+                label_indices = [
+                    index
+                    for index, item in enumerate(chart['buckets'])
+                    if item['show_label']
+                ]
+                self.assertLessEqual(len(label_indices), 7)
+                self.assertEqual(label_indices[0], 0)
+                self.assertEqual(label_indices[-1], period_days - 1)
+                self.assertEqual(chart['buckets'][0]['start_date'], chart['start_date'])
+                self.assertEqual(chart['buckets'][-1]['end_date'], chart['end_date'])
+
+    def test_ninety_days_use_exact_thirteen_rolling_buckets(self):
+        context = self.admin_dashboard('period=90&role=driver&shift=day').context
+        chart = context['chart']
+        buckets = chart['buckets']
+
+        self.assertEqual(chart['granularity'], 'week')
+        self.assertEqual(chart['granularity_label'], 'По интервалам до 7 дней')
+        self.assertEqual(chart['increment_label'], 'Стали готовы за интервал')
+        self.assertEqual(len(chart['daily_series']), 90)
+        self.assertEqual(len(buckets), 13)
+        self.assertEqual([item['span_days'] for item in buckets], [6] + [7] * 12)
+        self.assertTrue(buckets[0]['is_partial'])
+        self.assertTrue(all(not item['is_partial'] for item in buckets[1:]))
+        self.assertLessEqual(sum(item['show_label'] for item in buckets), 7)
+        self.assertTrue(buckets[0]['show_label'])
+        self.assertTrue(buckets[-1]['show_label'])
+        self.assertEqual(sum(item['span_days'] for item in buckets), 90)
+        self.assertEqual(buckets[0]['start_date'], chart['start_date'])
+        self.assertEqual(buckets[-1]['end_date'], chart['end_date'])
+        self.assertTrue(all(
+            left['end_date'] + timedelta(days=1) == right['start_date']
+            for left, right in zip(buckets, buckets[1:])
+        ))
+        self.assertEqual(
+            sum(item['new_count'] for item in chart['daily_series']),
+            sum(item['new_count'] for item in buckets),
+        )
+        self.assertEqual(
+            chart['baseline_count'] + sum(item['new_count'] for item in buckets),
+            chart['known_ready'],
+        )
+        self.assertEqual(chart['period_increment'], 1)
+        self.assertTrue(chart['has_period_increment'])
+        self.assertEqual(chart['endpoint_count'], 1)
+        self.assertEqual(chart['endpoint_percent'], 50)
+        bucket_x = [item['svg_x'] for item in buckets]
+        bucket_y = [item['svg_y'] for item in buckets]
+        cumulative = [item['cumulative_count'] for item in buckets]
+        self.assertEqual(len(chart['polyline'].split()), len(buckets))
+        self.assertAlmostEqual(bucket_x[0], 500 / len(buckets), places=2)
+        self.assertAlmostEqual(
+            bucket_x[-1],
+            1000 - (500 / len(buckets)),
+            places=2,
+        )
+        self.assertTrue(all(
+            left < right for left, right in zip(bucket_x, bucket_x[1:])
+        ))
+        self.assertTrue(all(
+            left <= right for left, right in zip(cumulative, cumulative[1:])
+        ))
+        self.assertTrue(all(
+            left >= right for left, right in zip(bucket_y, bucket_y[1:])
+        ))
+        self.assertEqual(chart['step_path'].split().count('V'), len(buckets))
+        self.assertEqual(chart['area_path'].split().count('V'), len(buckets))
+
+        last_bucket = buckets[-1]
+        query = parse_qs(urlsplit(last_bucket['url']).query)
+        self.assertEqual(query['period'], ['90'])
+        self.assertEqual(query['role'], ['driver'])
+        self.assertEqual(query['shift'], ['day'])
+        self.assertEqual(query['state'], ['ready'])
+        self.assertEqual(query['ready_from'], [last_bucket['start_iso']])
+        self.assertEqual(query['ready_to'], [last_bucket['end_iso']])
+        self.assertNotIn('ready_on', query)
+
+        selected = self.admin_dashboard(urlsplit(last_bucket['url']).query).context
+        self.assertEqual(selected['selected_ready_from'], last_bucket['start_date'])
+        self.assertEqual(selected['selected_ready_to'], last_bucket['end_date'])
+        self.assertTrue(selected['selected_ready_range_label'])
+        self.assertTrue(all(
+            last_bucket['start_date'] <= row['ready_on'] <= last_bucket['end_date']
+            for row in selected['rows']
+        ))
+        selected_bucket = next(
+            item for item in selected['chart']['buckets'] if item['is_selected']
+        )
+        self.assertEqual(selected_bucket['key'], last_bucket['key'])
+        for collection_name in (
+            'state_tabs',
+            'period_links',
+            'role_breakdown',
+            'shift_breakdown',
+            'funnel_steps',
+            'attention_items',
+        ):
+            with self.subTest(collection=collection_name):
+                self.assertTrue(all(
+                    not {'ready_on', 'ready_from', 'ready_to'}
+                    & set(parse_qs(urlsplit(item['url']).query))
+                    for item in selected[collection_name]
+                ))
+
+    def test_ready_range_filter_includes_both_endpoints(self):
+        today = timezone.localdate()
+        range_start = today - timedelta(days=6)
+        self.driver_active_access.activated_at = self.now - timedelta(days=6)
+        self.driver_active_access.save(update_fields=['activated_at'])
+        self.excavator_access.activated_at = self.now
+        self.excavator_access.save(update_fields=['activated_at'])
+
+        context = self.admin_dashboard(
+            'period=90&state=ready'
+            f'&ready_from={range_start.isoformat()}'
+            f'&ready_to={today.isoformat()}',
+        ).context
+
+        self.assertEqual(context['selected_ready_from'], range_start)
+        self.assertEqual(context['selected_ready_to'], today)
+        self.assertEqual(context['visible_total'], 2)
+        self.assertEqual(
+            {row['ready_on'] for row in context['rows']},
+            {range_start, today},
+        )
+        self.assertTrue(all(row['is_ready'] for row in context['rows']))
+
+    def test_chart_carries_pre_window_readiness_as_baseline(self):
+        today = date(2028, 3, 1)
+        chart_rows = [
+            {'is_ready': True, 'ready_on': today - timedelta(days=100)},
+            {'is_ready': True, 'ready_on': today - timedelta(days=2)},
+            {'is_ready': False, 'ready_on': None},
+        ]
+        with patch(
+            'users.registration_dashboard.timezone.localdate',
+            return_value=today,
+        ):
+            chart = _build_daily_chart(chart_rows, 90)
+
+        self.assertEqual(chart['baseline_count'], 1)
+        self.assertEqual(sum(
+            item['new_count'] for item in chart['daily_series']
+        ), 1)
+        self.assertEqual(chart['known_ready'], 2)
+        self.assertEqual(chart['current_ready'], 2)
+        self.assertEqual(chart['buckets'][0]['cumulative_count'], 1)
+        self.assertEqual(chart['buckets'][-1]['cumulative_count'], 2)
+        self.assertEqual(chart['buckets'][-1]['cumulative_percent'], 66.67)
+        self.assertEqual(chart['period_increment'], 1)
+        self.assertTrue(chart['has_period_increment'])
+        self.assertEqual(chart['endpoint_count'], 2)
+        self.assertEqual(chart['endpoint_percent'], 66.67)
+
+    def test_chart_daily_source_keeps_leap_day_and_separates_unknown_dates(self):
+        chart_rows = [
+            {'is_ready': True, 'ready_on': date(2028, 2, 29)},
+            {'is_ready': True, 'ready_on': None},
+            {'is_ready': True, 'ready_on': date(2028, 3, 2)},
+        ]
+        with patch(
+            'users.registration_dashboard.timezone.localdate',
+            return_value=date(2028, 3, 1),
+        ):
+            chart = _build_daily_chart(chart_rows, 7)
+
+        leap_day = next(
+            item for item in chart['daily_series']
+            if item['date'] == date(2028, 2, 29)
+        )
+        self.assertEqual(leap_day['new_count'], 1)
+        self.assertEqual(chart['known_ready'], 1)
+        self.assertEqual(chart['undated_ready'], 1)
+        self.assertEqual(chart['future_ready'], 1)
+        self.assertEqual(chart['current_ready'], 3)
+        self.assertEqual(
+            chart['known_ready'] + chart['undated_ready'] + chart['future_ready'],
+            chart['current_ready'],
+        )
+        self.assertEqual(chart['buckets'][-1]['cumulative'], 1)
+        self.assertIn('не исторический снимок', chart['semantics_note'])
 
     def test_median_activation_time_requires_three_valid_samples(self):
         self.driver_active_access.primary_code_issued_at = (
@@ -476,8 +705,17 @@ class AdminRegistrationDashboardTests(TestCase):
         self.assertEqual(context['ready'], 2)
         self.assertIsNone(row['ready_at'])
         self.assertEqual(context['chart']['undated_ready'], 1)
+        self.assertEqual(context['chart']['future_ready'], 0)
+        self.assertEqual(context['chart']['known_ready'], 1)
+        self.assertEqual(context['chart']['current_ready'], 2)
         self.assertEqual(sum(item['new_count'] for item in context['chart']['days']), 1)
-        self.assertEqual(context['chart']['days'][-1]['cumulative'], 2)
+        self.assertEqual(context['chart']['days'][-1]['cumulative'], 1)
+        self.assertEqual(
+            context['chart']['known_ready']
+            + context['chart']['undated_ready']
+            + context['chart']['future_ready'],
+            context['chart']['current_ready'],
+        )
 
     def test_delta_ready_on_filter_and_chart_links(self):
         previous_activation = self.now - timedelta(days=8)
@@ -512,18 +750,64 @@ class AdminRegistrationDashboardTests(TestCase):
             parse_qs(urlsplit(chart_day['url']).query)['state'],
             ['ready'],
         )
-        self.assertTrue(
-            all(
-                'ready_on' not in parse_qs(urlsplit(item['url']).query)
-                for item in filtered['state_tabs']
-            )
+        for collection_name in (
+            'state_tabs',
+            'period_links',
+            'role_breakdown',
+            'shift_breakdown',
+            'funnel_steps',
+            'attention_items',
+        ):
+            with self.subTest(collection=collection_name):
+                self.assertTrue(all(
+                    not {'ready_on', 'ready_from', 'ready_to'}
+                    & set(parse_qs(urlsplit(item['url']).query))
+                    for item in filtered[collection_name]
+                ))
+        self.assertFalse(
+            {'ready_on', 'ready_from', 'ready_to'}
+            & set(parse_qs(urlsplit(filtered['ready_filter_clear_url']).query))
         )
-        self.assertTrue(
-            all(
-                'ready_on' not in parse_qs(urlsplit(item['url']).query)
-                for item in filtered['period_links']
-            )
+
+    def test_exact_day_wins_over_range_and_invalid_ranges_are_ignored(self):
+        exact_day = timezone.localtime(self.excavator_ready_at).date()
+        range_start = exact_day - timedelta(days=5)
+        range_end = exact_day + timedelta(days=1)
+        conflicting = self.admin_dashboard(
+            'period=90&state=ready'
+            f'&ready_on={exact_day.isoformat()}'
+            f'&ready_from={range_start.isoformat()}'
+            f'&ready_to={range_end.isoformat()}',
+        ).context
+
+        self.assertEqual(conflicting['selected_ready_on'], exact_day)
+        self.assertIsNone(conflicting['selected_ready_from'])
+        self.assertIsNone(conflicting['selected_ready_to'])
+        self.assertEqual(conflicting['visible_total'], 1)
+        self.assertEqual(
+            conflicting['rows'][0]['employee'].full_name,
+            self.excavator_activated.full_name,
         )
+
+        invalid = self.admin_dashboard(
+            'period=90&state=ready'
+            f'&ready_from={range_end.isoformat()}'
+            f'&ready_to={range_start.isoformat()}',
+        ).context
+        self.assertIsNone(invalid['selected_ready_on'])
+        self.assertIsNone(invalid['selected_ready_from'])
+        self.assertIsNone(invalid['selected_ready_to'])
+        self.assertEqual(invalid['visible_total'], 2)
+        self.assertFalse(any(
+            item['is_selected'] for item in invalid['chart']['buckets']
+        ))
+
+        incomplete = self.admin_dashboard(
+            f'period=90&state=ready&ready_from={range_start.isoformat()}',
+        ).context
+        self.assertIsNone(incomplete['selected_ready_from'])
+        self.assertIsNone(incomplete['selected_ready_to'])
+        self.assertEqual(incomplete['visible_total'], 2)
 
     def test_inactive_employee_in_published_plan_is_not_ready(self):
         self.driver_active.is_active = False
@@ -607,13 +891,36 @@ class AdminRegistrationDashboardTests(TestCase):
         CrewPlan.objects.all().delete()
 
         context = self.admin_dashboard().context
+        chart = context['chart']
 
         self.assertFalse(context['has_published_plans'])
         self.assertEqual(context['total'], 0)
         self.assertEqual(context['prepared_percent'], 0)
         self.assertEqual(context['ready_percent'], 0)
         self.assertEqual(context['activation_conversion_percent'], 0)
-        self.assertEqual(context['chart']['max_cumulative'], 0)
+        self.assertEqual(chart['max_cumulative'], 0)
+        self.assertEqual(chart['max_increment'], 0)
+        self.assertEqual(chart['current_ready'], 0)
+        self.assertEqual(chart['known_ready'], 0)
+        self.assertEqual(chart['undated_ready'], 0)
+        self.assertEqual(chart['future_ready'], 0)
+        self.assertEqual(chart['period_increment'], 0)
+        self.assertFalse(chart['has_period_increment'])
+        self.assertEqual(chart['endpoint_count'], 0)
+        self.assertEqual(chart['endpoint_percent'], 0)
+        self.assertEqual(len(chart['daily_series']), 30)
+        self.assertEqual(len(chart['buckets']), 30)
+        self.assertTrue(all(
+            item['new_count'] == 0
+            and item['cumulative_count'] == 0
+            and item['cumulative_percent'] == 0
+            and item['svg_y'] == 228
+            for item in chart['buckets']
+        ))
+        self.assertNotIn('nan', chart['step_path'].lower())
+        self.assertNotIn('inf', chart['step_path'].lower())
+        self.assertNotIn('nan', chart['area_path'].lower())
+        self.assertNotIn('inf', chart['area_path'].lower())
 
     def test_dashboard_requires_admin_access(self):
         response = self.client.get('/system-admin/registrations/', HTTP_HOST='localhost')

@@ -121,6 +121,7 @@
     position: relative;
     display: grid;
     grid-template-rows: none;
+    grid-auto-rows: max-content;
     gap: 12px;
     min-width: 0;
     overflow: auto;
@@ -853,9 +854,73 @@ button.adoption-executive-card {
 
 .adoption-method-note strong { color: var(--admin-ink); }
 
-/* График: накопительный итог и дневные значения разведены по разным полосам. */
+/* График: одна временная ось, но две честно разделённые шкалы. */
+.adoption-visually-hidden {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: -1px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    clip: rect(0 0 0 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+.adoption-growth-panel {
+    --chart-main-height: 260px;
+    --chart-histogram-height: 80px;
+    --chart-axis-width: 44px;
+    --chart-cursor-x: 98%;
+    --chart-cursor-y: 50%;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: max-content;
+    align-self: start;
+    overflow: hidden;
+}
+
 .adoption-chart-heading {
     align-items: center;
+}
+
+.adoption-chart-header-actions {
+    display: grid;
+    min-width: 0;
+    justify-items: end;
+    gap: 6px;
+}
+
+.adoption-chart-headline-metrics {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin: 0;
+    flex-wrap: wrap;
+}
+
+.adoption-chart-headline-metrics strong,
+.adoption-chart-headline-metrics span {
+    display: inline-flex;
+    min-height: 24px;
+    align-items: center;
+    padding: 3px 8px;
+    border: 1px solid color-mix(in srgb, var(--admin-green) 34%, var(--admin-line));
+    border-radius: 999px;
+    background: var(--admin-green-soft);
+    color: var(--adoption-success-text);
+    font-size: 10px;
+    font-weight: 950;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.adoption-chart-headline-metrics span {
+    border-color: color-mix(in srgb, var(--admin-cyan) 34%, var(--admin-line));
+    background: color-mix(in srgb, var(--admin-cyan) 9%, var(--admin-panel));
+    color: var(--adoption-info-text);
 }
 
 .adoption-period-switcher,
@@ -864,6 +929,15 @@ button.adoption-executive-card {
     align-items: center;
     gap: 5px;
     min-width: 0;
+}
+
+.adoption-period-switcher {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    overflow: visible;
+}
+
+.adoption-state-tabs {
     overflow-x: auto;
     scrollbar-width: thin;
 }
@@ -908,12 +982,24 @@ button.adoption-executive-card {
     font-size: 10px;
 }
 
+.adoption-chart-semantics {
+    margin: -3px 0 10px;
+    padding: 8px 10px;
+    border-left: 3px solid var(--admin-green);
+    border-radius: 0 5px 5px 0;
+    background: var(--admin-green-soft);
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 750;
+    line-height: 1.4;
+}
+
 .adoption-chart-caveats,
 .adoption-selected-day {
     display: flex;
     gap: 6px;
     align-items: center;
-    margin: -4px 0 9px;
+    margin: 0 0 9px;
     flex-wrap: wrap;
 }
 
@@ -923,164 +1009,412 @@ button.adoption-executive-card {
     color: var(--adoption-warning-text);
 }
 
-.adoption-chart-scroll {
+.adoption-chart-figure {
+    display: grid;
+    grid-template-columns: var(--chart-axis-width) minmax(0, 1fr);
+    width: 100%;
+    max-width: 1440px;
     min-width: 0;
-    overflow-x: auto;
-    overscroll-behavior-inline: contain;
-    padding: 0 0 4px;
-    scrollbar-width: thin;
+    margin-inline: auto;
+    overflow: hidden;
 }
 
-.adoption-chart-stage {
-    min-width: max(616px, var(--chart-min-width, 1366px));
-}
-
-.adoption-line-band,
-.adoption-bars-band {
-    min-width: 0;
-}
-
-.adoption-chart-band-heading {
+.adoption-chart-legend {
+    grid-column: 1 / -1;
     display: flex;
+    min-width: 0;
+    min-height: 38px;
+    align-items: center;
+    gap: 7px 16px;
+    flex-wrap: wrap;
+    padding: 0 4px 7px var(--chart-axis-width);
+}
+
+.adoption-chart-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 850;
+    line-height: 1.3;
+}
+
+.adoption-chart-legend span::before {
+    content: "";
+    display: inline-block;
+    flex: 0 0 auto;
+}
+
+.adoption-chart-legend .is-line::before {
+    width: 20px;
+    height: 3px;
+    border-radius: 1px;
+    background: var(--admin-green);
+    box-shadow: 7px -3px 0 -1px var(--admin-green);
+}
+
+.adoption-chart-legend .is-bars::before {
+    width: 9px;
+    height: 12px;
+    border-radius: 2px 2px 0 0;
+    background: var(--admin-cyan);
+}
+
+.adoption-histogram-scale {
+    grid-column: 1 / -1;
+    display: flex;
+    min-width: 0;
+    min-height: 34px;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    min-height: 27px;
-    padding: 0 8px 0 38px;
+    gap: 10px;
+    margin-top: 5px;
+    padding: 5px 4px 4px var(--chart-axis-width);
+    border-top: 1px solid var(--admin-line-soft);
 }
 
-.adoption-chart-band-heading strong {
+.adoption-histogram-scale strong {
     color: var(--admin-ink);
     font-size: 11px;
     font-weight: 950;
+    line-height: 1.25;
     text-transform: uppercase;
 }
 
-.adoption-chart-band-heading span {
+.adoption-histogram-scale span {
     color: var(--admin-muted);
     font-size: 10px;
     font-weight: 800;
-}
-
-.adoption-line-canvas {
-    position: relative;
-    height: 168px;
-    border-top: 1px solid var(--admin-line-soft);
-    border-bottom: 1px solid var(--admin-line-soft);
-    background-image: linear-gradient(to bottom, var(--admin-line-soft) 1px, transparent 1px);
-    background-size: 100% 25%;
-}
-
-.adoption-axis {
-    position: absolute;
-    left: 3px;
-    z-index: 2;
-    min-width: 29px;
-    color: var(--admin-muted);
-    font-size: 9px;
-    font-weight: 850;
+    line-height: 1.3;
     text-align: right;
 }
 
-.adoption-axis.is-max { top: 4px; }
-.adoption-axis.is-zero { bottom: 4px; }
+.adoption-histogram-scale .is-empty {
+    color: var(--adoption-warning-text);
+}
 
-.adoption-cumulative-line {
+.adoption-percentage-axis,
+.adoption-count-axis {
+    position: relative;
+    width: var(--chart-axis-width);
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 850;
+    font-variant-numeric: tabular-nums;
+}
+
+.adoption-percentage-axis {
+    height: var(--chart-main-height);
+}
+
+.adoption-percentage-axis span {
     position: absolute;
-    inset: 0 8px 0 38px;
-    width: calc(100% - 46px);
+    right: 7px;
+    transform: translateY(-50%);
+}
+
+.adoption-percentage-axis span:nth-child(1) { top: 5%; }
+.adoption-percentage-axis span:nth-child(2) { top: 27.5%; }
+.adoption-percentage-axis span:nth-child(3) { top: 50%; }
+.adoption-percentage-axis span:nth-child(4) { top: 72.5%; }
+.adoption-percentage-axis span:nth-child(5) { top: 95%; }
+
+.adoption-readiness-plot {
+    position: relative;
+    height: var(--chart-main-height);
+    min-width: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--admin-panel-soft) 80%, transparent);
+    box-shadow: inset 0 0 0 1px var(--admin-line-soft);
+    cursor: crosshair;
+    outline: none;
+    touch-action: pan-y;
+}
+
+.adoption-readiness-plot:focus-visible {
+    box-shadow: inset 0 0 0 1px var(--admin-cyan), 0 0 0 2px color-mix(in srgb, var(--admin-cyan) 24%, transparent);
+}
+
+.adoption-readiness-svg {
+    display: block;
+    width: 100%;
     height: 100%;
-    overflow: visible;
+    overflow: hidden;
     pointer-events: none;
 }
 
-.adoption-cumulative-line polyline {
+.adoption-chart-gridlines line {
+    stroke: var(--admin-line-soft);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+}
+
+.adoption-readiness-area {
+    fill: color-mix(in srgb, var(--admin-green) 10%, transparent);
+}
+
+.adoption-readiness-step {
     fill: none;
     stroke: var(--admin-green);
-    stroke-linecap: round;
+    stroke-linecap: square;
     stroke-linejoin: round;
     stroke-width: 3;
     vector-effect: non-scaling-stroke;
 }
 
-.adoption-line-point {
-    fill: var(--admin-panel);
-    stroke: var(--admin-green);
-    stroke-width: 2.5;
-    vector-effect: non-scaling-stroke;
+.adoption-chart-crosshair {
+    position: absolute;
+    z-index: 3;
+    left: var(--chart-cursor-x);
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    transform: translateX(-.5px);
+    background: color-mix(in srgb, var(--adoption-info-text) 70%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--admin-panel) 74%, transparent);
+    opacity: 0;
+    pointer-events: none;
+    transition: left .12s ease, opacity .12s ease;
 }
 
-.adoption-line-point.is-selected {
-    fill: var(--admin-green);
-    stroke: var(--admin-panel);
-    stroke-width: 3;
+.adoption-chart-cursor-dot {
+    position: absolute;
+    z-index: 5;
+    left: var(--chart-cursor-x);
+    top: var(--chart-cursor-y);
+    width: 11px;
+    height: 11px;
+    transform: translate(-50%, -50%);
+    border: 3px solid var(--admin-panel);
+    border-radius: 50%;
+    background: var(--admin-green);
+    box-shadow: 0 0 0 2px var(--admin-green);
+    opacity: 0;
+    pointer-events: none;
+    transition: left .12s ease, top .12s ease, opacity .12s ease;
 }
 
-.adoption-bars-band {
-    padding-top: 5px;
+.adoption-growth-panel[data-chart-active="true"] .adoption-chart-crosshair,
+.adoption-growth-panel[data-chart-active="true"] .adoption-chart-cursor-dot {
+    opacity: 1;
 }
 
-.adoption-bars {
-    display: grid;
-    grid-template-columns: repeat(var(--chart-days, 30), minmax(44px, 1fr));
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(44px, 1fr);
-    gap: 0;
-    min-height: 132px;
-    align-items: end;
-    padding: 0 8px 0 38px;
-    border-bottom: 1px solid var(--admin-line);
-    background-image: linear-gradient(to bottom, var(--admin-line-soft) 1px, transparent 1px);
-    background-size: 100% 50%;
+.adoption-chart-endpoint {
+    position: absolute;
+    z-index: 4;
+    left: var(--endpoint-x);
+    top: var(--endpoint-y);
+    width: 10px;
+    height: 10px;
+    transform: translate(-50%, -50%);
+    border: 3px solid var(--admin-panel);
+    border-radius: 50%;
+    background: var(--admin-green);
+    box-shadow: 0 0 0 2px var(--admin-green);
+    pointer-events: none;
 }
 
-.adoption-bar-column {
+.adoption-chart-endpoint strong {
+    position: absolute;
+    right: 7px;
+    bottom: 7px;
+    min-width: 98px;
+    padding: 3px 5px;
+    border: 1px solid color-mix(in srgb, var(--admin-green) 42%, var(--admin-line));
+    border-radius: 5px;
+    background: var(--admin-panel);
+    color: var(--adoption-success-text);
+    font-size: 10px;
+    font-weight: 950;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.adoption-chart-endpoint strong b {
+    color: var(--adoption-success-text);
+    font: inherit;
+}
+
+.adoption-chart-endpoint.is-near-top strong {
+    top: 7px;
+    bottom: auto;
+}
+
+.adoption-count-axis {
+    height: var(--chart-histogram-height);
+}
+
+.adoption-count-axis span {
+    position: absolute;
+    right: 7px;
+}
+
+.adoption-count-axis span:first-child { top: -2px; }
+.adoption-count-axis span:last-child { bottom: -3px; }
+
+.adoption-histogram {
     position: relative;
     display: grid;
-    grid-template-rows: 18px 88px 24px;
+    grid-template-columns: repeat(var(--chart-points, 1), minmax(0, 1fr));
+    gap: 0;
+    height: var(--chart-histogram-height);
     min-width: 0;
     align-items: end;
-    justify-items: center;
-    border-radius: 5px 5px 0 0;
-    color: inherit;
-    cursor: pointer;
-    outline: none;
-    text-decoration: none;
+    overflow: hidden;
+    border-top: 1px solid var(--admin-line-soft);
+    border-bottom: 1px solid var(--admin-line);
+    background: linear-gradient(to bottom, transparent 49.5%, var(--admin-line-soft) 50%, transparent 50.5%);
+    cursor: crosshair;
+    touch-action: pan-y;
 }
 
-.adoption-bar-column.is-selected,
-.adoption-bar-column:focus-visible {
-    background: color-mix(in srgb, var(--admin-green) 7%, transparent);
+.adoption-histogram-column {
+    position: relative;
+    display: flex;
+    height: 100%;
+    min-width: 0;
+    align-items: flex-end;
+    justify-content: center;
 }
 
-.adoption-bar-column:focus-visible {
-    box-shadow: inset 0 0 0 2px var(--admin-cyan);
+.adoption-histogram-column.is-selected,
+.adoption-histogram-column.is-preview {
+    background: color-mix(in srgb, var(--admin-cyan) 8%, transparent);
 }
 
-.adoption-bar-column > strong {
-    color: var(--adoption-info-text);
-    font-size: 10px;
-    line-height: 1;
-}
-
-.adoption-bar {
-    width: min(17px, 72%);
-    height: max(2px, var(--bar-height));
+.adoption-histogram-bar {
+    width: clamp(2px, 58%, 18px);
+    height: var(--bar-height, 0%);
+    min-height: 2px;
     transform-origin: bottom;
     border-radius: 3px 3px 0 0;
-    background: color-mix(in srgb, var(--admin-cyan) 72%, transparent);
+    background: color-mix(in srgb, var(--admin-cyan) 78%, transparent);
 }
 
-.adoption-bar.is-zero {
+.adoption-histogram-bar.is-zero {
     height: 0;
+    min-height: 0;
 }
 
-.adoption-bar-column time {
-    align-self: center;
+.adoption-histogram-column.is-selected .adoption-histogram-bar {
+    background: var(--admin-cyan);
+}
+
+.adoption-axis-spacer {
+    min-width: 0;
+}
+
+.adoption-chart-dates {
+    display: grid;
+    grid-template-columns: repeat(var(--chart-points, 1), minmax(0, 1fr));
+    gap: 0;
+    min-width: 0;
+    min-height: 28px;
+}
+
+.adoption-chart-dates time {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: center;
     color: var(--admin-muted);
     font-size: 9px;
     font-weight: 800;
+    line-height: 1;
     white-space: nowrap;
+}
+
+.adoption-chart-dates time.is-selected {
+    color: var(--adoption-success-text);
+    font-weight: 950;
+}
+
+.adoption-chart-dates time[hidden],
+.adoption-chart-selection-action [hidden] {
+    display: none !important;
+}
+
+.adoption-chart-selection {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(170px, 1.15fr) minmax(118px, .65fr) minmax(190px, 1fr) auto;
+    gap: 8px;
+    min-width: 0;
+    align-items: stretch;
+    margin-top: 9px;
+    padding: 9px;
+    border: 1px solid var(--admin-line-soft);
+    border-radius: 7px;
+    background: var(--admin-panel-soft);
+}
+
+.adoption-chart-selection > div:not(.adoption-chart-selection-action) {
+    display: grid;
+    min-width: 0;
+    align-content: center;
+    gap: 3px;
+    padding: 3px 8px;
+    border-left: 2px solid var(--admin-line);
+}
+
+.adoption-chart-selection > div > span {
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 900;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+.adoption-chart-selection > div > strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--admin-ink);
+    font-size: 12px;
+    font-weight: 950;
+    line-height: 1.25;
+}
+
+.adoption-chart-selection > div > strong b {
+    color: var(--adoption-success-text);
+    font: inherit;
+}
+
+.adoption-chart-selection-action {
+    display: flex;
+    min-width: 160px;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.adoption-chart-selection-action a {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+    padding: 0 13px;
+    border: 1px solid var(--adoption-action-border);
+    border-radius: 6px;
+    background: var(--adoption-action-bg);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 950;
+    line-height: 1.2;
+    text-align: center;
+    text-decoration: none;
+    text-transform: uppercase;
+}
+
+.adoption-chart-selection-action span {
+    max-width: 185px;
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.3;
+    text-align: right;
 }
 
 .adoption-tooltip {
@@ -1409,11 +1743,7 @@ button.adoption-executive-card {
         border-color: color-mix(in srgb, var(--admin-cyan) 42%, var(--admin-line));
     }
 
-    .adoption-bar-column:hover {
-        background: color-mix(in srgb, var(--admin-cyan) 7%, transparent);
-    }
-
-    .adoption-bar-column:hover .adoption-bar {
+    .adoption-histogram-column.is-preview .adoption-histogram-bar {
         background: var(--admin-cyan);
     }
 }
@@ -1438,13 +1768,17 @@ button.adoption-executive-card {
     animation: adoption-enter .22s ease-out both;
 }
 
-.admin-registration-page.is-ready .adoption-bar {
+.admin-registration-page.is-ready .adoption-histogram-bar {
     animation: adoption-bar-in .34s ease-out both;
-    animation-delay: min(calc(var(--bar-delay, 0) * 8ms), 220ms);
+    animation-delay: min(calc(var(--bar-delay, 0) * 6ms), 160ms);
 }
 
-.admin-registration-page.is-ready .adoption-cumulative-line polyline {
+.admin-registration-page.is-ready .adoption-readiness-step {
     animation: adoption-line-in .42s ease-out both;
+}
+
+.admin-registration-page.is-ready .adoption-readiness-area {
+    animation: adoption-area-in .28s ease-out both;
 }
 
 @keyframes adoption-enter {
@@ -1462,11 +1796,21 @@ button.adoption-executive-card {
     to { stroke-dasharray: 1; stroke-dashoffset: 0; opacity: 1; }
 }
 
+@keyframes adoption-area-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
 @keyframes adoption-spin { to { transform: rotate(360deg); } }
 
 /* Tablet: собственная management-шапка нужна независимо от orientation. */
 @media (max-width: 1180px) {
     .admin-registration-page { overflow: visible; }
+
+    .adoption-growth-panel {
+        --chart-main-height: 220px;
+        --chart-histogram-height: 72px;
+    }
 
     .adoption-filter-panel {
         grid-template-columns: 1fr;
@@ -1534,8 +1878,14 @@ button.adoption-executive-card {
     .adoption-period-switcher span,
     .adoption-state-tabs a,
     .adoption-state-tabs > span,
-    .adoption-search input {
+    .adoption-search input,
+    .adoption-selected-day a {
         min-height: 44px;
+    }
+
+    .adoption-selected-day a {
+        display: inline-flex;
+        align-items: center;
     }
 
     .adoption-breakdown-grid {
@@ -1656,10 +2006,48 @@ button.adoption-executive-card {
         width: 100%;
     }
 
+    .adoption-chart-header-actions {
+        width: 100%;
+        justify-items: stretch;
+    }
+
+    .adoption-chart-headline-metrics {
+        justify-content: flex-start;
+    }
+
     .adoption-period-switcher,
     .adoption-state-tabs {
         width: 100%;
         padding-bottom: 4px;
+    }
+
+    .adoption-period-switcher {
+        justify-content: flex-start;
+    }
+
+    .adoption-chart-selection {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        padding: 7px;
+    }
+
+    .adoption-chart-selection-date,
+    .adoption-chart-selection-action {
+        grid-column: 1 / -1;
+    }
+
+    .adoption-chart-selection-action {
+        min-width: 0;
+        justify-content: stretch;
+    }
+
+    .adoption-chart-selection-action a {
+        width: 100%;
+    }
+
+    .adoption-chart-selection-action span {
+        max-width: none;
+        text-align: left;
     }
 }
 
@@ -1816,18 +2204,50 @@ button.adoption-executive-card {
         align-self: center;
     }
 
-    .adoption-chart-stage {
-        min-width: max(616px, var(--chart-min-width, 1366px));
+    .adoption-growth-panel {
+        --chart-main-height: 190px;
+        --chart-histogram-height: 60px;
+        --chart-axis-width: 38px;
     }
 
-    .adoption-chart-band-heading {
+    .adoption-chart-semantics {
+        padding: 7px 8px;
+        font-size: 9px;
+    }
+
+    .adoption-chart-legend {
+        align-items: flex-start;
+        gap: 4px 10px;
+        padding-left: var(--chart-axis-width);
+    }
+
+    .adoption-histogram-scale {
         align-items: flex-start;
         flex-direction: column;
         gap: 2px;
-        padding-left: 38px;
+        min-height: 43px;
+        padding-left: var(--chart-axis-width);
     }
 
-    .adoption-line-canvas { height: 150px; }
+    .adoption-histogram-scale span {
+        text-align: left;
+    }
+
+    .adoption-percentage-axis,
+    .adoption-count-axis,
+    .adoption-chart-dates time {
+        font-size: 8px;
+    }
+
+    .adoption-percentage-axis span,
+    .adoption-count-axis span {
+        right: 5px;
+    }
+
+    .adoption-chart-endpoint strong {
+        min-width: 86px;
+        font-size: 9px;
+    }
 
     .adoption-breakdown-row {
         grid-template-columns: minmax(0, 1fr) 42px;
@@ -1920,6 +2340,11 @@ button.adoption-executive-card {
         overflow: visible;
     }
 
+    .adoption-growth-panel {
+        --chart-main-height: 156px;
+        --chart-histogram-height: 52px;
+    }
+
     .adoption-filter-panel {
         padding: 8px 10px;
     }
@@ -1967,10 +2392,17 @@ button.adoption-executive-card {
     .adoption-executive-card,
     .adoption-decision-grid,
     .adoption-growth-panel,
-    .adoption-bar,
-    .adoption-cumulative-line polyline {
+    .adoption-histogram-bar,
+    .adoption-readiness-step,
+    .adoption-readiness-area {
         animation: none !important;
         transform: none !important;
+    }
+
+    .adoption-chart-crosshair,
+    .adoption-chart-cursor-dot,
+    .adoption-chart-selection-action {
+        display: none !important;
     }
 }
 
