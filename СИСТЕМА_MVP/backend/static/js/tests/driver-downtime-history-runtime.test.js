@@ -156,13 +156,22 @@ test("trip and downtime report cards scroll vertically with readable rows", () =
 });
 
 test("Shift, Downtimes and Waybill share the same bottom action rails", () => {
+    assert.equal(
+        (TEMPLATE_SOURCE.match(/--driver-nav-content-h:\s*var\(--mobile-shift-role-nav-h,\s*78px\)/g) || []).length,
+        2,
+        "Driver content reserve must use the same adaptive height as the visible navigation"
+    );
     assert.match(
         TEMPLATE_SOURCE,
-        /\.mobile-shift\[data-mobile-shift-role="driver"\]\s*\{[\s\S]*?inset:\s*calc\(var\(--driver-safe-top\) \+ var\(--driver-header-h\) \+ var\(--driver-work-gap\)\)[\s\S]*?var\(--driver-edge\)[\s\S]*?calc\(var\(--driver-safe-bottom\) \+ var\(--driver-nav-content-h\) \+ var\(--driver-work-gap\)\)[\s\S]*?padding:\s*0 0 var\(--driver-footer-action-gap\)/
+        /\.mobile-shift\[data-mobile-shift-role="driver"\]\s*\{[\s\S]*?inset:\s*calc\(var\(--driver-safe-top\) \+ var\(--driver-header-h\) \+ var\(--driver-work-gap\)\)[\s\S]*?var\(--driver-edge\)[\s\S]*?calc\(var\(--driver-safe-bottom\) \+ var\(--driver-nav-content-h\)\)[\s\S]*?padding:\s*0 0 var\(--driver-footer-action-gap\)/
     );
     assert.match(
         TEMPLATE_SOURCE,
         /\.mobile-shift__actions,[\s\S]*?\.driver-downtime-close,[\s\S]*?\.driver-report-actions\s*\{[\s\S]*?height:\s*var\(--driver-footer-action-h\)/
+    );
+    assert.match(
+        TEMPLATE_SOURCE,
+        /\[data-driver-tab-panel="shift"\]\.is-active,[\s\S]*?\[data-driver-tab-panel="downtimes"\]\.is-active,[\s\S]*?\[data-driver-tab-panel="manifest"\]\.is-active\s*\{[\s\S]*?height:\s*calc\(100% \+ var\(--driver-work-gap\)\)[\s\S]*?max-height:\s*calc\(100% \+ var\(--driver-work-gap\)\)/
     );
 });
 

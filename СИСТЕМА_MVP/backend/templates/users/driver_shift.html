@@ -35,7 +35,7 @@ body.driver-mobile-screen {
     --driver-header-h: 54px;
     --driver-header-content-h: var(--driver-header-h);
     --driver-header-total-h: calc(var(--driver-safe-top) + var(--driver-header-content-h));
-    --driver-nav-content-h: 78px;
+    --driver-nav-content-h: var(--mobile-shift-role-nav-h, 78px);
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
     --driver-work-gap: clamp(12px, 1.8dvh, 20px);
     margin: 0;
@@ -97,7 +97,7 @@ body.driver-mobile-screen .driver-shell {
     --driver-safe-top: env(safe-area-inset-top, 0px);
     --driver-safe-bottom: env(safe-area-inset-bottom, 0px);
     --driver-header-total-h: calc(var(--driver-safe-top) + var(--driver-header-h));
-    --driver-nav-content-h: 78px;
+    --driver-nav-content-h: var(--mobile-shift-role-nav-h, 78px);
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
     --driver-work-gap: clamp(12px, 1.8dvh, 20px);
     --driver-work-column: min(100%, 720px);
@@ -4054,11 +4054,23 @@ body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] {
        when switching between Shift, Downtimes and Waybill. */
     inset: calc(var(--driver-safe-top) + var(--driver-header-h) + var(--driver-work-gap))
         var(--driver-edge)
-        calc(var(--driver-safe-bottom) + var(--driver-nav-content-h) + var(--driver-work-gap)) !important;
+        calc(var(--driver-safe-bottom) + var(--driver-nav-content-h)) !important;
     --ms-screen-rows: minmax(38px, .12fr) minmax(0, 1fr) var(--driver-footer-action-h);
     --ms-screen-rows-landscape: minmax(30px, .12fr) minmax(0, 1fr) var(--driver-footer-action-h);
     row-gap: var(--driver-footer-action-gap) !important;
     padding: 0 0 var(--driver-footer-action-gap) !important;
+}
+
+/* The Driver shell keeps a general work gap above the fixed navigation.  The
+   three footer-action tabs already own an equal gap above and below their
+   action row, so let them use that reserved strip instead of stacking two
+   different gaps.  Their flexible content row absorbs the recovered height;
+   the action height itself remains unchanged. */
+body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active,
+body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active,
+body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active {
+    height: calc(100% + var(--driver-work-gap));
+    max-height: calc(100% + var(--driver-work-gap));
 }
 
 body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__actions,
@@ -4069,13 +4081,15 @@ body.driver-mobile-screen .driver-report-actions {
     max-height: var(--driver-footer-action-h);
 }
 
-body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active {
+body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active,
+body.driver-mobile-screen .driver-shell[data-driver-density] [data-driver-tab-panel="downtimes"].is-active {
     grid-template-rows: clamp(34px, 4.5dvh, 40px) clamp(62px, 8.2dvh, 76px) minmax(0, 1fr) var(--driver-footer-action-h) !important;
     gap: var(--driver-footer-action-gap) !important;
     padding-bottom: var(--driver-footer-action-gap);
 }
 
-body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="report"].is-active {
+body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="report"].is-active,
+body.driver-mobile-screen .driver-shell[data-driver-density] .driver-manifest-view[data-driver-manifest-view="report"].is-active {
     grid-template-rows: minmax(0, 1fr) var(--driver-footer-action-h);
     gap: var(--driver-footer-action-gap);
     padding-bottom: var(--driver-footer-action-gap);
