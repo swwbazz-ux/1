@@ -12631,40 +12631,41 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
 /* ============================================================================
    КАРТОЧКА КОМПЛЕКСА: ИНФОРМАЦИЯ СЛЕВА, САМОСВАЛЫ СПРАВА
 
-   Карточка — это две зоны с постоянными местами, чтобы взгляд находил их без
-   поиска на любой из десяти карточек:
+   Две зоны с постоянными местами, чтобы взгляд находил нужное на любой из
+   десяти карточек без поиска:
 
-   +--------------+----------------------------+
-   | K-1          |  [12] [14] [19] [26]       |
-   | [ОЖИДАНИЕ..] |                            |
-   | Гор.90 Бл.52 |  [31] [33]                 |
-   | Первичная с..|                            |
-   | 4% 345/10000 |                            |
-   +--------------+----------------------------+
+   +----------------+------------------------------+
+   | K-2            |  [11] [12] [13] [14] [15]     |
+   | [НАЗНАЧЕНА]    |  [16] [17] [18] [19] [20]     |
+   | ГОР 105 БЛОК 41|  [21] [22]                    |
+   | Первичная      |                              |
+   | сульфидная руда|                              |
+   | 4% 345/10 000  |                              |
+   +----------------+------------------------------+
 
-   Слева столбиком: имя, статус с таймером, горизонт и блок, порода, план.
-   Всё остальное пространство — поле самосвалов, где каждая машина показана
-   полной плиткой: номер, картинка, подпись состояния, кольцо выполнения плана
-   по контуру. Поле занимает всю высоту карточки, поэтому в него помещается
-   до шестнадцати полных плиток; дальше плитка сжимается до жетона номера, а
-   совсем крайний хвост сворачивается в счётчик «+N». Размеры плиток считает
-   JS (refreshComplexTruckRack) от размеров самого поля.
+   Столбец слева фиксированной ширины — тогда столбцы всех карточек стоят на
+   одной вертикали, а поля машин начинаются с одной линии. Всё остальное —
+   поле самосвалов на всю высоту карточки; каждая машина в нём — полная
+   плитка: номер, картинка, подпись состояния, кольцо выполнения плана по
+   контуру. Размеры плиток считает JS (refreshComplexTruckRack) от размеров
+   самого поля, за которыми следит ResizeObserver.
 
-   Прежняя раскладка складывала всё в три строки друг под другом, и полоса
-   машин получала остаток, которого при десяти комплексах не оставалось.
+   Шкала кеглей (логические точки): имя 28 / статус 10 / чипы 11 / порода
+   и план 12 / номер машины 14 / подпись машины 9. Ритм отступов — 4-6-10.
    Заготовка-пустышка (.status-empty) и мобильный контур горного мастера
    этими правилами не затронуты.
    ============================================================================ */
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card:not(.status-empty) {
     display: grid;
-    grid-template-columns: minmax(140px, 32%) minmax(0, 1fr);
+    grid-template-columns: 168px minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas:
         "head trucks"
         "info trucks";
-    gap: 4px 12px;
+    gap: 0 14px;
     align-items: start;
+    padding: 14px 16px 14px 16px;
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card:not(.status-empty) > * {
@@ -12676,23 +12677,42 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-title-state {
     grid-area: head;
+    display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 5px;
+    gap: 6px;
     overflow: hidden;
 }
 
+/* Базовое правило обнуляло отступ заголовка только внутри .complex-work-head,
+   которой на настольном пульте нет, — и h2 носил браузерные 0.83em сверху и
+   снизу, отсюда провал между именем и статусом. */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-title-state h2 {
-    font-size: 30px;
+    flex: 0 0 auto;
+    max-width: 100%;
+    margin: 0;
+    color: var(--gd-ink);
+    font-size: 28px;
+    font-weight: 900;
     line-height: 1;
+    letter-spacing: -.01em;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
 }
 
-/* Статус и причина простоя — одной строкой. Полный текст причины остаётся в
-   подсказке (title) и в журнале; здесь важнее, чтобы он не выталкивал план и
-   породу за край карточки. */
+/* Статус и причина простоя — одной строкой, полный текст в подсказке. */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-state-chip,
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-downtime-status {
     max-width: 100%;
+    min-height: 20px;
+    padding: 0 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: .04em;
+    line-height: 20px;
+    text-transform: uppercase;
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-state-chip,
@@ -12702,6 +12722,40 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
     white-space: nowrap;
     text-overflow: ellipsis;
     text-align: left;
+}
+
+/* Причина простоя и таймер одинаково важны: причине — две строки, таймеру —
+   своё место справа, чтобы длинная причина не съедала его. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-downtime-status {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px 0;
+    align-items: start;
+    min-height: 20px;
+    padding: 4px 8px 3px;
+    line-height: 1.15;
+}
+
+/* Причина — на всю ширину столбца в две строки, без разрядки: рядом с
+   таймером ей оставалось меньше ста точек, и она обрывалась на втором
+   слове. Таймер — отдельной строкой, прижат вправо, цифры табличные. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-downtime-status > span {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    letter-spacing: 0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-downtime-status > time {
+    justify-self: end;
+    font-size: 11px;
+    line-height: 1;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-downtime-status > time {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
 }
 
 /* --- Левый столбец: контекст забоя и план --------------------------------- */
@@ -12716,6 +12770,7 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
     align-self: stretch;
     width: auto;
     max-width: none;
+    margin-top: 10px;
     gap: 4px;
     text-align: left;
     overflow: hidden;
@@ -12726,22 +12781,87 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
     max-width: 100%;
 }
 
-/* Порода, точки разгрузки и план занимают свою строку столбца целиком. */
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-rock,
+/* Горизонт и блок — два одинаковых чипа в одной строке. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-info-chip.chip-horizon,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-info-chip.chip-block {
+    min-height: 18px;
+    padding: 0 7px;
+    border-color: rgba(142, 158, 166, .32);
+    background: rgba(142, 158, 166, .10);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 18px;
+    letter-spacing: .02em;
+}
+
+/* Порода — обычным текстом в две строки, а не обрезанным чипом: это
+   ключевой признак забоя, его нужно дочитать, а место в столбце есть. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-rock {
+    flex: 1 0 100%;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    min-height: 0;
+    margin-top: 2px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--gd-muted);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .complex-unload-points,
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .dispatcher-plan-strip {
     flex: 1 0 100%;
-    margin-top: 0;
-}
-
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-rock {
-    display: block;
-    justify-content: flex-start;
-    color: var(--gd-muted);
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-unload-points {
     justify-items: start;
+}
+
+/* План — одна строка показаний: процент крупно, факт/план рядом. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .dispatcher-plan-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
+    margin-top: 6px;
+    padding: 5px 8px;
+    border-radius: 5px;
+    font-size: 12px;
+    line-height: 1.15;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip strong {
+    font-size: 14px;
+    font-weight: 900;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip span,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip em,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip small {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--gd-muted);
+    white-space: normal;
+}
+
+/* Без плана «Не назначен» и «План не назначен» дублируют друг друга —
+   оставляем одну приглушённую строку. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip.is-plan-missing {
+    border-style: dashed;
+    background: transparent;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip.is-plan-missing strong {
+    display: none;
 }
 
 /* --- Поле самосвалов ------------------------------------------------------- */
@@ -12753,48 +12873,57 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
     height: auto;
     align-content: start;
     justify-content: start;
+    border-radius: 8px;
 }
 
+/* Пустое поле — это место, куда диспетчер перетаскивает машины из гаража;
+   пунктирная рамка и приглушённая подпись так и говорят. */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks:has(.complex-truck-empty:not([hidden])) {
     align-content: center;
     justify-content: center;
+    border: 1px dashed rgba(142, 158, 166, .28);
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-empty {
     grid-column: 1 / -1;
     place-self: center;
     width: auto;
-    padding: 0;
+    padding: 0 12px;
+    color: rgba(142, 158, 166, .75);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .02em;
 }
 
-/* Полная плитка: номер, картинка, подпись состояния. Класс is-rich-trucks
-   ставит JS, пока выбранного размера хватает на все машины. */
+/* Полная плитка: номер главный, картинка второстепенная, подпись состояния
+   приглушённая. Класс is-rich-trucks ставит JS, пока размера хватает. */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 1px;
-    padding: 2px 3px;
+    justify-content: space-between;
+    gap: 0;
+    padding: 4px 4px 3px;
     border-radius: 6px;
+    border-width: 1px;
 }
 
-/* Кегль полной плитки считается от её высоты: номер около четверти,
-   подпись около шестой части. Формула жетона (половина высоты) здесь давала
-   номер в 25px и подпись, которая не влезала в ширину. */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile strong {
     margin: 0;
-    font-size: max(11px, calc(var(--complex-truck-h, 58px) * 0.24));
+    color: var(--gd-ink);
+    font-size: max(12px, calc(var(--complex-truck-h, 58px) * 0.25));
     font-weight: 900;
     line-height: 1;
     letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile img {
     display: block;
-    width: 62%;
-    height: 42%;
+    width: 56%;
+    height: 36%;
     object-fit: contain;
+    opacity: .78;
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile span {
@@ -12803,12 +12932,15 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    font-size: max(8px, calc(var(--complex-truck-h, 58px) * 0.16));
-    line-height: 1.05;
+    font-size: max(8px, calc(var(--complex-truck-h, 58px) * 0.155));
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: .01em;
+    opacity: .9;
 }
 
-/* Жетон: включается только когда машин столько, что подпись всё равно стала
-   бы нечитаемой. Состояние там читается цветом плитки и кольцом плана. */
+/* Жетон: только когда машин столько, что подпись всё равно нечитаема.
+   Состояние читается цветом плитки и кольцом плана. */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks:not(.is-rich-trucks) .complex-truck-tile {
     display: grid;
     place-items: center;
