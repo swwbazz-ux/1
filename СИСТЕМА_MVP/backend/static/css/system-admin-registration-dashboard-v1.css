@@ -1,25 +1,60 @@
-/* Подключение сотрудников */
+/* Подключение сотрудников: единая аналитика для администратора и руководства. */
 .admin-registration-shell {
-    /* Отчёт прокручивается по вертикали и не должен наследовать 90% zoom,
-       предназначенный для плотного одновысотного экрана «Выгрузки». */
     --admin-interface-scale: 1;
-    min-height: 100dvh;
+    /* Текстовые акценты: минимум 5.70:1 на светлом --admin-panel-soft. */
+    --adoption-success-text: #0b6b3f;
+    --adoption-warning-text: #765000;
+    --adoption-info-text: #075e72;
+    --adoption-danger-text: #a42c26;
+    /* Белый текст: 6.58:1 обычно, 8.33:1 при наведении. */
+    --adoption-action-bg: #0b6b3f;
+    --adoption-action-bg-hover: #085a34;
+    --adoption-action-border: #0b6b3f;
     width: 100%;
+    min-height: 100dvh;
     overflow-x: hidden;
     zoom: 1;
 }
 
-/* Экран руководства использует тот же отчёт, но наследует палитру и оболочку
-   управленческой витрины. Алиасы сохраняют единое оформление компонентов без
-   копирования всей таблицы и графиков во второй набор стилей. */
+.admin-registration-shell.admin-night {
+    /* Минимум 5.39:1 на самом светлом ночном --admin-panel-soft. */
+    --adoption-success-text: #5edc9c;
+    --adoption-warning-text: #f2be58;
+    --adoption-info-text: #62d6ef;
+    --adoption-danger-text: #ff8179;
+    --adoption-action-border: #5edc9c;
+}
+
+/* На промежуточной desktop-ширине отдаём навигации достаточно места для трёх рядов.
+   Правило ограничено этим отчётом: общую админскую шапку соседних экранов не меняем. */
+@media (min-width: 1181px) and (max-width: 1400px) {
+    .admin-registration-shell {
+        --admin-header-title-column: 230px;
+        --admin-header-gap: 6px;
+    }
+
+    .admin-registration-shell .admin-console-title h1 {
+        font-size: clamp(23px, 1.9vw, 27px);
+    }
+
+    .admin-registration-shell .admin-console-nav {
+        gap: 6px;
+    }
+
+    .admin-registration-shell .admin-console-nav a {
+        padding-inline: 5px;
+        font-size: 12px;
+    }
+}
+
 .management-registration-shell {
-    /* Общий диспетчерский fallback уменьшает любой landscape-экран до
-       виртуальных 1400x800. Этот отчёт уже адаптивный, поэтому ему нужна
-       фактическая ширина окна без transform-масштабирования. */
-    width: 100%;
-    height: 100dvh;
-    transform: none;
-    --gd-header-h: clamp(108px, 11vh, 126px);
+    /* Общий dispatcher-shell специально масштабируется в landscape. Этот отчёт
+       имеет собственную адаптивную сетку и всегда использует реальный viewport. */
+    width: 100% !important;
+    height: 100dvh !important;
+    min-height: 100dvh;
+    transform: none !important;
+    --gd-header-h: clamp(96px, 10vh, 118px);
     --admin-panel: var(--gd-panel);
     --admin-panel-soft: var(--gd-panel-soft);
     --admin-ink: var(--gd-ink);
@@ -35,29 +70,39 @@
     --admin-red: var(--gd-red);
     --admin-red-soft: var(--gd-red-soft);
     --admin-shadow: var(--gd-shadow);
+    --adoption-success-text: #5edc9c;
+    --adoption-warning-text: #f2be58;
+    --adoption-info-text: #62d6ef;
+    --adoption-danger-text: #ff8179;
+    --adoption-action-bg: #0b6b3f;
+    --adoption-action-bg-hover: #085a34;
+    --adoption-action-border: #5edc9c;
+}
+
+.management-registration-shell.dispatcher-day {
+    --adoption-success-text: #0b6b3f;
+    --adoption-warning-text: #765000;
+    --adoption-info-text: #075e72;
+    --adoption-danger-text: #a42c26;
+    --adoption-action-border: #0b6b3f;
+}
+
+.management-registration-shell .management-dashboard-board {
+    min-width: 0;
 }
 
 .management-registration-page {
+    min-width: 0;
     min-height: 0;
     padding: 0 2px 8px;
-    overflow: auto;
+    overflow: visible;
     user-select: text;
-}
-
-.management-registration-page .adoption-filter-form .admin-button {
-    font-family: inherit;
-}
-
-@media (min-width: 1181px) and (max-width: 1500px) {
-    .management-registration-shell .management-dashboard-header-title h1 {
-        font-size: 25px;
-    }
 }
 
 @supports not (zoom: 1) {
     .admin-registration-shell {
-        min-height: 100dvh;
         width: 100%;
+        min-height: 100dvh;
         transform: none;
     }
 }
@@ -72,41 +117,106 @@
     -webkit-line-clamp: 2;
 }
 
-.admin-registration-shell .admin-console-identity strong {
-    line-height: 1.12;
-}
-
 .admin-registration-page {
+    position: relative;
     display: grid;
     grid-template-rows: none;
-    gap: 14px;
+    gap: 12px;
+    min-width: 0;
     overflow: auto;
 }
 
 .adoption-filter-panel,
 .adoption-panel,
-.adoption-metric,
-.adoption-data-note {
+.adoption-executive-card,
+.adoption-method-note {
+    min-width: 0;
     border: 1px solid var(--admin-line);
     border-radius: 8px;
     background: var(--admin-panel);
     box-shadow: var(--admin-shadow);
 }
 
-.adoption-filter-panel {
-    display: grid;
-    grid-template-columns: minmax(220px, .65fr) minmax(0, 2fr);
-    gap: 18px;
-    align-items: end;
-    padding: 14px 16px;
+.adoption-loading[hidden],
+.adoption-filter-body[hidden],
+.adoption-search[hidden],
+.adoption-breakdown-toggle[hidden],
+.adoption-search-empty[hidden],
+.adoption-table [hidden] {
+    display: none !important;
 }
 
-.adoption-filter-heading span,
-.adoption-panel-heading > div > span {
-    color: var(--admin-green);
+.adoption-loading {
+    position: fixed;
+    top: max(10px, env(safe-area-inset-top));
+    left: 50%;
+    z-index: 12020;
+    display: inline-flex;
+    min-height: 42px;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 14px;
+    transform: translateX(-50%);
+    border: 1px solid color-mix(in srgb, var(--admin-cyan) 54%, var(--admin-line));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--admin-panel) 94%, transparent);
+    color: var(--admin-ink);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .25);
+    font-size: 12px;
+}
+
+.adoption-loading > span {
+    width: 15px;
+    height: 15px;
+    border: 2px solid color-mix(in srgb, var(--admin-cyan) 28%, transparent);
+    border-top-color: var(--admin-cyan);
+    border-radius: 50%;
+    animation: adoption-spin .7s linear infinite;
+}
+
+.admin-registration-page.is-loading {
+    cursor: progress;
+}
+
+.admin-registration-page.is-loading::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 12010;
+    background: rgba(4, 12, 16, .08);
+    pointer-events: all;
+}
+
+/* Фильтры */
+.adoption-filter-panel {
+    display: grid;
+    grid-template-columns: minmax(190px, .42fr) minmax(0, 1.58fr);
+    gap: 16px;
+    align-items: center;
+    padding: 12px 14px;
+}
+
+.adoption-filter-heading {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.adoption-filter-heading > div,
+.adoption-panel-heading > div {
+    min-width: 0;
+}
+
+.adoption-filter-heading > div > span,
+.adoption-panel-heading > div > span,
+.adoption-executive-card > span {
+    color: var(--adoption-success-text);
     font-size: 10px;
     font-weight: 950;
-    letter-spacing: .08em;
+    letter-spacing: .075em;
+    line-height: 1.1;
     text-transform: uppercase;
 }
 
@@ -118,20 +228,75 @@
     line-height: 1.1;
 }
 
-.adoption-filter-heading strong {
-    display: inline-block;
-    margin-top: 7px;
+.adoption-filter-heading p,
+.adoption-panel-heading p {
+    margin: 4px 0 0;
     color: var(--admin-muted);
-    font-size: 12px;
+    font-size: 11px;
+    line-height: 1.3;
 }
 
-.adoption-filter-heading strong.is-warning {
-    color: var(--admin-yellow);
+.adoption-filter-heading p.is-warning {
+    color: var(--adoption-warning-text);
+}
+
+.adoption-filter-toggle {
+    display: none;
+    grid-template-columns: minmax(0, 1fr) 18px;
+    grid-template-rows: auto auto;
+    gap: 2px 10px;
+    min-width: 170px;
+    min-height: 44px;
+    padding: 6px 10px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.adoption-filter-toggle span {
+    color: var(--admin-ink);
+    font-size: 11px;
+    font-weight: 950;
+    text-transform: uppercase;
+}
+
+.adoption-filter-toggle strong {
+    overflow: hidden;
+    color: var(--admin-muted);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.adoption-filter-toggle i {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    width: 8px;
+    height: 8px;
+    transform: rotate(45deg);
+    border-right: 2px solid var(--admin-muted);
+    border-bottom: 2px solid var(--admin-muted);
+    transition: transform .16s ease;
+}
+
+.adoption-filter-toggle[aria-expanded="true"] i {
+    transform: rotate(225deg) translate(-2px, -2px);
+}
+
+.adoption-filter-body {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
 }
 
 .adoption-filter-form {
     display: grid;
-    grid-template-columns: repeat(5, minmax(120px, 1fr)) auto auto;
+    grid-template-columns: repeat(3, minmax(130px, 1fr)) auto auto;
     gap: 8px;
     align-items: end;
 }
@@ -167,6 +332,17 @@
     padding: 0 12px;
 }
 
+.admin-registration-page .adoption-filter-form .admin-button-primary {
+    border: 1px solid var(--adoption-action-border);
+    border-radius: 6px;
+    background: var(--adoption-action-bg);
+    color: #fff;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 950;
+    text-transform: uppercase;
+}
+
 .adoption-filter-reset {
     display: inline-flex;
     align-items: center;
@@ -180,23 +356,155 @@
     text-transform: uppercase;
 }
 
-.adoption-metrics {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
+.adoption-filter-chips {
+    display: flex;
+    gap: 5px;
+    min-width: 0;
+    flex-wrap: wrap;
 }
 
-.adoption-metric {
+.adoption-filter-chips span,
+.adoption-chart-caveats span,
+.adoption-selected-day span {
+    display: inline-flex;
+    min-height: 22px;
+    align-items: center;
+    padding: 3px 8px;
+    border: 1px solid var(--admin-line-soft);
+    border-radius: 999px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 850;
+}
+
+.adoption-data-context {
+    grid-column: 1 / -1;
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    gap: 5px;
+    flex-wrap: wrap;
+    padding-top: 7px;
+    border-top: 1px solid var(--admin-line-soft);
+    color: var(--admin-muted);
+    font-size: 10px;
+    line-height: 1.3;
+}
+
+.adoption-data-context strong {
+    flex: 0 0 auto;
+    color: var(--admin-ink);
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+}
+
+.adoption-data-context span {
+    min-width: 0;
+}
+
+/* Честное состояние без когорты: фильтры остаются, нулевая аналитика скрыта. */
+.adoption-dashboard-empty {
+    display: grid;
+    min-height: clamp(260px, 48dvh, 460px);
+    place-content: center;
+    justify-items: center;
+    gap: 7px;
+    padding: 28px 18px;
+    border: 1px dashed var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    color: var(--admin-muted);
+    text-align: center;
+    box-shadow: var(--admin-shadow);
+}
+
+.adoption-dashboard-empty > i {
+    position: relative;
+    width: 46px;
+    height: 42px;
+    margin-bottom: 4px;
+    border: 2px solid var(--admin-muted);
+    border-radius: 8px;
+}
+
+.adoption-dashboard-empty > i::before,
+.adoption-dashboard-empty > i::after {
+    content: "";
+    position: absolute;
+    top: -6px;
+    left: 9px;
+    width: 3px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--admin-muted);
+    box-shadow: 21px 0 0 var(--admin-muted);
+}
+
+.adoption-dashboard-empty > i::after {
+    top: 9px;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.adoption-dashboard-empty > span {
+    color: var(--adoption-info-text);
+    font-size: 11px;
+    font-weight: 950;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+}
+
+.adoption-dashboard-empty h2 {
+    margin: 0;
+    color: var(--admin-ink);
+    font-size: clamp(21px, 3vw, 30px);
+    line-height: 1.1;
+}
+
+.adoption-dashboard-empty p {
+    max-width: 560px;
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.adoption-dashboard-empty .adoption-filter-reset {
+    min-height: 44px;
+    margin-top: 9px;
+    padding-inline: 16px;
+}
+
+/* Сводка руководителя */
+.adoption-executive-grid {
+    display: grid;
+    grid-template-columns: minmax(250px, 1.35fr) repeat(3, minmax(170px, 1fr));
+    gap: 10px;
+}
+
+.adoption-executive-card {
     position: relative;
     display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 4px 12px;
-    min-width: 0;
-    padding: 14px 16px 14px 18px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto 1fr auto;
+    gap: 4px 10px;
+    min-height: 126px;
+    padding: 13px 14px 12px 17px;
     overflow: hidden;
+    color: var(--admin-ink);
+    font: inherit;
+    text-align: left;
 }
 
-.adoption-metric::before {
+button.adoption-executive-card {
+    appearance: none;
+    cursor: pointer;
+}
+
+.adoption-executive-card::before {
     content: "";
     position: absolute;
     inset: 0 auto 0 0;
@@ -204,194 +512,484 @@
     background: var(--admin-muted);
 }
 
-.adoption-metric.is-issued::before {
-    background: var(--admin-cyan);
+.adoption-executive-card.is-primary::before { background: var(--admin-green); }
+.adoption-executive-card.is-attention::before { background: var(--admin-yellow); }
+.adoption-executive-card.is-attention.has-alert { background: color-mix(in srgb, var(--admin-yellow) 8%, var(--admin-panel)); }
+.adoption-executive-card.is-dynamic::before { background: var(--admin-cyan); }
+.adoption-executive-card.is-time::before { background: var(--admin-muted); }
+.adoption-executive-card.is-time.is-lag::before { background: var(--admin-yellow); }
+
+.adoption-executive-card > strong {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    align-self: center;
+    color: var(--admin-ink);
+    font-size: clamp(30px, 3vw, 46px);
+    font-weight: 950;
+    line-height: .95;
+    white-space: nowrap;
 }
 
-.adoption-metric.is-activated::before,
-.adoption-metric.is-login::before {
+.adoption-executive-card.is-primary > strong {
+    color: var(--adoption-success-text);
+    font-size: clamp(42px, 4.2vw, 62px);
+}
+
+.adoption-executive-card.is-attention.has-alert > strong { color: var(--adoption-warning-text); }
+.adoption-executive-card.is-lag > strong { color: var(--adoption-warning-text); }
+
+.adoption-executive-card p,
+.adoption-executive-card .adoption-executive-copy,
+.adoption-executive-card small {
+    margin: 0;
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.25;
+}
+
+.adoption-executive-card p,
+.adoption-executive-card .adoption-executive-copy {
+    grid-column: 1;
+    align-self: end;
+}
+
+.adoption-executive-card .adoption-executive-copy {
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.adoption-executive-card small {
+    grid-column: 1 / -1;
+    align-self: end;
+}
+
+.adoption-executive-progress {
+    grid-column: 1;
+    align-self: center;
+    height: 7px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--admin-panel-soft);
+}
+
+.adoption-executive-progress b {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
     background: var(--admin-green);
 }
 
-.adoption-metric span,
-.adoption-metric small {
+/* Воронка и внимание */
+.adoption-decision-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(310px, .82fr);
+    gap: 10px;
+}
+
+.adoption-panel {
+    padding: 14px 15px;
+}
+
+.adoption-panel-heading {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 12px;
+}
+
+.adoption-panel-heading.compact {
+    margin-bottom: 9px;
+}
+
+.adoption-panel-result {
+    align-self: center;
+    color: var(--adoption-success-text);
+    font-size: 13px;
+    font-weight: 950;
+    white-space: nowrap;
+}
+
+.adoption-funnel {
+    display: grid;
+    grid-template-columns: minmax(130px, 1fr) minmax(74px, .42fr) minmax(130px, 1fr) minmax(74px, .42fr) minmax(130px, 1fr);
+    gap: 7px;
+    align-items: stretch;
+}
+
+.adoption-funnel-step {
+    position: relative;
+    display: grid;
+    min-width: 0;
+    min-height: 112px;
+    align-content: center;
+    gap: 4px;
+    padding: 11px 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.adoption-funnel-step::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    border-radius: 7px 0 0 7px;
+    background: var(--admin-muted);
+}
+
+.adoption-funnel-step.is-prepared::before { background: var(--admin-cyan); }
+.adoption-funnel-step.is-ready::before { background: var(--admin-green); }
+
+.adoption-funnel-step span,
+.adoption-funnel-step small {
+    overflow: hidden;
     color: var(--admin-muted);
     font-size: 11px;
     font-weight: 850;
+    line-height: 1.15;
+    text-overflow: ellipsis;
 }
 
-.adoption-metric span {
+.adoption-funnel-step span {
+    color: var(--admin-ink);
+    font-weight: 950;
     text-transform: uppercase;
 }
 
-.adoption-metric strong {
-    grid-row: 1 / span 2;
-    grid-column: 2;
-    align-self: center;
+.adoption-funnel-step strong {
     color: var(--admin-ink);
-    font-size: clamp(28px, 3vw, 42px);
+    font-size: 34px;
     line-height: 1;
 }
 
-.adoption-data-note {
+.adoption-funnel-step.is-ready strong { color: var(--adoption-success-text); }
+
+.adoption-funnel-transition {
     display: grid;
-    grid-template-columns: 30px minmax(0, 1fr);
-    gap: 10px;
-    align-items: center;
-    padding: 10px 12px;
-    background: color-mix(in srgb, var(--admin-cyan) 7%, var(--admin-panel));
+    grid-template-columns: 1fr auto;
+    grid-template-rows: 20px auto;
+    gap: 3px 5px;
+    place-content: center;
+    min-width: 0;
+    color: var(--admin-muted);
+    text-align: center;
 }
 
-.adoption-data-note > span {
+.adoption-funnel-transition > span {
+    position: relative;
+    grid-column: 1 / -1;
+    align-self: center;
+    width: 100%;
+    height: 1px;
+    background: var(--admin-line);
+}
+
+.adoption-funnel-transition > span::after {
+    content: "";
+    position: absolute;
+    top: -3px;
+    right: -1px;
+    width: 7px;
+    height: 7px;
+    transform: rotate(-45deg);
+    border-right: 1px solid var(--admin-line);
+    border-bottom: 1px solid var(--admin-line);
+}
+
+.adoption-funnel-transition strong {
+    color: var(--adoption-warning-text);
+    font-size: 14px;
+    line-height: 1;
+}
+
+.adoption-funnel-transition small {
+    align-self: center;
+    overflow: hidden;
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.1;
+    text-overflow: ellipsis;
+}
+
+.adoption-attention-total {
     display: grid;
-    width: 26px;
-    height: 26px;
+    min-width: 42px;
+    height: 42px;
     place-items: center;
     border-radius: 50%;
-    background: var(--admin-cyan);
-    color: #fff;
-    font-size: 14px;
-    font-weight: 950;
+    background: var(--admin-panel-soft);
+    color: var(--admin-muted);
+    font-size: 21px;
 }
 
-.adoption-data-note p {
+.adoption-attention-total.has-alert {
+    background: var(--admin-yellow-soft);
+    color: var(--adoption-warning-text);
+}
+
+.adoption-attention-list {
+    display: grid;
+    gap: 6px;
+}
+
+.adoption-attention-item {
+    display: grid;
+    grid-template-columns: 9px minmax(0, 1fr) auto;
+    gap: 9px;
+    min-height: 46px;
+    align-items: center;
+    padding: 6px 8px;
+    border: 1px solid var(--admin-line-soft);
+    border-radius: 6px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    text-decoration: none;
+}
+
+.adoption-attention-item > i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--admin-muted);
+}
+
+.adoption-attention-item.is-warning > i { background: var(--admin-yellow); }
+.adoption-attention-item.is-danger > i { background: var(--admin-red); }
+.adoption-attention-item.is-info > i { background: var(--admin-cyan); }
+
+.adoption-attention-item.is-danger {
+    border-color: color-mix(in srgb, var(--admin-red) 46%, var(--admin-line));
+}
+
+.adoption-attention-item.is-danger b {
+    color: var(--adoption-danger-text);
+}
+
+.adoption-attention-item > span {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.adoption-attention-item strong,
+.adoption-attention-item small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.adoption-attention-item strong { font-size: 11px; }
+.adoption-attention-item small { color: var(--admin-muted); font-size: 10px; }
+.adoption-attention-item b { color: var(--admin-ink); font-size: 17px; }
+
+.adoption-attention-empty {
+    display: grid;
+    min-height: 130px;
+    place-content: center;
+    justify-items: center;
+    gap: 5px;
+    color: var(--admin-muted);
+    text-align: center;
+}
+
+.adoption-attention-empty i {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    border: 2px solid var(--admin-green);
+    border-radius: 50%;
+}
+
+.adoption-attention-empty i::after {
+    content: "";
+    position: absolute;
+    top: 7px;
+    left: 7px;
+    width: 12px;
+    height: 6px;
+    transform: rotate(-45deg);
+    border-bottom: 2px solid var(--admin-green);
+    border-left: 2px solid var(--admin-green);
+}
+
+.adoption-attention-empty strong { color: var(--adoption-success-text); font-size: 13px; }
+.adoption-attention-empty span { font-size: 11px; }
+
+.adoption-method-note {
+    padding: 0;
+    box-shadow: none;
+}
+
+.adoption-method-note summary {
+    min-height: 38px;
+    padding: 9px 13px;
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.adoption-method-note[open] summary {
+    border-bottom: 1px solid var(--admin-line-soft);
+    color: var(--admin-ink);
+}
+
+.adoption-method-note p {
     margin: 0;
+    padding: 10px 13px;
     color: var(--admin-muted);
     font-size: 11px;
     line-height: 1.4;
 }
 
-.adoption-data-note strong {
-    color: var(--admin-ink);
+.adoption-method-note strong { color: var(--admin-ink); }
+
+/* График: накопительный итог и дневные значения разведены по разным полосам. */
+.adoption-chart-heading {
+    align-items: center;
 }
 
-.adoption-chart-grid,
-.adoption-breakdown-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 2fr) minmax(300px, .8fr);
-    gap: 12px;
-}
-
-.adoption-breakdown-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.adoption-panel {
-    min-width: 0;
-    padding: 15px 16px;
-}
-
-.adoption-panel-heading {
+.adoption-period-switcher,
+.adoption-state-tabs {
     display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    align-items: start;
-    margin-bottom: 14px;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
 }
 
-.adoption-panel-heading.compact {
-    margin-bottom: 10px;
-}
-
-.adoption-panel-heading p {
-    margin: 4px 0 0;
+.adoption-period-switcher a,
+.adoption-period-switcher span,
+.adoption-state-tabs a,
+.adoption-state-tabs > span {
+    display: inline-flex;
+    min-height: 34px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 0 10px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    background: var(--admin-panel-soft);
     color: var(--admin-muted);
     font-size: 11px;
-}
-
-.adoption-chart-legend {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    color: var(--admin-muted);
-    font-size: 10px;
-    font-weight: 850;
-}
-
-.adoption-chart-legend span {
-    display: inline-flex;
-    gap: 6px;
-    align-items: center;
+    font-weight: 900;
+    text-decoration: none;
     white-space: nowrap;
 }
 
-.adoption-chart-legend span::before {
-    content: "";
-    width: 13px;
-    height: 4px;
-    border-radius: 3px;
-    background: var(--admin-cyan);
+.adoption-period-switcher .is-active,
+.adoption-state-tabs .is-active {
+    border-color: color-mix(in srgb, var(--admin-green) 58%, var(--admin-line));
+    background: var(--admin-green-soft);
+    color: var(--adoption-success-text);
 }
 
-.adoption-chart-legend .is-line::before {
-    height: 2px;
-    background: var(--admin-green);
+.adoption-state-tabs strong {
+    display: grid;
+    min-width: 20px;
+    height: 20px;
+    place-items: center;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: color-mix(in srgb, currentColor 11%, transparent);
+    color: inherit;
+    font-size: 10px;
+}
+
+.adoption-chart-caveats,
+.adoption-selected-day {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin: -4px 0 9px;
+    flex-wrap: wrap;
+}
+
+.adoption-chart-caveats span {
+    border-color: color-mix(in srgb, var(--admin-yellow) 38%, var(--admin-line));
+    background: var(--admin-yellow-soft);
+    color: var(--adoption-warning-text);
 }
 
 .adoption-chart-scroll {
     min-width: 0;
     overflow-x: auto;
-    padding-bottom: 3px;
+    overscroll-behavior-inline: contain;
+    padding: 0 0 4px;
+    scrollbar-width: thin;
 }
 
-.adoption-growth-chart {
+.adoption-chart-stage {
+    min-width: max(616px, var(--chart-min-width, 1366px));
+}
+
+.adoption-line-band,
+.adoption-bars-band {
+    min-width: 0;
+}
+
+.adoption-chart-band-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 27px;
+    padding: 0 8px 0 38px;
+}
+
+.adoption-chart-band-heading strong {
+    color: var(--admin-ink);
+    font-size: 11px;
+    font-weight: 950;
+    text-transform: uppercase;
+}
+
+.adoption-chart-band-heading span {
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.adoption-line-canvas {
     position: relative;
-    min-width: max(680px, calc(var(--chart-days) * 18px));
-    height: 250px;
-    padding: 10px 8px 0;
-    border-bottom: 1px solid var(--admin-line);
+    height: 168px;
+    border-top: 1px solid var(--admin-line-soft);
+    border-bottom: 1px solid var(--admin-line-soft);
     background-image: linear-gradient(to bottom, var(--admin-line-soft) 1px, transparent 1px);
     background-size: 100% 25%;
 }
 
-.adoption-bars {
+.adoption-axis {
     position: absolute;
-    inset: 10px 8px 0;
-    display: grid;
-    grid-template-columns: repeat(var(--chart-days, 30), minmax(10px, 1fr));
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(10px, 1fr);
-    gap: 3px;
-    align-items: end;
-}
-
-.adoption-bar-column {
-    position: relative;
-    display: grid;
-    grid-template-rows: 18px 190px 24px;
-    align-items: end;
-    justify-items: center;
-    min-width: 0;
-}
-
-.adoption-bar-column strong {
-    color: var(--admin-cyan);
-    font-size: 9px;
-    line-height: 1;
-}
-
-.adoption-bar {
-    z-index: 1;
-    width: min(16px, 72%);
-    height: max(2px, var(--bar-height));
-    border-radius: 3px 3px 0 0;
-    background: color-mix(in srgb, var(--admin-cyan) 66%, transparent);
-}
-
-.adoption-bar-column time {
-    align-self: center;
+    left: 3px;
+    z-index: 2;
+    min-width: 29px;
     color: var(--admin-muted);
-    font-size: 8px;
-    font-weight: 800;
-    white-space: nowrap;
+    font-size: 9px;
+    font-weight: 850;
+    text-align: right;
 }
+
+.adoption-axis.is-max { top: 4px; }
+.adoption-axis.is-zero { bottom: 4px; }
 
 .adoption-cumulative-line {
     position: absolute;
-    inset: 0 8px 24px;
-    z-index: 2;
-    width: calc(100% - 16px);
-    height: 226px;
+    inset: 0 8px 0 38px;
+    width: calc(100% - 46px);
+    height: 100%;
     overflow: visible;
     pointer-events: none;
 }
@@ -401,148 +999,172 @@
     stroke: var(--admin-green);
     stroke-linecap: round;
     stroke-linejoin: round;
-    stroke-width: 4;
-    vector-effect: non-scaling-stroke;
-}
-
-.adoption-cumulative-line circle {
-    fill: var(--admin-panel);
-    stroke: var(--admin-green);
     stroke-width: 3;
     vector-effect: non-scaling-stroke;
 }
 
-.adoption-donut-layout {
-    display: grid;
-    grid-template-columns: minmax(140px, .9fr) minmax(150px, 1fr);
-    gap: 16px;
-    align-items: center;
-    min-height: 250px;
+.adoption-line-point {
+    fill: var(--admin-panel);
+    stroke: var(--admin-green);
+    stroke-width: 2.5;
+    vector-effect: non-scaling-stroke;
 }
 
-.adoption-donut {
+.adoption-line-point.is-selected {
+    fill: var(--admin-green);
+    stroke: var(--admin-panel);
+    stroke-width: 3;
+}
+
+.adoption-bars-band {
+    padding-top: 5px;
+}
+
+.adoption-bars {
+    display: grid;
+    grid-template-columns: repeat(var(--chart-days, 30), minmax(44px, 1fr));
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(44px, 1fr);
+    gap: 0;
+    min-height: 132px;
+    align-items: end;
+    padding: 0 8px 0 38px;
+    border-bottom: 1px solid var(--admin-line);
+    background-image: linear-gradient(to bottom, var(--admin-line-soft) 1px, transparent 1px);
+    background-size: 100% 50%;
+}
+
+.adoption-bar-column {
     position: relative;
-    width: min(190px, 100%);
-    aspect-ratio: 1;
-    margin: auto;
-    border-radius: 50%;
-    background: conic-gradient(
-        var(--admin-green) 0 var(--activated-stop),
-        var(--admin-yellow) var(--activated-stop) var(--pending-stop),
-        color-mix(in srgb, var(--admin-muted) 35%, var(--admin-panel-soft)) var(--pending-stop) 100%
-    );
-}
-
-.adoption-donut::after {
-    content: "";
-    position: absolute;
-    inset: 24%;
-    border-radius: 50%;
-    background: var(--admin-panel);
-}
-
-.adoption-donut > span {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
     display: grid;
-    place-content: center;
-    text-align: center;
+    grid-template-rows: 18px 88px 24px;
+    min-width: 0;
+    align-items: end;
+    justify-items: center;
+    border-radius: 5px 5px 0 0;
+    color: inherit;
+    cursor: pointer;
+    outline: none;
+    text-decoration: none;
 }
 
-.adoption-donut strong,
-.adoption-donut small {
-    display: block;
+.adoption-bar-column.is-selected,
+.adoption-bar-column:focus-visible {
+    background: color-mix(in srgb, var(--admin-green) 7%, transparent);
 }
 
-.adoption-donut strong {
-    color: var(--admin-ink);
-    font-size: clamp(28px, 4vw, 44px);
+.adoption-bar-column:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--admin-cyan);
+}
+
+.adoption-bar-column > strong {
+    color: var(--adoption-info-text);
+    font-size: 10px;
     line-height: 1;
 }
 
-.adoption-donut small {
-    margin-top: 5px;
-    color: var(--admin-muted);
-    font-size: 10px;
-    font-weight: 850;
+.adoption-bar {
+    width: min(17px, 72%);
+    height: max(2px, var(--bar-height));
+    transform-origin: bottom;
+    border-radius: 3px 3px 0 0;
+    background: color-mix(in srgb, var(--admin-cyan) 72%, transparent);
 }
 
-.adoption-donut-legend {
-    display: grid;
-    gap: 8px;
+.adoption-bar.is-zero {
+    height: 0;
 }
 
-.adoption-donut-legend > div {
-    display: grid;
-    grid-template-columns: 10px minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: center;
+.adoption-bar-column time {
+    align-self: center;
     color: var(--admin-muted);
-    font-size: 11px;
+    font-size: 9px;
     font-weight: 800;
+    white-space: nowrap;
 }
 
-.adoption-donut-legend > div::before {
-    content: "";
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: var(--admin-muted);
+.adoption-tooltip {
+    position: fixed;
+    z-index: 13000;
+    max-width: min(270px, calc(100vw - 20px));
+    padding: 7px 9px;
+    transform: translateY(-4px);
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    background: var(--admin-ink);
+    color: var(--admin-panel);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .28);
+    font-size: 11px;
+    font-weight: 850;
+    line-height: 1.3;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .12s ease, transform .12s ease;
 }
 
-.adoption-donut-legend .is-activated::before {
-    background: var(--admin-green);
+.adoption-tooltip.is-visible {
+    transform: translateY(0);
+    opacity: 1;
 }
 
-.adoption-donut-legend .is-pending::before {
-    background: var(--admin-yellow);
-}
-
-.adoption-donut-legend strong {
-    color: var(--admin-ink);
-    font-size: 15px;
+/* Разрезы */
+.adoption-breakdown-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
 }
 
 .adoption-breakdown-list {
     display: grid;
-    gap: 10px;
+    gap: 6px;
+}
+
+.adoption-breakdown-list.is-collapsed .adoption-breakdown-row:nth-child(n+6) {
+    display: none;
 }
 
 .adoption-breakdown-row {
     display: grid;
-    grid-template-columns: minmax(160px, .8fr) minmax(140px, 1fr) 42px;
-    gap: 10px;
+    grid-template-columns: minmax(145px, .9fr) minmax(105px, 1fr) 40px 82px;
+    gap: 8px;
+    min-height: 45px;
     align-items: center;
+    padding: 5px 7px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--admin-ink);
+    text-decoration: none;
+}
+
+.adoption-breakdown-row:hover {
+    border-color: var(--admin-line);
+    background: var(--admin-panel-soft);
 }
 
 .adoption-breakdown-row > div:first-child {
     display: grid;
     gap: 2px;
+    min-width: 0;
 }
 
 .adoption-breakdown-row span,
 .adoption-breakdown-row strong,
-.adoption-breakdown-row small {
-    font-size: 11px;
+.adoption-breakdown-row small,
+.adoption-breakdown-row em {
+    overflow: hidden;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .adoption-breakdown-row span,
-.adoption-breakdown-row small {
-    color: var(--admin-muted);
-}
-
-.adoption-breakdown-row strong {
-    color: var(--admin-ink);
-}
-
-.adoption-breakdown-row small {
-    font-weight: 900;
-    text-align: right;
-}
+.adoption-breakdown-row small { color: var(--admin-muted); }
+.adoption-breakdown-row strong { color: var(--admin-ink); }
+.adoption-breakdown-row small { font-weight: 900; text-align: right; }
+.adoption-breakdown-row em { color: var(--adoption-warning-text); font-style: normal; font-weight: 850; text-align: right; }
 
 .adoption-progress {
-    height: 8px;
+    height: 7px;
     overflow: hidden;
     border-radius: 999px;
     background: var(--admin-panel-soft);
@@ -556,16 +1178,92 @@
     background: var(--admin-green);
 }
 
+.adoption-breakdown-toggle {
+    min-height: 36px;
+    margin-top: 8px;
+    padding: 0 11px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-muted);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+/* Список сотрудников */
+.adoption-people-heading {
+    align-items: end;
+}
+
+.adoption-search {
+    display: grid;
+    gap: 5px;
+    width: min(320px, 100%);
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.adoption-search input {
+    width: 100%;
+    min-height: 38px;
+    padding: 0 11px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    outline: none;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 750;
+    text-transform: none;
+}
+
+.adoption-search input:focus {
+    border-color: var(--admin-cyan);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--admin-cyan) 16%, transparent);
+}
+
+.adoption-state-tabs {
+    margin: -2px 0 10px;
+    padding-bottom: 2px;
+}
+
+.adoption-selected-day {
+    justify-content: space-between;
+    margin: 0 0 9px;
+    padding: 7px 8px;
+    border: 1px solid color-mix(in srgb, var(--admin-green) 40%, var(--admin-line));
+    border-radius: 6px;
+    background: var(--admin-green-soft);
+}
+
+.adoption-selected-day span {
+    border: 0;
+    background: transparent;
+    color: var(--adoption-success-text);
+}
+
+.adoption-selected-day a {
+    color: var(--adoption-success-text);
+    font-size: 10px;
+    font-weight: 900;
+}
+
 .adoption-table-wrap {
     min-width: 0;
     overflow-x: auto;
     border: 1px solid var(--admin-line);
     border-radius: 7px;
+    overscroll-behavior-inline: contain;
 }
 
 .adoption-table {
     width: 100%;
-    min-width: 980px;
+    min-width: 1080px;
     border-collapse: collapse;
     color: var(--admin-ink);
     font-size: 11px;
@@ -582,19 +1280,14 @@
 .adoption-table th {
     background: var(--admin-panel-soft);
     color: var(--admin-muted);
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 950;
     text-transform: uppercase;
     white-space: nowrap;
 }
 
-.adoption-table tbody tr:last-child td {
-    border-bottom: 0;
-}
-
-.adoption-table tbody tr:hover {
-    background: color-mix(in srgb, var(--admin-green) 4%, var(--admin-panel));
-}
+.adoption-table tbody tr:last-child td { border-bottom: 0; }
+.adoption-table tbody tr:hover { background: color-mix(in srgb, var(--admin-green) 4%, var(--admin-panel)); }
 
 .adoption-table a {
     color: var(--admin-ink);
@@ -602,15 +1295,16 @@
     text-decoration: none;
 }
 
-.adoption-table a:hover {
-    color: var(--admin-green);
+.adoption-table td > strong,
+.adoption-table td > a {
+    font-weight: 900;
 }
 
 .adoption-table td small {
     display: block;
     margin-top: 3px;
     color: var(--admin-muted);
-    font-size: 9px;
+    font-size: 10px;
 }
 
 .adoption-status {
@@ -622,7 +1316,7 @@
     border-radius: 999px;
     background: var(--admin-panel-soft);
     color: var(--admin-muted);
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 900;
     white-space: nowrap;
 }
@@ -630,23 +1324,39 @@
 .adoption-status.is-ok {
     border-color: color-mix(in srgb, var(--admin-green) 42%, var(--admin-line));
     background: var(--admin-green-soft);
-    color: var(--admin-green);
+    color: var(--adoption-success-text);
 }
 
 .adoption-status.is-info {
     border-color: color-mix(in srgb, var(--admin-cyan) 42%, var(--admin-line));
-    color: var(--admin-cyan);
+    color: var(--adoption-info-text);
 }
 
 .adoption-status.is-warning {
     border-color: color-mix(in srgb, var(--admin-yellow) 52%, var(--admin-line));
-    color: var(--admin-yellow);
+    background: var(--admin-yellow-soft);
+    color: var(--adoption-warning-text);
 }
 
 .adoption-status.is-danger {
     border-color: color-mix(in srgb, var(--admin-red) 52%, var(--admin-line));
     background: var(--admin-red-soft);
-    color: var(--admin-red);
+    color: var(--adoption-danger-text);
+}
+
+.adoption-issue { color: var(--admin-muted); }
+.adoption-issue.has-action { color: var(--adoption-warning-text); font-weight: 850; }
+
+.adoption-issue-copy,
+.adoption-waiting-age {
+    display: block;
+}
+
+.adoption-table td .adoption-waiting-age {
+    margin-top: 4px;
+    color: var(--adoption-warning-text);
+    font-size: 10px;
+    font-weight: 900;
 }
 
 .adoption-empty {
@@ -658,53 +1368,398 @@
     text-align: center;
 }
 
-@media (max-width: 1180px) {
-    .admin-registration-page {
-        overflow: visible;
+.adoption-search-empty { margin-top: 9px; }
+
+/* Доступные состояния взаимодействия */
+.adoption-filter-toggle:focus-visible,
+.adoption-filter-form select:focus-visible,
+.adoption-filter-form button:focus-visible,
+.adoption-filter-reset:focus-visible,
+.adoption-executive-card:focus-visible,
+.adoption-funnel-step:focus-visible,
+.adoption-attention-item:focus-visible,
+.adoption-period-switcher a:focus-visible,
+.adoption-state-tabs a:focus-visible,
+.adoption-breakdown-row:focus-visible,
+.adoption-breakdown-toggle:focus-visible,
+.adoption-selected-day a:focus-visible {
+    outline: 2px solid var(--admin-cyan);
+    outline-offset: 2px;
+}
+
+@media (hover: hover) {
+    .admin-registration-page .adoption-filter-form .admin-button-primary:hover {
+        border-color: var(--adoption-action-border);
+        background: var(--adoption-action-bg-hover);
+        color: #fff;
     }
+
+    .adoption-filter-reset:hover,
+    .adoption-period-switcher a:hover,
+    .adoption-state-tabs a:hover,
+    .adoption-breakdown-toggle:hover {
+        border-color: var(--admin-cyan);
+        color: var(--admin-ink);
+    }
+
+    button.adoption-executive-card:hover,
+    .adoption-funnel-step:hover,
+    .adoption-attention-item:hover {
+        transform: translateY(-1px);
+        border-color: color-mix(in srgb, var(--admin-cyan) 42%, var(--admin-line));
+    }
+
+    .adoption-bar-column:hover {
+        background: color-mix(in srgb, var(--admin-cyan) 7%, transparent);
+    }
+
+    .adoption-bar-column:hover .adoption-bar {
+        background: var(--admin-cyan);
+    }
+}
+
+.adoption-executive-card,
+.adoption-funnel-step,
+.adoption-attention-item,
+.adoption-breakdown-row,
+.adoption-progress i,
+.adoption-executive-progress b {
+    transition: transform .15s ease, border-color .15s ease, background .15s ease, color .15s ease, width .24s ease;
+}
+
+.management-registration-shell .dispatcher-subnav a:hover {
+    animation: none;
+}
+
+/* Однократное функциональное появление без задержки итоговых чисел. */
+.admin-registration-page.is-ready .adoption-executive-card,
+.admin-registration-page.is-ready .adoption-decision-grid,
+.admin-registration-page.is-ready .adoption-growth-panel {
+    animation: adoption-enter .22s ease-out both;
+}
+
+.admin-registration-page.is-ready .adoption-bar {
+    animation: adoption-bar-in .34s ease-out both;
+    animation-delay: min(calc(var(--bar-delay, 0) * 8ms), 220ms);
+}
+
+.admin-registration-page.is-ready .adoption-cumulative-line polyline {
+    animation: adoption-line-in .42s ease-out both;
+}
+
+@keyframes adoption-enter {
+    from { opacity: .72; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes adoption-bar-in {
+    from { transform: scaleY(.05); opacity: .45; }
+    to { transform: scaleY(1); opacity: 1; }
+}
+
+@keyframes adoption-line-in {
+    from { stroke-dasharray: 1; stroke-dashoffset: 1; opacity: .4; }
+    to { stroke-dasharray: 1; stroke-dashoffset: 0; opacity: 1; }
+}
+
+@keyframes adoption-spin { to { transform: rotate(360deg); } }
+
+/* Tablet: собственная management-шапка нужна независимо от orientation. */
+@media (max-width: 1180px) {
+    .admin-registration-page { overflow: visible; }
 
     .adoption-filter-panel {
         grid-template-columns: 1fr;
         align-items: stretch;
     }
 
-    .adoption-filter-form {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+    .adoption-filter-panel.is-filter-collapsible .adoption-filter-toggle {
+        display: grid;
     }
-}
 
-@media (max-width: 820px) {
-    .adoption-metrics,
-    .adoption-chart-grid,
-    .adoption-breakdown-grid {
+    .adoption-filter-form select,
+    .adoption-filter-form .admin-button,
+    .adoption-filter-reset {
+        min-height: 44px;
+    }
+
+    .adoption-executive-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .adoption-growth-panel,
-    .adoption-people-panel {
-        grid-column: 1 / -1;
-    }
-
-    .adoption-donut-panel {
-        grid-column: 1 / -1;
+    .adoption-decision-grid {
+        grid-template-columns: 1fr;
     }
 }
 
-@media (max-width: 640px) {
-    .management-registration-page {
-        overflow: visible;
+@media (max-width: 980px) {
+    .management-registration-shell .management-dashboard-header {
+        grid-template-columns: minmax(0, 1fr) auto !important;
+        gap: 10px !important;
+        min-height: 0 !important;
+        padding: 12px 14px !important;
     }
 
-    .adoption-filter-form,
-    .adoption-metrics,
-    .adoption-chart-grid,
+    .management-registration-shell .management-dashboard-header-title h1 {
+        font-size: clamp(24px, 4.6vw, 34px);
+        white-space: normal;
+    }
+
+    .management-registration-shell .management-dashboard-header-title p {
+        font-size: 12px;
+        white-space: normal;
+    }
+
+    .management-registration-shell .management-dashboard-header-meta {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .management-registration-shell .management-dashboard-header-actions {
+        grid-column: 2;
+        grid-row: 1;
+        grid-template-columns: 44px repeat(2, 94px);
+        gap: 6px;
+        width: auto;
+    }
+
+    .management-registration-shell .management-dashboard-header-actions a,
+    .management-registration-shell .management-dashboard-header-actions button {
+        min-height: 44px;
+        padding: 0 8px;
+    }
+
+    .adoption-period-switcher a,
+    .adoption-period-switcher span,
+    .adoption-state-tabs a,
+    .adoption-state-tabs > span,
+    .adoption-search input {
+        min-height: 44px;
+    }
+
     .adoption-breakdown-grid {
         grid-template-columns: 1fr;
     }
 
-    .adoption-filter-form .admin-button,
-    .adoption-filter-reset {
+    /* До 980 px рабочий список читается карточками без прокрутки таблицы. */
+    .adoption-table-wrap {
+        overflow: visible;
+        border: 0;
+        border-radius: 0;
+    }
+
+    .adoption-table,
+    .adoption-table tbody {
+        display: block;
+        width: 100%;
+        min-width: 0;
+    }
+
+    .adoption-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+    }
+
+    .adoption-table tbody {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .adoption-table tr[data-adoption-person] {
+        display: grid;
+        gap: 0;
+        padding: 8px 10px;
+        border: 1px solid var(--admin-line);
+        border-radius: 7px;
+        background: var(--admin-panel-soft);
+    }
+
+    .adoption-table tr[data-adoption-person]:hover {
+        background: var(--admin-panel-soft);
+    }
+
+    .adoption-table td {
+        display: grid;
+        grid-template-columns: 96px minmax(0, 1fr);
+        gap: 9px;
+        align-items: start;
+        padding: 7px 0;
+        border-bottom: 1px solid var(--admin-line-soft);
+        overflow-wrap: anywhere;
+    }
+
+    .adoption-table td::before {
+        content: attr(data-label);
+        color: var(--admin-muted);
+        font-size: 9px;
+        font-weight: 950;
+        line-height: 1.3;
+        text-transform: uppercase;
+    }
+
+    .adoption-table td:first-child {
+        grid-template-columns: 1fr;
+        order: 1;
+        padding-top: 2px;
+        color: var(--admin-ink);
+        font-size: 13px;
+    }
+
+    .adoption-table td:first-child > a {
+        display: inline-flex;
         min-height: 44px;
+        align-items: center;
+    }
+
+    .adoption-table td:first-child::before { display: none; }
+    .adoption-table td:nth-child(4) { order: 2; }
+    .adoption-table td:nth-child(5) { order: 3; }
+    .adoption-table td:nth-child(2) { order: 4; }
+    .adoption-table td:nth-child(3) { order: 5; }
+    .adoption-table td:nth-child(6) { order: 6; border-bottom: 0; }
+
+    .adoption-table .adoption-server-empty {
+        display: block;
+        grid-column: 1 / -1;
+    }
+
+    .adoption-table .adoption-server-empty td {
+        display: block;
+        border: 0;
+    }
+}
+
+@media (max-width: 760px) {
+    .adoption-filter-form {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .adoption-filter-form label:first-of-type {
+        grid-column: 1 / -1;
+    }
+
+    .adoption-chart-heading,
+    .adoption-people-heading {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .adoption-search {
+        width: 100%;
+    }
+
+    .adoption-period-switcher,
+    .adoption-state-tabs {
+        width: 100%;
+        padding-bottom: 4px;
+    }
+}
+
+@media (max-width: 640px) {
+    .management-registration-shell {
+        height: 100dvh !important;
+        min-height: 100dvh;
+        padding: 6px;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+
+    .management-registration-shell .management-dashboard-header {
+        grid-template-columns: 1fr !important;
+        padding: 10px !important;
+    }
+
+    .management-registration-shell .management-dashboard-header-title h1 {
+        font-size: clamp(24px, 8vw, 31px);
+        line-height: 1;
+    }
+
+    .management-registration-shell .management-dashboard-header-title p,
+    .management-registration-shell .management-dashboard-header-meta {
+        display: none;
+    }
+
+    .management-registration-shell .management-dashboard-header-actions {
+        grid-column: 1;
+        grid-row: 2;
+        grid-template-columns: 44px repeat(2, minmax(0, 1fr));
+        width: 100%;
+    }
+
+    .management-registration-page {
+        padding-inline: 0;
+        overflow: visible;
+    }
+
+    .admin-registration-page {
+        gap: 8px;
+    }
+
+    .adoption-filter-panel,
+    .adoption-panel {
+        padding: 11px;
+    }
+
+    .adoption-filter-heading {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .adoption-filter-toggle {
+        width: 100%;
+    }
+
+    .adoption-filter-form {
+        grid-template-columns: 1fr;
+    }
+
+    .adoption-filter-form label:first-of-type {
+        grid-column: auto;
+    }
+
+    .adoption-filter-form .admin-button,
+    .adoption-filter-reset,
+    .adoption-filter-form select,
+    .adoption-search input,
+    .adoption-period-switcher a,
+    .adoption-state-tabs a,
+    .adoption-breakdown-toggle {
+        min-height: 44px;
+    }
+
+    .adoption-executive-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .adoption-executive-card {
+        min-height: 112px;
+        padding: 11px 10px 10px 14px;
+    }
+
+    .adoption-executive-card.is-primary {
+        grid-column: 1 / -1;
+    }
+
+    .adoption-executive-card.is-time {
+        grid-column: 1 / -1;
+        min-height: 94px;
+    }
+
+    .adoption-executive-card > strong {
+        font-size: 28px;
+    }
+
+    .adoption-executive-card.is-primary > strong {
+        font-size: 45px;
     }
 
     .adoption-panel-heading {
@@ -712,24 +1767,222 @@
         flex-direction: column;
     }
 
-    .adoption-chart-legend {
-        flex-wrap: wrap;
+    .adoption-panel-result {
+        align-self: start;
     }
 
-    .adoption-donut-layout {
+    .adoption-funnel {
         grid-template-columns: 1fr;
+        gap: 0;
     }
 
-    .adoption-donut {
-        width: 170px;
+    .adoption-funnel-step {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: auto auto;
+        min-height: 76px;
+        padding: 10px 12px 10px 15px;
     }
+
+    .adoption-funnel-step strong {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+        align-self: center;
+    }
+
+    .adoption-funnel-transition {
+        grid-template-columns: 22px auto minmax(0, 1fr);
+        grid-template-rows: 38px;
+        justify-content: stretch;
+        padding-left: 15px;
+        text-align: left;
+    }
+
+    .adoption-funnel-transition > span {
+        grid-column: 1;
+        width: 1px;
+        height: 100%;
+        justify-self: center;
+    }
+
+    .adoption-funnel-transition > span::after {
+        top: auto;
+        right: -3px;
+        bottom: 0;
+        transform: rotate(45deg);
+    }
+
+    .adoption-funnel-transition strong,
+    .adoption-funnel-transition small {
+        align-self: center;
+    }
+
+    .adoption-chart-stage {
+        min-width: max(616px, var(--chart-min-width, 1366px));
+    }
+
+    .adoption-chart-band-heading {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 2px;
+        padding-left: 38px;
+    }
+
+    .adoption-line-canvas { height: 150px; }
 
     .adoption-breakdown-row {
         grid-template-columns: minmax(0, 1fr) 42px;
+        grid-template-rows: auto auto auto;
+        min-height: 70px;
+        padding: 8px;
     }
 
     .adoption-breakdown-row .adoption-progress {
         grid-column: 1 / -1;
         grid-row: 2;
+    }
+
+    .adoption-breakdown-row > small {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    .adoption-breakdown-row em {
+        grid-column: 1 / -1;
+        grid-row: 3;
+        text-align: left;
+    }
+
+    .adoption-table tbody {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Низкий широкий экран: максимум содержания в первом viewport. */
+@media (orientation: landscape) and (max-width: 980px) and (max-height: 500px) {
+    .management-registration-shell {
+        height: 100dvh !important;
+        min-height: 100dvh;
+        padding: 5px;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+
+    .management-registration-shell .management-dashboard-header {
+        grid-template-columns: minmax(0, 1fr) auto !important;
+        gap: 7px !important;
+        padding: 7px 9px !important;
+    }
+
+    .management-registration-shell .management-dashboard-header-title {
+        gap: 3px;
+    }
+
+    .management-registration-shell .management-dashboard-header-title span {
+        font-size: 9px;
+    }
+
+    .management-registration-shell .management-dashboard-header-title h1 {
+        font-size: 21px;
+        white-space: nowrap;
+    }
+
+    .management-registration-shell .management-dashboard-header-title p,
+    .management-registration-shell .management-dashboard-header-meta {
+        display: none;
+    }
+
+    .management-registration-shell .management-dashboard-header-actions {
+        grid-column: 2;
+        grid-row: 1;
+        grid-template-columns: 44px repeat(2, 78px);
+        gap: 5px;
+    }
+
+    .management-registration-shell .management-dashboard-header-actions a,
+    .management-registration-shell .management-dashboard-header-actions button {
+        min-height: 44px;
+        padding-inline: 5px;
+        font-size: 10px;
+    }
+
+    .management-registration-shell .dispatcher-analytics-toolbar {
+        gap: 6px;
+        padding: 2px 0;
+    }
+
+    .management-registration-shell .dispatcher-subnav a,
+    .management-registration-shell .dispatcher-report-actions button {
+        min-height: 44px;
+    }
+
+    .management-registration-page {
+        gap: 7px;
+        overflow: visible;
+    }
+
+    .adoption-filter-panel {
+        padding: 8px 10px;
+    }
+
+    .adoption-filter-heading h2 { font-size: 16px; }
+    .adoption-filter-heading p { display: none; }
+
+    .adoption-executive-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 7px;
+    }
+
+    .adoption-executive-card,
+    .adoption-executive-card.is-primary,
+    .adoption-executive-card.is-time {
+        grid-column: auto;
+        min-height: 94px;
+        padding: 9px 9px 8px 13px;
+    }
+
+    .adoption-executive-card > strong,
+    .adoption-executive-card.is-primary > strong {
+        font-size: 30px;
+    }
+
+    .adoption-executive-card small { display: none; }
+}
+
+@media print {
+    .adoption-loading,
+    .adoption-filter-toggle,
+    .adoption-search,
+    .adoption-state-tabs,
+    .adoption-period-switcher,
+    .adoption-breakdown-toggle,
+    .adoption-tooltip {
+        display: none !important;
+    }
+
+    .adoption-filter-body[hidden],
+    .adoption-breakdown-list.is-collapsed .adoption-breakdown-row:nth-child(n+6) {
+        display: grid !important;
+    }
+
+    .adoption-executive-card,
+    .adoption-decision-grid,
+    .adoption-growth-panel,
+    .adoption-bar,
+    .adoption-cumulative-line polyline {
+        animation: none !important;
+        transform: none !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .admin-registration-page *,
+    .admin-registration-page *::before,
+    .admin-registration-page *::after,
+    .management-registration-shell .dispatcher-subnav a {
+        scroll-behavior: auto !important;
+        animation-duration: .01ms !important;
+        animation-delay: 0ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
     }
 }
