@@ -6,7 +6,7 @@
     {% if mining_master_mobile_enabled %}
         {{ block.super }}
     {% else %}
-        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v={{ static_asset_release }}">
     {% endif %}
 {% endblock %}
 {% block viewport_extra %}{% if mining_master_mobile_enabled %}, viewport-fit=cover{% endif %}{% endblock %}
@@ -34,6 +34,8 @@
 
 {% block body %}
 {% spaceless %}
+{# Холст пульта: содержимое масштабируется под окно целиком, как картинка (скрипт ниже). #}
+<div class="dispatcher-canvas" data-dispatcher-canvas="off">
 <main
     class="dispatcher-shell"
     data-dispatcher-theme
@@ -95,44 +97,48 @@
                     {% if complex.is_empty %}
                         <div class="complex-empty" aria-hidden="true"></div>
                     {% else %}
+                        {% if mining_master_mobile_enabled %}
                         <div class="complex-work-head">
-                            <div class="complex-title-state">
-                                <h2>{{ complex.id }}</h2>
-                                {% if not mining_master_mobile_enabled and complex.active_downtime.active %}
-                                    <span class="complex-downtime-status" title="{{ complex.active_downtime.reason }}">
-                                        <span>{{ complex.active_downtime.reason }}</span>
-                                        <time
-                                            datetime="{{ complex.active_downtime.started_at }}"
-                                            data-gd-downtime-timer
-                                            data-started-at="{{ complex.active_downtime.started_at }}"
-                                        >{{ complex.active_downtime.elapsed_label }}</time>
-                                    </span>
-                                {% else %}
-                                    <span class="complex-state-chip">{{ complex.status_label }}</span>
-                                {% endif %}
-                            </div>
-                            <div class="complex-context">
-                                <span class="complex-info-chip chip-horizon">{{ complex.current_horizon|default:"Гор. -" }}</span>
-                                <span class="complex-info-chip chip-block">{{ complex.current_block|default:"Блок -" }}</span>
-                                <span class="complex-info-chip chip-rock">{{ complex.current_rock|default:"порода не указана" }}</span>
-                                {% if complex.unload_points %}
-                                    <div class="complex-unload-points">
-                                    {% for point in complex.unload_points %}
-                                        <span class="complex-info-chip chip-unload">{{ point.name }} {{ point.percent }}%</span>
-                                    {% endfor %}
-                                    </div>
-                                {% endif %}
-                                <div class="dispatcher-plan-strip{% if not complex.plan_has_plan %} is-plan-missing{% endif %}" data-plan-status="{{ complex.plan_status|default:'plan_not_assigned' }}">
-                                    <strong>{{ complex.plan_percent_label|default:"Не назначен" }}</strong>
-                                    <span>{{ complex.plan_fact_label|default:"План не назначен" }}</span>
-                                    {% if complex.plan_group_name %}<em>{{ complex.plan_group_name }}</em>{% endif %}
-                                    {% if complex.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ complex.plan_visual.completed_loops }}">×{{ complex.plan_visual.completed_loops }}</b>{% endif %}
+                        {% endif %}
+                        <div class="complex-title-state">
+                            <h2>{{ complex.id }}</h2>
+                            {% if not mining_master_mobile_enabled and complex.active_downtime.active %}
+                                <span class="complex-downtime-status" title="{{ complex.active_downtime.reason }}" data-card-single-line-badge>
+                                    <span>{{ complex.active_downtime.reason }}</span>
+                                    <time
+                                        datetime="{{ complex.active_downtime.started_at }}"
+                                        data-gd-downtime-timer
+                                        data-started-at="{{ complex.active_downtime.started_at }}"
+                                    >{{ complex.active_downtime.elapsed_label }}</time>
+                                </span>
+                            {% else %}
+                                <span class="complex-state-chip" data-card-single-line-badge>{{ complex.status_label }}</span>
+                            {% endif %}
+                        </div>
+                        <div class="complex-context">
+                            <span class="complex-info-chip chip-horizon" data-card-single-line-badge>{{ complex.current_horizon|default:"Гор. -" }}</span>
+                            <span class="complex-info-chip chip-block" data-card-single-line-badge>{{ complex.current_block|default:"Блок -" }}</span>
+                            <span class="complex-info-chip chip-rock" data-card-single-line-badge>{{ complex.current_rock|default:"порода не указана" }}</span>
+                            {% if complex.unload_points %}
+                                <div class="complex-unload-points">
+                                {% for point in complex.unload_points %}
+                                    <span class="complex-info-chip chip-unload" data-card-single-line-badge>{{ point.name }} {{ point.percent }}%</span>
+                                {% endfor %}
                                 </div>
+                            {% endif %}
+                            <div class="dispatcher-plan-strip{% if not complex.plan_has_plan %} is-plan-missing{% endif %}" data-plan-status="{{ complex.plan_status|default:'plan_not_assigned' }}">
+                                <strong>{{ complex.plan_percent_label|default:"Не назначен" }}</strong>
+                                <span>{{ complex.plan_fact_label|default:"План не назначен" }}</span>
+                                {% if complex.plan_group_name %}<em>{{ complex.plan_group_name }}</em>{% endif %}
+                                {% if complex.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ complex.plan_visual.completed_loops }}">×{{ complex.plan_visual.completed_loops }}</b>{% endif %}
                             </div>
                         </div>
+                        {% if mining_master_mobile_enabled %}
+                        </div>
+                        {% endif %}
                         <div class="complex-assigned-trucks {{ complex.truck_scale_class }}" style="--complex-truck-cols: {{ complex.truck_column_count|default:1 }};" aria-label="Активные самосвалы комплекса">
                             {% for truck in complex.active_truck_tiles %}
-                                <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-complex-truck="true" data-assigned-zone="{{ complex.zone_key }}" data-plan-status="{{ truck.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ truck.percent|default:0 }}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" data-plan-mode="{{ truck.plan_calculation_mode|default:'' }}" data-plan-value="{{ truck.plan_value|default:'' }}" data-plan-fact="{{ truck.plan_fact_value|default:'' }}" data-plan-unit="{{ truck.plan_unit|default:'' }}" data-plan-group="{{ truck.plan_group_name|default:'' }}">
+                                <article class="dispatcher-truck-tile complex-truck-tile status-{{ truck.status }}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}" style="--tile-progress: {% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% else %}0{% endif %}%; --tile-total-progress: {{ truck.percent|default:0 }}%;" role="button" tabindex="0" draggable="true" data-dispatcher-drag="truck" data-equipment-card-id="{{ truck.card_id }}" data-equipment-id="{{ truck.card_id }}" data-truck-tile data-equipment-name="{{ truck.name }}" data-equipment-state="{{ truck.equipment_state_code }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-complex-truck="true" data-assigned-zone="{{ complex.zone_key }}" data-plan-status="{{ truck.plan_status|default:'plan_not_assigned' }}" data-plan-percent="{{ truck.percent|default:0 }}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" data-plan-mode="{{ truck.plan_calculation_mode|default:'' }}" data-plan-value="{{ truck.plan_value|default:'' }}" data-plan-fact="{{ truck.plan_fact_value|default:'' }}" data-plan-unit="{{ truck.plan_unit|default:'' }}" data-plan-group="{{ truck.plan_group_name|default:'' }}">
                                     <strong>{{ truck.name }}</strong>
                                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                                     <span>{{ truck.label }}</span>
@@ -180,7 +186,7 @@
                 <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
                     {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                 </button>
-                {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
+                {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>версия {{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
             </div>
         </header>
 
@@ -204,20 +210,14 @@
         <div class="mm-mobile-complex-grid">
             {% for complex in dispatcher_dashboard.mobile_complex_zones %}
                 {% if not complex.is_empty %}
-                    <article class="mm-mobile-complex-card status-{{ complex.status_key }}{% if complex.plan_has_plan %} has-plan-progress{% endif %}{% if complex.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if complex.plan_has_plan %} style="--mm-mobile-plan-progress: {{ complex.plan_visual.loop_progress }}%;"{% endif %} role="button" tabindex="0" data-mm-mobile-open-complex="{{ complex.card_id }}" data-mm-mobile-excavator-id="{{ complex.equipment_card_id }}" data-plan-percent="{% if complex.plan_has_plan %}{{ complex.percent }}{% endif %}" data-plan-loop-percent="{% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ complex.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if complex.plan_has_plan %}{{ complex.plan_visual.phase }}{% endif %}">
+                    <article class="mm-mobile-complex-card status-{{ complex.status_key }}{% if complex.plan_has_plan %} has-plan-progress{% endif %}{% if complex.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if complex.plan_has_plan %} style="--mm-mobile-plan-progress: {{ complex.plan_visual.loop_progress }}%;"{% endif %} role="button" tabindex="0" data-mm-mobile-open-complex="{{ complex.card_id }}" data-mm-mobile-excavator-id="{{ complex.equipment_card_id }}" data-plan-percent="{% if complex.plan_has_plan %}{{ complex.percent }}{% endif %}" data-plan-loop-percent="{% if complex.plan_has_plan %}{{ complex.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ complex.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if complex.plan_has_plan %}{{ complex.plan_visual.phase }}{% endif %}"{% if complex.has_current_shift %} data-application-presence="{{ complex.presence_status }}" data-application-presence-label="{{ complex.presence_label }}"{% endif %}>
                         <div class="mm-mobile-complex-card-head">
-                            <h2>{{ complex.id }}</h2>
+                            <h2>{{ complex.id }}{% if complex.has_current_shift %}<i class="mm-mobile-presence-dot is-{{ complex.presence_status }}" data-mm-mobile-presence-indicator title="{{ complex.presence_label }}" aria-label="{{ complex.presence_label }}"></i>{% endif %}</h2>
                             <div class="mm-mobile-complex-head-meta">
                                 <span class="mm-mobile-complex-truck-count">{{ complex.active_truck_tiles|length }} сам.</span>
                                 <span class="mm-mobile-status-chip">
                                     {{ complex.status_label|default:"состояние" }}
                                 </span>
-                                {% if complex.plan_has_plan %}
-                                    <span class="mm-mobile-complex-plan-ring" role="img" aria-label="Выполнение плана {{ complex.percent }}%, завершено циклов: {{ complex.plan_visual.completed_loops }}">
-                                        <span>{{ complex.plan_visual.loop_progress }}%</span>
-                                        {% if complex.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ complex.plan_visual.completed_loops }}</b>{% endif %}
-                                    </span>
-                                {% endif %}
                             </div>
                         </div>
                         <div class="mm-mobile-complex-visual" aria-hidden="true" data-mm-mobile-release-trucks>
@@ -225,7 +225,7 @@
                         </div>
                         <div class="mm-mobile-truck-preview" aria-label="Самосвалы комплекса" data-mm-mobile-truck-count="{{ complex.active_truck_tiles|length }}"{% if complex.mobile_transfer_notice %} data-mm-transfer-notice="{{ complex.mobile_transfer_notice }}"{% endif %}>
                             {% for truck in complex.active_truck_tiles %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}{% if truck.transfer_pending %} is-transfer-pending{% endif %}"{% if forloop.counter > 3 %} hidden{% endif %}{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}"{% if truck.transfer_pending %} data-mm-transfer-label="из {{ truck.transfer_source_label }} · до 5 мин"{% endif %} data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
+                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}{% if truck.transfer_pending %} is-transfer-pending{% endif %}"{% if forloop.counter > 3 %} hidden{% endif %}{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-home-truck-id="{{ truck.card_id }}" data-mm-mobile-home-truck-number="{{ truck.name }}" data-mm-mobile-home-source-excavator-id="{{ complex.equipment_card_id }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}"{% if truck.transfer_pending %} data-mm-transfer-label="из {{ truck.transfer_source_label }} · до 5 мин"{% endif %} data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}"{% if truck.has_current_shift %} data-application-presence="{{ truck.presence_status }}" data-application-presence-label="{{ truck.presence_label }}"{% endif %}><b class="mm-mobile-truck-number">{{ truck.name }}</b>{% if truck.has_current_shift %}<i class="mm-mobile-presence-dot is-{{ truck.presence_status }}" data-mm-mobile-presence-indicator title="{{ truck.presence_label }}" aria-label="{{ truck.presence_label }}"></i>{% endif %}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}</span>
                             {% endfor %}
                             {% if complex.mobile_truck_overflow %}
                                 <button type="button" class="mm-mobile-truck-mini is-more" data-mm-mobile-open-truck-list data-mm-mobile-ignore-double-tap="true" aria-label="Показать остальные самосвалы комплекса">+{{ complex.mobile_truck_overflow }}</button>
@@ -272,7 +272,7 @@
                     <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
                         {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                     </button>
-                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
+                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>версия {{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
 
@@ -285,9 +285,10 @@
             <div class="mm-mobile-detail-trucks mm-mobile-excavator-garage-grid" style="--mm-mobile-garage-rows: {{ dispatcher_dashboard.mobile_excavator_garage_row_count|default:3 }};" aria-label="Гараж экскаваторов">
                 {% for excavator in dispatcher_dashboard.mobile_excavator_garage_tiles %}
                     {% if not excavator.is_placeholder %}
-                        <button type="button" class="mm-mobile-garage-excavator status-{{ excavator.status }}" data-mm-mobile-activate-excavator="{{ excavator.card_id }}" data-equipment-card-id="{{ excavator.card_id }}" data-mm-mobile-complex-label="{{ excavator.complex_label }}" data-mm-mobile-excavator-sort="{{ excavator.board_number|default:9999 }}" data-mm-mobile-equipment-state="{{ excavator.equipment_state_code }}" title="{{ excavator.label }}" aria-label="Вернуть экскаватор {{ excavator.display_name }} в активную смену">
+                        <button type="button" class="mm-mobile-garage-excavator status-{{ excavator.status }}" data-mm-mobile-activate-excavator="{{ excavator.card_id }}" data-equipment-card-id="{{ excavator.card_id }}" data-mm-mobile-complex-label="{{ excavator.complex_label }}" data-mm-mobile-excavator-sort="{{ excavator.board_number|default:9999 }}" data-mm-mobile-equipment-state="{{ excavator.equipment_state_code }}"{% if excavator.has_current_shift %} data-application-presence="{{ excavator.presence_status }}" data-application-presence-label="{{ excavator.presence_label }}"{% endif %} title="{{ excavator.label }}" aria-label="Вернуть экскаватор {{ excavator.display_name }} в активную смену">
                             <span>Экс {{ excavator.display_name }}</span>
                             <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
+                            {% if excavator.has_current_shift %}<i class="mm-mobile-presence-dot is-{{ excavator.presence_status }}" data-mm-mobile-presence-indicator title="{{ excavator.presence_label }}" aria-label="{{ excavator.presence_label }}"></i>{% endif %}
                         </button>
                     {% else %}
                         <article class="mm-mobile-garage-slot status-empty" aria-disabled="true"></article>
@@ -326,7 +327,7 @@
                     <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
                         {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                     </button>
-                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
+                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>версия {{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
 
@@ -336,12 +337,12 @@
 
             <div class="mm-mobile-detail-trucks" aria-label="Гараж самосвалов">
                 {% for truck in dispatcher_dashboard.mobile_truck_garage_tiles %}
-                    <article class="mm-mobile-truck-card status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} role="button" tabindex="0" data-equipment-card-id="{{ truck.card_id }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
+                    <article class="mm-mobile-truck-card status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} role="button" tabindex="0" data-equipment-card-id="{{ truck.card_id }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}"{% if truck.has_current_shift %} data-application-presence="{{ truck.presence_status }}" data-application-presence-label="{{ truck.presence_label }}"{% endif %} title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
                         <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                         <strong>{{ truck.name }}</strong>
                         <span></span>
+                        {% if truck.has_current_shift %}<i class="mm-mobile-presence-dot is-{{ truck.presence_status }}" data-mm-mobile-presence-indicator title="{{ truck.presence_label }}" aria-label="{{ truck.presence_label }}"></i>{% endif %}
                         {% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}
-                        {% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
                     </article>
                 {% empty %}
                     <div class="mm-mobile-detail-empty">самосвалов в гараже нет</div>
@@ -379,7 +380,7 @@
                     <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
                         {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                     </button>
-                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
+                    {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>версия {{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                 </div>
             </header>
 
@@ -400,14 +401,14 @@
                         <small>{{ dispatcher_dashboard.mobile_shift_report.unit_label|default:"т" }} выгружено</small>
                     </article>
                     <article>
-                        <span>В работе</span>
-                        <strong>{{ dispatcher_dashboard.mobile_shift_report.working_trucks|default:"0" }}</strong>
-                        <small>самосвалов</small>
+                        <span>В пути</span>
+                        <strong>{{ dispatcher_dashboard.mobile_shift_report.active_fact|default:"0" }}</strong>
+                        <small>{{ dispatcher_dashboard.mobile_shift_report.unit_label|default:"т" }} · {{ dispatcher_dashboard.mobile_shift_report.active_trip_count|default:"0" }} рейс.</small>
                     </article>
                     <article>
-                        <span>Свободно</span>
-                        <strong>{{ dispatcher_dashboard.mobile_shift_report.free_trucks|default:"0" }}</strong>
-                        <small>готовы в гараже</small>
+                        <span>Резерв техники</span>
+                        <strong>{{ dispatcher_dashboard.mobile_shift_report.reserve_total|default:"0" }}</strong>
+                        <small>{{ dispatcher_dashboard.mobile_shift_report.reserve_trucks|default:"0" }} сам. · {{ dispatcher_dashboard.mobile_shift_report.reserve_excavators|default:"0" }} экс.</small>
                     </article>
                 </div>
 
@@ -430,6 +431,22 @@
                         {% endfor %}
                     </div>
                 </section>
+                {% if dispatcher_dashboard.mobile_shift_report.active_points %}
+                    <section class="mm-mobile-report-destinations is-in-transit" aria-label="Куда направлены самосвалы в пути">
+                        <header><span>В пути к разгрузке</span></header>
+                        <div class="mm-mobile-report-destination-list">
+                            {% for point in dispatcher_dashboard.mobile_shift_report.active_points|slice:":3" %}
+                                <div class="mm-mobile-report-destination">
+                                    <div>
+                                        <strong>{{ point.name }}</strong>
+                                        <small>{{ point.fact_tons }} {{ dispatcher_dashboard.mobile_shift_report.unit_label }} · {{ point.trip_count_label }}</small>
+                                    </div>
+                                    <b>{{ point.fact_share_percent }}%</b>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </section>
+                {% endif %}
             </div>
 
             {% if dispatcher_header.shift_is_open %}
@@ -477,14 +494,6 @@
                 {% endif %}
             </form>
 
-            {% if not is_native_app %}
-            <div class="mm-mobile-version-strip" aria-label="Версия приложения">
-                <span>Версия приложения</span>
-                <strong data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</strong>
-                <button type="button" data-mm-pwa-check-update>Проверить обновления</button>
-            </div>
-            {% endif %}
-
             <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="home">
                     <span class="mm-mobile-nav-icon mm-mobile-nav-icon-pult" aria-hidden="true"></span>
@@ -519,7 +528,7 @@
                             <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
                                 {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%
                             </button>
-                            {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>{{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
+                            {% if not is_native_app %}<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>версия {{ app_shell_version|default:'mining-master-mobile-shell-v0'|cut:'mining-master-mobile-shell-' }}</span>{% endif %}
                         </div>
                     </header>
 
@@ -532,7 +541,7 @@
                         </div>
                         <div class="mm-mobile-fill-assigned" data-mm-mobile-fill-assigned aria-label="Самосвалы комплекса">
                             {% for truck in complex.active_truck_tiles|slice:":16" %}
-                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-assigned-truck-id="{{ truck.card_id }}" data-mm-mobile-assigned-truck-number="{{ truck.name }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}">{{ truck.name }}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}{% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}</span>
+                                <span class="mm-mobile-truck-mini status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-mm-mobile-assigned-truck-id="{{ truck.card_id }}" data-mm-mobile-assigned-truck-number="{{ truck.name }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}"{% if truck.has_current_shift %} data-application-presence="{{ truck.presence_status }}" data-application-presence-label="{{ truck.presence_label }}"{% endif %}><b class="mm-mobile-truck-number">{{ truck.name }}</b>{% if truck.has_current_shift %}<i class="mm-mobile-presence-dot is-{{ truck.presence_status }}" data-mm-mobile-presence-indicator title="{{ truck.presence_label }}" aria-label="{{ truck.presence_label }}"></i>{% endif %}{% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}</span>
                             {% endfor %}
                         </div>
                     </div>
@@ -543,12 +552,12 @@
                         </div>
                         <div class="mm-mobile-fill-truck-garage" aria-label="Гараж самосвалов">
                             {% for truck in dispatcher_dashboard.mobile_truck_garage_tiles %}
-                                <button type="button" class="mm-mobile-truck-card mm-mobile-fill-truck status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-number="{{ truck.name }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}" title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
+                                <button type="button" class="mm-mobile-truck-card mm-mobile-fill-truck status-{{ truck.status }}{% if truck.plan_has_plan %} has-plan-progress{% endif %}{% if truck.plan_visual.is_overrun %} is-plan-overrun{% endif %}"{% if truck.plan_has_plan %} style="--mm-mobile-plan-progress: {{ truck.plan_visual.loop_progress }}%;"{% endif %} data-equipment-card-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-id="{{ truck.card_id }}" data-mm-mobile-fill-truck-number="{{ truck.name }}" data-haul-assignment-state-id="{{ truck.assignment_state_id|default:0 }}" data-mm-mobile-truck-sort="{{ truck.name }}" data-mm-mobile-truck-state="{{ truck.status }}" data-mm-mobile-equipment-state="{{ truck.equipment_state_code }}" data-plan-percent="{% if truck.plan_has_plan %}{{ truck.percent }}{% endif %}" data-plan-loop-percent="{% if truck.plan_has_plan %}{{ truck.plan_visual.loop_progress }}{% endif %}" data-plan-completed-loops="{{ truck.plan_visual.completed_loops|default:0 }}" data-plan-progress-phase="{% if truck.plan_has_plan %}{{ truck.plan_visual.phase }}{% endif %}"{% if truck.has_current_shift %} data-application-presence="{{ truck.presence_status }}" data-application-presence-label="{{ truck.presence_label }}"{% endif %} title="{{ truck.label }}" aria-label="Самосвал {{ truck.name }}: {{ truck.label }}">
                                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                                     <strong>{{ truck.name }}</strong>
                                     <span></span>
+                                    {% if truck.has_current_shift %}<i class="mm-mobile-presence-dot is-{{ truck.presence_status }}" data-mm-mobile-presence-indicator title="{{ truck.presence_label }}" aria-label="{{ truck.presence_label }}"></i>{% endif %}
                                     {% if truck.plan_has_plan %}<i class="mm-mobile-plan-ring-layer" aria-hidden="true"></i>{% endif %}
-                                    {% if truck.plan_visual.has_completed_loops %}<b class="mm-mobile-plan-loop-badge">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
                                 </button>
                             {% empty %}
                                 <div class="mm-mobile-detail-empty">самосвалов в гараже нет</div>
@@ -576,9 +585,10 @@
                         <span>плана</span>
                     </div>
                     <div class="mm-shift-plan-total-copy">
-                        <span>Выполнено</span>
-                        <strong>{{ dispatcher_dashboard.shift_plan_detail.fact_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</strong>
-                        <small>из {{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ dispatcher_dashboard.shift_plan_detail.trip_count_label }}</small>
+                        <span>Выгружено</span>
+                        <strong>{{ dispatcher_dashboard.shift_plan_detail.completed_fact_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</strong>
+                        <small>из {{ dispatcher_dashboard.shift_plan_detail.plan_tons|default:"0" }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ dispatcher_dashboard.shift_plan_detail.completed_trip_count|default:"0" }} рейс.</small>
+                        {% if dispatcher_dashboard.shift_plan_detail.active_trip_count %}<small class="mm-shift-plan-transit">В пути: {{ dispatcher_dashboard.shift_plan_detail.active_fact_tons }} {{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }} · {{ dispatcher_dashboard.shift_plan_detail.active_trip_count }} рейс.</small>{% endif %}
                     </div>
                 </div>
                 <h3 class="mm-shift-plan-section-title">Куда вывезено</h3>
@@ -831,6 +841,7 @@
                                     <td>
                                         <strong>{{ shift.employee }}</strong>
                                         {% include "users/includes/application_presence.html" with presence=shift.application_presence compact=True show_time=True show_apps=True %}
+                                        {% if shift.is_dashboard_stale %}<small class="dispatcher-stale-shift-label">Старая незакрытая смена · на пульте не учитывается</small>{% endif %}
                                     </td>
                                     <td>{{ shift.role_name }}</td>
                                     <td>{{ shift.equipment|default:"-" }}</td>
@@ -991,7 +1002,9 @@
         </section>
     </div>
 </main>
+</div>
 {% endspaceless %}
+{% if not mining_master_mobile_enabled %}
 <script>
 (function () {
     /* Пульт диспетчера на телефоне: масштаб считает JS, а не CSS.
@@ -1021,6 +1034,148 @@
        столько условных точек ширины, сколько нужно под пропорцию экрана,
        и раскладка внутри распределяет их сама, как на широком мониторе.
        Ниже 1400 не опускаемся: у́же раскладка пульта уже не собирается. */
+    var DESIGN_HEIGHT = 800;
+    var DESIGN_WIDTH_MIN = 1400;
+
+    function fitDispatcherShellToScreen() {
+        var shell = document.querySelector(".dispatcher-shell");
+        if (!shell) return;
+        var isPhoneLandscape = window.matchMedia(
+            "(orientation: landscape) and (max-width: 1180px)"
+        ).matches;
+        if (!isPhoneLandscape) {
+            shell.style.transform = "";
+            shell.style.width = "";
+            return;
+        }
+        var designWidth = Math.max(
+            DESIGN_WIDTH_MIN,
+            Math.round(DESIGN_HEIGHT * window.innerWidth / window.innerHeight)
+        );
+        var scale = Math.min(
+            window.innerWidth / designWidth,
+            window.innerHeight / DESIGN_HEIGHT
+        );
+        shell.style.width = designWidth + "px";
+        shell.style.transform = "scale(" + scale + ")";
+    }
+
+    fitDispatcherShellToScreen();
+    window.addEventListener("resize", fitDispatcherShellToScreen);
+    window.addEventListener("orientationchange", function () {
+        /* Сразу после поворота браузер иногда ещё отчитывается старыми
+           размерами — небольшая пауза перед пересчётом. */
+        setTimeout(fitDispatcherShellToScreen, 60);
+    });
+    if (window.visualViewport) {
+        /* Показ и скрытие адресной строки/системных панелей не считается
+           поворотом экрана и resize документа не всегда вызывает — а
+           именно из-за этого на одном телефоне высота "плавала" между
+           280 и 336 точками без перезагрузки страницы. */
+        window.visualViewport.addEventListener("resize", fitDispatcherShellToScreen);
+    }
+})();
+</script>
+
+<script>
+(function () {
+    /* Пульт целиком масштабируется как картинка.
+
+       Раскладка пульта нарисована руками под конкретный размер и в
+       нескольких местах опирается на vw/vh. Поэтому пульт живёт внутри
+       холста постоянного логического размера, а под окно подгоняется
+       не раскладка, а весь холст сразу — одним transform: scale().
+       Внутренняя геометрия при этом не пересчитывается вообще: что на
+       большом мониторе, что на маленьком видно одну и ту же картинку,
+       только крупнее или мельче.
+
+       Постоянна только ВЫСОТА холста — 1108 точек. От неё зависит
+       читаемость: пульт нарисован под такую высоту, и на любом мониторе
+       он показывается именно в этой вертикальной пропорции, просто
+       крупнее или мельче. Ширина холста не фиксирована, а считается от
+       пропорции окна: designWidth = высота * innerWidth / innerHeight.
+       Поэтому масштаб выходит одинаковым по обеим осям, холст занимает
+       окно целиком без пустых полей, а лишнюю ширину раскладка
+       распределяет сама, как на широком мониторе. Растягивать пульт
+       отдельно по ширине нельзя — исказились бы буквы и значки.
+
+       Ниже 1400 опорная ширина не опускается: у́же раскладка пульта уже
+       не собирается, и там лучше честные поля сверху и снизу.
+
+       Откуда взялась высота 1108. Монитор 1920x1200, но в Windows включён
+       масштаб дисплея 125%, поэтому браузер при зуме 100% отдаёт странице
+       1536 точек, а не 1920 (окно приложения 1536x886, dpr 1.25 — измерено
+       диагностической плашкой, гадать тут бесполезно). Прежний вид при
+       зуме 80%, который просили повторить, собирался на 886/0.8 = 1108
+       точек по высоте.
+
+       Единицы вьюпорта внутри холста не работают: vw/vh продолжают мерить
+       настоящее окно. Поэтому JS отдаёт в CSS --gd-vw и --gd-vh — сотые
+       доли опорного размера, — а правила, которые от них зависят,
+       перечислены в dispatcher-control-v1.css (секция про опорный размер).
+
+       Единицы вьюпорта внутри холста не помогают: vw/vh считаются от
+       настоящего окна, а не от логического размера, поэтому те немногие
+       правила, которые от них зависят, зафиксированы отдельными
+       правилами в dispatcher-control-v1.css (секция "Холст пульта") —
+       посчитанными ровно для 2400x1500. Существующие правила при этом
+       не переписаны ни одного.
+
+       Телефонный landscape-режим пульта (скрипт выше) и мобильный
+       экран горного мастера сюда не попадают — там холст выключен и
+       раскладка остаётся ровно прежней. */
+    var CANVAS_HEIGHT = 1108;
+    var CANVAS_WIDTH_MIN = 1400;
+
+    function fitDispatcherCanvas() {
+        var canvas = document.querySelector("[data-dispatcher-canvas]");
+        if (!canvas) return;
+        var isMiningMasterMobile = document.body.classList.contains(
+            "mining-master-mobile-screen"
+        );
+        var isPhoneLandscape = window.matchMedia(
+            "(orientation: landscape) and (max-width: 1180px)"
+        ).matches;
+        if (isMiningMasterMobile || isPhoneLandscape) {
+            canvas.setAttribute("data-dispatcher-canvas", "off");
+            canvas.style.removeProperty("--dispatcher-canvas-w");
+            canvas.style.removeProperty("--dispatcher-canvas-h");
+            canvas.style.removeProperty("--dispatcher-canvas-scale");
+            canvas.style.removeProperty("--gd-vw");
+            canvas.style.removeProperty("--gd-vh");
+            return;
+        }
+        var canvasWidth = Math.max(
+            CANVAS_WIDTH_MIN,
+            Math.round(CANVAS_HEIGHT * window.innerWidth / window.innerHeight)
+        );
+        var scale = Math.min(
+            window.innerWidth / canvasWidth,
+            window.innerHeight / CANVAS_HEIGHT
+        );
+        canvas.style.setProperty("--dispatcher-canvas-w", canvasWidth + "px");
+        canvas.style.setProperty("--dispatcher-canvas-h", CANVAS_HEIGHT + "px");
+        canvas.style.setProperty("--dispatcher-canvas-scale", String(scale));
+        /* Замена vw/vh внутри холста: сотые доли опорного размера. */
+        canvas.style.setProperty("--gd-vw", (canvasWidth / 100) + "px");
+        canvas.style.setProperty("--gd-vh", (CANVAS_HEIGHT / 100) + "px");
+        canvas.setAttribute("data-dispatcher-canvas", "on");
+    }
+
+    fitDispatcherCanvas();
+    window.addEventListener("resize", fitDispatcherCanvas);
+    window.addEventListener("orientationchange", function () {
+        setTimeout(fitDispatcherCanvas, 60);
+    });
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", fitDispatcherCanvas);
+    }
+})();
+</script>
+{% else %}
+<script>
+(function () {
+    /* Мобильный контур горного мастера не получает desktop CSS-zoom. */
     var DESIGN_HEIGHT = 800;
     var DESIGN_WIDTH_MIN = 1400;
 
@@ -1063,6 +1218,7 @@
     }
 })();
 </script>
+{% endif %}
 
 {{ dispatcher_dashboard.equipment_cards|json_script:"gd-equipment-cards-data" }}
 {{ dispatcher_dashboard.equipment_state_ui|json_script:"gd-equipment-states-data" }}
@@ -1108,6 +1264,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var detailEmployeeInitials = document.querySelector("[data-gd-detail-employee-initials]");
     var detailEmployeeName = document.querySelector("[data-gd-detail-employee-name]");
     var detailEmployeePhone = document.querySelector("[data-gd-detail-employee-phone]");
+    var detailEmployeePresence = document.querySelector("[data-gd-detail-employee-presence]");
     var detailShiftReport = document.querySelector("[data-gd-detail-shift-report]");
     var detailMetrics = document.querySelector("[data-gd-detail-metrics]");
     var detailTabs = document.querySelector("[data-gd-detail-tabs]");
@@ -1179,7 +1336,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v147";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v162";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -2773,9 +2930,6 @@ document.addEventListener("DOMContentLoaded", function () {
         if (detailZone) detailZone.textContent = data.zone || "";
         if (detailEmployee) {
             var employee = data.employee || {};
-            if (data.category === "complex") {
-                detailEmployee.hidden = true;
-            } else {
             detailEmployee.hidden = false;
             if (detailEmployeeName) detailEmployeeName.textContent = employee.name || "Сотрудник не назначен";
             if (detailEmployeePhone) {
@@ -2788,6 +2942,11 @@ document.addEventListener("DOMContentLoaded", function () {
                     detailEmployeePhone.setAttribute("aria-disabled", "true");
                 }
             }
+            if (detailEmployeePresence) {
+                detailEmployeePresence.textContent = employee.presence_label || "Сотрудник не в смене";
+                detailEmployeePresence.className = employee.presence_status ? "is-" + employee.presence_status : "";
+                detailEmployeePresence.title = [employee.last_seen_label, employee.client_label].filter(Boolean).join(" · ");
+            }
             if (detailEmployeeImg && detailEmployeeInitials) {
                 if (employee.photo) {
                     detailEmployeeImg.src = employee.photo;
@@ -2799,7 +2958,6 @@ document.addEventListener("DOMContentLoaded", function () {
                     detailEmployeeInitials.textContent = employee.initials || "--";
                     detailEmployeeInitials.hidden = false;
                 }
-            }
             }
         }
         if (detailList) {
@@ -2986,7 +3144,7 @@ document.addEventListener("DOMContentLoaded", function () {
                         {% if is_native_app %}
                         '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Нажмите, чтобы открыть отчёт">0%</button></div>',
                         {% else %}
-                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Нажмите, чтобы открыть отчёт">0%</button><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
+                        '<div class="mm-mobile-header-actions"><button type="button" class="mm-mobile-plan-ring" data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: 0%;" aria-label="Выполнение плана смены 0%. Нажмите, чтобы открыть отчёт">0%</button><span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>версия ' + formatMiningMasterVersion(miningMasterShellVersion) + '</span></div>',
                         {% endif %}
                     '</header>',
                     '<div class="mm-mobile-fill-save-overlay" aria-hidden="true">Сохранить</div>',
@@ -3062,6 +3220,16 @@ document.addEventListener("DOMContentLoaded", function () {
             assigned.dataset.mmMobileFillCount = String(count);
             assigned.style.setProperty("--mm-fill-assigned-columns", columns);
             assigned.style.setProperty("--mm-fill-assigned-rows", rows);
+        }
+        function setMobileTruckMiniNumber(mini, number) {
+            if (!mini) return;
+            var label = mini.querySelector(".mm-mobile-truck-number");
+            if (!label) {
+                label = document.createElement("b");
+                label.className = "mm-mobile-truck-number";
+                mini.insertBefore(label, mini.firstChild);
+            }
+            label.textContent = String(number || "").trim();
         }
         function updateMobileHomeTruckPreviewLayout(preview) {
             if (!preview) return;
@@ -3170,7 +3338,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 mini.dataset.mmMobileHomeSourceExcavatorId = excavatorId;
                 mini.dataset.mmMobileEquipmentState = source.dataset.mmMobileEquipmentState || "";
                 mini.dataset.haulAssignmentStateId = haulAssignmentStateId(source);
-                mini.textContent = mini.dataset.mmMobileHomeTruckNumber || "";
+                setMobileTruckMiniNumber(mini, mini.dataset.mmMobileHomeTruckNumber || "");
                 syncMobilePlanVisual(source, mini);
                 preview.appendChild(mini);
                 bindMobileHomeTruckDrag(mini);
@@ -3248,6 +3416,25 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         function syncMobilePlanVisual(source, target) {
             if (!source || !target) return target;
+            var presenceCode = source.dataset.applicationPresence || "";
+            var presenceLabel = source.dataset.applicationPresenceLabel || "";
+            var presenceIndicator = target.querySelector("[data-mm-mobile-presence-indicator]");
+            if (presenceCode) {
+                target.dataset.applicationPresence = presenceCode;
+                target.dataset.applicationPresenceLabel = presenceLabel;
+                if (!presenceIndicator) {
+                    presenceIndicator = document.createElement("i");
+                    presenceIndicator.dataset.mmMobilePresenceIndicator = "true";
+                    target.appendChild(presenceIndicator);
+                }
+                presenceIndicator.className = "mm-mobile-presence-dot is-" + presenceCode;
+                presenceIndicator.title = presenceLabel;
+                presenceIndicator.setAttribute("aria-label", presenceLabel);
+            } else {
+                delete target.dataset.applicationPresence;
+                delete target.dataset.applicationPresenceLabel;
+                if (presenceIndicator) presenceIndicator.remove();
+            }
             ["planPercent", "planLoopPercent", "planCompletedLoops", "planProgressPhase"].forEach(function (key) {
                 var value = source.dataset[key] || "";
                 if (value) {
@@ -3278,14 +3465,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 ringLayer.remove();
             }
             var badge = target.querySelector(".mm-mobile-plan-loop-badge");
-            if (completedLoops > 0) {
-                if (!badge) {
-                    badge = document.createElement("b");
-                    badge.className = "mm-mobile-plan-loop-badge";
-                    target.appendChild(badge);
-                }
-                badge.textContent = "×" + completedLoops;
-            } else if (badge) {
+            if (badge) {
                 badge.remove();
             }
             return target;
@@ -3404,7 +3584,7 @@ document.addEventListener("DOMContentLoaded", function () {
             mini.dataset.mmMobileEquipmentState = homeTruck.dataset.mmMobileEquipmentState || "";
             mini.dataset.haulAssignmentStateId = haulAssignmentStateId(homeTruck);
             mini.dataset.mmMobileFillOriginal = "true";
-            mini.textContent = mini.dataset.mmMobileAssignedTruckNumber || "";
+            setMobileTruckMiniNumber(mini, mini.dataset.mmMobileAssignedTruckNumber || "");
             syncMobilePlanVisual(homeTruck, mini);
             return mini;
         }
@@ -3968,6 +4148,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (home) home.classList.remove("is-transfer-overlay");
             shell.querySelectorAll(".mm-mobile-complex-card.is-transfer-source, .mm-mobile-complex-card.is-transfer-target").forEach(function (card) {
                 card.classList.remove("is-transfer-source", "is-transfer-target", "is-transfer-hover");
+                card.style.removeProperty("order");
             });
         }
 
@@ -4025,16 +4206,62 @@ document.addEventListener("DOMContentLoaded", function () {
             };
         }
 
+        function pinMobileTruckTransferSourceAtPoint(sourceCard, clientX, clientY) {
+            var grid = home && home.querySelector(".mm-mobile-complex-grid");
+            if (!grid || !sourceCard || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+            var cards = Array.from(grid.querySelectorAll(".mm-mobile-complex-card:not(.status-empty)")).filter(function (card) {
+                return !card.hidden && card.style.display !== "none";
+            });
+            var sourceIndex = cards.indexOf(sourceCard);
+            if (sourceIndex < 0 || cards.length < 2) return;
+            cards.forEach(function (card, index) {
+                card.style.order = String(index);
+            });
+            var rect = grid.getBoundingClientRect();
+            if (!rect.width || !rect.height) return;
+            var gridStyle = window.getComputedStyle(grid);
+            var columnGap = parseFloat(gridStyle.columnGap) || 0;
+            var rowGap = parseFloat(gridStyle.rowGap) || 0;
+            var rowCount = Math.max(1, Math.ceil(cards.length / 2));
+            var columnWidth = Math.max(1, (rect.width - columnGap) / 2);
+            var viewportBottom = window.visualViewport
+                ? window.visualViewport.offsetTop + window.visualViewport.height
+                : window.innerHeight;
+            var stableGridHeight = Math.max(rect.height, viewportBottom - rect.top);
+            var rowHeight = Math.max(1, (stableGridHeight - rowGap * (rowCount - 1)) / rowCount);
+            var column = clientX >= rect.left + columnWidth + columnGap / 2 ? 1 : 0;
+            var row = Math.max(0, Math.min(rowCount - 1, Math.floor((clientY - rect.top) / (rowHeight + rowGap))));
+            var slotIndex = Math.min(cards.length - 1, row * 2 + column);
+            if (slotIndex === sourceIndex) return;
+            var slotCard = cards[slotIndex];
+            sourceCard.style.order = String(slotIndex);
+            slotCard.style.order = String(sourceIndex);
+        }
+
+        function schedulePinMobileTruckTransferSourceAtPoint(transfer, clientX, clientY) {
+            window.requestAnimationFrame(function () {
+                window.requestAnimationFrame(function () {
+                    if (mobileTruckTransfer !== transfer) return;
+                    pinMobileTruckTransferSourceAtPoint(transfer.sourceCard, clientX, clientY);
+                });
+            });
+        }
+
         function beginMobileTruckTransfer(node) {
             if (isMiningMasterMobileReadonly() || !node || node.classList.contains("is-transfer-pending")) return false;
             var transfer = mobileTruckTransferSource(node);
             if (!transfer || !transfer.sourceCard) return false;
+            var sourceRect = node.getBoundingClientRect();
+            var sourceAnchorX = sourceRect.left + sourceRect.width / 2;
+            var sourceAnchorY = sourceRect.top + sourceRect.height / 2;
             transfer.sourceFillScreen = node.closest("[data-mm-mobile-fill]");
             if (mobileTruckTransferNoticeTimer) window.clearTimeout(mobileTruckTransferNoticeTimer);
             mobileTruckTransfer = transfer;
-            if (transfer.sourceFillScreen && home) {
+            if (home) {
                 home.hidden = false;
                 home.classList.add("is-transfer-overlay");
+                var transferGrid = home.querySelector(".mm-mobile-complex-grid");
+                if (transferGrid) transferGrid.scrollTop = 0;
             }
             shell.classList.add("is-truck-transfer-mode");
             shell.querySelectorAll(".mm-mobile-complex-card:not(.status-empty)").forEach(function (card) {
@@ -4042,6 +4269,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 card.classList.toggle("is-transfer-source", isSource);
                 card.classList.toggle("is-transfer-target", !isSource);
             });
+            schedulePinMobileTruckTransferSourceAtPoint(transfer, sourceAnchorX, sourceAnchorY);
             if (mobileTruckTransferCaption) mobileTruckTransferCaption.textContent = "Перестановка самосвала";
             if (mobileTruckTransferTitle) mobileTruckTransferTitle.textContent = "№" + transfer.truckNumber + " из " + transfer.sourceLabel + " — отпустите на экскаваторе";
             if (mobileTruckTransferCancel) mobileTruckTransferCancel.hidden = false;
@@ -4215,7 +4443,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 suppressTransferClick(mobileTruckTransfer && mobileTruckTransfer.sourceCard);
                 suppressTransferClick(target);
                 if (ghost) ghost.classList.add("is-dropping");
-                if (!cancelled && target) {
+                var travelDistance = Math.hypot(clientX - startX, clientY - startY);
+                if (!cancelled && target && travelDistance >= 36) {
                     completeMobileTruckTransfer(target);
                 } else {
                     cancelMobileTruckTransfer();
@@ -4819,7 +5048,7 @@ document.addEventListener("DOMContentLoaded", function () {
             } else {
                 mini.dataset.mmMobileFillAdded = "true";
             }
-            mini.textContent = truckButton.dataset.mmMobileFillTruckNumber || (truckButton.querySelector("strong") && truckButton.querySelector("strong").textContent) || "";
+            setMobileTruckMiniNumber(mini, truckButton.dataset.mmMobileFillTruckNumber || (truckButton.querySelector("strong") && truckButton.querySelector("strong").textContent) || "");
             syncMobilePlanVisual(truckButton, mini);
             assigned.appendChild(mini);
             bindMobileFillAssignedTruckRelease(mini);
@@ -5471,6 +5700,7 @@ document.addEventListener("DOMContentLoaded", function () {
             var dragging = false;
             var moved = false;
             var dragMode = "";
+            var verticalPanning = false;
             function getSwipeTouch(event) {
                 var list = event.changedTouches && event.changedTouches.length ? event.changedTouches : event.touches;
                 if (!list) return null;
@@ -5490,6 +5720,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 dragging = false;
                 moved = false;
                 dragMode = "";
+                verticalPanning = false;
                 touchTakeoverSent = false;
                 card.style.setProperty("--mm-mobile-swipe-x", "0px");
                 card.style.setProperty("--mm-mobile-truck-swipe-x", "0px");
@@ -5502,24 +5733,18 @@ document.addEventListener("DOMContentLoaded", function () {
                     var absDx = Math.abs(dx);
                     var absDy = Math.abs(dy);
                     if (absDx + absDy < 10) return false;
-
-                    if (absDy >= absDx * 0.8 && dy < 0) {
-                        dragging = true;
-                        dragMode = "fill";
-                    } else if (absDy >= absDx * 0.8 && dy > 0) {
-                        dragging = true;
-                        dragMode = "create";
-                    } else if (absDx >= absDy * 0.8) {
-                        dragging = true;
-                        dragMode = dx < 0 ? "release" : "release-trucks";
-                    } else if (absDx > absDy) {
-                        dragging = true;
-                        dragMode = dx < 0 ? "release" : "release-trucks";
-                    } else if (absDy > absDx) {
-                        dragging = true;
-                        dragMode = dy < 0 ? "fill" : "create";
-                    } else {
+                    if (absDy >= absDx) {
+                        // Вертикальное движение принадлежит сетке: карточка
+                        // не захватывает его и не мешает прокручивать смену.
+                        verticalPanning = true;
                         return false;
+                    }
+                    dragging = true;
+                    dragMode = dx < 0 ? "release" : "release-trucks";
+                    if (activePointerId !== null && card.setPointerCapture) {
+                        try {
+                            card.setPointerCapture(activePointerId);
+                        } catch (error) {}
                     }
                     sendTouchTakeover();
                 }
@@ -5528,29 +5753,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     event.stopPropagation();
                 }
                 moved = true;
-                if (dragMode === "fill") {
-                    var fillOffset = Math.min(0, Math.max(-118, dy));
-                    card.classList.remove("is-swiping", "is-swipe-ready", "is-create-swiping", "is-create-ready");
-                    card.classList.add("is-fill-swiping");
-                    shell.classList.add("is-fill-target-peeking");
-                    shell.classList.toggle("is-fill-target-ready", Math.abs(fillOffset) >= 72);
-                    shell.classList.remove("is-excavator-garage-peeking", "is-truck-garage-peeking", "is-create-complex-peeking", "is-create-complex-ready");
-                    card.style.setProperty("--mm-mobile-swipe-x", "0px");
-                    card.style.setProperty("--mm-mobile-truck-swipe-x", "0px");
-                    card.style.setProperty("--mm-mobile-fill-swipe-y", fillOffset + "px");
-                    card.classList.toggle("is-fill-ready", Math.abs(fillOffset) >= 72);
-                } else if (dragMode === "create") {
-                    var createOffset = Math.max(0, Math.min(118, dy));
-                    card.classList.remove("is-swiping", "is-swipe-ready", "is-fill-swiping", "is-fill-ready");
-                    card.classList.add("is-create-swiping");
-                    shell.classList.add("is-create-complex-peeking");
-                    shell.classList.toggle("is-create-complex-ready", createOffset >= 72);
-                    shell.classList.remove("is-excavator-garage-peeking", "is-truck-garage-peeking", "is-fill-target-peeking", "is-fill-target-ready");
-                    card.style.setProperty("--mm-mobile-swipe-x", "0px");
-                    card.style.setProperty("--mm-mobile-truck-swipe-x", "0px");
-                    card.style.setProperty("--mm-mobile-fill-swipe-y", createOffset + "px");
-                    card.classList.toggle("is-create-ready", createOffset >= 72);
-                } else if (dragMode === "release-trucks") {
+                if (dragMode === "release-trucks") {
                     var truckOffset = Math.min(dx, card.offsetWidth);
                     var truckThreshold = Math.min(120, Math.max(72, card.offsetWidth * .34));
                     card.classList.remove("is-swiping", "is-swipe-ready", "is-fill-swiping", "is-fill-ready", "is-create-swiping", "is-create-ready");
@@ -5594,6 +5797,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 touchSwipeDeadline = 0;
                 dragging = false;
                 dragMode = "";
+                verticalPanning = false;
                 if (moved) {
                     card.dataset.mmMobileSwipeIgnoreClick = "true";
                     window.setTimeout(function () {
@@ -5657,11 +5861,6 @@ document.addEventListener("DOMContentLoaded", function () {
                 activeTouchId = null;
                 touchTakeoverTarget = null;
                 startSwipe(event.clientX, event.clientY);
-                if (card.setPointerCapture) {
-                    try {
-                        card.setPointerCapture(activePointerId);
-                    } catch (error) {}
-                }
             }, true);
             card.addEventListener("pointermove", function (event) {
                 if (activePointerId === null || event.pointerId !== activePointerId) return;
@@ -5677,7 +5876,7 @@ document.addEventListener("DOMContentLoaded", function () {
             });
             card.addEventListener("touchstart", function (event) {
                 if (isMiningMasterMobileReadonly()) return;
-                if (activeTouchId !== null || card.classList.contains("is-releasing")) return;
+                if (activePointerId !== null || activeTouchId !== null || card.classList.contains("is-releasing")) return;
                 if (!event.changedTouches || !event.changedTouches.length) return;
                 var truckControl = event.target && event.target.closest
                     ? event.target.closest("[data-mm-mobile-home-truck-id], [data-mm-mobile-open-truck-list]")
@@ -5694,6 +5893,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (activeTouchId === null) return;
                 var touch = getSwipeTouch(event);
                 if (!touch) return;
+                if (verticalPanning) return;
                 var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
                 if (!dragging && touchTakeoverTarget && now > touchSwipeDeadline) return;
                 moveSwipe(touch.clientX, touch.clientY, event);
@@ -5955,6 +6155,12 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     bindMiningMasterMobileScreens();
     {% if mining_master_mobile_enabled %}
+    window.setInterval(function () {
+        if (document.hidden || !isMiningMasterMobilePage() || isMobileOperationalRefreshUnsafe()) return;
+        Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
+    }, 30000);
+    {% endif %}
+    {% if mining_master_mobile_enabled %}
     refreshMiningMasterUpdateIndicatorFromStorage();
     {% endif %}
     if ("serviceWorker" in navigator) {
@@ -6208,7 +6414,6 @@ document.addEventListener("DOMContentLoaded", function () {
         var columns = tiles.length === 0 ? 6 : Math.min(6, Math.max(1, tiles.length));
         if (tiles.length > 6) columns = 6;
         var gap = tiles.length > 10 ? 5 : 6;
-        var rows = Math.max(1, Math.ceil(Math.max(1, tiles.length) / columns));
         var garageTiles = Array.from(document.querySelectorAll("[data-garage-item='truck']"));
         var garageRect = null;
         garageTiles.some(function (garageTile) {
@@ -6225,18 +6430,13 @@ document.addEventListener("DOMContentLoaded", function () {
         var garageWidth = garageRect ? garageRect.width : cssGarageWidth;
         var garageHeight = garageRect ? garageRect.height : cssGarageHeight;
         var rackWidth = rack.clientWidth || rack.getBoundingClientRect().width || 1;
-        var rackHeight = rack.clientHeight || rack.getBoundingClientRect().height || garageHeight;
         var fittedWidth = Math.floor((rackWidth - (gap * (columns - 1))) / columns);
-        var fittedHeight = Math.floor((rackHeight - (gap * (rows - 1))) / rows);
         var stepWidth = tiles.length <= 6 ? garageWidth : tiles.length <= 12 ? Math.min(garageWidth, 66) : tiles.length <= 18 ? Math.min(garageWidth, 58) : Math.min(garageWidth, 50);
-        var widthScale = garageWidth > 0 ? Math.min(1, stepWidth / garageWidth, fittedWidth / garageWidth) : 1;
-        var heightScale = garageHeight > 0 ? Math.min(1, fittedHeight / garageHeight) : 1;
-        var scale = Math.max(0, Math.min(widthScale, heightScale));
-        var width = Math.max(24, Math.floor(garageWidth * scale));
-        var height = Math.max(24, Math.floor(garageHeight * scale));
+        var width = Math.max(24, Math.min(garageWidth, stepWidth, fittedWidth));
+        var scale = garageWidth > 0 ? width / garageWidth : 1;
+        var height = Math.max(24, Math.min(garageHeight, Math.floor(garageHeight * scale)));
         var justify = tiles.length >= 5 ? "space-between" : "start";
         rack.style.setProperty("--complex-truck-cols", String(columns));
-        rack.style.setProperty("--complex-truck-rows", String(rows));
         rack.style.setProperty("--complex-truck-gap", gap + "px");
         rack.style.setProperty("--complex-truck-w", width + "px");
         rack.style.setProperty("--complex-truck-h", height + "px");
@@ -6829,6 +7029,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v64" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v73" defer></script>
 {% endif %}
 {% endblock %}
