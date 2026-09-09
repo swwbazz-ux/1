@@ -758,12 +758,34 @@ test("offline state is recoverable and does not terminate authentication", async
     assert.equal(runtime.redirects.length, 0);
 });
 
-test("work and observer screens use 5s and 15s polling instead of the global second", async () => {
+test("the Driver and Excavator use 2s polling while other work and observer screens keep their shared intervals", async () => {
     assert.doesNotMatch(BASE_TEMPLATE_SOURCE, /pollIntervalMs:\s*1000/);
     assert.match(BASE_TEMPLATE_SOURCE, /workPollIntervalMs:\s*5000/);
     assert.match(BASE_TEMPLATE_SOURCE, /observerPollIntervalMs:\s*15000/);
 
     const worker = createRuntime({
+        screens: [{
+            name: "driver",
+            role: "driver",
+            mode: "custom",
+            path: "^/driver/?$",
+            customRefresh: true,
+            pollIntervalMs: 2000,
+        }],
+        fetch() {
+            return Promise.resolve(response(200, {version: 7, role_active: true, relevant: false}));
+        },
+    });
+    const excavator = createRuntime({
+        currentHref: "http://excavator.localhost/excavator/work/",
+        screens: [{
+            name: "excavator",
+            role: "excavator_operator",
+            mode: "custom",
+            path: "^/excavator/work/?$",
+            customRefresh: true,
+            pollIntervalMs: 2000,
+        }],
         fetch() {
             return Promise.resolve(response(200, {version: 7, role_active: true, relevant: false}));
         },
@@ -795,7 +817,10 @@ test("work and observer screens use 5s and 15s polling instead of the global sec
     });
     await settlePromises();
 
-    assert.equal(worker.window.AppRealtime.getDebugState().pollIntervalMs, 5000);
+    assert.match(BASE_TEMPLATE_SOURCE, /name:\s*"driver"[^\n]*pollIntervalMs:\s*2000/);
+    assert.match(BASE_TEMPLATE_SOURCE, /name:\s*"excavator"[^\n]*pollIntervalMs:\s*2000/);
+    assert.equal(worker.window.AppRealtime.getDebugState().pollIntervalMs, 2000);
+    assert.equal(excavator.window.AppRealtime.getDebugState().pollIntervalMs, 2000);
     assert.equal(observer.window.AppRealtime.getDebugState().pollIntervalMs, 15000);
     assert.equal(manager.window.AppRealtime.getDebugState().pollIntervalMs, 15000);
     assert.equal(worker.intervalDelays().includes(1000), false);

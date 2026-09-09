@@ -6,15 +6,20 @@ import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
+
+import org.json.JSONObject;
 
 @CapacitorPlugin(name = "NativeSound")
 public class NativeSoundPlugin extends Plugin {
@@ -175,6 +180,58 @@ public class NativeSoundPlugin extends Plugin {
             .put("announced", result.announced)
             .put("reason", result.reason)
             .put("eventVersion", eventVersion));
+    }
+
+    @PluginMethod
+    public void announceEquipmentBatch(PluginCall call) {
+        if (!"excavator".equals(BuildConfig.APP_PROFILE_ID)) {
+            call.resolve(new JSObject()
+                .put("announced", false)
+                .put("reason", OperationalVoiceAnnouncer.REASON_RESOURCE_UNAVAILABLE));
+            return;
+        }
+        String cueName = call.getString("cue", "truck_assigned");
+        if (!ALLOWED_SOUNDS.contains(cueName)) {
+            call.reject("Unknown equipment cue");
+            return;
+        }
+        JSArray items = call.getArray("items", new JSArray());
+        List<OperationalVoiceAnnouncer.Operation> operations = new ArrayList<>();
+        long latestEventVersion = 0L;
+        for (int index = 0; index < items.length(); index += 1) {
+            JSONObject item = items.optJSONObject(index);
+            if (item == null) {
+                continue;
+            }
+            String action = item.optString("action", "");
+            String equipmentNumber = item.optString("equipmentNumber", "");
+            String operationKey = item.optString("operationKey", "").trim();
+            String[] voices = equipmentVoiceSequence(action, equipmentNumber, 0L, "");
+            if (voices.length == 0) {
+                String fallbackVoice = item.optString("fallbackVoice", "");
+                voices = ALLOWED_VOICES.contains(fallbackVoice)
+                    ? new String[] {fallbackVoice}
+                    : new String[0];
+            }
+            if (operationKey.isEmpty() || voices.length == 0) {
+                continue;
+            }
+            latestEventVersion = Math.max(latestEventVersion, item.optLong("eventVersion", 0L));
+            operations.add(new OperationalVoiceAnnouncer.Operation(operationKey, voices));
+        }
+        OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceOperations(
+            getContext(),
+            cueName,
+            operations,
+            false,
+            "",
+            ""
+        );
+        call.resolve(new JSObject()
+            .put("announced", result.announced)
+            .put("reason", result.reason)
+            .put("eventVersion", latestEventVersion)
+            .put("operationCount", operations.size()));
     }
 
     private String[] equipmentVoiceSequence(

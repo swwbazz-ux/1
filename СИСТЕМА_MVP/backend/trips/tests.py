@@ -1353,15 +1353,17 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v219')
+        self.assertContains(response, 'excavator-mobile-shell-v220')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 219')
+        self.assertContains(response, 'Версия 220')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
-        self.assertContains(response, 'playExcavatorEquipmentVoice(action, truckNumber')
+        self.assertContains(response, 'playExcavatorAssignmentAlerts(operations)')
+        self.assertContains(response, 'window.handleOperationalStateSignals = function (context)')
+        self.assertContains(response, 'data-assignment-id=')
         self.assertContains(response, 'action === "close" ? "shift_end" : "shift_start"')
         self.assertContains(response, 'action === "close" ? "voice_shift_closed" : "voice_shift_opened"')
         self.assertContains(response, 'card.dataset.eoLoadActionId')
@@ -1460,6 +1462,25 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, '<button class="eo-shift-update-button"')
         self.assertNotContains(response, 'runManualUpdateCheck')
         self.assertNotContains(response, 'data-eo-refresh-work')
+
+    def test_excavator_work_renders_readonly_instead_of_redirect_loop_for_stale_session(self):
+        active_generation = timezone.now()
+        self.access.last_login_at = active_generation
+        self.access.save(update_fields=['last_login_at'])
+        session = self.client.session
+        session['active_role_access_id'] = self.access.id
+        session['active_role_login_at'] = (
+            active_generation - timedelta(minutes=1)
+        ).isoformat()
+        session['active_role_code'] = 'excavator_operator'
+        session.save()
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-inactive-role-banner')
+        self.assertContains(response, 'data-inactive-role-reclaim')
+        self.assertContains(response, 'Продолжить здесь')
 
     def test_excavator_work_renders_twelve_assigned_trucks_without_hidden_overflow(self):
         for index in range(11):
@@ -3222,7 +3243,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v219', script)
+        self.assertIn('excavator-mobile-shell-v220', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,

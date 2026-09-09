@@ -28,6 +28,10 @@ import java.net.HttpURLConnection;
 import java.net.URLEncoder;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -626,6 +630,13 @@ public class ConnectivityForegroundService extends Service {
             }
             String roleCode = root.optString("role_app_code", BuildConfig.APP_PROFILE_ID);
             JSONArray workerEquipmentIds = root.optJSONArray("worker_equipment_ids");
+            if ("excavator_operator".equals(roleCode)) {
+                return showLatestExcavatorAssignmentAlerts(
+                    events,
+                    workerEquipmentIds,
+                    showNotification
+                );
+            }
             long selectedVersion = 0L;
             String[] selectedVoices = new String[0];
             String selectedTitle = "";
@@ -667,34 +678,6 @@ public class ConnectivityForegroundService extends Service {
                         title = "Назначение снято";
                         message = "Ожидайте нового экскаватора.";
                     }
-                } else if ("excavator_operator".equals(roleCode)) {
-                    long targetExcavatorId = payload.optLong("target_excavator_id", 0L);
-                    JSONArray excavatorIds = payload.optJSONArray("excavator_ids");
-                    boolean isTarget = targetExcavatorId > 0L
-                        && jsonArrayContains(workerEquipmentIds, targetExcavatorId);
-                    boolean wasRelated = jsonArraysIntersect(workerEquipmentIds, excavatorIds);
-                    String truckNumber = payload.optString("truck_number", "");
-                    String numberVoice = EquipmentVoiceCatalog.truckNumberVoice(truckNumber);
-                    if ("assignment_applied".equals(action) && isTarget) {
-                        voices = numberVoice.isEmpty()
-                            ? new String[] {"voice_truck_assigned"}
-                            : new String[] {"voice_truck_assigned_prefix", numberVoice};
-                        title = "Назначен самосвал";
-                        message = truckNumber.isBlank()
-                            ? "Проверьте номер на экране."
-                            : "Самосвал № " + truckNumber;
-                    } else if (
-                        ("assignment_applied".equals(action) || "release_applied".equals(action))
-                        && wasRelated
-                    ) {
-                        voices = numberVoice.isEmpty()
-                            ? new String[] {"voice_truck_removed"}
-                            : new String[] {"voice_truck_removed_prefix", numberVoice};
-                        title = "Самосвал снят";
-                        message = truckNumber.isBlank()
-                            ? "Назначение самосвала изменено."
-                            : "Самосвал № " + truckNumber;
-                    }
                 }
 
                 if (voices.length > 0) {
@@ -725,24 +708,155 @@ public class ConnectivityForegroundService extends Service {
         }
     }
 
+    private boolean showLatestExcavatorAssignmentAlerts(
+            JSONArray events,
+            JSONArray workerEquipmentIds,
+            boolean showNotification) {
+        Map<String, ExcavatorAssignmentVoice> latestByTruck = new LinkedHashMap<>();
+        for (int index = 0; index < events.length(); index += 1) {
+            JSONObject event = events.optJSONObject(index);
+            if (event == null || !"assignment_changed".equals(event.optString("type"))) {
+                continue;
+            }
+            if (!"HaulAssignment".equals(event.optString("object_type", ""))) {
+                continue;
+            }
+            long version = event.optLong("version", 0L);
+            JSONObject payload = event.optJSONObject("payload");
+            String assignmentId = event.optString("object_id", "").trim();
+            if (version <= 0L || payload == null || assignmentId.isEmpty()) {
+                continue;
+            }
+            String action = payload.optString("action", "");
+            long targetExcavatorId = payload.optLong("target_excavator_id", 0L);
+            long relatedExcavatorId = firstCommonId(
+                workerEquipmentIds,
+                payload.optJSONArray("excavator_ids")
+            );
+            String kind = "";
+            long currentExcavatorId = 0L;
+            if ("assignment_applied".equals(action)
+                    && targetExcavatorId > 0L
+                    && jsonArrayContains(workerEquipmentIds, targetExcavatorId)) {
+                kind = "assign";
+                currentExcavatorId = targetExcavatorId;
+            } else if (("assignment_applied".equals(action) || "release_applied".equals(action))
+                    && relatedExcavatorId > 0L) {
+                kind = "remove";
+                currentExcavatorId = relatedExcavatorId;
+            }
+            if (kind.isEmpty()) {
+                continue;
+            }
+
+            long truckIdValue = payload.optLong("truck_id", 0L);
+            JSONArray truckIds = payload.optJSONArray("truck_ids");
+            if (truckIdValue <= 0L && truckIds != null) {
+                truckIdValue = truckIds.optLong(0, 0L);
+            }
+            String truckId = String.valueOf(truckIdValue);
+            String truckNumber = payload.optString("truck_number", "");
+            if ("0".equals(truckId) && truckNumber.isBlank()) {
+                continue;
+            }
+            String truckKey = !"0".equals(truckId)
+                ? truckId
+                : "number:" + truckNumber;
+            String numberVoice = EquipmentVoiceCatalog.truckNumberVoice(truckNumber);
+            String[] voices;
+            if ("assign".equals(kind)) {
+                voices = numberVoice.isEmpty()
+                    ? new String[] {"voice_truck_assigned"}
+                    : new String[] {"voice_truck_assigned_prefix", numberVoice};
+            } else {
+                voices = numberVoice.isEmpty()
+                    ? new String[] {"voice_truck_removed"}
+                    : new String[] {"voice_truck_removed_prefix", numberVoice};
+            }
+            ExcavatorAssignmentVoice previous = latestByTruck.get(truckKey);
+            if (previous == null || version > previous.eventVersion) {
+                latestByTruck.put(
+                    truckKey,
+                    new ExcavatorAssignmentVoice(
+                        version,
+                        "excavator-assignment:" + kind + ":" + assignmentId + ":" + currentExcavatorId,
+                        voices,
+                        kind,
+                        truckNumber
+                    )
+                );
+            }
+        }
+        if (latestByTruck.isEmpty()) {
+            return false;
+        }
+
+        List<ExcavatorAssignmentVoice> selected = new ArrayList<>(latestByTruck.values());
+        selected.sort((left, right) -> Long.compare(left.eventVersion, right.eventVersion));
+        List<OperationalVoiceAnnouncer.Operation> operations = new ArrayList<>();
+        for (ExcavatorAssignmentVoice item : selected) {
+            operations.add(new OperationalVoiceAnnouncer.Operation(item.operationKey, item.voiceNames));
+        }
+        ExcavatorAssignmentVoice latest = selected.get(selected.size() - 1);
+        String notificationTitle = selected.size() > 1
+            ? "Изменены назначения"
+            : ("assign".equals(latest.kind) ? "Назначен самосвал" : "Самосвал снят");
+        String notificationBody = selected.size() > 1
+            ? "Изменений: " + selected.size()
+            : (latest.truckNumber.isBlank()
+                ? "Проверьте назначение на экране."
+                : "Самосвал № " + latest.truckNumber);
+        OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceOperations(
+            this,
+            "truck_assigned",
+            operations,
+            showNotification,
+            notificationTitle,
+            notificationBody
+        );
+        return result.announced;
+    }
+
+    private static long firstCommonId(JSONArray left, JSONArray right) {
+        if (left == null || right == null) {
+            return 0L;
+        }
+        for (int index = 0; index < left.length(); index += 1) {
+            long candidate = left.optLong(index, 0L);
+            if (candidate > 0L && jsonArrayContains(right, candidate)) {
+                return candidate;
+            }
+        }
+        return 0L;
+    }
+
+    private static final class ExcavatorAssignmentVoice {
+        final long eventVersion;
+        final String operationKey;
+        final String[] voiceNames;
+        final String kind;
+        final String truckNumber;
+
+        ExcavatorAssignmentVoice(
+                long eventVersion,
+                String operationKey,
+                String[] voiceNames,
+                String kind,
+                String truckNumber) {
+            this.eventVersion = eventVersion;
+            this.operationKey = operationKey;
+            this.voiceNames = voiceNames;
+            this.kind = kind;
+            this.truckNumber = truckNumber == null ? "" : truckNumber;
+        }
+    }
+
     private static boolean jsonArrayContains(JSONArray values, long expected) {
         if (values == null || expected <= 0L) {
             return false;
         }
         for (int index = 0; index < values.length(); index += 1) {
             if (values.optLong(index, 0L) == expected) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean jsonArraysIntersect(JSONArray left, JSONArray right) {
-        if (left == null || right == null) {
-            return false;
-        }
-        for (int index = 0; index < right.length(); index += 1) {
-            if (jsonArrayContains(left, right.optLong(index, 0L))) {
                 return true;
             }
         }

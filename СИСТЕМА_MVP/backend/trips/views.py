@@ -784,7 +784,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v219";
+const CACHE_NAME = "excavator-mobile-shell-v220";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -3376,7 +3376,7 @@ def dispatcher_assign_truck_view(request):
     return JsonResponse(response_payload)
 
 
-def excavator_access_from_request(request):
+def excavator_access_from_request(request, *, require_active_role=True):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return None
@@ -3389,7 +3389,10 @@ def excavator_access_from_request(request):
     if (
         not access
         or access.role.code != 'excavator_operator'
-        or not role_session_state(request, access)['is_active']
+        or (
+            require_active_role
+            and not role_session_state(request, access)['is_active']
+        )
     ):
         return None
     return access
@@ -4836,7 +4839,11 @@ def excavator_work_view(request):
         if requested_fragment == 'excavator':
             return JsonResponse({'authenticated': False}, status=401)
         return redirect('login')
-    access = excavator_access_from_request(request)
+    # GET must remain renderable when this same access was activated on another
+    # device. The common read-only banner then offers "Продолжить здесь".
+    # Rejecting the stale generation here used to create an endless
+    # /excavator/work/ -> /home/ -> /excavator/work/ redirect loop.
+    access = excavator_access_from_request(request, require_active_role=False)
     if not access:
         return redirect('role_home')
 
