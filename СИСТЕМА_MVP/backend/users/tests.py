@@ -268,7 +268,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v204')
+        self.assertContains(response, 'driver-mobile-shell-v206')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertContains(response, 'playDriverSound("truck_assigned")')
@@ -488,7 +488,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v204', script)
+        self.assertIn('driver-mobile-shell-v206', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -2516,6 +2516,9 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'data-driver-report-end-engine-hours="712')
         self.assertContains(response, 'data-excavator="7" data-dump-point="Отвал 3"')
         self.assertContains(response, 'Заправка')
+        self.assertContains(response, 'data-driver-report-trip-scroll')
+        self.assertContains(response, 'data-driver-report-downtime-scroll')
+        self.assertContains(response, 'class="driver-report-section-scroll"', count=2)
 
     def test_driver_sees_assigned_excavator_without_accept_action(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
@@ -3031,7 +3034,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v204')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v206')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
@@ -3113,9 +3116,67 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-driver-shift-downtime-seconds="1200"')
         self.assertContains(response, '>00:20:00</b>')
+        self.assertContains(response, 'data-driver-reason-seconds="1200"')
+        self.assertContains(response, 'is-used')
+        self.assertContains(response, 'data-driver-reason-duration')
         self.assertContains(response, 'data-duration="20 мин."')
         self.assertContains(response, 'data-driver-report-downtime-total="20 мин."')
         self.assertNotContains(response, 'driver-downtime-card status-yellow is-active')
+
+    def test_driver_downtime_json_keeps_per_reason_shift_totals(self):
+        truck = self.create_registered_driver_shift()
+        shift = EmployeeShift.objects.get(employee=self.employee, closed_at__isnull=True)
+        shift.opened_at = timezone.now() - timedelta(hours=1)
+        shift.save(update_fields=['opened_at'])
+        first_reason = DowntimeReason.objects.create(
+            name='Тест история простоя 1',
+            short_label='История 1',
+            show_for_truck_driver=True,
+        )
+        second_reason = DowntimeReason.objects.create(
+            name='Тест история простоя 2',
+            short_label='История 2',
+            show_for_truck_driver=True,
+        )
+        now = timezone.now()
+        DowntimeEvent.objects.create(
+            equipment=truck,
+            employee=self.employee,
+            reason=first_reason,
+            started_at=now - timedelta(minutes=10),
+            ended_at=now - timedelta(minutes=8),
+        )
+
+        start_response = self.client.post(
+            reverse('driver_downtime_action'),
+            data=json.dumps({'action': 'start', 'reason_id': second_reason.id}),
+            content_type='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_ACCEPT='application/json',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(start_response.status_code, 200)
+        start_payload = start_response.json()
+        self.assertEqual(start_payload['reason_totals'][str(first_reason.id)], 120)
+        self.assertIn(str(second_reason.id), start_payload['reason_totals'])
+        self.assertEqual(start_payload['reason_id'], second_reason.id)
+        self.assertTrue(start_payload['active'])
+
+        close_response = self.client.post(
+            reverse('driver_downtime_action'),
+            data=json.dumps({'action': 'close'}),
+            content_type='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_ACCEPT='application/json',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(close_response.status_code, 200)
+        close_payload = close_response.json()
+        self.assertFalse(close_payload['active'])
+        self.assertGreaterEqual(close_payload['reason_totals'][str(second_reason.id)], 0)
+        self.assertEqual(close_payload['reason_totals'][str(first_reason.id)], 120)
 
     def test_driver_downtime_action_validates_reason_by_workplace_and_equipment_type(self):
         truck = self.create_registered_driver_shift()

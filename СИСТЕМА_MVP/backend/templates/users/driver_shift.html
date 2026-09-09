@@ -4036,6 +4036,222 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         max-width: 520px;
     }
 }
+
+/* One structural contract for the bottom action on Shift, Downtimes and
+   Waybill. Semantic colours stay role-specific, while geometry and type no
+   longer jump when the driver switches tabs. */
+body.driver-mobile-screen {
+    --driver-footer-action-h: clamp(48px, 6.4dvh, 56px);
+    --driver-footer-action-gap: clamp(6px, .9dvh, 8px);
+    --driver-footer-action-radius: 10px;
+    --driver-footer-action-font-size: clamp(16px, min(4.4vw, 2.15dvh), 19px);
+}
+
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] {
+    --ms-screen-rows: minmax(38px, .12fr) minmax(0, 1fr) var(--driver-footer-action-h);
+    --ms-screen-rows-landscape: minmax(30px, .12fr) minmax(0, 1fr) var(--driver-footer-action-h);
+    row-gap: var(--driver-footer-action-gap) !important;
+    padding-bottom: var(--driver-footer-action-gap) !important;
+}
+
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__actions,
+body.driver-mobile-screen .driver-downtime-close,
+body.driver-mobile-screen .driver-report-actions {
+    min-height: var(--driver-footer-action-h);
+    height: var(--driver-footer-action-h);
+    max-height: var(--driver-footer-action-h);
+}
+
+body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active {
+    grid-template-rows: clamp(34px, 4.5dvh, 40px) clamp(62px, 8.2dvh, 76px) minmax(0, 1fr) var(--driver-footer-action-h) !important;
+    gap: var(--driver-footer-action-gap) !important;
+    padding-bottom: var(--driver-footer-action-gap);
+}
+
+body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="report"].is-active {
+    grid-template-rows: minmax(0, 1fr) var(--driver-footer-action-h);
+    gap: var(--driver-footer-action-gap);
+    padding-bottom: var(--driver-footer-action-gap);
+}
+
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__action,
+body.driver-mobile-screen .driver-downtime-close,
+body.driver-mobile-screen .driver-report-actions button {
+    box-sizing: border-box;
+    min-height: var(--driver-footer-action-h);
+    height: var(--driver-footer-action-h);
+    max-height: var(--driver-footer-action-h);
+    margin: 0;
+    border-width: 1px;
+    border-style: solid;
+    border-radius: var(--driver-footer-action-radius);
+    padding: 6px clamp(10px, 3vw, 16px);
+    font-family: inherit;
+    font-size: var(--driver-footer-action-font-size) !important;
+    font-weight: 700 !important;
+    line-height: 1.05 !important;
+    letter-spacing: 0;
+    box-shadow: inset 0 0 14px rgba(255, 255, 255, .035);
+    -webkit-tap-highlight-color: transparent;
+}
+
+body.driver-mobile-screen .driver-report-action-title {
+    font-size: var(--driver-footer-action-font-size);
+    font-weight: 700;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-report-action-hint {
+    font-size: clamp(10px, min(2.8vw, 1.35dvh), 12px);
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-downtime-close:not(:disabled),
+body.driver-mobile-screen .driver-downtime-close:disabled,
+body.driver-mobile-screen .driver-downtime-close.is-disabled {
+    font-weight: 700 !important;
+}
+
+/* Report lists keep a readable row height. Extra trips and downtimes scroll
+   inside their own cards instead of shrinking every line to fit the screen. */
+body.driver-mobile-screen .driver-report-section--scrollable {
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-report-section-scroll {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(88, 223, 82, .58) rgba(8, 20, 25, .7);
+    -webkit-overflow-scrolling: touch;
+}
+
+body.driver-mobile-screen .driver-report-section-scroll::-webkit-scrollbar {
+    width: 4px;
+}
+
+body.driver-mobile-screen .driver-report-section-scroll::-webkit-scrollbar-track {
+    background: rgba(8, 20, 25, .7);
+}
+
+body.driver-mobile-screen .driver-report-section-scroll::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(88, 223, 82, .58);
+}
+
+body.driver-mobile-screen .driver-report-section-scroll .driver-report-row {
+    min-height: clamp(34px, 4.8dvh, 42px);
+    padding: 7px 2px;
+    align-items: center;
+    font-size: clamp(13px, min(3.85vw, 1.9dvh), 16px);
+    line-height: 1.16;
+}
+
+body.driver-mobile-screen .driver-report-section-scroll .driver-report-row > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+/* Driver downtime buttons use the same history cue as the Excavator screen:
+   the active reason pulses, while every used reason keeps its shift timer. */
+body.driver-mobile-screen .driver-downtime-list button {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    place-items: center;
+    align-content: center;
+    gap: clamp(1px, .35dvh, 3px);
+    -webkit-text-size-adjust: none;
+    text-size-adjust: none;
+}
+
+body.driver-mobile-screen .driver-downtime-reason-label {
+    display: -webkit-box;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-align: center;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    font-size: inherit !important;
+    line-height: 1.05 !important;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+body.driver-mobile-screen .driver-downtime-reason-duration {
+    min-width: max-content;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 1px clamp(4px, 1.2vw, 7px);
+    border: 1px solid rgba(255, 102, 88, .58);
+    border-radius: 999px;
+    background: rgba(54, 10, 10, .88);
+    color: #ff6658;
+    box-shadow: inset 0 0 8px rgba(255, 102, 88, .14), 0 0 9px rgba(255, 102, 88, .18);
+    font-size: clamp(10px, min(3vw, 1.45dvh), 13px) !important;
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.08 !important;
+    letter-spacing: .045em;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-downtime-reason-duration[hidden] {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected) {
+    filter: brightness(1.08) saturate(1.04);
+    box-shadow:
+        inset 0 -3px 0 rgba(255, 102, 88, .82),
+        inset 0 0 0 1px color-mix(in srgb, var(--driver-reason-accent) 18%, transparent),
+        0 0 12px rgba(255, 102, 88, .1);
+}
+
+/* A second line with the per-reason timer must never be squeezed into the
+   legacy short-landscape equal fractions. Keep real touch rows and let only
+   the reasons area scroll vertically when the screen is short. */
+@media (orientation: landscape) and (max-height: 520px) {
+    body.driver-mobile-screen .driver-downtime-list {
+        grid-auto-rows: 52px !important;
+        align-content: start;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+        touch-action: pan-y;
+        padding-right: 3px;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(74, 222, 128, .5) rgba(148, 163, 184, .12);
+    }
+
+    body.driver-mobile-screen .driver-downtime-list form,
+    body.driver-mobile-screen .driver-downtime-list button {
+        height: 52px;
+        min-height: 52px;
+    }
+
+    body.driver-mobile-screen .driver-downtime-list button {
+        gap: 1px;
+        padding: 3px 4px;
+        font-size: clamp(9px, 1.45vw, 12px);
+        line-height: 1.02;
+    }
+
+    body.driver-mobile-screen .driver-downtime-reason-duration {
+        padding-block: 0;
+        font-size: clamp(8px, 1.25vw, 10px);
+        line-height: 1;
+    }
+}
 </style>
 <link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v={{ driver_shell_version }}">
 <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v={{ driver_shell_version }}" defer></script>
@@ -4204,7 +4420,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
             <h2>Простои</h2>
             <button class="driver-downtime-refresh" type="button" aria-label="Обновить" data-driver-downtime-refresh>↻</button>
         </div>
-        <div class="driver-downtime-card status-{{ active_downtime_status_key }}{% if active_downtime %} is-active{% endif %}" data-driver-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-driver-active-downtime-flow="{{ active_downtime_flow }}" data-driver-active-started-at="{{ active_downtime_started_at }}" data-driver-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-driver-shift-downtime-seconds="{{ shift_downtime_total_seconds }}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Простои за смену: {{ shift_downtime_total_label }}{% endif %}">
+        <div class="driver-downtime-card status-{{ active_downtime_status_key }}{% if active_downtime %} is-active{% endif %}" data-driver-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-driver-active-reason-id="{% if active_downtime %}{{ active_downtime.reason_id }}{% endif %}" data-driver-active-downtime-flow="{{ active_downtime_flow }}" data-driver-active-started-at="{{ active_downtime_started_at }}" data-driver-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-driver-shift-downtime-seconds="{{ shift_downtime_total_seconds }}" data-driver-downtime-calculated-at="{{ downtime_calculated_at }}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Простои за смену: {{ shift_downtime_total_label }}{% endif %}">
             <span class="driver-downtime-state-dot" data-driver-downtime-indicator aria-hidden="true">
                 <svg class="driver-downtime-state-icon driver-downtime-state-icon-play" viewBox="0 0 24 24" focusable="false"><path d="M7 4.8v14.4L19 12 7 4.8Z"></path></svg>
                 <svg class="driver-downtime-state-icon driver-downtime-state-icon-pause" viewBox="0 0 24 24" focusable="false"><path d="M6.5 5h4v14h-4V5Zm7 0h4v14h-4V5Z"></path></svg>
@@ -4216,8 +4432,9 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                 <form method="post" action="{% url 'driver_downtime_action' %}" data-driver-downtime-reason-id="{{ reason.id }}">
                     {% csrf_token %}
                     <input type="hidden" name="reason_id" value="{{ reason.id }}">
-                    <button class="driver-downtime-hold status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-downtime-flow="{{ reason.driver_workflow }}" data-driver-reason="{{ reason }}" data-driver-status-key="{{ reason.effective_color_group }}"{% if reason.driver_unavailable_message %} aria-disabled="true" data-driver-unavailable-message="{{ reason.driver_unavailable_message }}" aria-label="{{ reason.button_label }}. {{ reason.driver_unavailable_message }}"{% else %} aria-label="Начать простой: {{ reason.button_label }}"{% endif %}>
-                        {{ reason.button_label }}
+                    <button class="driver-downtime-hold status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}{% if reason.driver_is_used %} is-used{% endif %}{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-downtime-flow="{{ reason.driver_workflow }}" data-driver-reason="{{ reason }}" data-driver-reason-label="{{ reason.button_label }}" data-driver-reason-seconds="{{ reason.driver_total_seconds }}" data-driver-status-key="{{ reason.effective_color_group }}"{% if reason.driver_unavailable_message %} aria-disabled="true" data-driver-unavailable-message="{{ reason.driver_unavailable_message }}" aria-label="{{ reason.button_label }}. {{ reason.driver_unavailable_message }}"{% elif reason.driver_is_used %} aria-label="Начать простой: {{ reason.button_label }}. За смену: {{ reason.driver_total_label }}"{% else %} aria-label="Начать простой: {{ reason.button_label }}"{% endif %}>
+                        <span class="driver-downtime-reason-label" data-driver-reason-label>{{ reason.button_label }}</span>
+                        <span class="driver-downtime-reason-duration" data-driver-reason-duration{% if not reason.driver_is_used %} hidden{% endif %}>{{ reason.driver_total_label }}</span>
                     </button>
                 </form>
             {% empty %}
@@ -4241,19 +4458,23 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                 <h3>Б-{{ driver_shift_report_truck }} · {{ driver_shift_report_driver }}</h3>
             </div>
             <div class="driver-report-grid">
-                <section class="driver-report-section">
+                <section class="driver-report-section driver-report-section--scrollable">
                     <h4>Рейсы</h4>
+                    <div class="driver-report-section-scroll" data-driver-report-trip-scroll>
                     {% for row in driver_shift_report_trip_rows %}
                         <div class="driver-report-row" data-driver-report-trip data-excavator="{{ row.excavator }}" data-dump-point="{{ row.dump_point }}" data-count="{{ row.count }}"><span>{{ row.excavator }} {{ row.dump_point }}</span><strong>{{ row.count }}</strong></div>
                     {% empty %}<div class="driver-report-row"><span>Завершённых рейсов нет</span><strong>0</strong></div>{% endfor %}
                     <div class="driver-report-row"><span>Всего рейсов</span><strong>{{ shift_trip_count }}</strong></div>
+                    </div>
                 </section>
-                <section class="driver-report-section">
+                <section class="driver-report-section driver-report-section--scrollable">
                     <h4>Простои</h4>
+                    <div class="driver-report-section-scroll" data-driver-report-downtime-scroll>
                     {% for row in driver_shift_downtime_rows %}
                         <div class="driver-report-row" data-driver-report-downtime data-reason="{{ row.reason }}" data-duration="{{ row.duration }}"><span>{{ row.reason }}</span><strong>{{ row.duration }}</strong></div>
                     {% empty %}<div class="driver-report-row"><span>Простоев нет</span><strong>00:00:00</strong></div>{% endfor %}
                     <div class="driver-report-row"><span>Всего простоев</span><strong>{{ shift_downtime_report_total_label }}</strong></div>
+                    </div>
                 </section>
                 <section class="driver-report-section" data-driver-report-metrics>
                     <h4>Техника на конец смены</h4>
@@ -6530,6 +6751,7 @@ window.bindDriverMobileShell = function () {
     var downtimeTitle = shell.querySelector("[data-driver-active-title]");
     var downtimeReason = shell.querySelector("[data-driver-active-reason]");
     var downtimeClose = shell.querySelector("[data-driver-close-downtime]");
+    var downtimeReasonButtons = shell.querySelectorAll("[data-driver-downtime-reason-button]");
     var downtimeUrl = downtimePanel ? downtimePanel.dataset.driverDowntimeUrl : "";
     var downtimeCsrfInput = downtimePanel ? downtimePanel.querySelector("input[name='csrfmiddlewaretoken']") : null;
     var downtimeCsrfToken = downtimeCsrfInput ? downtimeCsrfInput.value : "";
@@ -6555,16 +6777,76 @@ window.bindDriverMobileShell = function () {
         }
     }
 
-    function startDriverDowntimeTimer(startedAt, fallbackElapsedSeconds) {
-        clearDriverDowntimeTimer();
-        if (!downtimeDuration) {
-            return;
+    function renderDriverReasonDuration(button, totalSeconds, isActive) {
+        if (!button) return;
+        var duration = button.querySelector("[data-driver-reason-duration]");
+        if (!duration) return;
+        var seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+        var isVisible = seconds > 0 || !!isActive;
+        duration.hidden = !isVisible;
+        button.classList.toggle("is-used", isVisible);
+        if (isVisible) {
+            duration.textContent = formatDriverDowntimeDuration(seconds);
         }
+        if (button.getAttribute("aria-disabled") !== "true") {
+            var reasonLabel = button.dataset.driverReasonLabel || button.dataset.driverReason || "Причина простоя";
+            var actionLabel = isActive ? "Активный простой" : "Начать простой";
+            button.setAttribute(
+                "aria-label",
+                actionLabel + ": " + reasonLabel + (isVisible ? ". За смену: " + formatDriverDowntimeDuration(seconds) : "")
+            );
+        }
+    }
+
+    function syncDriverReasonTotals(payload) {
+        payload = payload || {};
+        var reasonTotals = payload.reason_totals;
+        var activeReasonId = payload.active ? String(payload.reason_id || "") : "";
+        downtimeReasonButtons.forEach(function (button) {
+            var reasonId = String(button.dataset.driverDowntimeReasonId || "");
+            if (
+                reasonTotals
+                && typeof reasonTotals === "object"
+                && Object.prototype.hasOwnProperty.call(reasonTotals, reasonId)
+            ) {
+                button.dataset.driverReasonSeconds = String(
+                    Math.max(0, Math.floor(Number(reasonTotals[reasonId]) || 0))
+                );
+            }
+            renderDriverReasonDuration(
+                button,
+                button.dataset.driverReasonSeconds,
+                !!activeReasonId && reasonId === activeReasonId
+            );
+        });
+    }
+
+    function startDriverDowntimeTimer(payload) {
+        clearDriverDowntimeTimer();
+        payload = payload || {};
+        syncDriverReasonTotals(payload);
+        var startedAt = payload.started_at || "";
+        var fallbackElapsedSeconds = payload.elapsed_seconds || 0;
+        var activeReasonId = String(payload.reason_id || "");
         var startedAtMs = startedAt ? Date.parse(startedAt) : NaN;
         var fallbackStartedAtMs = Date.now() - (Math.max(0, Number(fallbackElapsedSeconds) || 0) * 1000);
         var startMs = Number.isNaN(startedAtMs) ? fallbackStartedAtMs : startedAtMs;
+        var syncedAtMs = Date.now();
         function tick() {
-            downtimeDuration.textContent = formatDriverDowntimeDuration((Date.now() - startMs) / 1000);
+            if (downtimeDuration) {
+                downtimeDuration.textContent = formatDriverDowntimeDuration((Date.now() - startMs) / 1000);
+            }
+            var liveSeconds = Math.max(0, Math.floor((Date.now() - syncedAtMs) / 1000));
+            downtimeReasonButtons.forEach(function (button) {
+                var reasonId = String(button.dataset.driverDowntimeReasonId || "");
+                var baseSeconds = Math.max(0, Math.floor(Number(button.dataset.driverReasonSeconds) || 0));
+                var reasonIsActive = !!activeReasonId && reasonId === activeReasonId;
+                renderDriverReasonDuration(
+                    button,
+                    baseSeconds + (reasonIsActive ? liveSeconds : 0),
+                    reasonIsActive
+                );
+            });
         }
         tick();
         window.driverDowntimeTimerId = window.setInterval(tick, 1000);
@@ -6612,14 +6894,17 @@ window.bindDriverMobileShell = function () {
             return false;
         }
         downtimeCard.dataset.driverActiveDowntimeId = payload.event_id;
+        downtimeCard.dataset.driverActiveReasonId = String(payload.reason_id || "");
         downtimeCard.dataset.driverActiveDowntimeFlow = payload.workflow || "";
         downtimeCard.dataset.driverActiveStartedAt = payload.started_at || "";
         downtimeCard.dataset.driverActiveElapsedSeconds = String(payload.elapsed_seconds || 0);
+        downtimeCard.dataset.driverShiftDowntimeSeconds = String(payload.shift_total_seconds || 0);
+        downtimeCard.dataset.driverDowntimeCalculatedAt = payload.calculated_at || "";
         downtimeCard.classList.add("is-active");
         setDriverDowntimeStatusClass(payload.status_key || "red");
         if (downtimeTitle) downtimeTitle.textContent = "Активный простой";
         if (downtimeReason) downtimeReason.textContent = payload.reason || "";
-        startDriverDowntimeTimer(payload.started_at, payload.elapsed_seconds);
+        startDriverDowntimeTimer(payload);
         if (downtimeClose) {
             downtimeClose.disabled = false;
             downtimeClose.classList.remove("is-disabled");
@@ -6636,6 +6921,7 @@ window.bindDriverMobileShell = function () {
         if (downtimeDuration) downtimeDuration.textContent = (payload && payload.shift_total_label) || formatDriverDowntimeDuration(shiftTotalSeconds);
         if (downtimeCard) {
             downtimeCard.dataset.driverActiveDowntimeId = "";
+            downtimeCard.dataset.driverActiveReasonId = "";
             downtimeCard.dataset.driverActiveDowntimeFlow = "";
             downtimeCard.dataset.driverActiveStartedAt = "";
             downtimeCard.dataset.driverActiveElapsedSeconds = String((payload && payload.elapsed_seconds) || 0);
@@ -6643,12 +6929,13 @@ window.bindDriverMobileShell = function () {
             downtimeCard.classList.remove("is-active");
             setDriverDowntimeStatusClass("yellow");
         }
+        syncDriverReasonTotals(Object.assign({}, payload || {}, { active: false }));
         if (downtimeClose) {
             downtimeClose.disabled = true;
             downtimeClose.classList.add("is-disabled");
             downtimeClose.setAttribute("aria-disabled", "true");
         }
-        shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (button) {
+        downtimeReasonButtons.forEach(function (button) {
             button.classList.remove("is-selected");
         });
         applyDriverWaitingMode({ workflow: "" });
@@ -6714,10 +7001,10 @@ window.bindDriverMobileShell = function () {
         downtimeRefresh.addEventListener("click", function () { window.location.reload(); });
     }
 
-    shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (button) {
+    downtimeReasonButtons.forEach(function (button) {
         registerDriverDowntimeAction(button, function () {
             if (button.disabled) return;
-            shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (item) {
+            downtimeReasonButtons.forEach(function (item) {
                 item.classList.remove("is-selected");
             });
             button.classList.add("is-selected");
@@ -6777,9 +7064,18 @@ window.bindDriverMobileShell = function () {
     }
 
     if (downtimeCard && downtimeCard.dataset.driverActiveDowntimeId && downtimeCard.dataset.driverActiveStartedAt) {
-        startDriverDowntimeTimer(downtimeCard.dataset.driverActiveStartedAt, downtimeCard.dataset.driverActiveElapsedSeconds);
+        startDriverDowntimeTimer({
+            active: true,
+            event_id: downtimeCard.dataset.driverActiveDowntimeId,
+            reason_id: downtimeCard.dataset.driverActiveReasonId,
+            started_at: downtimeCard.dataset.driverActiveStartedAt,
+            elapsed_seconds: downtimeCard.dataset.driverActiveElapsedSeconds,
+            shift_total_seconds: downtimeCard.dataset.driverShiftDowntimeSeconds,
+            calculated_at: downtimeCard.dataset.driverDowntimeCalculatedAt
+        });
     } else if (downtimeDuration) {
         downtimeDuration.textContent = formatDriverDowntimeDuration(downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds);
+        syncDriverReasonTotals({ active: false });
         clearDriverDowntimeTimer();
     }
 
