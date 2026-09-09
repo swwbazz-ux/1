@@ -32,7 +32,7 @@ from references.models import (
     TruckCapacityRule,
 )
 from reports.models import PilotFeedback, ReportTemplate, ReportType
-from shifts.models import AchievementPrize, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftClientAction, ShiftPlan
+from shifts.models import AchievementPrize, DriverShiftReadingConfirmation, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftClientAction, ShiftPlan
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
 
 from .forms import AdminEmployeeEditForm
@@ -111,6 +111,20 @@ class AccessLoginTests(TestCase):
         session['employee_access_id'] = self.access.id
         session.save()
         return truck
+
+    def create_registered_driver_shift_with_capacity(self, *, garage_number='10-CLOSE', capacity='2000'):
+        truck_type, _ = EquipmentType.objects.get_or_create(name='Самосвал')
+        model = EquipmentModel.objects.create(
+            equipment_type=truck_type,
+            name=f'БелАЗ закрытие {garage_number}',
+            fuel_capacity_limit_l=capacity,
+        )
+        truck = Equipment.objects.create(
+            equipment_type=truck_type,
+            model=model,
+            garage_number=garage_number,
+        )
+        return self.create_registered_driver_shift(truck)
 
     def create_driver_trip(self, truck, *, status=TripStatus.LOADED_WAITING_UNLOAD):
         excavator_type, _ = EquipmentType.objects.get_or_create(name='Экскаватор')
@@ -268,7 +282,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v209')
+        self.assertContains(response, 'driver-mobile-shell-v210')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertContains(response, 'playDriverSound("truck_assigned")')
@@ -488,7 +502,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v209', script)
+        self.assertIn('driver-mobile-shell-v210', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -2435,6 +2449,210 @@ class AccessLoginTests(TestCase):
             ShiftClientAction.objects.filter(client_action_id='native-close-wrong-shift').exists()
         )
 
+    def test_suspicious_driver_readings_return_confirmation_without_closing(self):
+        truck = self.create_registered_driver_shift_with_capacity(garage_number='10-WARN')
+        shift = EmployeeShift.objects.get(equipment=truck, closed_at__isnull=True)
+
+        response = self.client.post(
+            '/driver/shift/close/',
+            {
+                'shift_id': str(shift.pk),
+                'end_fuel': '2100',
+                'end_mileage': '12950',
+                'end_engine_hours': '1367',
+                'client_action_id': 'native-close-warning',
+            },
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 422)
+        payload = response.json()
+        self.assertTrue(payload['confirmation_required'])
+        self.assertTrue(payload['confirmation_token'])
+        self.assertEqual(
+            [warning['code'] for warning in payload['warnings']],
+            ['fuel_above_capacity', 'mileage_delta_high', 'engine_hours_delta_high'],
+        )
+        self.assertIn('12 560 км', payload['warnings'][1]['message'])
+        self.assertIn('12 950 км', payload['warnings'][1]['message'])
+        self.assertIn('390 км', payload['warnings'][1]['message'])
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+        self.assertIsNone(shift.end_fuel)
+        self.assertFalse(ShiftClientAction.objects.filter(client_action_id='native-close-warning').exists())
+        self.assertFalse(DriverShiftReadingConfirmation.objects.exists())
+
+    def test_confirmed_suspicious_driver_readings_close_exactly_once_and_create_audit(self):
+        truck = self.create_registered_driver_shift_with_capacity(garage_number='10-CONFIRM')
+        shift = EmployeeShift.objects.get(equipment=truck, closed_at__isnull=True)
+        data = {
+            'shift_id': str(shift.pk),
+            'end_fuel': '2100',
+            'end_mileage': '12950',
+            'end_engine_hours': '1367',
+            'client_action_id': 'native-close-confirmed',
+        }
+        first = self.client.post(
+            '/driver/shift/close/',
+            data,
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
+        confirmed_data = dict(data, reading_confirmation_token=first.json()['confirmation_token'])
+
+        confirmed = self.client.post(
+            '/driver/shift/close/',
+            confirmed_data,
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
+        repeated = self.client.post(
+            '/driver/shift/close/',
+            confirmed_data,
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertEqual(confirmed.json()['status'], 'applied')
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.json()['status'], 'already_applied')
+        shift.refresh_from_db()
+        self.assertIsNotNone(shift.closed_at)
+        self.assertEqual(shift.end_fuel, Decimal('2100'))
+        self.assertEqual(shift.end_mileage, Decimal('12950'))
+        self.assertEqual(shift.end_engine_hours, Decimal('1367'))
+        audit = DriverShiftReadingConfirmation.objects.get(shift=shift)
+        self.assertEqual(audit.employee, self.employee)
+        self.assertEqual(audit.client_action_id, 'native-close-confirmed')
+        self.assertEqual(len(audit.warnings), 3)
+        self.assertEqual(ShiftClientAction.objects.filter(client_action_id='native-close-confirmed').count(), 1)
+
+    def test_changed_confirmation_reading_is_rejected_and_new_check_is_required(self):
+        truck = self.create_registered_driver_shift_with_capacity(garage_number='10-EDIT')
+        shift = EmployeeShift.objects.get(equipment=truck, closed_at__isnull=True)
+        data = {
+            'shift_id': str(shift.pk),
+            'end_fuel': '900',
+            'end_mileage': '12950',
+            'end_engine_hours': '1360',
+            'client_action_id': 'native-close-edited',
+        }
+        first = self.client.post(
+            '/driver/shift/close/',
+            data,
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
+        changed = dict(
+            data,
+            end_mileage='12951',
+            reading_confirmation_token=first.json()['confirmation_token'],
+        )
+
+        response = self.client.post(
+            '/driver/shift/close/',
+            changed,
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(response.json()['confirmation_required'])
+        self.assertIn('изменились', response.json()['error'])
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+        self.assertFalse(ShiftClientAction.objects.filter(client_action_id='native-close-edited').exists())
+
+    def test_missing_start_reading_requires_driver_confirmation(self):
+        truck = self.create_registered_driver_shift_with_capacity(garage_number='10-MISSING')
+        shift = EmployeeShift.objects.get(equipment=truck, closed_at__isnull=True)
+        shift.start_mileage = None
+        shift.save(update_fields=['start_mileage'])
+
+        response = self.client.post(
+            '/driver/shift/close/',
+            {
+                'shift_id': str(shift.pk),
+                'end_fuel': '900',
+                'end_mileage': '12950',
+                'end_engine_hours': '1360',
+                'client_action_id': 'native-close-missing-start',
+            },
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            [warning['code'] for warning in response.json()['warnings']],
+            ['mileage_start_missing'],
+        )
+        self.assertIn('сравнить разницу невозможно', response.json()['warnings'][0]['message'])
+
+    def test_driver_close_keeps_blank_negative_nonnumeric_and_fractional_values_hard(self):
+        truck = self.create_registered_driver_shift_with_capacity(garage_number='10-HARD')
+        shift = EmployeeShift.objects.get(equipment=truck, closed_at__isnull=True)
+        cases = (
+            ('blank', '', 'end_fuel'),
+            ('negative', '-1', 'end_fuel'),
+            ('nonnumeric', 'abc', 'end_fuel'),
+            ('fractional', '10.5', 'end_fuel'),
+        )
+        for suffix, fuel, field_name in cases:
+            with self.subTest(suffix=suffix):
+                response = self.client.post(
+                    '/driver/shift/close/',
+                    {
+                        'shift_id': str(shift.pk),
+                        'end_fuel': fuel,
+                        'end_mileage': '12600',
+                        'end_engine_hours': '1360',
+                        'client_action_id': f'native-close-hard-{suffix}',
+                    },
+                    HTTP_ACCEPT='application/json',
+                    HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                    HTTP_HOST='localhost',
+                )
+                self.assertEqual(response.status_code, 422)
+                self.assertFalse(response.json()['confirmation_required'])
+                self.assertIn(field_name, response.json()['field_errors'])
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+
+    def test_non_json_suspicious_close_renders_confirmation_dialog_with_values(self):
+        truck = self.create_registered_driver_shift_with_capacity(garage_number='10-HTML')
+        shift = EmployeeShift.objects.get(equipment=truck, closed_at__isnull=True)
+
+        response = self.client.post(
+            '/driver/shift/close/',
+            {
+                'shift_id': str(shift.pk),
+                'end_fuel': '2100',
+                'end_mileage': '12950',
+                'end_engine_hours': '1367',
+                'client_action_id': 'html-close-warning',
+            },
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-driver-reading-confirmation')
+        self.assertContains(response, 'Вернуться и проверить')
+        self.assertContains(response, 'Всё верно — закрыть смену')
+        self.assertContains(response, '12 950 км')
+        self.assertContains(response, 'value="2100')
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+
     def test_driver_shift_rejects_fractional_readings(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10-1')
@@ -3034,7 +3252,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v209')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v210')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

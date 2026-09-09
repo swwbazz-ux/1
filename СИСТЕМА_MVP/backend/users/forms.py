@@ -1154,6 +1154,7 @@ class DriverOpenShiftForm(forms.ModelForm):
 
 class DriverCloseShiftForm(forms.ModelForm):
     client_action_id = forms.CharField(widget=forms.HiddenInput, required=False)
+    reading_confirmation_token = forms.CharField(widget=forms.HiddenInput, required=False)
 
     class Meta:
         model = EmployeeShift

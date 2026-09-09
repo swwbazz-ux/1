@@ -558,6 +558,38 @@ class ShiftReadingCorrection(models.Model):
         ]
 
 
+class DriverShiftReadingConfirmation(models.Model):
+    shift = models.OneToOneField(
+        EmployeeShift,
+        verbose_name='Смена',
+        on_delete=models.PROTECT,
+        related_name='driver_reading_confirmation',
+    )
+    employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Водитель',
+        on_delete=models.PROTECT,
+        related_name='driver_shift_reading_confirmations',
+    )
+    client_action_id = models.CharField('ID действия клиента', max_length=128, unique=True)
+    start_fuel = models.DecimalField('Топливо на начало', max_digits=10, decimal_places=2, null=True, blank=True)
+    start_mileage = models.DecimalField('Одометр на начало', max_digits=10, decimal_places=2, null=True, blank=True)
+    start_engine_hours = models.DecimalField('Моточасы на начало', max_digits=10, decimal_places=2, null=True, blank=True)
+    end_fuel = models.DecimalField('Топливо на конец', max_digits=10, decimal_places=2)
+    end_mileage = models.DecimalField('Одометр на конец', max_digits=10, decimal_places=2)
+    end_engine_hours = models.DecimalField('Моточасы на конец', max_digits=10, decimal_places=2)
+    warnings = models.JSONField('Подтверждённые предупреждения', default=list)
+    confirmed_at = models.DateTimeField('Подтверждено водителем', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Подтверждение аномальных показаний водителем'
+        verbose_name_plural = 'Подтверждения аномальных показаний водителем'
+        ordering = ['-confirmed_at']
+
+    def __str__(self):
+        return f'Аномальные показания подтверждены водителем: смена {self.shift_id}'
+
+
 class AchievementPrize(models.Model):
     title = models.CharField('Название', max_length=128, default='План выполнен')
     image = models.ImageField('Призовая картинка', upload_to='achievement_prizes/')

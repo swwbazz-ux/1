@@ -2,7 +2,9 @@ from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core import signing
 from django.db import IntegrityError, OperationalError, connection, transaction
 from django.db.models import Count, F, Q, Sum
 from django.utils import timezone
@@ -17,6 +19,7 @@ from trips.models import Trip, TripStatus
 
 from .equipment_plan_groups import equipment_garage_number_int
 from .models import (
+    DriverShiftReadingConfirmation,
     EmployeeShift,
     EquipmentPlanGroup,
     EquipmentShiftPlan,
@@ -35,6 +38,15 @@ DRIVER_SHIFT_READING_FIELDS = (
     ('start_mileage', 'end_mileage', ShiftReadingCorrection.Metric.MILEAGE),
     ('start_engine_hours', 'end_engine_hours', ShiftReadingCorrection.Metric.ENGINE_HOURS),
 )
+
+DRIVER_SHIFT_CLOSE_CONFIRMATION_SALT = 'shifts.driver-close-readings.v1'
+
+
+class DriverShiftCloseConfirmationRequired(Exception):
+    def __init__(self, *, warnings, confirmation_token):
+        super().__init__('Подтвердите подозрительные показания.')
+        self.warnings = warnings
+        self.confirmation_token = confirmation_token
 
 
 def recent_shift_reading_corrections(*, work_date=None, limit=None):
@@ -128,45 +140,185 @@ def validate_driver_close_readings(shift, *, end_fuel, end_mileage, end_engine_h
         ('end_mileage', end_mileage),
         ('end_engine_hours', end_engine_hours),
     ):
-        if not shift_reading_is_whole(value):
+        if value is None:
+            errors[field_name] = 'Укажите показание на конец смены.'
+        elif not shift_reading_is_whole(value):
             errors[field_name] = 'Укажите целое число без точки и запятой.'
-    if 'end_fuel' not in errors:
-        try:
-            validate_driver_fuel_reading(shift.equipment, end_fuel)
-        except ValidationError as error:
-            errors['end_fuel'] = error.messages[0]
-    start_mileage = (
-        shift.start_mileage.to_integral_value(rounding=ROUND_HALF_UP)
-        if shift.start_mileage is not None
-        else None
-    )
-    start_engine_hours = (
-        shift.start_engine_hours.to_integral_value(rounding=ROUND_HALF_UP)
-        if shift.start_engine_hours is not None
-        else None
-    )
-    if shift.start_mileage is None:
-        errors['end_mileage'] = 'В открытой смене отсутствует начальное показание одометра. Обратитесь к диспетчеру.'
-    elif end_mileage is None:
-        errors['end_mileage'] = 'Укажите одометр на конец смены.'
-    elif 'end_mileage' in errors:
-        pass
-    elif end_mileage < start_mileage:
-        errors['end_mileage'] = f'Одометр не может быть меньше начального показания {start_mileage:g} км.'
-    elif end_mileage - start_mileage > Decimal('250'):
-        errors['end_mileage'] = 'Пробег за смену не может превышать 250 км. Проверьте показания.'
-    if shift.start_engine_hours is None:
-        errors['end_engine_hours'] = 'В открытой смене отсутствует начальное показание моточасов. Обратитесь к диспетчеру.'
-    elif end_engine_hours is None:
-        errors['end_engine_hours'] = 'Укажите моточасы на конец смены.'
-    elif 'end_engine_hours' in errors:
-        pass
-    elif end_engine_hours < start_engine_hours:
-        errors['end_engine_hours'] = f'Моточасы не могут быть меньше начального показания {start_engine_hours:g} м/ч.'
-    elif end_engine_hours - start_engine_hours > Decimal('12'):
-        errors['end_engine_hours'] = 'Моточасы за смену не могут увеличиться более чем на 12. Проверьте показания.'
+    for field_name, value in (
+        ('end_fuel', end_fuel),
+        ('end_mileage', end_mileage),
+        ('end_engine_hours', end_engine_hours),
+    ):
+        if field_name not in errors and value < 0:
+            errors[field_name] = 'Показание не может быть отрицательным.'
+    fuel_limit = getattr(getattr(shift.equipment, 'model', None), 'fuel_capacity_limit_l', None)
+    if 'end_fuel' not in errors and fuel_limit is None:
+        errors['end_fuel'] = 'Для модели этого самосвала не настроена вместимость топливного бака.'
     if errors:
         raise ValidationError(errors)
+
+
+def _driver_reading_token_value(value):
+    if value is None:
+        return None
+    return format(Decimal(value), 'f')
+
+
+def _driver_reading_display(value):
+    if value is None:
+        return 'не указано'
+    normalized = Decimal(value)
+    if normalized == normalized.to_integral_value():
+        return f'{int(normalized):,}'.replace(',', ' ')
+    return format(normalized.normalize(), 'f')
+
+
+def driver_close_reading_warnings(shift, *, end_fuel, end_mileage, end_engine_hours):
+    """Return business warnings only; malformed readings stay ValidationError."""
+    validate_driver_close_readings(
+        shift,
+        end_fuel=end_fuel,
+        end_mileage=end_mileage,
+        end_engine_hours=end_engine_hours,
+    )
+    warnings = []
+    fuel_limit = Decimal(shift.equipment.model.fuel_capacity_limit_l)
+    if end_fuel > fuel_limit:
+        warnings.append({
+            'code': 'fuel_above_capacity',
+            'field': 'end_fuel',
+            'title': 'Топливо выше вместимости бака',
+            'message': (
+                f'Вместимость бака: {_driver_reading_display(fuel_limit)} л. '
+                f'Введено: {_driver_reading_display(end_fuel)} л. '
+                f'Превышение: {_driver_reading_display(end_fuel - fuel_limit)} л.'
+            ),
+        })
+
+    if shift.start_mileage is None:
+        warnings.append({
+            'code': 'mileage_start_missing',
+            'field': 'end_mileage',
+            'title': 'Нет начального показания одометра',
+            'message': (
+                'В смене отсутствует пробег на начало. '
+                f'Введено на конец: {_driver_reading_display(end_mileage)} км; сравнить разницу невозможно.'
+            ),
+        })
+    else:
+        start_mileage = Decimal(shift.start_mileage)
+        mileage_delta = end_mileage - start_mileage
+        if mileage_delta < 0:
+            warnings.append({
+                'code': 'mileage_decreased',
+                'field': 'end_mileage',
+                'title': 'Одометр меньше начального показания',
+                'message': (
+                    f'Пробег на начало: {_driver_reading_display(start_mileage)} км. '
+                    f'Введено: {_driver_reading_display(end_mileage)} км. '
+                    f'Разница: {_driver_reading_display(mileage_delta)} км.'
+                ),
+            })
+        elif mileage_delta > Decimal('250'):
+            warnings.append({
+                'code': 'mileage_delta_high',
+                'field': 'end_mileage',
+                'title': 'Пробег за смену больше 250 км',
+                'message': (
+                    f'Пробег на начало: {_driver_reading_display(start_mileage)} км. '
+                    f'Введено: {_driver_reading_display(end_mileage)} км. '
+                    f'Разница: {_driver_reading_display(mileage_delta)} км.'
+                ),
+            })
+
+    if shift.start_engine_hours is None:
+        warnings.append({
+            'code': 'engine_hours_start_missing',
+            'field': 'end_engine_hours',
+            'title': 'Нет начального показания моточасов',
+            'message': (
+                'В смене отсутствуют моточасы на начало. '
+                f'Введено на конец: {_driver_reading_display(end_engine_hours)} м/ч; сравнить разницу невозможно.'
+            ),
+        })
+    else:
+        start_engine_hours = Decimal(shift.start_engine_hours)
+        engine_hours_delta = end_engine_hours - start_engine_hours
+        if engine_hours_delta < 0:
+            warnings.append({
+                'code': 'engine_hours_decreased',
+                'field': 'end_engine_hours',
+                'title': 'Моточасы меньше начального показания',
+                'message': (
+                    f'Моточасы на начало: {_driver_reading_display(start_engine_hours)} м/ч. '
+                    f'Введено: {_driver_reading_display(end_engine_hours)} м/ч. '
+                    f'Разница: {_driver_reading_display(engine_hours_delta)} м/ч.'
+                ),
+            })
+        elif engine_hours_delta > Decimal('12'):
+            warnings.append({
+                'code': 'engine_hours_delta_high',
+                'field': 'end_engine_hours',
+                'title': 'Моточасы за смену выросли больше чем на 12',
+                'message': (
+                    f'Моточасы на начало: {_driver_reading_display(start_engine_hours)} м/ч. '
+                    f'Введено: {_driver_reading_display(end_engine_hours)} м/ч. '
+                    f'Разница: {_driver_reading_display(engine_hours_delta)} м/ч.'
+                ),
+            })
+    return warnings
+
+
+def _driver_close_confirmation_payload(shift, employee, readings, client_action_id, warnings):
+    fuel_limit = getattr(getattr(shift.equipment, 'model', None), 'fuel_capacity_limit_l', None)
+    return {
+        'version': 1,
+        'employee_id': employee.pk,
+        'shift_id': shift.pk,
+        'client_action_id': client_action_id,
+        'readings': {
+            field_name: _driver_reading_token_value(value)
+            for field_name, value in readings.items()
+        },
+        'start_readings': {
+            'start_fuel': _driver_reading_token_value(shift.start_fuel),
+            'start_mileage': _driver_reading_token_value(shift.start_mileage),
+            'start_engine_hours': _driver_reading_token_value(shift.start_engine_hours),
+        },
+        'fuel_capacity_limit_l': _driver_reading_token_value(fuel_limit),
+        'warning_codes': [warning['code'] for warning in warnings],
+    }
+
+
+def issue_driver_close_confirmation(shift, employee, readings, client_action_id, warnings):
+    return signing.dumps(
+        _driver_close_confirmation_payload(shift, employee, readings, client_action_id, warnings),
+        salt=DRIVER_SHIFT_CLOSE_CONFIRMATION_SALT,
+        compress=True,
+    )
+
+
+def validate_driver_close_confirmation(token, shift, employee, readings, client_action_id, warnings):
+    max_age = getattr(settings, 'DRIVER_SHIFT_CLOSE_CONFIRMATION_MAX_AGE_SECONDS', 30 * 60)
+    try:
+        signed_payload = signing.loads(
+            token,
+            salt=DRIVER_SHIFT_CLOSE_CONFIRMATION_SALT,
+            max_age=max_age,
+        )
+    except signing.SignatureExpired as error:
+        raise ValidationError('Подтверждение истекло. Проверьте показания ещё раз.') from error
+    except signing.BadSignature as error:
+        raise ValidationError('Подтверждение повреждено или не принадлежит этой смене.') from error
+    expected_payload = _driver_close_confirmation_payload(
+        shift,
+        employee,
+        readings,
+        client_action_id,
+        warnings,
+    )
+    if signed_payload != expected_payload:
+        raise ValidationError('Показания изменились. Получите новое подтверждение.')
 
 
 def _existing_driver_shift_action(action_type, client_action_id):
@@ -404,24 +556,57 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id):
         ) from error
 
 
-def close_driver_shift(*, shift, employee, readings, client_action_id):
-    existing_shift = _existing_driver_shift_action('driver_shift_closed', client_action_id)
-    if existing_shift:
-        return existing_shift, False
+def close_driver_shift(*, shift, employee, readings, client_action_id, confirmation_token=''):
+    existing_action = ShiftClientAction.objects.select_related('shift').filter(
+        action_type='driver_shift_closed',
+        client_action_id=client_action_id,
+    ).first()
+    if existing_action:
+        if existing_action.employee_id != employee.pk:
+            raise ValidationError('ID закрытия смены уже принадлежит другому водителю.')
+        return existing_action.shift, False
     from references.models import Equipment
     from trips.models import OPEN_TRIP_STATUSES
     from users.models import Employee
     with transaction.atomic():
         lock_idempotency_key('driver_shift_closed', client_action_id)
-        existing_shift = _existing_driver_shift_action('driver_shift_closed', client_action_id)
-        if existing_shift:
-            return existing_shift, False
+        existing_action = ShiftClientAction.objects.select_related('shift').filter(
+            action_type='driver_shift_closed',
+            client_action_id=client_action_id,
+        ).first()
+        if existing_action:
+            if existing_action.employee_id != employee.pk:
+                raise ValidationError('ID закрытия смены уже принадлежит другому водителю.')
+            return existing_action.shift, False
         Employee.objects.select_for_update().get(pk=employee.pk)
         locked_shift = EmployeeShift.objects.select_for_update(of=('self',)).select_related('equipment__model').get(pk=shift.pk)
         Equipment.objects.select_for_update().get(pk=locked_shift.equipment_id)
+        if locked_shift.employee_id != employee.pk:
+            raise ValidationError('Смена не принадлежит этому водителю.')
         if locked_shift.closed_at:
             raise ValidationError('Смена уже закрыта.')
         validate_driver_close_readings(locked_shift, **readings)
+        warnings = driver_close_reading_warnings(locked_shift, **readings)
+        if confirmation_token:
+            validate_driver_close_confirmation(
+                confirmation_token,
+                locked_shift,
+                employee,
+                readings,
+                client_action_id,
+                warnings,
+            )
+        elif warnings:
+            raise DriverShiftCloseConfirmationRequired(
+                warnings=warnings,
+                confirmation_token=issue_driver_close_confirmation(
+                    locked_shift,
+                    employee,
+                    readings,
+                    client_action_id,
+                    warnings,
+                ),
+            )
         for field, value in readings.items():
             setattr(locked_shift, field, value)
         locked_shift.closed_at = timezone.now()
@@ -443,11 +628,25 @@ def close_driver_shift(*, shift, employee, readings, client_action_id):
         )
         response = {
             'ok': True, 'shift_id': locked_shift.pk, 'truck_id': locked_shift.equipment_id, 'driver_id': employee.pk,
+            'anomalous_readings_confirmed': bool(warnings),
         }
         ShiftClientAction.objects.create(
             action_type='driver_shift_closed', client_action_id=client_action_id,
             employee=employee, shift=locked_shift, response_payload=response,
         )
+        if warnings:
+            DriverShiftReadingConfirmation.objects.create(
+                shift=locked_shift,
+                employee=employee,
+                client_action_id=client_action_id,
+                start_fuel=locked_shift.start_fuel,
+                start_mileage=locked_shift.start_mileage,
+                start_engine_hours=locked_shift.start_engine_hours,
+                end_fuel=readings['end_fuel'],
+                end_mileage=readings['end_mileage'],
+                end_engine_hours=readings['end_engine_hours'],
+                warnings=warnings,
+            )
         from core.models import bump_operational_state
         bump_operational_state(
             'DriverShift:closed', event_type='driver_shift_closed', object_type='EmployeeShift', object_id=locked_shift.pk,

@@ -4,6 +4,7 @@ from .forms import EquipmentPlanGroupForm
 from .models import (
     AchievementPrize,
     AchievementUnlock,
+    DriverShiftReadingConfirmation,
     EmployeeShift,
     EquipmentPlanGroup,
     EquipmentShiftPlan,
@@ -54,6 +55,35 @@ class ShiftReadingCorrectionAdmin(admin.ModelAdmin):
     search_fields = ('equipment__garage_number', 'employee__full_name')
     list_filter = ('metric', 'equipment', 'corrected_at')
     readonly_fields = ('corrected_at',)
+
+
+@admin.register(DriverShiftReadingConfirmation)
+class DriverShiftReadingConfirmationAdmin(admin.ModelAdmin):
+    list_display = ('confirmed_at', 'shift', 'employee', 'client_action_id')
+    search_fields = ('client_action_id', 'employee__full_name', 'shift__equipment__garage_number')
+    list_filter = ('confirmed_at',)
+    readonly_fields = (
+        'shift',
+        'employee',
+        'client_action_id',
+        'start_fuel',
+        'start_mileage',
+        'start_engine_hours',
+        'end_fuel',
+        'end_mileage',
+        'end_engine_hours',
+        'warnings',
+        'confirmed_at',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(AchievementPrize)

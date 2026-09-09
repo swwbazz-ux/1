@@ -576,9 +576,17 @@ test("native heartbeat follows the active-shift lifecycle and reports the exact 
   assert.match(connectionPlugin, /PendingDriverShiftClose\.enqueue/);
   assert.match(pendingShiftClose, /pending_driver_shift_close_v1/);
   assert.match(pendingShiftClose, /\.commit\(\)/);
+  assert.match(connectionPlugin, /call\.getString\("confirmationToken", ""\)/);
+  assert.match(pendingShiftClose, /confirmation_required/);
+  assert.match(pendingShiftClose, /has_active_shift/);
+  assert.match(pendingShiftClose, /field_errors/);
+  assert.match(pendingShiftClose, /warnings/);
+  assert.match(pendingShiftClose, /markAttention\(Context context, String expectedClientActionId, String responseBody\)/);
   assert.match(service, /runHeartbeat\(\)[\s\S]*?flushPendingDriverShiftClose\(\)[\s\S]*?requestHeartbeat\(\)/);
   assert.match(service, /onTaskRemoved\(Intent rootIntent\)[\s\S]*?PendingDriverShiftClose\.hasPending\(this\)[\s\S]*?scheduleHeartbeat\(0L\)/);
-  assert.match(service, /requestDriverShiftClose[\s\S]*?X-CSRFToken[\s\S]*?client_action_id[\s\S]*?shift_id/);
+  assert.match(service, /requestDriverShiftClose[\s\S]*?X-CSRFToken[\s\S]*?client_action_id[\s\S]*?shift_id[\s\S]*?reading_confirmation_token/);
+  assert.match(service, /Any HTTP response proves that transport worked[\s\S]*?PendingDriverShiftClose\.markAttention[\s\S]*?FlushResult\.ATTENTION/);
+  assert.doesNotMatch(service, /Shift close HTTP/);
   assert.match(notifications, /PendingDriverShiftClose\.hasPending\(context\)[\s\S]*?Открыть приложение/);
   assert.match(notifications, /Остановить связь/);
   assert.doesNotMatch(notifications, /Тест сигнала/);

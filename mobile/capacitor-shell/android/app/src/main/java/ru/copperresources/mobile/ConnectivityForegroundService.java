@@ -392,7 +392,8 @@ public class ConnectivityForegroundService extends Service {
         if (result.statusCode >= 200 && result.statusCode < 300) {
             JSONObject response = new JSONObject(result.body);
             if (!response.optBoolean("ok", false)) {
-                throw new IllegalStateException("Shift close response was not acknowledged");
+                PendingDriverShiftClose.markAttention(this, pending.clientActionId, result.body);
+                return FlushResult.ATTENTION;
             }
             if (!PendingDriverShiftClose.clear(this, pending.clientActionId)) {
                 throw new IllegalStateException("Shift close acknowledgement was not saved");
@@ -400,16 +401,10 @@ public class ConnectivityForegroundService extends Service {
             publishStatus("Закрытие смены отправлено");
             return FlushResult.APPLIED;
         }
-        if (result.statusCode >= 400 && result.statusCode < 500
-                && result.statusCode != 401 && result.statusCode != 403) {
-            String message = "Проверьте показания на конец смены.";
-            try {
-                message = new JSONObject(result.body).optString("error", message);
-            } catch (Exception ignored) {}
-            PendingDriverShiftClose.markAttention(this, pending.clientActionId, message);
-            return FlushResult.ATTENTION;
-        }
-        throw new IllegalStateException("Shift close HTTP " + result.statusCode);
+        // Any HTTP response proves that transport worked. Never present a server
+        // rejection (including 5xx/redirects) as an offline close or retry it forever.
+        PendingDriverShiftClose.markAttention(this, pending.clientActionId, result.body);
+        return FlushResult.ATTENTION;
     }
 
     private HeartbeatResult requestDriverShiftClose(PendingDriverShiftClose pending) throws Exception {
@@ -451,7 +446,8 @@ public class ConnectivityForegroundService extends Service {
                 + "&" + formField("shift_id", pending.shiftId)
                 + "&" + formField("end_fuel", pending.endFuel)
                 + "&" + formField("end_mileage", pending.endMileage)
-                + "&" + formField("end_engine_hours", pending.endEngineHours);
+                + "&" + formField("end_engine_hours", pending.endEngineHours)
+                + "&" + formField("reading_confirmation_token", pending.confirmationToken);
             byte[] body = encodedBody.getBytes(StandardCharsets.UTF_8);
             connection.setFixedLengthStreamingMode(body.length);
             try (OutputStream output = connection.getOutputStream()) {

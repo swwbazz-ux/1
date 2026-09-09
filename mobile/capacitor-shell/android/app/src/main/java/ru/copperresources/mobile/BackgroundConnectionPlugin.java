@@ -51,7 +51,8 @@ public class BackgroundConnectionPlugin extends Plugin {
             clientActionId,
             call.getString("endFuel", ""),
             call.getString("endMileage", ""),
-            call.getString("endEngineHours", "")
+            call.getString("endEngineHours", ""),
+            call.getString("confirmationToken", "")
         );
         if (!stored) {
             call.reject("Driver shift close was not saved");

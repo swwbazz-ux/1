@@ -3207,6 +3207,125 @@ body.driver-mobile-screen .app-confirm-content {
     align-self: center;
 }
 
+body.driver-mobile-screen .driver-reading-confirmation {
+    z-index: 1240;
+    background: rgba(0, 7, 10, .82);
+    backdrop-filter: blur(8px);
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__dialog {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    border-color: rgba(255, 196, 61, .42);
+    color: var(--driver-ink);
+    background: linear-gradient(155deg, rgba(20, 32, 37, .99), rgba(3, 13, 17, .99));
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .7), 0 0 28px rgba(255, 196, 61, .12);
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__dialog .app-confirm-icon {
+    color: #201400;
+    background: #ffc43d;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__content {
+    max-height: min(58dvh, 480px);
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__content p {
+    color: #c6d2d4;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__warnings {
+    max-height: min(42dvh, 350px);
+    margin: 12px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    list-style: none;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__warnings li {
+    min-width: 0;
+    padding: 10px 11px;
+    display: grid;
+    gap: 4px;
+    border: 1px solid rgba(255, 196, 61, .28);
+    border-radius: 10px;
+    background: rgba(255, 196, 61, .07);
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__warnings strong {
+    color: #ffd66f;
+    font-size: clamp(13px, 3.5vw, 15px);
+    line-height: 1.15;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__warnings span {
+    color: #f1f5f4;
+    font-size: clamp(12px, 3.25vw, 14px);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 9px;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__actions button {
+    width: 100%;
+    min-height: 50px;
+    margin: 0;
+    border: 1px solid rgba(137, 169, 180, .38);
+    border-radius: 10px;
+    padding: 9px 12px;
+    font-size: clamp(13px, 3.65vw, 16px);
+    line-height: 1.15;
+    font-weight: 900;
+    text-transform: uppercase;
+    white-space: normal;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__actions .secondary {
+    color: #d9e5e6;
+    background: rgba(111, 139, 148, .16);
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__actions .danger {
+    border-color: rgba(255, 196, 61, .72);
+    color: #1a1200;
+    background: #ffc43d;
+}
+
+@media (max-width: 420px), (max-height: 700px) {
+    body.driver-mobile-screen .driver-reading-confirmation__dialog {
+        grid-template-columns: 38px minmax(0, 1fr);
+        gap: 8px 10px;
+        padding: 12px;
+    }
+
+    body.driver-mobile-screen .driver-reading-confirmation__content {
+        max-height: min(57dvh, 410px);
+    }
+
+    body.driver-mobile-screen .driver-reading-confirmation__warnings {
+        max-height: min(40dvh, 290px);
+        gap: 6px;
+    }
+
+    body.driver-mobile-screen .driver-reading-confirmation__warnings li {
+        padding: 8px 9px;
+    }
+
+    body.driver-mobile-screen .driver-reading-confirmation__actions button {
+        min-height: 48px;
+    }
+}
+
 body.driver-mobile-screen .app-confirm-content h2 {
     margin: 0 0 clamp(4px, .8dvh, 8px);
     font-size: clamp(18px, min(5.5vw, 3dvh), 24px);
@@ -4445,11 +4564,31 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                 {% csrf_token %}
                 <input type="hidden" name="shift_id" value="{{ open_shift.id }}">
                 {{ close_form.client_action_id }}
+                {{ close_form.reading_confirmation_token }}
                 {% include "includes/mobile_shift_screen.html" with mobile_shift_role="driver" mobile_shift_state="open" mobile_shift_form=close_form mobile_shift_previous=False %}
                 <div class="driver-shift-sync-pending" data-driver-shift-sync-pending hidden role="status" aria-live="polite">
                     <i aria-hidden="true"></i>
                     <strong>Смена закрыта на телефоне</strong>
                     <span>{% if is_native_app %}Можно свернуть или закрыть приложение. Данные отправятся автоматически, когда появится связь.{% else %}Данные сохранены. Они отправятся автоматически при следующем подключении или открытии приложения.{% endif %}</span>
+                </div>
+                <div class="app-confirm-modal driver-reading-confirmation" data-driver-reading-confirmation {% if not close_review %}hidden{% endif %}>
+                    <div class="app-confirm-dialog driver-reading-confirmation__dialog" role="dialog" aria-modal="true" aria-labelledby="driver-reading-confirmation-title">
+                        <div class="app-confirm-accent" aria-hidden="true"></div>
+                        <div class="app-confirm-icon" aria-hidden="true">!</div>
+                        <div class="app-confirm-content driver-reading-confirmation__content">
+                            <h2 id="driver-reading-confirmation-title" data-driver-reading-confirmation-title>Проверьте показания</h2>
+                            <p data-driver-reading-confirmation-message>Сервер заметил необычные значения. Смена ещё не закрыта.</p>
+                            <ul class="driver-reading-confirmation__warnings" data-driver-reading-confirmation-warnings>
+                                {% for warning in close_review.warnings %}
+                                    <li data-warning-code="{{ warning.code }}"><strong>{{ warning.title }}</strong><span>{{ warning.message }}</span></li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        <div class="app-confirm-actions driver-reading-confirmation__actions">
+                            <button class="secondary" type="button" data-driver-reading-confirmation-back>Вернуться и проверить</button>
+                            <button class="danger" type="button" data-driver-reading-confirmation-accept>Всё верно — закрыть смену</button>
+                        </div>
+                    </div>
                 </div>
             </form>
         {% elif form %}
@@ -5604,6 +5743,8 @@ window.DriverShiftCloseOutbox = (function () {
             endFuel: field("end_fuel"),
             endMileage: field("end_mileage"),
             endEngineHours: field("end_engine_hours"),
+            confirmationToken: field("reading_confirmation_token"),
+            state: "queued",
             createdAt: Date.now()
         };
     }
@@ -5614,7 +5755,8 @@ window.DriverShiftCloseOutbox = (function () {
             ["client_action_id", "clientActionId"],
             ["end_fuel", "endFuel"],
             ["end_mileage", "endMileage"],
-            ["end_engine_hours", "endEngineHours"]
+            ["end_engine_hours", "endEngineHours"],
+            ["reading_confirmation_token", "confirmationToken"]
         ].forEach(function (mapping) {
             var input = form.querySelector('[name="' + mapping[0] + '"]');
             if (input && payload[mapping[1]] !== undefined) {
@@ -5623,7 +5765,9 @@ window.DriverShiftCloseOutbox = (function () {
         });
     }
 
-    function persist(payload) {
+    function persistQueued(payload) {
+        payload.state = "queued";
+        payload.requiresAttention = false;
         var localStored = writeLocal(payload);
         var native = nativeConnection();
         if (native && typeof native.queueDriverShiftClose === "function") {
@@ -5635,19 +5779,23 @@ window.DriverShiftCloseOutbox = (function () {
                 throw new Error("Не удалось включить фоновую отправку. Оставьте приложение открытым и повторите.");
             });
         }
-        if (localStored || navigator.onLine !== false) {
+        if (localStored) {
             return Promise.resolve(true);
         }
         return Promise.reject(new Error("Не удалось сохранить закрытие смены на телефоне."));
     }
 
-    function acknowledge(clientActionId) {
-        removeLocal(clientActionId);
+    function clearNative(clientActionId) {
         var native = nativeConnection();
         if (!native || typeof native.acknowledgeDriverShiftClose !== "function") {
             return Promise.resolve();
         }
         return Promise.resolve(native.acknowledgeDriverShiftClose(clientActionId)).catch(function () {});
+    }
+
+    function acknowledge(clientActionId) {
+        removeLocal(clientActionId);
+        return clearNative(clientActionId);
     }
 
     function showPending(form) {
@@ -5672,34 +5820,250 @@ window.DriverShiftCloseOutbox = (function () {
         });
     }
 
+    function resetSubmitUi(form) {
+        if (!form) return;
+        form.dataset.driverInPlacePending = "false";
+        var closeButton = form.querySelector("[data-driver-shift-close-button]");
+        if (closeButton) {
+            closeButton.disabled = false;
+            closeButton.classList.remove("is-pending");
+            var closeLabel = closeButton.querySelector("[data-mobile-shift-label]");
+            if (closeLabel) closeLabel.textContent = "Закрыть смену";
+        }
+    }
+
+    function hideAttention(form) {
+        if (!form) return;
+        var modal = form.querySelector("[data-driver-reading-confirmation]");
+        if (modal) modal.hidden = true;
+        if (document.body) document.body.classList.remove("modal-open");
+    }
+
+    function warningItems(data) {
+        if (data && Array.isArray(data.warnings) && data.warnings.length) {
+            return data.warnings.map(function (warning) {
+                return {
+                    code: String(warning.code || "warning"),
+                    field: String(warning.field || ""),
+                    title: String(warning.title || "Проверьте показание"),
+                    message: String(warning.message || data.error || "Проверьте введённое значение.")
+                };
+            });
+        }
+        var fieldErrors = data && data.field_errors ? data.field_errors : {};
+        var items = [];
+        Object.keys(fieldErrors).forEach(function (field) {
+            var messages = Array.isArray(fieldErrors[field]) ? fieldErrors[field] : [fieldErrors[field]];
+            messages.forEach(function (message) {
+                items.push({code: "validation_error", field: field, title: "Показание не принято", message: String(message || "")});
+            });
+        });
+        if (!items.length) {
+            items.push({code: "server_error", field: "", title: "Закрытие смены не выполнено", message: String(data && data.error || "Проверьте показания.")});
+        }
+        return items;
+    }
+
+    function renderWarningList(list, items) {
+        if (!list) return;
+        while (list.firstChild) list.removeChild(list.firstChild);
+        items.forEach(function (warning) {
+            var item = document.createElement("li");
+            item.dataset.warningCode = warning.code;
+            var title = document.createElement("strong");
+            var message = document.createElement("span");
+            title.textContent = warning.title;
+            message.textContent = warning.message;
+            item.appendChild(title);
+            item.appendChild(message);
+            list.appendChild(item);
+        });
+    }
+
+    function focusWarningField(form, items) {
+        var firstField = items.length ? items[0].field : "";
+        var input = firstField ? form.querySelector('[name="' + firstField + '"]') : null;
+        if (input && typeof input.focus === "function") input.focus({preventScroll: true});
+    }
+
+    function showAttention(form, payload) {
+        if (!form || !payload) return;
+        clearPendingUi(form);
+        resetSubmitUi(form);
+        fillForm(form, payload);
+        var modal = form.querySelector("[data-driver-reading-confirmation]");
+        if (!modal) {
+            if (typeof window.showDriverToast === "function") {
+                window.showDriverToast(payload.attentionMessage || payload.error || "Проверьте показания.");
+            }
+            return;
+        }
+        var confirmationRequired = payload.confirmationRequired === true;
+        var items = warningItems(payload);
+        var title = modal.querySelector("[data-driver-reading-confirmation-title]");
+        var message = modal.querySelector("[data-driver-reading-confirmation-message]");
+        var list = modal.querySelector("[data-driver-reading-confirmation-warnings]");
+        var back = modal.querySelector("[data-driver-reading-confirmation-back]");
+        var accept = modal.querySelector("[data-driver-reading-confirmation-accept]");
+        if (title) title.textContent = confirmationRequired ? "Проверьте подозрительные показания" : "Показания не приняты";
+        if (message) {
+            message.textContent = confirmationRequired
+                ? "Смена ещё не закрыта. Сверьте значения или подтвердите, что они верны."
+                : "Сервер отклонил значения. Исправьте поля и отправьте закрытие ещё раз.";
+        }
+        renderWarningList(list, items);
+        if (accept) {
+            accept.hidden = !confirmationRequired;
+            accept.onclick = function () {
+                var tokenInput = form.querySelector('[name="reading_confirmation_token"]');
+                if (tokenInput) tokenInput.value = String(payload.confirmationToken || "");
+                hideAttention(form);
+                form.dataset.driverInPlacePending = "true";
+                return submit(form, {payload: payload, confirmed: true}).catch(function (error) {
+                    resetSubmitUi(form);
+                    if (typeof window.showDriverToast === "function") {
+                        window.showDriverToast(error && error.message || "Не удалось сохранить закрытие смены.", "error");
+                    }
+                    return false;
+                });
+            };
+        }
+        if (back) {
+            back.textContent = payload.hasActiveShift === false
+                ? "Обновить экран"
+                : confirmationRequired
+                    ? "Вернуться и проверить"
+                    : "Отменить отправку и вернуться к вводу";
+            back.onclick = function () {
+                hideAttention(form);
+                if (payload.hasActiveShift === false) {
+                    acknowledge(payload.clientActionId).then(function () {
+                        if (window.location && typeof window.location.reload === "function") window.location.reload();
+                    });
+                    return;
+                }
+                acknowledge(payload.clientActionId);
+                var tokenInput = form.querySelector('[name="reading_confirmation_token"]');
+                if (tokenInput) tokenInput.value = "";
+                resetSubmitUi(form);
+                focusWarningField(form, items);
+            };
+        }
+        modal.hidden = false;
+        if (document.body) document.body.classList.add("modal-open");
+        if (back && typeof back.focus === "function") back.focus();
+    }
+
+    function serverAttentionPayload(payload, data) {
+        return Object.assign({}, payload, {
+            state: "attention",
+            requiresAttention: true,
+            confirmationRequired: data.confirmation_required === true,
+            confirmationToken: String(data.confirmation_token || payload.confirmationToken || ""),
+            warnings: Array.isArray(data.warnings) ? data.warnings : [],
+            field_errors: data.field_errors || {},
+            error: String(data.error || "Проверьте показания на конец смены."),
+            attentionMessage: String(data.error || "Проверьте показания на конец смены."),
+            hasActiveShift: data.has_active_shift !== false
+        });
+    }
+
+    function requestServer(form, payload) {
+        fillForm(form, payload);
+        var body = new window.FormData(form);
+        return window.fetch(form.getAttribute("action") || window.location.href, {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            redirect: "follow",
+            headers: {
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: body
+        }).then(function (response) {
+            return response.text().then(function (text) {
+                var data = {};
+                try { data = JSON.parse(text || "{}"); } catch (error) {
+                    data = {ok: false, error: "Сервер вернул непонятный ответ."};
+                }
+                return {response: response, data: data};
+            });
+        });
+    }
+
+    function completeApplied(payload, data) {
+        return acknowledge(payload.clientActionId).then(function () {
+            if (typeof playDriverVoice === "function") playDriverVoice("shift_end", "voice_shift_closed");
+            var target = String(data.redirect_url || "/driver/?tab=manifest");
+            if (window.location) {
+                if (typeof window.location.assign === "function") window.location.assign(target);
+                else window.location.href = target;
+            }
+            return true;
+        });
+    }
+
+    function handleServerResult(form, payload, result) {
+        var response = result.response;
+        var data = result.data || {};
+        if (response.ok && data.ok) return completeApplied(payload, data);
+        var attention = serverAttentionPayload(payload, data);
+        return clearNative(payload.clientActionId).then(function () {
+            writeLocal(attention);
+            showAttention(form, attention);
+            return true;
+        });
+    }
+
     function sendStored(form, payload, options) {
         options = options || {};
         if (!form || retryInFlight) return Promise.resolve(false);
         retryInFlight = true;
         clearPendingUi(form);
         fillForm(form, payload);
-        return window.submitDriverFormInPlace(form, {silentFailure: true, fallbackToNavigation: false})
-            .then(function (applied) {
-                if (!applied) {
+        return requestServer(form, payload).then(function (result) {
+                return handleServerResult(form, payload, result);
+            }, function () {
+                return persistQueued(payload).then(function () {
                     showPending(form);
                     return true;
-                }
-                return acknowledge(payload.clientActionId).then(function () { return true; });
+                });
             }).finally(function () {
                 retryInFlight = false;
             });
     }
 
-    function submit(form) {
-        var payload = payloadFromForm(form);
-        return persist(payload).then(function () {
-            return sendStored(form, payload);
+    function submit(form, options) {
+        options = options || {};
+        var payload = options.payload ? Object.assign({}, options.payload) : payloadFromForm(form);
+        if (options.confirmed) {
+            var tokenInput = form.querySelector('[name="reading_confirmation_token"]');
+            payload.confirmationToken = tokenInput ? String(tokenInput.value || "").trim() : String(payload.confirmationToken || "");
+        }
+        payload.state = "queued";
+        payload.requiresAttention = false;
+        return sendStored(form, payload);
+    }
+
+    function bindInvalidation(form) {
+        if (!form || form.dataset.driverShiftConfirmationBound === "true") return;
+        form.dataset.driverShiftConfirmationBound = "true";
+        form.querySelectorAll("[name='end_fuel'], [name='end_mileage'], [name='end_engine_hours']").forEach(function (input) {
+            input.addEventListener("input", function () {
+                var tokenInput = form.querySelector('[name="reading_confirmation_token"]');
+                if (tokenInput) tokenInput.value = "";
+                var pending = readLocal();
+                if (pending && pending.state === "attention") acknowledge(pending.clientActionId);
+                hideAttention(form);
+            });
         });
     }
 
     function restore(form) {
         var localPending = readLocal();
         var native = nativeConnection();
+        bindInvalidation(form);
         if (!form) {
             if (localPending) acknowledge(localPending.clientActionId);
             return Promise.resolve(false);
@@ -5708,34 +6072,46 @@ window.DriverShiftCloseOutbox = (function () {
             if (!localPending || String(form.dataset.nativeShiftId || "") !== String(localPending.shiftId || "")) {
                 return Promise.resolve(false);
             }
-            showPending(form);
-            if (navigator.onLine !== false) {
-                return sendStored(form, localPending, {quiet: true});
+            if (localPending.state === "attention" || localPending.requiresAttention) {
+                showAttention(form, localPending);
+                return Promise.resolve(true);
             }
+            if (navigator.onLine !== false) return sendStored(form, localPending, {quiet: true});
+            showPending(form);
             return Promise.resolve(true);
         }
         return Promise.resolve(native.getState()).then(function (state) {
             var nativePending = state && state.pendingDriverShiftClose;
             if (!nativePending) {
+                if (localPending && (localPending.state === "attention" || localPending.requiresAttention)) {
+                    showAttention(form, localPending);
+                    return true;
+                }
                 if (localPending) removeLocal(localPending.clientActionId);
                 return false;
             }
-            var pending = nativePending;
+            var pending = nativePending || localPending;
             if (!pending || String(form.dataset.nativeShiftId || "") !== String(pending.shiftId || "")) {
                 return false;
             }
-            fillForm(form, pending);
             if (pending.requiresAttention) {
-                clearPendingUi(form);
-                if (typeof window.showDriverToast === "function") {
-                    window.showDriverToast(pending.attentionMessage || "Проверьте показания на конец смены.");
-                }
-                return false;
+                pending.state = "attention";
+                pending.confirmationRequired = pending.confirmationRequired === true;
+                writeLocal(pending);
+            }
+            fillForm(form, pending);
+            if (pending.state === "attention" || pending.requiresAttention) {
+                showAttention(form, pending);
+                return true;
             }
             showPending(form);
             return true;
         }).catch(function () {
-            if (localPending) showPending(form);
+            if (localPending && (localPending.state === "attention" || localPending.requiresAttention)) {
+                showAttention(form, localPending);
+            } else if (localPending) {
+                showPending(form);
+            }
             return !!localPending;
         });
     }
@@ -5745,7 +6121,9 @@ window.DriverShiftCloseOutbox = (function () {
         restore: restore,
         readLocal: readLocal,
         showPending: showPending,
-        acknowledge: acknowledge
+        acknowledge: acknowledge,
+        showAttention: showAttention,
+        bindInvalidation: bindInvalidation
     };
 })();
 window.addEventListener("online", function () {

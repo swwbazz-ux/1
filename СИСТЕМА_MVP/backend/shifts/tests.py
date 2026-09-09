@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, EquipmentAssignment
@@ -15,7 +15,7 @@ from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentTyp
 from trips.models import OPEN_TRIP_STATUSES, Trip, TripStatus
 from users.models import Employee, EmployeeAccess, Role
 
-from .models import EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftClientAction, ShiftPlan, ShiftReadingCorrection
+from .models import DriverShiftReadingConfirmation, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftClientAction, ShiftPlan, ShiftReadingCorrection
 from .equipment_plan_groups import (
     reconcile_default_equipment_plan_groups,
     validate_equipment_plan_group_membership,
@@ -27,6 +27,8 @@ from .services import (
     calculate_open_shift_progress,
     calculate_truck_shift_progress,
     close_driver_shift,
+    driver_close_reading_warnings,
+    DriverShiftCloseConfirmationRequired,
     open_excavator_shift,
     open_driver_shift,
     shift_plan_totals,
@@ -298,34 +300,192 @@ class DriverShiftLifecycleTests(TestCase):
         shift = self.open_shift()
         validate_driver_close_readings(shift, **self.close_readings(mileage='10250'))
 
-    def test_mileage_above_250_is_blocked(self):
+    def test_mileage_above_250_requires_confirmation(self):
         shift = self.open_shift()
-        with self.assertRaises(ValidationError):
-            validate_driver_close_readings(shift, **self.close_readings(mileage='10250.01'))
+        warnings = driver_close_reading_warnings(shift, **self.close_readings(mileage='10251'))
 
-    def test_mileage_decrease_is_blocked(self):
+        self.assertEqual([warning['code'] for warning in warnings], ['mileage_delta_high'])
+
+    def test_mileage_decrease_requires_confirmation(self):
         shift = self.open_shift()
-        with self.assertRaises(ValidationError):
-            validate_driver_close_readings(shift, **self.close_readings(mileage='9999'))
+        warnings = driver_close_reading_warnings(shift, **self.close_readings(mileage='9999'))
+
+        self.assertEqual([warning['code'] for warning in warnings], ['mileage_decreased'])
 
     def test_engine_hours_may_increase_by_12(self):
         shift = self.open_shift()
         validate_driver_close_readings(shift, **self.close_readings(hours='1012'))
 
-    def test_engine_hours_above_12_is_blocked(self):
+    def test_engine_hours_above_12_requires_confirmation(self):
         shift = self.open_shift()
-        with self.assertRaisesMessage(ValidationError, 'не могут увеличиться более чем на 12'):
-            validate_driver_close_readings(shift, **self.close_readings(hours='1013'))
+        warnings = driver_close_reading_warnings(shift, **self.close_readings(hours='1013'))
+
+        self.assertEqual([warning['code'] for warning in warnings], ['engine_hours_delta_high'])
 
     def test_fractional_close_reading_is_blocked(self):
         shift = self.open_shift()
         with self.assertRaisesMessage(ValidationError, 'целое число'):
             validate_driver_close_readings(shift, **self.close_readings(hours='1011.5'))
 
-    def test_engine_hours_decrease_is_blocked(self):
+    def test_engine_hours_decrease_requires_confirmation(self):
         shift = self.open_shift()
+        warnings = driver_close_reading_warnings(shift, **self.close_readings(hours='999'))
+
+        self.assertEqual([warning['code'] for warning in warnings], ['engine_hours_decreased'])
+
+    def test_missing_start_readings_and_fuel_above_capacity_are_warnings(self):
+        shift = self.open_shift()
+        shift.start_mileage = None
+        shift.start_engine_hours = None
+        shift.save(update_fields=['start_mileage', 'start_engine_hours'])
+
+        warnings = driver_close_reading_warnings(
+            shift,
+            **self.close_readings(fuel='2100', mileage='10100', hours='1010'),
+        )
+
+        self.assertEqual(
+            [warning['code'] for warning in warnings],
+            ['fuel_above_capacity', 'mileage_start_missing', 'engine_hours_start_missing'],
+        )
+
+    def test_suspicious_close_requires_confirmation_without_mutating_shift(self):
+        shift = self.open_shift()
+        readings = self.close_readings(fuel='2100', mileage='10300', hours='1013')
+
+        with self.assertRaises(DriverShiftCloseConfirmationRequired) as raised:
+            close_driver_shift(
+                shift=shift,
+                employee=self.driver,
+                readings=readings,
+                client_action_id='suspicious-close',
+            )
+
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+        self.assertIsNone(shift.end_fuel)
+        self.assertFalse(ShiftClientAction.objects.filter(client_action_id='suspicious-close').exists())
+        self.assertFalse(DriverShiftReadingConfirmation.objects.exists())
+        self.assertTrue(raised.exception.confirmation_token)
+
+    def test_confirmed_suspicious_close_persists_exact_values_and_audit_once(self):
+        shift = self.open_shift()
+        readings = self.close_readings(fuel='2100', mileage='10300', hours='1013')
+        with self.assertRaises(DriverShiftCloseConfirmationRequired) as raised:
+            close_driver_shift(
+                shift=shift,
+                employee=self.driver,
+                readings=readings,
+                client_action_id='confirmed-suspicious-close',
+            )
+
+        closed, created = close_driver_shift(
+            shift=shift,
+            employee=self.driver,
+            readings=readings,
+            client_action_id='confirmed-suspicious-close',
+            confirmation_token=raised.exception.confirmation_token,
+        )
+        repeated, created_again = close_driver_shift(
+            shift=shift,
+            employee=self.driver,
+            readings=readings,
+            client_action_id='confirmed-suspicious-close',
+            confirmation_token=raised.exception.confirmation_token,
+        )
+
+        self.assertTrue(created)
+        self.assertFalse(created_again)
+        self.assertEqual(repeated.pk, closed.pk)
+        self.assertEqual(closed.end_fuel, Decimal('2100'))
+        self.assertEqual(closed.end_mileage, Decimal('10300'))
+        self.assertEqual(closed.end_engine_hours, Decimal('1013'))
+        audit = DriverShiftReadingConfirmation.objects.get(shift=closed)
+        self.assertEqual(audit.client_action_id, 'confirmed-suspicious-close')
+        self.assertEqual(audit.end_fuel, Decimal('2100'))
+        self.assertEqual(
+            [warning['code'] for warning in audit.warnings],
+            ['fuel_above_capacity', 'mileage_delta_high', 'engine_hours_delta_high'],
+        )
+        self.assertEqual(ShiftClientAction.objects.filter(client_action_id='confirmed-suspicious-close').count(), 1)
+
+    def test_changed_tampered_and_expired_confirmation_tokens_are_rejected(self):
+        shift = self.open_shift()
+        readings = self.close_readings(mileage='10300')
+        with self.assertRaises(DriverShiftCloseConfirmationRequired) as raised:
+            close_driver_shift(
+                shift=shift,
+                employee=self.driver,
+                readings=readings,
+                client_action_id='token-rejection-close',
+            )
+        token = raised.exception.confirmation_token
+
+        with self.assertRaisesMessage(ValidationError, 'Показания изменились'):
+            close_driver_shift(
+                shift=shift,
+                employee=self.driver,
+                readings=self.close_readings(mileage='10301'),
+                client_action_id='token-rejection-close',
+                confirmation_token=token,
+            )
+        with self.assertRaisesMessage(ValidationError, 'повреждено'):
+            close_driver_shift(
+                shift=shift,
+                employee=self.driver,
+                readings=readings,
+                client_action_id='token-rejection-close',
+                confirmation_token=f'{token}x',
+            )
+        with override_settings(DRIVER_SHIFT_CLOSE_CONFIRMATION_MAX_AGE_SECONDS=-1):
+            with self.assertRaisesMessage(ValidationError, 'истекло'):
+                close_driver_shift(
+                    shift=shift,
+                    employee=self.driver,
+                    readings=readings,
+                    client_action_id='token-rejection-close',
+                    confirmation_token=token,
+                )
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+
+    def test_foreign_confirmation_token_is_rejected(self):
+        shift = self.open_shift()
+        readings = self.close_readings(mileage='10300')
+        with self.assertRaises(DriverShiftCloseConfirmationRequired) as raised:
+            close_driver_shift(
+                shift=shift,
+                employee=self.driver,
+                readings=readings,
+                client_action_id='foreign-token-close',
+            )
+        other_driver = self.create_active_driver('Другой водитель', '200009')
+        other_truck = Equipment.objects.create(
+            equipment_type=self.truck_type,
+            model=self.belaz,
+            garage_number='99',
+        )
+        other_shift = EmployeeShift.objects.create(
+            employee=other_driver,
+            equipment=other_truck,
+            shift_type='day',
+            start_fuel=Decimal('1000'),
+            start_mileage=Decimal('10000'),
+            start_engine_hours=Decimal('1000'),
+            opened_at=timezone.now(),
+            opened_by=other_driver,
+        )
+
         with self.assertRaises(ValidationError):
-            validate_driver_close_readings(shift, **self.close_readings(hours='999'))
+            close_driver_shift(
+                shift=other_shift,
+                employee=other_driver,
+                readings=readings,
+                client_action_id='foreign-token-close',
+                confirmation_token=raised.exception.confirmation_token,
+            )
+        other_shift.refresh_from_db()
+        self.assertIsNone(other_shift.closed_at)
 
     def test_close_with_active_trip_hands_trip_to_replacement_shift(self):
         shift = self.open_shift()

@@ -76,6 +76,7 @@ from shifts.models import (
 from shifts.services import (
     calculate_truck_shift_progress,
     close_driver_shift,
+    DriverShiftCloseConfirmationRequired,
     open_driver_shift,
     open_shift_conflict_message,
     plan_status_label,
@@ -260,7 +261,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v209'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v210'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -4193,7 +4194,7 @@ def driver_shift_view(request):
             'active_trip': active_trip,
             'form': form,
             'close_form': close_form,
-            'close_review': getattr(request, '_driver_close_review', None),
+            'close_review': getattr(request, '_driver_close_confirmation', None),
             'last_closed_shift': last_closed_shift,
             'active_tab': active_tab,
             'active_downtime': active_downtime,
@@ -4323,12 +4324,20 @@ def driver_close_shift_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         if wants_json:
-            return JsonResponse({'ok': False, 'error': 'Требуется повторный вход.'}, status=401)
+            return JsonResponse({
+                'ok': False,
+                'error': 'Требуется повторный вход.',
+                'has_active_shift': False,
+            }, status=401)
         return redirect('login')
     access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     if not access or access.role.code != 'driver':
         if wants_json:
-            return JsonResponse({'ok': False, 'error': 'Нет доступа к приложению водителя.'}, status=403)
+            return JsonResponse({
+                'ok': False,
+                'error': 'Нет доступа к приложению водителя.',
+                'has_active_shift': False,
+            }, status=403)
         return redirect('role_home')
 
     client_action_id = request.POST.get('client_action_id', '').strip()
@@ -4343,6 +4352,7 @@ def driver_close_shift_view(request):
                 'ok': True,
                 'status': 'already_applied',
                 'client_action_id': client_action_id,
+                'redirect_url': f"{reverse('driver_work')}?tab=manifest",
             })
         messages.success(request, 'Смена закрыта.')
         return redirect(f"{reverse('driver_work')}?tab=manifest")
@@ -4355,11 +4365,16 @@ def driver_close_shift_view(request):
                     'ok': True,
                     'status': 'already_applied',
                     'client_action_id': client_action_id,
+                    'redirect_url': f"{reverse('driver_work')}?tab=manifest",
                 })
             messages.success(request, 'Смена закрыта.')
             return redirect(f"{reverse('driver_work')}?tab=manifest")
         if wants_json:
-            return JsonResponse({'ok': False, 'error': 'Открытая смена не найдена.'}, status=409)
+            return JsonResponse({
+                'ok': False,
+                'error': 'Открытая смена не найдена.',
+                'has_active_shift': False,
+            }, status=409)
         messages.error(request, 'Открытая смена не найдена.')
         return redirect('driver_work')
 
@@ -4369,11 +4384,15 @@ def driver_close_shift_view(request):
             return JsonResponse({
                 'ok': False,
                 'error': 'Смена на сервере уже изменилась. Откройте приложение и проверьте её состояние.',
+                'has_active_shift': True,
             }, status=409)
         messages.error(request, 'Смена на сервере уже изменилась. Обновите экран.')
         return redirect(f"{reverse('driver_work')}?tab=shift")
 
-    form = DriverCloseShiftForm(request.POST, instance=open_shift)
+    form_data = request.POST.copy()
+    if not form_data.get('client_action_id'):
+        form_data['client_action_id'] = secrets.token_urlsafe(24)
+    form = DriverCloseShiftForm(form_data, instance=open_shift)
     request._driver_close_form = form
     if form.is_valid():
         readings = {
@@ -4381,6 +4400,7 @@ def driver_close_shift_view(request):
             'end_mileage': form.cleaned_data['end_mileage'],
             'end_engine_hours': form.cleaned_data['end_engine_hours'],
         }
+        resolved_client_action_id = form.cleaned_data['client_action_id']
         try:
             with transaction.atomic():
                 Employee.objects.select_for_update().get(pk=access.employee_id)
@@ -4390,8 +4410,23 @@ def driver_close_shift_view(request):
                     shift=open_shift,
                     employee=access.employee,
                     readings=readings,
-                    client_action_id=form.cleaned_data.get('client_action_id') or secrets.token_urlsafe(24),
+                    client_action_id=resolved_client_action_id,
+                    confirmation_token=form.cleaned_data.get('reading_confirmation_token') or '',
                 )
+        except DriverShiftCloseConfirmationRequired as confirmation:
+            warning_payload = {
+                'ok': False,
+                'error': 'Проверьте подозрительные показания и подтвердите их.',
+                'confirmation_required': True,
+                'confirmation_token': confirmation.confirmation_token,
+                'warnings': confirmation.warnings,
+                'client_action_id': resolved_client_action_id,
+                'shift_id': open_shift.pk,
+                'has_active_shift': True,
+            }
+            if wants_json:
+                return JsonResponse(warning_payload, status=422)
+            request._driver_close_confirmation = warning_payload
         except ValidationError as error:
             form.add_error(None, error)
         else:
@@ -4400,7 +4435,8 @@ def driver_close_shift_view(request):
                     'ok': True,
                     'status': 'applied',
                     'shift_id': open_shift.pk,
-                    'client_action_id': form.cleaned_data.get('client_action_id') or client_action_id,
+                    'client_action_id': resolved_client_action_id,
+                    'redirect_url': f"{reverse('driver_work')}?tab=manifest",
                 })
             messages.success(request, 'Смена закрыта.')
             return redirect(f"{reverse('driver_work')}?tab=manifest")
@@ -4421,6 +4457,9 @@ def driver_close_shift_view(request):
             'ok': False,
             'error': first_error,
             'field_errors': field_errors,
+            'confirmation_required': False,
+            'shift_id': open_shift.pk,
+            'has_active_shift': True,
         }, status=422)
     request.GET = request.GET.copy()
     request.GET['tab'] = 'shift'
