@@ -12629,82 +12629,203 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
 
 
 /* ============================================================================
-   ЖЕТОНЫ САМОСВАЛОВ В КАРТОЧКЕ КОМПЛЕКСА
+   КАРТОЧКА КОМПЛЕКСА: ИНФОРМАЦИЯ СЛЕВА, САМОСВАЛЫ СПРАВА
 
-   В гараже самосвал показывается плиткой с картинкой — там рядом стоят
-   экскаваторы, и силуэт помогает их различать. В карточке комплекса под
-   экскаватором стоят только самосвалы, поэтому картинка не несёт информации,
-   зато съедает всю высоту плитки. Здесь самосвал — жетон номера: крупная
-   цифра, цвет по статусу, кольцо выполнения плана по контуру (оно рисуется
-   через ::before и места в потоке не занимает).
+   Карточка — это две зоны с постоянными местами, чтобы взгляд находил их без
+   поиска на любой из десяти карточек:
 
-   Полосе выдана постоянная высота, а не остаток от заголовка и чипов. Раньше
-   она получала «что осталось», и при длинном названии породы или чипе статуса
-   с таймером остаток уходил в ноль — полосу срезал overflow карточки.
-   Размеры жетонов внутри полосы считает JS (refreshComplexTruckRack).
+   +--------------+----------------------------+
+   | K-1          |  [12] [14] [19] [26]       |
+   | [ОЖИДАНИЕ..] |                            |
+   | Гор.90 Бл.52 |  [31] [33]                 |
+   | Первичная с..|                            |
+   | 4% 345/10000 |                            |
+   +--------------+----------------------------+
+
+   Слева столбиком: имя, статус с таймером, горизонт и блок, порода, план.
+   Всё остальное пространство — поле самосвалов, где каждая машина показана
+   полной плиткой: номер, картинка, подпись состояния, кольцо выполнения плана
+   по контуру. Поле занимает всю высоту карточки, поэтому в него помещается
+   до шестнадцати полных плиток; дальше плитка сжимается до жетона номера, а
+   совсем крайний хвост сворачивается в счётчик «+N». Размеры плиток считает
+   JS (refreshComplexTruckRack) от размеров самого поля.
+
+   Прежняя раскладка складывала всё в три строки друг под другом, и полоса
+   машин получала остаток, которого при десяти комплексах не оставалось.
+   Заготовка-пустышка (.status-empty) и мобильный контур горного мастера
+   этими правилами не затронуты.
    ============================================================================ */
 
-.dispatcher-complex-card .complex-assigned-trucks {
-    height: var(--complex-rack-h, 62px);
-    align-content: start;
-}
-
-.dispatcher-complex-card .complex-truck-tile {
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card:not(.status-empty) {
     display: grid;
-    place-items: center;
+    grid-template-columns: minmax(140px, 32%) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+        "head trucks"
+        "info trucks";
+    gap: 4px 12px;
+    align-items: start;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card:not(.status-empty) > * {
+    min-width: 0;
+    min-height: 0;
+}
+
+/* --- Левый столбец: имя и статус ------------------------------------------ */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-title-state {
+    grid-area: head;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+    overflow: hidden;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-title-state h2 {
+    font-size: 30px;
+    line-height: 1;
+}
+
+/* Статус и причина простоя — одной строкой. Полный текст причины остаётся в
+   подсказке (title) и в журнале; здесь важнее, чтобы он не выталкивал план и
+   породу за край карточки. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-state-chip,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-downtime-status {
+    max-width: 100%;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-state-chip,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-downtime-status > span {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    text-align: left;
+}
+
+/* --- Левый столбец: контекст забоя и план --------------------------------- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context {
+    grid-area: info;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    justify-content: flex-start;
+    justify-self: stretch;
+    align-self: stretch;
+    width: auto;
+    max-width: none;
+    gap: 4px;
+    text-align: left;
+    overflow: hidden;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context > * {
+    flex: 0 0 auto;
+    max-width: 100%;
+}
+
+/* Порода, точки разгрузки и план занимают свою строку столбца целиком. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-rock,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .complex-unload-points,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .dispatcher-plan-strip {
+    flex: 1 0 100%;
+    margin-top: 0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-rock {
+    display: block;
+    justify-content: flex-start;
+    color: var(--gd-muted);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-unload-points {
+    justify-items: start;
+}
+
+/* --- Поле самосвалов ------------------------------------------------------- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks {
+    grid-area: trucks;
+    align-self: stretch;
+    justify-self: stretch;
+    height: auto;
+    align-content: start;
+    justify-content: start;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks:has(.complex-truck-empty:not([hidden])) {
+    align-content: center;
+    justify-content: center;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-empty {
+    grid-column: 1 / -1;
+    place-self: center;
+    width: auto;
     padding: 0;
-    border-radius: 6px;
 }
 
-/* Пока машины помещаются полной плиткой, в карточке видно всё, что в неё
-   заложено: номер, картинку и подпись состояния. Класс is-rich-trucks ставит
-   JS, когда выбранного размера хватает. Прятать подпись «просто так» нельзя —
-   цвет говорит о статусе тому, кто его помнит, а подпись читают все. */
-.dispatcher-complex-card .complex-assigned-trucks:not(.is-rich-trucks) .complex-truck-tile img,
-.dispatcher-complex-card .complex-assigned-trucks:not(.is-rich-trucks) .complex-truck-tile span {
-    display: none;
-}
-
-.dispatcher-complex-card .complex-assigned-trucks.is-rich-trucks .complex-truck-tile {
+/* Полная плитка: номер, картинка, подпись состояния. Класс is-rich-trucks
+   ставит JS, пока выбранного размера хватает на все машины. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 1px;
     padding: 2px 3px;
+    border-radius: 6px;
 }
 
-.dispatcher-complex-card .complex-assigned-trucks.is-rich-trucks .complex-truck-tile img {
+/* Кегль полной плитки считается от её высоты: номер около четверти,
+   подпись около шестой части. Формула жетона (половина высоты) здесь давала
+   номер в 25px и подпись, которая не влезала в ширину. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile strong {
+    margin: 0;
+    font-size: max(11px, calc(var(--complex-truck-h, 58px) * 0.24));
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: 0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile img {
     display: block;
     width: 62%;
     height: 42%;
     object-fit: contain;
 }
 
-.dispatcher-complex-card .complex-assigned-trucks.is-rich-trucks .complex-truck-tile span {
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile span {
     display: block;
     max-width: 100%;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    font-size: max(7px, calc(var(--complex-truck-font, 15px) * 0.62));
+    font-size: max(8px, calc(var(--complex-truck-h, 58px) * 0.16));
     line-height: 1.05;
 }
 
-.dispatcher-complex-card .complex-assigned-trucks.is-rich-trucks .complex-truck-tile strong {
-    font-size: max(10px, calc(var(--complex-truck-font, 15px) * 0.82));
+/* Жетон: включается только когда машин столько, что подпись всё равно стала
+   бы нечитаемой. Состояние там читается цветом плитки и кольцом плана. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks:not(.is-rich-trucks) .complex-truck-tile {
+    display: grid;
+    place-items: center;
+    padding: 0;
 }
 
-.dispatcher-complex-card .complex-truck-tile strong {
-    margin: 0;
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks:not(.is-rich-trucks) .complex-truck-tile img,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks:not(.is-rich-trucks) .complex-truck-tile span {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks:not(.is-rich-trucks) .complex-truck-tile strong {
     font-size: var(--complex-truck-font, 15px);
-    font-weight: 900;
-    line-height: 1;
-    letter-spacing: 0;
 }
 
-/* Счётчик непоместившихся машин занимает такую же ячейку, как жетон. */
-.dispatcher-complex-card .complex-truck-more {
+/* Счётчик непоместившихся машин занимает такую же ячейку, как плитка. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-more {
     display: grid;
     place-items: center;
     width: var(--complex-truck-w, 56px);
@@ -12715,86 +12836,4 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     font-size: var(--complex-truck-font, 15px);
     font-weight: 900;
     line-height: 1;
-}
-
-/* Текстовая часть ужимается первой: название породы в одну строку с
-   многоточием вместо переноса на две. Полное написание всё равно есть в
-   карточке оборудования, а здесь важнее увидеть машины. */
-.dispatcher-complex-card .complex-info-chip.chip-rock {
-    display: block;
-    max-width: 100%;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-}
-
-/* Контекст забоя раскладывается в строку, а не столбиком.
-
-   Три чипа столбиком плюс плашка плана требовали 88px, а грид карточки
-   выдаёт этой строке около 52 — блок вываливался вниз и ложился поверх
-   жетонов самосвалов. Теперь чипы идут в строку с переносом, плашка плана
-   занимает свою строку целиком, а сам блок обрезан по своей ячейке, чтобы
-   при любых данных он не мог заехать на полосу машин. */
-.dispatcher-complex-card .complex-context {
-    display: flex;
-    flex-wrap: wrap;
-    align-content: start;
-    justify-content: flex-end;
-    gap: 4px;
-    min-width: 0;
-    overflow: hidden;
-}
-
-.dispatcher-complex-card .complex-context > * {
-    flex: 0 0 auto;
-}
-
-.dispatcher-complex-card .complex-context .chip-rock {
-    max-width: 52%;
-}
-
-.dispatcher-complex-card .complex-context .dispatcher-plan-strip,
-.dispatcher-complex-card .complex-context .complex-unload-points {
-    flex: 1 0 100%;
-    margin-top: 0;
-}
-
-/* Заголовок комплекса занимал 68px из 233 — почти треть карточки на одно
-   слово «K-1». Уменьшаем до размера, который всё ещё читается через комнату,
-   и возвращаем освободившееся место блоку с чипами, чтобы он перестал
-   подрезаться. Крупный кегль остаётся на экране оборудования. */
-.dispatcher-complex-card .complex-work-head h2,
-.dispatcher-complex-card .complex-title-state h2 {
-    font-size: 30px;
-    line-height: 1;
-}
-
-.dispatcher-complex-card {
-    gap: 6px;
-}
-
-/* Длинная причина простоя раздувала заголовок: «ДЕМО ДИАГНОСТИКА
-   МЕХАНИЧЕСКОЙ СЛУЖБЫ» переносилась в три строки и отнимала место у чипов и
-   у полосы машин. Причина видна целиком по наведению и в журнале, в карточке
-   достаточно начала. */
-.dispatcher-complex-card .complex-state-chip,
-.dispatcher-complex-card .complex-downtime-status > span {
-    display: block;
-    max-width: 100%;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-}
-
-.dispatcher-complex-card .complex-title-state {
-    min-width: 0;
-    overflow: hidden;
-}
-
-/* Строка грида не должна раздуваться под содержимое: у элемента внутри грида
-   min-height по умолчанию auto, поэтому блок вырастал выше выданной строки и
-   ложился на полосу машин, несмотря на overflow. */
-.dispatcher-complex-card > * {
-    min-height: 0;
-    min-width: 0;
 }

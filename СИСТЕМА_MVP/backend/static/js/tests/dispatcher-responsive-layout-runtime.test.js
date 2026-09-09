@@ -154,32 +154,28 @@ test("непоместившийся хвост сворачивается в с
 });
 
 test("подпись и картинка сохраняются, пока плитка полная", () => {
+    /* По умолчанию плитка полная: картинка и подпись видны. Прячутся они
+       только в жетоне, то есть под :not(.is-rich-trucks). */
+    assert.match(CSS, /\.dispatcher-complex-card \.complex-truck-tile img \{[^}]*display: block;/s);
+    assert.match(CSS, /\.dispatcher-complex-card \.complex-truck-tile span \{[^}]*display: block;/s);
     assert.match(
         CSS,
         /:not\(\.is-rich-trucks\) \.complex-truck-tile img,[\s\S]*?display: none;/
-    );
-    assert.match(
-        CSS,
-        /\.is-rich-trucks \.complex-truck-tile img \{[^}]*display: block;/s
-    );
-    assert.match(
-        CSS,
-        /\.is-rich-trucks \.complex-truck-tile span \{[^}]*display: block;/s
     );
     for (const source of [TEMPLATE, SCRIPT]) {
         assert.match(source, /classList\.toggle\("is-rich-trucks", rich\)/);
     }
 });
 
-test("полосе выдана постоянная высота, а не остаток от текста", () => {
-    assert.match(
-        CSS,
-        /\.dispatcher-complex-card \.complex-assigned-trucks \{[^}]*height: var\(--complex-rack-h, 62px\);/s
-    );
+test("карточка разделена на столбец информации и поле машин", () => {
+    assert.match(CSS, /grid-template-areas:\s*"head trucks"\s*"info trucks";/);
+    assert.match(CSS, /\.complex-title-state \{[^}]*grid-area: head;/s);
+    assert.match(CSS, /\.complex-context \{[^}]*grid-area: info;/s);
+    assert.match(CSS, /\.complex-assigned-trucks \{[^}]*grid-area: trucks;[^}]*align-self: stretch;/s);
 });
 
 test("длинный текст не выдавливает полосу машин", () => {
     assert.match(CSS, /\.dispatcher-complex-card \.complex-state-chip[\s\S]*?text-overflow: ellipsis;/);
     assert.match(CSS, /\.dispatcher-complex-card \.complex-context \{[^}]*overflow: hidden;/s);
-    assert.match(CSS, /\.dispatcher-complex-card > \* \{[^}]*min-height: 0;/s);
+    assert.match(CSS, /\.dispatcher-complex-card:not\(\.status-empty\) > \* \{[^}]*min-height: 0;/s);
 });
