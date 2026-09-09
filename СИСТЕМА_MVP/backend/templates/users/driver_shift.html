@@ -4048,10 +4048,17 @@ body.driver-mobile-screen {
 }
 
 body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] {
+    /* The shared Shift component is absolutely positioned by its generic
+       stylesheet.  Use the same content rails as the other Driver tabs so
+       its action row cannot sit closer to the navigation or jump sideways
+       when switching between Shift, Downtimes and Waybill. */
+    inset: calc(var(--driver-safe-top) + var(--driver-header-h) + var(--driver-work-gap))
+        var(--driver-edge)
+        calc(var(--driver-safe-bottom) + var(--driver-nav-content-h) + var(--driver-work-gap)) !important;
     --ms-screen-rows: minmax(38px, .12fr) minmax(0, 1fr) var(--driver-footer-action-h);
     --ms-screen-rows-landscape: minmax(30px, .12fr) minmax(0, 1fr) var(--driver-footer-action-h);
     row-gap: var(--driver-footer-action-gap) !important;
-    padding-bottom: var(--driver-footer-action-gap) !important;
+    padding: 0 0 var(--driver-footer-action-gap) !important;
 }
 
 body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__actions,
