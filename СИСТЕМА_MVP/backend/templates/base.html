@@ -8,6 +8,7 @@
     <title>{% block title %}MVP учетной системы{% endblock %}</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
     <link rel="stylesheet" href="{% static 'css/app.css' %}?v={{ static_asset_release }}">
+    {% block app_stylesheets %}{% endblock %}
     <style>
         .app-sync-overlay {
             position: fixed;
@@ -1574,11 +1575,12 @@
     <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v6"></script>
     {% if observer_mode %}<script src="{% static 'js/observer-mode.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% if role_session_authenticated and not observer_mode %}<script src="{% static 'js/application-session-heartbeat.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
+    {% if is_native_app and role_session_authenticated and not observer_mode %}<script src="{% static 'js/native-background-connection-v1.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     <script src="{% static 'js/client-error-report.js' %}?v={{ static_asset_release }}" defer></script>
     {% if role_session_authenticated and not observer_mode and role_app %}<script src="{% static 'js/push-notifications.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% block extra_head %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-native-app="{{ is_native_app|yesno:'true,false' }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
+<body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-native-app="{{ is_native_app|yesno:'true,false' }}" data-native-client-version="{{ native_app_version }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
 {% if is_yandex_android and not observer_mode %}
 <div class="app-yandex-warning-banner" data-yandex-warning role="status" aria-live="polite">
     <span><strong>Это Яндекс Браузер.</strong> Приложение может установиться неправильно — со своей строкой снизу. Нажмите «Скопировать ссылку», откройте Google Chrome и вставьте её в адресную строку.</span>
@@ -1736,6 +1738,18 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
     var logoutPath = "{% url 'logout' %}";
+    function navigateAfterNativeConnectionStop(url) {
+        var stopPromise = null;
+        try {
+            stopPromise = window.NativeBackgroundConnection
+                && typeof window.NativeBackgroundConnection.stop === "function"
+                ? window.NativeBackgroundConnection.stop()
+                : null;
+        } catch (error) {}
+        Promise.resolve(stopPromise).finally(function () {
+            window.location.href = url;
+        });
+    }
     var roleHomePath = "{% url 'role_home' %}";
     var linkedReportsHomePath = "{% if access.role.code == 'dispatcher' %}{% url 'dispatcher_reports' %}{% elif access.role.code == 'mechanic' %}{% url 'mechanic_dashboard' %}{% else %}{% url 'management_dashboard' %}{% endif %}";
     var confirmModal = document.getElementById("app-confirm-modal");
@@ -2042,7 +2056,7 @@ document.addEventListener("DOMContentLoaded", function () {
             && window.isAppRoleReadonly()
         ) {
             event.preventDefault();
-            window.location.href = link.href;
+            navigateAfterNativeConnectionStop(link.href);
             return;
         }
         var message = link.dataset.confirm;
@@ -2056,6 +2070,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 acceptLabel = "ОК, " + acceptLabel;
             }
             openConfirmDialog(message, function () {
+                if (isLogoutLink) {
+                    navigateAfterNativeConnectionStop(link.href);
+                    return;
+                }
                 window.location.href = link.href;
             }, link.dataset.confirmDelay || 0, acceptLabel, link.dataset || {});
         }
@@ -2411,8 +2429,8 @@ window.AppRealtimeConfig = {
         {name: "dispatcher-shift-report", role: "dispatcher", mode: "custom", path: "^/dispatcher/shift-reports/(?:trucks|excavation|hourly)/?$", customRefresh: true},
         {name: "dispatcher-reports", role: "dispatcher", mode: "manual", path: "^/dispatcher/"},
         {name: "mining-master", role: "mining_master", mode: "custom", path: "^/mining-master/", customRefresh: true},
-        {name: "excavator", role: "excavator_operator", mode: "custom", path: "^/excavator/work/?$", customRefresh: true},
-        {name: "driver", role: "driver", mode: "custom", path: "^/driver/(?:shift(?:/close)?/?)?$", customRefresh: true},
+        {name: "excavator", role: "excavator_operator", mode: "custom", path: "^/excavator/work/?$", customRefresh: true, foregroundReconcile: true, pollIntervalMs: 2000},
+        {name: "driver", role: "driver", mode: "custom", path: "^/driver/(?:shift(?:/close)?/?)?$", customRefresh: true, foregroundReconcile: true, pollIntervalMs: 2000},
         {name: "system-admin", role: "system_admin", mode: "observer", path: "^/system-admin/"},
         {name: "management-shift-analytics", role: "management", mode: "custom", path: "^/reports/shift-analytics/?$", customRefresh: true},
         {name: "management-dynamics", role: "management", mode: "custom", path: "^/reports/management/dynamics/?$", customRefresh: true},

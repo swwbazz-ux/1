@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% load static l10n %}
 
 {% block title %}Экскаваторщик{% endblock %}
@@ -6,14 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v203">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v203">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v203">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v203">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v203">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v203">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v203" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v203" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v220">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v220">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v220">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v220">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v220">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v220">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v220" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v220" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -28,6 +28,7 @@
     data-eo-active-tab="trucks"
     data-eo-current-excavator-id="{% if current_excavator %}{{ current_excavator.id }}{% endif %}"
     data-eo-shift-excavator-id="{% if shift_start_excavator %}{{ shift_start_excavator.id }}{% endif %}"
+    data-native-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}"
     data-eo-settings-url="{% url 'excavator_work_settings' %}"
     data-eo-shift-url="{% url 'excavator_shift_action' %}"
     data-eo-truck-loaded-url="{% url 'excavator_truck_loaded' %}"
@@ -151,11 +152,10 @@
                     </div>
                 </div>
 
-                <div class="eo-truck-grid eo-dashboard-truck-grid{% if not truck_cards %} is-empty{% elif truck_cards|length > 9 %} is-many is-rows-3{% else %} is-rows-3{% endif %}" aria-label="Самосвалы">
+                <div class="eo-truck-grid eo-dashboard-truck-grid{% if not truck_cards %} is-empty{% elif truck_cards|length > 9 %} is-many is-rows-4{% else %} is-rows-3{% endif %}" aria-label="Самосвалы">
                     {% for card in truck_cards %}
-                        {% if forloop.counter <= 9 %}
                             <button
-                                class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if open_shift and card.is_selected %} is-selected{% endif %}{% if card.is_inactive %} is-inactive{% endif %}{% if card.is_load_blocked %} is-load-blocked{% endif %}{% if card.load_block_reason_code == 'driver_shift_not_started' %} is-shift-pending{% endif %}{% if card.load_block_reason_code == 'no_driver' %} is-no-driver{% endif %}{% if card.plan_visual.is_overrun %} is-plan-overrun{% endif %}"
+                                class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if open_shift and card.is_selected %} is-selected{% endif %}{% if card.is_inactive %} is-inactive{% endif %}{% if card.is_load_blocked %} is-load-blocked{% endif %}{% if card.is_handoff_completion %} is-handoff-completion{% endif %}{% if card.load_block_reason_code == 'driver_shift_not_started' %} is-shift-pending{% endif %}{% if card.load_block_reason_code == 'no_driver' %} is-no-driver{% endif %}{% if card.plan_visual.is_overrun %} is-plan-overrun{% endif %}"
                                 type="button"
                                 draggable="{% if open_shift and card.can_drag %}true{% else %}false{% endif %}"
                                 style="--eo-truck-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --eo-truck-total-progress: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}%; --plan-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --truck-plan-percent: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %};"
@@ -163,9 +163,11 @@
                                 data-eo-dashboard-truck
                                 data-assignment-id="{{ card.assignment.id }}"
                                 data-truck-id="{{ card.assignment.truck.id }}"
+                                data-eo-truck-number="{{ card.number }}"
                                 data-eo-truck-detail-id="{{ card.detail_card_id }}"
                                 data-eo-equipment-state="{{ card.equipment_state_code }}"
                                 data-eo-can-load="{% if open_shift and card.can_load %}1{% else %}0{% endif %}"
+                                data-eo-handoff-completion="{% if card.is_handoff_completion %}1{% else %}0{% endif %}"
                                 {% if card.load_block_reason_code %}data-eo-load-block-reason-code="{{ card.load_block_reason_code }}"{% endif %}
                                 {% if card.load_block_reason_label %}data-eo-load-block-reason-label="{{ card.load_block_reason_label }}"{% endif %}
                                 data-eo-plan-percent="{% if card.plan_has_plan %}{{ card.plan_percent }}{% endif %}"
@@ -184,11 +186,7 @@
                                 <small>{% if card.plan_has_plan %}{{ card.plan_percent }}%{% else %}{{ card.plan_short_label }}{% endif %}</small>
                                 {% if card.plan_visual.has_completed_loops %}<b class="eo-truck-progress-loop" aria-label="Завершено циклов: {{ card.plan_visual.completed_loops }}">×{{ card.plan_visual.completed_loops }}</b>{% endif %}
                                 {% if card.target_label %}<em>{{ card.target_label }}</em>{% endif %}
-                                {% if forloop.counter == 9 and truck_cards|length > 9 %}
-                                    <b class="eo-dashboard-truck-overflow" aria-hidden="true">+{{ truck_cards|length|add:"-9" }}</b>
-                                {% endif %}
                             </button>
-                        {% endif %}
                     {% empty %}
                         <div class="eo-empty-state eo-dashboard-empty">
                             <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
@@ -199,7 +197,7 @@
                 </div>
                 <div data-eo-assignment-snapshot hidden>
                     {% for card in truck_cards %}
-                        <i data-truck-id="{{ card.assignment.truck.id }}" data-truck-number="{{ card.number }}"></i>
+                        <i data-assignment-id="{{ card.assignment.id }}" data-truck-id="{{ card.assignment.truck.id }}" data-truck-number="{{ card.number }}"></i>
                     {% endfor %}
                 </div>
             </div>
@@ -207,7 +205,7 @@
             <div class="eo-dashboard-dump-zone">
                 <div class="eo-unload-grid eo-unload-grid-work eo-dashboard-unload-grid is-count-{{ dump_cards|length }}{% if dump_cards|length == 1 %} is-single{% endif %}" aria-label="Точки разгрузки">
                     {% for card in dump_cards %}
-                        <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_last_sent %} is-last-dump{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% endif %}>
+                        <button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_last_sent %} is-last-dump{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}" data-eo-dump-distance="{{ card.transport_distance_km }}" data-eo-has-pending-trucks="{% if card.pending_trucks %}true{% else %}false{% endif %}"{% if not open_shift %} disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% endif %}>
                             <span class="eo-dashboard-unload-top">
                                 <strong>{{ card.name }}</strong>
                                 <small>{{ card.completed_count|default:0 }}</small>
@@ -215,7 +213,7 @@
                             <span class="eo-dashboard-unload-label">Разгружено</span>
                             <span class="eo-dashboard-unload-badges" aria-label="Назначены, не разгружены">
                                 {% for truck in card.pending_trucks %}
-                                    <b class="status-{{ truck.status_key }}" data-eo-queue-truck data-truck-id="{{ truck.truck_id }}" data-trip-id="{{ truck.trip_id }}" data-eo-truck-number="{{ truck.number }}">{{ truck.number }}</b>
+                                    <b class="status-{{ truck.status_key }}{% if truck.is_last_sent %} is-last-sent-truck{% endif %}" data-eo-queue-truck data-truck-id="{{ truck.truck_id }}" data-trip-id="{{ truck.trip_id }}" data-eo-truck-number="{{ truck.number }}" data-eo-last-sent-truck="{% if truck.is_last_sent %}true{% else %}false{% endif %}">{{ truck.number }}</b>
                                 {% empty %}
                                     <b class="is-muted">нет</b>
                                 {% endfor %}
@@ -398,7 +396,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v203";
+var excavatorShellVersion = "excavator-mobile-shell-v220";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -458,14 +456,232 @@ function playExcavatorSound(name) {
     return window.MobileOperationalSounds.play(name);
 }
 
-function playExcavatorAssignmentAlert() {
+function playExcavatorVoice(cue, voice, options) {
+    options = options || {};
+    if (!window.MobileOperationalSounds || typeof window.MobileOperationalSounds.announceOperational !== "function") {
+        return playExcavatorSound(cue);
+    }
+    return window.MobileOperationalSounds.announceOperational({
+        cue: cue,
+        voice: voice,
+        eventVersion: Number(options.eventVersion || 0),
+        eventKey: String(options.eventKey || "")
+    });
+}
+
+function playExcavatorEquipmentVoice(action, equipmentNumber, options) {
+    options = options || {};
+    if (!window.MobileOperationalSounds || typeof window.MobileOperationalSounds.announceEquipment !== "function") {
+        return playExcavatorVoice(
+            String(options.cue || "truck_assigned"),
+            String(options.fallbackVoice || "voice_truck_assigned"),
+            options
+        );
+    }
+    return window.MobileOperationalSounds.announceEquipment({
+        cue: String(options.cue || "truck_assigned"),
+        action: String(action || ""),
+        equipmentNumber: String(equipmentNumber || ""),
+        dumpPointId: Number(options.dumpPointId || 0),
+        dumpPointName: String(options.dumpPointName || ""),
+        fallbackVoice: String(options.fallbackVoice || "voice_truck_assigned"),
+        eventVersion: Number(options.eventVersion || 0),
+        eventKey: String(options.eventKey || "")
+    });
+}
+
+/* EXCAVATOR_VOICE_GUARD_START */
+window.ExcavatorVoiceGuard = (function () {
+    var LIMIT = 64;
+    var order = [];
+    var states = Object.create(null);
+
+    function forget(operationKey) {
+        delete states[operationKey];
+        var position = order.indexOf(operationKey);
+        if (position !== -1) order.splice(position, 1);
+    }
+
+    function claim(operationKey) {
+        if (!operationKey || states[operationKey]) return false;
+        states[operationKey] = "claimed";
+        order.push(operationKey);
+        while (order.length > LIMIT) {
+            delete states[order.shift()];
+        }
+        return true;
+    }
+
+    function finalize(operationKey) {
+        if (operationKey && states[operationKey]) states[operationKey] = "announced";
+    }
+
+    function release(operationKey) {
+        if (operationKey && states[operationKey] === "claimed") forget(operationKey);
+    }
+
+    function state(operationKey) {
+        return (operationKey && states[operationKey]) || "";
+    }
+
+    return {claim: claim, finalize: finalize, release: release, state: state};
+})();
+
+function settleExcavatorVoiceClaims(operationKeys, result) {
+    var announced = result === true || !!(result && result.announced === true);
+    var ownedElsewhere = !!(result && String(result.reason || "") === "already_announced");
+    (operationKeys || []).forEach(function (operationKey) {
+        if (announced || ownedElsewhere) {
+            window.ExcavatorVoiceGuard.finalize(operationKey);
+        } else {
+            window.ExcavatorVoiceGuard.release(operationKey);
+        }
+    });
+}
+
+function excavatorAssignmentOperationKey(kind, assignmentId, excavatorId) {
+    var normalizedKind = String(kind || "").trim();
+    var normalizedAssignmentId = String(assignmentId || "").trim();
+    var normalizedExcavatorId = String(excavatorId || "").trim();
+    if (!normalizedKind || !normalizedAssignmentId || !normalizedExcavatorId) return "";
+    return ["excavator-assignment", normalizedKind, normalizedAssignmentId, normalizedExcavatorId].join(":");
+}
+
+function currentExcavatorVoiceEquipmentId(root) {
+    var shell = root || document.querySelector("[data-eo-shell]");
+    return shell
+        ? String(shell.dataset.eoCurrentExcavatorId || shell.dataset.eoShiftExcavatorId || "").trim()
+        : "";
+}
+
+function excavatorEventContainsId(values, expected) {
+    var normalizedExpected = String(expected || "");
+    return Array.isArray(values) && values.some(function (value) {
+        return String(value || "") === normalizedExpected;
+    });
+}
+
+function latestExcavatorAssignmentOperations(context) {
+    var excavatorId = currentExcavatorVoiceEquipmentId();
+    var events = context && Array.isArray(context.events) ? context.events : [];
+    var latestByTruck = Object.create(null);
+    if (!excavatorId) return [];
+
+    events.forEach(function (event) {
+        var payload = event && event.payload ? event.payload : null;
+        var version = Number(event && event.version || 0);
+        if (!payload || event.type !== "assignment_changed" || version <= 0) return;
+        if (String(event.object_type || "") !== "HaulAssignment") return;
+        var assignmentId = String(event.object_id || "").trim();
+        var truckId = String(
+            payload.truck_id
+            || (Array.isArray(payload.truck_ids) ? payload.truck_ids[0] : "")
+            || ""
+        ).trim();
+        var truckNumber = String(payload.truck_number || "").trim();
+        if (!assignmentId || (!truckId && !truckNumber)) return;
+
+        var action = String(payload.action || "");
+        var targetExcavatorId = String(payload.target_excavator_id || "").trim();
+        var wasRelated = excavatorEventContainsId(payload.excavator_ids, excavatorId);
+        var kind = "";
+        if (action === "assignment_applied" && targetExcavatorId === excavatorId) {
+            kind = "assign";
+        } else if (
+            (action === "assignment_applied" || action === "release_applied")
+            && wasRelated
+        ) {
+            kind = "remove";
+        }
+        if (!kind) return;
+
+        var truckKey = truckId || "number:" + truckNumber;
+        var previous = latestByTruck[truckKey];
+        if (previous && previous.eventVersion >= version) return;
+        latestByTruck[truckKey] = {
+            kind: kind,
+            action: kind === "assign" ? "excavator_truck_assigned" : "excavator_truck_removed",
+            truckId: truckId,
+            truckNumber: truckNumber,
+            fallbackVoice: kind === "assign" ? "voice_truck_assigned" : "voice_truck_removed",
+            eventVersion: version,
+            operationKey: excavatorAssignmentOperationKey(kind, assignmentId, excavatorId)
+        };
+    });
+
+    return Object.keys(latestByTruck).map(function (truckKey) {
+        return latestByTruck[truckKey];
+    }).sort(function (left, right) {
+        return left.eventVersion - right.eventVersion;
+    });
+}
+
+function playExcavatorAssignmentAlerts(operations) {
+    var claimed = (operations || []).filter(function (operation) {
+        return operation && operation.operationKey
+            && window.ExcavatorVoiceGuard.claim(operation.operationKey);
+    });
+    if (!claimed.length) return;
+
     if (navigator.vibrate) {
         try {
             navigator.vibrate([180, 90, 180]);
         } catch (error) {}
     }
-    playExcavatorSound("truck_assigned");
+
+    var operationKeys = claimed.map(function (operation) { return operation.operationKey; });
+    var sounds = window.MobileOperationalSounds;
+    var pending;
+    try {
+        if (sounds && typeof sounds.announceEquipmentBatch === "function") {
+            pending = sounds.announceEquipmentBatch({
+                cue: "truck_assigned",
+                eventKey: "excavator_operator_assignment",
+                items: claimed.map(function (operation) {
+                    return {
+                        action: operation.action,
+                        equipmentNumber: operation.truckNumber,
+                        fallbackVoice: operation.fallbackVoice,
+                        eventVersion: Number(operation.eventVersion || 0),
+                        operationKey: operation.operationKey
+                    };
+                })
+            });
+        } else {
+            var first = claimed[0];
+            pending = playExcavatorEquipmentVoice(first.action, first.truckNumber, {
+                cue: "truck_assigned",
+                fallbackVoice: first.fallbackVoice,
+                eventVersion: Number(first.eventVersion || 0),
+                eventKey: "excavator_operator_assignment"
+            });
+        }
+    } catch (error) {
+        operationKeys.forEach(window.ExcavatorVoiceGuard.release);
+        return;
+    }
+    Promise.resolve(pending).then(function (result) {
+        settleExcavatorVoiceClaims(operationKeys, result);
+    }, function () {
+        operationKeys.forEach(window.ExcavatorVoiceGuard.release);
+    });
 }
+
+function playExcavatorAssignmentAlert(action, truckNumber, voice, eventVersion, options) {
+    options = options || {};
+    playExcavatorAssignmentAlerts([{
+        action: action,
+        truckNumber: String(truckNumber || ""),
+        fallbackVoice: voice || "voice_truck_assigned",
+        eventVersion: Number(eventVersion || 0),
+        operationKey: String(options.operationKey || "")
+    }]);
+}
+
+window.handleOperationalStateSignals = function (context) {
+    playExcavatorAssignmentAlerts(latestExcavatorAssignmentOperations(context));
+};
+/* EXCAVATOR_VOICE_GUARD_END */
 
 function readExcavatorAssignmentSnapshot(root) {
     var snapshot = {};
@@ -473,7 +689,10 @@ function readExcavatorAssignmentSnapshot(root) {
     root.querySelectorAll("[data-eo-assignment-snapshot] [data-truck-id]").forEach(function (item) {
         var truckId = String(item.dataset.truckId || "");
         if (!truckId) return;
-        snapshot[truckId] = String(item.dataset.truckNumber || truckId);
+        snapshot[truckId] = {
+            assignmentId: String(item.dataset.assignmentId || ""),
+            truckNumber: String(item.dataset.truckNumber || truckId)
+        };
     });
     return snapshot;
 }
@@ -502,21 +721,36 @@ function storeExcavatorAssignments(root, snapshot) {
     } catch (error) {}
 }
 
-function announceExcavatorAssignmentChanges(previousSnapshot, nextSnapshot) {
+function normalizeExcavatorAssignmentSnapshotItem(value, truckId) {
+    if (value && typeof value === "object") {
+        return {
+            assignmentId: String(value.assignmentId || ""),
+            truckNumber: String(value.truckNumber || truckId)
+        };
+    }
+    return {
+        assignmentId: "",
+        truckNumber: String(value || truckId)
+    };
+}
+
+function announceExcavatorAssignmentChanges(previousSnapshot, nextSnapshot, eventVersion) {
     var previous = previousSnapshot || {};
     var next = nextSnapshot || {};
-    var addedNumbers = Object.keys(next).filter(function (truckId) {
+    var addedTruckIds = Object.keys(next).filter(function (truckId) {
         return !previousSnapshot || !Object.prototype.hasOwnProperty.call(previous, truckId);
-    }).map(function (truckId) {
-        return next[truckId];
     });
     /* Снятый самосвал раньше исчезал молча, и машинист мог ждать машину,
        которую у него уже забрали. Об этом надо сообщать так же, как о
        назначении. */
-    var removedNumbers = !previousSnapshot ? [] : Object.keys(previous).filter(function (truckId) {
+    var removedTruckIds = !previousSnapshot ? [] : Object.keys(previous).filter(function (truckId) {
         return !Object.prototype.hasOwnProperty.call(next, truckId);
-    }).map(function (truckId) {
-        return previous[truckId];
+    });
+    var addedNumbers = addedTruckIds.map(function (truckId) {
+        return normalizeExcavatorAssignmentSnapshotItem(next[truckId], truckId).truckNumber;
+    });
+    var removedNumbers = removedTruckIds.map(function (truckId) {
+        return normalizeExcavatorAssignmentSnapshotItem(previous[truckId], truckId).truckNumber;
     });
     if (!addedNumbers.length && !removedNumbers.length) return;
 
@@ -535,11 +769,27 @@ function announceExcavatorAssignmentChanges(previousSnapshot, nextSnapshot) {
                 : "Сняты самосвалы: " + removedNumbers.join(", ") + "."
         );
     }
-    playExcavatorAssignmentAlert();
+    var excavatorId = currentExcavatorVoiceEquipmentId();
+    var fallbackOperations = addedTruckIds.map(function (truckId) {
+        var item = normalizeExcavatorAssignmentSnapshotItem(next[truckId], truckId);
+        return {
+            kind: "assign",
+            action: "excavator_truck_assigned",
+            truckId: truckId,
+            truckNumber: item.truckNumber,
+            fallbackVoice: "voice_truck_assigned",
+            eventVersion: Number(eventVersion || 0),
+            operationKey: excavatorAssignmentOperationKey("assign", item.assignmentId, excavatorId)
+        };
+    });
+    /* Снятие принадлежит точному release_applied из раннего сигнала или
+       heartbeat. В DOM уже нет id снимающей операции, поэтому state-based
+       вызов здесь создал бы второй, несовпадающий ключ. */
+    playExcavatorAssignmentAlerts(fallbackOperations);
     showExcavatorNotice(parts.join(" "));
 }
 
-function syncExcavatorAssignmentSnapshot(root, previousSnapshot) {
+function syncExcavatorAssignmentSnapshot(root, previousSnapshot, eventVersion) {
     if (!root) return;
     var nextSnapshot = readExcavatorAssignmentSnapshot(root);
     var baseline = previousSnapshot;
@@ -547,7 +797,7 @@ function syncExcavatorAssignmentSnapshot(root, previousSnapshot) {
         baseline = readStoredExcavatorAssignments(root);
     }
     if (baseline) {
-        announceExcavatorAssignmentChanges(baseline, nextSnapshot);
+        announceExcavatorAssignmentChanges(baseline, nextSnapshot, eventVersion);
     }
     storeExcavatorAssignments(root, nextSnapshot);
 }
@@ -701,7 +951,7 @@ function isExcavatorRefreshUnsafe(options) {
     )) {
         return true;
     }
-    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden])")) {
+    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .eo-dashboard-unload-card.is-return-swiping, .eo-dashboard-unload-card.is-return-rebounding, .eo-dashboard-unload-card.is-return-pending, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden])")) {
         return true;
     }
     return Array.prototype.some.call(
@@ -773,7 +1023,13 @@ function refreshExcavatorWorkFromServer(options) {
         if (typeof window.checkAchievementPrize === "function") {
             window.checkAchievementPrize(options.achievementContext);
         }
-        syncExcavatorAssignmentSnapshot(newShell, previousAssignments);
+        if (options.suppressAssignmentAlert === true) {
+            /* Открытие и закрытие смены меняют видимый список карточек, но это
+               не является реальным назначением или снятием самосвала. */
+            storeExcavatorAssignments(newShell, readExcavatorAssignmentSnapshot(newShell));
+        } else {
+            syncExcavatorAssignmentSnapshot(newShell, previousAssignments, Number(options.version || 0));
+        }
         scheduleExcavatorViewportHeightSync();
         return true;
     }).catch(function () {
@@ -795,7 +1051,7 @@ window.applyOperationalStateRefresh = function (context) {
     }
     var targetVersion = Number(context && context.version || 0);
     var events = context && context.events;
-    if (context && context.eventsTruncated) {
+    if (context && (context.eventsTruncated || context.foregroundReconcile === true)) {
         return refreshExcavatorWorkFromServer({ preserveTab: true, version: targetVersion, achievementContext: context }).then(function (applied) {
             if (!applied) return { deferred: true, reason: "excavator_refresh_failed" };
             storeExcavatorRealtimeVersion(targetVersion);
@@ -826,6 +1082,7 @@ window.initExcavatorWorkShell = function () {
     var assignmentInput = shell.querySelector("[data-eo-assignment-input]");
     var dumpInput = shell.querySelector("[data-eo-dump-input]");
     var dumpPointsInput = shell.querySelector("[data-eo-dump-points-input]");
+    var transportDistanceInput = shell.querySelector("input[name='transport_distance_km']");
     var downtimeInput = shell.querySelector("[data-eo-downtime-input]");
     var activeDuration = shell.querySelector("[data-eo-active-duration]");
     var downtimeCard = shell.querySelector("[data-eo-active-downtime-id]");
@@ -850,6 +1107,7 @@ window.initExcavatorWorkShell = function () {
     var shiftScroll = shell.querySelector("[data-eo-shift-scroll]");
     var shiftInputs = shell.querySelector("[data-eo-shift-inputs]");
     var shiftFuelInput = shell.querySelector("[data-eo-shift-fuel]");
+    var shiftFuelLiters = shell.querySelector("[data-eo-shift-fuel-liters]");
     var shiftHoursInput = shell.querySelector("[data-eo-shift-engine-hours]");
     var shiftFormError = shell.querySelector("[data-eo-shift-form-error]");
     var faceScreen = shell.querySelector('[data-eo-screen="face"]');
@@ -1309,6 +1567,9 @@ window.initExcavatorWorkShell = function () {
         if (!id) return;
         shell.querySelectorAll("[data-eo-dump-target]").forEach(function (item) {
             item.classList.toggle("is-selected", item.dataset.eoDumpTarget === id);
+            if (item.dataset.eoDumpTarget === id && transportDistanceInput) {
+                transportDistanceInput.value = item.dataset.eoDumpDistance || "";
+            }
         });
         if (dumpInput) {
             dumpInput.value = id;
@@ -1345,6 +1606,26 @@ window.initExcavatorWorkShell = function () {
         }
     }
 
+    function markLatestPendingTruckBadge(list, latestBadge) {
+        if (!list) return null;
+        var badges = Array.prototype.slice.call(list.querySelectorAll("[data-eo-queue-truck]"));
+        var latest = latestBadge && badges.indexOf(latestBadge) !== -1 ? latestBadge : (badges[0] || null);
+        badges.forEach(function (badge) {
+            var isLatest = badge === latest;
+            badge.classList.toggle("is-last-sent-truck", isLatest);
+            badge.dataset.eoLastSentTruck = isLatest ? "true" : "false";
+        });
+        var dumpTarget = list.closest ? list.closest("[data-eo-dump-target]") : null;
+        if (dumpTarget) dumpTarget.dataset.eoHasPendingTrucks = latest ? "true" : "false";
+        return latest;
+    }
+
+    function latestPendingTruckBadge(dumpTarget) {
+        if (!dumpTarget) return null;
+        var marked = dumpTarget.querySelector('[data-eo-queue-truck][data-eo-last-sent-truck="true"]');
+        return marked || dumpTarget.querySelector("[data-eo-queue-truck]");
+    }
+
     function addPendingTruckBadge(dumpTarget, card, tripId) {
         var list = pendingBadgeList(dumpTarget);
         if (!list || !card) return null;
@@ -1361,6 +1642,7 @@ window.initExcavatorWorkShell = function () {
         badge.dataset.eoTruckNumber = card.querySelector("strong") ? card.querySelector("strong").textContent.trim() : "";
         badge.textContent = badge.dataset.eoTruckNumber || truckId;
         list.appendChild(badge);
+        markLatestPendingTruckBadge(list, badge);
         return badge;
     }
 
@@ -1373,6 +1655,7 @@ window.initExcavatorWorkShell = function () {
             var sameTrip = tripId && item.dataset.tripId === String(tripId);
             if (sameTruck || sameTrip) item.remove();
         });
+        markLatestPendingTruckBadge(list);
         ensureMutedPendingBadge(list);
     }
 
@@ -1400,6 +1683,10 @@ window.initExcavatorWorkShell = function () {
         if (status) status.textContent = data.status_label || "назначена";
         var targetText = card.querySelector("em");
         if (targetText) targetText.remove();
+        card.classList.add("is-returned-from-dump");
+        window.setTimeout(function () {
+            card.classList.remove("is-returned-from-dump");
+        }, 520);
         selectTruck(card);
     }
 
@@ -1584,21 +1871,31 @@ window.initExcavatorWorkShell = function () {
         if (parts.dialog) parts.dialog.classList.remove("is-return-armed");
     }
 
-    function cancelLoadedTripFromQueue(item) {
-        if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
-            showQueueNote("Роль неактивна — доступен только просмотр.", true);
+    function showLoadedCancelStatus(options, text, isError) {
+        if (options && options.direct) {
+            showExcavatorNotice(text || "");
             return;
+        }
+        showQueueNote(text, isError);
+    }
+
+    function cancelLoadedTripFromQueue(item, options) {
+        options = options || {};
+        if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
+            showLoadedCancelStatus(options, "Роль неактивна — доступен только просмотр.", true);
+            return Promise.resolve(false);
         }
         if (!truckLoadedCancelUrl || !item || !item.dataset.tripId) {
             playExcavatorSound("action_error");
-            showQueueNote("Серверная отмена для этого рейса недоступна.", true);
-            return;
+            showLoadedCancelStatus(options, "Серверная отмена для этого рейса недоступна.", true);
+            return Promise.resolve(false);
         }
-        var cancelActionId = item.dataset.eoCancelActionId || generateClientActionId("truck-loaded-cancel");
-        item.dataset.eoCancelActionId = cancelActionId;
+        var actionOwner = options.actionOwner || item;
+        var cancelActionId = actionOwner.dataset.eoCancelActionId || generateClientActionId("truck-loaded-cancel");
+        actionOwner.dataset.eoCancelActionId = cancelActionId;
         item.disabled = true;
-        showQueueNote("Отменяю назначение на сервере...", false);
-        fetch(truckLoadedCancelUrl, {
+        showLoadedCancelStatus(options, options.direct ? "Возвращаю последний самосвал..." : "Отменяю назначение на сервере...", false);
+        return fetch(truckLoadedCancelUrl, {
             method: "POST",
             credentials: "same-origin",
             headers: {
@@ -1626,17 +1923,51 @@ window.initExcavatorWorkShell = function () {
             removePendingTruckBadge(dumpTarget, data.truck_id || item.dataset.truckId, data.trip_id || item.dataset.tripId);
             restoreTruckAfterLoadedCancel(cardByTruckId(data.truck_id || item.dataset.truckId), data);
             item.remove();
-            showQueueNote("Самосвал возвращен в назначенные.", false);
+            showLoadedCancelStatus(
+                options,
+                options.direct
+                    ? "Самосвал " + (item.dataset.truckNumber || "") + " возвращен. Выберите новую точку разгрузки."
+                    : "Самосвал возвращен в назначенные.",
+                false
+            );
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                 window.AppRealtime.wake("truck_loaded_cancel");
             }
+            return true;
         }).catch(function (error) {
             playExcavatorSound("action_error");
             item.disabled = false;
-            showQueueNote(error.message || "Назначение не отменено", true);
+            showLoadedCancelStatus(options, error.message || "Назначение не отменено", true);
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                 window.AppRealtime.wake("truck_loaded_cancel_error");
             }
+            return false;
+        }).then(function (result) {
+            if (options.dumpTarget) options.dumpTarget.classList.remove("is-return-pending");
+            if (options.actionOwner) options.actionOwner.classList.remove("is-returning");
+            return result;
+        });
+    }
+
+    function returnLastTruckFromDump(dumpTarget) {
+        if (!dumpTarget || dumpTarget.classList.contains("is-return-pending")) return Promise.resolve(false);
+        var badge = latestPendingTruckBadge(dumpTarget);
+        if (!badge) {
+            playExcavatorSound("action_error");
+            showExcavatorNotice("На этой точке нет самосвала для возврата.");
+            return Promise.resolve(false);
+        }
+        var item = queueItemFromBadge(badge, dumpTarget);
+        dumpTarget.classList.add("is-return-pending");
+        badge.classList.add("is-returning");
+        return cancelLoadedTripFromQueue(item, {
+            direct: true,
+            dumpTarget: dumpTarget,
+            actionOwner: badge
+        }).then(function (result) {
+            dumpTarget.classList.remove("is-return-pending");
+            badge.classList.remove("is-returning");
+            return result;
         });
     }
 
@@ -1761,7 +2092,7 @@ window.initExcavatorWorkShell = function () {
             rockTypeId: rockSelect ? String(rockSelect.value || "") : "",
             loadingHorizon: normalizeFaceSetting(horizonInput ? horizonInput.value : ""),
             loadingBlock: normalizeFaceSetting(blockInput ? blockInput.value : ""),
-            dumpPointIds: selectedDumpPointIds().map(String).sort()
+            dumpPointIds: selectedDumpPointIds()
         });
     }
 
@@ -1925,6 +2256,9 @@ window.initExcavatorWorkShell = function () {
         var snapshot = snapshotTruckCard(card);
         var optimisticBadge = null;
         var truckId = card.dataset.truckId || "";
+        var truckNumber = card.dataset.eoTruckNumber || (card.querySelector("strong") ? card.querySelector("strong").textContent.trim() : "");
+        var dumpPointId = Number(dumpTarget.dataset.eoDumpTarget || 0);
+        var dumpPointName = dumpTarget.dataset.eoDumpName || (dumpTarget.querySelector("strong") ? dumpTarget.querySelector("strong").textContent.trim() : "");
         var loadActionKey = [
             truckId,
             dumpTarget.dataset.eoDumpTarget || "",
@@ -1947,7 +2281,7 @@ window.initExcavatorWorkShell = function () {
             loading_horizon: shell.querySelector("input[name='loading_horizon']") ? shell.querySelector("input[name='loading_horizon']").value : "",
             loading_block: shell.querySelector("input[name='loading_block']") ? shell.querySelector("input[name='loading_block']").value : "",
             planned_volume_m3: shell.querySelector("input[name='planned_volume_m3']") ? shell.querySelector("input[name='planned_volume_m3']").value : "",
-            transport_distance_km: shell.querySelector("input[name='transport_distance_km']") ? shell.querySelector("input[name='transport_distance_km']").value : "",
+            transport_distance_km: dumpTarget.dataset.eoDumpDistance || (transportDistanceInput ? transportDistanceInput.value : ""),
             downtime_text: downtimeInput ? downtimeInput.value : "",
             note: shell.querySelector("input[name='note']") ? shell.querySelector("input[name='note']").value : ""
         };
@@ -1971,7 +2305,14 @@ window.initExcavatorWorkShell = function () {
                 return data;
             });
         }).then(function (data) {
-            playExcavatorSound("action_ok");
+            playExcavatorEquipmentVoice("excavator_truck_sent", truckNumber, {
+                cue: "action_ok",
+                fallbackVoice: "voice_truck_sent",
+                dumpPointId: dumpPointId,
+                dumpPointName: dumpPointName,
+                eventVersion: Number(data.version || 0),
+                eventKey: "excavator_operator_truck_sent"
+            });
             delete card.dataset.eoLoadActionKey;
             delete card.dataset.eoLoadActionId;
             if (data.refresh_required) {
@@ -1999,7 +2340,7 @@ window.initExcavatorWorkShell = function () {
                 window.AppRealtime.wake("truck_loaded");
             }
         }).catch(function (error) {
-            playExcavatorSound("action_error");
+            playExcavatorVoice("action_error", "voice_truck_send_failed");
             restoreTruckCard(card, snapshot);
             if (optimisticBadge) optimisticBadge.remove();
             ensureMutedPendingBadge(pendingBadgeList(dumpTarget));
@@ -2314,36 +2655,212 @@ window.initExcavatorWorkShell = function () {
         });
     }
 
+    function isDumpReturnSwipe(deltaX, deltaY) {
+        return deltaY <= -48 && Math.abs(deltaY) >= Math.max(48, Math.abs(deltaX) * 1.25);
+    }
+
+    function rubberBandDumpReturnOffset(value, limit, directRatio, overflowRatio) {
+        var direction = value < 0 ? -1 : 1;
+        var distance = Math.abs(Number(value) || 0);
+        var directDistance = Math.min(distance, 56) * directRatio;
+        var resistedDistance = Math.max(0, distance - 56) * overflowRatio;
+        return direction * Math.min(limit, directDistance + resistedDistance);
+    }
+
+    function updateDumpReturnElastic(target, swipe) {
+        if (!target || !swipe) return;
+        var elasticX = rubberBandDumpReturnOffset(swipe.deltaX, 56, .64, .15);
+        var elasticY = rubberBandDumpReturnOffset(swipe.deltaY, 72, .84, .18);
+        var tilt = Math.max(-4.5, Math.min(4.5, elasticX / 11));
+        var stretchX = 1 + Math.min(.075, Math.abs(elasticX) / 760 + Math.abs(elasticY) / 2200);
+        var stretchY = 1 + Math.min(.105, Math.abs(elasticY) / 620 + Math.abs(elasticX) / 2400);
+        swipe.elasticX = elasticX;
+        swipe.elasticY = elasticY;
+        swipe.elasticTilt = tilt;
+        swipe.elasticStretchX = stretchX;
+        swipe.elasticStretchY = stretchY;
+        target.style.setProperty("--eo-return-drag-x", elasticX.toFixed(2) + "px");
+        target.style.setProperty("--eo-return-drag-y", elasticY.toFixed(2) + "px");
+        target.style.setProperty("--eo-return-tilt", tilt.toFixed(2) + "deg");
+        target.style.setProperty("--eo-return-stretch-x", stretchX.toFixed(4));
+        target.style.setProperty("--eo-return-stretch-y", stretchY.toFixed(4));
+        target.style.setProperty("--eo-return-origin-x", elasticX > 4 ? "0%" : (elasticX < -4 ? "100%" : "50%"));
+        target.style.setProperty("--eo-return-origin-y", elasticY > 4 ? "0%" : (elasticY < -4 ? "100%" : "50%"));
+        target.style.setProperty("--eo-return-tether-x", (-elasticX * .52).toFixed(2) + "px");
+        target.style.setProperty("--eo-return-tether-y", (-elasticY * .52).toFixed(2) + "px");
+        target.style.setProperty("--eo-return-anchor-x", (-elasticX).toFixed(2) + "px");
+        target.style.setProperty("--eo-return-anchor-y", (-elasticY).toFixed(2) + "px");
+    }
+
+    function setDumpReturnReleaseVector(target, swipe) {
+        var x = swipe && Number.isFinite(swipe.elasticX) ? swipe.elasticX : 0;
+        var y = swipe && Number.isFinite(swipe.elasticY) ? swipe.elasticY : 0;
+        var tilt = swipe && Number.isFinite(swipe.elasticTilt) ? swipe.elasticTilt : 0;
+        var stretchX = swipe && Number.isFinite(swipe.elasticStretchX) ? swipe.elasticStretchX : 1;
+        var stretchY = swipe && Number.isFinite(swipe.elasticStretchY) ? swipe.elasticStretchY : 1;
+        var vectors = [
+            ["--eo-return-release-x", x, "px"],
+            ["--eo-return-release-y", y, "px"],
+            ["--eo-return-release-tilt", tilt, "deg"],
+            ["--eo-return-bounce-1-x", -x * .28, "px"],
+            ["--eo-return-bounce-1-y", -y * .28, "px"],
+            ["--eo-return-bounce-1-tilt", -tilt * .38, "deg"],
+            ["--eo-return-bounce-2-x", x * .15, "px"],
+            ["--eo-return-bounce-2-y", y * .15, "px"],
+            ["--eo-return-bounce-2-tilt", tilt * .2, "deg"],
+            ["--eo-return-bounce-3-x", -x * .075, "px"],
+            ["--eo-return-bounce-3-y", -y * .075, "px"],
+            ["--eo-return-bounce-3-tilt", -tilt * .1, "deg"],
+            ["--eo-return-bounce-4-x", x * .03, "px"],
+            ["--eo-return-bounce-4-y", y * .03, "px"],
+            ["--eo-return-bounce-4-tilt", tilt * .04, "deg"]
+        ];
+        vectors.forEach(function (vector) {
+            target.style.setProperty(vector[0], vector[1].toFixed(2) + vector[2]);
+        });
+        target.style.setProperty("--eo-return-release-stretch-x", stretchX.toFixed(4));
+        target.style.setProperty("--eo-return-release-stretch-y", stretchY.toFixed(4));
+    }
+
+    function clearDumpReturnReleaseVector(target) {
+        [
+            "--eo-return-release-x", "--eo-return-release-y", "--eo-return-release-tilt",
+            "--eo-return-release-stretch-x", "--eo-return-release-stretch-y",
+            "--eo-return-bounce-1-x", "--eo-return-bounce-1-y", "--eo-return-bounce-1-tilt",
+            "--eo-return-bounce-2-x", "--eo-return-bounce-2-y", "--eo-return-bounce-2-tilt",
+            "--eo-return-bounce-3-x", "--eo-return-bounce-3-y", "--eo-return-bounce-3-tilt",
+            "--eo-return-bounce-4-x", "--eo-return-bounce-4-y", "--eo-return-bounce-4-tilt"
+        ].forEach(function (propertyName) {
+            target.style.removeProperty(propertyName);
+        });
+    }
+
+    function playDumpReturnRebound(target, swipe) {
+        if (!target) return;
+        target.classList.remove("is-return-rebounding");
+        setDumpReturnReleaseVector(target, swipe);
+        void target.offsetWidth;
+        target.classList.add("is-return-rebounding");
+        window.setTimeout(function () {
+            target.classList.remove("is-return-rebounding");
+            clearDumpReturnReleaseVector(target);
+        }, 860);
+    }
+
     shell.querySelectorAll("[data-eo-dump-target]").forEach(function (target) {
         var queueHoldTimer = null;
-        var queueHoldX = 0;
-        var queueHoldY = 0;
+        var dumpSwipe = null;
         function clearQueueHold() {
             if (queueHoldTimer) {
                 window.clearTimeout(queueHoldTimer);
                 queueHoldTimer = null;
             }
         }
+        function clearDumpSwipe() {
+            clearQueueHold();
+            target.classList.remove("is-return-swiping", "is-return-armed");
+            [
+                "--eo-return-swipe-progress", "--eo-return-drag-x", "--eo-return-drag-y",
+                "--eo-return-tilt", "--eo-return-stretch-x", "--eo-return-stretch-y",
+                "--eo-return-origin-x", "--eo-return-origin-y",
+                "--eo-return-tether-x", "--eo-return-tether-y",
+                "--eo-return-anchor-x", "--eo-return-anchor-y"
+            ].forEach(function (propertyName) {
+                target.style.removeProperty(propertyName);
+            });
+            var releasedSwipe = dumpSwipe;
+            dumpSwipe = null;
+            if (releasedSwipe && target.releasePointerCapture) {
+                try {
+                    target.releasePointerCapture(releasedSwipe.pointerId);
+                } catch (error) {}
+            }
+            return releasedSwipe;
+        }
         target.addEventListener("pointerdown", function (event) {
             if (event.button !== undefined && event.button !== 0) return;
-            queueHoldX = event.clientX;
-            queueHoldY = event.clientY;
+            if (target.classList.contains("is-return-pending") || shell.classList.contains("is-truck-drag-active")) return;
+            dumpSwipe = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                deltaX: 0,
+                deltaY: 0,
+                moved: false
+            };
+            if (target.setPointerCapture) {
+                try {
+                    target.setPointerCapture(event.pointerId);
+                } catch (error) {}
+            }
             clearQueueHold();
             queueHoldTimer = window.setTimeout(function () {
                 target.dataset.eoSuppressClick = "1";
                 openDumpQueueModal(target);
+                clearDumpSwipe();
                 window.setTimeout(function () {
                     delete target.dataset.eoSuppressClick;
                 }, 450);
             }, 560);
         });
         target.addEventListener("pointermove", function (event) {
-            if (Math.abs(event.clientX - queueHoldX) > 8 || Math.abs(event.clientY - queueHoldY) > 8) {
+            if (!dumpSwipe || event.pointerId !== dumpSwipe.pointerId) return;
+            dumpSwipe.deltaX = event.clientX - dumpSwipe.startX;
+            dumpSwipe.deltaY = event.clientY - dumpSwipe.startY;
+            if (Math.abs(dumpSwipe.deltaX) > 8 || Math.abs(dumpSwipe.deltaY) > 8) {
                 clearQueueHold();
             }
+            var distance = Math.hypot(dumpSwipe.deltaX, dumpSwipe.deltaY);
+            if (distance < 5) {
+                target.classList.remove("is-return-swiping", "is-return-armed");
+                target.style.removeProperty("--eo-return-swipe-progress");
+                return;
+            }
+            event.preventDefault();
+            dumpSwipe.moved = true;
+            var progress = Math.min(1, Math.max(0, -dumpSwipe.deltaY) / 56);
+            target.style.setProperty("--eo-return-swipe-progress", String(progress));
+            updateDumpReturnElastic(target, dumpSwipe);
+            target.classList.add("is-return-swiping");
+            target.classList.toggle("is-return-armed", isDumpReturnSwipe(dumpSwipe.deltaX, dumpSwipe.deltaY));
         });
-        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
-            target.addEventListener(eventName, clearQueueHold);
+        target.addEventListener("pointerup", function (event) {
+            if (!dumpSwipe || event.pointerId !== dumpSwipe.pointerId) return;
+            if (Number.isFinite(event.clientX) && Number.isFinite(event.clientY)) {
+                dumpSwipe.deltaX = event.clientX - dumpSwipe.startX;
+                dumpSwipe.deltaY = event.clientY - dumpSwipe.startY;
+            }
+            var shouldReturn = isDumpReturnSwipe(dumpSwipe.deltaX, dumpSwipe.deltaY);
+            if (shouldReturn) {
+                event.preventDefault();
+                target.dataset.eoSuppressClick = "1";
+            }
+            updateDumpReturnElastic(target, dumpSwipe);
+            dumpSwipe.moved = dumpSwipe.moved || Math.hypot(dumpSwipe.deltaX, dumpSwipe.deltaY) >= 5;
+            var releasedSwipe = clearDumpSwipe();
+            if (releasedSwipe && releasedSwipe.moved) {
+                event.preventDefault();
+                target.dataset.eoSuppressClick = "1";
+                playDumpReturnRebound(target, releasedSwipe);
+                window.setTimeout(function () {
+                    delete target.dataset.eoSuppressClick;
+                }, 450);
+            }
+            if (shouldReturn) {
+                returnLastTruckFromDump(target);
+            }
+        });
+        target.addEventListener("pointercancel", function () {
+            var releasedSwipe = clearDumpSwipe();
+            if (releasedSwipe && releasedSwipe.moved) playDumpReturnRebound(target, releasedSwipe);
+        });
+        target.addEventListener("lostpointercapture", function () {
+            if (!dumpSwipe) return;
+            var releasedSwipe = clearDumpSwipe();
+            if (releasedSwipe && releasedSwipe.moved) playDumpReturnRebound(target, releasedSwipe);
+        });
+        target.addEventListener("pointerleave", function () {
+            clearQueueHold();
         });
         target.addEventListener("dragover", function (event) {
             event.preventDefault();
@@ -2462,7 +2979,7 @@ window.initExcavatorWorkShell = function () {
                     reason_id: button.dataset.eoDowntimeReasonId,
                     client_action_id: generateClientActionId("excavator-downtime")
                 }).then(function (payload) {
-                    playExcavatorSound("action_ok");
+                    playExcavatorVoice("action_ok", "voice_downtime_started");
                     applyActiveDowntime(payload);
                     if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                         try {
@@ -2472,7 +2989,7 @@ window.initExcavatorWorkShell = function () {
                         }
                     }
                 }, function (error) {
-                    playExcavatorSound("action_error");
+                    playExcavatorVoice("action_error", "voice_action_failed");
                     downtimeReasonButtons.forEach(function (item) {
                         item.classList.remove("is-selected");
                     });
@@ -2562,7 +3079,7 @@ window.initExcavatorWorkShell = function () {
                     return data;
                 });
             }).then(function (data) {
-                playExcavatorSound("action_ok");
+                playExcavatorVoice("action_ok", "voice_face_settings_saved");
                 var savedIds = normalizeDumpPointIds(data.dump_point_ids || ids);
                 replaceDraftDumpPointIds(savedIds);
                 replacePersistedDumpPointIds(savedIds);
@@ -2593,7 +3110,7 @@ window.initExcavatorWorkShell = function () {
                     }
                 });
             }, function (error) {
-                playExcavatorSound("action_error");
+                playExcavatorVoice("action_error", "voice_action_failed");
                 setFaceSettingsPending(false);
                 applySettings.classList.remove("is-pending");
                 setApplySettingsLabel("Применить настройки");
@@ -2624,7 +3141,7 @@ window.initExcavatorWorkShell = function () {
     }
 
     function showShiftErrors(message, fieldErrors) {
-        playExcavatorSound("action_error");
+        playExcavatorVoice("action_error", "voice_action_failed");
         clearShiftErrors();
         if (shiftFormError) {
             shiftFormError.textContent = message || "Проверьте показания.";
@@ -2649,15 +3166,30 @@ window.initExcavatorWorkShell = function () {
         });
     }
 
+    function calculatedShiftFuelLiters() {
+        var percent = parseShiftNumber(shiftFuelInput && shiftFuelInput.value);
+        var capacity = parseShiftNumber(shiftFuelInput && shiftFuelInput.dataset.eoFuelCapacity);
+        if (percent === null || Number.isNaN(percent) || capacity === null || Number.isNaN(capacity)) {
+            return null;
+        }
+        return Math.round(capacity * percent / 100);
+    }
+
+    function updateShiftFuelLiters() {
+        if (!shiftFuelLiters) return;
+        var liters = calculatedShiftFuelLiters();
+        shiftFuelLiters.textContent = liters === null ? "—" : String(liters);
+    }
+
     function validateShiftReadings(showErrors) {
         var errors = {};
         var fuel = parseShiftNumber(shiftFuelInput && shiftFuelInput.value);
         var hours = parseShiftNumber(shiftHoursInput && shiftHoursInput.value);
-        var fuelLimit = parseShiftNumber(shiftFuelInput && shiftFuelInput.dataset.eoFuelLimit);
         var startHours = parseShiftNumber(shiftHoursInput && shiftHoursInput.dataset.eoStartEngineHours);
         if (fuel === null || Number.isNaN(fuel)) errors.fuel = "Укажите корректное число.";
         else if (fuel < 0) errors.fuel = "Значение не может быть меньше нуля.";
-        else if (fuelLimit !== null && !Number.isNaN(fuelLimit) && fuel > fuelLimit) errors.fuel = "Максимум для этой модели: " + fuelLimit + " л.";
+        else if (!Number.isInteger(fuel)) errors.fuel = "Укажите целое количество процентов.";
+        else if (fuel > 100) errors.fuel = "Укажите значение от 0 до 100%.";
         if (hours === null || Number.isNaN(hours)) errors.engine_hours = "Укажите корректное число.";
         else if (hours < 0) errors.engine_hours = "Значение не может быть меньше нуля.";
         if (isShiftCloseAction() && !errors.engine_hours && startHours !== null && !Number.isNaN(startHours)) {
@@ -2668,7 +3200,7 @@ window.initExcavatorWorkShell = function () {
             if (Object.keys(errors).length) showShiftErrors("Проверьте показания.", errors);
             else clearShiftErrors();
         }
-        return { valid: Object.keys(errors).length === 0, fuel: fuel, hours: hours, startHours: startHours, errors: errors };
+        return { valid: Object.keys(errors).length === 0, fuel: fuel, fuelLiters: calculatedShiftFuelLiters(), hours: hours, startHours: startHours, errors: errors };
     }
 
     function updateShiftActionState() {
@@ -2696,10 +3228,12 @@ window.initExcavatorWorkShell = function () {
         input.addEventListener("input", function () {
             if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "true";
             clearShiftErrors();
+            updateShiftFuelLiters();
             updateShiftActionState();
         });
     });
 
+    updateShiftFuelLiters();
     updateShiftActionState();
 
     var shiftPendingActionKey = "";
@@ -2737,7 +3271,8 @@ window.initExcavatorWorkShell = function () {
             action: action,
             client_action_id: shiftPendingActionId,
             excavator_id: shell.dataset.eoShiftExcavatorId || shell.dataset.eoCurrentExcavatorId || "",
-            fuel: shell.querySelector("[data-eo-shift-fuel]") ? shell.querySelector("[data-eo-shift-fuel]").value : "",
+            fuel_percent: shell.querySelector("[data-eo-shift-fuel]") ? shell.querySelector("[data-eo-shift-fuel]").value : "",
+            fuel: validation.fuelLiters === null ? "" : String(validation.fuelLiters),
             engine_hours: shell.querySelector("[data-eo-shift-engine-hours]") ? shell.querySelector("[data-eo-shift-engine-hours]").value : ""
         };
         resetShiftHold();
@@ -2764,7 +3299,10 @@ window.initExcavatorWorkShell = function () {
                 return data;
             });
         }).then(function () {
-            playExcavatorSound(action === "close" ? "shift_end" : "shift_start");
+            playExcavatorVoice(
+                action === "close" ? "shift_end" : "shift_start",
+                action === "close" ? "voice_shift_closed" : "voice_shift_opened"
+            );
             shiftPendingActionKey = "";
             shiftPendingActionId = "";
             if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "false";
@@ -2776,7 +3314,11 @@ window.initExcavatorWorkShell = function () {
                     /* Сервер уже сохранил смену; realtime только ускоряет обновление. */
                 }
             }
-            return refreshExcavatorWorkFromServer({ preserveTab: true, pendingOwner: "shift" }).then(function (applied) {
+            return refreshExcavatorWorkFromServer({
+                preserveTab: true,
+                pendingOwner: "shift",
+                suppressAssignmentAlert: true
+            }).then(function (applied) {
                 if (!applied) {
                     window.location.reload();
                 }
@@ -2803,7 +3345,7 @@ window.initExcavatorWorkShell = function () {
             },
             onBlockedPress: function () {
                 if (shiftServerBlocked) {
-                    playExcavatorSound("action_error");
+                    playExcavatorVoice("action_error", "voice_action_failed");
                     showExcavatorNotice(shiftBlockMessage || "Смена сейчас недоступна.");
                     return;
                 }
@@ -2843,7 +3385,7 @@ window.initExcavatorWorkShell = function () {
                 action: "close",
                 client_action_id: generateClientActionId("excavator-downtime-close")
             }).then(function (payload) {
-                playExcavatorSound("action_ok");
+                playExcavatorVoice("action_ok", "voice_downtime_finished");
                 clearActiveDowntime(payload);
                 if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                     try {
@@ -2853,7 +3395,7 @@ window.initExcavatorWorkShell = function () {
                     }
                 }
             }, function (error) {
-                playExcavatorSound("action_error");
+                playExcavatorVoice("action_error", "voice_action_failed");
                 showExcavatorNotice(error.message || "Простой не завершен");
                 var canRetry = !!(
                     downtimeCard
@@ -2889,7 +3431,13 @@ window.initExcavatorWorkShell = function () {
                 logoutButton.classList.add("is-pending");
                 logoutButton.disabled = true;
                 if (logoutLabel) logoutLabel.textContent = "Выходим";
-                window.location.href = logoutButton.dataset.eoLogoutUrl || "/logout/";
+                var stopPromise = window.NativeBackgroundConnection
+                    && typeof window.NativeBackgroundConnection.stop === "function"
+                    ? window.NativeBackgroundConnection.stop()
+                    : null;
+                Promise.resolve(stopPromise).finally(function () {
+                    window.location.href = logoutButton.dataset.eoLogoutUrl || "/logout/";
+                });
             }
         });
     }

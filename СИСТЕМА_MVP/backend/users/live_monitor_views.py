@@ -13,14 +13,17 @@ from shifts.services import equipment_is_truck
 
 from .active_role import latest_active_role_access
 from .live_monitor import (
-    ONLINE_WINDOW,
+    PRESENCE_FOREGROUND,
     OBSERVER_MODE_CONTROL,
+    application_presence_by_access_ids,
     build_observer_url,
+    empty_application_presence,
     force_close_employee_shift,
     force_end_access_sessions,
     recent_application_sessions,
     touch_application_session,
 )
+from .context_processors import parse_native_app_marker
 from .models import AdminActionLog, EmployeeAccess
 from .role_apps import ROLE_APPS, get_role_app
 from .views import require_admin_access
@@ -39,9 +42,18 @@ SHIFT_TRACKED_APP_CODES = frozenset({
 def application_session_heartbeat_view(request):
     if getattr(request, 'observer_mode', False):
         return HttpResponse(status=403)
+    native_app, native_version = parse_native_app_marker(request)
+    client_kind = request.POST.get('client_kind', '')
+    client_version = request.POST.get('client_version', '')
+    if native_app:
+        client_kind = 'android_apk'
+        client_version = native_version or client_version
     if not touch_application_session(
         request,
         reported_path=request.POST.get('path', ''),
+        presence_kind=PRESENCE_FOREGROUND,
+        client_kind=client_kind,
+        client_version=client_version,
     ):
         return HttpResponse(status=401)
     response = HttpResponse(status=204)
@@ -109,6 +121,7 @@ def build_live_monitor_context(request, access):
 
     app_cards = []
     online_access_ids = set()
+    background_access_ids = set()
     for app in ROLE_APPS:
         row_map = {}
         for shift in shifts_by_app.get(app.role_code, []):
@@ -134,7 +147,9 @@ def build_live_monitor_context(request, access):
                 'last_seen_at': None,
                 'current_path': '',
                 'is_online': False,
+                'is_background': False,
                 'is_recent': False,
+                '_client_badges': {},
                 'is_truck': bool(shift.equipment_id and equipment_is_truck(shift.equipment)),
                 'needs_readings': bool(shift.equipment_id),
             }
@@ -150,23 +165,34 @@ def build_live_monitor_context(request, access):
                     'last_seen_at': None,
                     'current_path': '',
                     'is_online': False,
+                    'is_background': False,
                     'is_recent': False,
+                    '_client_badges': {},
                     'is_truck': False,
                     'needs_readings': False,
                 },
             )
             row['sessions'].append(session)
-            if row['last_seen_at'] is None or session.last_seen_at > row['last_seen_at']:
-                row['last_seen_at'] = session.last_seen_at
-                row['current_path'] = session.path
-            row['is_recent'] = True
-            row['is_online'] = session.last_seen_at >= now - ONLINE_WINDOW
-            if row['is_online']:
-                online_access_ids.add(session.access_id)
+        presence_by_access = application_presence_by_access_ids(
+            (row['access'].pk for row in row_map.values() if row['access']),
+            now=now,
+        )
 
         rows = []
         for row in row_map.values():
             target_access = row['access']
+            presence = (
+                presence_by_access.get(target_access.pk, empty_application_presence())
+                if target_access else empty_application_presence()
+            )
+            row.update(presence)
+            row['presence'] = presence
+            row.pop('_client_badges', None)
+            if target_access and row['is_online']:
+                online_access_ids.add(target_access.pk)
+                background_access_ids.discard(target_access.pk)
+            elif target_access and row['is_background']:
+                background_access_ids.add(target_access.pk)
             if target_access:
                 row['observe_url'] = build_observer_url(
                     request=request,
@@ -191,20 +217,28 @@ def build_live_monitor_context(request, access):
             rows.append(row)
         rows.sort(
             key=lambda row: (
-                not bool(row['shift']),
                 not row['is_online'],
+                not row['is_background'],
+                not bool(row['shift']),
                 row['employee'].full_name,
             )
         )
+        app_online_access_ids = {
+            row['access'].pk
+            for row in rows
+            if row['access'] and row['is_online']
+        }
+        app_background_access_ids = {
+            row['access'].pk
+            for row in rows
+            if row['access'] and row['is_background']
+        }
         app_cards.append({
             'app': app,
             'rows': rows,
             'open_shift_count': len(shifts_by_app.get(app.role_code, [])),
-            'online_count': len({
-                session.access_id
-                for session in sessions_by_app.get(app.role_code, [])
-                if session.last_seen_at >= now - ONLINE_WINDOW
-            }),
+            'online_count': len(app_online_access_ids),
+            'background_count': len(app_background_access_ids),
             'tracks_shifts': app.role_code in SHIFT_TRACKED_APP_CODES,
         })
 
@@ -213,6 +247,7 @@ def build_live_monitor_context(request, access):
         'app_cards': app_cards,
         'open_shift_total': len(open_shifts),
         'online_employee_total': len(online_access_ids),
+        'background_employee_total': len(background_access_ids - online_access_ids),
         'application_total': len(ROLE_APPS),
         'monitor_generated_at': now,
     }

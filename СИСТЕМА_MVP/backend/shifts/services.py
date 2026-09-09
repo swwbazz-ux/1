@@ -1,4 +1,5 @@
 from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
@@ -10,11 +11,11 @@ from core.db_locks import lock_idempotency_key
 from core.production_time import (
     production_day_bounds,
     production_shift_type,
-    production_work_date,
+    production_work_date_for_shift,
 )
-
 from trips.models import Trip, TripStatus
 
+from .equipment_plan_groups import equipment_garage_number_int
 from .models import (
     EmployeeShift,
     EquipmentPlanGroup,
@@ -222,12 +223,7 @@ def resolve_published_watch_period_for_shift(
         return None
     if not employee.watch_composition_id:
         return None
-    if shift_type != production_shift_type(opened_at):
-        # Ранние комплексы пока не имеют отдельного структурного признака.
-        # Не угадываем их производственную смену внутри контура рейтинга.
-        return None
-
-    work_date = production_work_date(opened_at)
+    work_date = production_work_date_for_shift(opened_at, shift_type)
     is_published_placement = CrewPlanSlot.objects.filter(
         plan__work_date=work_date,
         plan__role__code=role_code,
@@ -573,15 +569,18 @@ def shift_plan_totals_for_dates(dates):
     snapshot_shifts = (
         EmployeeShift.objects
         .filter(
-            opened_at__gte=production_start,
-            opened_at__lt=production_end,
+            opened_at__gte=production_start - timedelta(days=1),
+            opened_at__lt=production_end + timedelta(days=1),
             plan_status=PlanAssignmentStatus.ASSIGNED,
             plan_value__isnull=False,
         )
     )
     snapshot_dates = set()
     for shift in snapshot_shifts:
-        work_date = production_work_date(shift.opened_at)
+        work_date = production_work_date_for_shift(
+            shift.opened_at,
+            shift.shift_type,
+        )
         if work_date not in totals_by_date:
             continue
         snapshot_dates.add(work_date)
@@ -699,7 +698,10 @@ def assign_shift_plan_snapshot(shift):
         return empty_progress(None, shift=shift)
 
     group = get_equipment_plan_group(shift.equipment)
-    shift_date = production_work_date(shift.opened_at if shift.opened_at else timezone.now())
+    shift_date = production_work_date_for_shift(
+        shift.opened_at if shift.opened_at else timezone.now(),
+        shift.shift_type,
+    )
     shift.plan_assigned_at = timezone.now()
     shift.plan_group = group
     shift.plan_group_name = group.name if group else ''
@@ -810,7 +812,11 @@ def aggregate_completed_trip_facts_by_shift(*, unloading_shift_ids=(), loading_s
 
 def calculate_progress_from_snapshot_facts(shift, facts=None):
     facts = normalize_trip_facts(facts)
-    date = production_work_date(shift.opened_at) if shift and shift.opened_at else None
+    date = (
+        production_work_date_for_shift(shift.opened_at, shift.shift_type)
+        if shift and shift.opened_at
+        else None
+    )
     result = {
         'equipment': shift.equipment if shift else None,
         'date': date,
@@ -936,7 +942,10 @@ def calculate_truck_shift_progress(truck, reference_shift=None):
         return calculate_progress_from_snapshot(truck_shift, trips)
 
     if reference_shift and reference_shift.opened_at and reference_shift.shift_type:
-        date = production_work_date(reference_shift.opened_at)
+        date = production_work_date_for_shift(
+            reference_shift.opened_at,
+            reference_shift.shift_type,
+        )
         return calculate_equipment_shift_progress(truck, date, reference_shift.shift_type)
     return empty_progress(truck, status=PlanAssignmentStatus.NO_PLAN_GROUP)
 
@@ -957,7 +966,7 @@ def calculate_open_shift_progress(open_shift):
 
     return calculate_equipment_shift_progress(
         open_shift.equipment,
-        production_work_date(open_shift.opened_at),
+        production_work_date_for_shift(open_shift.opened_at, open_shift.shift_type),
         open_shift.shift_type,
     )
 
@@ -1019,10 +1028,38 @@ def excavator_fuel_limit(equipment):
     return Decimal(limit)
 
 
-def validate_excavator_shift_readings(equipment, fuel_value, engine_hours_value, *, opening_shift=None):
+def excavator_fuel_capacity_l(equipment):
+    garage_number = equipment_garage_number_int(equipment)
+    if garage_number in {1, 8}:
+        return Decimal('7450')
+    if garage_number in {2, 3, 4, 5, 6, 7}:
+        return Decimal('5700')
+    return Decimal('0')
+
+
+def excavator_fuel_liters_from_percent(equipment, percent_value):
+    percent = parse_required_shift_integer(percent_value, 'Топливо, %', 'fuel')
+    if percent > Decimal('100'):
+        raise ExcavatorShiftError(
+            'Топливо не может превышать 100%.',
+            field_errors={'fuel': 'Укажите значение от 0 до 100%.'},
+        )
+    capacity = excavator_fuel_capacity_l(equipment)
+    liters = (capacity * percent / Decimal('100')).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+    return liters, percent, capacity
+
+
+def validate_excavator_shift_readings(
+    equipment,
+    fuel_value,
+    engine_hours_value,
+    *,
+    opening_shift=None,
+    fuel_limit_override=None,
+):
     fuel = parse_required_shift_integer(fuel_value, 'Топливо', 'fuel')
     engine_hours = parse_required_shift_integer(engine_hours_value, 'Моточасы', 'engine_hours')
-    fuel_limit = excavator_fuel_limit(equipment)
+    fuel_limit = Decimal(fuel_limit_override) if fuel_limit_override is not None else excavator_fuel_limit(equipment)
     if fuel > fuel_limit:
         raise ExcavatorShiftError(
             f'Топливо не может превышать {int(fuel_limit)} л для модели этого экскаватора.',
@@ -1062,7 +1099,16 @@ def existing_shift_action_payload(action_type, client_action_id):
 
 
 @transaction.atomic
-def _open_excavator_shift_atomic(*, employee, equipment, shift_type, fuel_value, engine_hours_value, client_action_id):
+def _open_excavator_shift_atomic(
+    *,
+    employee,
+    equipment,
+    shift_type,
+    fuel_value,
+    engine_hours_value,
+    client_action_id,
+    fuel_limit_override=None,
+):
     from references.models import Equipment
 
     action_type = 'excavator_shift_opened'
@@ -1115,7 +1161,12 @@ def _open_excavator_shift_atomic(*, employee, equipment, shift_type, fuel_value,
             code='equipment_shift_already_open',
         )
 
-    fuel, engine_hours = validate_excavator_shift_readings(equipment, fuel_value, engine_hours_value)
+    fuel, engine_hours = validate_excavator_shift_readings(
+        equipment,
+        fuel_value,
+        engine_hours_value,
+        fuel_limit_override=fuel_limit_override,
+    )
     previous_shift = (
         EmployeeShift.objects.select_for_update(of=('self',))
         .filter(equipment=equipment, closed_at__isnull=False)
@@ -1207,7 +1258,16 @@ def _open_excavator_shift_atomic(*, employee, equipment, shift_type, fuel_value,
     return response
 
 
-def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_hours_value, client_action_id):
+def open_excavator_shift(
+    *,
+    employee,
+    equipment,
+    shift_type,
+    fuel_value,
+    engine_hours_value,
+    client_action_id,
+    fuel_limit_override=None,
+):
     try:
         return _open_excavator_shift_atomic(
             employee=employee,
@@ -1216,6 +1276,7 @@ def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_
             fuel_value=fuel_value,
             engine_hours_value=engine_hours_value,
             client_action_id=client_action_id,
+            fuel_limit_override=fuel_limit_override,
         )
     except IntegrityError as error:
         existing = existing_shift_action_payload(
@@ -1253,7 +1314,14 @@ def open_excavator_shift(*, employee, equipment, shift_type, fuel_value, engine_
 
 
 @transaction.atomic
-def close_excavator_shift(*, employee, fuel_value, engine_hours_value, client_action_id):
+def close_excavator_shift(
+    *,
+    employee,
+    fuel_value,
+    engine_hours_value,
+    client_action_id,
+    fuel_limit_override=None,
+):
     from references.models import Equipment
     from trips.models import OPEN_TRIP_STATUSES, Trip
     from users.models import Employee
@@ -1293,6 +1361,7 @@ def close_excavator_shift(*, employee, fuel_value, engine_hours_value, client_ac
         fuel_value,
         engine_hours_value,
         opening_shift=shift,
+        fuel_limit_override=fuel_limit_override,
     )
     shift.end_fuel = fuel
     shift.end_mileage = None
@@ -1300,6 +1369,10 @@ def close_excavator_shift(*, employee, fuel_value, engine_hours_value, client_ac
     shift.closed_at = timezone.now()
     shift.closed_by = employee
     shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
+    # Переходное право существует только до конца конкретной смены старого
+    # экскаватора. После закрытия оно не должно всплыть в следующей смене.
+    from assignments.services import expire_haul_handoffs_for_shift
+    expire_haul_handoffs_for_shift(shift, now=shift.closed_at)
     Trip.objects.filter(loading_shift=shift, status__in=OPEN_TRIP_STATUSES).update(is_carryover=True)
 
     response = {

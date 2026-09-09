@@ -25,6 +25,7 @@
                     <div>
                         <span class="oup-eyebrow">Выбран сотрудник</span>
                         <h2>{{ employee.full_name }}</h2>
+                        {% include "users/includes/application_presence.html" with presence=employee_presence compact=True show_time=True show_apps=True %}
                         <p>{{ employee.position|default:"Должность не указана" }} · {{ employee.department_label|default:"Подразделение не указано" }}</p>
                     </div>
                 </div>

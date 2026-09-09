@@ -248,9 +248,9 @@
                                 <strong>{{ row.employee.full_name }}</strong>
                                 <span>
                                     {{ row.role.name }}
-                                    {% if row.is_online %}· <b class="enter-online">в приложении</b>{% endif %}
                                     {% if not row.activated %}· пинкод не заведён{% endif %}
                                 </span>
+                                {% include "users/includes/application_presence.html" with presence=row.presence compact=True show_time=True %}
                             </div>
                             <div class="enter-row-actions">
                                 {% if row.activated %}

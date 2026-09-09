@@ -16,6 +16,7 @@ from references.models import (
     RockType,
     TruckCapacityRule,
 )
+from references.rock_catalog import CANONICAL_ROCK_NAMES
 from reports.models import PilotFeedback, ReportTemplate, ReportType
 from shifts.models import EmployeeShift
 from trips.models import Trip, TripStatus
@@ -238,14 +239,24 @@ class Command(BaseCommand):
         return trucks, excavator
 
     def get_demo_rock(self):
-        rock = RockType.objects.filter(is_active=True, density__isnull=False).order_by('name').first()
+        rock = (
+            RockType.objects
+            .filter(
+                name__in=CANONICAL_ROCK_NAMES,
+                is_active=True,
+                density__isnull=False,
+                loosening_factor__isnull=False,
+            )
+            .order_by('name')
+            .first()
+        )
         if rock:
             return rock
         rock, _ = RockType.objects.update_or_create(
-            name='Руда демо',
+            name='Первичная сульфидная руда',
             defaults={
-                'density': Decimal('2.50'),
-                'loosening_factor': Decimal('1.30'),
+                'density': Decimal('2.58'),
+                'loosening_factor': Decimal('1.50'),
                 'is_active': True,
             },
         )

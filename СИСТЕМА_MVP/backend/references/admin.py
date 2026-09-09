@@ -30,9 +30,9 @@ class EquipmentModelAdmin(admin.ModelAdmin):
 
 @admin.register(Equipment)
 class EquipmentAdmin(admin.ModelAdmin):
-    list_display = ('garage_number', 'equipment_type', 'model', 'vin', 'is_own', 'is_active')
-    search_fields = ('garage_number', 'vin', 'model__name')
-    list_filter = ('equipment_type', 'model', 'is_own', 'is_active')
+    list_display = ('garage_number', 'equipment_type', 'model', 'vin', 'is_own', 'contractor_organization', 'is_active')
+    search_fields = ('garage_number', 'vin', 'model__name', 'contractor_organization__name')
+    list_filter = ('equipment_type', 'model', 'is_own', 'contractor_organization', 'is_active')
 
 
 @admin.register(EquipmentState)

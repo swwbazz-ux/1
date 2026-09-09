@@ -100,16 +100,16 @@
                         <label for="loading_shift_type">Смена загрузки</label>
                         <select id="loading_shift_type" name="loading_shift_type">
                             <option value="">Все</option>
-                            <option value="day" {% if template_filters.loading_shift_type == 'day' %}selected{% endif %}>Дневная</option>
-                            <option value="night" {% if template_filters.loading_shift_type == 'night' %}selected{% endif %}>Ночная</option>
+                            <option value="day" {% if template_filters.loading_shift_type == 'day' %}selected{% endif %}>Первая смена</option>
+                            <option value="night" {% if template_filters.loading_shift_type == 'night' %}selected{% endif %}>Вторая смена</option>
                         </select>
                     </div>
                     <div>
                         <label for="unloading_shift_type">Смена разгрузки</label>
                         <select id="unloading_shift_type" name="unloading_shift_type">
                             <option value="">Все</option>
-                            <option value="day" {% if template_filters.unloading_shift_type == 'day' %}selected{% endif %}>Дневная</option>
-                            <option value="night" {% if template_filters.unloading_shift_type == 'night' %}selected{% endif %}>Ночная</option>
+                            <option value="day" {% if template_filters.unloading_shift_type == 'day' %}selected{% endif %}>Первая смена</option>
+                            <option value="night" {% if template_filters.unloading_shift_type == 'night' %}selected{% endif %}>Вторая смена</option>
                         </select>
                     </div>
                     <div>

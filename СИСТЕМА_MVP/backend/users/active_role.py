@@ -19,6 +19,9 @@ SAFE_ROLE_SWITCH_METHODS = {'GET', 'HEAD', 'OPTIONS', 'TRACE'}
 
 
 def active_access_queryset(employee):
+    eligible_employee_ids = Employee.objects.filter(
+        Employee.work_eligibility_q()
+    ).values('pk')
     return (
         EmployeeAccess.objects
         .filter(
@@ -29,7 +32,8 @@ def active_access_queryset(employee):
             employee__is_active=True,
             employee__status=Employee.Status.ACTIVE,
         )
-        .select_related('employee', 'role')
+        .filter(employee_id__in=eligible_employee_ids)
+        .select_related('employee', 'role', 'employee__contractor_organization')
     )
 
 
@@ -64,7 +68,7 @@ def role_session_state(request, access=None):
             }
         access = (
             EmployeeAccess.objects
-            .select_related('employee', 'role')
+            .select_related('employee', 'role', 'employee__contractor_organization')
             .filter(id=access_id)
             .first()
         )
@@ -81,6 +85,7 @@ def role_session_state(request, access=None):
         or not access.role.is_active
         or not access.employee.is_active
         or access.employee.status != Employee.Status.ACTIVE
+        or not access.employee.contractor_access_is_valid()
     ):
         return {
             'authenticated': False,

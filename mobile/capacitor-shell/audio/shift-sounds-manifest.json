@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Original deterministic synthesis created inside this repository; no third-party recordings, samples, speech, or melodies are used.",
+  "generator": "mobile/capacitor-shell/scripts/generate-shift-sounds.mjs",
+  "format": {
+    "container": "WAV",
+    "encoding": "PCM signed 16-bit little-endian",
+    "sampleRateHz": 48000,
+    "channels": 1,
+    "targetPeakDbfs": -1
+  },
+  "sounds": {
+    "shift_start": {
+      "description": "Three short, identical high-presence industrial pulses.",
+      "sha256": "e0f6f86ea48c2ae9349889834435d3711a5811e82275c81e7417d87f23791cfb",
+      "durationMs": 1200,
+      "peakDbfs": -1,
+      "rmsDbfs": -8.785,
+      "files": [
+        "mobile/capacitor-shell/profiles/driver/res/raw/driver_shift_start.wav",
+        "СИСТЕМА_MVP/backend/static/audio/driver/driver_shift_start.wav",
+        "mobile/capacitor-shell/profiles/excavator/res/raw/excavator_shift_start.wav",
+        "СИСТЕМА_MVP/backend/static/audio/excavator/excavator_shift_start.wav"
+      ]
+    },
+    "shift_end": {
+      "description": "Two long, descending industrial shutdown pulses.",
+      "sha256": "9a953e2a298a6eb5797c2cd95c5196060112f37a3899727ee8910ff3f9aba810",
+      "durationMs": 1550,
+      "peakDbfs": -1,
+      "rmsDbfs": -8.778,
+      "files": [
+        "mobile/capacitor-shell/profiles/driver/res/raw/driver_shift_end.wav",
+        "СИСТЕМА_MVP/backend/static/audio/driver/driver_shift_end.wav",
+        "mobile/capacitor-shell/profiles/excavator/res/raw/excavator_shift_end.wav",
+        "СИСТЕМА_MVP/backend/static/audio/excavator/excavator_shift_end.wav"
+      ]
+    }
+  }
+}

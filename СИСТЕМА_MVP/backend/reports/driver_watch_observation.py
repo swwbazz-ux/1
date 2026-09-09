@@ -5,7 +5,10 @@ from decimal import Decimal
 from django.db.models import Count, Q
 from django.utils import timezone
 
-from core.production_time import production_day_bounds, production_work_date
+from core.production_time import (
+    production_day_bounds,
+    production_work_date_for_shift,
+)
 from shifts.models import EmployeeShift, ShiftType
 from users.models import WatchComposition
 
@@ -637,7 +640,7 @@ def build_driver_watch_observation(
         for shift in shifts
         if not (
             watch_period.starts_on
-            <= production_work_date(shift.opened_at)
+            <= production_work_date_for_shift(shift.opened_at, shift.shift_type)
             <= watch_period.ends_on
         )
     }
@@ -889,7 +892,7 @@ def build_driver_rating_period_linkage_audit(
         for shift in selected_shifts
         if not (
             shift.watch_period.starts_on
-            <= production_work_date(shift.opened_at)
+            <= production_work_date_for_shift(shift.opened_at, shift.shift_type)
             <= shift.watch_period.ends_on
         )
     )
@@ -940,7 +943,7 @@ def build_driver_rating_period_observation(
         for shift in shifts
         if not (
             shift.watch_period.starts_on
-            <= production_work_date(shift.opened_at)
+            <= production_work_date_for_shift(shift.opened_at, shift.shift_type)
             <= shift.watch_period.ends_on
         )
     }

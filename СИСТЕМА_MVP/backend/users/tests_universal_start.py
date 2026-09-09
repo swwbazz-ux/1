@@ -4,10 +4,14 @@
 тому, у кого он уже есть, и вываливала все приложения одним списком.
 """
 
+import json
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -71,11 +75,35 @@ class UniversalStartTests(TestCase):
         apk_path.parent.mkdir(parents=True, exist_ok=True)
         apk_path.write_bytes(b'test apk placeholder')
 
-    def post(self, *, user_agent=''):
+    def add_android_release(self, profile, *, version_code, version_name):
+        self.add_apk(f'apk/{profile}-{version_name}.apk')
+        manifest_path = Path(self.media_directory.name) / f'apk/{profile}-update.json'
+        manifest_path.write_text(
+            json.dumps({
+                'schemaVersion': 1,
+                'profile': profile,
+                'versionCode': version_code,
+                'versionName': version_name,
+            }),
+            encoding='utf-8',
+        )
+
+    def add_driver_release(self, *, version_code=12, version_name='0.1.10'):
+        self.add_android_release(
+            'driver', version_code=version_code, version_name=version_name,
+        )
+
+    def add_excavator_release(self, *, version_code=24, version_name='0.1.18'):
+        self.add_android_release(
+            'excavator', version_code=version_code, version_name=version_name,
+        )
+
+    def post(self, *, user_agent='', follow=True):
         return self.client.post(
             reverse('universal_start'),
             {'phone': self.phone},
             HTTP_USER_AGENT=user_agent,
+            follow=follow,
         )
 
     def test_browser_bar_matches_the_shared_dark_background(self):
@@ -87,10 +115,126 @@ class UniversalStartTests(TestCase):
             count=1,
         )
 
+    def test_start_form_keeps_same_origin_csrf_evidence(self):
+        client = Client(enforce_csrf_checks=True)
+        form = client.get(reverse('universal_start'), secure=True)
+        html = form.content.decode('utf-8')
+        csrf_token = re.search(
+            r'name="csrfmiddlewaretoken" value="([^"]+)"',
+            html,
+        ).group(1)
+
+        self.assertEqual(form.headers['Referrer-Policy'], 'same-origin')
+        self.assertIn('csrftoken', client.cookies)
+
+        accepted = client.post(
+            reverse('universal_start'),
+            {'phone': '+79990000999', 'csrfmiddlewaretoken': csrf_token},
+            secure=True,
+            HTTP_ORIGIN='https://testserver',
+        )
+        rejected = client.post(
+            reverse('universal_start'),
+            {'phone': '+79990000999', 'csrfmiddlewaretoken': csrf_token},
+            secure=True,
+            HTTP_ORIGIN='null',
+        )
+
+        self.assertEqual(accepted.status_code, 303)
+        self.assertNotIn('phone=', accepted.headers['Location'])
+        self.assertEqual(rejected.status_code, 403)
+
+    def test_lookup_uses_opaque_post_redirect_get_result(self):
+        self.add_access('driver', 'Водитель самосвала')
+
+        submitted = self.post(user_agent=ANDROID_USER_AGENT, follow=False)
+
+        self.assertEqual(submitted.status_code, 303)
+        location = submitted.headers['Location']
+        parsed = urlparse(location)
+        result_tokens = parse_qs(parsed.query).get('result', [])
+        self.assertEqual(parsed.path, reverse('universal_start'))
+        self.assertEqual(len(result_tokens), 1)
+        self.assertRegex(result_tokens[0], r'^[A-Za-z0-9_-]{43}$')
+        self.assertNotIn('phone', location)
+        self.assertNotIn('79990000071', location)
+
+        first = self.client.get(location, HTTP_USER_AGENT=ANDROID_USER_AGENT)
+        reloaded = self.client.get(location, HTTP_USER_AGENT=ANDROID_USER_AGENT)
+
+        for response in (first, reloaded):
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.context['found'])
+            self.assertEqual(response.headers['Referrer-Policy'], 'no-referrer')
+            self.assertContains(response, 'Водитель самосвала')
+
+    def test_parallel_lookup_results_do_not_overwrite_each_other(self):
+        self.add_access('driver', 'Водитель самосвала')
+        other = Employee.objects.create(
+            full_name='Другой Водитель Водителевич',
+            phone='+79990000072',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        EmployeeAccess.objects.create(
+            employee=other,
+            role=make_role('driver', 'Водитель самосвала'),
+            access_code='170002',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+            activated_at=timezone.now(),
+        )
+
+        first = self.post(follow=False)
+        second = self.client.post(
+            reverse('universal_start'),
+            {'phone': '+79990000072'},
+        )
+
+        self.assertNotEqual(first.headers['Location'], second.headers['Location'])
+        for location, employee_name in (
+            (first.headers['Location'], self.employee.full_name),
+            (second.headers['Location'], other.full_name),
+        ):
+            response = self.client.get(location)
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.context['found'])
+            self.assertContains(response, employee_name)
+
+    @patch('users.start_views.cache.add', side_effect=RuntimeError('cache down'))
+    def test_cache_failure_redirects_to_clean_form_without_post_result(self, _add):
+        self.add_access('driver', 'Водитель самосвала')
+
+        response = self.post(follow=False)
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers['Location'], reverse('universal_start'))
+        self.assertNotIn('phone', response.headers['Location'])
+
+    def test_start_rejects_methods_other_than_get_and_post(self):
+        response = self.client.put(reverse('universal_start'))
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_missing_result_redirects_to_clean_same_origin_form(self):
+        missing = self.client.get(
+            f'{reverse("universal_start")}?result={"x" * 43}',
+        )
+
+        self.assertEqual(missing.status_code, 303)
+        self.assertEqual(missing.headers['Location'], reverse('universal_start'))
+        self.assertNotIn('phone', missing.headers['Location'])
+
+        form = self.client.get(missing.headers['Location'])
+        self.assertEqual(form.status_code, 200)
+        self.assertEqual(form.headers['Referrer-Policy'], 'same-origin')
+        self.assertContains(form, 'name="csrfmiddlewaretoken"')
+
     def test_unknown_phone_keeps_the_shared_dark_browser_bar(self):
         response = self.client.post(
             reverse('universal_start'),
             {'phone': '+79990000999'},
+            follow=True,
         )
 
         self.assertEqual(response.status_code, 200)
@@ -147,26 +291,61 @@ class UniversalStartTests(TestCase):
         self.assertEqual(response.context['apps'][0]['app'].role_code, 'mining_master')
 
     def test_android_sees_configured_apk_buttons_for_its_roles(self):
-        self.add_apk('apk/driver-5.apk')
-        self.add_apk('apk/excavator-7.apk')
+        self.add_driver_release()
+        self.add_excavator_release()
         self.add_access('driver', 'Водитель самосвала')
         self.add_access('excavator_operator', 'Машинист экскаватора')
 
         response = self.post(user_agent=ANDROID_USER_AGENT)
 
-        self.assertContains(response, '/media/apk/driver-5.apk')
-        self.assertContains(response, '/media/apk/excavator-7.apk')
+        self.assertContains(response, '/media/apk/driver-0.1.10.apk')
+        self.assertContains(response, '/media/apk/excavator-0.1.18.apk')
         self.assertContains(response, 'data-start-install-option="native"', count=2)
+        self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=2)
         self.assertContains(response, '<b>Приложение <i>стабильное</i></b>', count=2)
         self.assertContains(response, '<b>Браузер <i>нестабильно</i></b>', count=2)
-        self.assertContains(response, 'APK · версия 0.1.3 · скачать и установить', count=1)
-        self.assertContains(response, 'APK · версия 0.1.4 · скачать и установить', count=1)
+        self.assertContains(response, 'APK · версия 0.1.18 · скачать и установить', count=1)
+        self.assertContains(response, 'APK · версия 0.1.10 · скачать и установить', count=1)
+        self.assertNotContains(response, '2. Открыть приложение')
+        self.assertNotContains(response, '/native-handoff/')
         self.assertContains(response, 'PWA · ярлык на экран · открыть', count=2)
         self.assertContains(response, 'install=1', count=2)
         self.assertNotContains(response, 'class="start-screen__app-main" href=')
         # Атрибут download заставлял Chrome ругаться «файл может быть опасным».
         self.assertNotContains(response, ' download')
+        self.assertIn('no-store', response.headers['Cache-Control'])
+        self.assertEqual(response.headers['Referrer-Policy'], 'no-referrer')
+        self.assertContains(response, 'phone=79990000071', count=2)
+
+    def test_excavator_public_filename_follows_the_manifest_version_name(self):
+        self.add_excavator_release(version_code=29, version_name='0.2.0')
+        self.add_access('excavator_operator', 'Машинист экскаватора')
+
+        response = self.post(user_agent=ANDROID_USER_AGENT)
+
+        self.assertContains(response, '/media/apk/excavator-0.2.0.apk')
+        self.assertContains(response, 'APK · версия 0.2.0 · скачать и установить')
+        self.assertNotContains(response, '/media/apk/excavator-29.apk')
+
+    def test_driver_public_filename_follows_the_manifest_version_name(self):
+        self.add_driver_release(version_code=17, version_name='0.2.4')
+        self.add_access('driver', 'Водитель самосвала')
+
+        response = self.post(user_agent=ANDROID_USER_AGENT)
+
+        self.assertContains(response, '/media/apk/driver-0.2.4.apk')
+        self.assertContains(response, 'APK · версия 0.2.4 · скачать и установить')
+        self.assertNotContains(response, '/media/apk/driver-17.apk')
+
+    def test_native_phone_handoff_routes_are_removed(self):
+        for path in (
+            '/.well-known/assetlinks.json',
+            '/native-handoff/open/',
+            '/native-handoff/redeem/',
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 404)
 
     def test_android_does_not_see_button_when_configured_apk_file_is_missing(self):
         self.add_access('driver', 'Водитель самосвала')
@@ -174,9 +353,35 @@ class UniversalStartTests(TestCase):
         response = self.post(user_agent=ANDROID_USER_AGENT)
 
         self.assertIsNone(response.context['apps'][0]['apk'])
-        self.assertNotContains(response, 'href="/media/apk/driver-5.apk"')
+        self.assertNotContains(response, 'href="/media/apk/driver-0.1.10.apk"')
         self.assertNotContains(response, 'data-start-install-option="native"')
+        self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"')
+
+    def test_android_does_not_see_excavator_apk_for_invalid_update_manifest(self):
+        self.add_apk('apk/excavator-0.1.18.apk')
+        manifest_path = Path(self.media_directory.name) / 'apk/excavator-update.json'
+        manifest_path.write_text('{"versionCode": 24}', encoding='utf-8')
+        self.add_access('excavator_operator', 'Машинист экскаватора')
+
+        response = self.post(user_agent=ANDROID_USER_AGENT)
+
+        self.assertIsNone(response.context['apps'][0]['apk'])
+        self.assertNotContains(response, 'data-start-install-option="native"')
+
+    def test_android_does_not_see_driver_apk_for_invalid_update_manifest(self):
+        self.add_apk('apk/driver-0.1.10.apk')
+        manifest_path = Path(self.media_directory.name) / 'apk/driver-update.json'
+        manifest_path.write_text(
+            '{"schemaVersion": 1, "profile": "excavator", "versionCode": 12, "versionName": "0.1.10"}',
+            encoding='utf-8',
+        )
+        self.add_access('driver', 'Водитель самосвала')
+
+        response = self.post(user_agent=ANDROID_USER_AGENT)
+
+        self.assertIsNone(response.context['apps'][0]['apk'])
+        self.assertNotContains(response, 'data-start-install-option="native"')
 
     def test_android_does_not_see_apk_button_for_unsupported_role(self):
         self.add_access('mining_master', 'Горный мастер')
@@ -189,21 +394,22 @@ class UniversalStartTests(TestCase):
         self.assertNotContains(response, 'href="/media/apk/')
 
     def test_iphone_does_not_see_apk_button(self):
-        self.add_apk('apk/driver-5.apk')
+        self.add_driver_release()
         self.add_access('driver', 'Водитель самосвала')
 
         response = self.post(user_agent=IPHONE_USER_AGENT)
 
         self.assertIsNone(response.context['apps'][0]['apk'])
-        self.assertNotContains(response, 'href="/media/apk/driver-5.apk"')
+        self.assertNotContains(response, 'href="/media/apk/driver-0.1.10.apk"')
         self.assertNotContains(response, 'data-start-install-option="native"')
+        self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=1)
         self.assertContains(response, '<b>Браузер <i>нестабильно</i></b>')
         self.assertContains(response, 'install=1', count=1)
         self.assertContains(response, 'После перехода добавьте значок на экран')
 
     def test_iphone_shows_only_pwa_action_without_android_block(self):
-        self.add_apk('apk/driver-5.apk')
+        self.add_driver_release()
         self.add_access('driver', 'Водитель самосвала')
 
         response = self.post(user_agent=IPHONE_USER_AGENT)
@@ -213,7 +419,8 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'data-start-install-option="browser"', count=1)
         self.assertNotContains(response, 'data-start-install-option="native"')
         self.assertContains(response, 'install=1', count=1)
-        self.assertNotContains(response, 'href="/media/apk/driver-5.apk"')
+        self.assertNotContains(response, 'href="/media/apk/driver-0.1.10.apk"')
+        self.assertNotContains(response, 'data-start-native-open')
         self.assertNotContains(response, 'class="start-screen__app-main" href=')
 
     @override_settings(
@@ -231,6 +438,16 @@ class UniversalStartTests(TestCase):
         for response in (form, found):
             self.assertContains(response, 'https://max.ru/u/test')
             self.assertContains(response, 'Написать администратору в MAX')
+            self.assertContains(response, 'data-support-channel="max"', count=1)
+            self.assertContains(response, 'max-support-link-v1.css?v=6')
+
+        unknown = self.client.post(
+            reverse('universal_start'),
+            {'phone': '+79990000999'},
+            follow=True,
+        )
+        self.assertContains(unknown, 'phone-not-found__chat max-support-link')
+        self.assertContains(unknown, 'data-support-channel="max"', count=1)
 
     @override_settings(SUPPORT_CHAT_URL='')
     def test_administrator_contact_is_hidden_when_no_address_is_configured(self):
@@ -239,16 +456,23 @@ class UniversalStartTests(TestCase):
 
         response = self.post()
 
-        self.assertNotContains(response, 'class="start-screen__support"')
+        self.assertNotContains(response, 'data-support-channel="max"')
+
+    def test_start_support_hides_only_for_a_real_visual_keyboard(self):
+        response = self.client.get(reverse('universal_start'))
+
+        self.assertContains(response, 'viewport.height < window.innerHeight - 120')
+        self.assertContains(response, 'is-start-keyboard-active')
 
     def test_desktop_does_not_see_apk_button(self):
-        self.add_apk('apk/excavator-7.apk')
+        self.add_excavator_release()
         self.add_access('excavator_operator', 'Машинист экскаватора')
 
         response = self.post(user_agent=DESKTOP_USER_AGENT)
 
         self.assertIsNone(response.context['apps'][0]['apk'])
-        self.assertNotContains(response, 'href="/media/apk/excavator-7.apk"')
+        self.assertNotContains(response, 'href="/media/apk/excavator-0.1.18.apk"')
+        self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"')
         self.assertContains(response, 'install=1', count=1)
         self.assertNotContains(response, 'После перехода добавьте значок на экран')

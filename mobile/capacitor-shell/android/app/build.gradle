@@ -1,0 +1,275 @@
+import java.net.URI
+import java.net.URISyntaxException
+
+apply plugin: 'com.android.application'
+
+def profileDirectory = file("${rootProject.projectDir}/../profiles")
+def profileFiles = profileDirectory.exists()
+        ? profileDirectory.listFiles().findAll { it.isDirectory() && new File(it, 'app.properties').isFile() }
+        : []
+
+if (profileFiles.isEmpty()) {
+    throw new GradleException("No application profiles found in ${profileDirectory}")
+}
+
+def javaStringLiteral = { String value ->
+    '"' + (value ?: '').replace('\\', '\\\\').replace('"', '\\"') + '"'
+}
+
+def parseProfileHttpsUri = { String propertyName, String rawValue, File profileDir ->
+    URI uri
+    try {
+        uri = new URI(rawValue)
+    } catch (URISyntaxException exception) {
+        throw new GradleException("Invalid ${propertyName} in ${profileDir}/app.properties", exception)
+    }
+    String rawPath = uri.rawPath ?: '/'
+    if (!uri.absolute
+            || !'https'.equalsIgnoreCase(uri.scheme)
+            || !uri.host
+            || uri.rawUserInfo != null
+            || uri.rawQuery != null
+            || uri.rawFragment != null
+            || !(uri.port in [-1, 443])
+            || uri.normalize().rawPath != rawPath) {
+        throw new GradleException(
+                "${propertyName} must be a normalized HTTPS URL without credentials, query, or fragment " +
+                        "in ${profileDir}/app.properties"
+        )
+    }
+    uri
+}
+
+def effectiveHttpsPort = { URI uri -> uri.port == -1 ? 443 : uri.port }
+
+def releaseCredentialsPath = System.getenv('COPPER_RELEASE_KEYSTORE_PROPERTIES')?.trim()
+if (!releaseCredentialsPath) {
+    releaseCredentialsPath = new File(
+            System.getProperty('user.home'),
+            'CopperResourcesKeys/keystore-credentials.txt'
+    ).absolutePath
+}
+def releaseCredentialsFile = file(releaseCredentialsPath)
+def releaseCredentials = new Properties()
+if (releaseCredentialsFile.isFile()) {
+    releaseCredentialsFile.withReader('UTF-8') { reader ->
+        releaseCredentials.load(reader)
+    }
+}
+
+def releaseRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.toLowerCase(Locale.ROOT).contains('release')
+}
+def requiredReleaseProperties = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
+def missingReleaseProperties = requiredReleaseProperties.findAll { propertyName ->
+    !releaseCredentials.getProperty(propertyName, '').trim()
+}
+
+if (releaseRequested && !releaseCredentialsFile.isFile()) {
+    throw new GradleException(
+            "Release signing credentials were not found: ${releaseCredentialsFile}. " +
+                    'Restore the external credentials file or set COPPER_RELEASE_KEYSTORE_PROPERTIES.'
+    )
+}
+if (releaseRequested && !missingReleaseProperties.isEmpty()) {
+    throw new GradleException(
+            "Release signing credentials are incomplete in ${releaseCredentialsFile}. " +
+                    "Missing properties: ${missingReleaseProperties.join(', ')}"
+    )
+}
+
+def releaseKeystoreFile = null
+if (releaseCredentialsFile.isFile() && missingReleaseProperties.isEmpty()) {
+    releaseKeystoreFile = new File(releaseCredentials.getProperty('storeFile'))
+    if (!releaseKeystoreFile.isAbsolute()) {
+        releaseKeystoreFile = new File(releaseCredentialsFile.parentFile, releaseKeystoreFile.path)
+    }
+}
+if (releaseRequested && (releaseKeystoreFile == null || !releaseKeystoreFile.isFile())) {
+    throw new GradleException(
+            "Release keystore was not found: ${releaseKeystoreFile}. " +
+                    'Restore copper-release.jks before building a release.'
+    )
+}
+
+android {
+    namespace = "ru.copperresources.mobile"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "ru.copperresources.mobile"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    buildFeatures {
+        buildConfig true
+    }
+    signingConfigs {
+        release {
+            if (releaseKeystoreFile != null) {
+                storeFile releaseKeystoreFile
+                storePassword releaseCredentials.getProperty('storePassword')
+                keyAlias releaseCredentials.getProperty('keyAlias')
+                keyPassword releaseCredentials.getProperty('keyPassword')
+                v1SigningEnabled true
+                v2SigningEnabled true
+            }
+        }
+    }
+    flavorDimensions += "role"
+    productFlavors {
+        profileFiles.each { profileDir ->
+            Properties profile = new Properties()
+            new File(profileDir, 'app.properties').withReader('UTF-8') { reader ->
+                profile.load(reader)
+            }
+            String profileId = profileDir.name
+            String tokenEnvironmentVariable = profile.getProperty('syncTokenEnv', '').trim()
+            String syncToken = tokenEnvironmentVariable ? (System.getenv(tokenEnvironmentVariable) ?: '') : ''
+            String serverUrl = profile.getProperty('serverUrl', '').trim()
+            String startUrl = profile.getProperty('startUrl', serverUrl).trim()
+            URI serverUri = parseProfileHttpsUri('serverUrl', serverUrl, profileDir)
+            URI startUri = parseProfileHttpsUri('startUrl', startUrl, profileDir)
+            String serverPath = serverUri.rawPath ?: '/'
+            String startPath = startUri.rawPath ?: '/'
+            long heartbeatIntervalMs = Long.parseLong(profile.getProperty('heartbeatIntervalSeconds', '20')) * 1000L
+            long updateCheckIntervalMs = Long.parseLong(profile.getProperty('updateCheckIntervalMinutes', '15')) * 60_000L
+            boolean inAppUpdaterEnabled = Boolean.parseBoolean(
+                    profile.getProperty('inAppUpdaterEnabled', 'true')
+            )
+            String updateManifestUrl = profile.getProperty('updateManifestUrl', '').trim()
+            boolean driverVoiceAlertsEnabled = Boolean.parseBoolean(profile.getProperty('driverVoiceAlertsEnabled', 'false'))
+            long alertCueDurationMs = Long.parseLong(profile.getProperty('alertCueDurationMs', '720'))
+            long voiceAfterCueDelayMs = Long.parseLong(profile.getProperty('voiceAfterCueDelayMs', '200'))
+            String splashBackgroundColor = profile.getProperty('splashBackgroundColor', '').trim()
+            String splashAccentColor = profile.getProperty('splashAccentColor', '').trim()
+            String splashIconResource = profile.getProperty('splashIconResource', '').trim()
+
+            if (!(splashBackgroundColor ==~ /#[0-9A-Fa-f]{6}/)) {
+                throw new GradleException("Invalid splashBackgroundColor in ${profileDir}/app.properties")
+            }
+            if (!(splashAccentColor ==~ /#[0-9A-Fa-f]{6}/)) {
+                throw new GradleException("Invalid splashAccentColor in ${profileDir}/app.properties")
+            }
+            if (!(splashIconResource ==~ /[a-z][a-z0-9_]*/)) {
+                throw new GradleException("Invalid splashIconResource in ${profileDir}/app.properties")
+            }
+            if (serverPath != '/') {
+                throw new GradleException("serverUrl must point to the HTTPS origin root in ${profileDir}/app.properties")
+            }
+            if (!serverUri.host.equalsIgnoreCase(startUri.host)
+                    || effectiveHttpsPort(serverUri) != effectiveHttpsPort(startUri)
+                    || !(startPath == serverPath || startPath.startsWith(serverPath))) {
+                throw new GradleException("startUrl must stay inside the exact serverUrl origin in ${profileDir}/app.properties")
+            }
+            if (inAppUpdaterEnabled && !updateManifestUrl.startsWith('https://')) {
+                throw new GradleException("updateManifestUrl must use HTTPS in ${profileDir}/app.properties")
+            }
+            if (alertCueDurationMs < 0L || voiceAfterCueDelayMs < 0L) {
+                throw new GradleException("Audio alert delays must not be negative in ${profileDir}/app.properties")
+            }
+
+            create(profileId) {
+                dimension "role"
+                applicationId profile.getProperty('applicationId')
+                versionCode Integer.parseInt(profile.getProperty('versionCode', '1'))
+                versionName profile.getProperty('versionName', '0.1.0')
+
+                resValue "string", "app_name", profile.getProperty('appName')
+                resValue "string", "title_activity_main", profile.getProperty('appName')
+                resValue "string", "foreground_channel_name", profile.getProperty('foregroundChannelName', 'Фоновая связь')
+                resValue "string", "alert_channel_name", profile.getProperty('alertChannelName', 'Оповещения')
+                resValue "string", "foreground_notification_title", profile.getProperty('foregroundNotificationTitle', profile.getProperty('appName'))
+                resValue "color", "startup_splash_background", splashBackgroundColor
+                resValue "drawable", "startup_splash_icon", "@drawable/${splashIconResource}"
+
+                buildConfigField "String", "APP_PROFILE_ID", javaStringLiteral(
+                        profile.getProperty('appProfileId', profileId)
+                )
+                buildConfigField "String", "APP_DISPLAY_NAME", javaStringLiteral(profile.getProperty('appName'))
+                buildConfigField "String", "APP_SERVER_URL", javaStringLiteral(serverUrl)
+                buildConfigField "String", "APP_START_URL", javaStringLiteral(startUrl)
+                buildConfigField "String", "HEARTBEAT_URL", javaStringLiteral(profile.getProperty('heartbeatUrl', profile.getProperty('serverUrl')))
+                buildConfigField "long", "HEARTBEAT_INTERVAL_MS", "${heartbeatIntervalMs}L"
+                buildConfigField "String", "UPDATE_MANIFEST_URL", javaStringLiteral(updateManifestUrl)
+                buildConfigField "boolean", "IN_APP_UPDATER_ENABLED", inAppUpdaterEnabled.toString()
+                buildConfigField "long", "UPDATE_CHECK_INTERVAL_MS", "${updateCheckIntervalMs}L"
+                buildConfigField "String", "SYNC_AUTH_HEADER", javaStringLiteral(profile.getProperty('syncAuthHeader', 'Authorization'))
+                buildConfigField "String", "SYNC_AUTH_TOKEN", javaStringLiteral(syncToken)
+                buildConfigField "String", "FOREGROUND_CHANNEL_ID", javaStringLiteral(profile.getProperty('foregroundChannelId'))
+                buildConfigField "String", "ALERT_CHANNEL_ID", javaStringLiteral(profile.getProperty('alertChannelId'))
+                buildConfigField "String", "ALERT_SOUND_RESOURCE", javaStringLiteral(profile.getProperty('alertSoundResource', 'app_alert'))
+                buildConfigField "boolean", "DRIVER_VOICE_ALERTS_ENABLED", Boolean.toString(driverVoiceAlertsEnabled)
+                buildConfigField "long", "ALERT_CUE_DURATION_MS", "${alertCueDurationMs}L"
+                buildConfigField "long", "VOICE_AFTER_CUE_DELAY_MS", "${voiceAfterCueDelayMs}L"
+                buildConfigField "String", "SPLASH_BACKGROUND_COLOR", javaStringLiteral(splashBackgroundColor)
+                buildConfigField "String", "SPLASH_ACCENT_COLOR", javaStringLiteral(splashAccentColor)
+                buildConfigField "String", "SPLASH_ICON_RESOURCE", javaStringLiteral(splashIconResource)
+
+                manifestPlaceholders.specialUseDescription = profile.getProperty(
+                        'specialUseDescription',
+                        'Continuous operational server connectivity during an active work shift'
+                )
+            }
+        }
+    }
+    sourceSets {
+        profileFiles.each { profileDir ->
+            Properties profile = new Properties()
+            new File(profileDir, 'app.properties').withReader('UTF-8') { reader ->
+                profile.load(reader)
+            }
+            named(profileDir.name) {
+                String resourceProfile = profile.getProperty('resourceProfile', profileDir.name)
+                res.srcDir(new File(profileDirectory, "${resourceProfile}/res"))
+                File profileManifest = new File(profileDir, 'AndroidManifest.xml')
+                if (profileManifest.isFile()) {
+                    manifest.srcFile(profileManifest)
+                }
+            }
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

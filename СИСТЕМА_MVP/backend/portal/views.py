@@ -203,6 +203,7 @@ def public_contacts(request):
 
 
 def public_privacy(request):
+    privacy_role_login_return = request.GET.get('from') == 'role-login'
     return render(
         request,
         'portal/public_privacy.html',
@@ -210,6 +211,11 @@ def public_privacy(request):
             'company': COMPANY_PROFILE,
             'privacy_policy_effective_date': PRIVACY_POLICY_EFFECTIVE_DATE,
             'privacy_policy_version': PRIVACY_POLICY_VERSION,
+            'privacy_role_login_return': privacy_role_login_return,
+            # The role hosts expose login at their root. Keep this fallback
+            # fixed and same-origin so a crafted query cannot create an open
+            # redirect inside the application WebView.
+            'privacy_return_url': '/?form=1',
         },
     )
 

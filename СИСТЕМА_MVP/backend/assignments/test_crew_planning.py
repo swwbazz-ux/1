@@ -181,6 +181,28 @@ class CrewPlanningServiceTests(TestCase):
         slot = updated.slots.get(equipment=self.truck_1, shift_type=WorkShiftType.SHIFT_2)
         self.assertEqual(slot.employee, employee)
 
+    def test_draft_update_locks_only_employee_with_nullable_contractor_join(self):
+        plan, _created = get_or_create_crew_draft(role=self.driver_role, actor=self.actor)
+
+        with patch.object(
+            Employee.objects,
+            'select_for_update',
+            wraps=Employee.objects.select_for_update,
+        ) as employee_lock:
+            update_crew_draft_slot(
+                plan=plan,
+                equipment=self.truck_1,
+                shift_type=WorkShiftType.SHIFT_2,
+                employee=self.free_driver,
+                expected_version=plan.version,
+                actor=self.actor,
+            )
+
+        self.assertTrue(any(
+            call.kwargs.get('of') == ('self',)
+            for call in employee_lock.call_args_list
+        ))
+
     def test_assignment_reloads_locked_employee_before_validation(self):
         stale_employee = self.free_driver
         Employee.objects.filter(pk=stale_employee.pk).update(

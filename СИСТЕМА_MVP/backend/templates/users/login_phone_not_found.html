@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}{% if wrong_app %}Чужое приложение{% else %}Номер не найден{% endif %}{% if login_role_app %} · {{ login_role_app.short_name }}{% endif %}{% endblock %}
+{% block title %}{% if access_conflict %}Нужна помощь администратора{% elif wrong_app %}Нужно другое приложение{% else %}Номер не найден{% endif %}{% if login_role_app %} · {{ login_role_app.short_name }}{% endif %}{% endblock %}
 {% block extra_head %}
     <meta name="theme-color" content="{{ entry_screen_browser_bar }}">
     <link rel="stylesheet" href="{% static 'css/max-support-link-v1.css' %}?v=6">
@@ -99,9 +99,14 @@
 <main class="phone-not-found">
     <div class="phone-not-found__inner">
         {% if login_role_app %}<img src="{{ login_role_app.icon_180_url }}" width="72" height="72" alt="">{% endif %}
-        {% if wrong_app %}
-        <h2>Это чужое приложение</h2>
-        <p>Ваш номер в базе есть, но {% if login_role_app %}приложение «{{ login_role_app.short_name }}» не для вашей должности{% else %}это приложение не для вашей должности{% endif %}.</p>
+        {% if access_conflict %}
+        <h2>Нужна помощь администратора</h2>
+        <p>Для этого номера найдено несколько записей доступа. Система не будет выбирать одну из них автоматически.</p>
+        <div class="phone-not-found__phone">{{ submitted_phone }}</div>
+        <p>Напишите администратору — он оставит правильную запись, после чего вы сможете безопасно создать PIN.</p>
+        {% elif wrong_app %}
+        <h2>Вам нужно другое приложение</h2>
+        <p>Ваш номер в базе есть, но {% if login_role_app %}приложение «{{ login_role_app.short_name }}» не соответствует вашей роли{% else %}это приложение не соответствует вашей роли{% endif %}.</p>
         <div class="phone-not-found__phone">{{ submitted_phone }}</div>
         <p>Вы {% for name in own_role_names %}{% if not forloop.first %} и {% endif %}<b>{{ name }}</b>{% endfor %}. Откройте своё приложение — ссылку на него давал администратор. Если считаете, что должность указана неверно, напишите ему.</p>
         {% else %}

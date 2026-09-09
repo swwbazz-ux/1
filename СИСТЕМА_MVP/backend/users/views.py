@@ -1,4 +1,4 @@
-﻿import secrets
+import secrets
 import json
 from datetime import datetime, timedelta
 from contextlib import nullcontext
@@ -32,10 +32,32 @@ from assignments.services import (
     reconcile_due_haul_assignments,
     work_assignment_state,
 )
-from core.models import OperationalStateEvent, OperationalStateVersion, bump_operational_state
+from core.models import (
+    OperationalStateEvent,
+    OperationalStateVersion,
+    bump_operational_state,
+    lock_production_state,
+)
 from core.operational_fragments import operational_fragment_response
+from downtimes.driver_workflow import (
+    DRIVER_DOWNTIME_FLOW_WAITING_LOADING,
+    DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD,
+    driver_downtime_flow,
+    driver_downtime_opens_work,
+    driver_downtime_requires_empty_truck,
+    driver_downtime_requires_loaded_trip,
+)
 from downtimes.models import DowntimeEvent, DowntimeReason
-from references.models import Dormitory, DormitorySection, DumpPoint, Equipment, EquipmentState, EquipmentType, RockType
+from references.models import (
+    Dormitory,
+    DormitorySection,
+    DumpPoint,
+    Equipment,
+    EquipmentModel,
+    EquipmentState,
+    EquipmentType,
+    RockType,
+)
 from reports.forms import RatingPeriodReferenceForm
 from reports.models import RatingPeriod, ReportTemplate
 from reports.rating_period_generation import inspect_rating_period_calendar
@@ -88,9 +110,13 @@ from .protected_cards import (
 from .privacy_consent import (
     PRIVACY_CONSENT_FIELD,
     PRIVACY_CONSENT_REQUIRED_MESSAGE,
+    PRIVACY_CONSENT_SESSION_KEY,
+    PRIVACY_POLICY_VERSION,
     accept_current_privacy_policy,
+    privacy_consent_cookie_matches_access,
     privacy_consent_matches_access,
     privacy_consent_submission_is_current,
+    set_current_privacy_consent_cookie,
 )
 from .forms import (
     AdminAccessBlockForm,
@@ -108,6 +134,7 @@ from .forms import (
 from .models import (
     AdminActionLog,
     AdminConflict,
+    ContractorOrganization,
     DriverPrimaryRegistration,
     Employee,
     EmployeeAccess,
@@ -119,7 +146,7 @@ from .models import (
     WatchComposition,
     WorkSchedule,
 )
-from .live_monitor import presence_by_employee_id
+from .live_monitor import attach_application_presence, application_presence_by_employee_ids
 from .registration_dashboard import build_registration_dashboard
 from .oup_undo import (
     get_oup_action_undo_state,
@@ -233,7 +260,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v189'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v209'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -281,12 +308,14 @@ const CACHE_PREFIX = "driver-mobile-shell-";
 const APP_SHELL_URL = "/driver/";
 const LEGACY_SHELL_URL = "/driver/shift/";
 const MANIFEST_URL = "/driver.webmanifest";
+const PRIVACY_POLICY_PATH = "/company/privacy/";
+const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";
 const CORE_ASSETS = [
     APP_SHELL_URL,
     LEGACY_SHELL_URL,
     MANIFEST_URL,
-    "/company/privacy/",
-    "/static/portal/css/portal-shell-v5.css?v=6",
+    PRIVACY_POLICY_URL,
+    "/static/portal/css/portal-shell-v5.css?v=7",
     "/static/portal/js/portal-shell-v5.js",
     "/static/css/app.css",
     "/static/css/mobile-role-login-v1.css",
@@ -371,6 +400,10 @@ self.addEventListener("fetch", (event) => {{
     }}
     if (request.headers.get("x-requested-with") === "XMLHttpRequest") {{
         event.respondWith(fetch(request));
+        return;
+    }}
+    if (url.pathname === PRIVACY_POLICY_PATH) {{
+        event.respondWith(networkFirst(request, PRIVACY_POLICY_URL));
         return;
     }}
     if (request.mode === "navigate" || url.pathname === APP_SHELL_URL || url.pathname === LEGACY_SHELL_URL) {{
@@ -586,6 +619,85 @@ def _masked_activation_phone(value):
     return 'Телефон подтвержден'
 
 
+PENDING_ACTIVATION_SESSION_KEYS = (
+    'pending_activation_access_id',
+    'pending_activation_role_code',
+    'pending_activation_target_app_code',
+    'post_activation_next',
+)
+
+
+def _clear_pending_activation_session(request):
+    for key in PENDING_ACTIVATION_SESSION_KEYS:
+        request.session.pop(key, None)
+
+
+def _mobile_privacy_consent_matches(request, access):
+    """Restore a current, access-bound consent into a fresh login session."""
+    if privacy_consent_matches_access(request.session, access):
+        return True
+    if privacy_consent_cookie_matches_access(request, access):
+        accept_current_privacy_policy(
+            request,
+            PRIVACY_POLICY_VERSION,
+            access=access,
+        )
+        return True
+    return False
+
+
+def _mobile_privacy_consent_gate(request, access, submitted_version):
+    """Return whether login may continue and whether a cookie must be issued."""
+    if _mobile_privacy_consent_matches(request, access):
+        return True, False
+    if privacy_consent_submission_is_current(submitted_version):
+        accept_current_privacy_policy(
+            request,
+            submitted_version,
+            access=access,
+        )
+        return True, True
+    return False, False
+
+
+def _render_mobile_privacy_consent_step(
+    request,
+    *,
+    selected_device_kind,
+    next_url,
+    login_role_app,
+    submitted_phone,
+    invalid=False,
+):
+    if invalid:
+        messages.error(request, PRIVACY_CONSENT_REQUIRED_MESSAGE)
+    return render(
+        request,
+        'users/login.html',
+        {
+            'selected_device_kind': selected_device_kind,
+            'next_url': next_url,
+            'login_role_app': login_role_app,
+            'combined_mobile_login': True,
+            'submitted_phone': submitted_phone,
+            'login_step': 'consent',
+            'privacy_consent_error': invalid,
+        },
+    )
+
+
+def _attach_mobile_privacy_consent_cookie(
+    response,
+    request,
+    access,
+    *,
+    accepted_now,
+):
+    if accepted_now:
+        set_current_privacy_consent_cookie(response, request, access)
+    return response
+
+
 def login_view(
     request,
     *,
@@ -600,6 +712,17 @@ def login_view(
         and role_app.role_code in {'driver', 'excavator_operator'}
         and target_role_app is None
     )
+    if (
+        request.method == 'GET'
+        and combined_mobile_login
+        and request.GET.get('reset') == '1'
+    ):
+        # «Ввести другой номер» начинает новую предавторизационную попытку.
+        # Согласие и выбранный доступ прошлого сотрудника нельзя переносить на
+        # следующий номер, особенно на общем телефоне.
+        _clear_pending_activation_session(request)
+        request.session.pop(PRIVACY_CONSENT_SESSION_KEY, None)
+        request.session.cycle_key()
     allowed_role_codes = tuple(allowed_role_codes or ())
     next_url = forced_next_url or _validated_next_url(
         request,
@@ -651,34 +774,17 @@ def login_view(
         request.GET.get('phone', '').strip() if request.method == 'GET' else ''
     )
     submitted_action = request.POST.get('action', '') if request.method == 'POST' else ''
-    login_action = submitted_action if submitted_action in {'register', 'continue'} else 'login'
+    login_action = (
+        submitted_action
+        if submitted_action in {'register', 'continue', 'consent'}
+        else 'login'
+    )
     submitted_privacy_consent = (
         request.POST.get(PRIVACY_CONSENT_FIELD, '')
         if request.method == 'POST'
         else ''
     )
-    if (
-        request.method == 'POST'
-        and combined_mobile_login
-        and login_action in {'login', 'register', 'continue'}
-        and not privacy_consent_submission_is_current(submitted_privacy_consent)
-    ):
-        messages.error(request, PRIVACY_CONSENT_REQUIRED_MESSAGE)
-        return render(
-            request,
-            'users/login.html',
-            {
-                'selected_device_kind': selected_device_kind,
-                'next_url': next_url,
-                'login_role_app': login_role_app,
-                'combined_mobile_login': True,
-                'submitted_phone': submitted_phone or prefilled_phone,
-                'login_step': 'pin' if submitted_phone else '',
-                'privacy_consent_error': True,
-            },
-        )
-
-    if request.method == 'POST' and login_action in {'register', 'continue'}:
+    if request.method == 'POST' and login_action in {'register', 'continue', 'consent'}:
         # Первый вход. Раньше сюда пускал только выданный вручную временный код,
         # и раздавать его приходилось каждому — при текучке в двадцать человек за
         # вахту это неподъёмно. Теперь ключ — номер телефона из карточки, а ФИО
@@ -701,23 +807,67 @@ def login_view(
         # например, доступ переоформляли. Если хоть одна уже активирована, у
         # человека есть рабочий пинкод, и вести его на регистрацию нельзя:
         # заведёт второй и запутается, каким входить.
-        already_registered = any(
-            candidate.status == EmployeeAccess.Status.ACTIVATED
+        activated = [
+            candidate
             for candidate in matches
-        )
+            if candidate.status == EmployeeAccess.Status.ACTIVATED
+        ]
+        if len(activated) > 1:
+            return render(
+                request,
+                'users/login_phone_not_found.html',
+                {
+                    'login_role_app': login_role_app,
+                    'submitted_phone': format_phone_for_display(phone),
+                    'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
+                    'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
+                    'access_conflict': True,
+                },
+            )
+        already_registered = bool(activated)
         pending = [
             candidate
             for candidate in matches
             if candidate.status == EmployeeAccess.Status.NOT_ACTIVATED
         ]
+        if len(pending) > 1 and not already_registered:
+            return render(
+                request,
+                'users/login_phone_not_found.html',
+                {
+                    'login_role_app': login_role_app,
+                    'submitted_phone': format_phone_for_display(phone),
+                    'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
+                    'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
+                    'access_conflict': True,
+                },
+            )
+        privacy_consent_accepted_now = False
+        consent_access = (
+            pending[0]
+            if pending and not already_registered
+            else (activated[0] if activated else None)
+        )
+        if combined_mobile_login and consent_access:
+            consent_ready, privacy_consent_accepted_now = (
+                _mobile_privacy_consent_gate(
+                    request,
+                    consent_access,
+                    submitted_privacy_consent,
+                )
+            )
+            if not consent_ready:
+                return _render_mobile_privacy_consent_step(
+                    request,
+                    selected_device_kind=selected_device_kind,
+                    next_url=next_url,
+                    login_role_app=login_role_app,
+                    submitted_phone=phone,
+                    invalid=(login_action == 'consent'),
+                )
         if pending and not already_registered:
             access = pending[0]
             request.session.cycle_key()
-            accept_current_privacy_policy(
-                request,
-                submitted_privacy_consent,
-                access=access,
-            )
             request.session['pending_activation_access_id'] = access.id
             request.session['pending_activation_role_code'] = access.role.code
             if target_role_app:
@@ -727,23 +877,34 @@ def login_view(
             if next_url:
                 request.session['post_activation_next'] = next_url
             set_session_device_kind(request, selected_device_kind)
-            return _login_redirect_response(request, reverse('activate_access'))
-        if matches:
-            # Пинкод у человека уже есть — просим именно его, вторым шагом.
-            return render(
+            response = _login_redirect_response(request, reverse('activate_access'))
+            return _attach_mobile_privacy_consent_cookie(
+                response,
+                request,
+                access,
+                accepted_now=privacy_consent_accepted_now,
+            )
+        if activated:
+            # Пинкод у человека уже есть — система сама открывает второй шаг.
+            # Согласие принято на шаге телефона и привязано к конкретному
+            # доступу, поэтому повторять чекбокс рядом с PIN не нужно.
+            response = render(
                 request,
                 'users/login.html',
                 {
                     'selected_device_kind': selected_device_kind,
                     'next_url': next_url,
                     'login_role_app': login_role_app,
-                    # Старый cached-клиент action=continue заменяет только
-                    # <main>, но не может подхватить новый CSS из <head>.
-                    # Возвращаем ему прежний самостоятельный PIN-шаг.
-                    'combined_mobile_login': False,
+                    'combined_mobile_login': combined_mobile_login,
                     'submitted_phone': phone,
                     'login_step': 'pin',
                 },
+            )
+            return _attach_mobile_privacy_consent_cookie(
+                response,
+                request,
+                activated[0],
+                accepted_now=privacy_consent_accepted_now,
             )
         else:
             # Номер может быть в базе, но за другой должностью: человек открыл
@@ -804,6 +965,59 @@ def login_view(
             allow_pending_access=True,
         ):
             access = None
+        # Мобильный двухшаговый вход никогда не авторизует NOT_ACTIVATED по
+        # старому временному коду. Состояние такого доступа определяется ниже
+        # только по телефону и ведёт на обязательное создание постоянного PIN.
+        if (
+            combined_mobile_login
+            and access
+            and access.status != EmployeeAccess.Status.ACTIVATED
+        ):
+            access = None
+        if combined_mobile_login and access:
+            activated_for_phone = [
+                candidate
+                for candidate in find_unactivated_accesses_by_phone(
+                    phone,
+                    role_codes=([role_app.role_code] if role_app else None),
+                )
+                if candidate.status == EmployeeAccess.Status.ACTIVATED
+                and employee_has_effective_access_role(
+                    candidate.employee,
+                    candidate.role.code,
+                    allow_pending_access=True,
+                )
+            ]
+            if len(activated_for_phone) > 1:
+                return render(
+                    request,
+                    'users/login_phone_not_found.html',
+                    {
+                        'login_role_app': login_role_app,
+                        'submitted_phone': format_phone_for_display(phone),
+                        'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
+                        'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
+                        'access_conflict': True,
+                    },
+                )
+        privacy_consent_accepted_now = False
+        if combined_mobile_login and access:
+            consent_ready, privacy_consent_accepted_now = (
+                _mobile_privacy_consent_gate(
+                    request,
+                    access,
+                    submitted_privacy_consent,
+                )
+            )
+            if not consent_ready:
+                return _render_mobile_privacy_consent_step(
+                    request,
+                    selected_device_kind=selected_device_kind,
+                    next_url=next_url,
+                    login_role_app=login_role_app,
+                    submitted_phone=phone,
+                    invalid=False,
+                )
         if access:
             if access.status == EmployeeAccess.Status.NOT_ACTIVATED:
                 if access.primary_code_issued_at:
@@ -862,14 +1076,15 @@ def login_view(
                 )
             request.session.cycle_key()
             set_session_device_kind(request, selected_device_kind)
-            accept_current_privacy_policy(
-                request,
-                submitted_privacy_consent,
-                access=locked_access,
-            )
-            return _login_redirect_response(
+            response = _login_redirect_response(
                 request,
                 next_url or _role_landing_url(access),
+            )
+            return _attach_mobile_privacy_consent_cookie(
+                response,
+                request,
+                locked_access,
+                accepted_now=privacy_consent_accepted_now,
             )
         # Пинкода у номера ещё нет — человек первый раз в приложении. Отбивать
         # его «неверный пинкод» бессмысленно: вводить ему нечего. Ведём на экран,
@@ -896,14 +1111,39 @@ def login_view(
             for candidate in phone_accesses
             if candidate.status == EmployeeAccess.Status.NOT_ACTIVATED
         ]
+        if combined_mobile_login and len(first_time) > 1:
+            return render(
+                request,
+                'users/login_phone_not_found.html',
+                {
+                    'login_role_app': login_role_app,
+                    'submitted_phone': format_phone_for_display(phone),
+                    'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
+                    'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
+                    'access_conflict': True,
+                },
+            )
         if first_time:
             pending_access = first_time[0]
+            privacy_consent_accepted_now = False
+            if combined_mobile_login:
+                consent_ready, privacy_consent_accepted_now = (
+                    _mobile_privacy_consent_gate(
+                        request,
+                        pending_access,
+                        submitted_privacy_consent,
+                    )
+                )
+                if not consent_ready:
+                    return _render_mobile_privacy_consent_step(
+                        request,
+                        selected_device_kind=selected_device_kind,
+                        next_url=next_url,
+                        login_role_app=login_role_app,
+                        submitted_phone=phone,
+                        invalid=False,
+                    )
             request.session.cycle_key()
-            accept_current_privacy_policy(
-                request,
-                submitted_privacy_consent,
-                access=pending_access,
-            )
             request.session['pending_activation_access_id'] = pending_access.id
             request.session['pending_activation_role_code'] = pending_access.role.code
             if target_role_app:
@@ -913,7 +1153,13 @@ def login_view(
             if next_url:
                 request.session['post_activation_next'] = next_url
             set_session_device_kind(request, selected_device_kind)
-            return _login_redirect_response(request, reverse('activate_access'))
+            response = _login_redirect_response(request, reverse('activate_access'))
+            return _attach_mobile_privacy_consent_cookie(
+                response,
+                request,
+                pending_access,
+                accepted_now=privacy_consent_accepted_now,
+            )
 
         other_access = None
         if allowed_role_codes:
@@ -922,6 +1168,11 @@ def login_view(
             messages.error(
                 request,
                 f'У этой учетной записи нет доступа к приложению «{login_role_app.short_name}».',
+            )
+        elif login_role_app and combined_mobile_login and submitted_phone:
+            messages.error(
+                request,
+                'PIN не подошёл. Проверьте 6 цифр и попробуйте ещё раз.',
             )
         elif login_role_app:
             messages.error(
@@ -939,7 +1190,13 @@ def login_view(
             'login_role_app': login_role_app,
             'combined_mobile_login': combined_mobile_login,
             'submitted_phone': submitted_phone or prefilled_phone,
-            'login_step': 'pin' if submitted_phone else '',
+            'login_step': (
+                'pin'
+                if request.method == 'POST'
+                and login_action == 'login'
+                and submitted_phone
+                else 'phone'
+            ),
             # Отличаем «номер пришёл в ссылке со /start/» от «человек уже
             # пробовал войти»: в первом случае экран установки должен
             # показаться как обычно, во втором — форма уже открыта на JS,
@@ -1003,12 +1260,23 @@ def activate_access_view(request):
     target_app = get_role_app(
         request.session.get('pending_activation_target_app_code', '')
     )
+    host_role_app = get_role_app_for_request(request)
+    if (
+        host_role_app
+        and target_app is None
+        and pending_role_code
+        and pending_role_code != host_role_app.role_code
+    ):
+        # Предактивационная сессия одного приложения не переносится в другое.
+        # Cookie сейчас host-only, но эта проверка оставляет изоляцию корректной
+        # и при будущих изменениях домена cookie или прокси.
+        _clear_pending_activation_session(request)
+        return redirect('login')
     access_queryset = (
         EmployeeAccess.objects
         .select_related('employee', 'role')
         .filter(id=access_id, is_active=True, status=EmployeeAccess.Status.NOT_ACTIVATED)
     )
-    host_role_app = get_role_app_for_request(request)
     if pending_role_code:
         access_queryset = access_queryset.filter(role__code=pending_role_code)
     elif host_role_app:
@@ -1021,28 +1289,16 @@ def activate_access_view(request):
     ):
         access = None
     if not access:
-        for key in (
-            'pending_activation_access_id',
-            'pending_activation_role_code',
-            'pending_activation_target_app_code',
-            'post_activation_next',
-        ):
-            request.session.pop(key, None)
+        _clear_pending_activation_session(request)
         return redirect('login')
 
     activation_role_app = target_app or host_role_app
     if (
         activation_role_app
         and activation_role_app.role_code in {'driver', 'excavator_operator'}
-        and not privacy_consent_matches_access(request.session, access)
+        and not _mobile_privacy_consent_matches(request, access)
     ):
-        for key in (
-            'pending_activation_access_id',
-            'pending_activation_role_code',
-            'pending_activation_target_app_code',
-            'post_activation_next',
-        ):
-            request.session.pop(key, None)
+        _clear_pending_activation_session(request)
         messages.error(request, PRIVACY_CONSENT_REQUIRED_MESSAGE)
         return redirect('login')
 
@@ -1071,6 +1327,13 @@ def activate_access_view(request):
                         locked_employee.is_active = True
                         locked_employee.save(update_fields=['status', 'is_active', 'updated_at'])
                     access = activate_role_session(request, locked_access)
+            except (Employee.DoesNotExist, EmployeeAccess.DoesNotExist):
+                _clear_pending_activation_session(request)
+                messages.error(
+                    request,
+                    'Доступ уже изменился. Введите номер ещё раз.',
+                )
+                return redirect('login')
             except ValidationError as error:
                 form.add_error(None, '; '.join(error.messages))
                 return render(
@@ -1083,11 +1346,7 @@ def activate_access_view(request):
                         'activation_role_app': activation_role_app,
                     },
                 )
-            for key in (
-                'pending_activation_access_id',
-                'pending_activation_role_code',
-                'pending_activation_target_app_code',
-            ):
+            for key in PENDING_ACTIVATION_SESSION_KEYS[:3]:
                 request.session.pop(key, None)
             request.session.cycle_key()
             set_session_device_kind(request, get_session_device_kind(request))
@@ -1181,6 +1440,7 @@ def system_admin_dashboard_view(request):
         ('Кадровые должности', PersonnelPosition.objects.count(), '/system-admin/references/personnel-positions/'),
         ('Производственные специализации', ProductionSpecialization.objects.count(), '/system-admin/references/production-specializations/'),
         ('Виды техники', EquipmentType.objects.count(), '/admin/references/equipmenttype/'),
+        ('Модели техники', EquipmentModel.objects.count(), '/admin/references/equipmentmodel/'),
         ('Техника', Equipment.objects.count(), '/admin/references/equipment/'),
         ('Состояния техники', EquipmentState.objects.count(), '/admin/references/equipmentstate/'),
         ('Причины простоев', DowntimeReason.objects.count(), '/admin/downtimes/downtimereason/'),
@@ -1191,6 +1451,9 @@ def system_admin_dashboard_view(request):
         ('Шаблоны отчетов', ReportTemplate.objects.count(), '/reports/templates/'),
     ]
 
+    recent_employees = attach_application_presence(
+        Employee.objects.order_by('-created_at')[:5]
+    )
     return render(
         request,
         'users/system_admin_dashboard.html',
@@ -1201,7 +1464,7 @@ def system_admin_dashboard_view(request):
             'not_activated_total': access_status_counts.get(EmployeeAccess.Status.NOT_ACTIVATED, 0),
             'blocked_total': access_status_counts.get(EmployeeAccess.Status.BLOCKED, 0),
             'deactivated_total': access_status_counts.get(EmployeeAccess.Status.DEACTIVATED, 0),
-            'recent_employees': Employee.objects.order_by('-created_at')[:5],
+            'recent_employees': recent_employees,
             'recent_accesses': EmployeeAccess.objects.select_related('employee', 'role').order_by('-last_login_at', '-created_at')[:5],
             'recent_logs': AdminActionLog.objects.select_related('actor')[:8],
             'open_conflicts': AdminConflict.objects.select_related('employee', 'role').filter(status=AdminConflict.Status.OPEN)[:8],
@@ -1272,6 +1535,7 @@ def system_admin_references_view(request):
             'title': 'Сотрудники и доступы',
             'items': [
                 {'name': 'Сотрудники', 'count': Employee.objects.count(), 'url': 'system_admin_employees', 'external_url': ''},
+                {'name': 'Организации подрядчиков', 'count': ContractorOrganization.objects.count(), 'url': '', 'external_url': '/admin/users/contractororganization/', 'detail_code': 'contractor-organizations'},
                 {'name': 'Подразделения', 'count': PersonnelDepartment.objects.count(), 'url': '', 'external_url': '/admin/users/personneldepartment/', 'detail_code': 'personnel-departments'},
                 {'name': 'Графики работы', 'count': WorkSchedule.objects.count(), 'url': '', 'external_url': '/admin/users/workschedule/', 'detail_code': 'work-schedules'},
                 {'name': 'Утверждённые составы вахт', 'count': WatchComposition.objects.count(), 'url': '', 'external_url': '/admin/users/watchcomposition/', 'detail_code': 'watch-compositions'},
@@ -1285,6 +1549,7 @@ def system_admin_references_view(request):
             'title': 'Техника',
             'items': [
                 {'name': 'Виды техники', 'count': EquipmentType.objects.count(), 'url': '', 'external_url': '/admin/references/equipmenttype/', 'detail_code': 'equipment-types'},
+                {'name': 'Модели техники', 'count': EquipmentModel.objects.count(), 'url': '', 'external_url': '/admin/references/equipmentmodel/', 'detail_code': 'equipment-models'},
                 {'name': 'Техника', 'count': Equipment.objects.count(), 'url': '', 'external_url': '/admin/references/equipment/', 'detail_code': 'equipment'},
                 {'name': 'Состояния техники', 'count': EquipmentState.objects.count(), 'url': '', 'external_url': '/admin/references/equipmentstate/', 'detail_code': 'equipment-states'},
             ],
@@ -1370,6 +1635,27 @@ def system_admin_references_view(request):
 
 def get_system_admin_reference_configs():
     return {
+        'contractor-organizations': {
+            'title': 'Организации подрядчиков',
+            'section': 'Сотрудники и доступы',
+            'model': ContractorOrganization,
+            'description': 'Юридические лица подрядчиков, сроки договоров и общий допуск к производственным работам.',
+            'fields': [
+                'name',
+                'short_name',
+                'contract_number',
+                'contract_valid_from',
+                'contract_valid_until',
+                'contact_person',
+                'contact_phone',
+                'comment',
+                'is_active',
+            ],
+            'search_fields': ['name', 'short_name', 'contract_number', 'contact_person', 'contact_phone'],
+            'preview_fields': ['short_name', 'contract_number', 'contract_valid_from', 'contract_valid_until', 'is_active'],
+            'initial': {'is_active': True},
+            'admin_url': '/admin/users/contractororganization/',
+        },
         'personnel-departments': {
             'title': 'Подразделения',
             'section': 'Сотрудники и доступы',
@@ -1470,13 +1756,36 @@ def get_system_admin_reference_configs():
             'preview_fields': ['name', 'is_active'],
             'admin_url': '/admin/references/equipmenttype/',
         },
+        'equipment-models': {
+            'title': 'Модели техники',
+            'section': 'Техника',
+            'model': EquipmentModel,
+            'description': 'Марки и модели техники с их рабочими характеристиками. Для экскаватора укажите фактический объем ковша.',
+            'fields': ['equipment_type', 'name', 'body_volume_m3', 'payload_tons', 'fuel_capacity_limit_l', 'is_active'],
+            'search_fields': ['name', 'equipment_type__name'],
+            'preview_fields': ['equipment_type', 'body_volume_m3', 'payload_tons', 'fuel_capacity_limit_l', 'is_active'],
+            'select_related': ['equipment_type'],
+            'initial': {'is_active': True},
+            'help_texts': {
+                'body_volume_m3': 'Для экскаватора укажите фактический объем ковша в м3.',
+                'payload_tons': 'Для экскаватора это поле можно оставить пустым.',
+            },
+            'admin_url': '/admin/references/equipmentmodel/',
+        },
         'equipment': {
             'title': 'Техника',
             'section': 'Техника',
             'model': Equipment,
-            'search_fields': ['garage_number', 'vin', 'equipment_type__name', 'model__name'],
-            'preview_fields': ['equipment_type', 'garage_number', 'model', 'vin'],
-            'select_related': ['equipment_type', 'model'],
+            'description': 'Отдельные единицы техники. Для подрядной техники снимите флажок «Собственная техника» и выберите организацию-владельца.',
+            'fields': ['equipment_type', 'model', 'garage_number', 'vin', 'is_own', 'contractor_organization', 'is_active'],
+            'labels': {'is_own': 'Собственная техника'},
+            'help_texts': {
+                'is_own': 'Снимите флажок, если техника принадлежит подрядчику.',
+                'contractor_organization': 'Для подрядной техники организация обязательна.',
+            },
+            'search_fields': ['garage_number', 'vin', 'equipment_type__name', 'model__name', 'contractor_organization__name'],
+            'preview_fields': ['equipment_type', 'garage_number', 'model', 'contractor_organization', 'vin'],
+            'select_related': ['equipment_type', 'model', 'contractor_organization'],
             'admin_url': '/admin/references/equipment/',
         },
         'equipment-states': {
@@ -1664,7 +1973,12 @@ def build_reference_form(model, config=None):
         for field in model._meta.fields
         if field.name != 'id' and getattr(field, 'editable', True)
     ]
-    form_class = modelform_factory(model, fields=editable_fields)
+    form_class = modelform_factory(
+        model,
+        fields=editable_fields,
+        labels=config.get('labels'),
+        help_texts=config.get('help_texts'),
+    )
     field_choices = config.get('field_choices') or {}
     if not field_choices:
         return form_class
@@ -2011,7 +2325,17 @@ def system_admin_conflicts_view(request):
         for item in AdminConflict.objects.values('status').annotate(total=Count('id'))
     }
     conflicts = list(conflicts[:200])
+    conflict_employees = attach_application_presence(
+        conflict.employee for conflict in conflicts if conflict.employee_id
+    )
+    conflict_presence_by_employee_id = {
+        employee.pk: employee.application_presence
+        for employee in conflict_employees
+    }
     for conflict in conflicts:
+        conflict.application_presence = conflict_presence_by_employee_id.get(
+            conflict.employee_id
+        )
         if conflict.status == AdminConflict.Status.OPEN:
             conflict.status_class = 'danger'
         elif conflict.status == AdminConflict.Status.IN_PROGRESS:
@@ -2278,7 +2602,7 @@ def system_admin_employees_view(request):
 
     employees = (
         Employee.objects
-        .select_related('personnel_position')
+        .select_related('personnel_position', 'contractor_organization')
         .prefetch_related('accesses__role')
         .order_by('full_name')
     )
@@ -2286,6 +2610,8 @@ def system_admin_employees_view(request):
     access_status = request.GET.get('access_status', '').strip()
     role_id = request.GET.get('role', '').strip()
     personnel_position = request.GET.get('personnel_position', '').strip()
+    employment_type = request.GET.get('employment_type', '').strip()
+    contractor_organization = request.GET.get('contractor_organization', '').strip()
     query = request.GET.get('q', '').strip()
     if status:
         employees = employees.filter(status=status)
@@ -2293,6 +2619,10 @@ def system_admin_employees_view(request):
         employees = employees.filter(accesses__status=access_status).distinct()
     if role_id.isdigit():
         employees = employees.filter(accesses__role_id=int(role_id)).distinct()
+    if employment_type in Employee.EmploymentType.values:
+        employees = employees.filter(employment_type=employment_type)
+    if contractor_organization.isdigit():
+        employees = employees.filter(contractor_organization_id=int(contractor_organization))
     # Разметка фильтра по должности была на месте, а данные в неё не приходили:
     # список открывался пустым, и выбор в нём ничего не менял.
     if personnel_position == EMPLOYEES_WITHOUT_POSITION:
@@ -2301,6 +2631,7 @@ def system_admin_employees_view(request):
         employees = employees.filter(personnel_position_id=int(personnel_position))
     if query:
         employees = employees.filter(full_name__icontains=query)
+    employees = attach_application_presence(employees)
 
     return render(
         request,
@@ -2314,6 +2645,8 @@ def system_admin_employees_view(request):
             'personnel_positions': (
                 PersonnelPosition.objects.filter(is_active=True).order_by('name')
             ),
+            'employment_types': Employee.EmploymentType.choices,
+            'contractor_organizations': ContractorOrganization.objects.filter(is_active=True).order_by('name'),
             # Отдельной строкой — те, у кого должность не проставлена: при разборе
             # выгрузки из отдела кадров их надо находить в первую очередь.
             'personnel_position_groups': [
@@ -2323,6 +2656,8 @@ def system_admin_employees_view(request):
             'selected_access_status': access_status,
             'selected_role': role_id,
             'selected_personnel_position': personnel_position,
+            'selected_employment_type': employment_type,
+            'selected_contractor_organization': contractor_organization,
             'query': query,
         },
     )
@@ -2535,6 +2870,7 @@ def system_admin_employee_detail_view(request, employee_id):
             'block_form': AdminAccessBlockForm(),
             'employee_accesses': employee_accesses,
             'current_role_access': current_role_access,
+            'employee_presence': application_presence_by_employee_ids([employee.pk]).get(employee.pk),
             'active_equipment_assignment': active_equipment_assignment,
             'work_assignment_role': work_assignment_role,
             'work_assignment_supports_equipment': bool(
@@ -2542,6 +2878,7 @@ def system_admin_employee_detail_view(request, employee_id):
                 and work_assignment_role.code in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES
             ),
             'effective_specialization': effective_employee_specialization,
+            'employee_start_url': request.build_absolute_uri(reverse('universal_start')),
             'temporary_work_transfers': (
                 employee.temporary_work_transfers
                 .select_related(
@@ -3204,9 +3541,9 @@ def driver_report_duration_label(seconds, *, total=False):
     return f'{rounded_minutes} мин.'
 
 
-def driver_shift_downtime_seconds(equipment, shift, *, until=None):
+def driver_shift_downtime_seconds_by_reason(equipment, shift, *, until=None):
     if not equipment or not shift or not shift.opened_at:
-        return 0
+        return {}
     calculation_end = until or timezone.now()
     source_period_end = shift.closed_at or calculation_end
     events = DowntimeEvent.objects.filter(
@@ -3214,11 +3551,36 @@ def driver_shift_downtime_seconds(equipment, shift, *, until=None):
         started_at__gte=shift.opened_at,
         started_at__lt=source_period_end,
     )
-    total_seconds = 0
-    for event in events.only('started_at', 'ended_at'):
+    totals = {}
+    for event in events.only('reason_id', 'started_at', 'ended_at'):
+        if not event.reason_id:
+            continue
         event_end = min(event.ended_at or calculation_end, calculation_end)
-        total_seconds += max(0, int((event_end - event.started_at).total_seconds()))
-    return total_seconds
+        totals.setdefault(event.reason_id, 0)
+        totals[event.reason_id] += max(0, int((event_end - event.started_at).total_seconds()))
+    return totals
+
+
+def driver_shift_downtime_seconds(equipment, shift, *, until=None):
+    return sum(
+        driver_shift_downtime_seconds_by_reason(equipment, shift, until=until).values()
+    )
+
+
+def driver_downtime_totals_payload(equipment, shift, *, calculated_at=None):
+    calculated_at = calculated_at or timezone.now()
+    reason_totals = driver_shift_downtime_seconds_by_reason(
+        equipment,
+        shift,
+        until=calculated_at,
+    )
+    shift_total_seconds = sum(reason_totals.values())
+    return {
+        'calculated_at': calculated_at.isoformat(),
+        'shift_total_seconds': shift_total_seconds,
+        'shift_total_label': driver_format_duration_label(shift_total_seconds),
+        'reason_totals': reason_totals,
+    }
 
 
 def driver_downtime_reason_status_key(reason):
@@ -3234,8 +3596,8 @@ def driver_downtime_event_payload(event, *, action='', closed=False, shift=None)
     elapsed_until = ended_at or now
     elapsed_seconds = max(0, int((elapsed_until - started_at).total_seconds()))
     reason = event.reason if event.reason_id else None
-    shift_total_seconds = driver_shift_downtime_seconds(event.equipment, shift)
-    return {
+    workflow = driver_downtime_flow(reason)
+    payload = {
         'ok': True,
         'action': action,
         'active': not bool(ended_at),
@@ -3243,14 +3605,18 @@ def driver_downtime_event_payload(event, *, action='', closed=False, shift=None)
         'event_id': event.id,
         'reason_id': event.reason_id,
         'reason': str(reason) if reason else '',
+        'reason_label': reason.button_label if reason else '',
+        'workflow': workflow,
+        'requires_loaded_trip': workflow == DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD,
+        'requires_empty_truck': driver_downtime_requires_empty_truck(reason),
         'started_at': started_at.isoformat(),
         'ended_at': ended_at.isoformat() if ended_at else '',
         'elapsed_seconds': elapsed_seconds,
         'elapsed_label': driver_format_duration_label(elapsed_seconds),
-        'shift_total_seconds': shift_total_seconds,
-        'shift_total_label': driver_format_duration_label(shift_total_seconds),
         'status_key': driver_downtime_reason_status_key(reason),
     }
+    payload.update(driver_downtime_totals_payload(event.equipment, shift))
+    return payload
 
 
 def driver_json_payload(request):
@@ -3600,11 +3966,24 @@ def driver_shift_view(request):
         driver_status = active_downtime.reason.button_label
         driver_status_class = 'is-downtime'
 
-    driver_waiting_unload = bool(
+    driver_has_open_trip = bool(active_trip)
+    driver_has_loaded_trip = bool(
         active_trip
-        and active_downtime
-        and str(active_downtime.reason.name or '').strip().casefold()
-        == 'Ожидание разгрузки'.casefold()
+        and active_trip.status == TripStatus.LOADED_WAITING_UNLOAD
+    )
+    active_downtime_flow = driver_downtime_flow(
+        active_downtime.reason if active_downtime else None
+    )
+    driver_waiting_operation_active = driver_downtime_opens_work(
+        active_downtime.reason if active_downtime else None
+    )
+    driver_loading_wait_active = bool(
+        not driver_has_open_trip
+        and active_downtime_flow == DRIVER_DOWNTIME_FLOW_WAITING_LOADING
+    )
+    driver_unloading_wait_active = bool(
+        driver_has_loaded_trip
+        and active_downtime_flow == DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD
     )
 
     driver_work_excavator = active_trip.excavator if active_trip else (current_assignment.excavator if current_assignment else None)
@@ -3656,7 +4035,17 @@ def driver_shift_view(request):
     driver_context_label = ' · '.join(driver_context_parts)
     if active_trip:
         driver_dial_label = str(driver_target_label)
-        driver_dial_note = 'ОЖИДАНИЕ РАЗГРУЗКИ' if driver_waiting_unload else 'ТОЧКА РАЗГРУЗКИ'
+        driver_dial_note = (
+            active_downtime.reason.button_label.upper()
+            if driver_unloading_wait_active
+            else 'ТОЧКА РАЗГРУЗКИ'
+        )
+    elif driver_loading_wait_active:
+        # Во время ожидания сохраняем полезный ориентир погрузки в крупной
+        # строке, а само состояние показываем в подписи. Так server render и
+        # мгновенное AJAX-состояние выглядят одинаково.
+        driver_dial_label = driver_excavator_short_label(driver_work_excavator)
+        driver_dial_note = active_downtime.reason.button_label.upper()
     elif active_downtime:
         driver_dial_label = active_downtime.reason.button_label
         driver_dial_note = 'ПРИЧИНА ПРОСТОЯ'
@@ -3681,7 +4070,30 @@ def driver_shift_view(request):
             driver_assignment_effective_at = pending_assignment_action.effective_at.isoformat()
 
     downtime_equipment_type = current_truck.equipment_type if current_truck else None
-    downtime_reasons = DowntimeReason.for_workplace('truck_driver', downtime_equipment_type)
+    downtime_reasons = list(
+        DowntimeReason.for_workplace('truck_driver', downtime_equipment_type)
+    )
+    downtime_calculated_at = timezone.now()
+    downtime_reason_totals = driver_shift_downtime_seconds_by_reason(
+        open_shift.equipment if open_shift else current_truck,
+        open_shift,
+        until=downtime_calculated_at,
+    )
+    for reason in downtime_reasons:
+        reason.driver_workflow = driver_downtime_flow(reason)
+        reason.driver_requires_loaded_trip = driver_downtime_requires_loaded_trip(reason)
+        reason.driver_requires_empty_truck = driver_downtime_requires_empty_truck(reason)
+        reason.driver_total_seconds = downtime_reason_totals.get(reason.id, 0)
+        reason.driver_total_label = driver_format_duration_label(reason.driver_total_seconds)
+        reason.driver_is_used = bool(
+            reason.driver_total_seconds
+            or (active_downtime and active_downtime.reason_id == reason.id)
+        )
+        reason.driver_unavailable_message = ''
+        if reason.driver_requires_loaded_trip and not driver_has_loaded_trip:
+            reason.driver_unavailable_message = 'Доступно только после погрузки'
+        elif reason.driver_requires_empty_truck and driver_has_open_trip:
+            reason.driver_unavailable_message = 'Самосвал уже загружен'
     unload_points = DumpPoint.objects.filter(is_active=True).order_by('name')[:10]
     active_trip_assigned_dump_point = None
     active_trip_actual_dump_point_id = None
@@ -3690,10 +4102,7 @@ def driver_shift_view(request):
         active_trip_actual_dump_point_id = (active_trip.actual_dump_point_id or active_trip.dump_point_id)
     active_downtime_elapsed_seconds = 0
     active_downtime_elapsed_label = '00:00:00'
-    shift_downtime_total_seconds = driver_shift_downtime_seconds(
-        open_shift.equipment if open_shift else current_truck,
-        open_shift,
-    )
+    shift_downtime_total_seconds = sum(downtime_reason_totals.values())
     shift_downtime_total_label = driver_format_duration_label(shift_downtime_total_seconds)
     shift_downtime_report_total_seconds = sum(
         row['seconds'] for row in driver_shift_downtime_rows
@@ -3793,6 +4202,7 @@ def driver_shift_view(request):
             'active_downtime_elapsed_label': active_downtime_elapsed_label,
             'shift_downtime_total_seconds': shift_downtime_total_seconds,
             'shift_downtime_total_label': shift_downtime_total_label,
+            'downtime_calculated_at': downtime_calculated_at.isoformat(),
             'shift_downtime_report_total_label': shift_downtime_report_total_label,
             'active_downtime_status_key': active_downtime_status_key,
             'downtime_reasons': downtime_reasons,
@@ -3819,7 +4229,12 @@ def driver_shift_view(request):
             'shift_plan_visual': shift_plan['visual'],
             'driver_status': driver_status,
             'driver_status_class': driver_status_class,
-            'driver_waiting_unload': driver_waiting_unload,
+            'driver_has_open_trip': driver_has_open_trip,
+            'driver_has_loaded_trip': driver_has_loaded_trip,
+            'driver_waiting_operation_active': driver_waiting_operation_active,
+            'driver_loading_wait_active': driver_loading_wait_active,
+            'driver_unloading_wait_active': driver_unloading_wait_active,
+            'active_downtime_flow': active_downtime_flow,
             'driver_target_label': driver_target_label,
             'driver_header_label': driver_header_label,
             'driver_header_truck_label': driver_header_truck_label,
@@ -3885,8 +4300,13 @@ def driver_accept_assignment_view(request, assignment_id):
     )
     if not open_shift or not open_shift.equipment_id:
         return JsonResponse({'ok': False, 'error': 'Открытая смена водителя не найдена.'}, status=409)
+    # Тот же порядок блокировок, что у диспетчера, таймера и
+    # экскаваторщика: production -> truck -> haul assignments. Раньше здесь
+    # сначала блокировалось назначение, из-за чего параллельное принятие и DnD
+    # могли упереться друг в друга.
+    lock_production_state()
     assignment = get_object_or_404(
-        HaulAssignment.objects.select_for_update(),
+        HaulAssignment.objects,
         id=assignment_id,
         truck_id=open_shift.equipment_id,
         status=AssignmentStatus.PENDING,
@@ -3899,11 +4319,16 @@ def driver_accept_assignment_view(request, assignment_id):
 
 
 def driver_close_shift_view(request):
+    wants_json = driver_wants_json(request)
     access_id = request.session.get('employee_access_id')
     if not access_id:
+        if wants_json:
+            return JsonResponse({'ok': False, 'error': 'Требуется повторный вход.'}, status=401)
         return redirect('login')
     access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
     if not access or access.role.code != 'driver':
+        if wants_json:
+            return JsonResponse({'ok': False, 'error': 'Нет доступа к приложению водителя.'}, status=403)
         return redirect('role_home')
 
     client_action_id = request.POST.get('client_action_id', '').strip()
@@ -3913,16 +4338,40 @@ def driver_close_shift_view(request):
         employee=access.employee,
     ).exists()
     if client_action_id and completed_action():
+        if wants_json:
+            return JsonResponse({
+                'ok': True,
+                'status': 'already_applied',
+                'client_action_id': client_action_id,
+            })
         messages.success(request, 'Смена закрыта.')
         return redirect(f"{reverse('driver_work')}?tab=manifest")
 
     open_shift = driver_open_shift_queryset(access.employee).order_by('-opened_at').first()
     if not open_shift:
         if client_action_id and completed_action():
+            if wants_json:
+                return JsonResponse({
+                    'ok': True,
+                    'status': 'already_applied',
+                    'client_action_id': client_action_id,
+                })
             messages.success(request, 'Смена закрыта.')
             return redirect(f"{reverse('driver_work')}?tab=manifest")
+        if wants_json:
+            return JsonResponse({'ok': False, 'error': 'Открытая смена не найдена.'}, status=409)
         messages.error(request, 'Открытая смена не найдена.')
         return redirect('driver_work')
+
+    posted_shift_id = (request.POST.get('shift_id') or '').strip()
+    if posted_shift_id and posted_shift_id != str(open_shift.pk):
+        if wants_json:
+            return JsonResponse({
+                'ok': False,
+                'error': 'Смена на сервере уже изменилась. Откройте приложение и проверьте её состояние.',
+            }, status=409)
+        messages.error(request, 'Смена на сервере уже изменилась. Обновите экран.')
+        return redirect(f"{reverse('driver_work')}?tab=shift")
 
     form = DriverCloseShiftForm(request.POST, instance=open_shift)
     request._driver_close_form = form
@@ -3946,8 +4395,33 @@ def driver_close_shift_view(request):
         except ValidationError as error:
             form.add_error(None, error)
         else:
+            if wants_json:
+                return JsonResponse({
+                    'ok': True,
+                    'status': 'applied',
+                    'shift_id': open_shift.pk,
+                    'client_action_id': form.cleaned_data.get('client_action_id') or client_action_id,
+                })
             messages.success(request, 'Смена закрыта.')
             return redirect(f"{reverse('driver_work')}?tab=manifest")
+    if wants_json:
+        field_errors = {
+            field_name: [str(message) for message in error_list]
+            for field_name, error_list in form.errors.items()
+        }
+        first_error = next(
+            (
+                str(message)
+                for error_list in form.errors.values()
+                for message in error_list
+            ),
+            'Проверьте показания на конец смены.',
+        )
+        return JsonResponse({
+            'ok': False,
+            'error': first_error,
+            'field_errors': field_errors,
+        }, status=422)
     request.GET = request.GET.copy()
     request.GET['tab'] = 'shift'
     return driver_shift_view(request)
@@ -4004,14 +4478,15 @@ def driver_downtime_action_view(request):
     action = (payload.get('action') or '').strip()
     locked_equipment = Equipment.objects.select_for_update().get(pk=open_shift.equipment_id)
     open_shift.equipment = locked_equipment
-    active_event = (
-        DowntimeEvent.objects
-        .select_related('reason', 'reason__equipment_state')
-        .filter(equipment=open_shift.equipment, ended_at__isnull=True)
-        .order_by('-started_at')
-        .first()
-    )
     if action == 'close':
+        active_event = (
+            DowntimeEvent.objects
+            .select_for_update(of=('self',))
+            .select_related('reason', 'reason__equipment_state')
+            .filter(equipment=open_shift.equipment, ended_at__isnull=True)
+            .order_by('-started_at')
+            .first()
+        )
         if active_event:
             active_event.ended_at = timezone.now()
             active_event.save(update_fields=['ended_at'])
@@ -4019,15 +4494,17 @@ def driver_downtime_action_view(request):
                 return JsonResponse(driver_downtime_event_payload(active_event, action='downtime_closed', closed=True, shift=open_shift))
         else:
             if wants_json:
-                return JsonResponse({
+                response_payload = {
                     'ok': True,
                     'active': False,
                     'closed': False,
                     'elapsed_seconds': 0,
                     'elapsed_label': '00:00:00',
-                    'shift_total_seconds': driver_shift_downtime_seconds(open_shift.equipment, open_shift),
-                    'shift_total_label': driver_format_duration_label(driver_shift_downtime_seconds(open_shift.equipment, open_shift)),
-                })
+                }
+                response_payload.update(
+                    driver_downtime_totals_payload(open_shift.equipment, open_shift)
+                )
+                return JsonResponse(response_payload)
             messages.error(request, 'Активный простой не найден.')
         return redirect(f'{reverse("driver_work")}?tab=downtimes')
 
@@ -4038,6 +4515,65 @@ def driver_downtime_action_view(request):
             return JsonResponse({'ok': False, 'error': 'Причина простоя не найдена.'}, status=400)
         messages.error(request, 'Причина простоя не найдена.')
         return redirect(f'{reverse("driver_work")}?tab=downtimes')
+    workflow = driver_downtime_flow(reason)
+    if driver_downtime_requires_empty_truck(reason):
+        open_trip = (
+            Trip.objects
+            .select_for_update()
+            .filter(
+                truck=open_shift.equipment,
+                status__in=OPEN_TRIP_STATUSES,
+            )
+            .order_by('-created_at')
+            .first()
+        )
+        if open_trip:
+            error = 'Ожидание погрузки нельзя начать: самосвал уже загружен.'
+            if wants_json:
+                return JsonResponse(
+                    {
+                        'ok': False,
+                        'error': error,
+                        'code': 'empty_truck_required',
+                        'workflow': workflow,
+                    },
+                    status=409,
+                )
+            messages.error(request, error)
+            return redirect(f'{reverse("driver_work")}?tab=downtimes')
+    if driver_downtime_requires_loaded_trip(reason):
+        loaded_trip = (
+            Trip.objects
+            .select_for_update()
+            .filter(
+                truck=open_shift.equipment,
+                status=TripStatus.LOADED_WAITING_UNLOAD,
+            )
+            .order_by('-created_at')
+            .first()
+        )
+        if not loaded_trip:
+            error = 'Этот простой доступен только после погрузки самосвала.'
+            if wants_json:
+                return JsonResponse(
+                    {
+                        'ok': False,
+                        'error': error,
+                        'code': 'loaded_trip_required',
+                        'workflow': workflow,
+                    },
+                    status=409,
+                )
+            messages.error(request, error)
+            return redirect(f'{reverse("driver_work")}?tab=downtimes')
+    active_event = (
+        DowntimeEvent.objects
+        .select_for_update(of=('self',))
+        .select_related('reason', 'reason__equipment_state')
+        .filter(equipment=open_shift.equipment, ended_at__isnull=True)
+        .order_by('-started_at')
+        .first()
+    )
     if active_event:
         if active_event.employee_id != access.employee_id:
             error = (
@@ -4066,6 +4602,8 @@ def driver_downtime_action_view(request):
         action_label = 'downtime_started'
     if wants_json:
         return JsonResponse(driver_downtime_event_payload(event, action=action_label, shift=open_shift))
+    if driver_downtime_opens_work(reason):
+        return redirect(f'{reverse("driver_work")}?tab=work')
     return redirect(f'{reverse("driver_work")}?tab=downtimes')
 
 # Create your views here.

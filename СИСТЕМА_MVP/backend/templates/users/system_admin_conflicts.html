@@ -104,7 +104,10 @@
                                 </div>
                                 <div class="conflict-row-meta">
                                     <span>{{ conflict.created_at|date:"d.m.Y H:i" }}</span>
-                                    <span>{{ conflict.employee.full_name|default:"Сотрудник не указан" }}</span>
+                                    <div class="conflict-person-meta">
+                                        <span>{{ conflict.employee.full_name|default:"Сотрудник не указан" }}</span>
+                                        {% if conflict.application_presence %}{% include "users/includes/application_presence.html" with presence=conflict.application_presence compact=True show_apps=True %}{% endif %}
+                                    </div>
                                     <span>{{ conflict.role.name|default:"Роль не указана" }}</span>
                                     <span>{{ conflict.process|default:"Процесс не указан" }}</span>
                                 </div>

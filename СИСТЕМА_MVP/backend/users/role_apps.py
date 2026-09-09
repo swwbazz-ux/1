@@ -8,7 +8,7 @@ from django.http import HttpResponse, JsonResponse
 
 
 APP_CONTRACT_VERSION = 'pwa-contract-v1'
-STATIC_ASSET_RELEASE = 'ready-core-traffic-v104'
+STATIC_ASSET_RELEASE = 'ready-core-traffic-v125'
 READY_TRAFFIC_ROLE_CODES = frozenset({
     'admin',
     'oup',
@@ -219,7 +219,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v194',
+        shell_version='driver-mobile-shell-v209',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -236,7 +236,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v207',
+        shell_version='excavator-mobile-shell-v220',
     ),
     RoleApp(
         role_code='mining_master',
@@ -253,7 +253,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v139',
+        shell_version='mining-master-mobile-shell-v162',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
@@ -273,7 +273,7 @@ ROLE_APPS = (
         icon_slug='deputy-mining-manager',
         manifest_url='/deputy-mining-manager.webmanifest',
         service_worker_url='/deputy-mining-manager-sw.js',
-        shell_version='deputy-mining-manager-desktop-shell-v14',
+        shell_version='deputy-mining-manager-desktop-shell-v17',
     ),
     RoleApp(
         role_code='dispatcher',
@@ -290,7 +290,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v59',
+        shell_version='dispatcher-desktop-shell-v73',
     ),
     RoleApp(
         role_code='settlement_clerk',

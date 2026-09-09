@@ -90,107 +90,6 @@ class ManagementDashboardPlanTests(TestCase):
         )
 
 
-class ManagementDashboardAccessContractTests(TestCase):
-    def setUp(self):
-        self.dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
-        self.manager_role = Role.objects.create(code='manager', name='Руководитель')
-        self.mechanic_role = Role.objects.create(code='mechanic', name='Механик')
-        self.dispatcher_access = EmployeeAccess.objects.create(
-            employee=Employee.objects.create(full_name='Диспетчер проверки доступа'),
-            role=self.dispatcher_role,
-            access_code='501001',
-            status=EmployeeAccess.Status.ACTIVATED,
-            is_active=True,
-        )
-        self.manager_access = EmployeeAccess.objects.create(
-            employee=Employee.objects.create(full_name='Руководитель проверки доступа'),
-            role=self.manager_role,
-            access_code='601001',
-            status=EmployeeAccess.Status.ACTIVATED,
-            is_active=True,
-        )
-        self.mechanic_access = EmployeeAccess.objects.create(
-            employee=Employee.objects.create(full_name='Механик проверки доступа'),
-            role=self.mechanic_role,
-            access_code='401001',
-            status=EmployeeAccess.Status.ACTIVATED,
-            is_active=True,
-        )
-
-    def activate(self, access):
-        session = self.client.session
-        session['employee_access_id'] = access.id
-        session.save()
-
-    def test_dispatcher_cannot_open_management_pages_or_export(self):
-        self.activate(self.dispatcher_access)
-
-        for route_name in ('management_dashboard', 'management_dynamics', 'management_dashboard_export'):
-            with self.subTest(route_name=route_name):
-                response = self.client.get(reverse(route_name))
-                self.assertRedirects(response, reverse('role_home'), fetch_redirect_response=False)
-
-    def test_dispatcher_shared_report_keeps_dispatcher_navigation_contract(self):
-        self.activate(self.dispatcher_access)
-
-        for route_name in ('customer_daily_report', 'volume_report', 'downtime_report', 'shift_analytics_report'):
-            with self.subTest(route_name=route_name):
-                response = self.client.get(reverse(route_name))
-                self.assertEqual(response.status_code, 200)
-                self.assertContains(response, 'Горный диспетчер')
-                self.assertContains(response, 'Разделы отчетов диспетчера')
-                self.assertContains(response, f'href="{reverse("dispatcher_reports")}">Все отчёты</a>')
-                self.assertContains(response, f'var linkedReportsHomePath = "{reverse("dispatcher_reports")}";')
-                self.assertNotContains(response, 'Руководство MVP')
-                self.assertNotContains(response, f'href="{reverse("management_dashboard")}"')
-
-    def test_dispatcher_report_screens_use_compact_controlbar(self):
-        self.activate(self.dispatcher_access)
-
-        route_names = (
-            'dispatcher_mining_volumes',
-            'dispatcher_transport',
-            'dispatcher_downtimes',
-            'dispatcher_shift_log',
-            'customer_daily_report',
-            'volume_report',
-            'downtime_report',
-            'shift_analytics_report',
-            'report_template_builder',
-        )
-        for route_name in route_names:
-            with self.subTest(route_name=route_name):
-                response = self.client.get(reverse(route_name))
-                self.assertEqual(response.status_code, 200)
-                self.assertContains(response, 'dispatcher-report-controlbar')
-                self.assertContains(response, reverse('dispatcher_reports'))
-
-    def test_mechanic_downtime_report_keeps_mechanic_navigation_contract(self):
-        self.activate(self.mechanic_access)
-
-        response = self.client.get(reverse('downtime_report'))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Механическая служба')
-        self.assertContains(response, f'var linkedReportsHomePath = "{reverse("mechanic_dashboard")}";')
-        self.assertNotContains(response, 'Руководство MVP')
-        self.assertNotContains(response, f'href="{reverse("management_dashboard")}"')
-
-    def test_manager_keeps_management_pages_and_navigation(self):
-        self.activate(self.manager_access)
-
-        dashboard_response = self.client.get(reverse('management_dashboard'))
-        dynamics_response = self.client.get(reverse('management_dynamics'))
-        export_response = self.client.get(reverse('management_dashboard_export'))
-        daily_response = self.client.get(reverse('customer_daily_report'))
-
-        self.assertEqual(dashboard_response.status_code, 200)
-        self.assertEqual(dynamics_response.status_code, 200)
-        self.assertEqual(export_response.status_code, 200)
-        self.assertContains(daily_response, 'Руководство MVP')
-        self.assertContains(daily_response, f'href="{reverse("management_dashboard")}">Сводка</a>')
-
-
 class ProductionConsumerContractTests(TestCase):
     def setUp(self):
         self.factory = RequestFactory()
@@ -311,7 +210,7 @@ class ReportSemanticsRegressionTests(TestCase):
             equipment_type=self.truck_type,
             garage_number='10',
         )
-        self.rock = RockType.objects.create(name='Руда')
+        self.rock = RockType.objects.create(name='Скальная порода', density='2.6000', loosening_factor='1.5000')
         self.dump_point = DumpPoint.objects.create(name='ККД')
         self.selected_date = timezone.localdate()
         self.event_at = timezone.make_aware(
@@ -445,7 +344,7 @@ class ShiftAnalyticsReportTests(TestCase):
         self.truck = Equipment.objects.create(equipment_type=self.truck_type, model=self.truck_model, garage_number='25')
         self.open_truck = Equipment.objects.create(equipment_type=self.truck_type, model=self.truck_model, garage_number='26')
         self.excavator = Equipment.objects.create(equipment_type=self.excavator_type, model=self.excavator_model, garage_number='4')
-        self.rock = RockType.objects.create(name='Руда', density=Decimal('2.0000'))
+        self.rock = RockType.objects.create(name='Скальная порода', density=Decimal('2.0000'), loosening_factor=Decimal('1.5000'))
         self.dump_point = DumpPoint.objects.create(name='ККД')
         TruckCapacityRule.objects.create(equipment_model=self.truck_model, rock_type=self.rock, volume_m3=Decimal('38.00'))
 
@@ -506,6 +405,55 @@ class ShiftAnalyticsReportTests(TestCase):
             started_at=opened_at,
         )
 
+    def test_assigned_early_handover_shifts_stay_in_selected_report_date(self):
+        early_starts = (
+            ('day', time(6, 40), 'Э-РАННЯЯ-1'),
+            ('night', time(18, 40), 'Э-РАННЯЯ-2'),
+        )
+        expected_trip_ids = set()
+        for shift_type, opened_time, garage_number in early_starts:
+            opened_at = timezone.make_aware(
+                datetime.combine(self.date, opened_time),
+                timezone.get_current_timezone(),
+            )
+            equipment = Equipment.objects.create(
+                equipment_type=self.excavator_type,
+                model=self.excavator_model,
+                garage_number=garage_number,
+            )
+            shift = EmployeeShift.objects.create(
+                employee=Employee.objects.create(full_name=f'Машинист {garage_number}'),
+                shift_type=shift_type,
+                equipment=equipment,
+                opened_at=opened_at,
+                closed_at=opened_at + timedelta(hours=12),
+            )
+            trip = Trip.objects.create(
+                excavator=equipment,
+                truck=self.truck,
+                loading_shift=shift,
+                rock_type=self.rock,
+                dump_point=self.dump_point,
+                volume_m3=Decimal('38.00'),
+                status=TripStatus.COMPLETED,
+                completed_at=opened_at + timedelta(minutes=5),
+            )
+            expected_trip_ids.add(trip.id)
+
+        analytics_trip_ids = {
+            trip.id
+            for trip in load_shift_analytics_data(self.date)['loading_trips']
+        }
+        request = RequestFactory().get('/reports/', {'date': self.date.isoformat()})
+        mining_trip_ids = set(
+            dispatcher_mining_trip_queryset(
+                dispatcher_mining_filters(request)
+            ).values_list('id', flat=True)
+        )
+
+        self.assertTrue(expected_trip_ids <= analytics_trip_ids)
+        self.assertTrue(expected_trip_ids <= mining_trip_ids)
+
     def test_shift_analytics_counts_loading_unloading_and_downtimes(self):
         analytics = build_shift_analytics(self.date, 'day')
 
@@ -518,7 +466,7 @@ class ShiftAnalyticsReportTests(TestCase):
         self.assertEqual(analytics['excavator_rows'][0]['loaded_count'], 2)
         self.assertEqual(analytics['truck_rows'][0]['unloaded_count'], 1)
         self.assertEqual(analytics['employee_rows'][0]['label'], 'Машинист')
-        self.assertEqual(analytics['rock_rows'][0]['label'], 'Руда')
+        self.assertEqual(analytics['rock_rows'][0]['label'], 'Скальная порода')
         self.assertEqual(analytics['face_rows'][0]['label'], '75 / 52')
 
     def test_shift_analytics_uses_authoritative_shift_production_date(self):

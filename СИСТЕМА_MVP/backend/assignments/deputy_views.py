@@ -24,7 +24,7 @@ from users.role_apps import (
     role_app_manifest_response,
     role_app_service_worker_response,
 )
-from users.live_monitor import presence_by_employee_id
+from users.live_monitor import application_presence_by_employee_ids, empty_application_presence
 from users.work_profiles import (
     effective_specialization,
     eligible_employee_ids_for_work_role,
@@ -405,6 +405,39 @@ def _employee_brigade_code(employee):
     return brigade_match.group(1) if brigade_match else ''
 
 
+def _application_presence_payload(presence):
+    presence = presence or empty_application_presence()
+    last_seen_at = presence.get('last_seen_at')
+    last_seen_time = ''
+    if last_seen_at:
+        last_seen_time = (
+            timezone.localtime(last_seen_at).strftime('%H:%M:%S')
+            if hasattr(last_seen_at, 'utcoffset')
+            else str(last_seen_at)
+        )
+    return {
+        'status_code': presence.get('status_code') or 'not_registered',
+        'status_label': presence.get('status_label') or 'Не подключался',
+        'last_seen_at': (
+            last_seen_at.isoformat()
+            if last_seen_at and hasattr(last_seen_at, 'isoformat')
+            else str(last_seen_at or '')
+        ),
+        'last_seen_time': last_seen_time,
+        'client_badges': [
+            {
+                'kind': badge.get('kind') or '',
+                'label': badge.get('label') or '',
+                'version': badge.get('version') or '',
+                'app_code': badge.get('app_code') or '',
+                'app_label': badge.get('app_label') or '',
+            }
+            for badge in presence.get('client_badges', [])
+            if badge.get('label')
+        ],
+    }
+
+
 def _employee_payload(employee, *, presence=None, eligible_positions=None):
     if not employee:
         return None
@@ -416,6 +449,12 @@ def _employee_payload(employee, *, presence=None, eligible_positions=None):
             photo_url = ''
     initials = ''.join(part[0] for part in (employee.full_name or '').split()[:2]).upper() or '—'
     brigade_code = _employee_brigade_code(employee)
+    contractor_label = (
+        str(employee.contractor_organization)
+        if employee.employment_type == Employee.EmploymentType.CONTRACTOR
+        and employee.contractor_organization_id
+        else ''
+    )
     payload = {
         'id': employee.id,
         'full_name': employee.full_name or '',
@@ -430,6 +469,13 @@ def _employee_payload(employee, *, presence=None, eligible_positions=None):
         'photo_url': photo_url,
         'initials': initials,
         'status_label': employee.get_status_display(),
+        'employment_type': employee.employment_type,
+        'employment_label': employee.get_employment_type_display(),
+        'contractor_label': contractor_label,
+        'contractor_access_until_label': (
+            employee.contractor_access_until.strftime('%d.%m.%Y')
+            if employee.contractor_access_until else ''
+        ),
         'rotation_label': (
             employee.work_schedule.name
             if getattr(employee, 'work_schedule_id', None)
@@ -437,13 +483,8 @@ def _employee_payload(employee, *, presence=None, eligible_positions=None):
         ),
         'brigade_code': brigade_code,
         'brigade_label': f'Бригада {brigade_code}' if brigade_code else 'Не указана',
-        'search': f'{employee.full_name} {employee.personnel_number}'.strip().lower(),
-        'presence': presence or {
-            'status': 'not_registered',
-            'label': 'Не зарегистрирован',
-            'last_seen_at': '',
-            'app_code': '',
-        },
+        'search': f'{employee.full_name} {employee.personnel_number} {contractor_label}'.strip().lower(),
+        'presence': _application_presence_payload(presence),
     }
     if eligible_positions is not None:
         payload['eligible_positions'] = list(eligible_positions)
@@ -456,7 +497,11 @@ def _secondary_eligible_employee_ids(role_code):
     if role_code != 'excavator_operator':
         return set()
     employees = (
-        Employee.objects.filter(is_active=True, status=Employee.Status.ACTIVE)
+        Employee.objects.filter(
+            Employee.work_eligibility_q(),
+            is_active=True,
+            status=Employee.Status.ACTIVE,
+        )
         .select_related(
             'base_specialization',
             'base_specialization__access_role',
@@ -493,15 +538,28 @@ def _work_date_from_request(request):
     return min(selected_date, current_date)
 
 
-def _slot_employee_issue(employee, eligible_employee_ids, other_role_assignment_employee_ids):
+def _slot_employee_issue(
+    employee,
+    eligible_employee_ids,
+    other_role_assignment_employee_ids,
+    *,
+    equipment,
+):
     if not employee:
         return ''
     if not employee.is_active or employee.status != Employee.Status.ACTIVE:
         return 'Сотрудник неактивен'
+    if not employee.contractor_access_is_valid():
+        return 'Допуск подрядчика не действует'
     if employee.id not in eligible_employee_ids:
         return 'Не соответствует производственной специализации'
     if employee.id in other_role_assignment_employee_ids:
         return 'Назначен по другой роли'
+    if (
+        employee.employment_type == Employee.EmploymentType.CONTRACTOR
+        and employee.contractor_organization_id != equipment.contractor_organization_id
+    ):
+        return 'Подрядчик другой организации'
     return ''
 
 
@@ -541,15 +599,20 @@ def build_crew_plan_payload(plan, *, request=None):
             'employee',
             'employee__personnel_position',
             'employee__work_schedule',
+            'equipment__contractor_organization',
+            'employee__contractor_organization',
             'secondary_employee',
             'secondary_employee__personnel_position',
             'secondary_employee__work_schedule',
+            'secondary_employee__contractor_organization',
             'baseline_employee',
             'baseline_employee__personnel_position',
             'baseline_employee__work_schedule',
+            'baseline_employee__contractor_organization',
             'baseline_secondary_employee',
             'baseline_secondary_employee__personnel_position',
             'baseline_secondary_employee__work_schedule',
+            'baseline_secondary_employee__contractor_organization',
         )
         .order_by('equipment__garage_number', 'shift_type')
     )
@@ -583,7 +646,7 @@ def build_crew_plan_payload(plan, *, request=None):
     if editable:
         eligible_employees = list(
             Employee.objects.filter(id__in=all_eligible_employee_ids)
-            .select_related('personnel_position', 'work_schedule')
+            .select_related('personnel_position', 'work_schedule', 'contractor_organization')
             .exclude(id__in=assigned_employee_ids)
             .exclude(id__in=other_role_assignment_employee_ids)
             .order_by('full_name')
@@ -596,10 +659,14 @@ def build_crew_plan_payload(plan, *, request=None):
             effective_to__gte=timezone.localdate(),
         ).values_list('employee_id', flat=True)
         transfer_candidates = list(
-            Employee.objects.filter(is_active=True, status=Employee.Status.ACTIVE)
+            Employee.objects.filter(
+                Employee.work_eligibility_q(),
+                is_active=True,
+                status=Employee.Status.ACTIVE,
+            )
             .exclude(id__in=eligible_employee_ids)
             .exclude(id__in=transfer_pending_employee_ids)
-            .select_related('personnel_position', 'work_schedule')
+            .select_related('personnel_position', 'work_schedule', 'contractor_organization')
             .order_by('full_name')
         )
         transfer_specializations = list(
@@ -632,7 +699,7 @@ def build_crew_plan_payload(plan, *, request=None):
         for slot in slots
         if slot.baseline_secondary_employee_id
     )
-    presence_by_employee = presence_by_employee_id(payload_employee_ids)
+    presence_by_employee = application_presence_by_employee_ids(payload_employee_ids)
 
     equipment_items = []
     seen_equipment_ids = set()
@@ -663,11 +730,13 @@ def build_crew_plan_payload(plan, *, request=None):
                 slot.employee,
                 eligible_employee_ids,
                 other_role_assignment_employee_ids,
+                equipment=equipment,
             )
             secondary_issue = _slot_employee_issue(
                 slot.secondary_employee,
                 secondary_eligible_employee_ids,
                 other_role_assignment_employee_ids,
+                equipment=equipment,
             )
             if not equipment.is_active:
                 issue = issue or 'Техника недоступна'
@@ -698,8 +767,8 @@ def build_crew_plan_payload(plan, *, request=None):
                 row_changed = True
             row_slots.append({
                 'shift_type': shift_type,
-                'label': 'День' if shift_type == WorkShiftType.SHIFT_1 else 'Ночь',
-                'time_label': '07:00–19:00' if shift_type == WorkShiftType.SHIFT_1 else '19:00–07:00',
+                'label': 'Первая смена' if shift_type == WorkShiftType.SHIFT_1 else 'Вторая смена',
+                'time_label': 'по расстановке',
                 'employee': _employee_payload(
                     slot.employee,
                     presence=presence_by_employee.get(slot.employee_id),
@@ -1044,7 +1113,7 @@ def build_deputy_crew_plan_workbook(plan, *, actor):
     sheet.row_dimensions[5].height = 24
     sheet.row_dimensions[6].height = 8
 
-    headers = ('Техника', 'Модель', 'День · 07:00–19:00', 'Ночь · 19:00–07:00', 'Примечание')
+    headers = ('Техника', 'Модель', 'Первая смена', 'Вторая смена', 'Примечание')
     for column, header in enumerate(headers, start=1):
         cell = sheet.cell(DEPUTY_XLSX_TABLE_HEADER_ROW, column, header)
         cell.fill = green_fill

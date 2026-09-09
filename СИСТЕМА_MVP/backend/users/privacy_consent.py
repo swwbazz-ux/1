@@ -3,10 +3,13 @@ from datetime import timezone as datetime_timezone
 from django.utils import timezone
 
 
-PRIVACY_POLICY_VERSION = '2026-09-04'
-PRIVACY_POLICY_EFFECTIVE_DATE = '4 сентября 2026 года'
+PRIVACY_POLICY_VERSION = '2026-09-05'
+PRIVACY_POLICY_EFFECTIVE_DATE = '5 сентября 2026 года'
 PRIVACY_CONSENT_FIELD = 'privacy_consent'
 PRIVACY_CONSENT_SESSION_KEY = 'mobile_privacy_consent'
+PRIVACY_CONSENT_COOKIE_NAME = 'cr_mobile_privacy_consent'
+PRIVACY_CONSENT_COOKIE_SALT = 'users.mobile-privacy-consent.v1'
+PRIVACY_CONSENT_COOKIE_MAX_AGE = 365 * 24 * 60 * 60
 PRIVACY_CONSENT_REQUIRED_MESSAGE = (
     'Подтвердите согласие с Политикой обработки персональных данных.'
 )
@@ -37,6 +40,49 @@ def privacy_consent_matches_access(session, access):
 def privacy_consent_submission_is_current(submitted_version):
     """Validate the submitted revision without changing the session."""
     return submitted_version == PRIVACY_POLICY_VERSION
+
+
+def privacy_consent_cookie_matches_access(request, access):
+    """Remember a consent revision outside the login session.
+
+    Role-app logout intentionally flushes the Django session. A separate signed,
+    host-only cookie lets the same employee keep the accepted policy revision
+    without exposing it to JavaScript or carrying it to another role host.
+    """
+    if access is None:
+        return False
+    stored = request.get_signed_cookie(
+        PRIVACY_CONSENT_COOKIE_NAME,
+        default='',
+        salt=PRIVACY_CONSENT_COOKIE_SALT,
+        max_age=PRIVACY_CONSENT_COOKIE_MAX_AGE,
+    )
+    return stored == ':'.join((
+        PRIVACY_POLICY_VERSION,
+        str(access.pk),
+        str(access.role.code),
+    ))
+
+
+def set_current_privacy_consent_cookie(response, request, access):
+    """Persist only the current revision and exact role access on this host."""
+    if access is None:
+        return response
+    response.set_signed_cookie(
+        PRIVACY_CONSENT_COOKIE_NAME,
+        ':'.join((
+            PRIVACY_POLICY_VERSION,
+            str(access.pk),
+            str(access.role.code),
+        )),
+        salt=PRIVACY_CONSENT_COOKIE_SALT,
+        max_age=PRIVACY_CONSENT_COOKIE_MAX_AGE,
+        secure=request.is_secure(),
+        httponly=True,
+        samesite='Lax',
+        path='/',
+    )
+    return response
 
 
 def accept_current_privacy_policy(request, submitted_version, *, access):

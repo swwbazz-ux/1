@@ -94,3 +94,68 @@ test("connection sounds fire only on a real lost transition and its recovery", (
     listener();
     assert.deepEqual(runtime.played, ["connection_lost", "connection_restored"]);
 });
+
+test("Excavator assignment batches reach the native bridge with exact operation keys", async () => {
+    const runtime = createRuntime();
+    const calls = [];
+    runtime.window.Capacitor.Plugins.NativeSound.announceEquipmentBatch = (details) => {
+        calls.push(details);
+        return Promise.resolve({announced: true});
+    };
+
+    const result = await runtime.window.MobileOperationalSounds.announceEquipmentBatch({
+        cue: "truck_assigned",
+        items: [{
+            action: "excavator_truck_assigned",
+            equipmentNumber: "41",
+            fallbackVoice: "voice_truck_assigned",
+            eventVersion: 120,
+            operationKey: "excavator-assignment:assign:501:9",
+        }],
+    });
+
+    assert.equal(result.announced, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].items[0].operationKey, "excavator-assignment:assign:501:9");
+    assert.equal(calls[0].items[0].eventVersion, 120);
+});
+
+test("an already announced Excavator batch never falls through to another cue", async () => {
+    const runtime = createRuntime();
+    runtime.window.Capacitor.Plugins.NativeSound.announceEquipmentBatch = () => (
+        Promise.resolve({announced: false, reason: "already_announced"})
+    );
+
+    const result = await runtime.window.MobileOperationalSounds.announceEquipmentBatch({
+        items: [{
+            action: "excavator_truck_removed",
+            equipmentNumber: "42",
+            fallbackVoice: "voice_truck_removed",
+            eventVersion: 121,
+            operationKey: "excavator-assignment:remove:502:9",
+        }],
+    });
+
+    assert.equal(result.reason, "already_announced");
+    assert.deepEqual(runtime.played, []);
+});
+
+test("a synchronous batch bridge failure falls back without rejecting", async () => {
+    const runtime = createRuntime();
+    runtime.window.Capacitor.Plugins.NativeSound.announceEquipmentBatch = () => {
+        throw new Error("bridge unavailable");
+    };
+
+    const result = await runtime.window.MobileOperationalSounds.announceEquipmentBatch({
+        items: [{
+            action: "excavator_truck_assigned",
+            equipmentNumber: "43",
+            fallbackVoice: "voice_truck_assigned",
+            eventVersion: 122,
+            operationKey: "excavator-assignment:assign:503:9",
+        }],
+    });
+
+    assert.equal(result.announced, true);
+    assert.deepEqual(runtime.played, ["truck_assigned"]);
+});

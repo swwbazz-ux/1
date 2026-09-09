@@ -12,6 +12,7 @@ from .views import (
     dispatcher_assign_truck_view,
     dispatcher_complete_trip_view,
     dispatcher_control_view,
+    dispatcher_close_downtime_view,
     dispatcher_equipment_detail_view,
     dispatcher_manifest_view,
     dispatcher_move_excavator_view,
@@ -36,6 +37,11 @@ urlpatterns = [
     path('excavator.webmanifest', excavator_manifest_view, name='excavator_manifest'),
     path('excavator-sw.js', excavator_service_worker_view, name='excavator_service_worker'),
     path('dispatcher/control/', dispatcher_control_view, name='dispatcher_control'),
+    path(
+        'dispatcher/control/downtime/<int:event_id>/close/',
+        dispatcher_close_downtime_view,
+        name='dispatcher_close_downtime',
+    ),
     path(
         'dispatcher/control/card/<str:category>/<int:equipment_id>/',
         dispatcher_equipment_detail_view,

@@ -35,7 +35,7 @@ body.driver-mobile-screen {
     --driver-header-h: 54px;
     --driver-header-content-h: var(--driver-header-h);
     --driver-header-total-h: calc(var(--driver-safe-top) + var(--driver-header-content-h));
-    --driver-nav-content-h: 78px;
+    --driver-nav-content-h: var(--mobile-shift-role-nav-h, 78px);
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
     --driver-work-gap: clamp(12px, 1.8dvh, 20px);
     margin: 0;
@@ -97,7 +97,7 @@ body.driver-mobile-screen .driver-shell {
     --driver-safe-top: env(safe-area-inset-top, 0px);
     --driver-safe-bottom: env(safe-area-inset-bottom, 0px);
     --driver-header-total-h: calc(var(--driver-safe-top) + var(--driver-header-h));
-    --driver-nav-content-h: 78px;
+    --driver-nav-content-h: var(--mobile-shift-role-nav-h, 78px);
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
     --driver-work-gap: clamp(12px, 1.8dvh, 20px);
     --driver-work-column: min(100%, 720px);
@@ -153,24 +153,79 @@ body.driver-mobile-screen .driver-toast[hidden] {
 }
 
 body.driver-mobile-screen .driver-toast {
-    position: absolute;
-    left: var(--driver-edge);
-    right: var(--driver-edge);
-    bottom: calc(var(--driver-nav-total-h) + 18px);
-    z-index: 6;
-    min-height: 56px;
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    z-index: 180;
+    width: min(360px, calc(100vw - 40px));
+    min-height: 52px;
     border: 1px solid rgba(255, 91, 80, 0.42);
-    border-radius: 8px;
-    padding: 14px 16px;
+    border-radius: 14px;
+    padding: 13px 16px;
     display: grid;
     align-items: center;
+    transform: translate(-50%, -50%);
     color: #ffe7e4;
     background: linear-gradient(145deg, rgba(73, 19, 22, 0.97), rgba(22, 12, 15, 0.97));
     box-shadow: 0 18px 54px rgba(0,0,0,0.45), 0 0 22px rgba(255, 91, 80, 0.18);
-    text-transform: uppercase;
-    font-size: 16px;
-    line-height: 1.12;
-    font-weight: 800;
+    text-align: center;
+    font-size: 15px;
+    line-height: 1.25;
+    font-weight: 700;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending[hidden] {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-shell[data-active-tab="shift"] [data-driver-tab-panel="shift"].is-active .mobile-shift-host.is-sync-pending > .mobile-shift {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending {
+    height: 100%;
+    padding: 26px;
+    display: grid;
+    place-content: center;
+    gap: 12px;
+    text-align: center;
+    color: #f7fbfa;
+    background: radial-gradient(circle at 50% 42%, rgba(255, 196, 61, 0.1), transparent 56%);
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending i {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 4px;
+    justify-self: center;
+    border: 3px solid rgba(255, 196, 61, 0.25);
+    border-top-color: #ffc43d;
+    border-radius: 50%;
+    animation: driver-pending-shift-spin 1.15s linear infinite;
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending strong {
+    font-size: clamp(22px, 7vw, 30px);
+    line-height: 1.05;
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending span {
+    max-width: 330px;
+    color: #b8c7c9;
+    font-size: 15px;
+    line-height: 1.35;
+}
+
+@keyframes driver-pending-shift-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.driver-mobile-screen .driver-shift-sync-pending i {
+        animation: none;
+        border-color: #ffc43d;
+    }
 }
 
 body.driver-mobile-screen .driver-header {
@@ -1173,26 +1228,6 @@ body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-percen
         0 1px 0 rgba(0,0,0,0.78);
 }
 
-body.driver-mobile-screen .driver-work-dial.is-waiting-unload,
-body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload {
-    --driver-green: #facc15;
-}
-
-body.driver-mobile-screen .driver-work-dial.is-waiting-unload::before,
-body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload .driver-work-dial-core {
-    animation: driver-waiting-unload-pulse 1.05s ease-in-out infinite;
-}
-
-body.driver-mobile-screen .driver-work-dial-button.is-waiting-unload .driver-work-note {
-    color: #fde68a;
-    font-weight: 800;
-}
-
-@keyframes driver-waiting-unload-pulse {
-    0%, 100% { filter: drop-shadow(0 0 8px rgba(250, 204, 21, .24)); }
-    50% { filter: drop-shadow(0 0 26px rgba(250, 204, 21, .78)); }
-}
-
 body.driver-mobile-screen .driver-work-dial-button.is-empty {
     color: rgba(198, 213, 217, 0.76);
 }
@@ -1224,6 +1259,54 @@ body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-dial-co
         inset 0 0 46px rgba(255,255,255,0.05),
         0 9px 24px rgba(0,0,0,0.38),
         0 0 38px rgba(190,210,220,0.10);
+}
+
+body.driver-mobile-screen .driver-work-dial.is-waiting-operation,
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation {
+    --driver-green: #facc15;
+}
+
+body.driver-mobile-screen .driver-work-dial.is-waiting-operation::before,
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-dial-core {
+    animation: driver-waiting-operation-pulse 1.05s ease-in-out infinite;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-note {
+    color: #fde68a;
+    font-weight: 800;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-progress {
+    stroke: #facc15;
+    filter: drop-shadow(0 0 18px rgba(250, 204, 21, .88));
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-dial-core {
+    border-color: rgba(250, 204, 21, .82);
+    box-shadow:
+        inset 0 12px 22px rgba(254, 249, 195, .1),
+        inset 0 -26px 36px rgba(0, 0, 0, .5),
+        inset 0 0 44px rgba(250, 204, 21, .18),
+        0 10px 28px rgba(0, 0, 0, .42),
+        0 0 48px rgba(250, 204, 21, .42);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-label-line {
+    background: linear-gradient(180deg, #fff7b2 0%, #fde047 34%, #facc15 66%, #ca8a04 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow:
+        0 -1px 0 rgba(255, 251, 235, .5),
+        0 2px 0 rgba(113, 63, 18, .78);
+    filter:
+        drop-shadow(0 3px 2px rgba(0, 0, 0, .46))
+        drop-shadow(0 0 10px rgba(250, 204, 21, .3));
+}
+
+@keyframes driver-waiting-operation-pulse {
+    0%, 100% { filter: drop-shadow(0 0 8px rgba(250, 204, 21, .24)); }
+    50% { filter: drop-shadow(0 0 26px rgba(250, 204, 21, .78)); }
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-pending {
@@ -2287,6 +2370,29 @@ body.driver-mobile-screen .driver-downtime-list button.is-selected {
     text-shadow: 0 0 9px var(--driver-reason-accent);
 }
 
+body.driver-mobile-screen .driver-downtime-list button.is-unavailable,
+body.driver-mobile-screen .driver-downtime-list button[aria-disabled="true"] {
+    --driver-reason-accent: rgba(148, 163, 184, .48);
+    --driver-reason-fill: rgba(71, 85, 105, .08);
+    --driver-reason-glow: transparent;
+    color: rgba(203, 213, 225, .48);
+    border-color: rgba(148, 163, 184, .28);
+    background: linear-gradient(180deg, rgba(71, 85, 105, .08), rgba(8, 14, 17, .98));
+    box-shadow: none;
+    text-shadow: none;
+    opacity: .58;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.driver-mobile-screen .driver-work-dial.is-waiting-operation::before,
+    body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-dial-core,
+    body.driver-mobile-screen .driver-downtime-card.is-active,
+    body.driver-mobile-screen .driver-downtime-card.is-active .driver-downtime-state-icon-pause,
+    body.driver-mobile-screen .driver-downtime-card.is-active b[data-driver-active-duration] {
+        animation: none;
+    }
+}
+
 body.driver-mobile-screen .driver-downtime-close {
     grid-row: 4 !important;
     position: relative;
@@ -2485,20 +2591,79 @@ body.driver-mobile-screen .driver-report-row strong {
 
 body.driver-mobile-screen .driver-report-actions {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: minmax(0, 1fr);
     padding-top: 0;
     background: #030b0e;
 }
 
 body.driver-mobile-screen .driver-report-actions button {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    place-items: center;
+    width: 100%;
     min-height: 48px;
     border: 1px solid #58df52;
     border-radius: 7px;
     color: #58df52;
     background: rgba(12, 38, 22, .84);
+    transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+body.driver-mobile-screen .driver-report-action-copy {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-report-action-title {
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 800;
+    line-height: 1.05;
+}
+
+body.driver-mobile-screen .driver-report-action-hint {
+    color: #9eb0b8;
+    font-size: 10px;
+    font-weight: 650;
+    line-height: 1.05;
+}
+
+body.driver-mobile-screen .driver-report-max-mark {
+    display: none;
+    min-width: 44px;
+    min-height: 28px;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, .58);
+    border-radius: 9px;
+    color: #471aff;
+    background: #fff;
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: -.02em;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    padding-inline: 12px;
+    border-color: #6e1aff;
+    color: #fff;
+    background: linear-gradient(110deg, #471aff 0%, #6e1aff 50%, #9500ff 100%);
+    box-shadow: 0 0 0 1px rgba(0, 191, 255, .2), 0 8px 22px rgba(71, 26, 255, .28);
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready .driver-report-max-mark {
+    display: grid;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready .driver-report-action-copy {
+    justify-self: start;
+    text-align: left;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready .driver-report-action-hint {
+    color: rgba(255, 255, 255, .82);
 }
 
 body.driver-mobile-screen .driver-timeline {
@@ -3366,7 +3531,7 @@ body.driver-mobile-screen .driver-report-scroll {
 }
 
 body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="report"].is-active {
-    grid-template-rows: minmax(0, 1fr) clamp(42px, 5.8dvh, 52px);
+    grid-template-rows: minmax(0, 1fr) clamp(52px, 6.8dvh, 60px);
 }
 
 body.driver-mobile-screen .driver-report-scroll {
@@ -3434,23 +3599,33 @@ body.driver-mobile-screen .driver-report-actions button {
 body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="timeline"].is-active,
 body.driver-mobile-screen .driver-timeline {
     min-height: 0;
-    height: 100%;
-    overflow: hidden;
 }
 
 body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="timeline"].is-active {
-    display: grid;
+    display: block;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 12px;
 }
 
 body.driver-mobile-screen .driver-timeline {
     display: grid;
-    grid-auto-rows: minmax(0, 1fr);
-    align-content: stretch;
+    width: 100%;
+    height: auto;
+    grid-auto-rows: minmax(64px, auto);
+    align-content: start;
+    overflow: visible;
 }
 
 body.driver-mobile-screen .driver-timeline-row {
-    min-height: 0;
-    height: 100%;
+    width: 100%;
+    min-height: 64px;
+    height: auto;
+    box-sizing: border-box;
 }
 
 body.driver-mobile-screen .driver-shell-version {
@@ -3861,6 +4036,272 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         max-width: 520px;
     }
 }
+
+/* One structural contract for the bottom action on Shift, Downtimes and
+   Waybill. Semantic colours stay role-specific, while geometry and type no
+   longer jump when the driver switches tabs. */
+body.driver-mobile-screen {
+    --driver-footer-action-h: clamp(48px, 6.4dvh, 56px);
+    --driver-footer-action-gap: clamp(6px, .9dvh, 8px);
+    --driver-footer-action-radius: 10px;
+    --driver-footer-action-font-size: clamp(16px, min(4.4vw, 2.15dvh), 19px);
+}
+
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] {
+    /* The shared Shift component is absolutely positioned by its generic
+       stylesheet.  Use the same content rails as the other Driver tabs so
+       its action row cannot sit closer to the navigation or jump sideways
+       when switching between Shift, Downtimes and Waybill. */
+    inset: calc(var(--driver-safe-top) + var(--driver-header-h) + var(--driver-work-gap))
+        var(--driver-edge)
+        calc(var(--driver-safe-bottom) + var(--driver-nav-content-h)) !important;
+    --ms-screen-rows: minmax(38px, .12fr) minmax(0, 1fr) var(--driver-footer-action-h);
+    --ms-screen-rows-landscape: minmax(30px, .12fr) minmax(0, 1fr) var(--driver-footer-action-h);
+    row-gap: var(--driver-footer-action-gap) !important;
+    padding: 0 0 var(--driver-footer-action-gap) !important;
+}
+
+/* The Driver shell keeps a general work gap above the fixed navigation.  The
+   three footer-action tabs already own an equal gap above and below their
+   action row, so let them use that reserved strip instead of stacking two
+   different gaps.  Their flexible content row absorbs the recovered height;
+   the action height itself remains unchanged. */
+body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active,
+body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active,
+body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active {
+    height: calc(100% + var(--driver-work-gap));
+    max-height: calc(100% + var(--driver-work-gap));
+}
+
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__actions,
+body.driver-mobile-screen .driver-downtime-close,
+body.driver-mobile-screen .driver-report-actions {
+    min-height: var(--driver-footer-action-h);
+    height: var(--driver-footer-action-h);
+    max-height: var(--driver-footer-action-h);
+}
+
+body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active,
+body.driver-mobile-screen .driver-shell[data-driver-density] [data-driver-tab-panel="downtimes"].is-active {
+    grid-template-rows: clamp(34px, 4.5dvh, 40px) clamp(62px, 8.2dvh, 76px) minmax(0, 1fr) var(--driver-footer-action-h) !important;
+    gap: var(--driver-footer-action-gap) !important;
+    padding-bottom: var(--driver-footer-action-gap);
+}
+
+body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="report"].is-active,
+body.driver-mobile-screen .driver-shell[data-driver-density] .driver-manifest-view[data-driver-manifest-view="report"].is-active {
+    grid-template-rows: minmax(0, 1fr) var(--driver-footer-action-h);
+    gap: var(--driver-footer-action-gap);
+    padding-bottom: var(--driver-footer-action-gap);
+}
+
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__action,
+body.driver-mobile-screen .driver-downtime-close,
+body.driver-mobile-screen .driver-report-actions button {
+    box-sizing: border-box;
+    min-height: var(--driver-footer-action-h);
+    height: var(--driver-footer-action-h);
+    max-height: var(--driver-footer-action-h);
+    margin: 0;
+    border-width: 1px;
+    border-style: solid;
+    border-radius: var(--driver-footer-action-radius);
+    padding: 6px clamp(10px, 3vw, 16px);
+    font-family: inherit;
+    font-size: var(--driver-footer-action-font-size) !important;
+    font-weight: 700 !important;
+    line-height: 1.15 !important;
+    letter-spacing: 0;
+    box-shadow: inset 0 0 14px rgba(255, 255, 255, .035);
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Every bottom action uses one label contract.  Keep it on the visible text
+   node as well as on the button: the shared Shift component and the MAX
+   delivery state both wrap their captions in child elements. */
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__action > [data-mobile-shift-label],
+body.driver-mobile-screen .driver-downtime-close,
+body.driver-mobile-screen .driver-report-action-title {
+    font-family: inherit !important;
+    font-size: var(--driver-footer-action-font-size) !important;
+    font-weight: 700 !important;
+    line-height: 1.15 !important;
+    letter-spacing: 0 !important;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__action > [data-mobile-shift-label],
+body.driver-mobile-screen [data-driver-footer-action-label],
+body.driver-mobile-screen .driver-report-action-title {
+    display: block;
+    max-width: 100%;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-report-action-copy {
+    gap: 0;
+    place-items: center;
+}
+
+body.driver-mobile-screen .driver-report-action-hint {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready {
+    grid-template-columns: auto auto;
+    justify-content: center;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready .driver-report-action-copy {
+    justify-self: auto;
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-downtime-close:not(:disabled),
+body.driver-mobile-screen .driver-downtime-close:disabled,
+body.driver-mobile-screen .driver-downtime-close.is-disabled {
+    font-weight: 700 !important;
+}
+
+/* Report lists keep a readable row height. Extra trips and downtimes scroll
+   inside their own cards instead of shrinking every line to fit the screen. */
+body.driver-mobile-screen .driver-report-section--scrollable {
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-report-section-scroll {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(88, 223, 82, .58) rgba(8, 20, 25, .7);
+    -webkit-overflow-scrolling: touch;
+}
+
+body.driver-mobile-screen .driver-report-section-scroll::-webkit-scrollbar {
+    width: 4px;
+}
+
+body.driver-mobile-screen .driver-report-section-scroll::-webkit-scrollbar-track {
+    background: rgba(8, 20, 25, .7);
+}
+
+body.driver-mobile-screen .driver-report-section-scroll::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(88, 223, 82, .58);
+}
+
+body.driver-mobile-screen .driver-report-section-scroll .driver-report-row {
+    min-height: clamp(34px, 4.8dvh, 42px);
+    padding: 7px 2px;
+    align-items: center;
+    font-size: clamp(13px, min(3.85vw, 1.9dvh), 16px);
+    line-height: 1.16;
+}
+
+body.driver-mobile-screen .driver-report-section-scroll .driver-report-row > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+/* Driver downtime buttons use the same history cue as the Excavator screen:
+   the active reason pulses, while every used reason keeps its shift timer. */
+body.driver-mobile-screen .driver-downtime-list button {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    place-items: center;
+    align-content: center;
+    gap: clamp(1px, .35dvh, 3px);
+    -webkit-text-size-adjust: none;
+    text-size-adjust: none;
+}
+
+body.driver-mobile-screen .driver-downtime-reason-label {
+    display: -webkit-box;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-align: center;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    font-size: inherit !important;
+    line-height: 1.05 !important;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+body.driver-mobile-screen .driver-downtime-reason-duration {
+    min-width: max-content;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 1px clamp(4px, 1.2vw, 7px);
+    border: 1px solid rgba(255, 102, 88, .58);
+    border-radius: 999px;
+    background: rgba(54, 10, 10, .88);
+    color: #ff6658;
+    box-shadow: inset 0 0 8px rgba(255, 102, 88, .14), 0 0 9px rgba(255, 102, 88, .18);
+    font-size: clamp(10px, min(3vw, 1.45dvh), 13px) !important;
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.08 !important;
+    letter-spacing: .045em;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-downtime-reason-duration[hidden] {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected) {
+    filter: brightness(1.08) saturate(1.04);
+    box-shadow:
+        inset 0 -3px 0 rgba(255, 102, 88, .82),
+        inset 0 0 0 1px color-mix(in srgb, var(--driver-reason-accent) 18%, transparent),
+        0 0 12px rgba(255, 102, 88, .1);
+}
+
+/* A second line with the per-reason timer must never be squeezed into the
+   legacy short-landscape equal fractions. Keep real touch rows and let only
+   the reasons area scroll vertically when the screen is short. */
+@media (orientation: landscape) and (max-height: 520px) {
+    body.driver-mobile-screen .driver-downtime-list {
+        grid-auto-rows: 52px !important;
+        align-content: start;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+        touch-action: pan-y;
+        padding-right: 3px;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(74, 222, 128, .5) rgba(148, 163, 184, .12);
+    }
+
+    body.driver-mobile-screen .driver-downtime-list form,
+    body.driver-mobile-screen .driver-downtime-list button {
+        height: 52px;
+        min-height: 52px;
+    }
+
+    body.driver-mobile-screen .driver-downtime-list button {
+        gap: 1px;
+        padding: 3px 4px;
+        font-size: clamp(9px, 1.45vw, 12px);
+        line-height: 1.02;
+    }
+
+    body.driver-mobile-screen .driver-downtime-reason-duration {
+        padding-block: 0;
+        font-size: clamp(8px, 1.25vw, 10px);
+        line-height: 1;
+    }
+}
 </style>
 <link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v={{ driver_shell_version }}">
 <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v={{ driver_shell_version }}" defer></script>
@@ -3868,7 +4309,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version }}">
+<main class="driver-shell" data-driver-shell data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-has-open-trip="{% if driver_has_open_trip %}true{% else %}false{% endif %}" data-driver-has-loaded-trip="{% if driver_has_loaded_trip %}true{% else %}false{% endif %}" data-driver-active-trip-id="{% if active_trip %}{{ active_trip.id }}{% endif %}" data-driver-assigned-dump-point-id="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point.id }}{% endif %}" data-driver-assigned-dump-point-name="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version }}">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -3876,7 +4317,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
             {% endfor %}
         </div>
     {% endif %}
-    <div class="driver-toast" data-driver-toast hidden role="status" aria-live="polite"></div>
+    <div class="driver-toast" data-driver-toast hidden role="status" aria-live="polite" aria-atomic="true"></div>
 
     <header class="driver-header">
         <div class="driver-header-id{% if not open_shift %} is-inactive{% endif %}" aria-label="{{ driver_header_label }}">
@@ -3917,12 +4358,12 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         </section>
 
         <div class="driver-work-dial-zone">
-            <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_waiting_unload %} is-waiting-unload{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}{% if shift_plan_visual.is_overrun %} is-over-plan{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-progress-capped: {% if shift_plan_visual.is_overrun %}100{% else %}{{ shift_plan_visual.loop_progress }}{% endif %}; --driver-over-progress: {% if shift_plan_visual.is_overrun %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}; --driver-hold: 0;" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-driver-loop-progress="{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}" data-driver-completed-loops="{{ shift_plan_visual.completed_loops|default:0 }}" data-driver-has-plan="{% if shift_plan_has_plan %}1{% else %}0{% endif %}" data-plan-progress-phase="{% if shift_plan_has_plan %}{{ shift_plan_visual.phase }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
+            <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_loading_wait_active %} is-waiting-loading{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}{% if shift_plan_visual.is_overrun %} is-over-plan{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-progress-capped: {% if shift_plan_visual.is_overrun %}100{% else %}{{ shift_plan_visual.loop_progress }}{% endif %}; --driver-over-progress: {% if shift_plan_visual.is_overrun %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}; --driver-hold: 0;" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-driver-loop-progress="{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}" data-driver-completed-loops="{{ shift_plan_visual.completed_loops|default:0 }}" data-driver-has-plan="{% if shift_plan_has_plan %}1{% else %}0{% endif %}" data-plan-progress-phase="{% if shift_plan_has_plan %}{{ shift_plan_visual.phase }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
                 {% if active_trip %}
-                    <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-work-dial-form" data-driver-hold-form data-driver-trip-id="{{ active_trip.id }}" data-driver-unload-one-tap="{% if driver_waiting_unload %}true{% else %}false{% endif %}">
+                    <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-work-dial-form" data-driver-hold-form data-driver-trip-id="{{ active_trip.id }}" data-driver-unload-one-tap="{% if driver_unloading_wait_active %}true{% else %}false{% endif %}">
                         {% csrf_token %}
                         <input type="hidden" name="client_action_id" value="" data-driver-client-action>
-                        <button class="driver-work-dial-button is-loaded{% if driver_waiting_unload %} is-waiting-unload{% endif %}" type="submit" data-driver-hold-button data-driver-pending-label="ОТПРАВКА">
+                        <button class="driver-work-dial-button is-loaded{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}" type="submit" data-driver-work-dial-control data-driver-hold-button data-driver-pending-label="ОТПРАВКА">
                             <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
                                 <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                                 <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
@@ -3940,7 +4381,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                         </button>
                     </form>
                 {% else %}
-                    <div class="driver-work-dial-button is-empty" aria-disabled="true">
+                    <div class="driver-work-dial-button is-empty{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_loading_wait_active %} is-waiting-loading{% endif %}" data-driver-work-dial-control aria-disabled="true">
                         <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
                             <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                             <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
@@ -3961,7 +4402,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         </div>
 
         {% if driver_new_assignment_label %}
-            <form id="driver-assignment-action" method="post" action="{% url 'driver_accept_assignment' pending_assignment_action.id %}" data-driver-in-place="assignment" hidden>
+            <form id="driver-assignment-action" method="post" action="{% url 'driver_accept_assignment' pending_assignment_action.id %}" data-driver-in-place="assignment" data-driver-assignment-id="{{ pending_assignment_action.id }}" data-driver-assignment-kind="{{ pending_assignment_action.action }}" data-driver-excavator-number="{% if pending_assignment_action.excavator_id %}{{ pending_assignment_action.excavator.garage_number }}{% endif %}" hidden>
                 {% csrf_token %}
             </form>
             <button class="driver-work-assignment" type="submit" form="driver-assignment-action" data-driver-assignment-deadline="{{ driver_assignment_effective_at }}">
@@ -4000,10 +4441,16 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 
     <section class="driver-panel driver-tab {% if active_tab == 'shift' %}is-active{% endif %}" data-driver-tab-panel="shift">
         {% if open_shift %}
-            <form method="post" action="{% url 'driver_close_shift' %}" class="mobile-shift-host" data-driver-shift-close-form data-driver-in-place="shift-close">
+            <form method="post" action="{% url 'driver_close_shift' %}" class="mobile-shift-host" data-driver-shift-close-form data-native-shift-id="{{ open_shift.id }}" data-driver-in-place="shift-close">
                 {% csrf_token %}
+                <input type="hidden" name="shift_id" value="{{ open_shift.id }}">
                 {{ close_form.client_action_id }}
                 {% include "includes/mobile_shift_screen.html" with mobile_shift_role="driver" mobile_shift_state="open" mobile_shift_form=close_form mobile_shift_previous=False %}
+                <div class="driver-shift-sync-pending" data-driver-shift-sync-pending hidden role="status" aria-live="polite">
+                    <i aria-hidden="true"></i>
+                    <strong>Смена закрыта на телефоне</strong>
+                    <span>{% if is_native_app %}Можно свернуть или закрыть приложение. Данные отправятся автоматически, когда появится связь.{% else %}Данные сохранены. Они отправятся автоматически при следующем подключении или открытии приложения.{% endif %}</span>
+                </div>
             </form>
         {% elif form %}
             <form method="post" class="mobile-shift-host driver-shift-opening-form" data-driver-in-place="shift-open">
@@ -4023,7 +4470,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
             <h2>Простои</h2>
             <button class="driver-downtime-refresh" type="button" aria-label="Обновить" data-driver-downtime-refresh>↻</button>
         </div>
-        <div class="driver-downtime-card status-{{ active_downtime_status_key }}{% if active_downtime %} is-active{% endif %}" data-driver-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-driver-active-started-at="{{ active_downtime_started_at }}" data-driver-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-driver-shift-downtime-seconds="{{ shift_downtime_total_seconds }}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Простои за смену: {{ shift_downtime_total_label }}{% endif %}">
+        <div class="driver-downtime-card status-{{ active_downtime_status_key }}{% if active_downtime %} is-active{% endif %}" data-driver-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-driver-active-reason-id="{% if active_downtime %}{{ active_downtime.reason_id }}{% endif %}" data-driver-active-downtime-flow="{{ active_downtime_flow }}" data-driver-active-started-at="{{ active_downtime_started_at }}" data-driver-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-driver-shift-downtime-seconds="{{ shift_downtime_total_seconds }}" data-driver-downtime-calculated-at="{{ downtime_calculated_at }}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Простои за смену: {{ shift_downtime_total_label }}{% endif %}">
             <span class="driver-downtime-state-dot" data-driver-downtime-indicator aria-hidden="true">
                 <svg class="driver-downtime-state-icon driver-downtime-state-icon-play" viewBox="0 0 24 24" focusable="false"><path d="M7 4.8v14.4L19 12 7 4.8Z"></path></svg>
                 <svg class="driver-downtime-state-icon driver-downtime-state-icon-pause" viewBox="0 0 24 24" focusable="false"><path d="M6.5 5h4v14h-4V5Zm7 0h4v14h-4V5Z"></path></svg>
@@ -4035,15 +4482,16 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                 <form method="post" action="{% url 'driver_downtime_action' %}" data-driver-downtime-reason-id="{{ reason.id }}">
                     {% csrf_token %}
                     <input type="hidden" name="reason_id" value="{{ reason.id }}">
-                    <button class="driver-downtime-hold status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}" type="button" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-reason="{{ reason }}" data-driver-status-key="{{ reason.effective_color_group }}" aria-label="Начать простой: {{ reason.button_label }}">
-                        {{ reason.button_label }}
+                    <button class="driver-downtime-hold status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}{% if reason.driver_is_used %} is-used{% endif %}{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-downtime-flow="{{ reason.driver_workflow }}" data-driver-reason="{{ reason }}" data-driver-reason-label="{{ reason.button_label }}" data-driver-reason-seconds="{{ reason.driver_total_seconds }}" data-driver-status-key="{{ reason.effective_color_group }}"{% if reason.driver_unavailable_message %} aria-disabled="true" data-driver-unavailable-message="{{ reason.driver_unavailable_message }}" aria-label="{{ reason.button_label }}. {{ reason.driver_unavailable_message }}"{% elif reason.driver_is_used %} aria-label="Начать простой: {{ reason.button_label }}. За смену: {{ reason.driver_total_label }}"{% else %} aria-label="Начать простой: {{ reason.button_label }}"{% endif %}>
+                        <span class="driver-downtime-reason-label" data-driver-reason-label>{{ reason.button_label }}</span>
+                        <span class="driver-downtime-reason-duration" data-driver-reason-duration{% if not reason.driver_is_used %} hidden{% endif %}>{{ reason.driver_total_label }}</span>
                     </button>
                 </form>
             {% empty %}
                 <div class="driver-inline-note">Активные причины простоев для самосвалов не найдены.</div>
             {% endfor %}
         </div>
-        <button class="driver-primary-action driver-downtime-close driver-downtime-hold{% if not active_downtime %} is-disabled{% endif %}" type="button" data-driver-close-downtime {% if not active_downtime %}disabled aria-disabled="true"{% else %}aria-label="Завершить простой"{% endif %}>Завершить простой</button>
+        <button class="driver-primary-action driver-downtime-close driver-downtime-hold{% if not active_downtime %} is-disabled{% endif %}" type="button" data-driver-close-downtime {% if not active_downtime %}disabled aria-disabled="true"{% else %}aria-label="Завершить простой"{% endif %}><span data-driver-footer-action-label>Завершить простой</span></button>
     </section>
 
     <section class="driver-panel driver-tab {% if active_tab == 'manifest' %}is-active{% endif %}" data-driver-tab-panel="manifest" data-driver-report-date="{{ driver_shift_report_date }}" data-driver-report-shift="{{ driver_shift_report_shift }}" data-driver-report-driver="{{ driver_shift_report_driver }}" data-driver-report-truck="{{ driver_shift_report_truck }}" data-driver-report-trip-total="{{ shift_trip_count }}" data-driver-report-downtime-total="{{ shift_downtime_report_total_label }}" data-driver-report-end-fuel="{{ driver_shift_report_end_fuel|default_if_none:'' }}" data-driver-report-end-mileage="{{ driver_shift_report_end_mileage|default_if_none:'' }}" data-driver-report-end-engine-hours="{{ driver_shift_report_end_engine_hours|default_if_none:'' }}">
@@ -4060,19 +4508,23 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
                 <h3>Б-{{ driver_shift_report_truck }} · {{ driver_shift_report_driver }}</h3>
             </div>
             <div class="driver-report-grid">
-                <section class="driver-report-section">
+                <section class="driver-report-section driver-report-section--scrollable">
                     <h4>Рейсы</h4>
+                    <div class="driver-report-section-scroll" data-driver-report-trip-scroll>
                     {% for row in driver_shift_report_trip_rows %}
                         <div class="driver-report-row" data-driver-report-trip data-excavator="{{ row.excavator }}" data-dump-point="{{ row.dump_point }}" data-count="{{ row.count }}"><span>{{ row.excavator }} {{ row.dump_point }}</span><strong>{{ row.count }}</strong></div>
                     {% empty %}<div class="driver-report-row"><span>Завершённых рейсов нет</span><strong>0</strong></div>{% endfor %}
                     <div class="driver-report-row"><span>Всего рейсов</span><strong>{{ shift_trip_count }}</strong></div>
+                    </div>
                 </section>
-                <section class="driver-report-section">
+                <section class="driver-report-section driver-report-section--scrollable">
                     <h4>Простои</h4>
+                    <div class="driver-report-section-scroll" data-driver-report-downtime-scroll>
                     {% for row in driver_shift_downtime_rows %}
                         <div class="driver-report-row" data-driver-report-downtime data-reason="{{ row.reason }}" data-duration="{{ row.duration }}"><span>{{ row.reason }}</span><strong>{{ row.duration }}</strong></div>
                     {% empty %}<div class="driver-report-row"><span>Простоев нет</span><strong>00:00:00</strong></div>{% endfor %}
                     <div class="driver-report-row"><span>Всего простоев</span><strong>{{ shift_downtime_report_total_label }}</strong></div>
+                    </div>
                 </section>
                 <section class="driver-report-section" data-driver-report-metrics>
                     <h4>Техника на конец смены</h4>
@@ -4083,8 +4535,18 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
             </div>
             </div>
             <div class="driver-report-actions">
-                <button type="button" data-driver-report-copy>Скопировать</button>
-                <button type="button" data-driver-report-share>Поделиться</button>
+                <button
+                    type="button"
+                    data-driver-report-delivery
+                    data-driver-report-state="prepare"
+                    data-driver-max-group-url="https://max.ru/join/haXmcD7Efa-2_dVX3_VLqfftNKU1QyMlnVTWgiQSDdE"
+                >
+                    <span class="driver-report-max-mark" aria-hidden="true">MAX</span>
+                    <span class="driver-report-action-copy">
+                        <strong class="driver-report-action-title" data-driver-report-action-title>Подготовить путёвку</strong>
+                        <small class="driver-report-action-hint" data-driver-report-action-hint aria-hidden="true">для отправки диспетчеру</small>
+                    </span>
+                </button>
             </div>
         </div>
         <div class="driver-manifest-view" data-driver-manifest-view="timeline">
@@ -4374,6 +4836,7 @@ window.createDriverUnloadRecovery = function (options) {
     return {
         ensureActionId: ensureActionId,
         storageKey: storageKey,
+        recover: recoverPendingUi,
         destroy: function () {
             if (destroyed) {
                 return;
@@ -4386,6 +4849,126 @@ window.createDriverUnloadRecovery = function (options) {
     };
 };
 /* DRIVER_UNLOAD_RECOVERY_END */
+
+/* DRIVER_UNLOAD_GESTURE_START */
+window.bindDriverUnloadGesture = function (options) {
+    options = options || {};
+    var form = options.form;
+    var button = options.button;
+    var holdGuard = options.holdGuard;
+    if (!form || !button || !holdGuard) {
+        return null;
+    }
+    var oneTapPointerId = null;
+
+    function isOneTap() {
+        return form.dataset.driverUnloadOneTap === "true";
+    }
+
+    function canTrigger() {
+        return (
+            !button.disabled
+            && (!options.canTrigger || options.canTrigger())
+        );
+    }
+
+    function triggerOneTap(event) {
+        if (event && typeof event.preventDefault === "function") {
+            event.preventDefault();
+        }
+        if (!isOneTap() || !canTrigger()) {
+            return false;
+        }
+        oneTapPointerId = null;
+        button.classList.remove("is-touch-armed");
+        return options.onOneTap() !== false;
+    }
+
+    function onPointerDown(event) {
+        if (!canTrigger()) {
+            return;
+        }
+        if (isOneTap()) {
+            event.preventDefault();
+            oneTapPointerId = event.pointerId;
+            button.classList.add("is-touch-armed");
+            button.setPointerCapture?.(event.pointerId);
+            return;
+        }
+        button.setPointerCapture?.(event.pointerId);
+        holdGuard.start();
+    }
+
+    function onPointerUp(event) {
+        if (isOneTap() && oneTapPointerId === event.pointerId) {
+            triggerOneTap(event);
+            return;
+        }
+        oneTapPointerId = null;
+        button.classList.remove("is-touch-armed");
+        if (form.dataset.holdComplete !== "true") {
+            holdGuard.reset();
+        }
+    }
+
+    function onPointerCancel() {
+        oneTapPointerId = null;
+        button.classList.remove("is-touch-armed");
+        if (form.dataset.holdComplete !== "true") {
+            holdGuard.reset();
+        }
+    }
+
+    function onPointerLeave() {
+        /* Pointer capture keeps a short tap reliable even when a finger moves
+           a few pixels outside the round button. A real pointercancel still
+           aborts the action, while the normal hold keeps its old reset rule. */
+        if (!isOneTap() && form.dataset.holdComplete !== "true") {
+            holdGuard.reset();
+        }
+    }
+
+    function onClick(event) {
+        event.preventDefault();
+        /* Keyboard activation and old WebView engines may emit click without
+           Pointer Events. The pending/disabled guard keeps this fallback from
+           duplicating a request already sent on pointerup. */
+        triggerOneTap();
+    }
+
+    function onSubmit(event) {
+        if (options.canTrigger && !options.canTrigger()) {
+            event.preventDefault();
+            holdGuard.cancel();
+            return;
+        }
+        if (!isOneTap() && form.dataset.holdComplete !== "true") {
+            event.preventDefault();
+            holdGuard.reset();
+        }
+    }
+
+    button.addEventListener("pointerdown", onPointerDown);
+    button.addEventListener("pointerup", onPointerUp);
+    button.addEventListener("pointercancel", onPointerCancel);
+    button.addEventListener("pointerleave", onPointerLeave);
+    button.addEventListener("click", onClick);
+    form.addEventListener("submit", onSubmit);
+
+    return {
+        triggerOneTap: triggerOneTap,
+        destroy: function () {
+            button.removeEventListener("pointerdown", onPointerDown);
+            button.removeEventListener("pointerup", onPointerUp);
+            button.removeEventListener("pointercancel", onPointerCancel);
+            button.removeEventListener("pointerleave", onPointerLeave);
+            button.removeEventListener("click", onClick);
+            form.removeEventListener("submit", onSubmit);
+            button.classList.remove("is-touch-armed");
+        }
+    };
+};
+/* DRIVER_UNLOAD_GESTURE_END */
 
 if (typeof window.bindAchievementPrizeUnlock === "function") {
     window.bindAchievementPrizeUnlock();
@@ -4419,7 +5002,7 @@ function isDriverOperationalRefreshUnsafe(shell) {
         return true;
     }
     return !!(
-        shell.querySelector(".is-holding, .is-pending, .is-dragging, [data-driver-point-sheet]:not([hidden])") ||
+        shell.querySelector(".is-touch-armed, .is-holding, .is-pending, .is-dragging, [data-driver-point-sheet]:not([hidden])") ||
         document.querySelector("[data-driver-pwa-update-modal]:not([hidden]), .app-confirm-modal:not([hidden])")
     );
 }
@@ -4431,6 +5014,142 @@ if (
     window.AppPwaContractGuard.registerUnsafeCheck(isDriverOperationalRefreshUnsafe);
 }
 
+/* DRIVER_VOICE_GUARD_START */
+/* Одно рабочее событие приходит на экран по трём путям: ранним сигналом сразу
+   после ответа сервера, слушателем «operational-state-refresh-applied» и
+   сравнением DOM после подмены. Раньше каждый путь решал сам, и отметка о
+   произнесённом ставилась уже после возврата из моста — то есть два
+   синхронных вызова подряд успевали пройти проверку оба.
+
+   Владелец решения теперь один, и заявка ставится синхронно, до обращения к
+   мосту. Ключ — идентификатор самой операции (назначение или рейс), а не
+   версия состояния: его одинаково знают и событие сервера, и разметка. */
+window.DriverVoiceGuard = (function () {
+    var LIMIT = 32;
+    var order = [];
+    var states = Object.create(null);
+
+    function forget(opKey) {
+        delete states[opKey];
+        var position = order.indexOf(opKey);
+        if (position !== -1) order.splice(position, 1);
+    }
+
+    function claim(opKey) {
+        if (!opKey) return false;
+        if (states[opKey]) return false;
+        states[opKey] = "claimed";
+        order.push(opKey);
+        while (order.length > LIMIT) {
+            delete states[order.shift()];
+        }
+        return true;
+    }
+
+    /* Заявка закрывается, когда звук фактически пошёл либо когда событием уже
+       владеет другой канал. Освобождать можно только полную тишину, иначе
+       следующий путь повторит то, что человек уже услышал. */
+    function finalize(opKey) {
+        if (opKey && states[opKey]) states[opKey] = "announced";
+    }
+
+    function release(opKey) {
+        if (opKey && states[opKey] === "claimed") forget(opKey);
+    }
+
+    function state(opKey) {
+        return (opKey && states[opKey]) || "";
+    }
+
+    return {claim: claim, finalize: finalize, release: release, state: state};
+})();
+
+function settleDriverVoiceClaim(opKey, result) {
+    if (!opKey) return;
+    /* playDriverSound и резервный веб-звук отвечают простым признаком
+       «сыграло», нативный мост — объектом. Прозвучавшее в любой форме
+       закрывает заявку. */
+    var announced = result === true || !!(result && result.announced === true);
+    var ownedElsewhere = !!(result && String(result.reason || "") === "already_announced");
+    if (announced || ownedElsewhere) {
+        window.DriverVoiceGuard.finalize(opKey);
+        return;
+    }
+    window.DriverVoiceGuard.release(opKey);
+}
+
+/* Единственная точка обращения к мосту под заявкой.
+
+   Мост может не только вернуть отказ, но и бросить исключение — синхронно при
+   вызове или отклонением промиса. Без освобождения заявка осталась бы в
+   состоянии «принято» до перезагрузки страницы, и событие замолчало бы
+   навсегда: ни резервный путь по DOM, ни повторный опрос его уже не подняли
+   бы. Любой сбой возвращает операцию следующему источнику. */
+function announceDriverVoiceUnderClaim(opKey, produceAnnouncement) {
+    var pending;
+    try {
+        pending = produceAnnouncement();
+    } catch (error) {
+        window.DriverVoiceGuard.release(opKey);
+        return;
+    }
+    Promise.resolve(pending).then(function (result) {
+        settleDriverVoiceClaim(opKey, result);
+    }, function () {
+        window.DriverVoiceGuard.release(opKey);
+    });
+}
+
+/* Повторяет правило нативного heartbeat: водителю озвучиваются выданное
+   назначение и снятое назначение. Из дельты берётся событие с наибольшей
+   версией — если назначение успели перевыдать, прозвучит последнее, а не
+   первое. Актуальность определяется состоянием, а не возрастом события. */
+function latestDriverAssignmentEvent(context) {
+    var selected = null;
+    var events = context && Array.isArray(context.events) ? context.events : [];
+    events.forEach(function (event) {
+        var payload = event && event.payload ? event.payload : null;
+        var version = Number(event && event.version || 0);
+        if (!payload || !event || event.type !== "assignment_changed") return;
+        if (selected && version <= selected.eventVersion) return;
+        if (String(event.object_type || "") !== "HaulAssignment") return;
+        var assignmentId = String(event.object_id || "").trim();
+        if (!assignmentId) return;
+        var action = String(payload.action || "");
+        if (action === "assignment_pending") {
+            selected = {
+                eventVersion: version,
+                assignmentId: assignmentId,
+                kind: "assign",
+                excavatorNumber: String(payload.target_excavator_number || "").trim()
+            };
+            return;
+        }
+        if (action === "release_applied") {
+            selected = {
+                eventVersion: version,
+                assignmentId: assignmentId,
+                kind: "release",
+                excavatorNumber: ""
+            };
+        }
+    });
+    return selected;
+}
+
+window.handleOperationalStateSignals = function (context) {
+    playDriverDumpPointAlert(context);
+    var assignment = latestDriverAssignmentEvent(context);
+    if (!assignment) return;
+    playDriverAssignmentAlert(
+        assignment.eventVersion,
+        assignment.kind,
+        assignment.excavatorNumber,
+        {opKey: "assign:" + assignment.assignmentId}
+    );
+};
+/* DRIVER_VOICE_GUARD_END */
+
 function playDriverSound(name) {
     if (!window.MobileOperationalSounds || typeof window.MobileOperationalSounds.play !== "function") {
         return Promise.resolve(false);
@@ -4438,44 +5157,254 @@ function playDriverSound(name) {
     return window.MobileOperationalSounds.play(name);
 }
 
-function playDriverAssignmentAlert() {
+function playDriverVoice(cue, voice, options) {
+    options = options || {};
+    if (!window.MobileOperationalSounds || typeof window.MobileOperationalSounds.announceOperational !== "function") {
+        return playDriverSound(cue);
+    }
+    return window.MobileOperationalSounds.announceOperational({
+        cue: cue,
+        voice: voice,
+        eventVersion: Number(options.eventVersion || 0),
+        eventKey: String(options.eventKey || "")
+    });
+}
+
+function playDriverAssignmentAlert(eventVersion, assignmentKind, excavatorNumber, options) {
+    options = options || {};
+    var opKey = String(options.opKey || "");
+    /* Заявка ставится до вибрации и до моста: иначе два синхронных вызова
+       подряд успевают обратиться к проигрывателю оба. */
+    if (opKey && !window.DriverVoiceGuard.claim(opKey)) {
+        return;
+    }
     if (navigator.vibrate) {
         try { navigator.vibrate([180, 90, 180]); } catch (error) {}
     }
-    playDriverSound("truck_assigned");
+    if (assignmentKind !== "assign") {
+        announceDriverVoiceUnderClaim(opKey, function () {
+            return playDriverVoice("truck_assigned", "voice_assignment_removed", {
+                eventVersion: Number(eventVersion || 0),
+                eventKey: "driver_assignment"
+            });
+        });
+        return;
+    }
+    if (window.MobileOperationalSounds && typeof window.MobileOperationalSounds.announceEquipment === "function") {
+        announceDriverVoiceUnderClaim(opKey, function () {
+            return window.MobileOperationalSounds.announceEquipment({
+                cue: "truck_assigned",
+                action: "driver_excavator_assigned",
+                equipmentNumber: String(excavatorNumber || ""),
+                fallbackVoice: "voice_excavator_assigned",
+                eventVersion: Number(eventVersion || 0),
+                eventKey: "driver_assignment"
+            });
+        });
+        return;
+    }
+    announceDriverVoiceUnderClaim(opKey, function () {
+        return playDriverVoice("truck_assigned", "voice_excavator_assigned", {
+            eventVersion: Number(eventVersion || 0),
+            eventKey: "driver_assignment"
+        });
+    });
 }
 
-function driverAppliedActionSound(actionKind, freshShell) {
+/* Предложение снять назначение только привлекает внимание коротким пиком.
+
+   Голосовая фраза «Назначение снято» принадлежит событию «release_applied»:
+   его одинаково видят и ранний обработчик, и нативный heartbeat, и оба
+   передают одну и ту же версию события, поэтому фраза звучит ровно один раз.
+   Произнести её здесь, на «release_pending», значило бы записать нативный
+   маркер на меньшей версии — «release_applied» пришёл бы с большей и
+   прозвучал бы вторым, с опозданием.
+
+   Пик идёт мимо аннонсера, через обычный проигрыватель сигналов, и никакого
+   маркера не пишет. Пространство ключа отдельное: ключ «assign:<номер>»
+   принадлежит самому снятию, и пик не имеет права его закрывать. */
+function playDriverReleaseOfferCue(assignmentId) {
+    var opKey = assignmentId ? "release-cue:" + String(assignmentId) : "";
+    if (opKey && !window.DriverVoiceGuard.claim(opKey)) {
+        return;
+    }
+    if (navigator.vibrate) {
+        try { navigator.vibrate([180, 90, 180]); } catch (error) {}
+    }
+    announceDriverVoiceUnderClaim(opKey, function () {
+        return playDriverSound("truck_assigned");
+    });
+}
+
+function reportDriverAudioDiagnostic(stage, details, extra) {
+    if (!document.body || document.body.dataset.nativeApp !== "true" || !window.fetch) return;
+    var payload = {
+        message: "driver_audio:" + String(stage || "unknown"),
+        source: "driver-audio",
+        stack: JSON.stringify({details: details || {}, extra: extra || {}}),
+        screen: "driver",
+        role: "driver",
+        appVersion: document.body.dataset.appShellVersion || ""
+    };
+    try {
+        window.fetch("/client-error/", {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            keepalive: true,
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+        }).catch(function () {});
+    } catch (error) {}
+}
+
+/* Отдельной отметки о произнесённом здесь больше нет: она обновлялась только
+   после возврата из моста и от синхронного двойного вызова не защищала.
+   Владелец решения — DriverVoiceGuard, заявка по ключу рейса. */
+function latestDriverDumpPointEvent(context) {
+    var selected = null;
+    var events = context && Array.isArray(context.events) ? context.events : [];
+    events.forEach(function (event) {
+        var payload = event && event.payload ? event.payload : null;
+        var version = Number(event && event.version || 0);
+        if (
+            !payload
+            || event.type !== "trip_changed"
+            || payload.action !== "truck_loaded"
+            || (selected && version <= selected.eventVersion)
+        ) {
+            return;
+        }
+        var tripId = Number(payload.trip_id || 0);
+        var dumpPointId = Number(payload.assigned_dump_point_id || payload.dump_point_id || 0);
+        var dumpPointName = String(payload.dump_point_name || "").trim();
+        if (!tripId || (!dumpPointId && !dumpPointName)) return;
+        selected = {
+            eventVersion: version,
+            tripId: tripId,
+            dumpPointId: dumpPointId,
+            dumpPointName: dumpPointName
+        };
+    });
+    return selected;
+}
+
+function playDriverDumpPointAlert(context) {
+    var details = latestDriverDumpPointEvent(context);
+    if (!details) return;
+    var opKey = "dump:" + String(details.tripId || "");
+    if (!window.DriverVoiceGuard.claim(opKey)) {
+        return;
+    }
+    reportDriverAudioDiagnostic("trigger", details, {
+        capacitor: !!window.Capacitor,
+        nativeSound: !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeSound)
+    });
+    var sounds = window.MobileOperationalSounds;
+    var announce;
+    try {
+        announce = sounds && typeof sounds.announceDumpPoint === "function"
+            ? sounds.announceDumpPoint(details)
+            : Promise.resolve({supported: false, announced: false});
+    } catch (error) {
+        /* Синхронный бросок моста не должен запирать рейс до перезагрузки. */
+        window.DriverVoiceGuard.release(opKey);
+        return;
+    }
+    /* Резервный сигнал тоже закрывает заявку: он уже прозвучал, и повторять
+       его следующим путём нельзя. Освобождается заявка только тогда, когда не
+       прозвучало ничего. */
+    function settleWithFallback(nativeResult, withVibration) {
+        if (withVibration && navigator.vibrate) {
+            try { navigator.vibrate([180, 90, 180]); } catch (error) {}
+        }
+        return Promise.resolve(playDriverSound("truck_assigned")).then(function (played) {
+            settleDriverVoiceClaim(opKey, played === true ? true : nativeResult);
+        });
+    }
+    Promise.resolve(announce).then(function (nativeResult) {
+        nativeResult = nativeResult || {supported: false, announced: false};
+        reportDriverAudioDiagnostic("result", details, nativeResult);
+        if (sounds && typeof sounds.diagnostics === "function") {
+            window.setTimeout(function () {
+                sounds.diagnostics().then(function (diagnostics) {
+                    reportDriverAudioDiagnostic("playback", details, diagnostics);
+                });
+            }, 1600);
+        }
+        if (nativeResult.supported && nativeResult.announced) {
+            settleDriverVoiceClaim(opKey, nativeResult);
+            return;
+        }
+        if (nativeResult.supported && nativeResult.reason === "already_announced") {
+            settleDriverVoiceClaim(opKey, nativeResult);
+            return;
+        }
+        if (nativeResult.supported) {
+            return settleWithFallback(nativeResult, false);
+        }
+        if (document.body && document.body.dataset.nativeApp === "true" && !nativeResult.supported) {
+            return settleWithFallback(nativeResult, false);
+        }
+        return settleWithFallback(nativeResult, true);
+    }).catch(function () {
+        window.DriverVoiceGuard.release(opKey);
+    });
+}
+
+window.addEventListener("operational-state-refresh-applied", function (event) {
+    playDriverDumpPointAlert(event && event.detail ? event.detail : null);
+});
+
+function driverAppliedActionVoice(actionKind, freshShell) {
     if (actionKind === "shift-open") {
         return freshShell.querySelector("[data-driver-shift-close-button]")
-            ? "shift_start"
-            : "action_error";
+            ? {cue: "shift_start", voice: "voice_shift_opened"}
+            : {cue: "action_error", voice: "voice_action_failed"};
     }
     if (actionKind === "shift-close") {
         return freshShell.querySelector("[data-driver-shift-close-button]")
-            ? "action_error"
-            : "shift_end";
+            ? {cue: "action_error", voice: "voice_action_failed"}
+            : {cue: "shift_end", voice: "voice_shift_closed"};
     }
-    return "action_ok";
+    if (actionKind === "complete-trip") {
+        return {cue: "action_ok", voice: "voice_trip_finished"};
+    }
+    return {cue: "action_ok", voice: ""};
+}
+
+function syncDriverTabMarkup(shell, tab) {
+    if (!shell) return;
+    shell.dataset.activeTab = tab;
+    shell.querySelectorAll("[data-driver-tab-panel]").forEach(function (panel) {
+        panel.classList.toggle("is-active", panel.dataset.driverTabPanel === tab);
+    });
+    document.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
+        button.classList.toggle("is-active", button.dataset.driverTabOpen === tab);
+    });
 }
 
 window.applyOperationalStateRefresh = function (context) {
     var currentShell = document.querySelector("[data-driver-shell]");
     if (!currentShell || !window.AppOperationalFragment || isDriverOperationalRefreshUnsafe(currentShell)) {
-        return Promise.resolve(false);
+        return Promise.resolve({deferred: true, reason: "driver_busy"});
     }
     var activeTab = currentShell.dataset.activeTab || "work";
     var targetVersion = Number(context && context.version || 0);
     return window.AppOperationalFragment.request("driver", targetVersion).then(function (payload) {
         var oldShell = document.querySelector("[data-driver-shell]");
         if (!oldShell || isDriverOperationalRefreshUnsafe(oldShell)) {
-            return false;
+            return {deferred: true, reason: "driver_busy"};
         }
         var freshShell = window.AppOperationalFragment.parseRoot(
             payload.html,
             "[data-driver-shell]"
         );
-        if (!freshShell) return false;
+        if (!freshShell) return {deferred: true, reason: "driver_fragment_invalid"};
+        var previousDowntimeCard = oldShell.querySelector("[data-driver-active-downtime-flow]");
+        var previousDowntimeFlow = previousDowntimeCard
+            ? String(previousDowntimeCard.dataset.driverActiveDowntimeFlow || "")
+            : "";
         var previousAssignmentForm = oldShell.querySelector("#driver-assignment-action");
         var nextAssignmentForm = freshShell.querySelector("#driver-assignment-action");
         var previousAssignmentKey = previousAssignmentForm
@@ -4484,7 +5413,23 @@ window.applyOperationalStateRefresh = function (context) {
         var nextAssignmentKey = nextAssignmentForm
             ? String(nextAssignmentForm.getAttribute("action") || "")
             : "";
-        freshShell.dataset.activeTab = activeTab;
+        var movedFromLoadingWaitToWork = (
+            previousDowntimeFlow === "waiting_loading"
+            && freshShell.dataset.driverHasLoadedTrip === "true"
+        );
+        var becameLoaded = (
+            oldShell.dataset.driverHasLoadedTrip !== "true"
+            && freshShell.dataset.driverHasLoadedTrip === "true"
+        );
+        if (movedFromLoadingWaitToWork) {
+            activeTab = "work";
+        }
+        syncDriverTabMarkup(freshShell, activeTab);
+        if (movedFromLoadingWaitToWork && window.history && window.history.replaceState) {
+            var refreshedUrl = new URL(window.location.href);
+            refreshedUrl.searchParams.set("tab", activeTab);
+            window.history.replaceState({}, "", refreshedUrl.toString());
+        }
         oldShell.replaceWith(freshShell);
 
         if (targetVersion) {
@@ -4496,12 +5441,43 @@ window.applyOperationalStateRefresh = function (context) {
         if (typeof window.checkAchievementPrize === "function") {
             window.checkAchievementPrize(context);
         }
-        if (nextAssignmentKey && nextAssignmentKey !== previousAssignmentKey) {
-            playDriverAssignmentAlert();
+        if (becameLoaded) {
+            playDriverDumpPointAlert({events: [{
+                version: targetVersion,
+                type: "trip_changed",
+                payload: {
+                    action: "truck_loaded",
+                    trip_id: Number(freshShell.dataset.driverActiveTripId || 0),
+                    assigned_dump_point_id: Number(freshShell.dataset.driverAssignedDumpPointId || 0),
+                    dump_point_name: String(freshShell.dataset.driverAssignedDumpPointName || "")
+                }
+            }]});
         }
-        return true;
+        /* Резервный путь: сюда доходит только то, чего не было в дельте —
+           усечённый ответ, повреждённый payload, отсутствующий идентификатор.
+           Версия остаётся положительной: это тот же монотонный счётчик
+           состояния, поэтому будущие события с большими версиями он не
+           заглушит, а нулевую версию нативная сторона отвергла бы.
+
+           Предложение снять назначение отсюда только пикает: голос ждёт
+           фактического «release_applied». Иначе маркер записался бы на
+           меньшей версии, и снятие прозвучало бы дважды. */
+        if (nextAssignmentKey && nextAssignmentKey !== previousAssignmentKey) {
+            var fallbackAssignmentId = String(nextAssignmentForm.dataset.driverAssignmentId || "").trim();
+            if (String(nextAssignmentForm.dataset.driverAssignmentKind || "") === "assign") {
+                playDriverAssignmentAlert(
+                    targetVersion,
+                    "assign",
+                    String(nextAssignmentForm.dataset.driverExcavatorNumber || ""),
+                    {opKey: fallbackAssignmentId ? "assign:" + fallbackAssignmentId : ""}
+                );
+            } else {
+                playDriverReleaseOfferCue(fallbackAssignmentId);
+            }
+        }
+        return {applied: true};
     }).catch(function () {
-        return false;
+        return {deferred: true, reason: "driver_refresh_failed"};
     });
 };
 
@@ -4510,14 +5486,17 @@ window.applyOperationalStateRefresh = function (context) {
    разбираем сами и меняем только рабочую часть — остальное остаётся на месте.
 
    Повтор действия безопасен: у формы есть свой номер действия, сервер по нему
-   узнаёт уже выполненный рейс. Поэтому при любой осечке спокойно отдаём форму
-   браузеру — действие не потеряется. */
+   узнаёт уже выполненный рейс. При ошибке оставляем рабочий экран на месте:
+   обычная навигация на ответ сервера превращала временный HTTP 500 в чёрный
+   экран WebView без возможности восстановиться. */
 window.submitDriverFormInPlace = function (form, options) {
     options = options || {};
     var actionKind = String(form.dataset.driverInPlace || "");
     if (!actionKind && form.matches("[data-driver-hold-form]")) actionKind = "complete-trip";
     if (!window.fetch || !window.AppOperationalFragment || !window.FormData) {
-        form.submit();
+        if (!options.silentFailure && typeof window.showDriverToast === "function") {
+            window.showDriverToast("Действие не отправлено. Проверьте связь и повторите.");
+        }
         return Promise.resolve(false);
     }
     var body = new window.FormData(form);
@@ -4536,7 +5515,7 @@ window.submitDriverFormInPlace = function (form, options) {
         var freshShell = window.AppOperationalFragment.parseRoot(result.html, "[data-driver-shell]");
         var oldShell = document.querySelector("[data-driver-shell]");
         if (!freshShell || !oldShell) throw new Error("driver shell missing");
-        var soundName = driverAppliedActionSound(actionKind, freshShell);
+        var actionVoice = driverAppliedActionVoice(actionKind, freshShell);
         oldShell.replaceWith(freshShell);
         if (result.url && window.history && window.history.replaceState) {
             var responseUrl = new URL(result.url, window.location.href);
@@ -4551,15 +5530,20 @@ window.submitDriverFormInPlace = function (form, options) {
         if (typeof window.bindDriverMobileShell === "function") {
             window.bindDriverMobileShell();
         }
-        playDriverSound(soundName);
+        if (actionVoice.voice) {
+            playDriverVoice(actionVoice.cue, actionVoice.voice);
+        } else {
+            playDriverSound(actionVoice.cue);
+        }
         return true;
     }).catch(function () {
-        playDriverSound("action_error");
-        if (options.fallbackToNavigation !== false) {
-            form.submit();
-            return false;
+        if (!options.silentFailure) {
+            playDriverVoice(
+                "action_error",
+                actionKind === "complete-trip" ? "voice_trip_finish_failed" : "voice_action_failed"
+            );
         }
-        if (typeof window.showDriverToast === "function") {
+        if (!options.silentFailure && typeof window.showDriverToast === "function") {
             window.showDriverToast("Не удалось обновить экран. Проверяем состояние сервера.");
         }
         if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
@@ -4568,6 +5552,210 @@ window.submitDriverFormInPlace = function (form, options) {
         return false;
     });
 };
+
+/* DRIVER_SHIFT_CLOSE_OUTBOX_START */
+window.DriverShiftCloseOutbox = (function () {
+    var storageKey = "driver-shift-close-pending:v1";
+    var retryInFlight = false;
+
+    function nativeConnection() {
+        return window.NativeBackgroundConnection || null;
+    }
+
+    function readLocal() {
+        try {
+            var value = JSON.parse(window.localStorage.getItem(storageKey) || "null");
+            return value && value.clientActionId ? value : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writeLocal(payload) {
+        try {
+            window.localStorage.setItem(storageKey, JSON.stringify(payload));
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function removeLocal(expectedActionId) {
+        var pending = readLocal();
+        if (pending && expectedActionId && pending.clientActionId !== expectedActionId) {
+            return false;
+        }
+        try {
+            window.localStorage.removeItem(storageKey);
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function payloadFromForm(form) {
+        function field(name) {
+            var input = form.querySelector('[name="' + name + '"]');
+            return input ? String(input.value || "").trim() : "";
+        }
+        return {
+            shiftId: String(form.dataset.nativeShiftId || "").trim(),
+            clientActionId: field("client_action_id"),
+            endFuel: field("end_fuel"),
+            endMileage: field("end_mileage"),
+            endEngineHours: field("end_engine_hours"),
+            createdAt: Date.now()
+        };
+    }
+
+    function fillForm(form, payload) {
+        if (!form || !payload) return;
+        [
+            ["client_action_id", "clientActionId"],
+            ["end_fuel", "endFuel"],
+            ["end_mileage", "endMileage"],
+            ["end_engine_hours", "endEngineHours"]
+        ].forEach(function (mapping) {
+            var input = form.querySelector('[name="' + mapping[0] + '"]');
+            if (input && payload[mapping[1]] !== undefined) {
+                input.value = String(payload[mapping[1]] || "");
+            }
+        });
+    }
+
+    function persist(payload) {
+        var localStored = writeLocal(payload);
+        var native = nativeConnection();
+        if (native && typeof native.queueDriverShiftClose === "function") {
+            return Promise.resolve(native.queueDriverShiftClose(payload)).then(function () {
+                return true;
+            }).catch(function (error) {
+                removeLocal(payload.clientActionId);
+                if (!localStored) throw error;
+                throw new Error("Не удалось включить фоновую отправку. Оставьте приложение открытым и повторите.");
+            });
+        }
+        if (localStored || navigator.onLine !== false) {
+            return Promise.resolve(true);
+        }
+        return Promise.reject(new Error("Не удалось сохранить закрытие смены на телефоне."));
+    }
+
+    function acknowledge(clientActionId) {
+        removeLocal(clientActionId);
+        var native = nativeConnection();
+        if (!native || typeof native.acknowledgeDriverShiftClose !== "function") {
+            return Promise.resolve();
+        }
+        return Promise.resolve(native.acknowledgeDriverShiftClose(clientActionId)).catch(function () {});
+    }
+
+    function showPending(form) {
+        if (!form) return;
+        form.classList.add("is-sync-pending");
+        var panel = form.querySelector("[data-driver-shift-sync-pending]");
+        if (panel) panel.hidden = false;
+        if (document.body) document.body.dataset.driverShiftClosePending = "true";
+        form.querySelectorAll("input, button, select, textarea").forEach(function (control) {
+            control.disabled = true;
+        });
+    }
+
+    function clearPendingUi(form) {
+        if (!form) return;
+        form.classList.remove("is-sync-pending");
+        var panel = form.querySelector("[data-driver-shift-sync-pending]");
+        if (panel) panel.hidden = true;
+        if (document.body) delete document.body.dataset.driverShiftClosePending;
+        form.querySelectorAll("input, button, select, textarea").forEach(function (control) {
+            control.disabled = false;
+        });
+    }
+
+    function sendStored(form, payload, options) {
+        options = options || {};
+        if (!form || retryInFlight) return Promise.resolve(false);
+        retryInFlight = true;
+        clearPendingUi(form);
+        fillForm(form, payload);
+        return window.submitDriverFormInPlace(form, {silentFailure: true, fallbackToNavigation: false})
+            .then(function (applied) {
+                if (!applied) {
+                    showPending(form);
+                    return true;
+                }
+                return acknowledge(payload.clientActionId).then(function () { return true; });
+            }).finally(function () {
+                retryInFlight = false;
+            });
+    }
+
+    function submit(form) {
+        var payload = payloadFromForm(form);
+        return persist(payload).then(function () {
+            return sendStored(form, payload);
+        });
+    }
+
+    function restore(form) {
+        var localPending = readLocal();
+        var native = nativeConnection();
+        if (!form) {
+            if (localPending) acknowledge(localPending.clientActionId);
+            return Promise.resolve(false);
+        }
+        if (!native || typeof native.getState !== "function") {
+            if (!localPending || String(form.dataset.nativeShiftId || "") !== String(localPending.shiftId || "")) {
+                return Promise.resolve(false);
+            }
+            showPending(form);
+            if (navigator.onLine !== false) {
+                return sendStored(form, localPending, {quiet: true});
+            }
+            return Promise.resolve(true);
+        }
+        return Promise.resolve(native.getState()).then(function (state) {
+            var nativePending = state && state.pendingDriverShiftClose;
+            if (!nativePending) {
+                if (localPending) removeLocal(localPending.clientActionId);
+                return false;
+            }
+            var pending = nativePending;
+            if (!pending || String(form.dataset.nativeShiftId || "") !== String(pending.shiftId || "")) {
+                return false;
+            }
+            fillForm(form, pending);
+            if (pending.requiresAttention) {
+                clearPendingUi(form);
+                if (typeof window.showDriverToast === "function") {
+                    window.showDriverToast(pending.attentionMessage || "Проверьте показания на конец смены.");
+                }
+                return false;
+            }
+            showPending(form);
+            return true;
+        }).catch(function () {
+            if (localPending) showPending(form);
+            return !!localPending;
+        });
+    }
+
+    return {
+        submit: submit,
+        restore: restore,
+        readLocal: readLocal,
+        showPending: showPending,
+        acknowledge: acknowledge
+    };
+})();
+window.addEventListener("online", function () {
+    if (window.DriverShiftCloseOutbox) {
+        window.DriverShiftCloseOutbox.restore(
+            document.querySelector("[data-driver-shift-close-form]")
+        );
+    }
+});
+/* DRIVER_SHIFT_CLOSE_OUTBOX_END */
 
 function bindDriverShiftHoldAction(form, button, options) {
     options = options || {};
@@ -4983,11 +6171,15 @@ window.bindDriverMobileShell = function () {
         window.driverUnloadRecovery.destroy();
         window.driverUnloadRecovery = null;
     }
+    if (window.driverUnloadGesture && typeof window.driverUnloadGesture.destroy === "function") {
+        window.driverUnloadGesture.destroy();
+        window.driverUnloadGesture = null;
+    }
     function driverRoleIsReadonly() {
         return (
             typeof window.isAppRoleReadonly === "function"
             && window.isAppRoleReadonly()
-        );
+        ) || (document.body && document.body.dataset.driverShiftClosePending === "true");
     }
     shell.querySelectorAll(".mobile-shift__metric-value input").forEach(function (input) {
         if (!input.getAttribute("placeholder")) input.setAttribute("placeholder", "0");
@@ -5155,7 +6347,13 @@ window.bindDriverMobileShell = function () {
                 onComplete: function () {
                     var logoutLabel = logoutButton.querySelector("[data-driver-logout-label]");
                     if (logoutLabel) logoutLabel.textContent = "Выходим";
-                    window.location.href = logoutButton.dataset.driverLogoutUrl;
+                    var stopPromise = window.NativeBackgroundConnection
+                        && typeof window.NativeBackgroundConnection.stop === "function"
+                        ? window.NativeBackgroundConnection.stop()
+                        : null;
+                    Promise.resolve(stopPromise).finally(function () {
+                        window.location.href = logoutButton.dataset.driverLogoutUrl;
+                    });
                 }
             });
         }
@@ -5398,18 +6596,12 @@ window.bindDriverMobileShell = function () {
         }, 3600);
     }
     function openDriverTab(tab) {
-        shell.dataset.activeTab = tab;
         /* Новая панель должна получить базовую плотность до первого paint:
            иначе она на кадр наследует tight/compact от предыдущей вкладки. */
         shell.dataset.driverDensity = shell.dataset.driverViewportDensity
             || shell.dataset.driverDensity
             || "normal";
-        shell.querySelectorAll("[data-driver-tab-panel]").forEach(function (panel) {
-            panel.classList.toggle("is-active", panel.dataset.driverTabPanel === tab);
-        });
-        document.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
-            button.classList.toggle("is-active", button.dataset.driverTabOpen === tab);
-        });
+        syncDriverTabMarkup(shell, tab);
         if (window.history && window.history.replaceState) {
             var url = new URL(window.location.href);
             url.searchParams.set("tab", tab);
@@ -5483,6 +6675,79 @@ window.bindDriverMobileShell = function () {
         );
         return lines.join("\n");
     }
+    function copyDriverReportText(text) {
+        if (navigator.clipboard && window.isSecureContext && typeof navigator.clipboard.writeText === "function") {
+            return navigator.clipboard.writeText(text);
+        }
+        return new Promise(function (resolve, reject) {
+            var field = document.createElement("textarea");
+            field.value = text;
+            field.setAttribute("readonly", "");
+            field.style.position = "fixed";
+            field.style.opacity = "0";
+            document.body.appendChild(field);
+            field.select();
+            var copied = false;
+            try {
+                copied = Boolean(document.execCommand && document.execCommand("copy"));
+            } catch (error) {}
+            field.remove();
+            if (copied) resolve();
+            else reject(new Error("copy_failed"));
+        });
+    }
+    function openDriverMaxGroup(url) {
+        var link = document.createElement("a");
+        link.href = url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer external";
+        link.hidden = true;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+    }
+    function createDriverReportDeliveryController(options) {
+        var preparedText = "";
+        var copyPending = false;
+        function render(ready) {
+            options.button.classList.toggle("is-max-ready", ready);
+            options.button.dataset.driverReportState = ready ? "max" : "prepare";
+            options.title.textContent = ready ? "Открыть группу" : "Подготовить путёвку";
+            options.hint.textContent = ready ? "текст уже скопирован" : "для отправки диспетчеру";
+        }
+        function reset() {
+            preparedText = "";
+            render(false);
+        }
+        function handleClick() {
+            if (copyPending) return;
+            var currentText = options.buildText();
+            if (preparedText) {
+                if (currentText !== preparedText) {
+                    reset();
+                    options.notify("Данные изменились. Подготовьте путёвку снова");
+                    return;
+                }
+                options.openGroup(options.groupUrl);
+                return;
+            }
+            copyPending = true;
+            options.button.disabled = true;
+            Promise.resolve(options.copyText(currentText)).then(function () {
+                preparedText = currentText;
+                render(true);
+                options.notify("Путёвка скопирована. Теперь откройте MAX");
+            }).catch(function () {
+                reset();
+                options.notify("Не удалось скопировать путёвку");
+            }).finally(function () {
+                copyPending = false;
+                options.button.disabled = Boolean(options.isReadonly && options.isReadonly());
+            });
+        }
+        render(false);
+        return {handleClick: handleClick, reset: reset};
+    }
     if (manifestPanel) {
         manifestPanel.querySelectorAll("[data-driver-manifest-view-open]").forEach(function (button) {
             button.addEventListener("click", function () {
@@ -5497,29 +6762,27 @@ window.bindDriverMobileShell = function () {
                 });
             });
         });
-        var copyReport = manifestPanel.querySelector("[data-driver-report-copy]");
-        if (copyReport) copyReport.addEventListener("click", function () {
-            navigator.clipboard.writeText(buildDriverShiftReportText()).then(function () {
-                showDriverToast("Отчёт скопирован");
-            }).catch(function () {
-                showDriverToast("Не удалось скопировать отчёт");
+        var reportDeliveryButton = manifestPanel.querySelector("[data-driver-report-delivery]");
+        var reportDelivery = null;
+        if (reportDeliveryButton) {
+            reportDelivery = createDriverReportDeliveryController({
+                button: reportDeliveryButton,
+                title: reportDeliveryButton.querySelector("[data-driver-report-action-title]"),
+                hint: reportDeliveryButton.querySelector("[data-driver-report-action-hint]"),
+                groupUrl: reportDeliveryButton.dataset.driverMaxGroupUrl,
+                buildText: buildDriverShiftReportText,
+                copyText: copyDriverReportText,
+                openGroup: openDriverMaxGroup,
+                notify: showDriverToast,
+                isReadonly: driverRoleIsReadonly
             });
-        });
-        var shareReport = manifestPanel.querySelector("[data-driver-report-share]");
-        if (shareReport) shareReport.addEventListener("click", function () {
-            var text = buildDriverShiftReportText();
-            if (navigator.share) {
-                navigator.share({title: "Отчёт водителя за смену", text: text}).catch(function (error) {
-                    if (error && error.name !== "AbortError") showDriverToast("Не удалось открыть отправку");
-                });
-            } else {
-                navigator.clipboard.writeText(text).then(function () {
-                    showDriverToast("Отчёт скопирован для отправки");
-                });
-            }
-        });
+            reportDeliveryButton.addEventListener("click", reportDelivery.handleClick);
+        }
         shell.querySelectorAll("[name='end_fuel'], [name='end_mileage'], [name='end_engine_hours']").forEach(function (input) {
-            input.addEventListener("input", syncDriverReportMetrics);
+            input.addEventListener("input", function () {
+                syncDriverReportMetrics();
+                if (reportDelivery) reportDelivery.reset();
+            });
         });
         syncDriverReportMetrics();
     }
@@ -5538,9 +6801,14 @@ window.bindDriverMobileShell = function () {
     var downtimeTitle = shell.querySelector("[data-driver-active-title]");
     var downtimeReason = shell.querySelector("[data-driver-active-reason]");
     var downtimeClose = shell.querySelector("[data-driver-close-downtime]");
+    var downtimeReasonButtons = shell.querySelectorAll("[data-driver-downtime-reason-button]");
     var downtimeUrl = downtimePanel ? downtimePanel.dataset.driverDowntimeUrl : "";
     var downtimeCsrfInput = downtimePanel ? downtimePanel.querySelector("input[name='csrfmiddlewaretoken']") : null;
     var downtimeCsrfToken = downtimeCsrfInput ? downtimeCsrfInput.value : "";
+    var holdForm = shell.querySelector("[data-driver-hold-form]");
+    var holdButton = shell.querySelector("[data-driver-hold-button]");
+    var workDial = shell.querySelector(".driver-work-dial");
+    var workDialControl = shell.querySelector("[data-driver-work-dial-control]");
 
     function formatDriverDowntimeDuration(seconds) {
         seconds = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -5559,16 +6827,76 @@ window.bindDriverMobileShell = function () {
         }
     }
 
-    function startDriverDowntimeTimer(startedAt, fallbackElapsedSeconds) {
-        clearDriverDowntimeTimer();
-        if (!downtimeDuration) {
-            return;
+    function renderDriverReasonDuration(button, totalSeconds, isActive) {
+        if (!button) return;
+        var duration = button.querySelector("[data-driver-reason-duration]");
+        if (!duration) return;
+        var seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+        var isVisible = seconds > 0 || !!isActive;
+        duration.hidden = !isVisible;
+        button.classList.toggle("is-used", isVisible);
+        if (isVisible) {
+            duration.textContent = formatDriverDowntimeDuration(seconds);
         }
+        if (button.getAttribute("aria-disabled") !== "true") {
+            var reasonLabel = button.dataset.driverReasonLabel || button.dataset.driverReason || "Причина простоя";
+            var actionLabel = isActive ? "Активный простой" : "Начать простой";
+            button.setAttribute(
+                "aria-label",
+                actionLabel + ": " + reasonLabel + (isVisible ? ". За смену: " + formatDriverDowntimeDuration(seconds) : "")
+            );
+        }
+    }
+
+    function syncDriverReasonTotals(payload) {
+        payload = payload || {};
+        var reasonTotals = payload.reason_totals;
+        var activeReasonId = payload.active ? String(payload.reason_id || "") : "";
+        downtimeReasonButtons.forEach(function (button) {
+            var reasonId = String(button.dataset.driverDowntimeReasonId || "");
+            if (
+                reasonTotals
+                && typeof reasonTotals === "object"
+                && Object.prototype.hasOwnProperty.call(reasonTotals, reasonId)
+            ) {
+                button.dataset.driverReasonSeconds = String(
+                    Math.max(0, Math.floor(Number(reasonTotals[reasonId]) || 0))
+                );
+            }
+            renderDriverReasonDuration(
+                button,
+                button.dataset.driverReasonSeconds,
+                !!activeReasonId && reasonId === activeReasonId
+            );
+        });
+    }
+
+    function startDriverDowntimeTimer(payload) {
+        clearDriverDowntimeTimer();
+        payload = payload || {};
+        syncDriverReasonTotals(payload);
+        var startedAt = payload.started_at || "";
+        var fallbackElapsedSeconds = payload.elapsed_seconds || 0;
+        var activeReasonId = String(payload.reason_id || "");
         var startedAtMs = startedAt ? Date.parse(startedAt) : NaN;
         var fallbackStartedAtMs = Date.now() - (Math.max(0, Number(fallbackElapsedSeconds) || 0) * 1000);
         var startMs = Number.isNaN(startedAtMs) ? fallbackStartedAtMs : startedAtMs;
+        var syncedAtMs = Date.now();
         function tick() {
-            downtimeDuration.textContent = formatDriverDowntimeDuration((Date.now() - startMs) / 1000);
+            if (downtimeDuration) {
+                downtimeDuration.textContent = formatDriverDowntimeDuration((Date.now() - startMs) / 1000);
+            }
+            var liveSeconds = Math.max(0, Math.floor((Date.now() - syncedAtMs) / 1000));
+            downtimeReasonButtons.forEach(function (button) {
+                var reasonId = String(button.dataset.driverDowntimeReasonId || "");
+                var baseSeconds = Math.max(0, Math.floor(Number(button.dataset.driverReasonSeconds) || 0));
+                var reasonIsActive = !!activeReasonId && reasonId === activeReasonId;
+                renderDriverReasonDuration(
+                    button,
+                    baseSeconds + (reasonIsActive ? liveSeconds : 0),
+                    reasonIsActive
+                );
+            });
         }
         tick();
         window.driverDowntimeTimerId = window.setInterval(tick, 1000);
@@ -5584,23 +6912,55 @@ window.bindDriverMobileShell = function () {
         downtimeCard.classList.add("status-" + (statusKey || "yellow"));
     }
 
+    function applyDriverWaitingMode(payload) {
+        var flow = String((payload && payload.workflow) || "");
+        var isLoadingWait = flow === "waiting_loading";
+        var isUnloadingWait = flow === "waiting_unload";
+        var isWaiting = isLoadingWait || isUnloadingWait;
+        if (holdForm) {
+            holdForm.dataset.driverUnloadOneTap = isUnloadingWait ? "true" : "false";
+        }
+        if (workDial) {
+            workDial.classList.toggle("is-waiting-operation", isWaiting);
+            workDial.classList.toggle("is-waiting-loading", isLoadingWait);
+            workDial.classList.toggle("is-waiting-unload", isUnloadingWait);
+        }
+        if (workDialControl) {
+            workDialControl.classList.toggle("is-waiting-operation", isWaiting);
+            workDialControl.classList.toggle("is-waiting-loading", isLoadingWait);
+            workDialControl.classList.toggle("is-waiting-unload", isUnloadingWait);
+        }
+        var note = workDialControl ? workDialControl.querySelector(".driver-work-note") : null;
+        if (note) {
+            note.textContent = isWaiting
+                ? String(payload.reason_label || payload.reason || "Ожидание").toLocaleUpperCase("ru-RU")
+                : (holdForm ? "ТОЧКА РАЗГРУЗКИ" : "НА ЗАГРУЗКУ");
+        }
+        return isWaiting;
+    }
+
     function applyDriverActiveDowntime(payload) {
         if (!downtimeCard || !payload || !payload.event_id) {
-            return;
+            return false;
         }
         downtimeCard.dataset.driverActiveDowntimeId = payload.event_id;
+        downtimeCard.dataset.driverActiveReasonId = String(payload.reason_id || "");
+        downtimeCard.dataset.driverActiveDowntimeFlow = payload.workflow || "";
         downtimeCard.dataset.driverActiveStartedAt = payload.started_at || "";
         downtimeCard.dataset.driverActiveElapsedSeconds = String(payload.elapsed_seconds || 0);
+        downtimeCard.dataset.driverShiftDowntimeSeconds = String(payload.shift_total_seconds || 0);
+        downtimeCard.dataset.driverDowntimeCalculatedAt = payload.calculated_at || "";
         downtimeCard.classList.add("is-active");
         setDriverDowntimeStatusClass(payload.status_key || "red");
         if (downtimeTitle) downtimeTitle.textContent = "Активный простой";
         if (downtimeReason) downtimeReason.textContent = payload.reason || "";
-        startDriverDowntimeTimer(payload.started_at, payload.elapsed_seconds);
+        startDriverDowntimeTimer(payload);
         if (downtimeClose) {
             downtimeClose.disabled = false;
             downtimeClose.classList.remove("is-disabled");
             downtimeClose.removeAttribute("aria-disabled");
         }
+        return applyDriverWaitingMode(payload);
     }
 
     function clearDriverActiveDowntime(payload) {
@@ -5611,20 +6971,24 @@ window.bindDriverMobileShell = function () {
         if (downtimeDuration) downtimeDuration.textContent = (payload && payload.shift_total_label) || formatDriverDowntimeDuration(shiftTotalSeconds);
         if (downtimeCard) {
             downtimeCard.dataset.driverActiveDowntimeId = "";
+            downtimeCard.dataset.driverActiveReasonId = "";
+            downtimeCard.dataset.driverActiveDowntimeFlow = "";
             downtimeCard.dataset.driverActiveStartedAt = "";
             downtimeCard.dataset.driverActiveElapsedSeconds = String((payload && payload.elapsed_seconds) || 0);
             downtimeCard.dataset.driverShiftDowntimeSeconds = String(shiftTotalSeconds);
             downtimeCard.classList.remove("is-active");
             setDriverDowntimeStatusClass("yellow");
         }
+        syncDriverReasonTotals(Object.assign({}, payload || {}, { active: false }));
         if (downtimeClose) {
             downtimeClose.disabled = true;
             downtimeClose.classList.add("is-disabled");
             downtimeClose.setAttribute("aria-disabled", "true");
         }
-        shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (button) {
+        downtimeReasonButtons.forEach(function (button) {
             button.classList.remove("is-selected");
         });
+        applyDriverWaitingMode({ workflow: "" });
     }
 
     function postDriverDowntimeAction(payload) {
@@ -5656,9 +7020,12 @@ window.bindDriverMobileShell = function () {
         var pending = false;
         button.addEventListener("click", function (event) {
             event.preventDefault();
+            if (button.getAttribute("aria-disabled") === "true") {
+                showDriverToast(button.dataset.driverUnavailableMessage || "Действие недоступно");
+                return;
+            }
             if (
                 button.disabled
-                || button.getAttribute("aria-disabled") === "true"
                 || pending
                 || driverRoleIsReadonly()
             ) return;
@@ -5684,10 +7051,10 @@ window.bindDriverMobileShell = function () {
         downtimeRefresh.addEventListener("click", function () { window.location.reload(); });
     }
 
-    shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (button) {
+    downtimeReasonButtons.forEach(function (button) {
         registerDriverDowntimeAction(button, function () {
             if (button.disabled) return;
-            shell.querySelectorAll("[data-driver-downtime-reason-button]").forEach(function (item) {
+            downtimeReasonButtons.forEach(function (item) {
                 item.classList.remove("is-selected");
             });
             button.classList.add("is-selected");
@@ -5697,26 +7064,15 @@ window.bindDriverMobileShell = function () {
                 reason_id: button.dataset.driverDowntimeReasonId,
                 client_action_id: generateClientActionId("driver-downtime")
             }).then(function (payload) {
-                playDriverSound("action_ok");
-                applyDriverActiveDowntime(payload);
-                if (
-                    String(payload.reason || "").trim().toLocaleLowerCase("ru-RU") === "ожидание разгрузки"
-                    && holdForm
-                    && holdButton
-                ) {
-                    holdForm.dataset.driverUnloadOneTap = "true";
-                    holdButton.classList.add("is-waiting-unload");
-                    var waitingDial = holdButton.closest(".driver-work-dial");
-                    if (waitingDial) waitingDial.classList.add("is-waiting-unload");
-                    var waitingNote = holdButton.querySelector(".driver-work-note");
-                    if (waitingNote) waitingNote.textContent = "ОЖИДАНИЕ РАЗГРУЗКИ";
+                playDriverVoice("action_ok", "voice_downtime_started");
+                if (applyDriverActiveDowntime(payload)) {
                     openDriverTab("work");
                 }
                 if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                     window.AppRealtime.wake("driver_downtime_saved");
                 }
             }).catch(function (error) {
-                playDriverSound("action_error");
+                playDriverVoice("action_error", "voice_action_failed");
                 showDriverToast(error.message || "Простой не сохранен");
                 button.classList.remove("is-selected");
             }).finally(function () {
@@ -5740,13 +7096,13 @@ window.bindDriverMobileShell = function () {
                 action: "close",
                 client_action_id: generateClientActionId("driver-downtime-close")
             }).then(function (payload) {
-                playDriverSound("action_ok");
+                playDriverVoice("action_ok", "voice_downtime_finished");
                 clearDriverActiveDowntime(payload);
                 if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                     window.AppRealtime.wake("driver_downtime_closed");
                 }
             }).catch(function (error) {
-                playDriverSound("action_error");
+                playDriverVoice("action_error", "voice_action_failed");
                 showDriverToast(error.message || "Простой не завершен");
                 downtimeClose.disabled = false;
                 downtimeClose.classList.remove("is-disabled");
@@ -5758,15 +7114,23 @@ window.bindDriverMobileShell = function () {
     }
 
     if (downtimeCard && downtimeCard.dataset.driverActiveDowntimeId && downtimeCard.dataset.driverActiveStartedAt) {
-        startDriverDowntimeTimer(downtimeCard.dataset.driverActiveStartedAt, downtimeCard.dataset.driverActiveElapsedSeconds);
+        startDriverDowntimeTimer({
+            active: true,
+            event_id: downtimeCard.dataset.driverActiveDowntimeId,
+            reason_id: downtimeCard.dataset.driverActiveReasonId,
+            started_at: downtimeCard.dataset.driverActiveStartedAt,
+            elapsed_seconds: downtimeCard.dataset.driverActiveElapsedSeconds,
+            shift_total_seconds: downtimeCard.dataset.driverShiftDowntimeSeconds,
+            calculated_at: downtimeCard.dataset.driverDowntimeCalculatedAt
+        });
     } else if (downtimeDuration) {
         downtimeDuration.textContent = formatDriverDowntimeDuration(downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds);
+        syncDriverReasonTotals({ active: false });
         clearDriverDowntimeTimer();
     }
 
-    var holdForm = shell.querySelector("[data-driver-hold-form]");
-    var holdButton = shell.querySelector("[data-driver-hold-button]");
     var unloadHoldGuard = null;
+    var unloadSubmissionPending = false;
     var unloadRecoveryStorage = null;
     try {
         unloadRecoveryStorage = window.sessionStorage;
@@ -5779,6 +7143,10 @@ window.bindDriverMobileShell = function () {
             return generateClientActionId("trip-unloaded");
         },
         onRecover: function () {
+            unloadSubmissionPending = false;
+            if (holdForm) {
+                delete holdForm.dataset.driverUnloadSubmitting;
+            }
             if (unloadHoldGuard) {
                 unloadHoldGuard.cancel();
             }
@@ -5793,9 +7161,42 @@ window.bindDriverMobileShell = function () {
         var readyDialLabel = dialLabel
             ? (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " "))
             : "";
+        function submitDriverUnloadOnce() {
+            if (
+                unloadSubmissionPending
+                || holdForm.dataset.driverUnloadSubmitting === "true"
+                || holdButton.disabled
+                || driverRoleIsReadonly()
+            ) {
+                return false;
+            }
+            if (!unloadRecovery.ensureActionId()) {
+                showDriverToast("Не удалось подготовить разгрузку. Повторите нажатие");
+                return false;
+            }
+            unloadSubmissionPending = true;
+            holdForm.dataset.driverUnloadSubmitting = "true";
+            holdForm.dataset.holdComplete = "true";
+            holdButton.classList.remove("is-loaded", "is-holding");
+            holdButton.classList.add("is-pending");
+            if (dialLabel) {
+                renderDriverDialLabel(
+                    dialLabel,
+                    holdButton.dataset.driverPendingLabel || "ОТПРАВКА"
+                );
+                scheduleDriverDialLabelFit();
+            }
+            holdButton.disabled = true;
+            window.submitDriverFormInPlace(holdForm, {fallbackToNavigation: false}).then(function (applied) {
+                if (!applied && holdForm.isConnected) {
+                    unloadRecovery.recover({type: "submit_failed"});
+                }
+            });
+            return true;
+        }
         unloadHoldGuard = window.createDriverRoleHoldGuard({
-            /* Разгрузка повторяется десятки раз за смену — держать две секунды
-               на каждом рейсе слишком долго. */
+            /* Разгрузка повторяется десятки раз за смену — удерживать кнопку
+               дольше одной секунды на каждом рейсе слишком долго. */
             holdMs: 1000,
             onStart: function () {
                 holdButton.classList.add("is-holding");
@@ -5819,81 +7220,21 @@ window.bindDriverMobileShell = function () {
                 }
             },
             onComplete: function () {
-                if (driverRoleIsReadonly()) {
+                if (!submitDriverUnloadOnce()) {
                     unloadHoldGuard.cancel();
-                    return;
                 }
-                unloadRecovery.ensureActionId();
-                holdForm.dataset.holdComplete = "true";
-                holdButton.classList.remove("is-loaded", "is-holding");
-                holdButton.classList.add("is-pending");
-                if (dialLabel) {
-                    renderDriverDialLabel(
-                        dialLabel,
-                        holdButton.dataset.driverPendingLabel || "ОТПРАВКА"
-                    );
-                    scheduleDriverDialLabelFit();
-                }
-                if (driverRoleIsReadonly()) {
-                    unloadHoldGuard.cancel();
-                    return;
-                }
-                holdButton.disabled = true;
-                window.submitDriverFormInPlace(holdForm);
             }
         });
         window.driverUnloadHoldGuard = unloadHoldGuard;
-        holdButton.addEventListener("pointerdown", function (event) {
-            if (holdButton.disabled || driverRoleIsReadonly()) {
-                return;
-            }
-            if (holdForm.dataset.driverUnloadOneTap === "true") {
-                return;
-            }
-            holdButton.setPointerCapture?.(event.pointerId);
-            unloadHoldGuard.start();
-        });
-        holdButton.addEventListener("click", function (event) {
-            event.preventDefault();
-            if (
-                holdForm.dataset.driverUnloadOneTap === "true"
-                && !holdButton.disabled
-                && !driverRoleIsReadonly()
-            ) {
-                unloadRecovery.ensureActionId();
-                holdForm.dataset.holdComplete = "true";
-                holdButton.classList.remove("is-loaded", "is-holding");
-                holdButton.classList.add("is-pending");
-                if (dialLabel) {
-                    renderDriverDialLabel(
-                        dialLabel,
-                        holdButton.dataset.driverPendingLabel || "ОТПРАВКА"
-                    );
-                    scheduleDriverDialLabelFit();
-                }
-                holdButton.disabled = true;
-                window.submitDriverFormInPlace(holdForm);
-            }
-        });
-        ["pointerup", "pointercancel", "pointerleave"].forEach(function (eventName) {
-            holdButton.addEventListener(eventName, function () {
-                if (holdForm.dataset.holdComplete !== "true") {
-                    unloadHoldGuard.reset();
-                }
-            });
-        });
-        holdForm.addEventListener("submit", function (event) {
-            if (driverRoleIsReadonly()) {
-                event.preventDefault();
-                unloadHoldGuard.cancel();
-                return;
-            }
-            if (
-                holdForm.dataset.driverUnloadOneTap !== "true"
-                && holdForm.dataset.holdComplete !== "true"
-            ) {
-                event.preventDefault();
-                unloadHoldGuard.reset();
+        window.driverUnloadGesture = window.bindDriverUnloadGesture({
+            form: holdForm,
+            button: holdButton,
+            holdGuard: unloadHoldGuard,
+            canTrigger: function () {
+                return !unloadSubmissionPending && !driverRoleIsReadonly();
+            },
+            onOneTap: function () {
+                return submitDriverUnloadOnce();
             }
         });
     }
@@ -5946,7 +7287,10 @@ window.bindDriverMobileShell = function () {
             if (actionInput && !actionInput.value) {
                 actionInput.value = generateClientActionId(form.dataset.driverInPlace || "driver-action");
             }
-            window.submitDriverFormInPlace(form, {fallbackToNavigation: false}).then(function (applied) {
+            var submitPromise = form.dataset.driverInPlace === "shift-close"
+                ? window.DriverShiftCloseOutbox.submit(form)
+                : window.submitDriverFormInPlace(form, {fallbackToNavigation: false});
+            Promise.resolve(submitPromise).then(function (applied) {
                 if (!applied && form.isConnected) {
                     form.dataset.driverInPlacePending = "false";
                     form.dataset.driverShiftOpeningPending = "false";
@@ -5960,12 +7304,30 @@ window.bindDriverMobileShell = function () {
                     if (closeButton) {
                         closeButton.disabled = false;
                         closeButton.classList.remove("is-pending");
-                        closeButton.textContent = "Закрыть смену";
+                        var closeLabel = closeButton.querySelector("[data-mobile-shift-label]");
+                        if (closeLabel) closeLabel.textContent = "Закрыть смену";
                     }
+                }
+            }).catch(function (error) {
+                if (form.isConnected) {
+                    form.dataset.driverInPlacePending = "false";
+                    var closeButton = form.querySelector("[data-driver-shift-close-button]");
+                    if (closeButton) {
+                        closeButton.disabled = false;
+                        closeButton.classList.remove("is-pending");
+                        var closeLabel = closeButton.querySelector("[data-mobile-shift-label]");
+                        if (closeLabel) closeLabel.textContent = "Закрыть смену";
+                    }
+                }
+                if (typeof window.showDriverToast === "function") {
+                    window.showDriverToast(error && error.message ? error.message : "Не удалось сохранить действие.");
                 }
             });
         });
     });
+    window.DriverShiftCloseOutbox.restore(
+        shell.querySelector("[data-driver-shift-close-form]")
+    );
 
     (function initDriverPwaUpdates() {
         if (!("serviceWorker" in navigator)) {

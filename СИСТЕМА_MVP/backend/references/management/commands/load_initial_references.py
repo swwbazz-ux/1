@@ -2,7 +2,7 @@ import csv
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from downtimes.defaults import infer_downtime_reason_state_code
 from downtimes.models import DowntimeReason
@@ -19,6 +19,7 @@ from references.models import (
     RockType,
     TruckCapacityRule,
 )
+from references.rock_catalog import CANONICAL_ROCK_NAMES
 
 
 def as_bool(value):
@@ -64,7 +65,6 @@ class Command(BaseCommand):
         self.load_trucks(source_dir / 'sam_domain_trucks.csv', truck_type)
         self.load_excavators(source_dir / 'excavators.csv', excavator_type)
         self.load_dump_points(source_dir / 'dump_points.csv')
-        self.load_cargo_types(source_dir / 'cargo_types.csv')
         self.load_rock_density(source_dir / 'rock_density_and_loosening.csv')
         self.load_truck_capacity_rules(source_dir / 'truck_capacity_rules.csv', truck_type)
         self.load_truck_downtime_reasons(source_dir / 'truck_downtime_reasons_found.csv', truck_type)
@@ -164,29 +164,25 @@ class Command(BaseCommand):
             count += 1
         self.stdout.write(f'Точки разгрузки: {count}')
 
-    def load_cargo_types(self, path):
-        if not path.exists():
-            return
-        count = 0
-        for row in read_csv(path):
-            name = str(row.get('cargo_type_name') or '').strip()
-            if not name:
-                continue
-            RockType.objects.update_or_create(
-                name=name,
-                defaults={
-                    'density': as_decimal(row.get('density_t_m3')),
-                    'is_active': as_bool(row.get('is_active')),
-                },
-            )
-            count += 1
-        self.stdout.write(f'Породы/грузы: {count}')
-
     def load_rock_density(self, path):
         if not path.exists():
             return
+        rows = list(read_csv(path))
+        source_names = {
+            str(row.get('material') or '').strip()
+            for row in rows
+            if str(row.get('material') or '').strip()
+        }
+        unexpected_names = source_names - set(CANONICAL_ROCK_NAMES)
+        missing_names = set(CANONICAL_ROCK_NAMES) - source_names
+        if unexpected_names or missing_names:
+            raise CommandError(
+                'Файл пород не совпадает с единым справочником. '
+                f'Лишние: {sorted(unexpected_names)}; '
+                f'отсутствуют: {sorted(missing_names)}.'
+            )
         count = 0
-        for row in read_csv(path):
+        for row in rows:
             name = str(row.get('material') or '').strip()
             if not name:
                 continue
@@ -215,6 +211,10 @@ class Command(BaseCommand):
             volume = as_decimal(row.get('body_volume_m3'))
             if not model_name or not material or volume is None:
                 continue
+            if material not in CANONICAL_ROCK_NAMES:
+                raise CommandError(
+                    f'В файле кубатуры найдена неканоническая порода: {material!r}.'
+                )
             model, _ = EquipmentModel.objects.get_or_create(equipment_type=truck_type, name=model_name)
             rock, _ = RockType.objects.get_or_create(name=material)
             TruckCapacityRule.objects.update_or_create(

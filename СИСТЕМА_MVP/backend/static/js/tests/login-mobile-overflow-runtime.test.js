@@ -9,8 +9,15 @@ const vm = require("node:vm");
 const BACKEND_ROOT = path.resolve(__dirname, "..", "..", "..");
 const LOGIN_TEMPLATE_PATH = path.join(BACKEND_ROOT, "templates", "users", "login.html");
 const APP_CSS_PATH = path.join(BACKEND_ROOT, "static", "css", "app.css");
+const MOBILE_ROLE_LOGIN_CSS_PATH = path.join(
+    BACKEND_ROOT,
+    "static",
+    "css",
+    "mobile-role-login-v1.css"
+);
 const LOGIN_TEMPLATE = fs.readFileSync(LOGIN_TEMPLATE_PATH, "utf8");
 const APP_CSS = fs.readFileSync(APP_CSS_PATH, "utf8");
+const MOBILE_ROLE_LOGIN_CSS = fs.readFileSync(MOBILE_ROLE_LOGIN_CSS_PATH, "utf8");
 
 class FakeClassList {
     constructor(initialValues) {
@@ -87,11 +94,14 @@ function createTimers() {
 }
 
 function extractLoginRuntime() {
-    const start = LOGIN_TEMPLATE.indexOf("document.addEventListener('DOMContentLoaded'");
-    const serviceWorkerStart = LOGIN_TEMPLATE.indexOf('    if ("serviceWorker" in navigator)', start);
-    assert.notEqual(start, -1, "login DOMContentLoaded runtime must exist");
+    const memoryMarker = 'var LOGIN_MEMORY_KEY = "login-remembered-credentials";';
+    const memoryStart = LOGIN_TEMPLATE.indexOf(memoryMarker);
+    const start = LOGIN_TEMPLATE.lastIndexOf("(function (window, document) {", memoryStart);
+    assert.notEqual(memoryStart, -1, "login memory runtime must exist");
+    const serviceWorkerStart = LOGIN_TEMPLATE.indexOf('    {% if not role_app %}', start);
+    assert.notEqual(start, -1, "login runtime must exist");
     assert.notEqual(serviceWorkerStart, -1, "service worker boundary must exist");
-    return LOGIN_TEMPLATE.slice(start, serviceWorkerStart) + "\n});";
+    return LOGIN_TEMPLATE.slice(start, serviceWorkerStart) + "\n})(window, document);";
 }
 
 function createInput(id, attributeName) {
@@ -121,11 +131,46 @@ function createInput(id, attributeName) {
 
 function createLoginRuntime(options) {
     const runtimeOptions = options || {};
+    const includePin = runtimeOptions.includePin !== false;
+    const includeConsent = runtimeOptions.includeConsent === true;
+    const includeRegister = runtimeOptions.includeRegister !== false;
     const viewportHeight = Number(runtimeOptions.viewportHeight || 844);
+    const storageValues = new Map();
+    if (typeof runtimeOptions.rememberedCredentials === "string") {
+        storageValues.set("login-remembered-credentials", runtimeOptions.rememberedCredentials);
+    }
     const timers = createTimers();
     const phoneInput = createInput("login-phone", "data-phone-input");
     const pinInput = createInput("login-pin", "data-pin-input");
-    const submitButton = {disabled: false};
+    const submitButton = {
+        disabled: false,
+        value: runtimeOptions.submitValue || "login",
+        classList: new FakeClassList(),
+        firstChild: {textContent: "Войти"},
+    };
+    const registerButton = {
+        disabled: false,
+        value: "register",
+        classList: new FakeClassList(),
+        firstChild: {textContent: "Первый вход — создать пинкод"},
+    };
+    const consentLabel = {
+        classList: new FakeClassList(["mobile-role-login__consent"]),
+    };
+    const consentAttributes = new Map();
+    const consentField = Object.assign(createEventTarget(), {
+        checked: false,
+        value: "2026-09-05",
+        setAttribute(name, value) {
+            consentAttributes.set(name, String(value));
+        },
+        getAttribute(name) {
+            return consentAttributes.has(name) ? consentAttributes.get(name) : null;
+        },
+        closest(selector) {
+            return selector === ".mobile-role-login__consent" ? consentLabel : null;
+        },
+    });
     const main = {
         scrollLeft: Number(runtimeOptions.mainScrollLeft || 0),
         clientWidth: 358,
@@ -143,22 +188,42 @@ function createLoginRuntime(options) {
     };
     const formTarget = createEventTarget();
     const form = Object.assign(formTarget, {
+        dataset: {loginCombined: "true"},
+        requestSubmitCalls: 0,
         querySelector(selector) {
-            if (selector === 'button[type="submit"]') return submitButton;
+            if (selector === 'button[type="submit"]' || selector === ".unified-login-submit") {
+                return submitButton;
+            }
+            if (selector === ".unified-login-register") return includeRegister ? registerButton : null;
             if (selector === "[data-phone-input]") return phoneInput;
-            if (selector === "[data-pin-input]") return pinInput;
+            if (selector === "[data-pin-input]") return includePin ? pinInput : null;
+            if (selector === "[data-privacy-consent]") {
+                return includeConsent ? consentField : null;
+            }
             return null;
         },
-        querySelectorAll() {
-            return [phoneInput, pinInput];
+        querySelectorAll(selector) {
+            if (selector === "[data-phone-input], [data-pin-input]") {
+                return includePin ? [phoneInput, pinInput] : [phoneInput];
+            }
+            if (selector === 'button[type="submit"]') {
+                return includeRegister ? [submitButton, registerButton] : [submitButton];
+            }
+            return [];
         },
         contains(element) {
-            return element === phoneInput || element === pinInput;
+            return element === phoneInput
+                || (includePin && element === pinInput)
+                || (includeConsent && element === consentField);
+        },
+        requestSubmit() {
+            this.requestSubmitCalls += 1;
         },
     });
     const documentTarget = createEventTarget();
     const document = Object.assign(documentTarget, {
         body,
+        documentElement: {dataset: {}},
         activeElement: runtimeOptions.autofocus ? phoneInput : body,
         scrollingElement: {
             scrollLeft: Number(runtimeOptions.documentScrollLeft || 0),
@@ -172,14 +237,14 @@ function createLoginRuntime(options) {
         },
         querySelectorAll(selector) {
             if (selector === "[data-phone-input], [data-pin-input]") {
-                return [phoneInput, pinInput];
+                return includePin ? [phoneInput, pinInput] : [phoneInput];
             }
             return [];
         },
     });
     const viewportTarget = createEventTarget();
     const scrollCalls = [];
-    const window = {
+    const window = Object.assign(createEventTarget(), {
         innerHeight: viewportHeight,
         scrollY: 0,
         visualViewport: Object.assign(viewportTarget, {
@@ -188,15 +253,41 @@ function createLoginRuntime(options) {
         }),
         setTimeout: timers.setTimeout,
         clearTimeout: timers.clearTimeout,
+        requestAnimationFrame(callback) {
+            callback();
+        },
+        localStorage: {
+            getItem(key) {
+                return storageValues.has(key) ? storageValues.get(key) : null;
+            },
+            setItem(key, value) {
+                storageValues.set(key, String(value));
+            },
+            removeItem(key) {
+                storageValues.delete(key);
+            },
+        },
         scrollTo(optionsValue) {
             scrollCalls.push(optionsValue);
             if (optionsValue && typeof optionsValue.left !== "undefined") {
                 document.scrollingElement.scrollLeft = Number(optionsValue.left);
             }
         },
-    };
+    });
     window.window = window;
     window.document = document;
+    phoneInput.focus = function () {
+        document.activeElement = phoneInput;
+    };
+    pinInput.focus = function () {
+        document.activeElement = pinInput;
+    };
+    pinInput.blur = function () {
+        if (document.activeElement === pinInput) document.activeElement = body;
+    };
+    consentField.focus = function () {
+        document.activeElement = consentField;
+    };
 
     vm.runInNewContext(extractLoginRuntime(), {
         window,
@@ -219,6 +310,13 @@ function createLoginRuntime(options) {
         main,
         phoneInput,
         pinInput,
+        consentField,
+        consentLabel,
+        registerButton,
+        submitButton,
+        rememberedCredentials() {
+            return window.localStorage.getItem("login-remembered-credentials");
+        },
         scrollCalls,
         timers,
         focus(input, initialScrollLeft) {
@@ -264,7 +362,7 @@ test("mobile login CSS constrains every grid child and wraps long role headings"
     );
 });
 
-test("natural autofocus and delayed correction keep the mobile login at x=0", () => {
+test("natural autofocus without viewport shrink keeps the mobile login at x=0", () => {
     const runtime = createLoginRuntime({
         autofocus: true,
         mainScrollLeft: 88,
@@ -274,7 +372,7 @@ test("natural autofocus and delayed correction keep the mobile login at x=0", ()
     runtime.timers.advance(350);
 
     assertHorizontalOrigin(runtime, "autofocus after 350ms");
-    assert.equal(runtime.body.classList.contains("is-login-keyboard-active"), true);
+    assert.equal(runtime.body.classList.contains("is-login-keyboard-active"), false);
     assert.equal(runtime.phoneInput.scrollIntoViewCalls, 0);
 });
 
@@ -307,4 +405,139 @@ test("desktop focus remains stable when the field is already visible", () => {
     assertHorizontalOrigin(runtime, "desktop autofocus");
     assert.deepEqual(runtime.scrollCalls, []);
     assert.equal(runtime.phoneInput.scrollIntoViewCalls, 0);
+});
+
+test("shared combined login keeps one geometry and role-specific accent tokens", () => {
+    assert.match(
+        MOBILE_ROLE_LOGIN_CSS,
+        /\.unified-login-dialog\.mobile-role-login\s*\{[^}]*position:\s*fixed;[^}]*height:\s*var\(--login-vv-height, 100dvh\);/s
+    );
+    assert.match(
+        MOBILE_ROLE_LOGIN_CSS,
+        /\.login-combined\.login-role-driver\s*\{[^}]*--mobile-login-button-top:\s*#60e3d6;[^}]*--mobile-login-button-bottom:\s*#16998e;/s
+    );
+    assert.match(
+        MOBILE_ROLE_LOGIN_CSS,
+        /--mobile-login-accent:\s*var\(--login-accent, #ffd200\);/
+    );
+    assert.match(
+        MOBILE_ROLE_LOGIN_CSS,
+        /\.mobile-role-login__consent\s*\{[^}]*grid-template-columns:\s*26px minmax\(0, 1fr\);[^}]*min-height:\s*48px;[^}]*font:\s*600 clamp\(12px, 3\.25vw, 14px\)\/1\.3/s
+    );
+    assert.match(
+        MOBILE_ROLE_LOGIN_CSS,
+        /\.mobile-role-login__consent-box\s*\{[^}]*width:\s*26px;[^}]*height:\s*26px;[^}]*border-radius:\s*6px;/s
+    );
+    assert.match(
+        MOBILE_ROLE_LOGIN_CSS,
+        /\.mobile-role-login__consent > input:checked \+ \.mobile-role-login__consent-box\s*\{[^}]*background:\s*var\(--mobile-login-accent\);/s
+    );
+    assert.match(
+        MOBILE_ROLE_LOGIN_CSS,
+        /\.mobile-role-login__privacy-link\s*\{[^}]*min-height:\s*44px;/s
+    );
+    assert.match(
+        MOBILE_ROLE_LOGIN_CSS,
+        /@media \(orientation:\s*landscape\) and \(max-height:\s*360px\)\s*\{[\s\S]*?\.unified-login-form\.is-combined-login\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\) !important;[\s\S]*?\.mobile-role-login__consent,[\s\S]*?\.unified-login-actions\s*\{[^}]*grid-column:\s*1 \/ -1 !important;/s
+    );
+    assert.doesNotMatch(
+        MOBILE_ROLE_LOGIN_CSS,
+        /^body\.login-page\.login-fullscreen\.login-combined \.unified-login-dialog\.mobile-role-login\s*\{[^}]*overflow-y:\s*(?:auto|scroll);/ms
+    );
+    assert.match(
+        MOBILE_ROLE_LOGIN_CSS,
+        /\.is-login-a11y-overflow \.unified-login-dialog\.mobile-role-login\s*\{[^}]*overflow-y:\s*auto;/s
+    );
+    assert.doesNotMatch(MOBILE_ROLE_LOGIN_CSS, /excavator-login/);
+});
+
+test("legacy remembered credentials are migrated to phone-only storage", () => {
+    const runtime = createLoginRuntime({
+        rememberedCredentials: JSON.stringify({phone: "9000000003", pin: "654321"}),
+    });
+
+    assert.equal(runtime.phoneInput.value, "900-000-00-03");
+    assert.equal(runtime.pinInput.value, "");
+    assert.deepEqual(
+        JSON.parse(runtime.rememberedCredentials()),
+        {phone: "9000000003"}
+    );
+});
+
+test("malformed remembered credentials are removed instead of retained", () => {
+    const runtime = createLoginRuntime({rememberedCredentials: '{"phone":'});
+
+    assert.equal(runtime.phoneInput.value, "");
+    assert.equal(runtime.pinInput.value, "");
+    assert.equal(runtime.rememberedCredentials(), null);
+});
+
+test("phone-first login enables Continue after a valid phone without consent", () => {
+    const runtime = createLoginRuntime({
+        includePin: false,
+        includeConsent: false,
+        includeRegister: false,
+        submitValue: "continue",
+    });
+
+    assert.equal(runtime.submitButton.disabled, true);
+    assert.equal(runtime.form.querySelector(".unified-login-register"), null);
+
+    runtime.phoneInput.value = "9990000001";
+    runtime.phoneInput.dispatchEvent({type: "input"});
+    assert.equal(runtime.submitButton.disabled, false);
+});
+
+test("consent step requires its standalone checkbox", () => {
+    const runtime = createLoginRuntime({
+        includePin: false,
+        includeConsent: true,
+        includeRegister: false,
+        submitValue: "consent",
+    });
+
+    runtime.phoneInput.value = "9990000001";
+    runtime.phoneInput.dispatchEvent({type: "input"});
+    assert.equal(runtime.submitButton.disabled, true);
+
+    runtime.consentField.checked = true;
+    runtime.consentField.dispatchEvent({type: "change"});
+    assert.equal(runtime.submitButton.disabled, false);
+    assert.equal(runtime.consentField.getAttribute("aria-invalid"), "false");
+
+    runtime.consentField.checked = false;
+    runtime.consentField.dispatchEvent({type: "change"});
+    assert.equal(runtime.submitButton.disabled, true);
+    assert.equal(runtime.consentField.getAttribute("aria-invalid"), "true");
+    assert.equal(runtime.consentLabel.classList.contains("is-invalid"), true);
+});
+
+test("combined login Enter moves phone to PIN and submits without repeated consent", () => {
+    const runtime = createLoginRuntime({includeConsent: false});
+    let phonePrevented = false;
+    let pinPrevented = false;
+
+    runtime.phoneInput.value = "9990000001";
+    runtime.phoneInput.dispatchEvent({type: "input"});
+    runtime.phoneInput.dispatchEvent({
+        type: "keydown",
+        key: "Enter",
+        isComposing: false,
+        preventDefault() { phonePrevented = true; },
+    });
+
+    assert.equal(phonePrevented, true);
+    assert.equal(runtime.document.activeElement, runtime.pinInput);
+
+    runtime.pinInput.value = "123456";
+    runtime.pinInput.dispatchEvent({type: "input"});
+    runtime.pinInput.dispatchEvent({
+        type: "keydown",
+        key: "Enter",
+        isComposing: false,
+        preventDefault() { pinPrevented = true; },
+    });
+
+    assert.equal(pinPrevented, true);
+    assert.equal(runtime.form.requestSubmitCalls, 1);
 });

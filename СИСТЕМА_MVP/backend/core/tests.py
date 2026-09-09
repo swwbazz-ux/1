@@ -3,9 +3,11 @@ from tempfile import TemporaryDirectory
 
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
 from references.models import Equipment, EquipmentType
+from shifts.models import EmployeeShift
 from users.models import Employee, EmployeeAccess, Role
 
 from .checks import media_storage_writable_check
@@ -96,6 +98,76 @@ class OperationalStateVersionViewTests(TestCase):
         self.assertEqual(payload['role_app_code'], 'dispatcher')
         self.assertTrue(payload['role_shell_version'].startswith('dispatcher-'))
 
+    def test_driver_background_connection_is_required_only_during_open_driver_shift(self):
+        driver_role = Role.objects.create(code='driver', name='Водитель', is_active=True)
+        self.access.role = driver_role
+        self.access.save(update_fields=['role'])
+        self.authorize()
+
+        inactive = self.client.get(
+            self.url,
+            {'include_events': '0', 'role_app_code': 'driver'},
+            HTTP_HOST='localhost',
+        ).json()
+        self.assertFalse(inactive['has_active_shift'])
+        self.assertEqual(inactive['active_shift_id'], '')
+        self.assertFalse(inactive['background_connection_required'])
+
+        shift = EmployeeShift.objects.create(
+            employee=self.employee,
+            shift_type='day',
+            workplace_code='driver',
+            opened_at=timezone.now(),
+            opened_by=self.employee,
+        )
+        active = self.client.get(
+            self.url,
+            {'include_events': '0', 'role_app_code': 'driver'},
+            HTTP_HOST='localhost',
+        ).json()
+        self.assertTrue(active['role_active'])
+        self.assertTrue(active['has_active_shift'])
+        self.assertEqual(active['active_shift_id'], str(shift.id))
+        self.assertTrue(active['background_connection_required'])
+
+        shift.closed_at = timezone.now()
+        shift.closed_by = self.employee
+        shift.save(update_fields=['closed_at', 'closed_by'])
+        closed = self.client.get(
+            self.url,
+            {'include_events': '0', 'role_app_code': 'driver'},
+            HTTP_HOST='localhost',
+        ).json()
+        self.assertFalse(closed['background_connection_required'])
+
+    def test_excavator_background_connection_rejects_another_workplace_shift(self):
+        excavator_role = Role.objects.create(
+            code='excavator_operator',
+            name='Машинист экскаватора',
+            is_active=True,
+        )
+        self.access.role = excavator_role
+        self.access.save(update_fields=['role'])
+        self.authorize()
+        EmployeeShift.objects.create(
+            employee=self.employee,
+            shift_type='day',
+            workplace_code='driver',
+            opened_at=timezone.now(),
+            opened_by=self.employee,
+        )
+
+        payload = self.client.get(
+            self.url,
+            {'include_events': '0', 'role_app_code': 'excavator'},
+            HTTP_HOST='localhost',
+        ).json()
+
+        self.assertTrue(payload['role_active'])
+        self.assertEqual(payload['role_app_code'], 'excavator_operator')
+        self.assertFalse(payload['has_active_shift'])
+        self.assertFalse(payload['background_connection_required'])
+
     def test_old_dispatcher_screen_is_readonly_after_session_role_changes(self):
         admin_role = Role.objects.create(
             code='admin',
@@ -155,6 +227,48 @@ class OperationalStateVersionViewTests(TestCase):
         event = OperationalStateEvent.objects.filter(event_type='equipment_changed').latest('version')
         self.assertEqual(event.object_type, 'Equipment')
         self.assertEqual(event.payload['action'], 'save')
+
+    def test_assignment_event_carries_assignment_id_in_object_id(self):
+        """Экран Водителя склеивает раннее событие и разметку по этому номеру.
+
+        Ранняя озвучка берёт ключ операции из ``object_id`` события, а резервный
+        путь по DOM — из ``data-driver-assignment-id`` формы. Если сервер
+        перестанет класть сюда номер назначения, два пути перестанут узнавать
+        одну операцию и водитель услышит её дважды.
+        """
+        excavator_type = EquipmentType.objects.create(name='Экскаватор погрузки')
+        truck_type = EquipmentType.objects.create(name='Самосвал погрузки')
+        excavator = Equipment.objects.create(
+            equipment_type=excavator_type, garage_number='Э-41', is_active=True
+        )
+        truck = Equipment.objects.create(
+            equipment_type=truck_type, garage_number='С-18', is_active=True
+        )
+        assignment = HaulAssignment.objects.create(
+            truck=truck,
+            excavator=excavator,
+            action='assign',
+            status=AssignmentStatus.PENDING,
+            effective_at=timezone.now(),
+        )
+
+        from assignments.services import _emit_assignment_changed
+
+        _emit_assignment_changed(
+            action='assignment_pending',
+            truck_id=truck.id,
+            excavator_ids=[excavator.id],
+            assignment_id=assignment.id,
+            target_excavator_id=excavator.id,
+        )
+
+        event = OperationalStateEvent.objects.filter(
+            event_type='assignment_changed'
+        ).latest('version')
+        self.assertEqual(event.object_type, 'HaulAssignment')
+        self.assertEqual(event.object_id, str(assignment.id))
+        self.assertEqual(event.payload['action'], 'assignment_pending')
+        self.assertEqual(event.payload['target_excavator_number'], 'Э-41')
 
     def test_employee_save_bumps_operational_state_for_open_workplaces(self):
         after = OperationalStateVersion.objects.get(key='production').version

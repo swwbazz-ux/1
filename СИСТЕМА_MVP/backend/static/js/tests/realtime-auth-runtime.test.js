@@ -108,7 +108,14 @@ function createRuntime(options) {
     const intervals = new Map();
     const timeouts = new Map();
     let nextTimerId = 1;
+    let nowMs = Number(runtimeOptions.nowMs || 1_000_000);
     let currentHref = runtimeOptions.currentHref || "http://driver.localhost/driver/";
+
+    class RuntimeDate extends Date {
+        static now() {
+            return nowMs;
+        }
+    }
 
     const location = {
         get href() {
@@ -274,7 +281,7 @@ function createRuntime(options) {
         URL,
         Promise,
         Error,
-        Date,
+        Date: RuntimeDate,
         JSON,
         Math,
         Number,
@@ -353,6 +360,9 @@ function createRuntime(options) {
             }
             return false;
         },
+        advanceTime(milliseconds) {
+            nowMs += Number(milliseconds || 0);
+        },
     };
 }
 
@@ -369,6 +379,51 @@ function readQueue(runtime) {
     }
     return JSON.parse(rawQueue);
 }
+
+function foregroundWorkerScreen(role) {
+    if (role === "excavator_operator") {
+        return {
+            currentHref: "http://excavator.localhost/excavator/work/",
+            appRoleCode: "excavator_operator",
+            screens: [{
+                name: "excavator",
+                role: "excavator_operator",
+                mode: "custom",
+                path: "^/excavator/work/?$",
+                customRefresh: true,
+                foregroundReconcile: true,
+            }],
+        };
+    }
+    return {
+        currentHref: "http://driver.localhost/driver/",
+        appRoleCode: "driver",
+        screens: [{
+            name: "driver",
+            role: "driver",
+            mode: "custom",
+            path: "^/driver/?$",
+            customRefresh: true,
+            foregroundReconcile: true,
+        }],
+    };
+}
+
+test("only Driver and Excavator opt into full foreground reconciliation", () => {
+    const screenLines = BASE_TEMPLATE_SOURCE
+        .split(/\r?\n/)
+        .filter((line) => line.includes("{name:"));
+    const driverLine = screenLines.find((line) => line.includes('name: "driver"'));
+    const excavatorLine = screenLines.find((line) => line.includes('name: "excavator"'));
+    const otherLines = screenLines.filter((line) => (
+        !line.includes('name: "driver"')
+        && !line.includes('name: "excavator"')
+    ));
+
+    assert.match(driverLine || "", /foregroundReconcile:\s*true/);
+    assert.match(excavatorLine || "", /foregroundReconcile:\s*true/);
+    otherLines.forEach((line) => assert.doesNotMatch(line, /foregroundReconcile:\s*true/));
+});
 
 test("first realtime 401 terminates auth once and permanently stops this client", async () => {
     const runtime = createRuntime({
@@ -703,12 +758,34 @@ test("offline state is recoverable and does not terminate authentication", async
     assert.equal(runtime.redirects.length, 0);
 });
 
-test("work and observer screens use 5s and 15s polling instead of the global second", async () => {
+test("the Driver and Excavator use 2s polling while other work and observer screens keep their shared intervals", async () => {
     assert.doesNotMatch(BASE_TEMPLATE_SOURCE, /pollIntervalMs:\s*1000/);
     assert.match(BASE_TEMPLATE_SOURCE, /workPollIntervalMs:\s*5000/);
     assert.match(BASE_TEMPLATE_SOURCE, /observerPollIntervalMs:\s*15000/);
 
     const worker = createRuntime({
+        screens: [{
+            name: "driver",
+            role: "driver",
+            mode: "custom",
+            path: "^/driver/?$",
+            customRefresh: true,
+            pollIntervalMs: 2000,
+        }],
+        fetch() {
+            return Promise.resolve(response(200, {version: 7, role_active: true, relevant: false}));
+        },
+    });
+    const excavator = createRuntime({
+        currentHref: "http://excavator.localhost/excavator/work/",
+        screens: [{
+            name: "excavator",
+            role: "excavator_operator",
+            mode: "custom",
+            path: "^/excavator/work/?$",
+            customRefresh: true,
+            pollIntervalMs: 2000,
+        }],
         fetch() {
             return Promise.resolve(response(200, {version: 7, role_active: true, relevant: false}));
         },
@@ -740,7 +817,10 @@ test("work and observer screens use 5s and 15s polling instead of the global sec
     });
     await settlePromises();
 
-    assert.equal(worker.window.AppRealtime.getDebugState().pollIntervalMs, 5000);
+    assert.match(BASE_TEMPLATE_SOURCE, /name:\s*"driver"[^\n]*pollIntervalMs:\s*2000/);
+    assert.match(BASE_TEMPLATE_SOURCE, /name:\s*"excavator"[^\n]*pollIntervalMs:\s*2000/);
+    assert.equal(worker.window.AppRealtime.getDebugState().pollIntervalMs, 2000);
+    assert.equal(excavator.window.AppRealtime.getDebugState().pollIntervalMs, 2000);
     assert.equal(observer.window.AppRealtime.getDebugState().pollIntervalMs, 15000);
     assert.equal(manager.window.AppRealtime.getDebugState().pollIntervalMs, 15000);
     assert.equal(worker.intervalDelays().includes(1000), false);
@@ -894,6 +974,256 @@ test("Mining Master coalesces focus, visibility and online catch-up into one sta
     assert.equal(runtime.fetchCalls.length, 2, "the wake must not leave a polling storm behind");
 });
 
+test("Driver foreground recovery reconciles the server fragment even at the same version", async () => {
+    const customRefreshCalls = [];
+    const runtime = createRuntime(Object.assign(foregroundWorkerScreen("driver"), {
+        idleDelayMs: -1,
+        fetchResponses: [
+            response(200, {version: 7, role_active: true, relevant: false, events: []}),
+            response(200, {version: 7, role_active: true, relevant: false, events: []}),
+        ],
+        applyOperationalStateRefresh(context) {
+            customRefreshCalls.push(context);
+            return Promise.resolve({applied: true});
+        },
+    }));
+    await settlePromises();
+    assert.equal(customRefreshCalls.length, 0, "the fresh initial render needs no duplicate fragment");
+
+    runtime.document.hidden = true;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.document.hidden = false;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.window.dispatchEvent({type: "focus"});
+    runtime.window.dispatchEvent({type: "online"});
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 2, "the wake burst must coalesce into one state GET");
+    assert.equal(customRefreshCalls.length, 1, "same-version wake must still reconcile the Driver DOM");
+    assert.equal(customRefreshCalls[0].foregroundReconcile, true);
+    assert.equal(customRefreshCalls[0].reconcileReason, "visibility_hidden");
+    assert.equal(customRefreshCalls[0].version, 7);
+    assert.equal(runtime.window.AppRealtime.getDebugState().foregroundReconcileRequested, false);
+    assert.equal(runtime.reloads.length, 0);
+});
+
+test("Excavator BFCache recovery reconciles its first known version despite irrelevant delta", async () => {
+    const customRefreshCalls = [];
+    const runtime = createRuntime(Object.assign(foregroundWorkerScreen("excavator_operator"), {
+        hidden: true,
+        initialVersion: 0,
+        idleDelayMs: -1,
+        fetchResponses: [
+            response(200, {version: 12, role_active: true, relevant: false, events: []}),
+        ],
+        applyOperationalStateRefresh(context) {
+            customRefreshCalls.push(context);
+            return Promise.resolve({applied: true});
+        },
+    }));
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 0);
+
+    runtime.window.dispatchEvent({type: "pagehide"});
+    assert.equal(runtime.window.AppRealtime.getDebugState().pageActive, false);
+    runtime.document.hidden = false;
+    runtime.window.dispatchEvent({type: "pageshow", persisted: true});
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(customRefreshCalls.length, 1, "BFCache restore must reconcile even without a prior client version");
+    assert.equal(customRefreshCalls[0].foregroundReconcile, true);
+    assert.equal(customRefreshCalls[0].reconcileReason, "pageshow_persisted");
+    assert.equal(customRefreshCalls[0].version, 12);
+    assert.equal(runtime.window.AppRealtime.getDebugState().currentVersion, 12);
+});
+
+test("foreground reconciliation stays pending while a worker edits and applies after focus clears", async () => {
+    const customRefreshCalls = [];
+    const runtime = createRuntime(Object.assign(foregroundWorkerScreen("driver"), {
+        idleDelayMs: -1,
+        fetchResponses: [
+            response(200, {version: 7, role_active: true, relevant: false, events: []}),
+            response(200, {version: 8, role_active: true, relevant: false, events: []}),
+        ],
+        applyOperationalStateRefresh(context) {
+            customRefreshCalls.push(context);
+            return Promise.resolve({applied: true});
+        },
+    }));
+    await settlePromises();
+
+    runtime.document.hidden = true;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.document.activeElement = {tagName: "INPUT"};
+    runtime.document.hidden = false;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    assert.equal(customRefreshCalls.length, 0, "an active input must not be replaced on wake");
+    assert.equal(runtime.refreshDeferredEvents.at(-1).reason, "input_focus");
+    assert.equal(runtime.window.AppRealtime.getDebugState().foregroundReconcileRequested, true);
+
+    runtime.document.activeElement = null;
+    runtime.runTimeoutsUpTo(1000);
+    await settlePromises();
+
+    assert.equal(customRefreshCalls.length, 1);
+    assert.equal(customRefreshCalls[0].version, 8);
+    assert.equal(runtime.window.AppRealtime.getDebugState().foregroundReconcileRequested, false);
+});
+
+test("ordinary focused polling does not reload a fresh Driver fragment", async () => {
+    const customRefreshCalls = [];
+    const runtime = createRuntime(Object.assign(foregroundWorkerScreen("driver"), {
+        idleDelayMs: -1,
+        fetchResponses: [
+            response(200, {version: 7, role_active: true, relevant: false, events: []}),
+            response(200, {version: 7, role_active: true, relevant: false, events: []}),
+        ],
+        applyOperationalStateRefresh(context) {
+            customRefreshCalls.push(context);
+            return Promise.resolve({applied: true});
+        },
+    }));
+    await settlePromises();
+
+    runtime.window.dispatchEvent({type: "focus"});
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 2);
+    assert.equal(customRefreshCalls.length, 0, "plain focus without a background transition stays lightweight");
+});
+
+test("a touch after a missed Android lifecycle gap forces one server reconciliation", async () => {
+    const customRefreshCalls = [];
+    const runtime = createRuntime(Object.assign(foregroundWorkerScreen("driver"), {
+        idleDelayMs: -1,
+        fetchResponses: [
+            response(200, {version: 7, role_active: true, relevant: false, events: []}),
+            response(200, {version: 7, role_active: true, relevant: false, events: []}),
+        ],
+        applyOperationalStateRefresh(context) {
+            customRefreshCalls.push(context);
+            return Promise.resolve({applied: true});
+        },
+    }));
+    await settlePromises();
+
+    runtime.advanceTime(13_000);
+    runtime.document.dispatchEvent({type: "pointerdown"});
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 2);
+    assert.equal(customRefreshCalls.length, 1);
+    assert.equal(customRefreshCalls[0].foregroundReconcile, true);
+    assert.equal(customRefreshCalls[0].reconcileReason, "silent_interaction");
+});
+
+test("a second background cycle cannot be erased by an older in-flight fragment", async () => {
+    const customRefreshCalls = [];
+    let resolveFirstRefresh;
+    const runtime = createRuntime(Object.assign(foregroundWorkerScreen("driver"), {
+        idleDelayMs: -1,
+        fetchResponses: [
+            response(200, {version: 7, role_active: true, relevant: false, events: []}),
+            response(200, {version: 7, role_active: true, relevant: false, events: []}),
+            response(200, {version: 7, role_active: true, relevant: false, events: []}),
+        ],
+        applyOperationalStateRefresh(context) {
+            customRefreshCalls.push(context);
+            if (customRefreshCalls.length === 1) {
+                return new Promise((resolve) => {
+                    resolveFirstRefresh = resolve;
+                });
+            }
+            return Promise.resolve({applied: true});
+        },
+    }));
+    await settlePromises();
+
+    runtime.document.hidden = true;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.document.hidden = false;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.flushZeroTimers();
+    await settlePromises();
+    assert.equal(customRefreshCalls.length, 1);
+
+    runtime.document.hidden = true;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.document.hidden = false;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.flushZeroTimers();
+    await settlePromises();
+    assert.equal(customRefreshCalls.length, 1, "the second fragment waits for the first single-flight apply");
+    assert.ok(
+        runtime.window.AppRealtime.getDebugState().foregroundReconcileRevision
+            > customRefreshCalls[0].reconcileRevision,
+        "the second foreground transition must own a newer reconciliation revision"
+    );
+
+    resolveFirstRefresh({applied: true});
+    await settlePromises();
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    assert.equal(customRefreshCalls.length, 2, "the newer wake must run immediately after the stale apply finishes");
+    assert.ok(customRefreshCalls[1].reconcileRevision > customRefreshCalls[0].reconcileRevision);
+    assert.equal(runtime.window.AppRealtime.getDebugState().foregroundReconcileRequested, false);
+});
+
+test("background during a normal version update still runs the required foreground fragment", async () => {
+    const customRefreshCalls = [];
+    let resolveVersionRefresh;
+    const runtime = createRuntime(Object.assign(foregroundWorkerScreen("driver"), {
+        idleDelayMs: -1,
+        fetchResponses: [
+            response(200, {
+                version: 8,
+                role_active: true,
+                relevant: true,
+                events: [{version: 8, type: "trip_changed", payload: {truck_id: 17}}],
+            }),
+            response(200, {version: 8, role_active: true, relevant: false, events: []}),
+        ],
+        applyOperationalStateRefresh(context) {
+            customRefreshCalls.push(context);
+            if (customRefreshCalls.length === 1) {
+                return new Promise((resolve) => {
+                    resolveVersionRefresh = resolve;
+                });
+            }
+            return Promise.resolve({applied: true});
+        },
+    }));
+    await settlePromises();
+    assert.equal(customRefreshCalls.length, 1);
+    assert.equal(customRefreshCalls[0].foregroundReconcile, false);
+
+    runtime.document.hidden = true;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.document.hidden = false;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    resolveVersionRefresh({applied: true});
+    await settlePromises();
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    assert.equal(customRefreshCalls.length, 2);
+    assert.equal(customRefreshCalls[1].foregroundReconcile, true);
+    assert.equal(customRefreshCalls[1].version, 8);
+    assert.equal(runtime.window.AppRealtime.getDebugState().foregroundReconcileRequested, false);
+});
+
 test("hidden tab performs no initial or timer-driven realtime requests", async () => {
     const runtime = createRuntime({
         hidden: true,
@@ -928,6 +1258,67 @@ test("blur pauses polling and focus performs one immediate catch-up request", as
     runtime.flushZeroTimers();
     await settlePromises();
     assert.equal(runtime.fetchCalls.length, 2);
+});
+
+test("native startup reveal wakes a rendered WebView before DOM focus is reported", async () => {
+    const runtime = createRuntime({
+        focused: false,
+        fetch() {
+            return Promise.resolve(response(200, {
+                version: 7,
+                role_active: true,
+                relevant: false,
+            }));
+        },
+    });
+    await settlePromises();
+
+    assert.equal(
+        runtime.fetchCalls.length,
+        0,
+        "a WebView covered by the native startup layer must not poll before it is revealed"
+    );
+    assert.equal(runtime.window.AppRealtime.getDebugState().pageActive, false);
+
+    runtime.window.dispatchEvent({type: "native-connectivity-resume"});
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    assert.equal(
+        runtime.fetchCalls.length,
+        1,
+        "the native reveal signal must trigger exactly one immediate catch-up"
+    );
+    assert.equal(runtime.window.AppRealtime.getDebugState().pageActive, true);
+});
+
+test("native Driver reveal reconciles its same-version shell before the first DOM focus", async () => {
+    const customRefreshCalls = [];
+    const runtime = createRuntime(Object.assign(foregroundWorkerScreen("driver"), {
+        focused: false,
+        initialVersion: 7,
+        idleDelayMs: -1,
+        fetchResponses: [
+            response(200, {version: 7, role_active: true, relevant: false, events: []}),
+        ],
+        applyOperationalStateRefresh(context) {
+            customRefreshCalls.push(context);
+            return Promise.resolve({applied: true});
+        },
+    }));
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 0);
+
+    runtime.window.dispatchEvent({type: "native-connectivity-resume"});
+    runtime.flushZeroTimers();
+    await settlePromises();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(customRefreshCalls.length, 1);
+    assert.equal(customRefreshCalls[0].foregroundReconcile, true);
+    assert.equal(customRefreshCalls[0].reconcileReason, "native_connectivity_resume");
+    assert.equal(customRefreshCalls[0].version, 7);
+    assert.equal(runtime.window.AppRealtime.getDebugState().foregroundReconcileRequested, false);
 });
 
 test("forced catch-up ignores the aborted older response without clearing the new poll", async () => {

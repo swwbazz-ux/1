@@ -1,0 +1,264 @@
+/* Первый вход водителя и машиниста экскаватора.
+   Стандартный телефон помещает весь обязательный путь в visual viewport.
+   При системном увеличении текста содержимое остаётся в естественном потоке
+   и может расширить документ — одноэкранность не достигается обрезанием. */
+
+body.login-page.login-fullscreen.login-combined.login-activation {
+    height: var(--login-vv-height, 100svh);
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: auto;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .unified-login-dialog.mobile-role-activation {
+    position: relative;
+    inset: auto;
+    top: auto;
+    grid-template-rows: clamp(112px, 16svh, 145px) minmax(max-content, 1fr) 48px;
+    width: 100%;
+    min-height: 0;
+    height: var(--login-vv-height, 100svh);
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    overflow: visible;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .unified-login-form.is-activation {
+    align-self: center;
+    max-height: none;
+    margin-top: -14px;
+    padding: 10px 14px;
+    gap: 6px;
+    overflow: visible;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .unified-login-role-identity,
+body.login-page.login-fullscreen.login-combined.login-activation .activation-stage {
+    display: none;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .activation-confirmed {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 8px;
+    align-items: center;
+    min-width: 0;
+    margin: 0;
+    padding: 7px 10px;
+    border: 1px solid var(--mobile-login-panel-border);
+    border-radius: 14px;
+    background: rgba(5, 13, 17, .72);
+    box-shadow: inset 0 1px rgba(255, 255, 255, .035);
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .activation-confirmed strong {
+    min-width: 0;
+    overflow: visible;
+    color: var(--mobile-login-text);
+    grid-column: 1 / -1;
+    font: 800 clamp(14px, 3.8vw, 16px)/1.15 "Segoe UI", Arial, sans-serif;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .activation-confirmed span {
+    grid-column: 1;
+    grid-row: 2;
+    color: var(--mobile-login-muted);
+    font: 600 clamp(11px, 2.9vw, 12px)/1.2 "Segoe UI", Arial, sans-serif;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .activation-confirmed .activation-phone {
+    grid-column: 2;
+    grid-row: 2;
+    color: var(--mobile-login-accent);
+    font: 800 clamp(11px, 2.9vw, 12px)/1.2 "Segoe UI", Arial, sans-serif;
+    white-space: nowrap;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .shared-shift-login-field {
+    gap: 2px;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .shared-shift-login-field input {
+    min-height: 50px;
+    padding-inline: 12px;
+    font-size: 20px;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .input-hint {
+    min-height: 11px;
+    font-size: 10px;
+    line-height: 1.1;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .activation-pin-toggle {
+    display: inline-grid;
+    grid-template-columns: 22px auto;
+    align-items: center;
+    justify-self: start;
+    gap: 8px;
+    min-height: 44px;
+    margin: -3px 0;
+    color: var(--mobile-login-muted);
+    font: 600 clamp(12px, 3.3vw, 14px)/1.2 "Segoe UI", Arial, sans-serif;
+    cursor: pointer;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .activation-pin-toggle input {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    accent-color: var(--mobile-login-accent);
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .activation-pin-toggle input:focus-visible {
+    outline: 3px solid #fff;
+    outline-offset: 3px;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .app-confirm-actions.unified-login-actions {
+    display: block;
+    margin: 0;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .unified-login-submit {
+    min-height: 52px;
+    font-size: 19px;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .unified-login-change-phone {
+    min-height: 44px;
+    margin: 0;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .message.error {
+    margin: 0;
+    padding: 7px 9px;
+    border: 1px solid rgba(255, 107, 107, .38);
+    border-radius: 10px;
+    background: rgba(75, 18, 22, .28);
+    color: #ffb8b8;
+    font: 600 12px/1.3 "Segoe UI", Arial, sans-serif;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation .max-support-link {
+    height: 48px;
+    min-height: 48px;
+    margin: 0;
+}
+
+@media (max-width: 360px) and (max-height: 640px) {
+    body.login-page.login-fullscreen.login-combined.login-activation .unified-login-dialog.mobile-role-activation {
+        grid-template-rows: 84px minmax(max-content, 1fr) 48px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .unified-login-form.is-activation {
+        margin-top: -8px;
+        padding: 7px 10px;
+        gap: 3px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .unified-login-dialog h1 {
+        font-size: 20px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .mobile-role-login__lead {
+        display: none;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .activation-confirmed {
+        padding: 5px 8px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .activation-confirmed strong {
+        font-size: 14px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .shared-shift-login-field input {
+        min-height: 44px;
+        font-size: 18px;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .input-hint:not(.is-invalid) {
+        display: none;
+        min-height: 0;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .unified-login-submit {
+        min-height: 48px;
+        font-size: 17px;
+    }
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation.is-login-keyboard-active {
+    height: var(--login-vv-height, 100dvh);
+    min-height: 0;
+    overflow: hidden;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation.is-login-keyboard-active .unified-login-dialog.mobile-role-activation {
+    position: fixed;
+    top: var(--login-vv-top, 0px);
+    grid-template-rows: minmax(0, 1fr);
+    min-height: 0;
+    height: var(--login-vv-height, 100dvh);
+    padding-bottom: 5px;
+    overflow-y: auto;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation.is-login-keyboard-active .activation-stage,
+body.login-page.login-fullscreen.login-combined.login-activation.is-login-keyboard-active .activation-confirmed,
+body.login-page.login-fullscreen.login-combined.login-activation.is-login-keyboard-active .activation-pin-toggle {
+    display: none;
+}
+
+body.login-page.login-fullscreen.login-combined.login-activation.is-login-keyboard-active .unified-login-form.is-activation {
+    align-self: start;
+    max-height: none;
+    margin: 0;
+    overflow: visible;
+}
+
+@media (orientation: landscape) and (max-height: 430px) {
+    body.login-page.login-fullscreen.login-combined.login-activation .unified-login-dialog.mobile-role-activation {
+        grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr);
+        grid-template-rows: auto max-content;
+        min-height: 100svh;
+        column-gap: 10px;
+        padding: 8px max(10px, env(safe-area-inset-right, 0px))
+            max(8px, env(safe-area-inset-bottom, 0px))
+            max(10px, env(safe-area-inset-left, 0px));
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .mobile-role-login__hero {
+        grid-column: 1;
+        grid-row: 1 / span 2;
+        width: calc(100% + max(10px, env(safe-area-inset-left, 0px)));
+        height: calc(100% + 16px);
+        margin: -8px 0 -8px calc(-1 * max(10px, env(safe-area-inset-left, 0px)));
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .unified-login-form.is-activation {
+        grid-column: 2;
+        grid-row: 1;
+        margin: 0;
+    }
+
+    body.login-page.login-fullscreen.login-combined.login-activation .max-support-link {
+        grid-column: 2;
+        grid-row: 2;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.login-page.login-fullscreen.login-combined.login-activation *,
+    body.login-page.login-fullscreen.login-combined.login-activation *::before,
+    body.login-page.login-fullscreen.login-combined.login-activation *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+    }
+}

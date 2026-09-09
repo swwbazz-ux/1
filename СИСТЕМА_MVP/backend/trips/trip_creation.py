@@ -1,10 +1,11 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 
-from references.models import TruckCapacityRule
+from references.models import Equipment, TruckCapacityRule
 
-from .models import Trip, TripStatus
+from .models import OPEN_TRIP_STATUSES, Trip, TripStatus
 
 
 TRIP_CAPACITY_UNRESOLVED_MESSAGE = (
@@ -13,6 +14,30 @@ TRIP_CAPACITY_UNRESOLVED_MESSAGE = (
 TRIP_DENSITY_UNRESOLVED_MESSAGE = (
     'Для выбранной породы не настроена плотность.'
 )
+
+
+def lock_trip_participant_equipment(*, excavator_id, truck_id):
+    """Lock both trip participants in one deterministic order.
+
+    Callers must already be inside ``transaction.atomic()``. The truck row is
+    the shared serialization point with driver downtime actions, so a loaded
+    trip and an incompatible waiting-for-loading event cannot be committed in
+    opposite transactions.
+    """
+    participant_ids = tuple(sorted({excavator_id, truck_id}))
+    locked_by_id = {
+        equipment.pk: equipment
+        for equipment in (
+            Equipment.objects
+            .select_for_update(of=('self',))
+            .select_related('equipment_type', 'model')
+            .filter(pk__in=participant_ids)
+            .order_by('pk')
+        )
+    }
+    if any(participant_id not in locked_by_id for participant_id in participant_ids):
+        raise ValidationError('Техника для рейса больше недоступна.')
+    return locked_by_id[excavator_id], locked_by_id[truck_id]
 
 
 def calculate_trip_volume_and_tonnage(truck, rock_type):
@@ -44,6 +69,7 @@ def resolve_required_trip_measurements(truck, rock_type):
     return volume, tonnage
 
 
+@transaction.atomic
 def create_loaded_waiting_unload_trip(
     *,
     assignment,
@@ -59,11 +85,23 @@ def create_loaded_waiting_unload_trip(
     note='',
 ):
     """Create the single server-side state used after an excavator loads a truck."""
+    locked_truck = (
+        Equipment.objects
+        .select_for_update(of=('self',))
+        .select_related('model')
+        .get(pk=assignment.truck_id)
+    )
+    if Trip.objects.select_for_update().filter(
+        truck=locked_truck,
+        status__in=OPEN_TRIP_STATUSES,
+    ).exists():
+        raise ValidationError('Самосвал уже находится в незакрытом рейсе.')
+    assignment.truck = locked_truck
     volume_m3, tonnage = resolve_required_trip_measurements(
         assignment.truck,
         rock_type,
     )
-    return Trip.objects.create(
+    trip = Trip.objects.create(
         excavator=assignment.excavator,
         truck=assignment.truck,
         excavator_operator=excavator_operator,
@@ -82,3 +120,7 @@ def create_loaded_waiting_unload_trip(
         note=str(note or '')[:1000],
         status=TripStatus.LOADED_WAITING_UNLOAD,
     )
+    # Импорт внутри функции не образует циклическую зависимость models/services.
+    from assignments.services import resolve_haul_handoffs_for_trip
+    resolve_haul_handoffs_for_trip(trip)
+    return trip

@@ -250,6 +250,7 @@ class SameEmployeeAccessRoleRevisionRegressionTests(TestCase):
                 'phone': access.employee.phone,
                 'access_code': access.access_code,
                 'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
             },
             HTTP_HOST=host,
         )

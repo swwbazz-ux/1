@@ -23,6 +23,7 @@ from references.models import DormitorySection, Equipment
 from shifts.models import EmployeeShift
 
 from .models import (
+    ContractorOrganization,
     DriverPrimaryRegistration,
     Employee,
     EmployeeAccess,
@@ -178,6 +179,10 @@ class EmployeeCardForm(forms.ModelForm):
         model = Employee
         fields = [
             'full_name',
+            'employment_type',
+            'contractor_organization',
+            'contractor_access_from',
+            'contractor_access_until',
             'birth_date',
             'sex',
             'personnel_number',
@@ -200,6 +205,10 @@ class EmployeeCardForm(forms.ModelForm):
         ]
         labels = {
             'full_name': 'ФИО',
+            'employment_type': 'Тип сотрудника',
+            'contractor_organization': 'Организация подрядчика',
+            'contractor_access_from': 'Допуск действует с',
+            'contractor_access_until': 'Допуск действует по',
             'birth_date': 'Дата рождения',
             'sex': 'Пол',
             'phone': 'Мобильный телефон',
@@ -221,6 +230,8 @@ class EmployeeCardForm(forms.ModelForm):
         }
         widgets = {
             'birth_date': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
+            'contractor_access_from': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
+            'contractor_access_until': forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
             'personnel_number': forms.TextInput(attrs={
                 'autocomplete': 'off',
                 'maxlength': '64',
@@ -259,6 +270,10 @@ class EmployeeCardForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         is_existing_employee = bool(self.instance and self.instance.pk)
         self.fields['full_name'].required = True
+        self.fields['employment_type'].required = False
+        self.fields['contractor_organization'].required = False
+        self.fields['contractor_access_from'].required = False
+        self.fields['contractor_access_until'].required = False
         self.fields['phone'].required = not is_existing_employee
         # Older internal POST clients did not send this field. Preserve an
         # existing explicit value and use the canonical unknown value on create.
@@ -290,6 +305,11 @@ class EmployeeCardForm(forms.ModelForm):
             'watch_composition_id',
             None,
         )
+        current_contractor_organization_id = getattr(
+            self.instance,
+            'contractor_organization_id',
+            None,
+        )
         self._initial_personnel_department_id = current_department_id
         self._initial_work_schedule_id = current_schedule_id
         self.fields['personnel_position'].queryset = (
@@ -315,6 +335,16 @@ class EmployeeCardForm(forms.ModelForm):
             .filter(Q(is_active=True) | Q(pk=current_watch_composition_id))
             .order_by('name')
         )
+        self.fields['contractor_organization'].queryset = (
+            ContractorOrganization.objects
+            .filter(Q(is_active=True) | Q(pk=current_contractor_organization_id))
+            .order_by('name')
+        )
+        self.fields['contractor_organization'].empty_label = 'Не указана'
+        self.fields['employment_type'].widget.attrs['data-employment-type'] = '1'
+        self.fields['contractor_organization'].widget.attrs['data-contractor-field'] = '1'
+        self.fields['contractor_access_from'].widget.attrs['data-contractor-field'] = '1'
+        self.fields['contractor_access_until'].widget.attrs['data-contractor-field'] = '1'
         self.fields['personnel_department'].empty_label = 'Не указано'
         self.fields['work_schedule'].empty_label = 'Не указано'
         self.fields['watch_composition'].empty_label = 'Не указан'
@@ -406,6 +436,14 @@ class EmployeeCardForm(forms.ModelForm):
             return self.instance.work_category
         return Employee.WorkCategory.OTHER
 
+    def clean_employment_type(self):
+        value = self.cleaned_data.get('employment_type')
+        if value:
+            return value
+        if self.instance and self.instance.pk:
+            return self.instance.employment_type
+        return Employee.EmploymentType.STAFF
+
     def clean_hired_at(self):
         value = self.cleaned_data.get('hired_at')
         if value and value > timezone.localdate():
@@ -421,6 +459,34 @@ class EmployeeCardForm(forms.ModelForm):
         dismissed_at = cleaned_data.get('dismissed_at')
         if hired_at and dismissed_at and dismissed_at < hired_at:
             self.add_error('dismissed_at', 'Дата увольнения не может быть раньше даты приема.')
+
+        employment_type = cleaned_data.get('employment_type') or Employee.EmploymentType.STAFF
+        contractor_organization = cleaned_data.get('contractor_organization')
+        contractor_access_from = cleaned_data.get('contractor_access_from')
+        contractor_access_until = cleaned_data.get('contractor_access_until')
+        if employment_type == Employee.EmploymentType.CONTRACTOR:
+            if not contractor_organization:
+                self.add_error('contractor_organization', 'Выберите организацию подрядчика.')
+            if not contractor_access_from:
+                self.add_error('contractor_access_from', 'Укажите дату начала допуска.')
+            if not contractor_access_until:
+                self.add_error('contractor_access_until', 'Укажите дату окончания допуска.')
+            if (
+                contractor_access_from
+                and contractor_access_until
+                and contractor_access_until < contractor_access_from
+            ):
+                self.add_error('contractor_access_until', 'Дата окончания допуска не может быть раньше даты начала.')
+            if contractor_organization and contractor_access_from and contractor_organization.contract_valid_from:
+                if contractor_access_from < contractor_organization.contract_valid_from:
+                    self.add_error('contractor_access_from', 'Допуск не может начинаться раньше договора подрядчика.')
+            if contractor_organization and contractor_access_until and contractor_organization.contract_valid_until:
+                if contractor_access_until > contractor_organization.contract_valid_until:
+                    self.add_error('contractor_access_until', 'Допуск не может заканчиваться позже договора подрядчика.')
+        else:
+            cleaned_data['contractor_organization'] = None
+            cleaned_data['contractor_access_from'] = None
+            cleaned_data['contractor_access_until'] = None
 
         work_schedule = cleaned_data.get('work_schedule')
         brigade_number = cleaned_data.get('brigade_number')
@@ -942,9 +1008,8 @@ class AccessActivationForm(forms.Form):
             'maxlength': '6',
             'pattern': '[0-9]{6}',
             'data-pin-input': '1',
-            'data-hint': 'Введите ровно 6 цифр. Придумайте свой — его будете вводить при каждом входе.',
+            'data-hint': '6 цифр, без простых последовательностей.',
             'aria-describedby': 'activation-new-pin-hint',
-            'autofocus': 'autofocus',
         }),
     )
     confirm_access_code = forms.CharField(
@@ -958,7 +1023,7 @@ class AccessActivationForm(forms.Form):
             'maxlength': '6',
             'pattern': '[0-9]{6}',
             'data-pin-input': '1',
-            'data-hint': 'Введите тот же новый PIN еще раз.',
+            'data-hint': 'Повторите тот же PIN.',
             'aria-describedby': 'activation-confirm-pin-hint',
         }),
     )

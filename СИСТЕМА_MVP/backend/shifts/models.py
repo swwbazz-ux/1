@@ -4,8 +4,8 @@ from django.utils import timezone
 
 
 class ShiftType(models.TextChoices):
-    DAY = 'day', 'Дневная'
-    NIGHT = 'night', 'Ночная'
+    DAY = 'day', 'Первая смена'
+    NIGHT = 'night', 'Вторая смена'
 
 
 class PlanCalculationMode(models.TextChoices):
@@ -342,8 +342,8 @@ class WatchPeriodBrigadePhaseVersion(BrigadePhaseImmutableModel):
 
 class WatchPeriodBrigadePhaseRow(BrigadePhaseImmutableModel):
     class Phase(models.TextChoices):
-        DAY = 'day', 'Дневная смена'
-        NIGHT = 'night', 'Ночная смена'
+        DAY = 'day', 'Первая смена'
+        NIGHT = 'night', 'Вторая смена'
         OFF = 'off', 'Межвахта'
 
     version = models.ForeignKey(
@@ -625,8 +625,8 @@ class AchievementUnlock(models.Model):
 class ShiftPlanScope(models.TextChoices):
     MONTH = 'month', 'Месячный план'
     DAY = 'day_total', 'Суточный план'
-    DAY_SHIFT = 'day_shift', 'Дневная смена'
-    NIGHT_SHIFT = 'night_shift', 'Ночная смена'
+    DAY_SHIFT = 'day_shift', 'Первая смена'
+    NIGHT_SHIFT = 'night_shift', 'Вторая смена'
 
 
 class ShiftPlan(models.Model):

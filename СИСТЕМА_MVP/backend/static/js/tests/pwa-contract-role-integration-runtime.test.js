@@ -97,6 +97,10 @@ class ClassListStub {
         this.values.add(name);
         return true;
     }
+
+    contains(name) {
+        return this.values.has(name);
+    }
 }
 
 class ElementStub extends EventTargetStub {
@@ -278,6 +282,11 @@ function createIntegratedRuntime(options = {}) {
         },
     });
     const navigator = {serviceWorker};
+    function setTimeoutStub(callback, delay) {
+        const timer = setTimeout(callback, delay);
+        if (timer && typeof timer.unref === "function") timer.unref();
+        return timer;
+    }
     const window = Object.assign(windowTarget, {
         document,
         navigator,
@@ -294,7 +303,7 @@ function createIntegratedRuntime(options = {}) {
         Promise,
         URL,
         console,
-        setTimeout,
+        setTimeout: setTimeoutStub,
         clearTimeout,
     });
     function MessageChannelStub() {
@@ -317,7 +326,7 @@ function createIntegratedRuntime(options = {}) {
         Promise,
         URL,
         console,
-        setTimeout,
+        setTimeout: setTimeoutStub,
         clearTimeout,
     });
 
@@ -425,5 +434,22 @@ test(
 
         assert.equal(runtime.updateCalls, 2, "the manual retry must start one new update");
         assert.match(runtime.status.textContent, /актуальная версия/i);
+    }
+);
+
+test(
+    "real Driver button reports an unavailable shared updater instead of a false current version",
+    async () => {
+        const runtime = createIntegratedRuntime();
+        await flushPromises();
+
+        runtime.window.AppPwaContractGuard.requestManualUpdate = function () {
+            return Promise.resolve({status: "unavailable", registration: null});
+        };
+        runtime.applyButton.dispatchEvent(new CustomEventStub("click"));
+        await flushPromises();
+
+        assert.match(runtime.status.textContent, /Служба обновления недоступна/);
+        assert.doesNotMatch(runtime.status.textContent, /актуальная версия/i);
     }
 );

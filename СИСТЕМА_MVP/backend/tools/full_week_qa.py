@@ -84,6 +84,7 @@ from users.models import (  # noqa: E402
     Role,
     WorkSchedule,
 )
+from users.privacy_consent import PRIVACY_POLICY_VERSION  # noqa: E402
 
 
 LOCAL_QA_DB_NAME = "copper_week_qa_20260727"
@@ -428,6 +429,7 @@ class RoleHttpClient:
                 "phone": phone,
                 "access_code": pin,
                 "device_kind": device_kind,
+                "privacy_consent": PRIVACY_POLICY_VERSION,
             },
             expected=(302,),
             label=f"{self.role_code}: вход",

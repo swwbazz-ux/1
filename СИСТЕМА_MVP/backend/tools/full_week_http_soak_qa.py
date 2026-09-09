@@ -35,6 +35,10 @@ CSRF_RE = re.compile(
     r'name=["\']csrfmiddlewaretoken["\']\s+value=["\']([^"\']+)["\']',
     re.IGNORECASE,
 )
+PRIVACY_CONSENT_RE = re.compile(
+    r'name=["\']privacy_consent["\'][^>]*\svalue=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
 ALLOWED_PORT = 8000
 
 
@@ -236,18 +240,20 @@ def login(
     if not token_match:
         raise RuntimeError("CSRF-токен не найден на экране входа.")
 
-    payload = urllib.parse.urlencode(
-        {
-            "csrfmiddlewaretoken": token_match.group(1),
-            "phone": account.phone,
-            "access_code": account.pin,
-            "device_kind": (
-                "shared"
-                if account.role in {"dispatcher", "mining_master"}
-                else "personal"
-            ),
-        }
-    ).encode("ascii")
+    payload_fields = {
+        "csrfmiddlewaretoken": token_match.group(1),
+        "phone": account.phone,
+        "access_code": account.pin,
+        "device_kind": (
+            "shared"
+            if account.role in {"dispatcher", "mining_master"}
+            else "personal"
+        ),
+    }
+    consent_match = PRIVACY_CONSENT_RE.search(html)
+    if consent_match:
+        payload_fields["privacy_consent"] = consent_match.group(1)
+    payload = urllib.parse.urlencode(payload_fields).encode("ascii")
     post_request = urllib.request.Request(
         root,
         data=payload,

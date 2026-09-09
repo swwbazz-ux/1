@@ -8906,10 +8906,10 @@ body.management-dynamics-chart-modal-open {
 
 .complex-state-chip {
     display: inline-flex;
+    flex: 0 1 auto;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
-    max-width: clamp(72px, 8vw, 128px);
+    max-width: min(190px, calc(100% - 64px));
     min-height: 20px;
     padding: 2px 8px;
     border: 1px solid color-mix(in srgb, var(--complex-accent) 68%, transparent);
@@ -8918,9 +8918,45 @@ body.management-dynamics-chart-modal-open {
     color: var(--complex-accent);
     font-size: clamp(9px, .62vw, 11px);
     font-weight: 900;
-    line-height: 1;
-    text-overflow: ellipsis;
+    line-height: 1.1;
+    overflow-wrap: normal;
+    text-align: center;
     text-transform: uppercase;
+    white-space: normal;
+}
+
+.complex-downtime-status {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 4px 7px;
+    min-width: 0;
+    max-width: min(210px, 100%);
+    padding: 4px 7px;
+    border: 1px solid color-mix(in srgb, var(--complex-accent) 72%, transparent);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--complex-accent) 16%, transparent);
+    color: var(--complex-accent);
+}
+
+.complex-downtime-status > span {
+    min-width: 0;
+    font-size: clamp(9px, .62vw, 11px);
+    font-weight: 900;
+    line-height: 1.12;
+    overflow-wrap: anywhere;
+    text-transform: uppercase;
+    white-space: normal;
+}
+
+.complex-downtime-status > time {
+    align-self: center;
+    color: var(--gd-ink);
+    font-size: clamp(10px, .7vw, 12px);
+    font-variant-numeric: tabular-nums;
+    font-weight: 900;
+    letter-spacing: .025em;
+    line-height: 1;
     white-space: nowrap;
 }
 
@@ -9881,6 +9917,112 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     line-height: 1;
 }
 
+.gd-detail-downtime {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 8px 14px;
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid color-mix(in srgb, var(--gd-orange) 58%, var(--gd-detail-line));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--gd-orange) 10%, var(--gd-detail-panel));
+}
+
+.gd-detail-downtime[hidden] {
+    display: none;
+}
+
+.gd-detail-downtime-copy {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+}
+
+.gd-detail-downtime-copy > span,
+.gd-detail-downtime-copy > small {
+    color: var(--gd-detail-muted);
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+.gd-detail-downtime-copy > span {
+    letter-spacing: .045em;
+    text-transform: uppercase;
+}
+
+.gd-detail-downtime-copy > strong {
+    color: var(--gd-detail-ink);
+    font-size: 16px;
+    font-weight: 900;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+}
+
+.gd-detail-downtime > time {
+    min-width: 92px;
+    color: var(--gd-orange);
+    font-size: 21px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 900;
+    letter-spacing: .035em;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.gd-detail-downtime > button {
+    min-height: 38px;
+    padding: 0 14px;
+    border: 1px solid color-mix(in srgb, var(--gd-red) 74%, var(--gd-detail-line));
+    border-radius: 6px;
+    background: var(--gd-red-soft);
+    color: var(--gd-red);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+.gd-detail-downtime > button:hover,
+.gd-detail-downtime > button:focus-visible {
+    border-color: var(--gd-red);
+    background: color-mix(in srgb, var(--gd-red-soft) 70%, var(--gd-red) 14%);
+    outline: none;
+}
+
+.gd-detail-downtime > button:disabled {
+    cursor: wait;
+    opacity: .58;
+}
+
+.gd-detail-downtime-result {
+    grid-column: 1 / -1;
+    min-height: 0;
+    color: var(--gd-detail-muted);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.gd-detail-downtime-result:empty {
+    display: none;
+}
+
+@media (max-width: 760px) {
+    .gd-detail-downtime {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .gd-detail-downtime > button {
+        grid-column: 1 / -1;
+        width: 100%;
+    }
+}
+
 .gd-equipment-detail .mm-detail-list {
     grid-template-columns: minmax(96px, .48fr) minmax(0, 1fr);
     gap: 0 12px;
@@ -9903,38 +10045,39 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     text-align: right;
 }
 
-.gd-detail-settings {
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings {
     margin-top: 12px;
-    padding: 12px;
-    border: 1px solid color-mix(in srgb, var(--gd-blue) 45%, var(--gd-detail-line));
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--gd-blue) 7%, transparent);
+    padding: 12px 14px;
+    border: 1px solid rgba(38, 198, 218, .38);
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(16, 37, 47, .96), rgba(10, 25, 33, .96));
+    box-shadow: inset 3px 0 0 rgba(38, 198, 218, .72);
 }
 
 .gd-detail-settings[hidden] {
     display: none;
 }
 
-.gd-detail-settings-head {
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
 }
 
-.gd-detail-settings-head strong,
-.gd-detail-settings-head span {
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-head strong,
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-head span {
     display: block;
 }
 
-.gd-detail-settings-head strong {
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-head strong {
     color: var(--gd-detail-ink);
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 900;
     text-transform: uppercase;
 }
 
-.gd-detail-settings-head > div > span {
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-head > div > span {
     max-width: 720px;
     margin-top: 4px;
     color: var(--gd-detail-muted);
@@ -9942,7 +10085,7 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     line-height: 1.25;
 }
 
-.gd-detail-settings-status {
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-status {
     min-height: 16px;
     color: var(--gd-green);
     font-size: 11px;
@@ -9950,20 +10093,20 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     text-align: right;
 }
 
-.gd-detail-settings-grid {
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-face {
     display: grid;
-    grid-template-columns: .7fr .7fr 1.25fr 1.4fr .85fr auto;
+    grid-template-columns: 110px 110px minmax(190px, 1fr);
     gap: 8px;
     align-items: end;
     margin-top: 10px;
 }
 
-.gd-detail-settings-grid label,
-.gd-detail-settings-grid label > span {
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings label,
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings label > span {
     display: block;
 }
 
-.gd-detail-settings-grid label > span {
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings label > span {
     margin-bottom: 4px;
     color: var(--gd-detail-muted);
     font-size: 10px;
@@ -9971,46 +10114,142 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     text-transform: uppercase;
 }
 
-.gd-detail-settings-grid input,
-.gd-detail-settings-grid select,
-.gd-detail-settings-save {
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings input,
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings select,
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings button {
+    box-sizing: border-box;
     width: 100%;
-    min-height: 34px;
-    border: 1px solid var(--gd-detail-line);
+    min-height: 32px;
+    border: 1px solid rgba(129, 154, 166, .32);
     border-radius: 6px;
-    background: color-mix(in srgb, var(--gd-detail-panel) 86%, #ffffff 14%);
-    color: var(--gd-detail-ink);
+    background: #101f28;
+    color: #e8f2f5;
     font: inherit;
     font-size: 12px;
+    line-height: 1.1;
 }
 
-.gd-detail-settings-grid input,
-.gd-detail-settings-grid select {
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings input,
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings select {
     padding: 6px 8px;
 }
 
-.gd-detail-settings-save {
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings input:focus,
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings select:focus {
+    border-color: var(--gd-blue);
+    outline: 1px solid rgba(38, 198, 218, .28);
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destinations {
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid rgba(129, 154, 166, .18);
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destinations-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destinations-head strong,
+.dispatcher-shell .gd-equipment-detail .gd-detail-destinations-head span {
+    display: inline;
+    font-size: 11px;
+    line-height: 1;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destinations-head strong {
+    color: #dbe8ed;
+    text-transform: uppercase;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destinations-head span {
+    margin-left: 7px;
+    color: var(--gd-detail-muted);
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings .gd-detail-destination-add {
     width: auto;
-    min-width: 152px;
-    padding: 6px 12px;
+    min-height: 28px;
+    padding: 4px 10px;
+    border-color: rgba(38, 198, 218, .38);
+    color: var(--gd-blue);
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destination-list {
+    display: grid;
+    gap: 6px;
+    margin-top: 7px;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destination-row {
+    display: grid;
+    grid-template-columns: minmax(190px, 1fr) 110px 30px;
+    gap: 7px;
+    align-items: end;
+    padding: 7px;
+    border: 1px solid rgba(129, 154, 166, .18);
+    border-radius: 7px;
+    background: rgba(5, 15, 21, .42);
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-destination-row label > span {
+    margin-bottom: 3px;
+    font-size: 9px;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings .gd-detail-destination-remove {
+    width: 30px;
+    min-height: 32px;
+    padding: 0;
+    border-color: rgba(239, 83, 80, .38);
+    color: #ff8a80;
+    font-size: 20px;
+    cursor: pointer;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 9px;
+}
+
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings .gd-detail-settings-save {
+    width: auto;
+    min-width: 180px;
+    min-height: 34px;
+    padding: 6px 14px;
     border-color: color-mix(in srgb, var(--gd-green) 66%, var(--gd-detail-line));
-    background: color-mix(in srgb, var(--gd-green) 18%, transparent);
+    background: rgba(107, 231, 20, .14);
     color: var(--gd-green);
     font-weight: 900;
     cursor: pointer;
 }
 
-.gd-detail-settings-save:disabled {
+.dispatcher-shell .gd-equipment-detail .gd-detail-settings button:disabled {
     opacity: .45;
     cursor: not-allowed;
 }
 
-@media (max-width: 1180px) {
-    .gd-detail-settings-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+@media (max-width: 760px) {
+    .dispatcher-shell .gd-equipment-detail .gd-detail-settings-face {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .gd-detail-settings-save {
+    .dispatcher-shell .gd-equipment-detail .gd-detail-settings-face label:last-child {
+        grid-column: 1 / -1;
+    }
+
+    .dispatcher-shell .gd-equipment-detail .gd-detail-destination-row {
+        grid-template-columns: minmax(0, 1fr) 86px 30px;
+    }
+
+    .dispatcher-shell .gd-equipment-detail .gd-detail-settings .gd-detail-settings-save {
         width: 100%;
     }
 }
@@ -12057,6 +12296,148 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
         width: calc(100vw - 12px);
         max-height: calc(100dvh - 12px);
         padding: 12px;
+    }
+}
+
+/*
+ * Dispatcher desktop density is driven by the available board/card size.
+ * This keeps the control usable at 100% browser zoom on common office screens
+ * instead of relying on one hard-coded monitor width.
+ */
+@media (min-width: 761px) {
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-shell {
+        --gd-header-h: clamp(106px, 10vh, 116px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-unified-topbar {
+        --gd-header-identity-width: clamp(280px, 22vw, 420px);
+        --gd-header-actions-width: clamp(286px, 20.5vw, 394px);
+        --gd-header-clock-width: clamp(146px, 9.5vw, 184px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-command-main {
+        padding-inline: clamp(14px, 1.35vw, 26px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-command-context {
+        grid-template-columns: minmax(170px, 1fr) auto auto auto;
+        gap: 0 clamp(10px, 1vw, 18px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-command-context strong {
+        min-width: 170px;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-zone-grid {
+        grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr));
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card {
+        container-type: inline-size;
+        gap: 6px;
+        padding: clamp(9px, .68vw, 12px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-work-head {
+        grid-template-columns: minmax(0, 1fr) minmax(164px, min(42%, 224px));
+        gap: clamp(8px, .68vw, 12px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-title-state {
+        flex-wrap: wrap;
+        align-content: flex-start;
+        align-items: flex-start;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-work-head h2 {
+        font-size: clamp(28px, 2.15vw, 40px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-state-chip,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-downtime-status {
+        flex: 0 1 auto;
+        min-width: min(120px, 100%);
+        max-width: min(210px, 100%);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-state-chip,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-downtime-status > span {
+        overflow-wrap: normal;
+        word-break: normal;
+        text-wrap: balance;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-context {
+        grid-template-columns: repeat(2, minmax(0, max-content));
+        justify-content: end;
+        width: 100%;
+        max-width: 224px;
+        gap: 3px 4px;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-info-chip.chip-rock,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-unload-points,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-plan-strip {
+        grid-column: 1 / -1;
+        justify-self: end;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-info-chip.chip-rock,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-unload-points {
+        max-width: 100%;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-plan-strip {
+        width: 100%;
+        min-width: 0;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks {
+        width: 100%;
+        max-width: 100%;
+        overflow: hidden;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card:has(.complex-assigned-trucks.truck-fill-3) {
+        min-height: 230px;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card:has(.complex-assigned-trucks.truck-fill-4) {
+        min-height: 260px;
+    }
+}
+
+@media (min-width: 1181px) {
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-board {
+        --gd-equipment-slot-w: clamp(62px, calc(4.9vw - 10px), 82px);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-zone-grid {
+        grid-auto-rows: minmax(clamp(190px, 21vh, 220px), auto);
+    }
+}
+
+@container (max-width: 430px) {
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-work-head {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-context {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        justify-self: stretch;
+        justify-content: stretch;
+        width: 100%;
+        max-width: none;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-info-chip {
+        width: 100%;
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-info-chip.chip-rock,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .complex-unload-points,
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-plan-strip {
+        grid-column: 1 / -1;
     }
 }
 

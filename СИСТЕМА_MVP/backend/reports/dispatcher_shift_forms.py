@@ -9,7 +9,10 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from core.production_time import production_shift_bounds
+from core.production_time import (
+    assigned_shift_open_bounds,
+    production_shift_bounds,
+)
 from downtimes.models import DowntimeEvent
 from references.models import Equipment
 from shifts.models import EmployeeShift, ShiftType
@@ -49,19 +52,20 @@ def shift_meta(selected_date, shift_type):
     return {
         'start': start,
         'end': end,
-        'label': 'Дневная' if shift_type == ShiftType.DAY else 'Ночная',
-        'short_label': 'день' if shift_type == ShiftType.DAY else 'ночь',
+        'label': 'Первая смена' if shift_type == ShiftType.DAY else 'Вторая смена',
+        'short_label': 'первая' if shift_type == ShiftType.DAY else 'вторая',
         'time_range': f'{start:%H:%M}–{end:%H:%M}',
     }
 
 
 def shift_trip_filter(selected_date, shift_type):
     shift_start, shift_end = production_shift_bounds(selected_date, shift_type)
+    assigned_start, assigned_end = assigned_shift_open_bounds(selected_date, shift_type)
     return (
         Q(
             loading_shift__shift_type=shift_type,
-            loading_shift__opened_at__gte=shift_start,
-            loading_shift__opened_at__lt=shift_end,
+            loading_shift__opened_at__gte=assigned_start,
+            loading_shift__opened_at__lt=assigned_end,
         )
         | Q(
             loading_shift__isnull=True,

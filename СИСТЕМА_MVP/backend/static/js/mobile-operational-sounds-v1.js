@@ -27,10 +27,14 @@
     var activeSource = null;
     var lastConnectionState = "";
 
-    function nativeSoundPlugin() {
+    function capacitorNativeSoundPlugin() {
         var capacitor = window.Capacitor;
         var plugins = capacitor && capacitor.Plugins;
-        var plugin = plugins && plugins.NativeSound;
+        return plugins && plugins.NativeSound ? plugins.NativeSound : null;
+    }
+
+    function nativeSoundPlugin() {
+        var plugin = capacitorNativeSoundPlugin();
         return plugin && typeof plugin.play === "function" ? plugin : null;
     }
 
@@ -138,6 +142,158 @@
         return playWebSound(name);
     }
 
+    function announceDumpPoint(details) {
+        var plugin = capacitorNativeSoundPlugin();
+        if (!plugin || typeof plugin.announceDumpPoint !== "function") {
+            return Promise.resolve({supported: false, announced: false});
+        }
+        return Promise.resolve(plugin.announceDumpPoint(details || {})).then(function (result) {
+            return {
+                supported: true,
+                announced: !!(result && result.announced === true),
+                reason: result && result.reason ? String(result.reason) : ""
+            };
+        }).catch(function (error) {
+            return {
+                supported: true,
+                announced: false,
+                reason: "bridge_error",
+                error: error && error.message ? String(error.message) : ""
+            };
+        });
+    }
+
+    function announceOperational(details) {
+        details = details || {};
+        var plugin = capacitorNativeSoundPlugin();
+        if (!plugin || typeof plugin.announceOperational !== "function") {
+            return play(String(details.cue || "action_ok")).then(function (played) {
+                return {supported: false, announced: played};
+            });
+        }
+        return Promise.resolve(plugin.announceOperational({
+            cue: String(details.cue || "action_ok"),
+            voice: String(details.voice || ""),
+            eventVersion: Number(details.eventVersion || 0),
+            eventKey: String(details.eventKey || "")
+        })).then(function (result) {
+            return {
+                supported: true,
+                announced: !!(result && result.announced === true),
+                reason: result && result.reason ? String(result.reason) : ""
+            };
+        }).catch(function () {
+            return play(String(details.cue || "action_ok")).then(function (played) {
+                return {supported: true, announced: played, reason: "bridge_error"};
+            });
+        });
+    }
+
+    function announceEquipment(details) {
+        details = details || {};
+        var plugin = capacitorNativeSoundPlugin();
+        if (!plugin || typeof plugin.announceEquipment !== "function") {
+            return announceOperational({
+                cue: String(details.cue || "truck_assigned"),
+                voice: String(details.fallbackVoice || "voice_truck_assigned"),
+                eventVersion: Number(details.eventVersion || 0),
+                eventKey: String(details.eventKey || "")
+            });
+        }
+        return Promise.resolve(plugin.announceEquipment({
+            cue: String(details.cue || "truck_assigned"),
+            action: String(details.action || ""),
+            equipmentNumber: String(details.equipmentNumber || ""),
+            dumpPointId: Number(details.dumpPointId || 0),
+            dumpPointName: String(details.dumpPointName || ""),
+            eventVersion: Number(details.eventVersion || 0),
+            eventKey: String(details.eventKey || "")
+        })).then(function (result) {
+            if (result && result.announced === true) {
+                return {supported: true, announced: true, reason: String(result.reason || "")};
+            }
+            return announceOperational({
+                cue: String(details.cue || "truck_assigned"),
+                voice: String(details.fallbackVoice || "voice_truck_assigned"),
+                eventVersion: Number(details.eventVersion || 0),
+                eventKey: String(details.eventKey || "")
+            });
+        }).catch(function () {
+            return announceOperational({
+                cue: String(details.cue || "truck_assigned"),
+                voice: String(details.fallbackVoice || "voice_truck_assigned"),
+                eventVersion: Number(details.eventVersion || 0),
+                eventKey: String(details.eventKey || "")
+            });
+        });
+    }
+
+    function announceEquipmentBatch(details) {
+        details = details || {};
+        var items = Array.isArray(details.items) ? details.items.filter(Boolean) : [];
+        if (!items.length) {
+            return Promise.resolve({supported: true, announced: false, reason: "resource_unavailable"});
+        }
+        var plugin = capacitorNativeSoundPlugin();
+        function fallback() {
+            var first = items[0] || {};
+            return announceEquipment({
+                cue: String(details.cue || "truck_assigned"),
+                action: String(first.action || ""),
+                equipmentNumber: String(first.equipmentNumber || ""),
+                fallbackVoice: String(first.fallbackVoice || "voice_truck_assigned"),
+                eventVersion: Number(first.eventVersion || 0),
+                eventKey: String(details.eventKey || "excavator_operator_assignment")
+            });
+        }
+        if (!plugin || typeof plugin.announceEquipmentBatch !== "function") {
+            return fallback();
+        }
+        var pending;
+        try {
+            pending = plugin.announceEquipmentBatch({
+                cue: String(details.cue || "truck_assigned"),
+                items: items.map(function (item) {
+                    return {
+                        action: String(item.action || ""),
+                        equipmentNumber: String(item.equipmentNumber || ""),
+                        fallbackVoice: String(item.fallbackVoice || "voice_truck_assigned"),
+                        eventVersion: Number(item.eventVersion || 0),
+                        operationKey: String(item.operationKey || "")
+                    };
+                })
+            });
+        } catch (error) {
+            return fallback();
+        }
+        return Promise.resolve(pending).then(function (result) {
+            if (result && result.announced === true) {
+                return {supported: true, announced: true, reason: String(result.reason || "")};
+            }
+            if (result && String(result.reason || "") === "already_announced") {
+                return {supported: true, announced: false, reason: "already_announced"};
+            }
+            return fallback();
+        }).catch(fallback);
+    }
+
+    function diagnostics() {
+        var plugin = capacitorNativeSoundPlugin();
+        if (!plugin || typeof plugin.getDiagnostics !== "function") {
+            return Promise.resolve({supported: false});
+        }
+        return Promise.resolve(plugin.getDiagnostics()).then(function (result) {
+            result = result || {};
+            result.supported = true;
+            return result;
+        }).catch(function (error) {
+            return {
+                supported: true,
+                error: error && error.message ? String(error.message) : "bridge_error"
+            };
+        });
+    }
+
     function unlock() {
         var context = getAudioContext();
         if (!context) return;
@@ -176,6 +332,11 @@
         profile: profile,
         files: soundFiles,
         play: play,
+        announceDumpPoint: announceDumpPoint,
+        announceOperational: announceOperational,
+        announceEquipment: announceEquipment,
+        announceEquipmentBatch: announceEquipmentBatch,
+        diagnostics: diagnostics,
         preload: unlock
     });
 })();

@@ -364,9 +364,9 @@ test("live role switch makes mutations readonly and preserves safe controls", as
         method: "post",
         action: "/excavator/work/",
     });
-    const safeRefresh = new FakeElement("button", {"data-eo-refresh-work": ""});
+    const safeTab = new FakeElement("button", {"data-eo-tab": "shift"});
     const mutationButton = new FakeElement("button", {"data-eo-shift-button": ""});
-    mutationForm.appendChild(safeRefresh);
+    mutationForm.appendChild(safeTab);
     mutationForm.appendChild(mutationButton);
 
     const getForm = new FakeFormElement({method: "get", action: "/reports/"});
@@ -395,10 +395,10 @@ test("live role switch makes mutations readonly and preserves safe controls", as
     assert.equal(runtime.document.body.dataset.roleReadonly, "true");
     assert.ok(runtime.document.querySelector("[data-inactive-role-banner]"));
     assert.equal(mutationButton.disabled, true);
-    assert.equal(safeRefresh.disabled, false);
+    assert.equal(safeTab.disabled, false);
     assert.equal(navigationButton.disabled, false);
 
-    const safeClick = runtime.dispatchDocumentEvent("click", safeRefresh);
+    const safeClick = runtime.dispatchDocumentEvent("click", safeTab);
     const mutationClick = runtime.dispatchDocumentEvent("click", mutationButton);
     const navigationClick = runtime.dispatchDocumentEvent("click", navigationButton);
     assert.equal(safeClick.defaultPrevented, false);
@@ -662,7 +662,11 @@ function extractDriverShiftCloseBindingSource() {
     );
     const source = fs.readFileSync(templatePath, "utf8");
     const startMarker = '        if (form && closeButton && closeButton.dataset.driverShiftBound !== "true") {';
-    const endMarker = '        if (updateButton && updateButton.dataset.driverShiftUpdateBound !== "true") {';
+    // Раньше границей служила привязка кнопки «Обновить» рядом со сменой. Её
+    // убрали совсем: она проверяла обновление веб-оболочки, а стояла во
+    // вкладке «Смена» и читалась как обновление данных смены. Берём следующую
+    // привязку в том же блоке — выход из смены.
+    const endMarker = '        if (logoutButton && logoutButton.dataset.driverLogoutBound !== "true") {';
     const start = source.indexOf(startMarker);
     const end = source.indexOf(endMarker, start);
     assert.notEqual(start, -1, "Production driver shift-close binding was not found.");
@@ -874,40 +878,24 @@ test("driver hold final callback rechecks readonly before local state changes", 
     assert.ok(state.resets >= 1);
 });
 
-test("production driver reading input handler cancels the real shift-close guard", () => {
+test("production driver shift-close requires its hold marker and blocks readonly role", () => {
     const runtime = createHoldRuntime();
-    vm.runInNewContext(extractDriverHoldGuardSource(), {
-        window: runtime.window,
-        Date: runtime.FakeDate,
-    });
-
     const form = new FakeFormElement({method: "post", action: "/driver/shift/close/"});
     const closeButton = new FakeElement("button");
-    const readingInput = new FakeElement("input", {type: "number"});
-    const shiftAction = new FakeElement("input", {type: "hidden"});
-    const reviewPanel = new FakeElement("section");
-    const inputsSection = new FakeElement("section");
-    shiftAction.value = "close";
-    form.dataset.driverShiftConfirmed = "true";
-    form.classList.add("is-reviewed");
-    reviewPanel.hidden = false;
-    inputsSection.hidden = true;
-    form.appendChild(readingInput);
-    form.appendChild(shiftAction);
-
+    const closeLabel = new FakeElement("span", {"data-mobile-shift-label": ""});
+    closeButton.appendChild(closeLabel);
     const binding = extractDriverShiftCloseBindingSource();
     vm.runInNewContext(
         `
         (function () {
             var form = context.form;
             var closeButton = context.closeButton;
-            var shiftAction = context.shiftAction;
-            var inputsSection = context.inputsSection;
             var shiftScroll = null;
-            var reviewPanel = context.reviewPanel;
-            var editButton = null;
             function driverRoleIsReadonly() {
                 return window.isAppRoleReadonly();
+            }
+            function bindDriverShiftHoldAction(boundForm, boundButton, options) {
+                context.holdBinding = {form: boundForm, button: boundButton, options: options};
             }
             ${binding.source}
         })();
@@ -917,39 +905,44 @@ test("production driver reading input handler cancels the real shift-close guard
             context: {
                 form,
                 closeButton,
-                shiftAction,
-                inputsSection,
-                reviewPanel,
             },
         }
     );
 
-    assert.ok(runtime.window.driverShiftCloseHoldGuard);
-    assert.equal(runtime.window.driverShiftCloseHoldGuard.start(), true);
-    runtime.advance(800);
-    runtime.runFrames();
-    assert.ok(
-        Number.parseFloat(
-            closeButton.style.getPropertyValue("--driver-shift-hold")
-        ) > 0
-    );
-    closeButton.classList.add("is-pending");
-
-    readingInput.dispatchEvent({type: "input", target: readingInput});
-
-    assert.equal(shiftAction.value, "review");
-    assert.equal(form.dataset.driverShiftDirty, "true");
-    assert.equal(form.dataset.driverShiftConfirmed, "false");
-    assert.equal(reviewPanel.hidden, true);
-    assert.equal(inputsSection.hidden, false);
-    assert.equal(form.classList.contains("is-reviewed"), false);
-    assert.equal(closeButton.classList.contains("is-holding"), false);
+    assert.equal(form.dispatchEvent(createEvent("submit", form)), false);
+    assert.equal(closeButton.disabled, false);
     assert.equal(closeButton.classList.contains("is-pending"), false);
-    assert.equal(
-        closeButton.style.getPropertyValue("--driver-shift-hold"),
-        "0%"
+    form.dataset.driverShiftHoldComplete = "true";
+    assert.equal(form.dispatchEvent(createEvent("submit", form)), true);
+    assert.equal(closeButton.disabled, true);
+    assert.equal(closeButton.classList.contains("is-pending"), true);
+    assert.equal(closeLabel.textContent, "Закрываем смену");
+    assert.equal(form.dataset.driverShiftHoldComplete, undefined);
+
+    const readonlyRuntime = createHoldRuntime();
+    readonlyRuntime.setReadonly(true);
+    const readonlyForm = new FakeFormElement({method: "post", action: "/driver/shift/close/"});
+    const readonlyButton = new FakeElement("button");
+    vm.runInNewContext(
+        `
+        (function () {
+            var form = context.form;
+            var closeButton = context.closeButton;
+            var shiftScroll = null;
+            function driverRoleIsReadonly() {
+                return window.isAppRoleReadonly();
+            }
+            function bindDriverShiftHoldAction() {}
+            ${binding.source}
+        })();
+        `,
+        {
+            window: readonlyRuntime.window,
+            context: {form: readonlyForm, closeButton: readonlyButton},
+        }
     );
-    assert.equal(runtime.pendingTimers(), 0);
-    assert.equal(runtime.pendingFrames(), 0);
-    assert.equal(/\bresetHold\s*\(/.test(binding.template), false);
+    readonlyForm.dataset.driverShiftHoldComplete = "true";
+    assert.equal(readonlyForm.dispatchEvent(createEvent("submit", readonlyForm)), false);
+    assert.equal(readonlyButton.disabled, false);
+    assert.equal(binding.source.includes("holdMs: 1000"), true);
 });

@@ -124,6 +124,9 @@
     var currentBrigade = "all";
     var currentSlot = null;
     var candidateEmployees = [];
+    var activeEquipmentId = "";
+    var dragSourceEquipmentId = "";
+    var dragTargetEquipmentId = "";
     var saving = false;
     var toastTimer = null;
     var dragPayload = null;
@@ -140,9 +143,15 @@
     }
 
     function employeeMeta(employee) {
-        return textValue(employee && (
+        var position = textValue(employee && (
             employee.position_label || employee.role_label || employee.position || employee.meta
         ));
+        var contractor = textValue(employee && employee.contractor_label);
+        var until = textValue(employee && employee.contractor_access_until_label);
+        if (!contractor) return position;
+        return [position, "Подрядчик: " + contractor + (until ? " · допуск по " + until : "")]
+            .filter(Boolean)
+            .join(" · ");
     }
 
     function employeePhoto(employee) {
@@ -161,31 +170,51 @@
         var presence = employee && employee.presence && typeof employee.presence === "object"
             ? employee.presence
             : {};
-        var status = textValue(presence.status) || "not_registered";
+        var status = textValue(presence.status_code || presence.status) || "not_registered";
         return {
             status: status,
-            label: textValue(presence.label) || "Нет связи с приложением"
+            label: textValue(presence.status_label || presence.label) || "Не подключался",
+            lastSeenTime: textValue(presence.last_seen_time),
+            clientBadges: Array.isArray(presence.client_badges) ? presence.client_badges : []
         };
     }
 
     function createPresenceBadge(employee) {
         var presence = employeePresence(employee);
-        var shortLabels = {
-            online: "В сети",
-            recent: "Недавно",
-            offline: "Нет связи",
-            not_registered: "Нет входа"
-        };
-        var badge = createElement("span", "deputy-presence-badge is-" + presence.status);
-        badge.setAttribute("aria-label", "Приложение: " + presence.label);
-        badge.setAttribute("title", "Приложение: " + presence.label);
-        badge.appendChild(createElement("i", "deputy-presence-badge__dot"));
-        badge.appendChild(createElement(
-            "span",
-            "deputy-presence-badge__label",
-            shortLabels[presence.status] || presence.label
-        ));
-        return badge;
+        var wrapper = createElement("span", "application-presence is-compact deputy-presence");
+        wrapper.setAttribute("data-application-presence", presence.status);
+        wrapper.setAttribute("aria-label", "Приложение: " + presence.label);
+        wrapper.setAttribute("title", "Приложение: " + presence.label);
+
+        var line = createElement("span", "application-presence__line");
+        line.appendChild(createElement("i", "application-presence__dot is-" + presence.status));
+        line.appendChild(createElement("b", "is-" + presence.status, presence.label));
+        if (presence.lastSeenTime) {
+            line.appendChild(createElement("time", "", presence.lastSeenTime));
+        }
+        wrapper.appendChild(line);
+
+        if (presence.clientBadges.length) {
+            var clients = createElement(
+                "small",
+                "application-presence__clients admin-live-client-badges"
+            );
+            clients.setAttribute("aria-label", "Вариант приложения");
+            presence.clientBadges.forEach(function (client) {
+                var label = textValue(client.label) || "Приложение";
+                if (presence.clientBadges.length > 1 && client.app_label) {
+                    label = textValue(client.app_label) + " · " + label;
+                }
+                if (client.version) label += " · " + textValue(client.version);
+                clients.appendChild(createElement(
+                    "em",
+                    "application-presence__client admin-live-client-badge is-" + textValue(client.kind),
+                    label
+                ));
+            });
+            wrapper.appendChild(clients);
+        }
+        return wrapper;
     }
 
     function normalizeSearch(value) {
@@ -314,13 +343,75 @@
         }
     }
 
-    function closeDialog(dialog) {
+    function closeDialog(dialog, options) {
         if (!dialog) return;
+        var preserveEquipmentActive = Boolean(options && options.preserveEquipmentActive);
+        var candidateWasOpen = dialog === candidateDialog && Boolean(dialog.open || dialog.hasAttribute("open"));
+        if (dialog === candidateDialog) {
+            if (preserveEquipmentActive) {
+                dialog.setAttribute("data-preserve-equipment-active", "true");
+            } else {
+                dialog.removeAttribute("data-preserve-equipment-active");
+            }
+        }
         if (typeof dialog.close === "function" && dialog.open) {
             dialog.close();
         } else {
             dialog.removeAttribute("open");
         }
+        if (candidateWasOpen && !preserveEquipmentActive) clearActiveEquipmentRow();
+    }
+
+    function equipmentRowId(row) {
+        return textValue(row && row.equipment && row.equipment.id);
+    }
+
+    function syncEquipmentRowStates() {
+        if (!board) return;
+        Array.prototype.slice.call(board.querySelectorAll(".deputy-equipment-row")).forEach(function (rowNode) {
+            var rowId = textValue(rowNode.getAttribute("data-equipment-id"));
+            var isActive = Boolean(activeEquipmentId) && rowId === activeEquipmentId;
+            var isDragSource = Boolean(dragSourceEquipmentId) && rowId === dragSourceEquipmentId;
+            var isDropTarget = Boolean(dragTargetEquipmentId) && rowId === dragTargetEquipmentId;
+            var interactionLabel = isDropTarget ? "Сюда" : (isDragSource ? "Отсюда" : (isActive ? "Выбрано" : ""));
+            var stateBadge = rowNode.querySelector(".deputy-equipment-state");
+            rowNode.classList.toggle("is-active-equipment", isActive);
+            rowNode.classList.toggle("is-drag-source", isDragSource);
+            rowNode.classList.toggle("is-drop-target", isDropTarget);
+            if (isActive) {
+                rowNode.setAttribute("aria-current", "true");
+            } else {
+                rowNode.removeAttribute("aria-current");
+            }
+            if (stateBadge) {
+                stateBadge.textContent = interactionLabel || "Выбрано";
+                stateBadge.classList.toggle("is-visible", Boolean(interactionLabel));
+            }
+        });
+    }
+
+    function setActiveEquipmentRow(row) {
+        activeEquipmentId = equipmentRowId(row);
+        syncEquipmentRowStates();
+    }
+
+    function clearActiveEquipmentRow() {
+        if (!activeEquipmentId) return;
+        activeEquipmentId = "";
+        syncEquipmentRowStates();
+    }
+
+    function setDragTargetEquipmentRow(row) {
+        var nextId = equipmentRowId(row);
+        if (dragTargetEquipmentId === nextId) return;
+        dragTargetEquipmentId = nextId;
+        syncEquipmentRowStates();
+    }
+
+    function clearDragTargetEquipmentRow(row) {
+        if (row && dragTargetEquipmentId !== equipmentRowId(row)) return;
+        dragTargetEquipmentId = "";
+        syncEquipmentRowStates();
     }
 
     function temporaryTransferData() {
@@ -575,7 +666,17 @@
         }
         appendRecordField("Назначение", assignmentLabel || "Свободен");
         appendRecordField("Статус", employee.status_label || "Активен");
-        appendRecordField("Связь с приложением", employeePresence(employee).label);
+        var presence = employeePresence(employee);
+        appendRecordField("Связь с приложением", presence.label);
+        if (presence.clientBadges.length) {
+            appendRecordField(
+                "Вариант приложения",
+                presence.clientBadges.map(function (client) {
+                    return (textValue(client.label) || "Приложение")
+                        + (client.version ? " · " + textValue(client.version) : "");
+                }).join(", ")
+            );
+        }
         openDialog(recordDialog);
     }
 
@@ -689,6 +790,9 @@
             node.classList.remove("is-dragging");
         });
         clearDropHighlights();
+        dragSourceEquipmentId = "";
+        dragTargetEquipmentId = "";
+        syncEquipmentRowStates();
         removeDragPreview();
         dragPayload = null;
     }
@@ -699,12 +803,8 @@
         preview.appendChild(createAvatar(employee, false));
         var main = createElement("span", "deputy-employee-main");
         main.appendChild(createElement("strong", "", employeeName(employee)));
-        var presence = employeePresence(employee);
-        main.appendChild(createElement(
-            "small",
-            "deputy-employee-presence is-" + presence.status,
-            (employeeMeta(employee) || "Сотрудник") + " · " + presence.label
-        ));
+        main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
+        main.appendChild(createPresenceBadge(employee));
         preview.appendChild(main);
         applyDragPreviewTheme(preview);
         document.body.appendChild(preview);
@@ -735,6 +835,8 @@
                 sourceShiftType: source.source_shift_type,
                 sourcePosition: source.source_position
             };
+            dragSourceEquipmentId = textValue(source.source_equipment_id);
+            syncEquipmentRowStates();
             visual.classList.add("is-dragging");
             if (event.dataTransfer) {
                 event.dataTransfer.effectAllowed = "move";
@@ -860,6 +962,9 @@
         var main = createElement("span", "deputy-equipment-main");
         main.appendChild(createElement("strong", "", equipment.label || "Техника"));
         if (equipment.model_label) main.appendChild(createElement("small", "", equipment.model_label));
+        var stateBadge = createElement("span", "deputy-equipment-state", "Выбрано");
+        stateBadge.setAttribute("aria-hidden", "true");
+        main.appendChild(stateBadge);
         var issue = attentionLabel(row);
         var status = textValue(equipment.status_label);
         var note = issue || (!neutralStatus(status) ? status : "");
@@ -906,7 +1011,8 @@
             button.addEventListener("click", function () {
                 var source = sourceForEmployee(employee);
                 var target = currentSlot;
-                closeDialog(candidateDialog);
+                closeDialog(candidateDialog, { preserveEquipmentActive: true });
+                setActiveEquipmentRow(target.row);
                 saveSlot(target.row, target.slot, employee.id, source, target.position);
             });
             candidateList.appendChild(button);
@@ -951,6 +1057,7 @@
             ? (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник")
             : (state.role.code === "driver" ? "Водитель" : "Машинист");
         currentSlot = { row: row, slot: slot, position: position };
+        setActiveEquipmentRow(row);
         if (candidateContext) {
             candidateContext.textContent = [row.equipment && row.equipment.label, slot.label, positionLabel]
                 .filter(Boolean).join(" · ");
@@ -1102,17 +1209,23 @@
             if (!planEditable() || saving) return;
             event.preventDefault();
             button.classList.add("is-drag-over");
+            setActiveEquipmentRow(row);
+            setDragTargetEquipmentRow(row);
             if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
         });
         button.addEventListener("dragleave", function () {
             button.classList.remove("is-drag-over");
+            clearDragTargetEquipmentRow(row);
         });
         button.addEventListener("drop", function (event) {
             if (!planEditable() || saving) return;
             event.preventDefault();
             button.classList.remove("is-drag-over");
             var payload = dropPayloadFromEvent(event);
-            if (!payload || !payload.employeeId) return;
+            if (!payload || !payload.employeeId) {
+                finishDrag();
+                return;
+            }
             var employee = state.employees.concat(
                 state.rows.reduce(function (items, candidateRow) {
                     (candidateRow.slots || []).forEach(function (candidateSlot) {
@@ -1124,14 +1237,19 @@
             ).find(function (candidate) {
                 return textValue(candidate.id) === textValue(payload.employeeId);
             });
-            if (employee && !employeeCanFillPosition(employee, position)) return;
+            if (employee && !employeeCanFillPosition(employee, position)) {
+                finishDrag();
+                return;
+            }
             if (
                 textValue(payload.sourceEquipmentId) === textValue(row.equipment && row.equipment.id)
                 && textValue(payload.sourceShiftType) === textValue(slot.shift_type)
                 && textValue(payload.sourcePosition || "primary") === textValue(position)
             ) {
+                finishDrag();
                 return;
             }
+            finishDrag();
             saveSlot(row, slot, payload.employeeId, {
                 source_equipment_id: payload.sourceEquipmentId,
                 source_shift_type: payload.sourceShiftType,
@@ -1175,8 +1293,12 @@
         var tbody = document.createElement("tbody");
         rows.forEach(function (row) {
             var tr = document.createElement("tr");
+            tr.classList.add("deputy-equipment-row");
+            tr.setAttribute("data-equipment-id", equipmentRowId(row));
             tr.classList.toggle("has-attention", Boolean(row.attention || row.issue));
             tr.classList.toggle("has-conflict", rowHasConflict(row));
+            tr.addEventListener("pointerdown", function () { setActiveEquipmentRow(row); });
+            tr.addEventListener("focusin", function () { setActiveEquipmentRow(row); });
             var equipmentCell = document.createElement("td");
             equipmentCell.appendChild(createEquipmentCell(row));
             tr.appendChild(equipmentCell);
@@ -1194,6 +1316,7 @@
         });
         table.appendChild(tbody);
         board.appendChild(table);
+        syncEquipmentRowStates();
     }
 
     function updatePublishButton() {
@@ -1521,8 +1644,10 @@
     if (clearSlotButton) {
         clearSlotButton.addEventListener("click", function () {
             if (!currentSlot) return;
-            closeDialog(candidateDialog);
-            saveSlot(currentSlot.row, currentSlot.slot, null, null, currentSlot.position);
+            var target = currentSlot;
+            closeDialog(candidateDialog, { preserveEquipmentActive: true });
+            setActiveEquipmentRow(target.row);
+            saveSlot(target.row, target.slot, null, null, target.position);
         });
     }
     if (publishButton) publishButton.addEventListener("click", openPublishConfirmation);
@@ -1560,6 +1685,13 @@
         });
     }
     if (candidateDialog) {
+        candidateDialog.addEventListener("close", function () {
+            if (candidateDialog.hasAttribute("data-preserve-equipment-active")) {
+                candidateDialog.removeAttribute("data-preserve-equipment-active");
+                return;
+            }
+            clearActiveEquipmentRow();
+        });
         candidateDialog.addEventListener("click", function (event) {
             if (event.target === candidateDialog) closeDialog(candidateDialog);
         });
@@ -1578,6 +1710,22 @@
         if (event.key === "Escape" && photoDialog && photoDialog.open) closeDialog(photoDialog);
         if (event.key === "Escape" && notice && !notice.hidden) hideNotice();
     });
+    document.addEventListener("pointerdown", function (event) {
+        if (!event.target || typeof event.target.closest !== "function") return;
+        if (event.target.closest(".deputy-equipment-row")) return;
+        if (candidateDialog && candidateDialog.contains(event.target)) return;
+        if (recordDialog && recordDialog.contains(event.target)) return;
+        if (photoDialog && photoDialog.contains(event.target)) return;
+        clearActiveEquipmentRow();
+    });
+    document.addEventListener("focusin", function (event) {
+        if (!event.target || typeof event.target.closest !== "function") return;
+        if (event.target.closest(".deputy-equipment-row")) return;
+        if (candidateDialog && candidateDialog.contains(event.target)) return;
+        if (recordDialog && recordDialog.contains(event.target)) return;
+        if (photoDialog && photoDialog.contains(event.target)) return;
+        clearActiveEquipmentRow();
+    });
     document.addEventListener("dragover", moveDragPreview);
     document.addEventListener("drop", finishDrag);
 
@@ -1586,6 +1734,7 @@
             finishDrag();
             currentSlot = null;
             closeDialog(candidateDialog);
+            clearActiveEquipmentRow();
             closeDialog(publishDialog);
             closeDialog(temporaryTransferDialog);
         }
