@@ -25,8 +25,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "37",
-    versionName: "0.1.23",
+    versionCode: "40",
+    versionName: "0.1.24",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -36,8 +36,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "40",
-    versionName: "0.1.24",
+    versionCode: "43",
+    versionName: "0.1.26",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -47,8 +47,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver.qa",
     appName: "Водитель QA",
-    versionCode: "5",
-    versionName: "1.0.4-qa",
+    versionCode: "6",
+    versionName: "1.0.5-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -58,8 +58,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "42",
-    versionName: "0.1.24",
+    versionCode: "45",
+    versionName: "0.1.26",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -69,8 +69,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "41",
-    versionName: "0.1.24-rc",
+    versionCode: "44",
+    versionName: "0.1.26-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -80,8 +80,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator.qa",
     appName: "Экскаваторщик QA",
-    versionCode: "8",
-    versionName: "1.0.7-qa",
+    versionCode: "9",
+    versionName: "1.0.8-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -91,8 +91,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "39",
-    versionName: "0.1.23",
+    versionCode: "42",
+    versionName: "0.1.24",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -102,8 +102,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "38",
-    versionName: "0.1.23-rc",
+    versionCode: "41",
+    versionName: "0.1.24-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -206,6 +206,13 @@ test("driver and excavator builds embed the same complete loud sound pack", () =
     "connection_restored",
     "shift_start",
     "shift_end",
+    "assignment_notice",
+    "action_success_notice",
+    "assignment_removed_notice",
+    "shift_notice",
+    "action_failed_notice",
+    "connection_lost_notice",
+    "connection_restored_notice",
   ];
   for (const profileName of ["driver", "excavator"]) {
     const nativeRaw = resolve(root, "profiles", profileName, "res", "raw");
@@ -232,8 +239,8 @@ test("driver and excavator builds embed the same complete loud sound pack", () =
     const config = profile(profileName);
     const role = profileName.startsWith("excavator") ? "excavator" : "driver";
     assert.equal(config.resourceProfile || profileName, role);
-    assert.equal(config.alertSoundResource, `${role}_truck_assigned`);
-    assert.match(config.alertChannelId, /_v2$/);
+    assert.equal(config.alertSoundResource, `${role}_assignment_notice`);
+    assert.match(config.alertChannelId, /_v3$/);
   }
 
   const activity = readFileSync(resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile", "MainActivity.java"), "utf8");
@@ -244,8 +251,49 @@ test("driver and excavator builds embed the same complete loud sound pack", () =
   assert.match(plugin, /setVolume\(1\.0f, 1\.0f\)/);
   assert.match(plugin, /USAGE_ASSISTANCE_SONIFICATION/);
   const driver = profile("driver");
-  assert.equal(driver.alertSoundResource, "driver_truck_assigned");
-  assert.match(driver.alertChannelId, /_v2$/);
+  assert.equal(driver.alertSoundResource, "driver_assignment_notice");
+  assert.match(driver.alertChannelId, /_v3$/);
+});
+
+test("operational cues stay dynamic when Android shows a heads-up notification", () => {
+  const javaRoot = resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile");
+  const catalog = readFileSync(resolve(javaRoot, "OperationalCueCatalog.java"), "utf8");
+  const notifications = readFileSync(resolve(javaRoot, "AppNotifications.java"), "utf8");
+  const announcer = readFileSync(resolve(javaRoot, "OperationalVoiceAnnouncer.java"), "utf8");
+  const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  const plugin = readFileSync(resolve(javaRoot, "NativeSoundPlugin.java"), "utf8");
+
+  for (const cue of [
+    "assignment_notice",
+    "action_success_notice",
+    "assignment_removed_notice",
+    "shift_notice",
+    "action_failed_notice",
+    "connection_lost_notice",
+    "connection_restored_notice",
+  ]) {
+    assert.match(catalog, new RegExp(`"${cue}"`));
+    assert.match(plugin, new RegExp(`"${cue}"`));
+  }
+  assert.match(catalog, /forOperational[\s\S]*?voice_assignment_removed[\s\S]*?ASSIGNMENT_REMOVED/);
+  assert.match(catalog, /forEquipmentBatch[\s\S]*?sawRemoval[\s\S]*?ASSIGNMENT_REMOVED/);
+  assert.match(notifications, /alerts\.setSound\(null, null\)/);
+  assert.doesNotMatch(notifications, /DEFAULT_NOTIFICATION_URI/);
+  assert.match(announcer, /OperationalVoicePlayer\.playSequence\([\s\S]*?true,[\s\S]*?0L/);
+  assert.match(service, /OperationalCueCatalog\.ASSIGNMENT_REMOVED/);
+  assert.match(service, /OperationalCueCatalog\.CONNECTION_LOST/);
+});
+
+test("semantic operational-cue files match their reviewed manifest", () => {
+  const manifest = JSON.parse(readFileSync(resolve(root, "audio", "operational-cues-manifest.json"), "utf8"));
+  assert.equal(manifest.format.channels, 1);
+  assert.equal(manifest.format.sample_rate_hz, 44100);
+  for (const [cue, metadata] of Object.entries(manifest.cues)) {
+    for (const role of ["driver", "excavator"]) {
+      const bytes = readFileSync(resolve(root, "profiles", role, "res", "raw", `${role}_${cue}.wav`));
+      assert.equal(createHash("sha256").update(bytes).digest("hex"), metadata.sha256, `${role}_${cue}`);
+    }
+  }
 });
 
 test("native builds expose an explicit keyboard close bridge", () => {
@@ -335,7 +383,8 @@ test("background service announces only a fresh driver truck_loaded event", () =
   assert.match(service, /"trip_changed"\.equals\(event\.optString\("type"\)\)/);
   assert.match(service, /"truck_loaded"\.equals\(payload\.optString\("action"\)\)/);
   assert.match(service, /last_driver_dump_point_alert_version/);
-  assert.match(announcer, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
+  assert.match(announcer, /sharedPlayer\.announce\([\s\S]*?0L,[\s\S]*?playCue/);
+  assert.match(player, /playAlertCue\(scheduledGeneration,[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
   assert.match(player, /AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK/);
   assert.match(player, /DriverVoiceCatalog\.resourceNameFor/);
   for (const [id, resource] of [
@@ -402,6 +451,8 @@ test("both production profiles package every approved operational voice phrase",
   assert.match(announcer, /last_operational_voice_/);
   assert.match(service, /showLatestAssignmentAlert/);
   assert.match(service, /CONNECTION_LOSS_ANNOUNCED/);
+  assert.match(service, /connectionLossWasAnnounced && !AppVisibility\.isForeground\(\)/);
+  assert.match(service, /shouldAnnounceConnectionLoss && !AppVisibility\.isForeground\(\)/);
 });
 
 test("recorded equipment numbers are packaged and routed through native sequences", () => {
@@ -461,7 +512,7 @@ test("recorded equipment numbers are packaged and routed through native sequence
   const excavatorShellVersion = excavatorTemplate.match(
     /var excavatorShellVersion = "(excavator-mobile-shell-v\d+)";/
   )?.[1];
-  assert.equal(excavatorShellVersion, "excavator-mobile-shell-v220");
+  assert.equal(excavatorShellVersion, "excavator-mobile-shell-v221");
   const excavatorAssetVersions = [
     ...excavatorTemplate.matchAll(/\?v=(excavator-mobile-shell-v\d+)/g),
   ].map((match) => match[1]);
@@ -486,12 +537,12 @@ test("foreground driver screen uses the same deduplicated recorded voice bridge"
   assert.match(announcer, /private static DriverVoicePlayer sharedPlayer/);
   assert.match(announcer, /lastScheduledTripId/);
   assert.match(announcer, /last_driver_dump_point_alert_trip_id[\s\S]*?tripId == persistedTripId[\s\S]*?tripId == lastScheduledTripId/);
-  assert.match(announcer, /ALERT_CUE_DURATION_MS[\s\S]*?VOICE_AFTER_CUE_DELAY_MS[\s\S]*?sharedPlayer\.announce/);
+  assert.match(announcer, /sharedPlayer\.announce\([\s\S]*?0L,[\s\S]*?playCue/);
   assert.match(announcer, /sharedPlayer\.announce\([\s\S]*?preferences\.edit\(\)/);
   assert.match(plugin, /result\.announced[\s\S]*?cuePlayed/);
   assert.match(plugin, /dumpPointName,[\s\S]*?false,[\s\S]*?true/);
   assert.match(service, /displayName,[\s\S]*?showNotification,[\s\S]*?true/);
-  assert.match(player, /void announce\([\s\S]*?boolean playCue\)[\s\S]*?playAlertCue\(\)/);
+  assert.match(player, /void announce\([\s\S]*?boolean playCue\)[\s\S]*?playAlertCue\(scheduledGeneration,[\s\S]*?VOICE_AFTER_CUE_DELAY_MS/);
   assert.match(service, /DriverDumpPointAnnouncer\.announce/);
   assert.doesNotMatch(service, /private DriverVoicePlayer driverVoicePlayer/);
   assert.doesNotMatch(plugin, /private DriverVoicePlayer driverVoicePlayer/);

@@ -1,14 +1,11 @@
 package ru.copperresources.mobile;
 
 import android.app.Notification;
-import android.annotation.SuppressLint;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
-import android.media.AudioAttributes;
-import android.net.Uri;
 import android.os.Build;
 
 import androidx.core.app.NotificationCompat;
@@ -20,7 +17,6 @@ public final class AppNotifications {
 
     private AppNotifications() {}
 
-    @SuppressLint("DiscouragedApi")
     public static void createChannels(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return;
@@ -40,19 +36,6 @@ public final class AppNotifications {
         foreground.setSound(null, null);
         manager.createNotificationChannel(foreground);
 
-        int soundId = context.getResources().getIdentifier(
-            BuildConfig.ALERT_SOUND_RESOURCE,
-            "raw",
-            context.getPackageName()
-        );
-        Uri soundUri = soundId == 0
-            ? android.provider.Settings.System.DEFAULT_NOTIFICATION_URI
-            : Uri.parse("android.resource://" + context.getPackageName() + "/" + soundId);
-        AudioAttributes attributes = new AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .build();
-
         NotificationChannel alerts = new NotificationChannel(
             BuildConfig.ALERT_CHANNEL_ID,
             context.getString(R.string.alert_channel_name),
@@ -61,7 +44,9 @@ public final class AppNotifications {
         alerts.setDescription("Звуковые производственные оповещения приложения");
         alerts.enableVibration(true);
         alerts.enableLights(true);
-        alerts.setSound(soundUri, attributes);
+        // Channel sounds are immutable and cannot vary per event. The shared player
+        // owns the selected cue and voice while this channel keeps heads-up visibility.
+        alerts.setSound(null, null);
         manager.createNotificationChannel(alerts);
     }
 

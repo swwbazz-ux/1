@@ -5371,7 +5371,7 @@ function playDriverReleaseOfferCue(assignmentId) {
         try { navigator.vibrate([180, 90, 180]); } catch (error) {}
     }
     announceDriverVoiceUnderClaim(opKey, function () {
-        return playDriverSound("truck_assigned");
+        return playDriverSound("assignment_removed_notice");
     });
 }
 

@@ -29,4 +29,5 @@ test("Driver release keeps recorded voice calls wired to operational actions", (
   assert.match(driverTemplate, /playDriverVoice\(actionVoice\.cue, actionVoice\.voice\)/);
   assert.match(driverTemplate, /announceEquipment\([\s\S]*?driver_excavator_assigned/);
   assert.match(driverTemplate, /announceDumpPoint\(details\)/);
+  assert.match(driverTemplate, /function playDriverReleaseOfferCue\(assignmentId\)[\s\S]*?playDriverSound\("assignment_removed_notice"\)/);
 });

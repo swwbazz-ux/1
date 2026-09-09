@@ -784,7 +784,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v220";
+const CACHE_NAME = "excavator-mobile-shell-v221";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -830,7 +830,14 @@ const CORE_ASSETS = [
   "/static/audio/excavator/excavator_connection_lost.wav",
   "/static/audio/excavator/excavator_connection_restored.wav",
   "/static/audio/excavator/excavator_shift_start.wav",
-  "/static/audio/excavator/excavator_shift_end.wav"
+  "/static/audio/excavator/excavator_shift_end.wav",
+  "/static/audio/excavator/excavator_assignment_notice.wav",
+  "/static/audio/excavator/excavator_action_success_notice.wav",
+  "/static/audio/excavator/excavator_assignment_removed_notice.wav",
+  "/static/audio/excavator/excavator_shift_notice.wav",
+  "/static/audio/excavator/excavator_action_failed_notice.wav",
+  "/static/audio/excavator/excavator_connection_lost_notice.wav",
+  "/static/audio/excavator/excavator_connection_restored_notice.wav"
 ];
 
 self.addEventListener("install", event => {

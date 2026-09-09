@@ -261,7 +261,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v210'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v211'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -339,7 +339,14 @@ const CORE_ASSETS = [
     "/static/audio/driver/driver_connection_lost.wav",
     "/static/audio/driver/driver_connection_restored.wav",
     "/static/audio/driver/driver_shift_start.wav",
-    "/static/audio/driver/driver_shift_end.wav"
+    "/static/audio/driver/driver_shift_end.wav",
+    "/static/audio/driver/driver_assignment_notice.wav",
+    "/static/audio/driver/driver_action_success_notice.wav",
+    "/static/audio/driver/driver_assignment_removed_notice.wav",
+    "/static/audio/driver/driver_shift_notice.wav",
+    "/static/audio/driver/driver_action_failed_notice.wav",
+    "/static/audio/driver/driver_connection_lost_notice.wav",
+    "/static/audio/driver/driver_connection_restored_notice.wav"
 ];
 
 self.addEventListener("install", (event) => {{

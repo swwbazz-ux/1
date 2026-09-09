@@ -62,6 +62,13 @@ test(`${profile} native app receives the exact event name and full sound map`, a
             "connection_restored",
             "shift_start",
             "shift_end",
+            "assignment_notice",
+            "action_success_notice",
+            "assignment_removed_notice",
+            "shift_notice",
+            "action_failed_notice",
+            "connection_lost_notice",
+            "connection_restored_notice",
         ]
     );
     assert.equal(runtime.window.MobileOperationalSounds.profile, profile);
@@ -71,8 +78,10 @@ test(`${profile} native app receives the exact event name and full sound map`, a
     );
     assert.equal(await runtime.window.MobileOperationalSounds.play("shift_start"), true);
     assert.deepEqual(runtime.played, ["shift_start"]);
+    assert.equal(await runtime.window.MobileOperationalSounds.play("assignment_removed_notice"), true);
+    assert.deepEqual(runtime.played, ["shift_start", "assignment_removed_notice"]);
     assert.equal(await runtime.window.MobileOperationalSounds.play("unknown"), false);
-    assert.deepEqual(runtime.played, ["shift_start"]);
+    assert.deepEqual(runtime.played, ["shift_start", "assignment_removed_notice"]);
 });
 }
 
@@ -88,11 +97,34 @@ test("connection sounds fire only on a real lost transition and its recovery", (
     runtime.document.body.dataset.connectionState = "lost";
     listener();
     listener();
-    assert.deepEqual(runtime.played, ["connection_lost"]);
+    assert.deepEqual(runtime.played, ["connection_lost_notice"]);
 
     runtime.document.body.dataset.connectionState = "ok";
     listener();
-    assert.deepEqual(runtime.played, ["connection_lost", "connection_restored"]);
+    assert.deepEqual(runtime.played, ["connection_lost_notice", "connection_restored_notice"]);
+});
+
+test("connection transitions use one native signal-and-voice sequence", () => {
+    const runtime = createRuntime();
+    const calls = [];
+    runtime.window.Capacitor.Plugins.NativeSound.announceOperational = (details) => {
+        calls.push(details);
+        return Promise.resolve({announced: true});
+    };
+    const listener = runtime.windowListeners.get("operational-state-connection");
+
+    runtime.document.body.dataset.connectionState = "weak";
+    listener();
+    runtime.document.body.dataset.connectionState = "lost";
+    listener();
+    listener();
+    runtime.document.body.dataset.connectionState = "ok";
+    listener();
+
+    assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+        {cue: "connection_lost", voice: "voice_connection_lost", cueResolved: false, eventVersion: 0, eventKey: ""},
+        {cue: "connection_restored", voice: "voice_connection_restored", cueResolved: false, eventVersion: 0, eventKey: ""},
+    ]);
 });
 
 test("Excavator assignment batches reach the native bridge with exact operation keys", async () => {
@@ -157,5 +189,102 @@ test("a synchronous batch bridge failure falls back without rejecting", async ()
     });
 
     assert.equal(result.announced, true);
-    assert.deepEqual(runtime.played, ["truck_assigned"]);
+    assert.deepEqual(runtime.played, ["assignment_notice"]);
+});
+
+test("native bridge keeps the legacy event contract while web fallback chooses the semantic cue", async () => {
+    const runtime = createRuntime("driver");
+    const calls = [];
+    runtime.window.Capacitor.Plugins.NativeSound.announceOperational = (details) => {
+        calls.push(details);
+        return Promise.resolve({announced: true});
+    };
+
+    const announced = await runtime.window.MobileOperationalSounds.announceOperational({
+        cue: "truck_assigned",
+        voice: "voice_assignment_removed",
+        eventVersion: 133,
+        eventKey: "driver_assignment",
+    });
+
+    assert.equal(announced.announced, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].cue, "truck_assigned");
+    assert.equal(calls[0].voice, "voice_assignment_removed");
+    assert.equal(calls[0].eventVersion, 133);
+    assert.equal(calls[0].eventKey, "driver_assignment");
+
+    runtime.window.Capacitor.Plugins.NativeSound.announceOperational = () => Promise.reject(new Error("old bridge"));
+    const fallback = await runtime.window.MobileOperationalSounds.announceOperational({
+        cue: "truck_assigned",
+        voice: "voice_assignment_removed",
+    });
+
+    assert.equal(fallback.announced, true);
+    assert.deepEqual(runtime.played, ["assignment_removed_notice"]);
+});
+
+test("equipment removal fallback uses its distinct removal cue", async () => {
+    const runtime = createRuntime("excavator");
+    runtime.window.Capacitor.Plugins.NativeSound.announceEquipment = () => Promise.reject(new Error("old bridge"));
+    runtime.window.Capacitor.Plugins.NativeSound.announceOperational = () => Promise.reject(new Error("old bridge"));
+
+    const result = await runtime.window.MobileOperationalSounds.announceEquipment({
+        cue: "truck_assigned",
+        action: "excavator_truck_removed",
+        equipmentNumber: "41",
+        fallbackVoice: "voice_truck_removed",
+    });
+
+    assert.equal(result.announced, true);
+    assert.deepEqual(runtime.played, ["assignment_removed_notice"]);
+});
+
+test("a mixed Excavator batch keeps the generic assignment cue in its fallback", async () => {
+    for (const items of [[
+        {
+            action: "excavator_truck_removed",
+            equipmentNumber: "41",
+            fallbackVoice: "voice_truck_removed",
+            eventVersion: 141,
+            operationKey: "excavator-assignment:remove:501:9",
+        },
+        {
+            action: "excavator_truck_assigned",
+            equipmentNumber: "42",
+            fallbackVoice: "voice_truck_assigned",
+            eventVersion: 142,
+            operationKey: "excavator-assignment:assign:502:9",
+        },
+    ], [
+        {
+            action: "excavator_truck_sent",
+            equipmentNumber: "43",
+            fallbackVoice: "voice_truck_sent",
+            eventVersion: 143,
+            operationKey: "excavator-assignment:sent:503:9",
+        },
+        {
+            action: "excavator_truck_assigned",
+            equipmentNumber: "44",
+            fallbackVoice: "voice_truck_assigned",
+            eventVersion: 144,
+            operationKey: "excavator-assignment:assign:504:9",
+        },
+    ]]) {
+        const runtime = createRuntime("excavator");
+        runtime.window.Capacitor.Plugins.NativeSound.announceEquipmentBatch = () => {
+            throw new Error("batch bridge unavailable");
+        };
+        runtime.window.Capacitor.Plugins.NativeSound.announceEquipment = () => {
+            throw new Error("equipment bridge unavailable");
+        };
+        runtime.window.Capacitor.Plugins.NativeSound.announceOperational = () => {
+            throw new Error("operational bridge unavailable");
+        };
+
+        const result = await runtime.window.MobileOperationalSounds.announceEquipmentBatch({items});
+        assert.equal(result.announced, true);
+        assert.deepEqual(runtime.played, ["assignment_notice"]);
+    }
 });

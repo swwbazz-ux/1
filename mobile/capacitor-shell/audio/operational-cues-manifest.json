@@ -1,0 +1,47 @@
+{
+  "format": {
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "codec": "pcm_s16le_wav",
+    "loudness_target_lufs": -18,
+    "true_peak_db": -1.5
+  },
+  "source_status": "user_supplied_2026-09-09",
+  "cues": {
+    "assignment_notice": {
+      "source": "Sound_19346.mp3",
+      "trim_seconds": [0.12, 3.279],
+      "sha256": "f4d218d1638caa210782cfd15efab013280f2c6b16ef48ca3a10ffca7b4c2895"
+    },
+    "action_success_notice": {
+      "source": "Sound_23927.mp3",
+      "trim_seconds": [0.97, 3.32],
+      "sha256": "0e2c6d7292d23d1ae4fec134f95a989e771833957d34e38bf778e9a23e287b7c"
+    },
+    "assignment_removed_notice": {
+      "source": "Sound_23928.mp3",
+      "trim_seconds": [0.47, 3.15],
+      "sha256": "709ab05dacfa2ab8cb2793f47902eb60e20eec39c3f215bfe24205c391a45f17"
+    },
+    "shift_notice": {
+      "source": "informator-na-_okzale.mp3",
+      "trim_seconds": [0.49, 5.15],
+      "sha256": "8eae5a6771a3e99d1202179ac0b469a2153b63f99150f39475e36c0df77c8867"
+    },
+    "action_failed_notice": {
+      "source": "Sound_23926.mp3 low motif",
+      "trim_seconds": [0.95, 5.15],
+      "sha256": "55a02d16b5b3649ce3b11b1e7dc54805782bdab38924f8042fcd1daece88e3ac"
+    },
+    "connection_lost_notice": {
+      "source": "Sound_23926.mp3 low motif",
+      "trim_seconds": [0.95, 5.15],
+      "sha256": "55a02d16b5b3649ce3b11b1e7dc54805782bdab38924f8042fcd1daece88e3ac"
+    },
+    "connection_restored_notice": {
+      "source": "Sound_23926.mp3 high motif",
+      "trim_seconds": [6.95, 11.18],
+      "sha256": "b6a28aa9870738c90832c4f359b24d38782804879009d35f9f97e323027381ae"
+    }
+  }
+}

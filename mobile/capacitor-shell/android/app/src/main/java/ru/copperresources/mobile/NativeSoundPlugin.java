@@ -30,7 +30,14 @@ public class NativeSoundPlugin extends Plugin {
         "connection_lost",
         "connection_restored",
         "shift_start",
-        "shift_end"
+        "shift_end",
+        "assignment_notice",
+        "action_success_notice",
+        "assignment_removed_notice",
+        "shift_notice",
+        "action_failed_notice",
+        "connection_lost_notice",
+        "connection_restored_notice"
     ));
     private static final Set<String> ALLOWED_VOICES = new HashSet<>(Arrays.asList(
         "voice_shift_opened",
@@ -56,11 +63,12 @@ public class NativeSoundPlugin extends Plugin {
 
     @PluginMethod
     public void play(PluginCall call) {
-        String soundName = call.getString("name", "");
-        if (!ALLOWED_SOUNDS.contains(soundName)) {
+        String requestedSoundName = call.getString("name", "");
+        if (!ALLOWED_SOUNDS.contains(requestedSoundName)) {
             call.reject("Unknown sound");
             return;
         }
+        String soundName = OperationalCueCatalog.forDirectCue(requestedSoundName);
         int resourceId = getContext().getResources().getIdentifier(
             BuildConfig.APP_PROFILE_ID + "_" + soundName,
             "raw",
@@ -117,12 +125,16 @@ public class NativeSoundPlugin extends Plugin {
 
     @PluginMethod
     public void announceOperational(PluginCall call) {
-        String cueName = call.getString("cue", "");
+        String requestedCueName = call.getString("cue", "");
         String voiceName = call.getString("voice", "");
-        if (!ALLOWED_SOUNDS.contains(cueName) || !ALLOWED_VOICES.contains(voiceName)) {
+        if (!ALLOWED_SOUNDS.contains(requestedCueName) || !ALLOWED_VOICES.contains(voiceName)) {
             call.reject("Unknown operational voice");
             return;
         }
+        boolean cueResolved = Boolean.TRUE.equals(call.getBoolean("cueResolved", false));
+        String cueName = cueResolved
+            ? requestedCueName
+            : OperationalCueCatalog.forOperational(requestedCueName, voiceName);
         long eventVersion = readNumericLong(call, "eventVersion");
         String eventKey = call.getString("eventKey", "");
         OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announce(
@@ -143,12 +155,16 @@ public class NativeSoundPlugin extends Plugin {
 
     @PluginMethod
     public void announceEquipment(PluginCall call) {
-        String cueName = call.getString("cue", "truck_assigned");
-        if (!ALLOWED_SOUNDS.contains(cueName)) {
+        String requestedCueName = call.getString("cue", "truck_assigned");
+        if (!ALLOWED_SOUNDS.contains(requestedCueName)) {
             call.reject("Unknown equipment cue");
             return;
         }
         String action = call.getString("action", "");
+        boolean cueResolved = Boolean.TRUE.equals(call.getBoolean("cueResolved", false));
+        String cueName = cueResolved
+            ? requestedCueName
+            : OperationalCueCatalog.forEquipment(requestedCueName, action);
         String equipmentNumber = call.getString("equipmentNumber", "");
         long dumpPointId = readNumericLong(call, "dumpPointId");
         String dumpPointName = call.getString("dumpPointName", "");
@@ -190,13 +206,14 @@ public class NativeSoundPlugin extends Plugin {
                 .put("reason", OperationalVoiceAnnouncer.REASON_RESOURCE_UNAVAILABLE));
             return;
         }
-        String cueName = call.getString("cue", "truck_assigned");
-        if (!ALLOWED_SOUNDS.contains(cueName)) {
+        String requestedCueName = call.getString("cue", "truck_assigned");
+        if (!ALLOWED_SOUNDS.contains(requestedCueName)) {
             call.reject("Unknown equipment cue");
             return;
         }
         JSArray items = call.getArray("items", new JSArray());
         List<OperationalVoiceAnnouncer.Operation> operations = new ArrayList<>();
+        List<String> actions = new ArrayList<>();
         long latestEventVersion = 0L;
         for (int index = 0; index < items.length(); index += 1) {
             JSONObject item = items.optJSONObject(index);
@@ -217,8 +234,10 @@ public class NativeSoundPlugin extends Plugin {
                 continue;
             }
             latestEventVersion = Math.max(latestEventVersion, item.optLong("eventVersion", 0L));
+            actions.add(action);
             operations.add(new OperationalVoiceAnnouncer.Operation(operationKey, voices));
         }
+        String cueName = OperationalCueCatalog.forEquipmentBatch(requestedCueName, actions);
         OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceOperations(
             getContext(),
             cueName,

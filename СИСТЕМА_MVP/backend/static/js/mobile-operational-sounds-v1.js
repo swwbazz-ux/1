@@ -15,7 +15,14 @@
         "connection_lost",
         "connection_restored",
         "shift_start",
-        "shift_end"
+        "shift_end",
+        "assignment_notice",
+        "action_success_notice",
+        "assignment_removed_notice",
+        "shift_notice",
+        "action_failed_notice",
+        "connection_lost_notice",
+        "connection_restored_notice"
     ]);
     var soundFiles = Object.freeze(soundNames.reduce(function (files, name) {
         files[name] = profile + "_" + name + ".wav";
@@ -26,6 +33,85 @@
     var loadingBuffers = Object.create(null);
     var activeSource = null;
     var lastConnectionState = "";
+
+    var directCueAliases = Object.freeze({
+        truck_assigned: "assignment_notice",
+        action_ok: "action_success_notice",
+        action_error: "action_failed_notice",
+        connection_lost: "connection_lost_notice",
+        connection_restored: "connection_restored_notice",
+        shift_start: "shift_notice",
+        shift_end: "shift_notice"
+    });
+
+    function directCueName(name) {
+        name = String(name || "");
+        return directCueAliases[name] || name;
+    }
+
+    function operationalCueName(cueName, voiceName) {
+        voiceName = String(voiceName || "");
+        if (voiceName === "voice_shift_opened" || voiceName === "voice_shift_closed") {
+            return "shift_notice";
+        }
+        if (voiceName === "voice_connection_lost") return "connection_lost_notice";
+        if (voiceName === "voice_connection_restored") return "connection_restored_notice";
+        if (voiceName === "voice_assignment_removed" || voiceName === "voice_truck_removed") {
+            return "assignment_removed_notice";
+        }
+        if ([
+            "voice_action_failed",
+            "voice_trip_finish_failed",
+            "voice_truck_send_failed"
+        ].indexOf(voiceName) >= 0) {
+            return "action_failed_notice";
+        }
+        if ([
+            "voice_trip_finished",
+            "voice_downtime_started",
+            "voice_downtime_finished",
+            "voice_face_settings_saved",
+            "voice_truck_sent"
+        ].indexOf(voiceName) >= 0) {
+            return "action_success_notice";
+        }
+        if ([
+            "voice_excavator_assigned",
+            "voice_excavator_changed",
+            "voice_truck_assigned"
+        ].indexOf(voiceName) >= 0) {
+            return "assignment_notice";
+        }
+        return directCueName(cueName);
+    }
+
+    function equipmentCueName(cueName, action) {
+        action = String(action || "");
+        if (action === "excavator_truck_removed") return "assignment_removed_notice";
+        if (action === "excavator_truck_sent") return "action_success_notice";
+        if (action === "excavator_truck_assigned" || action === "driver_excavator_assigned") {
+            return "assignment_notice";
+        }
+        return directCueName(cueName);
+    }
+
+    function equipmentBatchCueName(cueName, items) {
+        var sawAssignment = false;
+        var sawRemoval = false;
+        var sawSuccess = false;
+        (items || []).forEach(function (item) {
+            var action = String(item && item.action || "");
+            if (action === "excavator_truck_removed") sawRemoval = true;
+            else if (action === "excavator_truck_sent") sawSuccess = true;
+            else if (action === "excavator_truck_assigned" || action === "driver_excavator_assigned") {
+                sawAssignment = true;
+            }
+        });
+        if (sawRemoval && !sawAssignment && !sawSuccess) return "assignment_removed_notice";
+        if (sawSuccess && !sawAssignment && !sawRemoval) return "action_success_notice";
+        if (sawAssignment || sawRemoval || sawSuccess) return "assignment_notice";
+        return directCueName(cueName);
+    }
 
     function capacitorNativeSoundPlugin() {
         var capacitor = window.Capacitor;
@@ -131,15 +217,16 @@
 
     function play(name) {
         if (!soundFiles[name]) return Promise.resolve(false);
+        var webName = directCueName(name);
         var plugin = nativeSoundPlugin();
         if (plugin) {
             return Promise.resolve(plugin.play({name: name})).then(function () {
                 return true;
             }).catch(function () {
-                return playWebSound(name);
+                return playWebSound(webName);
             });
         }
-        return playWebSound(name);
+        return playWebSound(webName);
     }
 
     function announceDumpPoint(details) {
@@ -165,25 +252,40 @@
 
     function announceOperational(details) {
         details = details || {};
+        var requestedCue = String(details.cue || "action_ok");
+        var voiceName = String(details.voice || "");
+        var fallbackCue = details._cueIsResolved === true
+            ? requestedCue
+            : operationalCueName(requestedCue, voiceName);
         var plugin = capacitorNativeSoundPlugin();
-        if (!plugin || typeof plugin.announceOperational !== "function") {
-            return play(String(details.cue || "action_ok")).then(function (played) {
+        function fallback() {
+            return play(fallbackCue).then(function (played) {
                 return {supported: false, announced: played};
             });
         }
-        return Promise.resolve(plugin.announceOperational({
-            cue: String(details.cue || "action_ok"),
-            voice: String(details.voice || ""),
-            eventVersion: Number(details.eventVersion || 0),
-            eventKey: String(details.eventKey || "")
-        })).then(function (result) {
+        if (!plugin || typeof plugin.announceOperational !== "function") {
+            return fallback();
+        }
+        var pending;
+        try {
+            pending = plugin.announceOperational({
+                cue: requestedCue,
+                voice: voiceName,
+                cueResolved: details._cueIsResolved === true,
+                eventVersion: Number(details.eventVersion || 0),
+                eventKey: String(details.eventKey || "")
+            });
+        } catch (error) {
+            return fallback();
+        }
+        return Promise.resolve(pending).then(function (result) {
             return {
                 supported: true,
                 announced: !!(result && result.announced === true),
                 reason: result && result.reason ? String(result.reason) : ""
             };
         }).catch(function () {
-            return play(String(details.cue || "action_ok")).then(function (played) {
+            return play(fallbackCue).then(function (played) {
                 return {supported: true, announced: played, reason: "bridge_error"};
             });
         });
@@ -191,41 +293,44 @@
 
     function announceEquipment(details) {
         details = details || {};
+        var requestedCue = String(details.cue || "truck_assigned");
+        var fallbackCue = details._cueIsResolved === true
+            ? requestedCue
+            : equipmentCueName(requestedCue, details.action);
         var plugin = capacitorNativeSoundPlugin();
-        if (!plugin || typeof plugin.announceEquipment !== "function") {
+        function fallback() {
             return announceOperational({
-                cue: String(details.cue || "truck_assigned"),
+                cue: fallbackCue,
+                _cueIsResolved: true,
                 voice: String(details.fallbackVoice || "voice_truck_assigned"),
                 eventVersion: Number(details.eventVersion || 0),
                 eventKey: String(details.eventKey || "")
             });
         }
-        return Promise.resolve(plugin.announceEquipment({
-            cue: String(details.cue || "truck_assigned"),
-            action: String(details.action || ""),
-            equipmentNumber: String(details.equipmentNumber || ""),
-            dumpPointId: Number(details.dumpPointId || 0),
-            dumpPointName: String(details.dumpPointName || ""),
-            eventVersion: Number(details.eventVersion || 0),
-            eventKey: String(details.eventKey || "")
-        })).then(function (result) {
+        if (!plugin || typeof plugin.announceEquipment !== "function") {
+            return fallback();
+        }
+        var pending;
+        try {
+            pending = plugin.announceEquipment({
+                cue: requestedCue,
+                cueResolved: details._cueIsResolved === true,
+                action: String(details.action || ""),
+                equipmentNumber: String(details.equipmentNumber || ""),
+                dumpPointId: Number(details.dumpPointId || 0),
+                dumpPointName: String(details.dumpPointName || ""),
+                eventVersion: Number(details.eventVersion || 0),
+                eventKey: String(details.eventKey || "")
+            });
+        } catch (error) {
+            return fallback();
+        }
+        return Promise.resolve(pending).then(function (result) {
             if (result && result.announced === true) {
                 return {supported: true, announced: true, reason: String(result.reason || "")};
             }
-            return announceOperational({
-                cue: String(details.cue || "truck_assigned"),
-                voice: String(details.fallbackVoice || "voice_truck_assigned"),
-                eventVersion: Number(details.eventVersion || 0),
-                eventKey: String(details.eventKey || "")
-            });
-        }).catch(function () {
-            return announceOperational({
-                cue: String(details.cue || "truck_assigned"),
-                voice: String(details.fallbackVoice || "voice_truck_assigned"),
-                eventVersion: Number(details.eventVersion || 0),
-                eventKey: String(details.eventKey || "")
-            });
-        });
+            return fallback();
+        }).catch(fallback);
     }
 
     function announceEquipmentBatch(details) {
@@ -235,10 +340,13 @@
             return Promise.resolve({supported: true, announced: false, reason: "resource_unavailable"});
         }
         var plugin = capacitorNativeSoundPlugin();
+        var requestedCue = String(details.cue || "truck_assigned");
+        var fallbackCue = equipmentBatchCueName(requestedCue, items);
         function fallback() {
             var first = items[0] || {};
             return announceEquipment({
-                cue: String(details.cue || "truck_assigned"),
+                cue: fallbackCue,
+                _cueIsResolved: true,
                 action: String(first.action || ""),
                 equipmentNumber: String(first.equipmentNumber || ""),
                 fallbackVoice: String(first.fallbackVoice || "voice_truck_assigned"),
@@ -252,7 +360,7 @@
         var pending;
         try {
             pending = plugin.announceEquipmentBatch({
-                cue: String(details.cue || "truck_assigned"),
+                cue: requestedCue,
                 items: items.map(function (item) {
                     return {
                         action: String(item.action || ""),
@@ -322,9 +430,15 @@
         var previousState = lastConnectionState;
         lastConnectionState = nextState;
         if (nextState === "lost") {
-            play("connection_lost");
+            announceOperational({
+                cue: "connection_lost",
+                voice: "voice_connection_lost"
+            });
         } else if (previousState === "lost" && nextState === "ok") {
-            play("connection_restored");
+            announceOperational({
+                cue: "connection_restored",
+                voice: "voice_connection_restored"
+            });
         }
     });
 

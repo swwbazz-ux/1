@@ -66,16 +66,13 @@ public final class DriverDumpPointAnnouncer {
             "Новая точка разгрузки",
             displayName
         );
-        long voiceDelayMs = BuildConfig.ALERT_CUE_DURATION_MS
-            + BuildConfig.VOICE_AFTER_CUE_DELAY_MS;
-
         /* Сначала гарантированно ставим звук в общий проигрыватель и только
            после этого публикуем dedupe-маркер для второго канала. */
         sharedPlayer.announce(
             dumpPointId,
             displayName,
-            voiceDelayMs,
-            playCue && !notificationShown,
+            0L,
+            playCue,
             eventVersion,
             tripId
         );
@@ -86,7 +83,7 @@ public final class DriverDumpPointAnnouncer {
             .putLong("last_driver_dump_point_alert_trip_id", tripId)
             .putLong("last_driver_dump_point_alert_dump_point_id", dumpPointId)
             .commit();
-        return Result.announced(notificationShown, playCue && !notificationShown);
+        return Result.announced(notificationShown, playCue);
     }
 
     public static final class Result {

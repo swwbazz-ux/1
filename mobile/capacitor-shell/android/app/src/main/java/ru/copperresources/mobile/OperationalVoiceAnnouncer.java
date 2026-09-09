@@ -72,10 +72,8 @@ public final class OperationalVoiceAnnouncer {
             appContext,
             cueName,
             voiceNames,
-            !notificationShown,
-            notificationShown
-                ? BuildConfig.ALERT_CUE_DURATION_MS + BuildConfig.VOICE_AFTER_CUE_DELAY_MS
-                : 0L
+            true,
+            0L
         );
         if (!queued) {
             return Result.rejected(REASON_RESOURCE_UNAVAILABLE);
@@ -142,10 +140,8 @@ public final class OperationalVoiceAnnouncer {
             appContext,
             cueName,
             voiceNames.toArray(new String[0]),
-            !notificationShown,
-            notificationShown
-                ? BuildConfig.ALERT_CUE_DURATION_MS + BuildConfig.VOICE_AFTER_CUE_DELAY_MS
-                : 0L
+            true,
+            0L
         );
         if (!queued) {
             return Result.rejected(REASON_RESOURCE_UNAVAILABLE);

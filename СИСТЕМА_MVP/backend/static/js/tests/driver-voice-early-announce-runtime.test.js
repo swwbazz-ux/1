@@ -538,7 +538,7 @@ test("release_pending plays one cue and no voice", async () => {
 
     assert.deepEqual(
         runtime.soundCalls,
-        ["truck_assigned"],
+        ["assignment_removed_notice"],
         "the offer must draw attention with a single cue"
     );
     assert.equal(
@@ -566,7 +566,7 @@ test("a repeated DOM refresh does not repeat the release cue", async () => {
 
     assert.deepEqual(
         runtime.soundCalls,
-        ["truck_assigned"],
+        ["assignment_removed_notice"],
         "the cue is claimed once per release offer, however often the screen refreshes"
     );
     assert.equal(runtime.vibrations.length, 1);
@@ -582,7 +582,7 @@ test("release_applied still produces one full announcement after the pending cue
         driverExcavatorNumber: "",
     });
     await settlePromises();
-    assert.deepEqual(runtime.soundCalls, ["truck_assigned"]);
+    assert.deepEqual(runtime.soundCalls, ["assignment_removed_notice"]);
     assert.equal(runtime.bridgeCalls.length, 0);
 
     /* Водитель подтвердил: приходит release_applied с тем же номером записи. */
@@ -605,7 +605,7 @@ test("release_applied still produces one full announcement after the pending cue
         driverExcavatorNumber: "",
     });
     await settlePromises();
-    assert.deepEqual(runtime.soundCalls, ["truck_assigned"]);
+    assert.deepEqual(runtime.soundCalls, ["assignment_removed_notice"]);
     assert.equal(runtime.bridgeCalls.length, 1);
 });
 
@@ -634,7 +634,7 @@ test("the release cue and the release phrase use separate claim keys", async () 
 test("the release cue never reaches the native announcer", () => {
     assert.match(
         RELEASE_OFFER_CUE_SOURCE,
-        /playDriverSound\("truck_assigned"\)/,
+        /playDriverSound\("assignment_removed_notice"\)/,
         "the offer uses the plain signal player"
     );
     assert.doesNotMatch(

@@ -89,25 +89,33 @@ public final class DriverVoicePlayer {
             "queued",
             resourceName + ";event=" + eventVersion + ";trip=" + tripId
         );
-        if (playCue) {
-            mainHandler.post(() -> {
-                if (destroyed || scheduledGeneration != generation) {
-                    return;
-                }
-                stopCurrentPlayback();
-                playAlertCue();
-            });
-        }
-        mainHandler.postDelayed(() -> {
+        mainHandler.post(() -> {
             if (destroyed || scheduledGeneration != generation) {
                 return;
             }
             stopCurrentPlayback();
-            playRecordedOrFallback(resourceName, fallbackText, scheduledGeneration);
-        }, Math.max(0L, delayMs));
+            if (playCue) {
+                playAlertCue(scheduledGeneration, () -> mainHandler.postDelayed(
+                    () -> playIfCurrent(resourceName, fallbackText, scheduledGeneration),
+                    Math.max(0L, BuildConfig.VOICE_AFTER_CUE_DELAY_MS)
+                ));
+                return;
+            }
+            mainHandler.postDelayed(
+                () -> playIfCurrent(resourceName, fallbackText, scheduledGeneration),
+                Math.max(0L, delayMs)
+            );
+        });
     }
 
-    private void playAlertCue() {
+    private void playIfCurrent(String resourceName, String fallbackText, int scheduledGeneration) {
+        if (destroyed || scheduledGeneration != generation) {
+            return;
+        }
+        playRecordedOrFallback(resourceName, fallbackText, scheduledGeneration);
+    }
+
+    private void playAlertCue(int scheduledGeneration, Runnable afterCue) {
         int resourceId = context.getResources().getIdentifier(
             BuildConfig.ALERT_SOUND_RESOURCE,
             "raw",
@@ -115,6 +123,7 @@ public final class DriverVoicePlayer {
         );
         if (resourceId == 0) {
             recordStage("cue_resource_missing", BuildConfig.ALERT_SOUND_RESOURCE);
+            afterCue.run();
             return;
         }
         cuePlayer = MediaPlayer.create(
@@ -125,13 +134,22 @@ public final class DriverVoicePlayer {
         );
         if (cuePlayer == null) {
             recordStage("cue_create_failed", BuildConfig.ALERT_SOUND_RESOURCE);
+            afterCue.run();
             return;
         }
         cuePlayer.setVolume(1.0f, 1.0f);
-        cuePlayer.setOnCompletionListener(player -> releaseCuePlayer(player));
+        cuePlayer.setOnCompletionListener(player -> {
+            releaseCuePlayer(player);
+            if (!destroyed && scheduledGeneration == generation) {
+                afterCue.run();
+            }
+        });
         cuePlayer.setOnErrorListener((player, what, extra) -> {
             recordStage("cue_error", what + "/" + extra);
             releaseCuePlayer(player);
+            if (!destroyed && scheduledGeneration == generation) {
+                afterCue.run();
+            }
             return true;
         });
         cuePlayer.start();

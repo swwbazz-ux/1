@@ -280,10 +280,10 @@ public class ConnectivityForegroundService extends Service {
                 .putBoolean(CONNECTION_LOSS_ANNOUNCED, false)
                 .apply();
             ConnectionState.recordAlive(this, System.currentTimeMillis());
-            if (connectionLossWasAnnounced) {
+            if (connectionLossWasAnnounced && !AppVisibility.isForeground()) {
                 OperationalVoicePlayer.play(
                     this,
-                    "connection_restored",
+                    OperationalCueCatalog.CONNECTION_RESTORED,
                     "voice_connection_restored",
                     true,
                     0L
@@ -320,10 +320,10 @@ public class ConnectivityForegroundService extends Service {
                 .putBoolean(CONNECTION_LOSS_ANNOUNCED, shouldAnnounceConnectionLoss
                     || preferences.getBoolean(CONNECTION_LOSS_ANNOUNCED, false))
                 .apply();
-            if (shouldAnnounceConnectionLoss) {
+            if (shouldAnnounceConnectionLoss && !AppVisibility.isForeground()) {
                 OperationalVoicePlayer.play(
                     this,
-                    "connection_lost",
+                    OperationalCueCatalog.CONNECTION_LOST,
                     "voice_connection_lost",
                     true,
                     0L
@@ -635,6 +635,7 @@ public class ConnectivityForegroundService extends Service {
             }
             long selectedVersion = 0L;
             String[] selectedVoices = new String[0];
+            String selectedCue = OperationalCueCatalog.ASSIGNMENT;
             String selectedTitle = "";
             String selectedBody = "";
 
@@ -658,6 +659,7 @@ public class ConnectivityForegroundService extends Service {
 
                 if ("driver".equals(roleCode)) {
                     if ("assignment_pending".equals(action)) {
+                        selectedCue = OperationalCueCatalog.ASSIGNMENT;
                         String assignmentVoice = EquipmentVoiceCatalog.driverExcavatorAssignmentVoice(
                             payload.optString("target_excavator_number", "")
                         );
@@ -670,6 +672,7 @@ public class ConnectivityForegroundService extends Service {
                             ? "Проверьте назначенный экскаватор."
                             : "Экскаватор № " + excavatorNumber;
                     } else if ("release_applied".equals(action)) {
+                        selectedCue = OperationalCueCatalog.ASSIGNMENT_REMOVED;
                         voices = new String[] {"voice_assignment_removed"};
                         title = "Назначение снято";
                         message = "Ожидайте нового экскаватора.";
@@ -689,7 +692,7 @@ public class ConnectivityForegroundService extends Service {
             }
             OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceSequence(
                 this,
-                "truck_assigned",
+                selectedCue,
                 selectedVoices,
                 selectedVersion,
                 roleCode + "_assignment",
@@ -790,8 +793,12 @@ public class ConnectivityForegroundService extends Service {
         List<ExcavatorAssignmentVoice> selected = new ArrayList<>(latestByTruck.values());
         selected.sort((left, right) -> Long.compare(left.eventVersion, right.eventVersion));
         List<OperationalVoiceAnnouncer.Operation> operations = new ArrayList<>();
+        boolean onlyRemovals = true;
         for (ExcavatorAssignmentVoice item : selected) {
             operations.add(new OperationalVoiceAnnouncer.Operation(item.operationKey, item.voiceNames));
+            if (!"remove".equals(item.kind)) {
+                onlyRemovals = false;
+            }
         }
         ExcavatorAssignmentVoice latest = selected.get(selected.size() - 1);
         String notificationTitle = selected.size() > 1
@@ -804,7 +811,9 @@ public class ConnectivityForegroundService extends Service {
                 : "Самосвал № " + latest.truckNumber);
         OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceOperations(
             this,
-            "truck_assigned",
+            onlyRemovals
+                ? OperationalCueCatalog.ASSIGNMENT_REMOVED
+                : OperationalCueCatalog.ASSIGNMENT,
             operations,
             showNotification,
             notificationTitle,
