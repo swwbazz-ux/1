@@ -12897,15 +12897,30 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
 
 /* Полная плитка: номер главный, картинка второстепенная, подпись состояния
    приглушённая. Класс is-rich-trucks ставит JS, пока размера хватает. */
+/* Базовая плитка кладёт номер абсолютно ПОВЕРХ картинки. Здесь все три
+   части стоят в потоке друг под другом: номер сверху, картинка крупно в
+   середине, подпись снизу — ничто ничего не закрывает. */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: space-between;
     gap: 0;
-    padding: 4px 4px 3px;
+    padding: 3px 3px 2px;
     border-radius: 6px;
     border-width: 1px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile > strong,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile > img,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile > span {
+    position: static;
+    top: auto;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    transform: none;
+    flex: 0 0 auto;
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile strong {
@@ -12920,10 +12935,11 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile img {
     display: block;
-    width: 56%;
-    height: 36%;
+    width: 82%;
+    height: 46%;
+    margin: 0 auto;
     object-fit: contain;
-    opacity: .78;
+    opacity: .92;
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile span {
