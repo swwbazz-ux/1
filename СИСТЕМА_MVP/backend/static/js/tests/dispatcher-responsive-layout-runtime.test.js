@@ -32,8 +32,21 @@ const CSS = fs.readFileSync(
 );
 
 const GAP = 6;
-const MAX = { w: 56, h: 28 };
-const MIN = { w: 38, h: 22 };
+/* Полная плитка сохраняет всё, что в неё заложено: номер, картинку и подпись
+   состояния. Жетон остаётся только там, где машин столько, что подпись всё
+   равно стала бы нечитаемой. */
+const RICH = [
+    { w: 72, h: 58 },
+    { w: 66, h: 53 },
+    { w: 60, h: 48 },
+    { w: 54, h: 44 }
+];
+const COMPACT = [
+    { w: 56, h: 28 },
+    { w: 50, h: 26 },
+    { w: 44, h: 24 },
+    { w: 38, h: 22 }
+];
 
 function capacity(rackWidth, rackHeight, w, h) {
     const cols = Math.max(1, Math.floor((rackWidth + GAP) / (w + GAP)));
@@ -43,15 +56,25 @@ function capacity(rackWidth, rackHeight, w, h) {
 
 function fitRack(rackWidth, rackHeight, count) {
     let chosen = null;
-    for (let w = MAX.w; w >= MIN.w; w -= 2) {
-        const h = Math.max(MIN.h, Math.round((w * MAX.h) / MAX.w));
-        const fit = capacity(rackWidth, rackHeight, w, h);
-        chosen = { w, h, ...fit };
-        if (fit.total >= count) break;
+    let rich = false;
+    for (const step of RICH) {
+        const fit = capacity(rackWidth, rackHeight, step.w, step.h);
+        if (fit.total >= count) {
+            chosen = { ...step, ...fit };
+            rich = true;
+            break;
+        }
+    }
+    if (!chosen) {
+        for (const step of COMPACT) {
+            const fit = capacity(rackWidth, rackHeight, step.w, step.h);
+            chosen = { ...step, ...fit };
+            if (fit.total >= count) break;
+        }
     }
     const overflow = Math.max(0, count - chosen.total);
     const visible = overflow > 0 ? Math.max(0, chosen.total - 1) : count;
-    return { ...chosen, visible, hidden: count - visible };
+    return { ...chosen, rich, visible, hidden: count - visible };
 }
 
 function rackFunction(source) {
@@ -85,10 +108,11 @@ test("за размером полосы следит ResizeObserver", () => {
     }
 });
 
-test("один самосвал показывается крупным жетоном и ничего не растягивает", () => {
+test("один самосвал показывается полной плиткой и ничего не растягивает", () => {
     const fit = fitRack(452, 62, 1);
-    assert.equal(fit.w, MAX.w);
-    assert.equal(fit.h, MAX.h);
+    assert.equal(fit.rich, true, "при одной машине подпись и картинка остаются");
+    assert.equal(fit.w, RICH[0].w);
+    assert.equal(fit.h, RICH[0].h);
     assert.equal(fit.visible, 1);
     assert.equal(fit.hidden, 0);
     for (const source of [TEMPLATE, SCRIPT]) {
@@ -96,17 +120,25 @@ test("один самосвал показывается крупным жето
     }
 });
 
-test("двенадцать самосвалов помещаются без уменьшения жетона", () => {
+test("шесть самосвалов ещё показываются полной плиткой с подписью", () => {
+    const fit = fitRack(452, 62, 6);
+    assert.equal(fit.rich, true);
+    assert.equal(fit.visible, 6);
+    assert.equal(fit.hidden, 0);
+});
+
+test("двенадцать самосвалов переходят на жетон, но помещаются все", () => {
     const fit = fitRack(452, 62, 12);
-    assert.equal(fit.w, MAX.w);
+    assert.equal(fit.rich, false, "подпись при таком количестве уже нечитаема");
+    assert.equal(fit.w, COMPACT[0].w);
     assert.equal(fit.visible, 12);
     assert.equal(fit.hidden, 0);
 });
 
 test("двадцать самосвалов помещаются, жетон уменьшается на ступень", () => {
     const fit = fitRack(452, 62, 20);
-    assert.ok(fit.w < MAX.w, "жетон должен стать мельче");
-    assert.ok(fit.w >= MIN.w, "жетон не должен уйти ниже минимума");
+    assert.ok(fit.w < COMPACT[0].w, "жетон должен стать мельче");
+    assert.ok(fit.w >= COMPACT[COMPACT.length - 1].w, "не ниже минимума");
     assert.equal(fit.visible, 20);
     assert.equal(fit.hidden, 0);
 });
@@ -121,12 +153,22 @@ test("непоместившийся хвост сворачивается в с
     }
 });
 
-test("в карточке самосвал показан жетоном номера, картинка остаётся в гараже", () => {
+test("подпись и картинка сохраняются, пока плитка полная", () => {
     assert.match(
         CSS,
-        /\.dispatcher-complex-card \.complex-truck-tile img,\s*\.dispatcher-complex-card \.complex-truck-tile span \{\s*display: none;/
+        /:not\(\.is-rich-trucks\) \.complex-truck-tile img,[\s\S]*?display: none;/
     );
-    assert.match(CSS, /\.dispatcher-complex-card \.complex-truck-tile strong \{[^}]*var\(--complex-truck-font/s);
+    assert.match(
+        CSS,
+        /\.is-rich-trucks \.complex-truck-tile img \{[^}]*display: block;/s
+    );
+    assert.match(
+        CSS,
+        /\.is-rich-trucks \.complex-truck-tile span \{[^}]*display: block;/s
+    );
+    for (const source of [TEMPLATE, SCRIPT]) {
+        assert.match(source, /classList\.toggle\("is-rich-trucks", rich\)/);
+    }
 });
 
 test("полосе выдана постоянная высота, а не остаток от текста", () => {

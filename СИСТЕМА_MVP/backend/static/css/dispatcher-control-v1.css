@@ -12656,10 +12656,43 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     border-radius: 6px;
 }
 
-/* Картинка и подпись статуса — только для гаража. */
-.dispatcher-complex-card .complex-truck-tile img,
-.dispatcher-complex-card .complex-truck-tile span {
+/* Пока машины помещаются полной плиткой, в карточке видно всё, что в неё
+   заложено: номер, картинку и подпись состояния. Класс is-rich-trucks ставит
+   JS, когда выбранного размера хватает. Прятать подпись «просто так» нельзя —
+   цвет говорит о статусе тому, кто его помнит, а подпись читают все. */
+.dispatcher-complex-card .complex-assigned-trucks:not(.is-rich-trucks) .complex-truck-tile img,
+.dispatcher-complex-card .complex-assigned-trucks:not(.is-rich-trucks) .complex-truck-tile span {
     display: none;
+}
+
+.dispatcher-complex-card .complex-assigned-trucks.is-rich-trucks .complex-truck-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    padding: 2px 3px;
+}
+
+.dispatcher-complex-card .complex-assigned-trucks.is-rich-trucks .complex-truck-tile img {
+    display: block;
+    width: 62%;
+    height: 42%;
+    object-fit: contain;
+}
+
+.dispatcher-complex-card .complex-assigned-trucks.is-rich-trucks .complex-truck-tile span {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: max(7px, calc(var(--complex-truck-font, 15px) * 0.62));
+    line-height: 1.05;
+}
+
+.dispatcher-complex-card .complex-assigned-trucks.is-rich-trucks .complex-truck-tile strong {
+    font-size: max(10px, calc(var(--complex-truck-font, 15px) * 0.82));
 }
 
 .dispatcher-complex-card .complex-truck-tile strong {

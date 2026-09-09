@@ -6420,7 +6420,23 @@ document.addEventListener("DOMContentLoaded", function () {
        Скролла внутри карточки нет намеренно: прокручивать десять карточек
        по отдельности диспетчер не станет. */
     var COMPLEX_TILE_GAP = 6;
-    var COMPLEX_TILE_MAX = { w: 56, h: 28 };
+    /* Две формы плитки. Пока машины помещаются полной плиткой — показываем всё,
+       что в неё заложено: номер, картинку и подпись состояния. Полная плитка
+       уходит только тогда, когда машин физически много и подпись всё равно
+       стала бы нечитаемой — тогда остаётся жетон номера, а состояние читается
+       цветом и кольцом плана. */
+    var COMPLEX_TILE_RICH = [
+        { w: 72, h: 58 },
+        { w: 66, h: 53 },
+        { w: 60, h: 48 },
+        { w: 54, h: 44 }
+    ];
+    var COMPLEX_TILE_COMPACT = [
+        { w: 56, h: 28 },
+        { w: 50, h: 26 },
+        { w: 44, h: 24 },
+        { w: 38, h: 22 }
+    ];
     var COMPLEX_TILE_MIN = { w: 38, h: 22 };
 
     function complexRackCapacity(rackWidth, rackHeight, w, h) {
@@ -6450,19 +6466,28 @@ document.addEventListener("DOMContentLoaded", function () {
         if (rackWidth < COMPLEX_TILE_MIN.w || rackHeight < COMPLEX_TILE_MIN.h) return;
 
         var chosen = null;
-        for (var w = COMPLEX_TILE_MAX.w; w >= COMPLEX_TILE_MIN.w; w -= 2) {
-            var h = Math.max(
-                COMPLEX_TILE_MIN.h,
-                Math.round(w * COMPLEX_TILE_MAX.h / COMPLEX_TILE_MAX.w)
-            );
-            var fit = complexRackCapacity(rackWidth, rackHeight, w, h);
-            chosen = { w: w, h: h, cols: fit.cols, rows: fit.rows, total: fit.total };
-            if (fit.total >= tiles.length) break;
+        var rich = false;
+        var step;
+        var fit;
+        var i;
+        for (i = 0; i < COMPLEX_TILE_RICH.length; i += 1) {
+            step = COMPLEX_TILE_RICH[i];
+            fit = complexRackCapacity(rackWidth, rackHeight, step.w, step.h);
+            if (fit.total >= tiles.length) {
+                chosen = { w: step.w, h: step.h, cols: fit.cols, rows: fit.rows, total: fit.total };
+                rich = true;
+                break;
+            }
         }
         if (!chosen) {
-            var f = complexRackCapacity(rackWidth, rackHeight, COMPLEX_TILE_MIN.w, COMPLEX_TILE_MIN.h);
-            chosen = { w: COMPLEX_TILE_MIN.w, h: COMPLEX_TILE_MIN.h, cols: f.cols, rows: f.rows, total: f.total };
+            for (i = 0; i < COMPLEX_TILE_COMPACT.length; i += 1) {
+                step = COMPLEX_TILE_COMPACT[i];
+                fit = complexRackCapacity(rackWidth, rackHeight, step.w, step.h);
+                chosen = { w: step.w, h: step.h, cols: fit.cols, rows: fit.rows, total: fit.total };
+                if (fit.total >= tiles.length) break;
+            }
         }
+        rack.classList.toggle("is-rich-trucks", rich);
 
         /* Хвост, который не поместился, сворачиваем в счётчик. Сама ячейка
            счётчика занимает место, поэтому видимых машин на одну меньше. */
