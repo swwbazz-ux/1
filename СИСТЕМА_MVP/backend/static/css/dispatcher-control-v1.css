@@ -12760,18 +12760,27 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
 
 /* --- Левый столбец: контекст забоя и план --------------------------------- */
 
+/* Данные забоя — не набор чипов-рамочек, а таблица показаний в языке шапки
+   пульта: мелкая подпись капителью, под ней значение. Подписи рисуются через
+   ::before, потому что тот же чип собирает и скрипт при перетаскивании
+   экскаватора в пустую зону — разметка должна остаться общей. Единственный
+   цветной элемент столбца — чип статуса; всё остальное держится на двух
+   начертаниях: значение (ink, 800) и подпись (muted, капитель). */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context {
     grid-area: info;
     display: flex;
     flex-wrap: wrap;
     align-content: flex-start;
+    align-items: flex-end;
     justify-content: flex-start;
     justify-self: stretch;
     align-self: stretch;
     width: auto;
     max-width: none;
-    margin-top: 10px;
-    gap: 4px;
+    margin-top: 7px;
+    padding-top: 7px;
+    border-top: 1px solid rgba(142, 158, 166, .18);
+    gap: 5px 10px;
     text-align: left;
     overflow: hidden;
 }
@@ -12779,89 +12788,185 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context > * {
     flex: 0 0 auto;
     max-width: 100%;
-}
-
-/* Горизонт и блок — два одинаковых чипа в одной строке. */
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-info-chip.chip-horizon,
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-info-chip.chip-block {
-    min-height: 18px;
-    padding: 0 7px;
-    border-color: rgba(142, 158, 166, .32);
-    background: rgba(142, 158, 166, .10);
-    font-size: 11px;
-    font-weight: 800;
-    line-height: 18px;
-    letter-spacing: .02em;
-}
-
-/* Порода — обычным текстом в две строки, а не обрезанным чипом: это
-   ключевой признак забоя, его нужно дочитать, а место в столбце есть. */
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-rock {
-    flex: 1 0 100%;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    min-width: 0;
     min-height: 0;
-    margin-top: 2px;
     padding: 0;
     border: 0;
+    border-radius: 0;
     background: transparent;
-    color: var(--gd-muted);
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1.2;
-    white-space: normal;
+    color: var(--gd-ink);
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
+/* Подпись над значением. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-horizon,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-rock,
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .complex-unload-points,
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .dispatcher-plan-strip {
+    display: block;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-horizon::before,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-rock::before,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .complex-unload-points::before,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .dispatcher-plan-strip::before {
+    display: block;
+    margin-bottom: 2px;
+    color: rgba(142, 158, 166, .85);
+    font-size: 9px;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-horizon::before { content: "Забой"; }
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-rock::before { content: "Порода"; }
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .complex-unload-points::before { content: "Разгрузка"; }
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .dispatcher-plan-strip::before { content: "План"; }
+
+/* Блок стоит на одной строке с горизонтом, отделён точкой. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-block {
+    margin-left: -4px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-block::before {
+    content: "·";
+    margin-right: 6px;
+    color: rgba(142, 158, 166, .7);
+    font-weight: 900;
+}
+
+/* Порода — обычным начертанием в две строки: её надо дочитать. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .chip-rock {
     flex: 1 0 100%;
-}
-
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-unload-points {
-    justify-items: start;
-}
-
-/* План — одна строка показаний: процент крупно, факт/план рядом. */
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .dispatcher-plan-strip {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 2px 8px;
-    margin-top: 6px;
-    padding: 5px 8px;
-    border-radius: 5px;
+    color: rgba(243, 247, 248, .88);
     font-size: 12px;
-    line-height: 1.15;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: normal;
+}
+
+/* Точки разгрузки — в одну строку, через точку. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .complex-unload-points {
+    flex: 1 0 100%;
+    justify-items: start;
+    white-space: normal;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-unload-points .chip-unload {
+    display: inline;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--gd-ink);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: normal;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-unload-points .chip-unload + .chip-unload::before {
+    content: "·";
+    margin: 0 5px;
+    color: rgba(142, 158, 166, .7);
+}
+
+/* План — показания одной строкой: процент крупно, факт/план и группа
+   приглушённо, бейдж циклов справа. Без плана — одна приглушённая строка. */
+/* Сетка строки плана: подпись / процент · факт-план · бейдж / группа.
+   В разметке бейдж стоит после группы, а в потоке он падал под процент. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .dispatcher-plan-strip {
+    flex: 1 0 100%;
+    position: relative;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+        "cap cap cap"
+        "pct val badge"
+        "grp grp grp";
+    align-items: center;
+    column-gap: 6px;
+    row-gap: 0;
+    margin-top: 0;
+    white-space: normal;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .dispatcher-plan-strip::before {
+    grid-area: cap;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip strong { grid-area: pct; }
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip span { grid-area: val; }
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip em { grid-area: grp; }
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip .dispatcher-plan-loop-badge { grid-area: badge; }
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip strong,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip span,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip em {
+    display: inline;
+    font-style: normal;
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip strong {
-    font-size: 14px;
+    margin-right: 0;
+    color: var(--complex-accent);
+    font-size: 15px;
     font-weight: 900;
     line-height: 1;
     font-variant-numeric: tabular-nums;
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip span,
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip em,
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip small {
-    font-size: 11px;
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip em {
+    color: rgba(243, 247, 248, .88);
+    font-size: 12px;
     font-weight: 700;
-    color: var(--gd-muted);
-    white-space: normal;
+    line-height: 1.2;
 }
 
-/* Без плана «Не назначен» и «План не назначен» дублируют друг друга —
-   оставляем одну приглушённую строку. */
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip.is-plan-missing {
-    border-style: dashed;
-    background: transparent;
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip em {
+    display: block;
+    margin-top: 1px;
+    color: rgba(142, 158, 166, .9);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.15;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
 }
 
-body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip.is-plan-missing strong {
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip .dispatcher-plan-loop-badge {
+    position: static;
+    display: inline-grid;
+    place-items: center;
+    justify-self: end;
+    min-width: 20px;
+    height: 16px;
+    margin-left: 0;
+    padding: 0 5px;
+    border-radius: 999px;
+    vertical-align: middle;
+    font-size: 10px;
+    line-height: 1;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip.is-plan-missing strong,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-context .dispatcher-plan-strip.is-plan-missing::before {
     display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .dispatcher-plan-strip.is-plan-missing span {
+    color: rgba(142, 158, 166, .85);
+    font-weight: 600;
 }
 
 /* --- Поле самосвалов ------------------------------------------------------- */
