@@ -406,9 +406,9 @@
                         <small>{{ dispatcher_dashboard.mobile_shift_report.unit_label|default:"т" }} · {{ dispatcher_dashboard.mobile_shift_report.active_trip_count|default:"0" }} рейс.</small>
                     </article>
                     <article>
-                        <span>Свободно</span>
-                        <strong>{{ dispatcher_dashboard.mobile_shift_report.free_trucks|default:"0" }}</strong>
-                        <small>готовы в гараже</small>
+                        <span>Резерв техники</span>
+                        <strong>{{ dispatcher_dashboard.mobile_shift_report.reserve_total|default:"0" }}</strong>
+                        <small>{{ dispatcher_dashboard.mobile_shift_report.reserve_trucks|default:"0" }} сам. · {{ dispatcher_dashboard.mobile_shift_report.reserve_excavators|default:"0" }} экс.</small>
                     </article>
                 </div>
 
@@ -1336,7 +1336,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v161";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v162";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -6398,6 +6398,37 @@ document.addEventListener("DOMContentLoaded", function () {
             grid.appendChild(card);
         });
     }
+    /* Жетоны самосвалов в карточке комплекса.
+
+       Раньше размер плитки брался от ГАРАЖНОЙ плитки справа: её ширину
+       подгоняли под полосу, и ту же пропорцию применяли к высоте. Сколько
+       высоты реально осталось в карточке, никто не спрашивал, поэтому при
+       десяти комплексах плитка 73px заезжала в полосу высотой 10px и её
+       срезал overflow карточки — на экране оставалась кромка с обрубленными
+       цифрами. Вдобавок вёрсткой карточки управлял чужой элемент: правка
+       гаража ломала комплексы.
+
+       Теперь полоса считает себя сама. В карточке самосвал показывается
+       жетоном номера без картинки: под экскаватором стоят только самосвалы,
+       различать их по силуэту не нужно, а картинка съедала всю высоту.
+       Кольцо выполнения плана рисуется по контуру жетона через ::before и
+       места в потоке не занимает.
+
+       Размер подбирается от крупного к мелкому: берём самый большой жетон,
+       при котором все машины влезают в полосу. Не влезли даже минимальным —
+       последняя ячейка становится счётчиком «+N», а не обрезанной плиткой.
+       Скролла внутри карточки нет намеренно: прокручивать десять карточек
+       по отдельности диспетчер не станет. */
+    var COMPLEX_TILE_GAP = 6;
+    var COMPLEX_TILE_MAX = { w: 56, h: 28 };
+    var COMPLEX_TILE_MIN = { w: 38, h: 22 };
+
+    function complexRackCapacity(rackWidth, rackHeight, w, h) {
+        var cols = Math.max(1, Math.floor((rackWidth + COMPLEX_TILE_GAP) / (w + COMPLEX_TILE_GAP)));
+        var rows = Math.max(1, Math.floor((rackHeight + COMPLEX_TILE_GAP) / (h + COMPLEX_TILE_GAP)));
+        return { cols: cols, rows: rows, total: cols * rows };
+    }
+
     function refreshComplexTruckRack(rack) {
         if (!rack) return;
         sortDesktopEquipmentList(rack, ".complex-truck-tile");
@@ -6409,43 +6440,90 @@ document.addEventListener("DOMContentLoaded", function () {
             empty.textContent = "самосвалы не назначены";
             rack.appendChild(empty);
         }
-        rack.classList.remove("truck-fill-1", "truck-fill-2", "truck-fill-3", "truck-fill-4");
-        rack.classList.add(tiles.length <= 6 ? "truck-fill-1" : tiles.length <= 12 ? "truck-fill-2" : tiles.length <= 18 ? "truck-fill-3" : "truck-fill-4");
-        var columns = tiles.length === 0 ? 6 : Math.min(6, Math.max(1, tiles.length));
-        if (tiles.length > 6) columns = 6;
-        var gap = tiles.length > 10 ? 5 : 6;
-        var garageTiles = Array.from(document.querySelectorAll("[data-garage-item='truck']"));
-        var garageRect = null;
-        garageTiles.some(function (garageTile) {
-            var rect = garageTile.getBoundingClientRect();
-            if (rect.width > 20 && rect.height > 20) {
-                garageRect = rect;
-                return true;
-            }
-            return false;
+
+        var rackWidth = rack.clientWidth || rack.getBoundingClientRect().width || 0;
+        var rackHeight = rack.clientHeight || rack.getBoundingClientRect().height || 0;
+        /* До первой раскладки карточки полоса ещё нулевая. Считать по таким
+           размерам нельзя: ёмкость выходит в одну ячейку и все машины
+           сворачиваются в счётчик, а через кадр пересчёт даёт другое. Ждём
+           реальных размеров — пересчёт всё равно придёт по resize. */
+        if (rackWidth < COMPLEX_TILE_MIN.w || rackHeight < COMPLEX_TILE_MIN.h) return;
+
+        var chosen = null;
+        for (var w = COMPLEX_TILE_MAX.w; w >= COMPLEX_TILE_MIN.w; w -= 2) {
+            var h = Math.max(
+                COMPLEX_TILE_MIN.h,
+                Math.round(w * COMPLEX_TILE_MAX.h / COMPLEX_TILE_MAX.w)
+            );
+            var fit = complexRackCapacity(rackWidth, rackHeight, w, h);
+            chosen = { w: w, h: h, cols: fit.cols, rows: fit.rows, total: fit.total };
+            if (fit.total >= tiles.length) break;
+        }
+        if (!chosen) {
+            var f = complexRackCapacity(rackWidth, rackHeight, COMPLEX_TILE_MIN.w, COMPLEX_TILE_MIN.h);
+            chosen = { w: COMPLEX_TILE_MIN.w, h: COMPLEX_TILE_MIN.h, cols: f.cols, rows: f.rows, total: f.total };
+        }
+
+        /* Хвост, который не поместился, сворачиваем в счётчик. Сама ячейка
+           счётчика занимает место, поэтому видимых машин на одну меньше. */
+        var overflow = Math.max(0, tiles.length - chosen.total);
+        var visible = overflow > 0 ? Math.max(0, chosen.total - 1) : tiles.length;
+        tiles.forEach(function (tile, index) {
+            tile.hidden = index >= visible;
         });
-        var boardStyles = getComputedStyle(document.querySelector(".dispatcher-board") || document.documentElement);
-        var cssGarageWidth = parseFloat(boardStyles.getPropertyValue("--gd-truck-slot-w")) || 74;
-        var cssGarageHeight = parseFloat(boardStyles.getPropertyValue("--gd-truck-slot-h")) || 74;
-        var garageWidth = garageRect ? garageRect.width : cssGarageWidth;
-        var garageHeight = garageRect ? garageRect.height : cssGarageHeight;
-        var rackWidth = rack.clientWidth || rack.getBoundingClientRect().width || 1;
-        var fittedWidth = Math.floor((rackWidth - (gap * (columns - 1))) / columns);
-        var stepWidth = tiles.length <= 6 ? garageWidth : tiles.length <= 12 ? Math.min(garageWidth, 66) : tiles.length <= 18 ? Math.min(garageWidth, 58) : Math.min(garageWidth, 50);
-        var width = Math.max(24, Math.min(garageWidth, stepWidth, fittedWidth));
-        var scale = garageWidth > 0 ? width / garageWidth : 1;
-        var height = Math.max(24, Math.min(garageHeight, Math.floor(garageHeight * scale)));
-        var justify = tiles.length >= 5 ? "space-between" : "start";
-        rack.style.setProperty("--complex-truck-cols", String(columns));
-        rack.style.setProperty("--complex-truck-gap", gap + "px");
-        rack.style.setProperty("--complex-truck-w", width + "px");
-        rack.style.setProperty("--complex-truck-h", height + "px");
-        rack.style.setProperty("--complex-truck-justify", justify);
+
+        var more = rack.querySelector(".complex-truck-more");
+        var hiddenCount = tiles.length - visible;
+        if (hiddenCount > 0) {
+            if (!more) {
+                more = document.createElement("b");
+                more.className = "complex-truck-more";
+                rack.appendChild(more);
+            }
+            more.hidden = false;
+            more.textContent = "+" + hiddenCount;
+            more.title = "Ещё самосвалов: " + hiddenCount;
+        } else if (more) {
+            more.hidden = true;
+        }
+
+        rack.classList.remove("truck-fill-1", "truck-fill-2", "truck-fill-3", "truck-fill-4");
+        rack.style.setProperty("--complex-truck-cols", String(chosen.cols));
+        rack.style.setProperty("--complex-truck-gap", COMPLEX_TILE_GAP + "px");
+        rack.style.setProperty("--complex-truck-w", chosen.w + "px");
+        rack.style.setProperty("--complex-truck-h", chosen.h + "px");
+        rack.style.setProperty("--complex-truck-font", Math.max(10, Math.round(chosen.h * 0.52)) + "px");
+        rack.style.setProperty("--complex-truck-justify", "start");
         if (empty) empty.hidden = tiles.length > 0;
     }
     function refreshAllComplexTruckRacks() {
         document.querySelectorAll(".complex-assigned-trucks").forEach(refreshComplexTruckRack);
     }
+    /* Размер жетона зависит от размера полосы, поэтому следим именно за ним.
+       Одного-двух кадров после DOMContentLoaded не хватает: карточки внутри
+       холста раскладываются позже, и расчёт выходил на нулевых размерах, а
+       жетоны до первого resize оставались гаражными. ResizeObserver закрывает
+       и первую раскладку, и смену размера окна, и подгрузку шрифтов. */
+    var complexRackResizeObserver = null;
+    function watchComplexTruckRacks() {
+        if (typeof ResizeObserver === "undefined") {
+            requestAnimationFrame(function () {
+                requestAnimationFrame(refreshAllComplexTruckRacks);
+            });
+            window.addEventListener("load", refreshAllComplexTruckRacks, { once: true });
+            return;
+        }
+        if (!complexRackResizeObserver) {
+            complexRackResizeObserver = new ResizeObserver(function () {
+                refreshAllComplexTruckRacks();
+            });
+        }
+        complexRackResizeObserver.disconnect();
+        document.querySelectorAll(".complex-assigned-trucks").forEach(function (rack) {
+            complexRackResizeObserver.observe(rack);
+        });
+    }
+    watchComplexTruckRacks();
     function findTruckGarageList() {
         return document.querySelector(".dispatcher-trucks");
     }

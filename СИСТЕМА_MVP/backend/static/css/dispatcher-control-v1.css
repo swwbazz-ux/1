@@ -12626,3 +12626,142 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     /* min(1020px, calc(100vw - 32px)) */
     width: min(1020px, calc(calc(100 * var(--gd-vw)) - 32px));
 }
+
+
+/* ============================================================================
+   ЖЕТОНЫ САМОСВАЛОВ В КАРТОЧКЕ КОМПЛЕКСА
+
+   В гараже самосвал показывается плиткой с картинкой — там рядом стоят
+   экскаваторы, и силуэт помогает их различать. В карточке комплекса под
+   экскаватором стоят только самосвалы, поэтому картинка не несёт информации,
+   зато съедает всю высоту плитки. Здесь самосвал — жетон номера: крупная
+   цифра, цвет по статусу, кольцо выполнения плана по контуру (оно рисуется
+   через ::before и места в потоке не занимает).
+
+   Полосе выдана постоянная высота, а не остаток от заголовка и чипов. Раньше
+   она получала «что осталось», и при длинном названии породы или чипе статуса
+   с таймером остаток уходил в ноль — полосу срезал overflow карточки.
+   Размеры жетонов внутри полосы считает JS (refreshComplexTruckRack).
+   ============================================================================ */
+
+.dispatcher-complex-card .complex-assigned-trucks {
+    height: var(--complex-rack-h, 62px);
+    align-content: start;
+}
+
+.dispatcher-complex-card .complex-truck-tile {
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border-radius: 6px;
+}
+
+/* Картинка и подпись статуса — только для гаража. */
+.dispatcher-complex-card .complex-truck-tile img,
+.dispatcher-complex-card .complex-truck-tile span {
+    display: none;
+}
+
+.dispatcher-complex-card .complex-truck-tile strong {
+    margin: 0;
+    font-size: var(--complex-truck-font, 15px);
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: 0;
+}
+
+/* Счётчик непоместившихся машин занимает такую же ячейку, как жетон. */
+.dispatcher-complex-card .complex-truck-more {
+    display: grid;
+    place-items: center;
+    width: var(--complex-truck-w, 56px);
+    height: var(--complex-truck-h, 28px);
+    border: 1px dashed var(--gd-line);
+    border-radius: 6px;
+    color: var(--gd-muted);
+    font-size: var(--complex-truck-font, 15px);
+    font-weight: 900;
+    line-height: 1;
+}
+
+/* Текстовая часть ужимается первой: название породы в одну строку с
+   многоточием вместо переноса на две. Полное написание всё равно есть в
+   карточке оборудования, а здесь важнее увидеть машины. */
+.dispatcher-complex-card .complex-info-chip.chip-rock {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* Контекст забоя раскладывается в строку, а не столбиком.
+
+   Три чипа столбиком плюс плашка плана требовали 88px, а грид карточки
+   выдаёт этой строке около 52 — блок вываливался вниз и ложился поверх
+   жетонов самосвалов. Теперь чипы идут в строку с переносом, плашка плана
+   занимает свою строку целиком, а сам блок обрезан по своей ячейке, чтобы
+   при любых данных он не мог заехать на полосу машин. */
+.dispatcher-complex-card .complex-context {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: start;
+    justify-content: flex-end;
+    gap: 4px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.dispatcher-complex-card .complex-context > * {
+    flex: 0 0 auto;
+}
+
+.dispatcher-complex-card .complex-context .chip-rock {
+    max-width: 52%;
+}
+
+.dispatcher-complex-card .complex-context .dispatcher-plan-strip,
+.dispatcher-complex-card .complex-context .complex-unload-points {
+    flex: 1 0 100%;
+    margin-top: 0;
+}
+
+/* Заголовок комплекса занимал 68px из 233 — почти треть карточки на одно
+   слово «K-1». Уменьшаем до размера, который всё ещё читается через комнату,
+   и возвращаем освободившееся место блоку с чипами, чтобы он перестал
+   подрезаться. Крупный кегль остаётся на экране оборудования. */
+.dispatcher-complex-card .complex-work-head h2,
+.dispatcher-complex-card .complex-title-state h2 {
+    font-size: 30px;
+    line-height: 1;
+}
+
+.dispatcher-complex-card {
+    gap: 6px;
+}
+
+/* Длинная причина простоя раздувала заголовок: «ДЕМО ДИАГНОСТИКА
+   МЕХАНИЧЕСКОЙ СЛУЖБЫ» переносилась в три строки и отнимала место у чипов и
+   у полосы машин. Причина видна целиком по наведению и в журнале, в карточке
+   достаточно начала. */
+.dispatcher-complex-card .complex-state-chip,
+.dispatcher-complex-card .complex-downtime-status > span {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.dispatcher-complex-card .complex-title-state {
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* Строка грида не должна раздуваться под содержимое: у элемента внутри грида
+   min-height по умолчанию auto, поэтому блок вырастал выше выданной строки и
+   ложился на полосу машин, несмотря на overflow. */
+.dispatcher-complex-card > * {
+    min-height: 0;
+    min-width: 0;
+}
