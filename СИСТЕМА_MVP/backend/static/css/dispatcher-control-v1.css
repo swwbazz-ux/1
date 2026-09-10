@@ -13041,11 +13041,11 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equ
 
 @keyframes dispatcher-search-blink {
     0%, 100% {
-        box-shadow: 0 0 0 2px var(--gd-cyan), 0 0 12px 2px rgba(52, 194, 211, .55);
+        box-shadow: 0 0 0 3px var(--gd-cyan), 0 0 12px 2px rgba(52, 194, 211, .55);
         filter: brightness(1.05);
     }
     50% {
-        box-shadow: 0 0 0 3px #8df3ff, 0 0 26px 8px rgba(141, 243, 255, .85);
+        box-shadow: 0 0 0 4px #8df3ff, 0 0 26px 8px rgba(141, 243, 255, .85);
         filter: brightness(1.45);
     }
 }
@@ -13056,11 +13056,44 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .is-search-hit 
     animation: dispatcher-search-blink .7s ease-in-out infinite;
 }
 
+/* Подсветка лежит поверх статусной заливки: исходный цвет состояния плитки
+   остаётся под ней и возвращается без пересчёта после очистки поиска. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage .is-search-hit::after,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-garage .is-search-hit::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    background: rgba(52, 194, 211, .22);
+    background: color-mix(in srgb, var(--gd-cyan) 22%, transparent);
+    box-shadow: inset 0 0 0 3px #8df3ff;
+    pointer-events: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage .is-search-hit img,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-garage .is-search-hit img {
+    opacity: 1;
+    filter: grayscale(0);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage .is-search-hit strong,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage .is-search-hit span,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-garage .is-search-hit strong,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-garage .is-search-hit span {
+    color: #ffffff;
+}
+
 body.dispatcher-control-screen:not(.mining-master-mobile-screen).is-equipment-search .complex-truck-tile:not(.is-search-hit),
 body.dispatcher-control-screen:not(.mining-master-mobile-screen).is-equipment-search .dispatcher-truck-tile:not(.is-search-hit),
 body.dispatcher-control-screen:not(.mining-master-mobile-screen).is-equipment-search .dispatcher-equipment-tile:not(.is-search-hit) {
     opacity: .38;
     transition: opacity .14s ease;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen).is-equipment-search .dispatcher-excavator-garage .dispatcher-excavator-garage-tile:not(.is-search-hit),
+body.dispatcher-control-screen:not(.mining-master-mobile-screen).is-equipment-search .dispatcher-truck-garage .dispatcher-truck-tile:not(.is-search-hit) {
+    opacity: .22;
 }
 
 @media (prefers-reduced-motion: reduce) {

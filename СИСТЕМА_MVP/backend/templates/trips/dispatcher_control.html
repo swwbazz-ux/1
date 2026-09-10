@@ -6590,13 +6590,15 @@ document.addEventListener("DOMContentLoaded", function () {
         function applyEquipmentSearch() {
             var needle = normalizeSearchText(query);
             var hits = 0;
-            var first = null;
+            var firstGarageHit = null;
             document.querySelectorAll(".dispatcher-shell [data-equipment-name]").forEach(function (node) {
                 var hit = needle !== "" && matchesSearch(node, needle);
                 node.classList.toggle("is-search-hit", hit);
                 if (hit) {
                     hits += 1;
-                    if (!first) first = node;
+                    if (!firstGarageHit && node.hasAttribute("data-garage-item") && !node.classList.contains("is-assigned")) {
+                        firstGarageHit = node;
+                    }
                 }
             });
             document.body.classList.toggle("is-equipment-search", needle !== "");
@@ -6606,9 +6608,21 @@ document.addEventListener("DOMContentLoaded", function () {
                 count.textContent = String(hits);
                 count.classList.toggle("is-none", hits === 0);
             }
-            /* Гараж прокручивается — первое совпадение подтягиваем в кадр. */
-            if (first && typeof first.scrollIntoView === "function") {
-                first.scrollIntoView({ block: "nearest", inline: "nearest" });
+            /* Центрируем только скрытое совпадение боковой рейки: видимую
+               плитку не дёргаем и не смещаем весь холст без необходимости. */
+            if (firstGarageHit && typeof firstGarageHit.scrollIntoView === "function") {
+                var rail = firstGarageHit.closest(".dispatcher-excavators, .dispatcher-trucks");
+                if (rail) {
+                    var tileRect = firstGarageHit.getBoundingClientRect();
+                    var railRect = rail.getBoundingClientRect();
+                    var isOutsideRail = tileRect.top < railRect.top
+                        || tileRect.bottom > railRect.bottom
+                        || tileRect.left < railRect.left
+                        || tileRect.right > railRect.right;
+                    if (isOutsideRail) {
+                        firstGarageHit.scrollIntoView({ block: "center", inline: "nearest" });
+                    }
+                }
             }
         }
 
