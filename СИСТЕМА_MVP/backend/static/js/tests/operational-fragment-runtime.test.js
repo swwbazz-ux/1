@@ -203,7 +203,7 @@ function createExcavatorRefreshRuntime() {
 
 
 function extractExcavatorShiftSuccessHandler() {
-    const marker = '}).then(function () {\n            playExcavatorVoice(';
+    const marker = '}).then(function () {\n            hideShiftConfirmation();';
     const start = EXCAVATOR_TEMPLATE_SOURCE.indexOf(marker);
     assert.notEqual(start, -1, "Excavator Shift success handler was not found.");
     return extractBraceBlock(
@@ -486,6 +486,7 @@ test("successful Excavator Shift save clears its draft before owned fragment rec
         shiftPendingActionKey: "pending-key",
         shiftPendingActionId: "pending-id",
         shiftScreen,
+        hideShiftConfirmation() {},
         clearShiftErrors() {
             clearCalls += 1;
         },

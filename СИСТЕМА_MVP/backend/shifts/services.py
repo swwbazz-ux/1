@@ -21,6 +21,7 @@ from .equipment_plan_groups import equipment_garage_number_int
 from .models import (
     DriverShiftReadingConfirmation,
     EmployeeShift,
+    ExcavatorShiftReadingConfirmation,
     EquipmentPlanGroup,
     EquipmentShiftPlan,
     PlanAssignmentStatus,
@@ -40,9 +41,18 @@ DRIVER_SHIFT_READING_FIELDS = (
 )
 
 DRIVER_SHIFT_CLOSE_CONFIRMATION_SALT = 'shifts.driver-close-readings.v1'
+EXCAVATOR_SHIFT_CLOSE_CONFIRMATION_SALT = 'shifts.excavator-close-readings.v1'
+MAX_SHIFT_READING_VALUE = Decimal('99999999')
 
 
 class DriverShiftCloseConfirmationRequired(Exception):
+    def __init__(self, *, warnings, confirmation_token):
+        super().__init__('Подтвердите подозрительные показания.')
+        self.warnings = warnings
+        self.confirmation_token = confirmation_token
+
+
+class ExcavatorShiftCloseConfirmationRequired(Exception):
     def __init__(self, *, warnings, confirmation_token):
         super().__init__('Подтвердите подозрительные показания.')
         self.warnings = warnings
@@ -1205,6 +1215,13 @@ def parse_required_shift_integer(value, label, field_name):
             f'{label}: нужно указать целое число.',
             field_errors={field_name: 'Укажите целое число без точки и запятой.'},
         )
+    # EmployeeShift stores these readings in DecimalField(max_digits=10,
+    # decimal_places=2): at most eight digits are available before the point.
+    if parsed > MAX_SHIFT_READING_VALUE:
+        raise ExcavatorShiftError(
+            f'{label}: значение слишком большое.',
+            field_errors={field_name: 'Укажите значение не больше 99 999 999.'},
+        )
     try:
         return parsed.quantize(Decimal('1'))
     except InvalidOperation:
@@ -1233,18 +1250,31 @@ def excavator_fuel_capacity_l(equipment):
         return Decimal('7450')
     if garage_number in {2, 3, 4, 5, 6, 7}:
         return Decimal('5700')
-    return Decimal('0')
+    configured_limit = getattr(getattr(equipment, 'model', None), 'fuel_capacity_limit_l', None)
+    return Decimal(configured_limit) if configured_limit is not None else Decimal('0')
 
 
-def excavator_fuel_liters_from_percent(equipment, percent_value):
+def excavator_fuel_liters_from_percent(equipment, percent_value, *, allow_above_100=False):
     percent = parse_required_shift_integer(percent_value, 'Топливо, %', 'fuel')
-    if percent > Decimal('100'):
+    if percent > Decimal('100') and not allow_above_100:
         raise ExcavatorShiftError(
             'Топливо не может превышать 100%.',
             field_errors={'fuel': 'Укажите значение от 0 до 100%.'},
         )
     capacity = excavator_fuel_capacity_l(equipment)
+    if capacity <= 0:
+        raise ExcavatorShiftError(
+            'Для этого экскаватора не настроена вместимость топливного бака. Обратитесь к администратору.',
+            field_errors={'fuel': 'Вместимость топливного бака не настроена.'},
+            status=409,
+            code='fuel_capacity_not_configured',
+        )
     liters = (capacity * percent / Decimal('100')).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+    if liters > MAX_SHIFT_READING_VALUE:
+        raise ExcavatorShiftError(
+            'Топливо: рассчитанное значение слишком большое.',
+            field_errors={'fuel': 'Укажите процент, при котором объём не превышает 99 999 999 л.'},
+        )
     return liters, percent, capacity
 
 
@@ -1285,16 +1315,205 @@ def validate_excavator_shift_readings(
     return fuel, engine_hours
 
 
-def existing_shift_action_payload(action_type, client_action_id):
+def validate_excavator_close_readings(
+    equipment,
+    fuel_value,
+    engine_hours_value,
+    *,
+    fuel_limit_override=None,
+):
+    """Validate input shape only; plausible business anomalies require confirmation."""
+    fuel = parse_required_shift_integer(fuel_value, 'Топливо', 'fuel')
+    engine_hours = parse_required_shift_integer(engine_hours_value, 'Моточасы', 'engine_hours')
+    fuel_limit = Decimal(fuel_limit_override) if fuel_limit_override is not None else excavator_fuel_limit(equipment)
+    if fuel_limit <= 0:
+        raise ExcavatorShiftError(
+            'Для этого экскаватора не настроена вместимость топливного бака. Обратитесь к администратору.',
+            field_errors={'fuel': 'Вместимость топливного бака не настроена.'},
+            status=409,
+            code='fuel_capacity_not_configured',
+        )
+    return fuel, engine_hours, fuel_limit
+
+
+def excavator_close_reading_warnings(
+    shift,
+    *,
+    end_fuel,
+    end_engine_hours,
+    fuel_capacity_l,
+    submitted_fuel_percent=None,
+):
+    warnings = []
+    fuel_capacity_l = Decimal(fuel_capacity_l)
+    if end_fuel > fuel_capacity_l:
+        warnings.append({
+            'code': 'fuel_above_capacity',
+            'field': 'fuel',
+            'title': 'Топливо выше вместимости бака',
+            'message': (
+                f'Вместимость бака: {_driver_reading_display(fuel_capacity_l)} л. '
+                + (
+                    f'Введено: {_driver_reading_display(submitted_fuel_percent)}% '
+                    f'({_driver_reading_display(end_fuel)} л). '
+                    if submitted_fuel_percent is not None
+                    else f'Введено: {_driver_reading_display(end_fuel)} л. '
+                )
+                + f'Превышение: {_driver_reading_display(end_fuel - fuel_capacity_l)} л.'
+            ),
+        })
+
+    if shift.start_engine_hours is None:
+        warnings.append({
+            'code': 'engine_hours_start_missing',
+            'field': 'engine_hours',
+            'title': 'Нет начального показания моточасов',
+            'message': (
+                'В смене отсутствуют моточасы на начало. '
+                f'Введено на конец: {_driver_reading_display(end_engine_hours)} м/ч; '
+                'сравнить разницу невозможно.'
+            ),
+        })
+    else:
+        start_engine_hours = Decimal(shift.start_engine_hours)
+        engine_hours_delta = end_engine_hours - start_engine_hours
+        if engine_hours_delta < 0:
+            warnings.append({
+                'code': 'engine_hours_decreased',
+                'field': 'engine_hours',
+                'title': 'Моточасы меньше начального показания',
+                'message': (
+                    f'Моточасы на начало: {_driver_reading_display(start_engine_hours)} м/ч. '
+                    f'Введено: {_driver_reading_display(end_engine_hours)} м/ч. '
+                    f'Разница: {_driver_reading_display(engine_hours_delta)} м/ч.'
+                ),
+            })
+        elif engine_hours_delta > Decimal('12'):
+            warnings.append({
+                'code': 'engine_hours_delta_high',
+                'field': 'engine_hours',
+                'title': 'Моточасы за смену выросли больше чем на 12',
+                'message': (
+                    f'Моточасы на начало: {_driver_reading_display(start_engine_hours)} м/ч. '
+                    f'Введено: {_driver_reading_display(end_engine_hours)} м/ч. '
+                    f'Разница: {_driver_reading_display(engine_hours_delta)} м/ч.'
+                ),
+            })
+    return warnings
+
+
+def _excavator_close_confirmation_payload(
+    shift,
+    employee,
+    *,
+    end_fuel,
+    end_engine_hours,
+    submitted_fuel_percent,
+    fuel_capacity_l,
+    client_action_id,
+    warnings,
+):
+    return {
+        'version': 1,
+        'employee_id': employee.pk,
+        'shift_id': shift.pk,
+        'equipment_id': shift.equipment_id,
+        'client_action_id': client_action_id,
+        'readings': {
+            'submitted_fuel_percent': _driver_reading_token_value(submitted_fuel_percent),
+            'end_fuel': _driver_reading_token_value(end_fuel),
+            'end_engine_hours': _driver_reading_token_value(end_engine_hours),
+        },
+        'start_readings': {
+            'start_fuel': _driver_reading_token_value(shift.start_fuel),
+            'start_engine_hours': _driver_reading_token_value(shift.start_engine_hours),
+        },
+        'fuel_capacity_l': _driver_reading_token_value(fuel_capacity_l),
+        'warning_codes': [warning['code'] for warning in warnings],
+    }
+
+
+def issue_excavator_close_confirmation(shift, employee, **payload):
+    return signing.dumps(
+        _excavator_close_confirmation_payload(shift, employee, **payload),
+        salt=EXCAVATOR_SHIFT_CLOSE_CONFIRMATION_SALT,
+        compress=True,
+    )
+
+
+def validate_excavator_close_confirmation(token, shift, employee, **payload):
+    max_age = getattr(settings, 'EXCAVATOR_SHIFT_CLOSE_CONFIRMATION_MAX_AGE_SECONDS', 30 * 60)
+    try:
+        signed_payload = signing.loads(
+            token,
+            salt=EXCAVATOR_SHIFT_CLOSE_CONFIRMATION_SALT,
+            max_age=max_age,
+        )
+    except signing.SignatureExpired as error:
+        raise ExcavatorShiftError(
+            'Подтверждение истекло. Проверьте показания ещё раз.',
+            status=422,
+            code='confirmation_expired',
+        ) from error
+    except signing.BadSignature as error:
+        raise ExcavatorShiftError(
+            'Подтверждение повреждено или не принадлежит этой смене.',
+            status=422,
+            code='confirmation_invalid',
+        ) from error
+    expected_payload = _excavator_close_confirmation_payload(shift, employee, **payload)
+    if signed_payload != expected_payload:
+        raise ExcavatorShiftError(
+            'Показания или смена изменились. Получите новое подтверждение.',
+            status=422,
+            code='confirmation_context_changed',
+        )
+
+
+def existing_shift_action_payload(
+    action_type,
+    client_action_id,
+    *,
+    employee=None,
+    expected_shift_id=None,
+    request_signature=None,
+):
     action = ShiftClientAction.objects.filter(
         action_type=action_type,
         client_action_id=client_action_id,
-    ).first()
+    ).select_related('shift').first()
     if not action:
         return None
+    if employee is not None and action.employee_id != employee.pk:
+        raise ExcavatorShiftError(
+            'ID действия уже принадлежит другому сотруднику.',
+            status=409,
+            code='client_action_conflict',
+        )
+    if expected_shift_id is not None and str(action.shift_id) != str(expected_shift_id):
+        raise ExcavatorShiftError(
+            'ID действия уже использован для другой смены.',
+            status=409,
+            code='client_action_conflict',
+        )
     payload = dict(action.response_payload or {})
+    stored_signature = payload.pop('_request_signature', None)
+    if request_signature is not None and stored_signature != request_signature:
+        raise ExcavatorShiftError(
+            'ID действия уже использован с другими показаниями.',
+            status=409,
+            code='client_action_conflict',
+        )
     payload['deduplicated'] = True
     return payload
+
+
+def excavator_close_request_signature(*, fuel, engine_hours, submitted_fuel_percent):
+    return {
+        'fuel': _driver_reading_token_value(fuel),
+        'engine_hours': _driver_reading_token_value(engine_hours),
+        'submitted_fuel_percent': _driver_reading_token_value(submitted_fuel_percent),
+    }
 
 
 @transaction.atomic
@@ -1311,12 +1530,12 @@ def _open_excavator_shift_atomic(
     from references.models import Equipment
 
     action_type = 'excavator_shift_opened'
-    existing = existing_shift_action_payload(action_type, client_action_id)
+    existing = existing_shift_action_payload(action_type, client_action_id, employee=employee)
     if existing:
         return existing
 
     lock_idempotency_key(action_type, client_action_id)
-    existing = existing_shift_action_payload(action_type, client_action_id)
+    existing = existing_shift_action_payload(action_type, client_action_id, employee=employee)
     if existing:
         return existing
 
@@ -1329,7 +1548,7 @@ def _open_excavator_shift_atomic(
             code='employee_inactive',
         ) from error
     equipment = Equipment.objects.select_for_update(of=('self',)).select_related('model', 'equipment_type').get(pk=equipment.pk)
-    existing = existing_shift_action_payload(action_type, client_action_id)
+    existing = existing_shift_action_payload(action_type, client_action_id, employee=employee)
     if existing:
         return existing
 
@@ -1481,6 +1700,7 @@ def open_excavator_shift(
         existing = existing_shift_action_payload(
             'excavator_shift_opened',
             client_action_id,
+            employee=employee,
         )
         if existing:
             return existing
@@ -1520,34 +1740,55 @@ def close_excavator_shift(
     engine_hours_value,
     client_action_id,
     fuel_limit_override=None,
+    submitted_fuel_percent=None,
+    confirmation_token='',
+    expected_shift_id=None,
 ):
     from references.models import Equipment
     from trips.models import OPEN_TRIP_STATUSES, Trip
     from users.models import Employee
 
     action_type = 'excavator_shift_closed'
-    existing = existing_shift_action_payload(action_type, client_action_id)
-    if existing:
-        return existing
+    if expected_shift_id is None or not str(expected_shift_id).strip():
+        raise ExcavatorShiftError(
+            'Не указан ID закрываемой смены. Обновите экран и повторите действие.',
+            status=409,
+            code='shift_context_required',
+        )
+    raw_shift_id = str(expected_shift_id).strip()
+    if not raw_shift_id.isascii() or not raw_shift_id.isdigit():
+        raise ExcavatorShiftError(
+            'Некорректный ID закрываемой смены. Обновите экран и повторите действие.',
+            status=400,
+            code='invalid_shift_context',
+        )
+    expected_shift_id = int(raw_shift_id)
+    if expected_shift_id <= 0 or expected_shift_id > 9223372036854775807:
+        raise ExcavatorShiftError(
+            'Некорректный ID закрываемой смены. Обновите экран и повторите действие.',
+            status=400,
+            code='invalid_shift_context',
+        )
 
     lock_idempotency_key(action_type, client_action_id)
-    existing = existing_shift_action_payload(action_type, client_action_id)
-    if existing:
-        return existing
-
     Employee.objects.select_for_update().get(pk=employee.pk)
-    existing = existing_shift_action_payload(action_type, client_action_id)
-    if existing:
-        return existing
     shift = (
         EmployeeShift.objects.select_for_update(of=('self',))
         .select_related('equipment', 'equipment__model', 'equipment__equipment_type')
-        .filter(employee=employee, closed_at__isnull=True)
-        .order_by('-opened_at')
+        .filter(pk=expected_shift_id, employee=employee)
+        .filter(equipment__equipment_type__name='Экскаватор')
+        .filter(
+            Q(workplace_code='excavator_operator')
+            | Q(workplace_code='')
+        )
         .first()
     )
     if not shift:
-        raise ExcavatorShiftError('Открытая смена уже закрыта.', status=409, code='shift_already_closed')
+        raise ExcavatorShiftError(
+            'Смена на сервере уже изменилась. Обновите экран и проверьте её состояние.',
+            status=409,
+            code='shift_context_changed',
+        )
     equipment = (
         Equipment.objects.select_for_update(of=('self',))
         .select_related('model', 'equipment_type')
@@ -1555,13 +1796,79 @@ def close_excavator_shift(
     )
     shift.equipment = equipment
 
-    fuel, engine_hours = validate_excavator_shift_readings(
-        equipment,
-        fuel_value,
-        engine_hours_value,
-        opening_shift=shift,
-        fuel_limit_override=fuel_limit_override,
+    normalized_fuel_percent = None
+    if submitted_fuel_percent is not None and str(submitted_fuel_percent).strip():
+        fuel, normalized_fuel_percent, fuel_capacity_l = excavator_fuel_liters_from_percent(
+            equipment,
+            submitted_fuel_percent,
+            allow_above_100=True,
+        )
+        if fuel_value is not None and str(fuel_value).strip():
+            posted_fuel = parse_required_shift_integer(fuel_value, 'Топливо', 'fuel')
+        else:
+            posted_fuel = fuel
+        if posted_fuel != fuel:
+            raise ExcavatorShiftError(
+                'Показание топлива изменилось. Повторите закрытие смены.',
+                field_errors={'fuel': 'Проценты и рассчитанные литры не совпадают.'},
+                status=422,
+                code='fuel_reading_mismatch',
+            )
+        engine_hours = parse_required_shift_integer(engine_hours_value, 'Моточасы', 'engine_hours')
+    else:
+        fuel, engine_hours, fuel_capacity_l = validate_excavator_close_readings(
+            equipment,
+            fuel_value,
+            engine_hours_value,
+            fuel_limit_override=fuel_limit_override,
+        )
+    request_signature = excavator_close_request_signature(
+        fuel=fuel,
+        engine_hours=engine_hours,
+        submitted_fuel_percent=normalized_fuel_percent,
     )
+    existing = existing_shift_action_payload(
+        action_type,
+        client_action_id,
+        employee=employee,
+        expected_shift_id=expected_shift_id,
+        request_signature=request_signature,
+    )
+    if existing:
+        return existing
+    if shift.closed_at:
+        raise ExcavatorShiftError('Открытая смена уже закрыта.', status=409, code='shift_already_closed')
+    warnings = excavator_close_reading_warnings(
+        shift,
+        end_fuel=fuel,
+        end_engine_hours=engine_hours,
+        fuel_capacity_l=fuel_capacity_l,
+        submitted_fuel_percent=normalized_fuel_percent,
+    )
+    confirmation_payload = {
+        'end_fuel': fuel,
+        'end_engine_hours': engine_hours,
+        'submitted_fuel_percent': normalized_fuel_percent,
+        'fuel_capacity_l': fuel_capacity_l,
+        'client_action_id': client_action_id,
+        'warnings': warnings,
+    }
+    if confirmation_token:
+        validate_excavator_close_confirmation(
+            confirmation_token,
+            shift,
+            employee,
+            **confirmation_payload,
+        )
+    elif warnings:
+        raise ExcavatorShiftCloseConfirmationRequired(
+            warnings=warnings,
+            confirmation_token=issue_excavator_close_confirmation(
+                shift,
+                employee,
+                **confirmation_payload,
+            ),
+        )
     shift.end_fuel = fuel
     shift.end_mileage = None
     shift.end_engine_hours = engine_hours
@@ -1580,14 +1887,30 @@ def close_excavator_shift(
         'client_action_id': client_action_id,
         'shift_id': shift.id,
         'shift_open': False,
+        'anomalous_readings_confirmed': bool(warnings),
     }
+    stored_response = {**response, '_request_signature': request_signature}
     client_action = ShiftClientAction.objects.create(
         action_type=action_type,
         client_action_id=client_action_id,
         employee=employee,
         shift=shift,
-        response_payload=response,
+        response_payload=stored_response,
     )
+    if warnings:
+        ExcavatorShiftReadingConfirmation.objects.create(
+            shift=shift,
+            employee=employee,
+            equipment=equipment,
+            client_action_id=client_action_id,
+            submitted_fuel_percent=normalized_fuel_percent,
+            fuel_capacity_l=fuel_capacity_l,
+            start_fuel=shift.start_fuel,
+            start_engine_hours=shift.start_engine_hours,
+            end_fuel=fuel,
+            end_engine_hours=engine_hours,
+            warnings=warnings,
+        )
     from core.models import bump_operational_state
     state = bump_operational_state(
         action_type,
@@ -1597,6 +1920,7 @@ def close_excavator_shift(
         payload={**response, 'employee_id': employee.id, 'equipment_id': shift.equipment_id},
     )
     response['version'] = state.version
-    client_action.response_payload = response
+    stored_response['version'] = state.version
+    client_action.response_payload = stored_response
     client_action.save(update_fields=['response_payload'])
     return response

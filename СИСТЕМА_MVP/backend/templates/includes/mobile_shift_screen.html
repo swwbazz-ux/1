@@ -69,7 +69,7 @@
                 {% else %}
                     <label class="mobile-shift__field" data-mobile-shift-field="fuel" data-eo-shift-field="fuel">
                         <span class="mobile-shift__field-label"><span>Топливо</span>{% if open_shift %}<small>Начало <strong>{{ shift_start_fuel_percent_display }}</strong>% · {{ shift_start_fuel_display }} л</small>{% else %}<small>По показанию на мониторе</small>{% endif %}</span>
-                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" step="1" pattern="[0-9]*" min="0" max="100" name="shift_fuel" value="{{ shift_fuel_display }}" placeholder="—" data-eo-shift-fuel data-eo-fuel-capacity="{{ shift_fuel_limit|floatformat:'0' }}" {% if equipment_open_shift %}disabled{% endif %}><em>%</em></span>
+                        <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" step="1" pattern="[0-9]*" min="0" {% if mobile_shift_state != "open" %}max="100" {% endif %}name="shift_fuel" value="{{ shift_fuel_display }}" placeholder="—" data-eo-shift-fuel data-eo-fuel-capacity="{{ shift_fuel_limit|floatformat:'0' }}" {% if equipment_open_shift %}disabled{% endif %}><em>%</em></span>
                         <small class="mobile-shift__field-error" data-eo-shift-field-error="fuel"></small>
                     </label>
                     <div class="mobile-shift__field mobile-shift__field--reference" data-mobile-shift-field="fuel_limit">

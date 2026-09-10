@@ -69,6 +69,7 @@ from references.rock_catalog import CANONICAL_ROCK_NAMES
 from shifts.models import EmployeeShift, ShiftClientAction
 from shifts.models import PlanAssignmentStatus, PlanCalculationMode
 from shifts.services import (
+    ExcavatorShiftCloseConfirmationRequired,
     ExcavatorShiftError,
     aggregate_completed_trip_facts_by_shift,
     assign_shift_plan_snapshot,
@@ -784,7 +785,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v221";
+const CACHE_NAME = "excavator-mobile-shell-v222";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -1200,7 +1201,7 @@ def excavator_fuel_percent_from_liters(value, capacity):
     if capacity_value <= 0:
         return '0'
     percent = (liters * Decimal('100') / capacity_value).to_integral_value(rounding=ROUND_HALF_UP)
-    return str(max(0, min(100, int(percent))))
+    return str(max(0, int(percent)))
 
 
 def format_whole_value_with_unit(value, unit):
@@ -3687,9 +3688,10 @@ def get_excavator_open_shift(employee):
     return (
         EmployeeShift.objects
         .filter(employee=employee, closed_at__isnull=True)
+        .filter(equipment__equipment_type__name='Экскаватор')
         .filter(
             Q(workplace_code='excavator_operator')
-            | Q(workplace_code='', equipment__equipment_type__name='Экскаватор')
+            | Q(workplace_code='')
         )
         .select_related('equipment', 'equipment__equipment_type')
         .order_by('-opened_at')
@@ -5039,23 +5041,27 @@ def excavator_shift_action_view(request):
     client_action_id = str(payload.get('client_action_id') or '').strip()
     if not client_action_id:
         return JsonResponse({'ok': False, 'error': 'Не передан client_action_id.'}, status=400)
+    if len(client_action_id) > 128:
+        return JsonResponse({'ok': False, 'error': 'client_action_id слишком длинный.'}, status=400)
 
-    action = str(payload.get('action') or payload.get('shift_action') or '').strip()
+    requested_action = str(payload.get('action') or payload.get('shift_action') or '').strip()
     lock_idempotency_key('excavator_shift_action', client_action_id)
-    existing_action = (
-        ShiftClientAction.objects
-        .filter(
-            action_type__in=('excavator_shift_opened', 'excavator_shift_closed'),
-            client_action_id=client_action_id,
-            employee=access.employee,
+    if requested_action == 'toggle':
+        existing_action = (
+            ShiftClientAction.objects
+            .filter(
+                action_type__in=('excavator_shift_opened', 'excavator_shift_closed'),
+                client_action_id=client_action_id,
+                employee=access.employee,
+            )
+            .order_by('created_at', 'id')
+            .first()
         )
-        .order_by('created_at', 'id')
-        .first()
-    )
-    if existing_action:
-        response_payload = dict(existing_action.response_payload or {})
-        response_payload['deduplicated'] = True
-        return JsonResponse(response_payload)
+        if existing_action:
+            response_payload = dict(existing_action.response_payload or {})
+            response_payload.pop('_request_signature', None)
+            response_payload['deduplicated'] = True
+            return JsonResponse(response_payload)
 
     Employee.objects.select_for_update().get(pk=access.employee_id)
     if not role_session_state(request, access)['is_active']:
@@ -5064,6 +5070,7 @@ def excavator_shift_action_view(request):
             status=409,
         )
     open_shift = get_excavator_open_shift(access.employee)
+    action = requested_action
     if action == 'toggle':
         action = 'close' if open_shift else 'open'
     if action not in {'open', 'close'}:
@@ -5071,19 +5078,25 @@ def excavator_shift_action_view(request):
 
     try:
         if action == 'close':
-            fuel_value = payload.get('fuel')
-            fuel_limit_override = None
-            if 'fuel_percent' in payload and open_shift:
-                fuel_value, _, fuel_limit_override = excavator_fuel_liters_from_percent(
-                    open_shift.equipment,
-                    payload.get('fuel_percent'),
+            posted_shift_id = str(payload.get('shift_id') or '').strip()
+            if not posted_shift_id:
+                return JsonResponse(
+                    {
+                        'ok': False,
+                        'error': 'Не указан ID закрываемой смены. Обновите экран и повторите действие.',
+                        'code': 'shift_context_required',
+                        'has_active_shift': bool(open_shift),
+                    },
+                    status=409,
                 )
             response_payload = close_excavator_shift(
                 employee=access.employee,
-                fuel_value=fuel_value,
+                fuel_value=payload.get('fuel'),
                 engine_hours_value=payload.get('engine_hours'),
                 client_action_id=client_action_id,
-                fuel_limit_override=fuel_limit_override,
+                submitted_fuel_percent=payload.get('fuel_percent'),
+                confirmation_token=str(payload.get('confirmation_token') or '').strip(),
+                expected_shift_id=posted_shift_id,
             )
             return JsonResponse(response_payload)
 
@@ -5108,12 +5121,30 @@ def excavator_shift_action_view(request):
             fuel_limit_override=fuel_limit_override,
         )
         return JsonResponse(response_payload)
+    except ExcavatorShiftCloseConfirmationRequired as confirmation:
+        return JsonResponse(
+            {
+                'ok': False,
+                'error': 'Проверьте подозрительные показания и подтвердите их.',
+                'code': 'reading_confirmation_required',
+                'confirmation_required': True,
+                'confirmation_token': confirmation.confirmation_token,
+                'warnings': confirmation.warnings,
+                'field_errors': {},
+                'client_action_id': client_action_id,
+                'shift_id': open_shift.pk if open_shift else None,
+                'has_active_shift': bool(open_shift),
+            },
+            status=422,
+        )
     except ExcavatorShiftError as error:
         return JsonResponse({
             'ok': False,
             'error': error.message,
             'code': error.code,
             'field_errors': error.field_errors,
+            'confirmation_required': False,
+            'has_active_shift': bool(open_shift),
         }, status=error.status)
 
 

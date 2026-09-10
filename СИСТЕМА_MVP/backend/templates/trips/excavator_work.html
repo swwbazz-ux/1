@@ -6,14 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v221">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v221">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v221">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v221">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v221">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v221">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v221" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v221" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v222">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v222">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v222">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v222">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v222">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v222">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v222" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v222" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -72,6 +72,22 @@
         </header>
 
         {% include "includes/mobile_shift_screen.html" with mobile_shift_role="excavator" mobile_shift_state=open_shift|yesno:"open,closed" mobile_shift_previous=shift_previous_readings %}
+
+        <div class="app-confirm-modal eo-reading-confirmation" data-eo-reading-confirmation hidden>
+            <div class="app-confirm-dialog eo-reading-confirmation__dialog" role="dialog" aria-modal="true" aria-labelledby="eo-reading-confirmation-title">
+                <div class="app-confirm-accent" aria-hidden="true"></div>
+                <div class="app-confirm-icon" aria-hidden="true">!</div>
+                <div class="app-confirm-content eo-reading-confirmation__content">
+                    <h2 id="eo-reading-confirmation-title">Проверьте показания</h2>
+                    <p>Смена ещё не закрыта. Сверьте значения или подтвердите, что они верны.</p>
+                    <ul class="eo-reading-confirmation__warnings" data-eo-reading-confirmation-warnings></ul>
+                </div>
+                <div class="app-confirm-actions eo-reading-confirmation__actions">
+                    <button class="secondary" type="button" data-eo-reading-confirmation-back>Вернуться и проверить</button>
+                    <button class="danger" type="button" data-eo-reading-confirmation-accept>Всё верно — закрыть смену</button>
+                </div>
+            </div>
+        </div>
 
         <section class="eo-screen mobile-work-screen mobile-face mobile-work-controls{% if not open_shift %} is-shift-inactive{% endif %}" data-eo-screen="face">
             <header class="mobile-shift__titlebar mobile-face__titlebar">
@@ -396,7 +412,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v221";
+var excavatorShellVersion = "excavator-mobile-shell-v222";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -951,7 +967,7 @@ function isExcavatorRefreshUnsafe(options) {
     )) {
         return true;
     }
-    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .eo-dashboard-unload-card.is-return-swiping, .eo-dashboard-unload-card.is-return-rebounding, .eo-dashboard-unload-card.is-return-pending, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden])")) {
+    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .eo-dashboard-unload-card.is-return-swiping, .eo-dashboard-unload-card.is-return-rebounding, .eo-dashboard-unload-card.is-return-pending, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .eo-reading-confirmation:not([hidden])")) {
         return true;
     }
     return Array.prototype.some.call(
@@ -1110,6 +1126,10 @@ window.initExcavatorWorkShell = function () {
     var shiftFuelLiters = shell.querySelector("[data-eo-shift-fuel-liters]");
     var shiftHoursInput = shell.querySelector("[data-eo-shift-engine-hours]");
     var shiftFormError = shell.querySelector("[data-eo-shift-form-error]");
+    var shiftConfirmationModal = shell.querySelector("[data-eo-reading-confirmation]");
+    var shiftConfirmationWarnings = shell.querySelector("[data-eo-reading-confirmation-warnings]");
+    var shiftConfirmationBack = shell.querySelector("[data-eo-reading-confirmation-back]");
+    var shiftConfirmationAccept = shell.querySelector("[data-eo-reading-confirmation-accept]");
     var faceScreen = shell.querySelector('[data-eo-screen="face"]');
     var faceContent = shell.querySelector("[data-eo-face-settings-available]");
     var eventsScreen = shell.querySelector('[data-eo-screen="events"]');
@@ -3189,13 +3209,10 @@ window.initExcavatorWorkShell = function () {
         if (fuel === null || Number.isNaN(fuel)) errors.fuel = "Укажите корректное число.";
         else if (fuel < 0) errors.fuel = "Значение не может быть меньше нуля.";
         else if (!Number.isInteger(fuel)) errors.fuel = "Укажите целое количество процентов.";
-        else if (fuel > 100) errors.fuel = "Укажите значение от 0 до 100%.";
+        else if (fuel > 100 && !isShiftCloseAction()) errors.fuel = "Укажите значение от 0 до 100%.";
         if (hours === null || Number.isNaN(hours)) errors.engine_hours = "Укажите корректное число.";
         else if (hours < 0) errors.engine_hours = "Значение не может быть меньше нуля.";
-        if (isShiftCloseAction() && !errors.engine_hours && startHours !== null && !Number.isNaN(startHours)) {
-            if (hours < startHours) errors.engine_hours = "Не меньше начального значения " + startHours + ".";
-            else if (hours - startHours > 12) errors.engine_hours = "Прирост не может превышать 12 моточасов.";
-        }
+        else if (!Number.isInteger(hours)) errors.engine_hours = "Укажите целое число без точки и запятой.";
         if (showErrors) {
             if (Object.keys(errors).length) showShiftErrors("Проверьте показания.", errors);
             else clearShiftErrors();
@@ -3223,9 +3240,58 @@ window.initExcavatorWorkShell = function () {
         );
     }
 
+    var shiftConfirmation = null;
+    var shiftConfirmationRequesting = false;
+
+    function hideShiftConfirmation() {
+        shiftConfirmation = null;
+        shiftConfirmationRequesting = false;
+        if (shiftConfirmationModal) shiftConfirmationModal.hidden = true;
+        if (shiftConfirmationAccept) shiftConfirmationAccept.disabled = false;
+        if (document.body) document.body.classList.remove("modal-open");
+    }
+
+    function renderShiftConfirmationWarnings(warnings) {
+        if (!shiftConfirmationWarnings) return;
+        while (shiftConfirmationWarnings.firstChild) {
+            shiftConfirmationWarnings.removeChild(shiftConfirmationWarnings.firstChild);
+        }
+        (Array.isArray(warnings) ? warnings : []).forEach(function (warning) {
+            var item = document.createElement("li");
+            var title = document.createElement("strong");
+            var message = document.createElement("span");
+            item.dataset.warningCode = String(warning.code || "warning");
+            title.textContent = String(warning.title || "Проверьте показание");
+            message.textContent = String(warning.message || "Проверьте введённое значение.");
+            item.appendChild(title);
+            item.appendChild(message);
+            shiftConfirmationWarnings.appendChild(item);
+        });
+    }
+
+    function showShiftConfirmation(payload, actionKey) {
+        if (!shiftConfirmationModal) {
+            showShiftErrors(payload.error || "Проверьте показания.", {});
+            return;
+        }
+        clearShiftErrors();
+        shiftConfirmation = {
+            token: String(payload.confirmation_token || ""),
+            actionKey: actionKey,
+            warnings: Array.isArray(payload.warnings) ? payload.warnings : []
+        };
+        renderShiftConfirmationWarnings(shiftConfirmation.warnings);
+        shiftConfirmationModal.hidden = false;
+        if (document.body) document.body.classList.add("modal-open");
+        window.requestAnimationFrame(function () {
+            if (shiftConfirmationBack) shiftConfirmationBack.focus({preventScroll: true});
+        });
+    }
+
     [shiftFuelInput, shiftHoursInput].forEach(function (input) {
         if (!input) return;
         input.addEventListener("input", function () {
+            hideShiftConfirmation();
             if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "true";
             clearShiftErrors();
             updateShiftFuelLiters();
@@ -3239,9 +3305,21 @@ window.initExcavatorWorkShell = function () {
     var shiftPendingActionKey = "";
     var shiftPendingActionId = "";
 
-    function submitExcavatorShiftAction() {
+    function resetShiftSubmissionUi(action) {
+        shiftConfirmationRequesting = false;
+        if (shiftConfirmationAccept) shiftConfirmationAccept.disabled = false;
+        shiftButton.disabled = false;
+        shiftButton.classList.remove("is-pending");
+        if (shiftLabel) {
+            shiftLabel.textContent = action === "close" ? "Закрыть смену" : "Начать смену";
+        }
+        updateShiftActionState();
+    }
+
+    function submitExcavatorShiftAction(options) {
+        options = options || {};
         if (!shiftButton) {
-            return;
+            return Promise.resolve(false);
         }
         if (
             !shiftUrl
@@ -3250,12 +3328,12 @@ window.initExcavatorWorkShell = function () {
             || shiftServerBlocked
             || (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly())
         ) {
-            return;
+            return Promise.resolve(false);
         }
         var action = shiftButton.dataset.eoShiftAction || "toggle";
         var validation = validateShiftReadings(true);
         if (!validation.valid) {
-            return;
+            return Promise.resolve(false);
         }
         var shiftActionKey = [
             action,
@@ -3263,6 +3341,11 @@ window.initExcavatorWorkShell = function () {
             shell.querySelector("[data-eo-shift-fuel]") ? shell.querySelector("[data-eo-shift-fuel]").value : "",
             shell.querySelector("[data-eo-shift-engine-hours]") ? shell.querySelector("[data-eo-shift-engine-hours]").value : ""
         ].join(":");
+        if (options.expectedActionKey && options.expectedActionKey !== shiftActionKey) {
+            hideShiftConfirmation();
+            showShiftErrors("Показания изменились. Проверьте их и повторите закрытие смены.", {});
+            return Promise.resolve(false);
+        }
         if (shiftPendingActionKey !== shiftActionKey || !shiftPendingActionId) {
             shiftPendingActionKey = shiftActionKey;
             shiftPendingActionId = generateClientActionId("excavator-shift");
@@ -3270,18 +3353,22 @@ window.initExcavatorWorkShell = function () {
         var payload = {
             action: action,
             client_action_id: shiftPendingActionId,
+            shift_id: shell.dataset.nativeShiftId || "",
             excavator_id: shell.dataset.eoShiftExcavatorId || shell.dataset.eoCurrentExcavatorId || "",
             fuel_percent: shell.querySelector("[data-eo-shift-fuel]") ? shell.querySelector("[data-eo-shift-fuel]").value : "",
             fuel: validation.fuelLiters === null ? "" : String(validation.fuelLiters),
             engine_hours: shell.querySelector("[data-eo-shift-engine-hours]") ? shell.querySelector("[data-eo-shift-engine-hours]").value : ""
         };
+        if (options.confirmationToken) {
+            payload.confirmation_token = String(options.confirmationToken);
+        }
         resetShiftHold();
         shiftButton.disabled = true;
         shiftButton.classList.add("is-pending");
         if (shiftLabel) {
             shiftLabel.textContent = action === "close" ? "Закрываем смену" : "Открываем смену";
         }
-        fetch(shiftUrl, {
+        return fetch(shiftUrl, {
             method: "POST",
             credentials: "same-origin",
             headers: {
@@ -3299,6 +3386,7 @@ window.initExcavatorWorkShell = function () {
                 return data;
             });
         }).then(function () {
+            hideShiftConfirmation();
             playExcavatorVoice(
                 action === "close" ? "shift_end" : "shift_start",
                 action === "close" ? "voice_shift_closed" : "voice_shift_opened"
@@ -3326,13 +3414,42 @@ window.initExcavatorWorkShell = function () {
                 window.location.reload();
             });
         }, function (error) {
-            showShiftErrors(error.error || error.message || "Смена не сохранена", error.field_errors || {});
-            shiftButton.disabled = false;
-            shiftButton.classList.remove("is-pending");
-            if (shiftLabel) {
-                shiftLabel.textContent = action === "close" ? "Закрыть смену" : "Начать смену";
+            if (error && error.confirmation_required === true && error.confirmation_token) {
+                resetShiftSubmissionUi(action);
+                showShiftConfirmation(error, shiftActionKey);
+                return false;
             }
-            updateShiftActionState();
+            hideShiftConfirmation();
+            showShiftErrors(error.error || error.message || "Смена не сохранена", error.field_errors || {});
+            resetShiftSubmissionUi(action);
+            return false;
+        });
+    }
+
+    if (shiftConfirmationBack) {
+        shiftConfirmationBack.addEventListener("click", function () {
+            var firstWarning = shiftConfirmation && shiftConfirmation.warnings.length
+                ? shiftConfirmation.warnings[0]
+                : null;
+            var fieldName = firstWarning ? String(firstWarning.field || "") : "";
+            var input = fieldName === "fuel" ? shiftFuelInput : shiftHoursInput;
+            hideShiftConfirmation();
+            if (input) input.focus({preventScroll: true});
+        });
+    }
+
+    if (shiftConfirmationAccept) {
+        shiftConfirmationAccept.addEventListener("click", function () {
+            if (!shiftConfirmation || shiftConfirmationRequesting) return;
+            var confirmation = shiftConfirmation;
+            shiftConfirmationRequesting = true;
+            shiftConfirmationAccept.disabled = true;
+            shiftConfirmationModal.hidden = true;
+            if (document.body) document.body.classList.remove("modal-open");
+            submitExcavatorShiftAction({
+                confirmationToken: confirmation.token,
+                expectedActionKey: confirmation.actionKey
+            });
         });
     }
 

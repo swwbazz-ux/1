@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -48,6 +48,7 @@ from references.models import (
 )
 from shifts.models import (
     EmployeeShift,
+    ExcavatorShiftReadingConfirmation,
     EquipmentPlanGroup,
     PlanAssignmentStatus,
     PlanCalculationMode,
@@ -1353,11 +1354,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v221')
+        self.assertContains(response, 'excavator-mobile-shell-v222')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 221')
+        self.assertContains(response, 'Версия 222')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
@@ -2429,6 +2430,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             reverse('excavator_shift_action'),
             data=json.dumps({
                 'action': 'close',
+                'shift_id': shift.pk,
                 'client_action_id': 'shift-close-1',
                 'fuel': '88',
                 'mileage': '1234',
@@ -2473,6 +2475,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             reverse('excavator_shift_action'),
             data=json.dumps({
                 'action': 'close',
+                'shift_id': shift.pk,
                 'client_action_id': 'shift-close-carryover',
                 'fuel': '88',
                 'mileage': '1234',
@@ -2489,6 +2492,368 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         finalize_trip_unloaded(trip, driver=self.driver, unloading_shift=unloading_shift)
         trip.refresh_from_db()
         self.assertTrue(trip.is_carryover)
+
+    def test_excavator_suspicious_close_requires_confirmation_without_mutation(self):
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'close',
+                'shift_id': shift.pk,
+                'client_action_id': 'excavator-suspicious-close',
+                'fuel_percent': '80',
+                'engine_hours': '1199',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 422)
+        payload = response.json()
+        self.assertTrue(payload['confirmation_required'])
+        self.assertTrue(payload['confirmation_token'])
+        self.assertEqual(
+            [warning['code'] for warning in payload['warnings']],
+            ['engine_hours_decreased'],
+        )
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+        self.assertIsNone(shift.end_fuel)
+        self.assertFalse(ShiftClientAction.objects.filter(client_action_id='excavator-suspicious-close').exists())
+        self.assertFalse(ExcavatorShiftReadingConfirmation.objects.exists())
+
+    def test_excavator_confirmed_suspicious_close_persists_exact_values_and_audit_once(self):
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        payload = {
+            'action': 'close',
+            'shift_id': shift.pk,
+            'client_action_id': 'excavator-confirmed-close',
+            'fuel_percent': '120',
+            'engine_hours': '1213',
+        }
+        review = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(review.status_code, 422)
+        review_payload = review.json()
+        self.assertEqual(
+            [warning['code'] for warning in review_payload['warnings']],
+            ['fuel_above_capacity', 'engine_hours_delta_high'],
+        )
+
+        payload['confirmation_token'] = review_payload['confirmation_token']
+        confirmed = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        repeated = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertTrue(confirmed.json()['anomalous_readings_confirmed'])
+        self.assertEqual(repeated.status_code, 200)
+        self.assertTrue(repeated.json()['deduplicated'])
+        shift.refresh_from_db()
+        self.assertIsNotNone(shift.closed_at)
+        self.assertEqual(shift.end_fuel, Decimal('8400'))
+        self.assertEqual(shift.end_engine_hours, Decimal('1213'))
+        audit = ExcavatorShiftReadingConfirmation.objects.get(shift=shift)
+        self.assertEqual(audit.employee, self.operator)
+        self.assertEqual(audit.equipment, self.excavator)
+        self.assertEqual(audit.submitted_fuel_percent, Decimal('120'))
+        self.assertEqual(audit.fuel_capacity_l, Decimal('7000'))
+        self.assertEqual(audit.end_fuel, Decimal('8400'))
+        self.assertEqual(
+            [warning['code'] for warning in audit.warnings],
+            ['fuel_above_capacity', 'engine_hours_delta_high'],
+        )
+        self.assertEqual(ShiftClientAction.objects.filter(client_action_id='excavator-confirmed-close').count(), 1)
+
+    def test_excavator_confirmation_rejects_changed_tampered_and_expired_context(self):
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        payload = {
+            'action': 'close',
+            'shift_id': shift.pk,
+            'client_action_id': 'excavator-token-rejection',
+            'fuel_percent': '80',
+            'engine_hours': '1213',
+        }
+        review = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+        token = review.json()['confirmation_token']
+
+        for label, changes in (
+            ('changed-hours', {'engine_hours': '1214', 'confirmation_token': token}),
+            ('tampered', {'confirmation_token': f'{token}x'}),
+        ):
+            with self.subTest(label=label):
+                attempt = self.client.post(
+                    reverse('excavator_shift_action'),
+                    data=json.dumps({**payload, **changes}),
+                    content_type='application/json',
+                )
+                self.assertEqual(attempt.status_code, 422)
+                self.assertFalse(attempt.json()['confirmation_required'])
+
+        with override_settings(EXCAVATOR_SHIFT_CLOSE_CONFIRMATION_MAX_AGE_SECONDS=-1):
+            expired = self.client.post(
+                reverse('excavator_shift_action'),
+                data=json.dumps({**payload, 'confirmation_token': token}),
+                content_type='application/json',
+            )
+        self.assertEqual(expired.status_code, 422)
+        self.assertEqual(expired.json()['code'], 'confirmation_expired')
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+        self.assertFalse(ShiftClientAction.objects.filter(client_action_id='excavator-token-rejection').exists())
+
+    def test_excavator_close_keeps_malformed_values_hard_and_rejects_stale_shift(self):
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        for label, field, value in (
+            ('blank', 'engine_hours', ''),
+            ('negative', 'engine_hours', '-1'),
+            ('fractional', 'engine_hours', '1200.5'),
+            ('not-number', 'fuel_percent', 'abc'),
+            ('negative-fuel', 'fuel_percent', '-1'),
+            ('fractional-fuel', 'fuel_percent', '10.5'),
+            ('too-large-hours', 'engine_hours', '100000000'),
+            ('too-large-fuel', 'fuel_percent', '100000000'),
+            ('derived-too-large-fuel', 'fuel_percent', '2000000'),
+        ):
+            with self.subTest(label=label):
+                payload = {
+                    'action': 'close',
+                    'shift_id': shift.pk,
+                    'client_action_id': f'excavator-hard-{label}',
+                    'fuel_percent': '80',
+                    'engine_hours': '1201',
+                }
+                payload[field] = value
+                response = self.client.post(
+                    reverse('excavator_shift_action'),
+                    data=json.dumps(payload),
+                    content_type='application/json',
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertFalse(response.json()['confirmation_required'])
+
+        stale = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'close',
+                'shift_id': shift.pk + 1000,
+                'client_action_id': 'excavator-stale-shift',
+                'fuel_percent': '80',
+                'engine_hours': '1201',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(stale.json()['code'], 'shift_context_changed')
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+
+    def test_excavator_close_requires_exact_shift_context(self):
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'close',
+                'client_action_id': 'excavator-missing-shift-context',
+                'fuel_percent': '80',
+                'engine_hours': '1201',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'shift_context_required')
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+        self.assertFalse(
+            ShiftClientAction.objects.filter(
+                client_action_id='excavator-missing-shift-context',
+            ).exists()
+        )
+
+        for label, invalid_shift_id in (
+            ('text', 'abc'),
+            ('negative', '-1'),
+            ('overflow', '9223372036854775808'),
+        ):
+            with self.subTest(label=label):
+                malformed = self.client.post(
+                    reverse('excavator_shift_action'),
+                    data=json.dumps({
+                        'action': 'close',
+                        'shift_id': invalid_shift_id,
+                        'client_action_id': f'excavator-invalid-shift-{label}',
+                        'fuel_percent': '80',
+                        'engine_hours': '1201',
+                    }),
+                    content_type='application/json',
+                )
+                self.assertEqual(malformed.status_code, 400)
+                self.assertEqual(malformed.json()['code'], 'invalid_shift_context')
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+
+    def test_excavator_close_rejects_non_excavator_shift_even_with_forged_workplace(self):
+        EmployeeShift.objects.filter(
+            employee=self.operator,
+            closed_at__isnull=True,
+        ).update(closed_at=timezone.now())
+        forged_shift = EmployeeShift.objects.create(
+            employee=self.operator,
+            equipment=self.other_truck,
+            shift_type='day',
+            workplace_code='excavator_operator',
+            start_fuel='100',
+            start_mileage='500',
+            start_engine_hours='1200',
+            opened_at=timezone.now(),
+            opened_by=self.operator,
+        )
+
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'close',
+                'shift_id': forged_shift.pk,
+                'client_action_id': 'excavator-forged-truck-shift',
+                'fuel_percent': '80',
+                'engine_hours': '1201',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'shift_context_changed')
+        forged_shift.refresh_from_db()
+        self.assertIsNone(forged_shift.closed_at)
+        self.assertIsNone(forged_shift.end_fuel)
+        self.assertIsNone(forged_shift.end_engine_hours)
+
+    def test_excavator_close_with_missing_start_hours_is_confirmable(self):
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        shift.start_engine_hours = None
+        shift.save(update_fields=['start_engine_hours'])
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'close',
+                'shift_id': shift.pk,
+                'client_action_id': 'excavator-missing-start-hours',
+                'fuel_percent': '80',
+                'engine_hours': '1201',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            [warning['code'] for warning in response.json()['warnings']],
+            ['engine_hours_start_missing'],
+        )
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+
+    def test_excavator_close_boundary_values_do_not_require_confirmation(self):
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'close',
+                'shift_id': shift.pk,
+                'client_action_id': 'excavator-boundary-close',
+                'fuel_percent': '100',
+                'engine_hours': '1212',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['anomalous_readings_confirmed'])
+        shift.refresh_from_db()
+        self.assertEqual(shift.end_fuel, Decimal('7000'))
+        self.assertEqual(shift.end_engine_hours, Decimal('1212'))
+        self.assertFalse(ExcavatorShiftReadingConfirmation.objects.exists())
+
+    def test_excavator_open_still_rejects_fuel_above_100_percent(self):
+        EmployeeShift.objects.filter(
+            employee=self.operator,
+            closed_at__isnull=True,
+        ).update(closed_at=timezone.now())
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'open',
+                'client_action_id': 'excavator-open-over-capacity',
+                'fuel_percent': '101',
+                'engine_hours': '1201',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('fuel', response.json()['field_errors'])
+        self.assertFalse(EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).exists())
+
+    def test_excavator_close_rejects_unconfigured_fuel_capacity(self):
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        self.excavator_model.fuel_capacity_limit_l = 0
+        self.excavator_model.save(update_fields=['fuel_capacity_limit_l'])
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'close',
+                'shift_id': shift.pk,
+                'client_action_id': 'excavator-no-fuel-capacity',
+                'fuel_percent': '80',
+                'engine_hours': '1201',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'fuel_capacity_not_configured')
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
+
+    def test_excavator_close_rejects_foreign_client_action_id(self):
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        ShiftClientAction.objects.create(
+            action_type='excavator_shift_closed',
+            client_action_id='foreign-excavator-close-action',
+            employee=self.driver,
+            shift=self.truck_shift,
+            response_payload={'ok': True, 'shift_id': self.truck_shift.pk},
+        )
+        response = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({
+                'action': 'close',
+                'shift_id': shift.pk,
+                'client_action_id': 'foreign-excavator-close-action',
+                'fuel_percent': '80',
+                'engine_hours': '1201',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'client_action_conflict')
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
 
     def test_excavator_shift_summary_uses_exact_open_shift_and_dump_count_uses_current_face(self):
         current_shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
@@ -2783,7 +3148,13 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
         closed = self.client.post(
             reverse('excavator_shift_action'),
-            data=json.dumps({'action': 'close', 'client_action_id': 'realtime-close', 'fuel': '100', 'engine_hours': '1201'}),
+            data=json.dumps({
+                'action': 'close',
+                'shift_id': opened.json()['shift_id'],
+                'client_action_id': 'realtime-close',
+                'fuel': '100',
+                'engine_hours': '1201',
+            }),
             content_type='application/json',
         )
 
@@ -2841,13 +3212,58 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(first_open.json()['shift_id'], second_open.json()['shift_id'])
         self.assertTrue(second_open.json()['deduplicated'])
 
-        close_payload = {'action': 'close', 'client_action_id': 'same-shift-close', 'fuel': '110', 'engine_hours': '1212'}
+        close_payload = {
+            'action': 'close',
+            'shift_id': first_open.json()['shift_id'],
+            'client_action_id': 'same-shift-close',
+            'fuel': '110',
+            'engine_hours': '1212',
+        }
         first_close = self.client.post(reverse('excavator_shift_action'), data=json.dumps(close_payload), content_type='application/json')
         second_close = self.client.post(reverse('excavator_shift_action'), data=json.dumps(close_payload), content_type='application/json')
         self.assertEqual(first_close.status_code, 200)
         self.assertEqual(second_close.status_code, 200)
         self.assertEqual(first_close.json()['shift_id'], second_close.json()['shift_id'])
         self.assertTrue(second_close.json()['deduplicated'])
+
+        changed_readings = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({**close_payload, 'engine_hours': '1211'}),
+            content_type='application/json',
+        )
+        self.assertEqual(changed_readings.status_code, 409)
+        self.assertEqual(changed_readings.json()['code'], 'client_action_conflict')
+
+        new_shift = EmployeeShift.objects.create(
+            employee=self.operator,
+            equipment=self.excavator,
+            shift_type='day',
+            workplace_code='excavator_operator',
+            start_fuel='110',
+            start_engine_hours='1212',
+            opened_at=timezone.now(),
+            opened_by=self.operator,
+        )
+        changed_shift = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps({**close_payload, 'shift_id': new_shift.pk}),
+            content_type='application/json',
+        )
+        self.assertEqual(changed_shift.status_code, 409)
+        self.assertEqual(changed_shift.json()['code'], 'client_action_conflict')
+        new_shift.refresh_from_db()
+        self.assertIsNone(new_shift.closed_at)
+
+        lost_response_retry = self.client.post(
+            reverse('excavator_shift_action'),
+            data=json.dumps(close_payload),
+            content_type='application/json',
+        )
+        self.assertEqual(lost_response_retry.status_code, 200)
+        self.assertTrue(lost_response_retry.json()['deduplicated'])
+        self.assertEqual(lost_response_retry.json()['shift_id'], first_close.json()['shift_id'])
+        new_shift.refresh_from_db()
+        self.assertIsNone(new_shift.closed_at)
         self.assertEqual(ShiftClientAction.objects.filter(client_action_id__in=['same-shift-open', 'same-shift-close']).count(), 2)
 
     def test_excavator_shift_toggle_retry_returns_original_action(self):
@@ -2894,17 +3310,17 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         lower = self.client.post(
             reverse('excavator_shift_action'),
-            data=json.dumps({'action': 'close', 'client_action_id': 'hours-lower', 'fuel': '150', 'engine_hours': '1199.99'}),
+            data=json.dumps({'action': 'close', 'shift_id': shift.pk, 'client_action_id': 'hours-lower', 'fuel': '150', 'engine_hours': '1199.99'}),
             content_type='application/json',
         )
         excessive = self.client.post(
             reverse('excavator_shift_action'),
-            data=json.dumps({'action': 'close', 'client_action_id': 'hours-high', 'fuel': '150', 'engine_hours': '1212.01'}),
+            data=json.dumps({'action': 'close', 'shift_id': shift.pk, 'client_action_id': 'hours-high', 'fuel': '150', 'engine_hours': '1212.01'}),
             content_type='application/json',
         )
         allowed = self.client.post(
             reverse('excavator_shift_action'),
-            data=json.dumps({'action': 'close', 'client_action_id': 'hours-12', 'fuel': '150', 'engine_hours': '1212'}),
+            data=json.dumps({'action': 'close', 'shift_id': shift.pk, 'client_action_id': 'hours-12', 'fuel': '150', 'engine_hours': '1212'}),
             content_type='application/json',
         )
 
@@ -3243,7 +3659,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v221', script)
+        self.assertIn('excavator-mobile-shell-v222', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -4094,6 +4510,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
     def test_closing_source_shift_expires_unused_handoff(self):
         previous, current = self.apply_reassignment_to_other_excavator()
+        source_shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
         handoff = HaulAssignmentHandoff.objects.get(
             source_assignment=previous,
             target_assignment=current,
@@ -4103,6 +4520,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             reverse('excavator_shift_action'),
             data=json.dumps({
                 'action': 'close',
+                'shift_id': source_shift.pk,
                 'client_action_id': 'close-source-with-handoff',
                 'fuel': '88',
                 'engine_hours': '1201',

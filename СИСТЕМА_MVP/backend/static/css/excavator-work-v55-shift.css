@@ -3449,3 +3449,148 @@ body.excavator-operator-screen .eo-screen.mm-mobile-shift-form .eo-shift-result-
     font-size: clamp(8px, 1.55cqh, 10px) !important;
     line-height: 1 !important;
 }
+
+/* Подтверждение технически возможных, но подозрительных показаний при закрытии смены. */
+body.excavator-operator-screen .eo-reading-confirmation {
+    z-index: 1240;
+    padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+    background: rgba(0, 7, 10, .84);
+    backdrop-filter: blur(8px);
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__dialog {
+    grid-template-columns: 46px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 10px 12px;
+    width: min(500px, calc(100vw - 28px));
+    max-height: calc(100dvh - 28px);
+    padding: 16px;
+    overflow: hidden;
+    border-color: rgba(255, 196, 61, .46);
+    border-radius: 18px;
+    color: #f4f8f7;
+    background: linear-gradient(155deg, rgba(20, 32, 37, .99), rgba(3, 13, 17, .99));
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .72), 0 0 28px rgba(255, 196, 61, .12);
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__dialog .app-confirm-icon {
+    color: #201400;
+    background: #ffc43d;
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__content {
+    min-width: 0;
+    max-height: min(58dvh, 480px);
+    overflow: hidden;
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__content h2 {
+    margin: 2px 0 7px;
+    color: #ffd66f;
+    font-size: clamp(20px, 5vw, 25px);
+    line-height: 1.05;
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__content p {
+    margin: 0;
+    color: #c6d2d4;
+    font-size: clamp(13px, 3.4vw, 15px);
+    line-height: 1.3;
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__warnings {
+    max-height: min(40dvh, 330px);
+    margin: 12px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    list-style: none;
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__warnings li {
+    min-width: 0;
+    padding: 10px 11px;
+    display: grid;
+    gap: 4px;
+    border: 1px solid rgba(255, 196, 61, .28);
+    border-radius: 10px;
+    background: rgba(255, 196, 61, .07);
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__warnings strong {
+    color: #ffd66f;
+    font-size: clamp(13px, 3.5vw, 15px);
+    line-height: 1.15;
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__warnings span {
+    color: #f1f5f4;
+    font-size: clamp(12px, 3.25vw, 14px);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 9px;
+    margin-top: 2px;
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__actions button {
+    width: 100%;
+    min-width: 0;
+    min-height: 50px;
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(137, 169, 180, .38);
+    border-radius: 10px;
+    font-size: clamp(13px, 3.5vw, 15px);
+    font-weight: 900;
+    line-height: 1.1;
+    text-transform: uppercase;
+    white-space: normal;
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__actions .secondary {
+    color: #d9e5e6;
+    background: rgba(111, 139, 148, .16);
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__actions .danger {
+    border-color: rgba(255, 196, 61, .72);
+    color: #1a1200;
+    background: #ffc43d;
+}
+
+body.excavator-operator-screen .eo-reading-confirmation__actions button:disabled {
+    opacity: .58;
+}
+
+@media (max-width: 420px), (max-height: 700px) {
+    body.excavator-operator-screen .eo-reading-confirmation__dialog {
+        grid-template-columns: 38px minmax(0, 1fr);
+        gap: 8px 10px;
+        padding: 12px;
+    }
+
+    body.excavator-operator-screen .eo-reading-confirmation__content {
+        max-height: min(57dvh, 410px);
+    }
+
+    body.excavator-operator-screen .eo-reading-confirmation__warnings {
+        max-height: min(38dvh, 270px);
+        gap: 6px;
+    }
+
+    body.excavator-operator-screen .eo-reading-confirmation__warnings li {
+        padding: 8px 9px;
+    }
+
+    body.excavator-operator-screen .eo-reading-confirmation__actions button {
+        min-height: 48px;
+    }
+}

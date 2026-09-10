@@ -5,6 +5,7 @@ from .models import (
     AchievementPrize,
     AchievementUnlock,
     DriverShiftReadingConfirmation,
+    ExcavatorShiftReadingConfirmation,
     EmployeeShift,
     EquipmentPlanGroup,
     EquipmentShiftPlan,
@@ -71,6 +72,36 @@ class DriverShiftReadingConfirmationAdmin(admin.ModelAdmin):
         'start_engine_hours',
         'end_fuel',
         'end_mileage',
+        'end_engine_hours',
+        'warnings',
+        'confirmed_at',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ExcavatorShiftReadingConfirmation)
+class ExcavatorShiftReadingConfirmationAdmin(admin.ModelAdmin):
+    list_display = ('confirmed_at', 'shift', 'employee', 'equipment', 'client_action_id')
+    search_fields = ('client_action_id', 'employee__full_name', 'equipment__garage_number')
+    list_filter = ('confirmed_at',)
+    readonly_fields = (
+        'shift',
+        'employee',
+        'equipment',
+        'client_action_id',
+        'submitted_fuel_percent',
+        'fuel_capacity_l',
+        'start_fuel',
+        'start_engine_hours',
+        'end_fuel',
         'end_engine_hours',
         'warnings',
         'confirmed_at',

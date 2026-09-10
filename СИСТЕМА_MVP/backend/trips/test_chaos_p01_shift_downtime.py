@@ -1443,6 +1443,7 @@ class ChaosExcavatorLoadingDowntimeRegressionTests(TestCase):
             fuel_value='90',
             engine_hours_value='1205',
             client_action_id='chaos-operator-handover-close',
+            expected_shift_id=self.operator_shift.pk,
         )
         self.assertTrue(close_payload['ok'])
         self.assertFalse(close_payload['shift_open'])
@@ -1514,6 +1515,7 @@ class ChaosExcavatorLoadingDowntimeRegressionTests(TestCase):
             fuel_value='90',
             engine_hours_value='1205',
             client_action_id='chaos-operator-duration-close',
+            expected_shift_id=self.operator_shift.pk,
         )
         self.operator_shift.refresh_from_db()
         replacement = Employee.objects.create(

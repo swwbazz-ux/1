@@ -590,6 +590,50 @@ class DriverShiftReadingConfirmation(models.Model):
         return f'Аномальные показания подтверждены водителем: смена {self.shift_id}'
 
 
+class ExcavatorShiftReadingConfirmation(models.Model):
+    shift = models.OneToOneField(
+        EmployeeShift,
+        verbose_name='Смена',
+        on_delete=models.PROTECT,
+        related_name='excavator_reading_confirmation',
+    )
+    employee = models.ForeignKey(
+        'users.Employee',
+        verbose_name='Машинист экскаватора',
+        on_delete=models.PROTECT,
+        related_name='excavator_shift_reading_confirmations',
+    )
+    equipment = models.ForeignKey(
+        'references.Equipment',
+        verbose_name='Экскаватор',
+        on_delete=models.PROTECT,
+        related_name='excavator_shift_reading_confirmations',
+    )
+    client_action_id = models.CharField('ID действия клиента', max_length=128, unique=True)
+    submitted_fuel_percent = models.DecimalField(
+        'Введённое топливо, %',
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    fuel_capacity_l = models.DecimalField('Вместимость бака, л', max_digits=10, decimal_places=2)
+    start_fuel = models.DecimalField('Топливо на начало, л', max_digits=10, decimal_places=2, null=True, blank=True)
+    start_engine_hours = models.DecimalField('Моточасы на начало', max_digits=10, decimal_places=2, null=True, blank=True)
+    end_fuel = models.DecimalField('Топливо на конец, л', max_digits=10, decimal_places=2)
+    end_engine_hours = models.DecimalField('Моточасы на конец', max_digits=10, decimal_places=2)
+    warnings = models.JSONField('Подтверждённые предупреждения', default=list)
+    confirmed_at = models.DateTimeField('Подтверждено машинистом', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Подтверждение аномальных показаний машинистом экскаватора'
+        verbose_name_plural = 'Подтверждения аномальных показаний машинистами экскаваторов'
+        ordering = ['-confirmed_at']
+
+    def __str__(self):
+        return f'Аномальные показания подтверждены машинистом: смена {self.shift_id}'
+
+
 class AchievementPrize(models.Model):
     title = models.CharField('Название', max_length=128, default='План выполнен')
     image = models.ImageField('Призовая картинка', upload_to='achievement_prizes/')
