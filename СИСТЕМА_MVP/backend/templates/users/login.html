@@ -38,12 +38,17 @@
     <link rel="stylesheet" href="{% static 'css/role-app-install-v1.css' %}?v=4">
     <script src="{% static 'js/role-app-install-v1.js' %}?v=5" defer></script>
     {% endif %}
-    {% if combined_mobile_login %}
+    {% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %}
     <link rel="preload" as="image" href="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
+    {% endif %}
+    {% if combined_mobile_login %}
     <link rel="stylesheet" href="{% static 'css/mobile-role-login-v1.css' %}?v={{ login_role_app.shell_version }}-consent1">
     {% endif %}
     {% endif %}
     <link rel="stylesheet" href="{% static 'css/entry-action-button-v2.css' %}">
+    {% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %}
+    <link rel="stylesheet" href="{% static 'css/mobile-role-login-start-v1.css' %}?v={{ login_role_app.shell_version }}-start1">
+    {% endif %}
 {% endblock %}
 {% comment %}
 is-app-installed внутри нативного приложения: экран «Установите приложение»
@@ -521,9 +526,9 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     }
 </style>
 {% endif %}
-<main class="shared-shift-dialog unified-login-dialog{% if combined_mobile_login %} mobile-role-login{% endif %}"{% if combined_mobile_login %} data-mobile-role-login{% endif %}>
+<main class="shared-shift-dialog unified-login-dialog{% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %} mobile-role-login{% endif %}"{% if combined_mobile_login %} data-mobile-role-login{% endif %}>
     <div class="shared-shift-accent" aria-hidden="true"></div>
-    {% if combined_mobile_login %}
+    {% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %}
     <section class="mobile-role-login__hero" aria-label="Коппер Рисорсез — горнотранспортная компания">
         <div class="mobile-role-login__hero-backdrop" aria-hidden="true"></div>
         <picture class="mobile-role-login__hero-picture">
@@ -538,6 +543,10 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
             <path d="M0 10 58 52 14 116 70 165 22 226 72 292 20 352 62 430M0 74 58 52 70 165 14 116 22 226 72 292 20 352M0 298 72 292 62 430" />
         </svg>
         <div class="mobile-role-login__hero-shade" aria-hidden="true"></div>
+        <div class="mobile-role-login__hero-brand" aria-hidden="true">
+            <span>{{ login_role_app.name }}</span>
+            <strong>Коппер Рисорсез</strong>
+        </div>
     </section>
     {% endif %}
     <form method="post" data-validated-login{% if combined_mobile_login %} data-login-combined="true" data-login-step="{{ login_step|default:'phone' }}"{% endif %}{% if phone_is_prefill_only %} data-phone-prefill-only{% endif %} class="app-confirm-content unified-login-form{% if login_step == 'pin' %} is-pin-step{% elif login_step == 'consent' %} is-consent-step{% elif combined_mobile_login %} is-phone-step{% endif %}{% if combined_mobile_login %} is-combined-login{% endif %}">
@@ -546,14 +555,15 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         {% if login_role_app %}
         <div class="unified-login-role-identity">
             <img src="{{ login_role_app.icon_180_url }}" width="72" height="72" alt="">
-            <span>{% if combined_mobile_login %}{{ login_role_app.name }}{% else %}Коппер Рисорсез{% endif %}</span>
+            <span>{% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %}{{ login_role_app.name }}{% else %}Коппер Рисорсез{% endif %}</span>
         </div>
         {% endif %}
         {% if combined_mobile_login %}
         <h1>{% if login_step == 'pin' %}Введите PIN{% elif login_step == 'consent' %}Подтвердите согласие{% else %}Вход в приложение{% endif %}</h1>
         <p class="mobile-role-login__lead">{% if login_step == 'pin' %}Для этого номера PIN уже создан{% elif login_step == 'consent' %}Только один раз для текущей редакции Политики{% else %}Введите номер — система сама определит следующий шаг{% endif %}</p>
         {% else %}
-        <h2>{% if login_role_app %}{{ login_role_app.name }}{% else %}Единый вход{% endif %}</h2>
+        <h2>{% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %}Вход в приложение{% elif login_role_app %}{{ login_role_app.name }}{% else %}Единый вход{% endif %}</h2>
+        {% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %}<p class="mobile-role-login__lead">{% if login_step == 'pin' %}Для этого номера PIN уже создан{% else %}Введите номер — система сама определит следующий шаг{% endif %}</p>{% endif %}
         {% endif %}
         <label class="shared-shift-login-field" for="login-phone">
             <span>Номер телефона</span>
@@ -590,21 +600,25 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
                        data-privacy-consent
                        required
                        aria-invalid="{% if privacy_consent_error %}true{% else %}false{% endif %}">
-                <span class="mobile-role-login__consent-box" aria-hidden="true"></span>
+                <span class="mobile-role-login__consent-box" aria-hidden="true">
+                    <svg viewBox="0 0 20 16" fill="none" focusable="false">
+                        <path d="m2 8 5 5L18 2" />
+                    </svg>
+                </span>
                 <span class="mobile-role-login__consent-copy">Согласен на обработку персональных данных</span>
             </label>
             <a class="mobile-role-login__privacy-link" href="{% url 'portal:public_privacy' %}?from=role-login" data-login-privacy-link>Открыть Политику</a>
         </div>
         {% endif %}
-        {% if combined_mobile_login %}
-        <div id="login-auth-feedback" class="mobile-role-login__feedback" data-login-feedback role="status" aria-live="assertive">
+        {% if combined_mobile_login or login_role_app.role_code == 'mining_master' %}
+        <div{% if combined_mobile_login %} id="login-auth-feedback"{% endif %} class="mobile-role-login__feedback" data-login-feedback role="status" aria-live="assertive">
             {% for message in messages %}<span class="message error">{{ message }}</span>{% endfor %}
         </div>
         {% endif %}
 
         <input type="hidden" name="device_kind" value="{{ selected_device_kind }}">
         <div class="unified-login-actions">
-            <button class="cr-button cr-is-medium cr-is-rounded cr-is-fullwidth entry-action unified-login-submit" type="submit" name="action" value="{% if login_step == 'pin' %}login{% elif login_step == 'consent' %}consent{% else %}continue{% endif %}">{% if login_step == 'pin' %}Войти{% elif login_step == 'consent' %}Согласиться и продолжить{% elif combined_mobile_login %}Продолжить{% else %}Далее{% endif %}{% if combined_mobile_login %}<span class="mobile-role-login__submit-arrow" aria-hidden="true">→</span>{% endif %}</button>
+            <button class="cr-button cr-is-medium cr-is-rounded cr-is-fullwidth entry-action unified-login-submit" type="submit" name="action" value="{% if login_step == 'pin' %}login{% elif login_step == 'consent' %}consent{% else %}continue{% endif %}">{% if login_step == 'pin' %}Войти{% elif login_step == 'consent' %}Согласиться и продолжить{% elif combined_mobile_login %}Продолжить{% else %}Далее{% endif %}{% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %}<svg class="mobile-role-login__submit-arrow" viewBox="0 0 32 24" fill="none" aria-hidden="true" focusable="false"><path d="M2 12h25M18 3l9 9-9 9" /></svg>{% endif %}</button>
         </div>
         {% if combined_mobile_login and login_step != 'phone' %}
         <a class="unified-login-change-phone" href="/?form=1&amp;reset=1" data-login-retry data-login-clear-phone>Ввести другой номер</a>
@@ -616,9 +630,9 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     <section class="login-install-gate" data-login-install-gate>
         <div class="unified-login-role-identity">
             <img src="{{ login_role_app.icon_180_url }}" width="72" height="72" alt="">
-            <span>Коппер Рисорсез</span>
+            <span>{% if login_role_app.role_code == 'mining_master' %}{{ login_role_app.name }}{% else %}Коппер Рисорсез{% endif %}</span>
         </div>
-        <h2>{{ login_role_app.name }}</h2>
+        {% if login_role_app.role_code == 'mining_master' %}<h1>Установите приложение</h1>{% else %}<h2>{{ login_role_app.name }}</h2>{% endif %}
         <p class="login-install-gate__lead">Установите приложение на телефон — вход будет уже в нём.</p>
         {% if is_ios %}
         {% comment %} На iPhone Safari не разрешает сайту предлагать установку — кнопка
@@ -690,7 +704,7 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     })(window, document);
     </script>
     {% endif %}
-    {% if not combined_mobile_login %}
+    {% if not combined_mobile_login and login_role_app.role_code != 'mining_master' %}
         {% for message in messages %}<div class="message error">{{ message }}</div>{% endfor %}
     {% endif %}
     {% if combined_mobile_login and login_step == 'consent' %}
