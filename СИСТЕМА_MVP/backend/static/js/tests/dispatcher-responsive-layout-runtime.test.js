@@ -272,3 +272,22 @@ test("недостающие по составу машины показаны �
     }
     assert.match(CSS, /\.complex-truck-slot \{[^}]*pointer-events: none;/s);
 });
+
+test("карточка, собранная скриптом в пустой зоне, выглядит как серверная", () => {
+    /* Сборщик заворачивает имя и показания в .complex-work-head — обёртку
+       мобильного контура; на настольном пульте она растворяется, иначе
+       области сетки head/info не находят своих элементов. */
+    assert.match(CSS, /> \.complex-work-head \{[^}]*display: contents;/s);
+    for (const source of [TEMPLATE, SCRIPT]) {
+        const from = source.indexOf('targetCard.innerHTML =');
+        assert.notEqual(from, -1, "сборщик карточки не найден");
+        const builder = source.slice(from, source.indexOf("tile.remove();", from));
+        assert.match(builder, /data-truck-need="0"/);
+        assert.match(builder, /class="complex-kpis"/);
+        for (const kpi of ["trucks", "volume", "plan"]) {
+            assert.match(builder, new RegExp(`data-kpi="${kpi}"`));
+        }
+        /* Полоса — только на настольном пульте, у горного мастера её нет. */
+        assert.match(builder, /mining-master-mobile-screen/);
+    }
+});

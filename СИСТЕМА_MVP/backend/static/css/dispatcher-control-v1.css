@@ -12681,6 +12681,14 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
     min-height: 0;
 }
 
+/* Карточку, собранную скриптом при перетаскивании экскаватора в пустую
+   зону (запасной путь без ответа сервера), сборщик заворачивает в
+   .complex-work-head — обёртку мобильного контура. На настольном пульте
+   она растворяется, и имя с показаниями встают в свои области сетки. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card:not(.status-empty) > .complex-work-head {
+    display: contents;
+}
+
 /* --- Ярус 1: имя и статус ------------------------------------------------- */
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-title-state {

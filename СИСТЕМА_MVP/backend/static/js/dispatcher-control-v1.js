@@ -5609,9 +5609,24 @@ document.addEventListener("DOMContentLoaded", function () {
                     '<span class="complex-info-chip chip-rock">порода не указана</span>' +
                 "</div>" +
             "</div>" +
-            '<div class="complex-assigned-trucks truck-fill-1" style="--complex-truck-cols: 6;" aria-label="Активные самосвалы комплекса">' +
+            '<div class="complex-assigned-trucks truck-fill-1" style="--complex-truck-cols: 6;" data-truck-need="0" aria-label="Активные самосвалы комплекса">' +
                 '<em class="complex-truck-empty">самосвалы не назначены</em>' +
             "</div>";
+        if (!document.body.classList.contains("mining-master-mobile-screen")) {
+            /* На настольном пульте карточка несёт полосу ключевых цифр, как в
+               шаблоне; значений до ответа сервера нет — нули и прочерк, как у
+               комплекса без плана. Единицу объёма берём у соседней карточки. */
+            var unitNode = document.querySelector('.dispatcher-complex-card .complex-kpi[data-kpi="volume"] small');
+            var unit = unitNode ? unitNode.textContent : "т";
+            targetCard.querySelector(".complex-assigned-trucks").insertAdjacentHTML(
+                "beforebegin",
+                '<div class="complex-kpis" aria-label="Показатели комплекса">' +
+                    '<span class="complex-kpi is-zero" data-kpi="trucks" title="Назначено самосвалов / нужно по составу"><i>Машин</i><b>0<small>/0</small></b></span>' +
+                    '<span class="complex-kpi" data-kpi="volume" title="Погружено за смену"><i>Объём</i><b>0<small>' + escapeHtml(unit) + '</small></b></span>' +
+                    '<span class="complex-kpi is-muted" data-kpi="plan" title="План не назначен"><i>План</i><b>&mdash;</b></span>' +
+                "</div>"
+            );
+        }
         tile.remove();
         bindDragTile(targetCard);
         bindEquipmentCardTrigger(targetCard);
