@@ -16,8 +16,13 @@ from core.production_time import production_shift_context, production_shift_type
 from core.models import lock_production_state
 from references.models import Equipment
 from shifts.models import EmployeeShift, ShiftType
-from shifts.services import lock_active_employee_for_shift
-from trips.dispatcher_header import WORKPLACE_ROLE_LABELS
+from shifts.services import (
+    find_other_role_open_shift,
+    lock_active_employee_for_shift,
+    other_role_shift_flag,
+    other_role_shift_prompt,
+    resolve_other_role_shift,
+)
 from trips.views import dispatcher_control_view as render_dispatcher_control_view
 from users.access_auth import find_employee_access_by_credentials
 from users.active_role import activate_role_session
@@ -89,7 +94,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v162";
+const CACHE_NAME = "mining-master-mobile-shell-v163";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -589,21 +594,14 @@ def handle_shift_action(request, action, access, current_shift, blocking_shift):
                     # запрещает две открытые смены у одного сотрудника в любых
                     # контурах (unique_open_shift_per_employee). Открытая смена
                     # диспетчера или водителя того же человека раньше кончалась
-                    # IntegrityError и белым экраном 500 — теперь это понятное
-                    # сообщение, как у диспетчера (open_dispatcher_shift).
-                    other_shift = (
-                        EmployeeShift.objects
-                        .select_for_update()
-                        .filter(employee=employee, closed_at__isnull=True)
-                        .order_by('-opened_at')
-                        .first()
+                    # IntegrityError и белым экраном 500 — теперь, как у всех
+                    # ролей, предлагается завершить её и начать эту.
+                    resolve_other_role_shift(
+                        employee,
+                        workplace_code='mining_master',
+                        close_other=other_role_shift_flag(request.POST),
+                        closed_by=employee,
                     )
-                    if other_shift:
-                        workplace_label = WORKPLACE_ROLE_LABELS.get(other_shift.workplace_code, 'другая роль')
-                        raise ValidationError(
-                            f'У вас уже открыта смена «{workplace_label}». '
-                            'Завершите её перед началом смены Горного мастера.'
-                        )
                     try:
                         with transaction.atomic():
                             EmployeeShift.objects.create(
@@ -822,6 +820,11 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
 
     can_start_shift = not current_shift and not blocking_shift
     requires_shift_reauth = can_start_shift and get_session_device_kind(request) == 'shared'
+    other_role_shift = (
+        find_other_role_open_shift(access.employee, workplace_code='mining_master', for_update=False)
+        if can_start_shift
+        else None
+    )
     production_context = production_shift_context()
     current_time = production_context.local_datetime.strftime('%H:%M')
     current_date = production_context.production_date.strftime('%d.%m.%Y')
@@ -863,8 +866,15 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
             'active_shift_title': 'Активная смена горного мастера',
             'inactive_shift_title': 'Смена горного мастера не открыта',
             'inactive_name': 'смена не открыта',
-            'shift_form_action': request.get_full_path(),
+            # Только путь: фрагмент доски рендерится тем же view с
+            # ?_operational_fragment=…, и полный адрес запекался в форму смены.
+            'shift_form_action': request.path,
             'shift_action_field_name': 'action',
+            'other_role_shift_prompt': (
+                other_role_shift_prompt(other_role_shift, target_workplace_code='mining_master')
+                if other_role_shift
+                else None
+            ),
             'shift_start_value': 'start_shift',
             'shift_end_value': 'end_shift',
             'shift_start_label': 'Начать смену',

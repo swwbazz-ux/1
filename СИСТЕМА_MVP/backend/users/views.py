@@ -77,8 +77,11 @@ from shifts.services import (
     calculate_truck_shift_progress,
     close_driver_shift,
     DriverShiftCloseConfirmationRequired,
+    find_other_role_open_shift,
     open_driver_shift,
     open_shift_conflict_message,
+    other_role_shift_flag,
+    other_role_shift_prompt,
     plan_status_label,
     plan_unit_label,
     progress_cycle_visual_context,
@@ -261,7 +264,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v211'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v212'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -4148,6 +4151,7 @@ def driver_shift_view(request):
                                 'start_engine_hours': form.cleaned_data['start_engine_hours'],
                             },
                             client_action_id=form.cleaned_data.get('client_action_id') or secrets.token_urlsafe(24),
+                            close_other_role_shift=other_role_shift_flag(request.POST),
                         )
                 except ValidationError as error:
                     form.add_error(None, error)
@@ -4168,6 +4172,15 @@ def driver_shift_view(request):
             if not open_shift and assignment_state == 'assigned'
             else None
         )
+
+    other_role_shift_prompt_context = None
+    if form is not None and not open_shift:
+        other_role_shift = find_other_role_open_shift(access.employee, workplace_code='driver', for_update=False)
+        if other_role_shift:
+            other_role_shift_prompt_context = other_role_shift_prompt(
+                other_role_shift,
+                target_workplace_code='driver',
+            )
 
     close_form = getattr(request, '_driver_close_form', None)
     if close_form is None and open_shift:
@@ -4195,6 +4208,7 @@ def driver_shift_view(request):
             'work_assignment': work_assignment,
             'work_assignment_state': assignment_state,
             'shift_start_conflict_message': shift_start_conflict_message,
+            'other_role_shift_prompt': other_role_shift_prompt_context,
             'work_assignment_shift_label': work_assignment.work_shift_label if work_assignment else '',
             'work_assignment_equipment': assignment_truck,
             'current_assignment': current_assignment,

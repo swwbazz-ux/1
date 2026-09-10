@@ -4,6 +4,10 @@
         {% if not dispatcher_header.shift_form_action %}
             <input type="hidden" name="next" value="{{ request.get_full_path }}">
         {% endif %}
+        {% if not dispatcher_header.shift_is_open and dispatcher_header.other_role_shift_prompt %}
+            {# Одна открытая смена на сотрудника: подтверждение в окне закрывает смену другой роли #}
+            <input type="hidden" name="{{ dispatcher_header.other_role_shift_prompt.field }}" value="1">
+        {% endif %}
         {% if dispatcher_header.shift_is_open %}
             <button
                 type="submit"
@@ -35,7 +39,7 @@
                 value="{{ dispatcher_header.shift_start_value|default:'start' }}"
                 class="dispatcher-shift-button"
                 {% if dispatcher_header.shift_button_marker %}data-mm-shift-control{% endif %}
-                data-confirm="{{ dispatcher_header.shift_start_confirm|default:'Начать смену горного диспетчера?' }}"
+                data-confirm="{% if dispatcher_header.other_role_shift_prompt %}{{ dispatcher_header.other_role_shift_prompt.question }}{% else %}{{ dispatcher_header.shift_start_confirm|default:'Начать смену горного диспетчера?' }}{% endif %}"
                 data-confirm-delay="10"
             >{{ dispatcher_header.shift_start_label|default:"Начать смену" }}</button>
         {% endif %}

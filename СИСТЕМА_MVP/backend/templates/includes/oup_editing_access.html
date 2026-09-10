@@ -27,9 +27,13 @@
         {% elif oup_period_is_occupied %}
             <span class="oup-editing-owner">Редактирование занято</span>
         {% else %}
-            <form method="post" action="{% url 'oup_shift_start' %}">
+            <form method="post" action="{% url 'oup_shift_start' %}"{% if other_role_shift_prompt %} data-confirm="{{ other_role_shift_prompt.question }}"{% endif %}>
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                {% if other_role_shift_prompt %}
+                    {# Одна открытая смена на сотрудника: подтверждение закрывает смену другой роли #}
+                    <input type="hidden" name="{{ other_role_shift_prompt.field }}" value="1">
+                {% endif %}
                 <button class="admin-button admin-button-primary oup-editing-button" type="submit">Включить редактирование</button>
             </form>
         {% endif %}

@@ -79,7 +79,10 @@ from shifts.services import (
     equipment_is_truck,
     excavator_fuel_capacity_l,
     excavator_fuel_liters_from_percent,
+    find_other_role_open_shift,
     format_progress_percent,
+    other_role_shift_flag,
+    other_role_shift_prompt,
     plan_status_label,
     progress_cycle_visual_context,
     plan_unit_label,
@@ -605,7 +608,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v74";
+const CACHE_NAME = "dispatcher-desktop-shell-v75";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -784,7 +787,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v221";
+const CACHE_NAME = "excavator-mobile-shell-v222";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -5106,6 +5109,7 @@ def excavator_shift_action_view(request):
             engine_hours_value=payload.get('engine_hours'),
             client_action_id=client_action_id,
             fuel_limit_override=fuel_limit_override,
+            close_other_role_shift=other_role_shift_flag(payload),
         )
         return JsonResponse(response_payload)
     except ExcavatorShiftError as error:
@@ -5114,6 +5118,7 @@ def excavator_shift_action_view(request):
             'error': error.message,
             'code': error.code,
             'field_errors': error.field_errors,
+            **error.extra,
         }, status=error.status)
 
 
@@ -5155,11 +5160,23 @@ def excavator_work_view(request):
         )
     shift_fuel_limit = excavator_fuel_capacity_l(shift_start_excavator) if shift_start_excavator else Decimal('0')
     shift_action_block_message = ''
+    other_role_shift_prompt_context = None
     if not open_shift:
         if assignment_state != 'assigned':
             shift_action_block_message = work_assignment_error_message(assignment_state)
         elif equipment_open_shift:
             shift_action_block_message = 'Техника занята в другой смене.'
+        else:
+            other_role_shift = find_other_role_open_shift(
+                access.employee,
+                workplace_code='excavator_operator',
+                for_update=False,
+            )
+            if other_role_shift:
+                other_role_shift_prompt_context = other_role_shift_prompt(
+                    other_role_shift,
+                    target_workplace_code='excavator_operator',
+                )
     previous_equipment_shift = None if open_shift or equipment_open_shift else get_previous_closed_equipment_shift(shift_start_excavator)
 
     legacy_trip_client_action_id = (
@@ -5883,6 +5900,7 @@ def excavator_work_view(request):
             'equipment_open_shift': equipment_open_shift,
             'shift_fuel_limit': shift_fuel_limit,
             'shift_action_block_message': shift_action_block_message,
+            'other_role_shift_prompt': other_role_shift_prompt_context,
             'shift_previous_readings': bool(previous_equipment_shift),
             'shift_start_fuel_display': format_whole_input_value(open_shift.start_fuel if open_shift else None),
             'shift_start_fuel_percent_display': excavator_fuel_percent_from_liters(
@@ -6703,7 +6721,10 @@ def dispatcher_toggle_shift_view(request):
             messages.warning(request, 'Смена горного диспетчера уже открыта.')
             return redirect(redirect_url)
         try:
-            shift = open_dispatcher_shift(access)
+            shift = open_dispatcher_shift(
+                access,
+                close_other_role_shift=other_role_shift_flag(request.POST),
+            )
         except ValidationError as error:
             messages.error(request, '; '.join(error.messages))
             return redirect(redirect_url)

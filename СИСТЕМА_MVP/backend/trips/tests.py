@@ -187,8 +187,43 @@ class DispatcherSharedShiftStartTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'У вас уже открыта смена')
+        self.assertContains(response, 'У вас открыта смена «Горный мастер»')
+        self.assertContains(response, 'Подтвердите её завершение, чтобы начать смену Горного диспетчера.')
         self.assertFalse(
+            EmployeeShift.objects.filter(
+                employee=self.current_dispatcher,
+                workplace_code='dispatcher',
+                closed_at__isnull=True,
+            ).exists()
+        )
+
+    def test_personal_dispatcher_can_hand_over_other_role_shift_with_confirmation(self):
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+        master_shift = EmployeeShift.objects.create(
+            employee=self.current_dispatcher,
+            shift_type='day',
+            workplace_code='mining_master',
+            opened_at=timezone.now(),
+            opened_by=self.current_dispatcher,
+        )
+
+        page = self.client.get(reverse('dispatcher_control'))
+        self.assertContains(page, 'name="close_other_role_shift" value="1"')
+        self.assertContains(page, 'Завершить её и начать смену Горного диспетчера?')
+
+        response = self.client.post(
+            reverse('dispatcher_toggle_shift'),
+            {'shift_action': 'start', 'close_other_role_shift': '1'},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        master_shift.refresh_from_db()
+        self.assertIsNotNone(master_shift.closed_at)
+        self.assertTrue(master_shift.is_service_closed)
+        self.assertEqual(master_shift.closed_by, self.current_dispatcher)
+        self.assertTrue(
             EmployeeShift.objects.filter(
                 employee=self.current_dispatcher,
                 workplace_code='dispatcher',
@@ -1353,7 +1388,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v221')
+        self.assertContains(response, 'excavator-mobile-shell-v222')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
@@ -3243,7 +3278,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v221', script)
+        self.assertIn('excavator-mobile-shell-v222', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -5222,7 +5257,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotIn('closeEventHoldController', html)
         self.assertNotIn('Удерживайте 2 секунды, чтобы завершить простой', html)
         self.assertNotIn('function registerHoldAction', html)
-        self.assertNotIn('window.openAppConfirmDialog(', html)
+        # Окно подтверждения на экране только одно по смыслу — «завершить смену
+        # другой роли и начать эту» (два вызова: по данным экрана и по ответу
+        # сервера); у простоев модальных окон нет.
+        self.assertEqual(html.count('window.openAppConfirmDialog('), 2)
         self.assertNotIn('eo-hold-action', html)
         self.assertNotIn('data-eo-instant', html)
 

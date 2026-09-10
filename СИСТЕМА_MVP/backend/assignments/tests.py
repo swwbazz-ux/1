@@ -1566,9 +1566,39 @@ class MiningMasterAssignmentsViewTests(TestCase):
             ).exists()
         )
         message_texts = [str(message) for message in response.context['messages']]
+        opened = timezone.localtime(self.shift.opened_at).strftime('%H:%M')
         self.assertIn(
-            'У вас уже открыта смена «Горный диспетчер». Завершите её перед началом смены Горного мастера.',
+            f'У вас открыта смена «Горный диспетчер» с {opened}. '
+            'Подтвердите её завершение, чтобы начать смену Горного мастера.',
             message_texts,
+        )
+
+    def test_mining_master_offers_and_performs_other_role_shift_handover(self):
+        self.shift.workplace_code = 'dispatcher'
+        self.shift.save(update_fields=['workplace_code'])
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+
+        page = self.client.get(reverse('mining_master_assignments'))
+        self.assertContains(page, 'name="close_other_role_shift" value="1"')
+        self.assertContains(page, 'Завершить её и начать смену Горного мастера?')
+        self.assertContains(page, 'action="/mining-master/assignments/"')
+
+        response = self.client.post(
+            reverse('mining_master_assignments'),
+            {'action': 'start_shift', 'device_kind': 'personal', 'close_other_role_shift': '1'},
+        )
+
+        self.assertRedirects(response, reverse('mining_master_assignments'))
+        self.shift.refresh_from_db()
+        self.assertIsNotNone(self.shift.closed_at)
+        self.assertTrue(self.shift.is_service_closed)
+        self.assertEqual(self.shift.closed_by, self.master)
+        self.assertTrue(
+            EmployeeShift.objects.filter(
+                employee=self.master, workplace_code='mining_master', closed_at__isnull=True,
+            ).exists()
         )
 
     def test_mining_master_cannot_restart_shift_after_employee_is_dismissed(self):

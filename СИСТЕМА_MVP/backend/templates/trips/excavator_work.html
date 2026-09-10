@@ -6,14 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v221">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v221">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v221">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v221">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v221">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v221">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v221" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v221" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v222">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v222">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v222">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v222">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v222">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v222">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v222" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v222" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -396,7 +396,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v221";
+var excavatorShellVersion = "excavator-mobile-shell-v222";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -3238,6 +3238,7 @@ window.initExcavatorWorkShell = function () {
 
     var shiftPendingActionKey = "";
     var shiftPendingActionId = "";
+    var shiftOtherRoleConfirmed = false;
 
     function submitExcavatorShiftAction() {
         if (!shiftButton) {
@@ -3257,6 +3258,18 @@ window.initExcavatorWorkShell = function () {
         if (!validation.valid) {
             return;
         }
+        /* Одна открытая смена на сотрудника: смена в другой роли ещё открыта —
+           после удержания спрашиваем «Завершить её и начать?», как у водителя,
+           диспетчера и мастера; «да» добавляет подтверждение в запрос. */
+        var otherRoleQuestion = action !== "close" ? (shiftButton.dataset.otherRoleShiftQuestion || "") : "";
+        if (otherRoleQuestion && !shiftOtherRoleConfirmed && typeof window.openAppConfirmDialog === "function") {
+            resetShiftHold();
+            window.openAppConfirmDialog(otherRoleQuestion, function () {
+                shiftOtherRoleConfirmed = true;
+                submitExcavatorShiftAction();
+            }, 0, shiftButton.dataset.otherRoleShiftAccept || "Завершить и начать");
+            return;
+        }
         var shiftActionKey = [
             action,
             shell.dataset.eoShiftExcavatorId || shell.dataset.eoCurrentExcavatorId || "",
@@ -3273,8 +3286,10 @@ window.initExcavatorWorkShell = function () {
             excavator_id: shell.dataset.eoShiftExcavatorId || shell.dataset.eoCurrentExcavatorId || "",
             fuel_percent: shell.querySelector("[data-eo-shift-fuel]") ? shell.querySelector("[data-eo-shift-fuel]").value : "",
             fuel: validation.fuelLiters === null ? "" : String(validation.fuelLiters),
-            engine_hours: shell.querySelector("[data-eo-shift-engine-hours]") ? shell.querySelector("[data-eo-shift-engine-hours]").value : ""
+            engine_hours: shell.querySelector("[data-eo-shift-engine-hours]") ? shell.querySelector("[data-eo-shift-engine-hours]").value : "",
+            close_other_role_shift: !!shiftOtherRoleConfirmed
         };
+        shiftOtherRoleConfirmed = false;
         resetShiftHold();
         shiftButton.disabled = true;
         shiftButton.classList.add("is-pending");
@@ -3326,13 +3341,25 @@ window.initExcavatorWorkShell = function () {
                 window.location.reload();
             });
         }, function (error) {
-            showShiftErrors(error.error || error.message || "Смена не сохранена", error.field_errors || {});
             shiftButton.disabled = false;
             shiftButton.classList.remove("is-pending");
             if (shiftLabel) {
                 shiftLabel.textContent = action === "close" ? "Закрыть смену" : "Начать смену";
             }
             updateShiftActionState();
+            /* Экран отрисован до того, как в другой роли открыли смену:
+               сервер сам прислал вопрос — задаём его и повторяем с ответом. */
+            var otherRole = error && error.code === "other_role_shift_open" ? error.other_role_shift : null;
+            if (otherRole && otherRole.question && typeof window.openAppConfirmDialog === "function") {
+                shiftButton.dataset.otherRoleShiftQuestion = otherRole.question;
+                shiftButton.dataset.otherRoleShiftAccept = otherRole.accept_label || "Завершить и начать";
+                window.openAppConfirmDialog(otherRole.question, function () {
+                    shiftOtherRoleConfirmed = true;
+                    submitExcavatorShiftAction();
+                }, 0, otherRole.accept_label || "Завершить и начать");
+                return;
+            }
+            showShiftErrors(error.error || error.message || "Смена не сохранена", error.field_errors || {});
         });
     }
 

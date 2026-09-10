@@ -479,6 +479,10 @@
                 {% csrf_token %}
                 {% if not dispatcher_header.shift_is_open %}
                     <input type="hidden" name="device_kind" value="personal">
+                    {% if dispatcher_header.other_role_shift_prompt %}
+                        {# Одна открытая смена на сотрудника: подтверждение в окне закрывает смену другой роли #}
+                        <input type="hidden" name="{{ dispatcher_header.other_role_shift_prompt.field }}" value="1">
+                    {% endif %}
                 {% endif %}
                 {% if dispatcher_header.shift_is_open %}
                     <button
@@ -503,7 +507,7 @@
                         value="{{ dispatcher_header.shift_start_value|default:'start' }}"
                         class="mm-mobile-shift-button"
                         {% if not dispatcher_header.can_toggle_shift %}disabled{% endif %}
-                        data-confirm="{{ dispatcher_header.shift_start_confirm|default:'Начать смену горного мастера?' }}"
+                        data-confirm="{% if dispatcher_header.other_role_shift_prompt %}{{ dispatcher_header.other_role_shift_prompt.question }}{% else %}{{ dispatcher_header.shift_start_confirm|default:'Начать смену горного мастера?' }}{% endif %}"
                         data-confirm-delay="10"
                     >Начать смену</button>
                 {% endif %}
@@ -1351,7 +1355,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v162";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v163";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -7255,6 +7259,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v74" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v75" defer></script>
 {% endif %}
 {% endblock %}
