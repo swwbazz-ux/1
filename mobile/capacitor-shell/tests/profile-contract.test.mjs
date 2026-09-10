@@ -25,8 +25,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "40",
-    versionName: "0.1.24",
+    versionCode: "41",
+    versionName: "0.1.25",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -36,8 +36,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "43",
-    versionName: "0.1.26",
+    versionCode: "44",
+    versionName: "0.1.27",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -778,6 +778,10 @@ test("native updater is profile-driven, deferrable and verifies the APK", () => 
   const updater = readFileSync(resolve(javaRoot, "AppUpdateManager.java"), "utf8");
   const manifest = readFileSync(resolve(root, "android", "app", "src", "main", "AndroidManifest.xml"), "utf8");
   const buildScript = readFileSync(resolve(root, "scripts", "build-android.mjs"), "utf8");
+  const shiftTemplate = readFileSync(
+    resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "includes", "mobile_shift_screen.html"),
+    "utf8"
+  );
 
   assert.match(activity, /BuildConfig\.IN_APP_UPDATER_ENABLED/);
   assert.match(activity, /new AppUpdateManager\(this\)/);
@@ -791,6 +795,15 @@ test("native updater is profile-driven, deferrable and verifies the APK", () => 
   assert.match(updater, /Update signing certificate mismatch/);
   assert.match(updater, /activity\.getPackageName\(\)\.equals\(archive\.packageName\)/);
   assert.match(updater, /!hostResumed \|\| !pageLoaded/);
+  assert.match(updater, /restoreCachedUpdate\(preferences, BuildConfig\.VERSION_CODE\)/);
+  assert.match(updater, /if \(!manifestReadSucceeded\) \{[\s\S]*?return previous;/);
+  assert.match(updater, /SUCCESS_RESUME_MIN_INTERVAL_MS = 5L \* 60L \* 1000L/);
+  assert.match(updater, /FAILURE_RETRY_INTERVAL_MS = 60L \* 1000L/);
+  assert.match(updater, /postDelayed\(delayedIndicatorRefresh, PAGE_INDICATOR_RETRY_MS\)/);
+  assert.match(updater, /public void refreshIndicator\(\)/);
+  assert.match(shiftTemplate, /DOMContentLoaded/);
+  assert.match(shiftTemplate, /window\.CopperResourcesUpdate/);
+  assert.match(shiftTemplate, /bridge\.refreshIndicator\(\)/);
   assert.match(activity, /onPageStarted\(loadingWebView\)[\s\S]*?appUpdateManager\.onPageStarted\(loadingWebView\)/);
   assert.match(manifest, /android\.permission\.REQUEST_INSTALL_PACKAGES/);
   assert.doesNotMatch(manifest, /android\.permission\.UPDATE_PACKAGES_WITHOUT_USER_ACTION/);
