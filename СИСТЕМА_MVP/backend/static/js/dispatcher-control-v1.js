@@ -5179,8 +5179,153 @@ document.addEventListener("DOMContentLoaded", function () {
             grid.appendChild(card);
         });
     }
-    function refreshComplexTruckRack(rack) {
-        if (!rack) return;
+    /* Плитки самосвалов в карточке комплекса.
+
+       Размер считается от размеров САМОГО поля, а не от гаражной плитки
+       справа: раньше плитка 73px заезжала в полосу высотой 10px и её срезал
+       overflow карточки, а вёрсткой карточки управлял чужой элемент.
+
+       Раскладка подбирается перебором, а не по лестнице фиксированных
+       размеров. Лестница брала первый размер, при котором машины помещаются,
+       и останавливалась — поэтому при двенадцати машинах в поле оставалась
+       пустая колонка справа шириной в целую плитку. Теперь для каждого числа
+       колонок считается своя ячейка, и выигрывает та раскладка, где плитка
+       крупнее всех: диспетчеру нужно попадать по ним мышью и различать номера
+       через комнату, поэтому пустое место всегда отдаётся плиткам.
+
+       Пропорция ограничена коридором, иначе при одной машине на всё поле
+       выходил бы вытянутый прямоугольник, а при двадцати — узкая полоска.
+       Ниже COMPLEX_TILE_RICH_MIN_H картинка и подпись состояния всё равно
+       нечитаемы, поэтому там плитка превращается в жетон номера; состояние
+       читается цветом и кольцом плана. Если машин больше, чем ячеек даже при
+       минимальном размере, хвост сворачивается в счётчик «+N». Скролла внутри
+       карточки нет намеренно: прокручивать десять карточек по отдельности
+       диспетчер не станет. */
+    var COMPLEX_TILE_GAP = 6;
+    /* Потолок держит форму при малом числе машин: исходник картинки 360x245,
+       так что до 168px по ширине она не мылится. Нижняя граница коридора
+       пропорций 1.15, иначе выигрывала вертикальная плитка (три машины в ряд
+       давали 120x126), а самосвал на ней лежит поперёк. */
+    var COMPLEX_TILE_MAX = { w: 168, h: 124 };
+    var COMPLEX_TILE_MIN = { w: 34, h: 20 };
+    /* Ниже этого размера доска не мельчает. Общий размер берётся по самому
+       загруженному комплексу, и без нижней границы один комплекс с шестнадцатью
+       машинами ужимал плитки на всей доске до нечитаемых. Двенадцать машин на
+       один экскаватор — уже за гранью обычной смены, поэтому такой перегруз
+       честнее показать счётчиком «+N», чем мельчить все десять карточек. */
+    var COMPLEX_TILE_FLOOR = { w: 88, h: 63 };
+    /* Минимум информационной панели слева; всё, что шире, отдаётся ей же,
+       когда сетка плиток не занимает ширину целиком. */
+    var COMPLEX_INFO_MIN_W = 176;
+    var COMPLEX_TILE_ASPECT = { min: 1.15, max: 1.55 };
+    var COMPLEX_TILE_RICH_MIN_H = 42;
+
+    /* Ячейка при заданном числе колонок и строк, ужатая до коридора пропорций. */
+    function complexTileForGrid(rackWidth, rackHeight, cols, rows) {
+        var cellW = (rackWidth - (COMPLEX_TILE_GAP * (cols - 1))) / cols;
+        var cellH = (rackHeight - (COMPLEX_TILE_GAP * (rows - 1))) / rows;
+        if (cellW < COMPLEX_TILE_MIN.w || cellH < COMPLEX_TILE_MIN.h) return null;
+        var w = Math.min(cellW, COMPLEX_TILE_MAX.w);
+        var h = Math.min(cellH, COMPLEX_TILE_MAX.h);
+        if (w / h > COMPLEX_TILE_ASPECT.max) w = h * COMPLEX_TILE_ASPECT.max;
+        if (w / h < COMPLEX_TILE_ASPECT.min) h = w / COMPLEX_TILE_ASPECT.min;
+        w = Math.floor(w);
+        h = Math.floor(h);
+        if (w < COMPLEX_TILE_MIN.w || h < COMPLEX_TILE_MIN.h) return null;
+        return { w: w, h: h, cols: cols, rows: rows, area: w * h };
+    }
+
+    /* Лучшая раскладка для count машин: максимум площади плитки. */
+    function complexTruckLayout(rackWidth, rackHeight, count) {
+        var best = null;
+        for (var cols = 1; cols <= count; cols += 1) {
+            var fit = complexTileForGrid(rackWidth, rackHeight, cols, Math.ceil(count / cols));
+            if (!fit) continue;
+            if (!best || fit.area > best.area || (fit.area === best.area && fit.rows < best.rows)) {
+                best = fit;
+            }
+        }
+        return best;
+    }
+
+    /* Применяет к полю готовый размер плитки и число колонок и раскладывает
+       по ним машины. Число колонок общее на всю доску: тогда сетки всех
+       карточек одной ширины, прижаты к правому краю, а информационные панели
+       слева получают одинаковую ширину и выстраиваются по одной вертикали. */
+    function applyComplexTruckLayout(rack, tiles, empty, size, cols, rackHeight) {
+        var rows = Math.max(1, Math.floor((rackHeight + COMPLEX_TILE_GAP) / (size.h + COMPLEX_TILE_GAP)));
+        var capacity = cols * rows;
+        var visible = tiles.length <= capacity ? tiles.length : Math.max(1, capacity - 1);
+
+        tiles.forEach(function (tile, index) {
+            tile.hidden = index >= visible;
+        });
+
+        var more = rack.querySelector(".complex-truck-more");
+        var hiddenCount = tiles.length - visible;
+        if (hiddenCount > 0) {
+            if (!more) {
+                more = document.createElement("b");
+                more.className = "complex-truck-more";
+                rack.appendChild(more);
+            }
+            more.hidden = false;
+            more.textContent = "+" + hiddenCount;
+            more.title = "Ещё самосвалов: " + hiddenCount;
+        } else if (more) {
+            more.hidden = true;
+        }
+
+        /* Пустые ячейки под недостающие машины: сколько нужно по составу
+           сверх назначенных, но не больше свободных ячеек. Диспетчер видит,
+           куда ещё ставить, а не просто пустое поле. Ячейки инертны и стоят
+           сразу за плитками: сортировка вставляет плитки перед подписью
+           пустого поля, поэтому и ячейки идут перед ней. На телефоне горного
+           мастера у поля своя вёрстка, там ячеек нет. */
+        var need = parseInt(rack.getAttribute("data-truck-need"), 10) || 0;
+        var mobile = document.body.classList.contains("mining-master-mobile-screen");
+        var free = capacity - visible - (hiddenCount > 0 ? 1 : 0);
+        var slots = (mobile || !tiles.length) ? 0 : Math.max(0, Math.min(need - tiles.length, free));
+        var ghosts = Array.from(rack.querySelectorAll(".complex-truck-slot"));
+        while (ghosts.length < slots) {
+            var ghost = document.createElement("i");
+            ghost.className = "complex-truck-slot";
+            ghost.setAttribute("aria-hidden", "true");
+            ghost.textContent = "+";
+            ghosts.push(ghost);
+        }
+        ghosts.forEach(function (ghost, index) {
+            ghost.hidden = index >= slots;
+            rack.insertBefore(ghost, empty && empty.parentNode === rack ? empty : null);
+        });
+
+        rack.classList.remove("truck-fill-1", "truck-fill-2", "truck-fill-3", "truck-fill-4");
+        rack.classList.toggle("is-rich-trucks", size.h >= COMPLEX_TILE_RICH_MIN_H);
+        rack.style.setProperty("--complex-truck-cols", String(cols));
+        rack.style.setProperty("--complex-truck-gap", COMPLEX_TILE_GAP + "px");
+        rack.style.setProperty("--complex-truck-w", size.w + "px");
+        rack.style.setProperty("--complex-truck-h", size.h + "px");
+        rack.style.setProperty("--complex-truck-font", Math.max(10, Math.round(size.h * 0.5)) + "px");
+        rack.style.setProperty("--complex-truck-justify", "start");
+        if (empty) empty.hidden = tiles.length > 0;
+    }
+
+    /* Ширина, которую поле может занять: внутренняя ширина карточки минус
+       минимум информационной панели и зазор между ними. Поле стоит в колонке
+       auto и само не знает, сколько ему можно, — считаем от карточки. */
+    function complexTruckFieldWidth(rack) {
+        var card = rack.closest(".dispatcher-complex-card");
+        if (!card) return rack.clientWidth || 0;
+        var cs = getComputedStyle(card);
+        var inner = card.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+        var gap = parseFloat(cs.columnGap) || 0;
+        return Math.max(0, inner - COMPLEX_INFO_MIN_W - gap);
+    }
+
+    /* Готовит поле к расчёту: сортирует плитки, заводит подпись пустого поля,
+       возвращает измерения или null, если карточка ещё не разложена. */
+    function measureComplexTruckRack(rack) {
+        if (!rack) return null;
         sortDesktopEquipmentList(rack, ".complex-truck-tile");
         var tiles = Array.from(rack.querySelectorAll(".complex-truck-tile"));
         var empty = rack.querySelector(".complex-truck-empty");
@@ -5190,26 +5335,94 @@ document.addEventListener("DOMContentLoaded", function () {
             empty.textContent = "самосвалы не назначены";
             rack.appendChild(empty);
         }
-        var gap = 6;
-        var rackWidth = rack.clientWidth || 1;
-        var naturalTile = 92;
-        var naturalColumns = Math.max(1, Math.floor((rackWidth + gap) / (naturalTile + gap)));
-        var targetColumns = Math.max(1, Math.min(7, tiles.length || naturalColumns));
-        var needsCompactTiles = tiles.length > naturalColumns;
-        var fittedTile = Math.floor((rackWidth - (gap * (targetColumns - 1))) / targetColumns);
-        var tile = needsCompactTiles
-            ? Math.max(44, Math.min(naturalTile - 4, fittedTile))
-            : Math.max(44, Math.min(naturalTile, fittedTile));
-        var renderedColumns = Math.max(1, Math.floor((rackWidth + gap) / (tile + gap)));
-        var renderedRows = tiles.length ? Math.ceil(tiles.length / renderedColumns) : 0;
+        var width = complexTruckFieldWidth(rack);
+        var height = rack.clientHeight || rack.getBoundingClientRect().height || 0;
+        /* До первой раскладки карточки поле ещё нулевое. Считать по таким
+           размерам нельзя: ёмкость выходит в одну ячейку и все машины
+           сворачиваются в счётчик, а через кадр пересчёт даёт другое.
+           Ждём реальных размеров — ResizeObserver вызовет пересчёт. */
+        if (width < COMPLEX_TILE_MIN.w || height < COMPLEX_TILE_MIN.h) return null;
+        return { rack: rack, tiles: tiles, empty: empty, width: width, height: height };
+    }
 
-        rack.style.setProperty("--tile", tile + "px");
-        rack.dataset.truckRows = String(renderedRows);
-        if (empty) empty.hidden = tiles.length > 0;
+    function refreshComplexTruckRack(rack) {
+        /* Одиночный пересчёт всё равно идёт через доску: размер и число
+           колонок общие, иначе одна карточка выбьется из строя. */
+        refreshAllComplexTruckRacks();
     }
+
+    /* Плитки одного размера и сетка одной ширины на всей доске.
+
+       Если считать размер по каждой карточке отдельно, рядом оказываются
+       плитки 168px и 70px: поле каждой карточки заполнено, но доска выглядит
+       коллажем, и по размеру плиток уже нельзя на глаз сравнить загрузку
+       комплексов — а диспетчер смотрит именно на доску целиком. Поэтому
+       размер выбирается один на всех — самый скромный из нужных, то есть по
+       самому загруженному комплексу, но не мельче нижней границы. Число
+       колонок тоже общее — по нему CSS задаёт ширину сетки, а всё, что
+       осталось слева, достаётся информационной панели. */
     function refreshAllComplexTruckRacks() {
-        document.querySelectorAll(".complex-assigned-trucks").forEach(refreshComplexTruckRack);
+        var measured = [];
+        document.querySelectorAll(".complex-assigned-trucks").forEach(function (rack) {
+            var m = measureComplexTruckRack(rack);
+            if (m) measured.push(m);
+        });
+        if (!measured.length) return;
+
+        var common = null;
+        var maxCount = 0;
+        measured.forEach(function (m) {
+            if (!m.tiles.length) return;
+            maxCount = Math.max(maxCount, m.tiles.length);
+            var size = complexTruckLayout(m.width, m.height, m.tiles.length);
+            if (!size) size = COMPLEX_TILE_MIN;
+            if (!common || (size.w * size.h) < (common.w * common.h)) common = size;
+        });
+        if (!common) common = COMPLEX_TILE_MAX;
+        if ((common.w * common.h) < (COMPLEX_TILE_FLOOR.w * COMPLEX_TILE_FLOOR.h)) {
+            common = COMPLEX_TILE_FLOOR;
+        }
+
+        /* Колонок столько, сколько влезает по ширине, но не больше, чем нужно
+           самой загруженной карточке: при шести машинах и четырёх колонках
+           получалось бы 4+2, а 3+3 ровнее и отдаёт лишнюю ширину панели. */
+        var width = measured[0].width;
+        var height = measured[0].height;
+        var fitCols = Math.max(1, Math.floor((width + COMPLEX_TILE_GAP) / (common.w + COMPLEX_TILE_GAP)));
+        var fitRows = Math.max(1, Math.floor((height + COMPLEX_TILE_GAP) / (common.h + COMPLEX_TILE_GAP)));
+        var needCols = Math.max(1, Math.ceil(Math.max(1, maxCount) / fitRows));
+        var cols = Math.max(1, Math.min(fitCols, needCols));
+
+        measured.forEach(function (m) {
+            applyComplexTruckLayout(m.rack, m.tiles, m.empty, common, cols, m.height);
+        });
     }
+
+    /* Размер жетона зависит от размера полосы, поэтому следим именно за ним.
+       Одного-двух кадров после DOMContentLoaded не хватает: карточки внутри
+       холста раскладываются позже, и расчёт выходил на нулевых размерах, а
+       жетоны до первого resize оставались гаражными. ResizeObserver закрывает
+       и первую раскладку, и смену размера окна, и подгрузку шрифтов. */
+    var complexRackResizeObserver = null;
+    function watchComplexTruckRacks() {
+        if (typeof ResizeObserver === "undefined") {
+            requestAnimationFrame(function () {
+                requestAnimationFrame(refreshAllComplexTruckRacks);
+            });
+            window.addEventListener("load", refreshAllComplexTruckRacks, { once: true });
+            return;
+        }
+        if (!complexRackResizeObserver) {
+            complexRackResizeObserver = new ResizeObserver(function () {
+                refreshAllComplexTruckRacks();
+            });
+        }
+        complexRackResizeObserver.disconnect();
+        document.querySelectorAll(".complex-assigned-trucks").forEach(function (rack) {
+            complexRackResizeObserver.observe(rack);
+        });
+    }
+    watchComplexTruckRacks();
     function findTruckGarageList() {
         return document.querySelector(".dispatcher-trucks");
     }
@@ -5398,9 +5611,24 @@ document.addEventListener("DOMContentLoaded", function () {
                     '<span class="complex-info-chip chip-rock">порода не указана</span>' +
                 "</div>" +
             "</div>" +
-            '<div class="complex-assigned-trucks truck-fill-1" style="--complex-truck-cols: 6;" aria-label="Активные самосвалы комплекса">' +
+            '<div class="complex-assigned-trucks truck-fill-1" style="--complex-truck-cols: 6;" data-truck-need="0" aria-label="Активные самосвалы комплекса">' +
                 '<em class="complex-truck-empty">самосвалы не назначены</em>' +
             "</div>";
+        if (!document.body.classList.contains("mining-master-mobile-screen")) {
+            /* На настольном пульте карточка несёт полосу ключевых цифр, как в
+               шаблоне; значений до ответа сервера нет — нули и прочерк, как у
+               комплекса без плана. Единицу объёма берём у соседней карточки. */
+            var unitNode = document.querySelector('.dispatcher-complex-card .complex-kpi[data-kpi="volume"] small');
+            var unit = unitNode ? unitNode.textContent : "т";
+            targetCard.querySelector(".complex-assigned-trucks").insertAdjacentHTML(
+                "beforebegin",
+                '<div class="complex-kpis" aria-label="Показатели комплекса">' +
+                    '<span class="complex-kpi is-zero" data-kpi="trucks" title="Назначено самосвалов / нужно по составу"><i>Машин</i><b>0<small>/0</small></b></span>' +
+                    '<span class="complex-kpi" data-kpi="volume" title="Погружено за смену"><i>Объём</i><b>0<small>' + escapeHtml(unit) + '</small></b></span>' +
+                    '<span class="complex-kpi is-muted" data-kpi="plan" title="План не назначен"><i>План</i><b>&mdash;</b></span>' +
+                "</div>"
+            );
+        }
         tile.remove();
         bindDragTile(targetCard);
         bindEquipmentCardTrigger(targetCard);

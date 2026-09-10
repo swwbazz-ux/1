@@ -94,6 +94,8 @@
                     if (stateCode === "all") targetUrl.searchParams.delete("state");
                     else targetUrl.searchParams.set("state", stateCode);
                     targetUrl.searchParams.delete("ready_on");
+                    targetUrl.searchParams.delete("ready_from");
+                    targetUrl.searchParams.delete("ready_to");
                 }
                 targetUrl.hash = "people-list";
                 if (targetUrl.pathname === window.location.pathname && targetUrl.search === window.location.search) {
@@ -164,101 +166,255 @@
         });
     }
 
-    function initChartKeyboard(root) {
-        var links = Array.prototype.slice.call(root.querySelectorAll("[data-chart-day]"));
-        if (!links.length) return;
-        var current = links.find(function (link) { return link.classList.contains("is-selected"); }) || links[links.length - 1];
-        links.forEach(function (link) { link.setAttribute("tabindex", link === current ? "0" : "-1"); });
+    function initUnifiedChart(root, tooltip) {
+        var chart = root.querySelector("[data-adoption-chart]");
+        if (!chart) return;
 
-        links.forEach(function (link, index) {
-            link.addEventListener("keydown", function (event) {
-                var targetIndex = index;
-                if (event.key === "ArrowLeft") targetIndex = Math.max(0, index - 1);
-                else if (event.key === "ArrowRight") targetIndex = Math.min(links.length - 1, index + 1);
-                else if (event.key === "Home") targetIndex = 0;
-                else if (event.key === "End") targetIndex = links.length - 1;
-                else return;
-                event.preventDefault();
-                links.forEach(function (item, itemIndex) { item.setAttribute("tabindex", itemIndex === targetIndex ? "0" : "-1"); });
-                links[targetIndex].focus();
-            });
-        });
-    }
+        var control = chart.querySelector("[data-chart-control]");
+        var histogram = chart.querySelector(".adoption-histogram");
+        var svg = chart.querySelector(".adoption-readiness-svg");
+        var endpoint = chart.querySelector("[data-chart-endpoint]");
+        var buckets = Array.prototype.slice.call(chart.querySelectorAll("[data-chart-bucket]"));
+        var labels = Array.prototype.slice.call(chart.querySelectorAll(".adoption-chart-dates [data-chart-label]"));
+        var hitAreas = Array.prototype.slice.call(chart.querySelectorAll("[data-chart-hit-area]"));
+        if (!control || !histogram || !svg || !buckets.length) return;
 
-    function initChartAlignmentCheck(root) {
-        var stage = root.querySelector(".adoption-chart-stage");
-        var line = stage ? stage.querySelector(".adoption-cumulative-line") : null;
-        var days = stage ? Array.prototype.slice.call(stage.querySelectorAll("[data-chart-day]")) : [];
-        var points = line ? Array.prototype.slice.call(line.querySelectorAll(".adoption-line-point")) : [];
-        if (!stage || !line || !days.length || days.length !== points.length) return;
+        var summaryDate = chart.querySelector("[data-chart-summary-date]");
+        var summaryNew = chart.querySelector("[data-chart-summary-new]");
+        var summaryCumulative = chart.querySelector("[data-chart-summary-cumulative]");
+        var summaryPercent = chart.querySelector("[data-chart-summary-percent]");
+        var drilldown = chart.querySelector("[data-chart-drilldown]");
+        var noDrilldown = chart.querySelector("[data-chart-no-drilldown]");
+        var granularity = chart.getAttribute("data-chart-granularity") === "week" ? "week" : "day";
+        var total = Number(chart.getAttribute("data-chart-total")) || 0;
+        var viewBox = svg.viewBox && svg.viewBox.baseVal;
+        var viewBoxWidth = viewBox && viewBox.width ? viewBox.width : 1000;
+        var viewBoxHeight = viewBox && viewBox.height ? viewBox.height : 240;
+        var committedIndex = buckets.findIndex(function (bucket) { return bucket.classList.contains("is-selected"); });
+        var hoverFrame = null;
+        var resizeFrame = null;
+        if (committedIndex < 0) committedIndex = buckets.length - 1;
 
-        var checkFrame = null;
-        function measureAlignment() {
-            if (checkFrame) window.cancelAnimationFrame(checkFrame);
-            checkFrame = window.requestAnimationFrame(function () {
-                var lineRect = line.getBoundingClientRect();
-                var viewBox = line.viewBox && line.viewBox.baseVal;
-                if (!viewBox || !lineRect.width || !viewBox.width) return;
-                var maxError = 0;
-                points.forEach(function (point, index) {
-                    var svgX = Number(point.getAttribute("cx"));
-                    var projectedCenter = lineRect.left + ((svgX - viewBox.x) / viewBox.width) * lineRect.width;
-                    var dayRect = days[index].getBoundingClientRect();
-                    var barCenter = dayRect.left + dayRect.width / 2;
-                    maxError = Math.max(maxError, Math.abs(projectedCenter - barCenter));
-                });
-                root.dataset.chartAlignmentError = maxError.toFixed(2);
-                root.dataset.chartAlignment = maxError <= 0.75 ? "aligned" : "misaligned";
+        function clampIndex(index) {
+            return Math.max(0, Math.min(buckets.length - 1, index));
+        }
+
+        function numberFrom(bucket, name) {
+            var value = Number(bucket.getAttribute(name));
+            return Number.isFinite(value) ? value : 0;
+        }
+
+        function bucketData(index) {
+            var bucket = buckets[clampIndex(index)];
+            return {
+                element: bucket,
+                label: bucket.getAttribute("data-chart-label") || "Интервал",
+                newCount: numberFrom(bucket, "data-chart-new"),
+                cumulative: numberFrom(bucket, "data-chart-cumulative"),
+                percent: numberFrom(bucket, "data-chart-percent"),
+                x: numberFrom(bucket, "data-chart-x"),
+                y: numberFrom(bucket, "data-chart-y"),
+                url: bucket.getAttribute("data-chart-url") || ""
+            };
+        }
+
+        function tooltipText(data) {
+            return data.label
+                + ": стали готовы " + data.newCount
+                + "; накоплено " + data.cumulative + " из " + total
+                + " (" + Math.round(data.percent) + "%).";
+        }
+
+        function setChartPosition(index, preview) {
+            var safeIndex = clampIndex(index);
+            var data = bucketData(safeIndex);
+            chart.style.setProperty("--chart-cursor-x", ((data.x / viewBoxWidth) * 100).toFixed(3) + "%");
+            chart.style.setProperty("--chart-cursor-y", ((data.y / viewBoxHeight) * 100).toFixed(3) + "%");
+            chart.setAttribute("data-chart-active", "true");
+            buckets.forEach(function (bucket, bucketIndex) {
+                bucket.classList.toggle("is-preview", Boolean(preview) && bucketIndex === safeIndex);
             });
         }
 
+        function updateDrilldown(data) {
+            var hasPeople = data.newCount > 0 && Boolean(data.url);
+            if (drilldown) {
+                if (data.url) {
+                    try {
+                        var targetUrl = new URL(data.url, window.location.href);
+                        targetUrl.hash = "people-list";
+                        drilldown.href = targetUrl.toString();
+                    } catch (error) {
+                        drilldown.href = data.url;
+                    }
+                }
+                drilldown.hidden = !hasPeople;
+                drilldown.setAttribute("aria-label", "Показать сотрудников: " + data.label);
+            }
+            if (noDrilldown) {
+                noDrilldown.hidden = hasPeople;
+                noDrilldown.textContent = data.newCount > 0
+                    ? "Ссылка на выбранный интервал недоступна"
+                    : (granularity === "week"
+                        ? "В выбранном интервале новых готовых нет"
+                        : "В выбранный день новых готовых нет");
+            }
+        }
+
+        function updateSummary(data) {
+            if (summaryDate) summaryDate.textContent = data.label;
+            if (summaryNew) summaryNew.textContent = String(data.newCount);
+            if (summaryCumulative) summaryCumulative.textContent = String(data.cumulative);
+            if (summaryPercent) summaryPercent.textContent = String(Math.round(data.percent));
+            updateDrilldown(data);
+        }
+
+        function commitIndex(index) {
+            committedIndex = clampIndex(index);
+            var data = bucketData(committedIndex);
+            buckets.forEach(function (bucket, bucketIndex) {
+                bucket.classList.toggle("is-selected", bucketIndex === committedIndex);
+                bucket.classList.remove("is-preview");
+            });
+            labels.forEach(function (label) {
+                label.classList.toggle("is-selected", Number(label.getAttribute("data-chart-index")) === committedIndex);
+            });
+            control.setAttribute("aria-valuenow", String(committedIndex + 1));
+            control.setAttribute("aria-valuetext", tooltipText(data));
+            chart.setAttribute("data-chart-selected-index", String(committedIndex));
+            setChartPosition(committedIndex, false);
+            updateSummary(data);
+        }
+
+        function indexFromPointer(event, area) {
+            var rect = area.getBoundingClientRect();
+            if (!rect.width) return committedIndex;
+            var ratio = Math.max(0, Math.min(0.999999, (event.clientX - rect.left) / rect.width));
+            return clampIndex(Math.floor(ratio * buckets.length));
+        }
+
+        function schedulePreview(event, area) {
+            if (event.pointerType && event.pointerType !== "mouse" && event.pointerType !== "pen") return;
+            var clientX = event.clientX;
+            var clientY = event.clientY;
+            var targetIndex = indexFromPointer(event, area);
+            if (hoverFrame) window.cancelAnimationFrame(hoverFrame);
+            hoverFrame = window.requestAnimationFrame(function () {
+                var data = bucketData(targetIndex);
+                setChartPosition(targetIndex, true);
+                if (tooltip && typeof tooltip.showAt === "function") {
+                    tooltip.showAt(tooltipText(data), clientX, clientY);
+                }
+            });
+        }
+
+        hitAreas.forEach(function (area) {
+            area.addEventListener("pointermove", function (event) {
+                schedulePreview(event, area);
+            }, { passive: true });
+            area.addEventListener("pointerleave", function (event) {
+                if (event.pointerType && event.pointerType === "touch") return;
+                if (hoverFrame) {
+                    window.cancelAnimationFrame(hoverFrame);
+                    hoverFrame = null;
+                }
+                if (tooltip && typeof tooltip.hide === "function") tooltip.hide();
+                setChartPosition(committedIndex, false);
+            });
+            area.addEventListener("click", function (event) {
+                commitIndex(indexFromPointer(event, area));
+                try { control.focus({ preventScroll: true }); }
+                catch (error) { control.focus(); }
+            });
+        });
+
+        document.addEventListener("keydown", function (event) {
+            if (event.key !== "Escape") return;
+            if (hoverFrame) {
+                window.cancelAnimationFrame(hoverFrame);
+                hoverFrame = null;
+            }
+            if (tooltip && typeof tooltip.hide === "function") tooltip.hide();
+            setChartPosition(committedIndex, false);
+        });
+
+        control.addEventListener("keydown", function (event) {
+            var targetIndex = committedIndex;
+            var intervalJump = granularity === "week" ? 1 : 7;
+            if (event.key === "ArrowLeft" || event.key === "ArrowDown") targetIndex -= 1;
+            else if (event.key === "ArrowRight" || event.key === "ArrowUp") targetIndex += 1;
+            else if (event.key === "PageUp") targetIndex -= intervalJump;
+            else if (event.key === "PageDown") targetIndex += intervalJump;
+            else if (event.key === "Home") targetIndex = 0;
+            else if (event.key === "End") targetIndex = buckets.length - 1;
+            else if (event.key === "Enter") {
+                if (drilldown && !drilldown.hidden) drilldown.click();
+                event.preventDefault();
+                return;
+            } else return;
+            event.preventDefault();
+            commitIndex(targetIndex);
+        });
+
+        function syncVisibleLabels() {
+            var plotWidth = control.getBoundingClientRect().width;
+            var limit = plotWidth < 430 ? 4 : (plotWidth < 720 ? 5 : 7);
+            var visible = {};
+            if (buckets.length <= limit) {
+                buckets.forEach(function (_, index) { visible[index] = true; });
+            } else {
+                for (var slot = 0; slot < limit; slot += 1) {
+                    visible[Math.round((slot * (buckets.length - 1)) / (limit - 1))] = true;
+                }
+            }
+            labels.forEach(function (label) {
+                label.hidden = !visible[Number(label.getAttribute("data-chart-index"))];
+            });
+        }
+
+        function measureAlignment() {
+            if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+            resizeFrame = window.requestAnimationFrame(function () {
+                syncVisibleLabels();
+                var svgRect = svg.getBoundingClientRect();
+                if (!svgRect.width) return;
+                var maxError = 0;
+                buckets.forEach(function (bucket) {
+                    var projectedCenter = svgRect.left
+                        + (numberFrom(bucket, "data-chart-x") / viewBoxWidth) * svgRect.width;
+                    var bucketRect = bucket.getBoundingClientRect();
+                    var bucketCenter = bucketRect.left + bucketRect.width / 2;
+                    maxError = Math.max(maxError, Math.abs(projectedCenter - bucketCenter));
+                });
+                chart.setAttribute("data-chart-alignment-error", maxError.toFixed(2));
+                chart.setAttribute("data-chart-alignment", maxError <= 0.75 ? "aligned" : "misaligned");
+            });
+        }
+
+        if (endpoint) {
+            var endpointData = bucketData(buckets.length - 1);
+            endpoint.style.setProperty("--endpoint-x", ((endpointData.x / viewBoxWidth) * 100).toFixed(3) + "%");
+            endpoint.style.setProperty("--endpoint-y", ((endpointData.y / viewBoxHeight) * 100).toFixed(3) + "%");
+            endpoint.classList.toggle("is-near-top", endpointData.y / viewBoxHeight < 0.17);
+        }
+
+        commitIndex(committedIndex);
         measureAlignment();
         if (typeof window.ResizeObserver === "function") {
             var observer = new window.ResizeObserver(measureAlignment);
-            observer.observe(stage);
+            observer.observe(control);
+            observer.observe(histogram);
         } else {
             window.addEventListener("resize", measureAlignment, { passive: true });
         }
     }
 
-    function isHistoryNavigation() {
-        try {
-            var entries = window.performance && window.performance.getEntriesByType
-                ? window.performance.getEntriesByType("navigation")
-                : [];
-            if (entries.length) return entries[0].type === "back_forward";
-            return Boolean(window.performance && window.performance.navigation && window.performance.navigation.type === 2);
-        } catch (error) {
-            return false;
-        }
-    }
-
-    function revealCurrentChartDay(root) {
-        var viewport = root.querySelector(".adoption-chart-scroll");
-        if (!viewport || isHistoryNavigation()) return;
-
-        var days = Array.prototype.slice.call(viewport.querySelectorAll("[data-chart-day]"));
-        if (!days.length) return;
-        var target = days.find(function (day) { return day.classList.contains("is-selected"); }) || days[days.length - 1];
-
-        window.requestAnimationFrame(function () {
-            if (viewport.scrollWidth <= viewport.clientWidth) return;
-            var viewportRect = viewport.getBoundingClientRect();
-            var targetRect = target.getBoundingClientRect();
-            var targetLeft = viewport.scrollLeft
-                + targetRect.left
-                - viewportRect.left
-                - ((viewport.clientWidth - targetRect.width) / 2);
-            var maxLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
-            viewport.scrollLeft = Math.max(0, Math.min(maxLeft, targetLeft));
-        });
-    }
-
     function initTooltips(root) {
         var popup = root.querySelector("[data-adoption-tooltip-popup]");
-        if (!popup) return;
+        if (!popup) return { showAt: function () {}, hide: function () {} };
         var activeTarget = null;
         var showFrame = null;
+        var chartTarget = { type: "chart" };
 
         function positionPopup(target) {
             if (!target || popup.hidden) return;
@@ -283,6 +439,26 @@
             if (showFrame) window.cancelAnimationFrame(showFrame);
             showFrame = window.requestAnimationFrame(function () {
                 positionPopup(target);
+                popup.classList.add("is-visible");
+            });
+        }
+
+        function showAt(text, clientX, clientY) {
+            if (!text) return;
+            activeTarget = chartTarget;
+            popup.textContent = text;
+            popup.hidden = false;
+            popup.classList.remove("is-visible");
+            if (showFrame) window.cancelAnimationFrame(showFrame);
+            showFrame = window.requestAnimationFrame(function () {
+                var popupRect = popup.getBoundingClientRect();
+                var margin = 8;
+                var left = clientX - popupRect.width / 2;
+                left = Math.max(margin, Math.min(window.innerWidth - popupRect.width - margin, left));
+                var top = clientY - popupRect.height - 15;
+                if (top < margin) top = Math.min(window.innerHeight - popupRect.height - margin, clientY + 15);
+                popup.style.left = Math.round(left) + "px";
+                popup.style.top = Math.round(top) + "px";
                 popup.classList.add("is-visible");
             });
         }
@@ -320,6 +496,7 @@
         });
         window.addEventListener("resize", hideTooltip, { passive: true });
         window.addEventListener("scroll", hideTooltip, { passive: true, capture: true });
+        return { showAt: showAt, hide: hideTooltip };
     }
 
     function initDashboard(root) {
@@ -330,10 +507,8 @@
         initServerNavigation(root);
         initTableSearch(root);
         initBreakdownDisclosure(root);
-        initChartKeyboard(root);
-        initChartAlignmentCheck(root);
-        revealCurrentChartDay(root);
-        initTooltips(root);
+        var tooltip = initTooltips(root);
+        initUnifiedChart(root, tooltip);
         window.requestAnimationFrame(function () {
             root.classList.add("is-ready");
         });

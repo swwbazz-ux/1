@@ -34705,7 +34705,12 @@ body.is-observer-mode .app-contract-banner {
     transform-origin: top left;
 }
 
-@media (orientation: landscape) and (max-width: 1700px) {
+/* Порог 1180 совпадает с порогом телефонного режима в скрипте пульта и лежит
+   выше всех мобильных брейкпоинтов. Прежний 1700 захватывал обычные мониторы
+   с масштабом дисплея 125% (1536 логических точек): на пульте это гасил
+   холст, а страницы отчётов, аналитики и журнала — у них холста нет —
+   ужимались вдвое в левый верхний угол. */
+@media (orientation: landscape) and (max-width: 1180px) {
     .dispatcher-shell {
         width: 1400px;
         height: 800px;

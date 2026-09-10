@@ -5,7 +5,7 @@
 {% block body_class %}{% if management_mode %}dispatcher-control-screen management-registration-dashboard-screen{% else %}system-admin-registration-dashboard-screen{% endif %}{% endblock %}
 {% block extra_head %}
 {% if not management_mode %}{% include "users/includes/system_admin_workspace_styles.html" %}{% endif %}
-<link rel="stylesheet" href="{% static 'css/system-admin-registration-dashboard-v1.css' %}?v=20260909-5">
+<link rel="stylesheet" href="{% static 'css/system-admin-registration-dashboard-v1.css' %}?v=20260909-6">
 {% if management_mode %}
     {% include "includes/role_app_pwa_head.html" with role_code="manager" manifest_url="/management.webmanifest" service_worker_url="/management-sw.js" legacy_scope="/reports/management/" theme_color="#5058A4" apple_title="Руководство" icon_180="img/pwa/management-180.png" %}
 {% else %}
@@ -216,37 +216,65 @@
             <p><strong>Доступ подготовлен</strong> — по всем требуемым ролям есть действующий персональный доступ: PIN сформирован или доступ уже активирован; готовые сотрудники также входят в этот этап. <strong>Готов к работе</strong> — сотрудник активировал доступ для каждой рабочей роли, требуемой выбранной расстановкой. Установка PWA или APK пока не фиксируется отдельно; после появления достоверного события первого запуска будет добавлен самостоятельный показатель.</p>
         </details>
 
-        <section class="adoption-panel adoption-growth-panel" aria-labelledby="adoption-growth-title">
+        <section class="adoption-panel adoption-growth-panel" data-adoption-chart data-chart-total="{{ total|default:0 }}" data-chart-granularity="{{ chart.granularity|default:'day' }}" aria-labelledby="adoption-growth-title">
             <header class="adoption-panel-heading adoption-chart-heading">
-                <div><span>Динамика</span><h2 id="adoption-growth-title">Готовность сотрудников выбранной расстановки</h2><p>{{ chart.start_date|date:"d.m.Y" }} — {{ chart.end_date|date:"d.m.Y" }}</p></div>
-                <nav class="adoption-period-switcher" aria-label="Период графика">
-                    {% for item in period_links %}<a class="{% if item.is_active %}is-active{% endif %}" data-server-filter href="{{ item.url }}#adoption-growth-title" {% if item.is_active %}aria-current="true"{% endif %}>{{ item.label }}</a>{% empty %}<span class="is-active">{{ period_days|default:30 }} дней</span>{% endfor %}
-                </nav>
+                <div><span>Распределение готовности</span><h2 id="adoption-growth-title">Когда сотрудники достигли готовности</h2><p>{{ chart.start_date|date:"d.m.Y" }} — {{ chart.end_date|date:"d.m.Y" }} · {{ chart.granularity_label|default:"По дням" }}</p></div>
+                <div class="adoption-chart-header-actions">
+                    <p class="adoption-chart-headline-metrics"><strong>Готовы {{ ready|default:0 }} из {{ total|default:0 }} · {{ ready_percent|default:0|floatformat:"0" }}%</strong><span>По подтверждённым датам за период +{{ chart.period_increment|default:0 }}</span></p>
+                    <nav class="adoption-period-switcher" aria-label="Период графика">
+                        {% for item in period_links %}<a class="{% if item.is_active %}is-active{% endif %}" data-server-filter href="{{ item.url }}#adoption-growth-title" {% if item.is_active %}aria-current="true"{% endif %}>{{ item.label }}</a>{% empty %}<span class="is-active">{{ period_days|default:30 }} дней</span>{% endfor %}
+                    </nav>
+                </div>
             </header>
+            <p class="adoption-chart-semantics" id="adoption-chart-semantics">{{ chart.semantics_note|default:"График распределяет готовых сейчас сотрудников выбранной расстановки по дате достижения готовности; это не исторический снимок состояния на каждую дату." }}</p>
             {% if chart.undated_ready or chart.future_ready %}<div class="adoption-chart-caveats" aria-label="Особенности данных графика">{% if chart.undated_ready %}<span>Без даты готовности: {{ chart.undated_ready }}</span>{% endif %}{% if chart.future_ready %}<span>Дата готовности позже текущей: {{ chart.future_ready }}</span>{% endif %}</div>{% endif %}
-            {% widthratio chart.days|length 1 44 as chart_columns_width %}
-            <div class="adoption-chart-scroll">
-                <div class="adoption-chart-stage" style="--chart-days: {{ chart.days|length|default:1 }}; --chart-min-width: calc(46px + {{ chart_columns_width|default:'44' }}px);">
-                    <section class="adoption-line-band" aria-label="Всего готовых сотрудников нарастающим итогом">
-                        <div class="adoption-chart-band-heading"><strong>Всего готовых</strong><span>Шкала 0–{{ total|default:"0" }} · нарастающим итогом</span></div>
-                        <div class="adoption-line-canvas">
-                            <span class="adoption-axis is-max">{{ total|default:"0" }}</span><span class="adoption-axis is-zero">0</span>
-                            <svg class="adoption-cumulative-line" viewBox="0 0 1000 240" preserveAspectRatio="none" aria-hidden="true">
-                                <polyline pathLength="1" points="{{ chart.polyline }}"></polyline>
-                                {% for item in chart.days %}
-                                    <circle class="adoption-line-point{% if item.is_selected %} is-selected{% endif %}" cx="{{ item.svg_x|unlocalize }}" cy="{{ item.svg_y|unlocalize }}" r="{% if item.new_count %}5{% else %}3.5{% endif %}"></circle>
-                                {% endfor %}
-                            </svg>
-                        </div>
-                    </section>
-                    <section class="adoption-bars-band" aria-label="Сотрудники, ставшие готовыми за каждый день">
-                        <div class="adoption-chart-band-heading"><strong>Стали готовы за день</strong><span>Шкала 0–{{ chart.max_daily|default:"0" }} · подписи у дней с готовностью</span></div>
-                        <div class="adoption-bars">
-                            {% for item in chart.days %}<a class="adoption-bar-column{% if item.is_selected %} is-selected{% endif %}" data-server-filter data-chart-day data-adoption-tooltip="{{ item.long_label|default:item.label }}: стали готовы {{ item.new_count }}, всего {{ item.cumulative }} ({{ item.cumulative_percent|default:'0' }}%)" href="{{ item.url }}#people-list" tabindex="{% if item.is_selected or forloop.last %}0{% else %}-1{% endif %}" aria-label="{{ item.long_label|default:item.label }}: стали готовы {{ item.new_count }}, всего готовых {{ item.cumulative }}, {{ item.cumulative_percent|default:'0' }} процентов"><strong>{% if item.show_value or item.new_count %}{{ item.new_count }}{% endif %}</strong><i class="adoption-bar{% if not item.new_count %} is-zero{% endif %}" style="--bar-height: {{ item.bar_height|unlocalize }}%; --bar-delay: {{ forloop.counter0 }};"></i><time datetime="{{ item.date_iso|default:'' }}">{% if item.show_label %}{{ item.label|default:item.date }}{% endif %}</time></a>{% empty %}<div class="adoption-empty">Для выбранного периода нет данных.</div>{% endfor %}
-                        </div>
-                    </section>
+            {% with series=chart.buckets|default:chart.days %}
+            {% with endpoint=series|last %}
+            <div class="adoption-chart-figure" style="--chart-points: {{ series|length|default:1 }};">
+                <div class="adoption-chart-legend" aria-label="Обозначения графика">
+                    <span class="is-line">{{ chart.cumulative_label|default:"Подтверждённая готовность нарастающим итогом" }}</span>
+                    <span class="is-bars">{{ chart.increment_label|default:"Стали готовы за день" }}</span>
+                </div>
+                <div class="adoption-percentage-axis" aria-hidden="true">
+                    {% for tick in chart.axis_ticks %}<span>{{ tick.label }}</span>{% empty %}<span>100%</span><span>75%</span><span>50%</span><span>25%</span><span>0%</span>{% endfor %}
+                </div>
+                <div class="adoption-readiness-plot" data-chart-control data-chart-hit-area role="slider" tabindex="0" aria-label="Распределение готовности по времени" aria-orientation="horizontal" aria-valuemin="1" aria-valuemax="{{ series|length|default:1 }}" aria-valuenow="{{ series|length|default:1 }}" aria-valuetext="{{ endpoint.long_label|default:endpoint.label }}: стали готовы {{ endpoint.increment_count|default:endpoint.new_count }}, накоплено {{ endpoint.cumulative_count|default:endpoint.cumulative }} из {{ total|default:0 }}, {{ endpoint.cumulative_percent|default:0 }} процентов" aria-describedby="adoption-chart-semantics adoption-chart-keyboard-help">
+                    <svg class="adoption-readiness-svg" viewBox="0 0 1000 240" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                        <g class="adoption-chart-gridlines">
+                            {% for tick in chart.axis_ticks %}<line x1="0" x2="1000" y1="{{ tick.svg_y|unlocalize }}" y2="{{ tick.svg_y|unlocalize }}"></line>{% empty %}<line x1="0" x2="1000" y1="12" y2="12"></line><line x1="0" x2="1000" y1="66" y2="66"></line><line x1="0" x2="1000" y1="120" y2="120"></line><line x1="0" x2="1000" y1="174" y2="174"></line><line x1="0" x2="1000" y1="228" y2="228"></line>{% endfor %}
+                        </g>
+                        <path class="adoption-readiness-area" d="{{ chart.area_path|default:'' }}"></path>
+                        <path class="adoption-readiness-step" pathLength="1" d="{{ chart.step_path|default:'' }}"></path>
+                    </svg>
+                    <i class="adoption-chart-crosshair" aria-hidden="true"></i>
+                    <i class="adoption-chart-cursor-dot" aria-hidden="true"></i>
+                    {% if endpoint %}{% widthratio endpoint.svg_x 1000 100 as endpoint_x %}{% widthratio endpoint.svg_y 240 100 as endpoint_y %}<span class="adoption-chart-endpoint" data-chart-endpoint data-chart-x="{{ endpoint.svg_x|unlocalize }}" data-chart-y="{{ endpoint.svg_y|unlocalize }}" style="--endpoint-x: {{ endpoint_x }}%; --endpoint-y: {{ endpoint_y }}%;" aria-hidden="true"><strong><b>{{ chart.endpoint_count|default:endpoint.cumulative_count|default:endpoint.cumulative|default:0 }}</b> из {{ total|default:0 }} · {{ chart.endpoint_percent|default:endpoint.cumulative_percent|default:0|floatformat:"0" }}%</strong></span>{% endif %}
+                </div>
+
+                <div class="adoption-histogram-scale">
+                    <strong>{{ chart.increment_label|default:"Стали готовы за день" }}</strong>
+                    {% if chart.max_increment %}<span>Отдельная шкала · максимум {{ chart.max_increment }}</span>{% else %}<span class="is-empty">За период нет подтверждённых дат достижения готовности</span>{% endif %}
+                </div>
+                <div class="adoption-count-axis" aria-hidden="true"><span>{{ chart.max_increment|default:chart.max_daily|default:"0" }}</span><span>0</span></div>
+                <div class="adoption-histogram" data-chart-hit-area aria-hidden="true">
+                    <i class="adoption-chart-crosshair" aria-hidden="true"></i>
+                    {% for item in series %}<span class="adoption-histogram-column{% if item.is_selected %} is-selected{% endif %}" data-chart-bucket data-chart-index="{{ forloop.counter0 }}" data-chart-label="{{ item.long_label|default:item.label }}" data-chart-new="{{ item.increment_count|default:item.new_count }}" data-chart-cumulative="{{ item.cumulative_count|default:item.cumulative }}" data-chart-percent="{{ item.cumulative_percent|default:0|unlocalize }}" data-chart-x="{{ item.svg_x|unlocalize }}" data-chart-y="{{ item.svg_y|unlocalize }}" data-chart-url="{{ item.url|default:'?' }}"><i class="adoption-histogram-bar{% if not item.new_count %} is-zero{% endif %}" style="--bar-height: {{ item.bar_height|default:item.bar_percent|default:0|unlocalize }}%; --bar-delay: {{ forloop.counter0 }};"></i></span>{% empty %}<span class="adoption-empty">Для выбранного периода нет данных.</span>{% endfor %}
+                </div>
+                <span class="adoption-axis-spacer" aria-hidden="true"></span>
+                <div class="adoption-chart-dates" aria-hidden="true">
+                    {% for item in series %}<time data-chart-label data-chart-index="{{ forloop.counter0 }}" datetime="{{ item.start_iso|default:item.date_iso|default:'' }}" {% if not item.show_label %}hidden{% endif %}>{{ item.label|default:item.date }}</time>{% endfor %}
+                </div>
+
+                <div class="adoption-chart-selection" data-chart-summary aria-live="polite" aria-atomic="true">
+                    <div class="adoption-chart-selection-date"><span>{% if chart.granularity == "week" %}Выбранный интервал{% else %}Выбранный день{% endif %}</span><strong data-chart-summary-date>{{ endpoint.long_label|default:endpoint.label }}</strong></div>
+                    <div><span>{{ chart.increment_label|default:"Стали готовы за день" }}</span><strong data-chart-summary-new>{{ endpoint.increment_count|default:endpoint.new_count|default:0 }}</strong></div>
+                    <div><span>С подтверждённой датой к концу интервала</span><strong><b data-chart-summary-cumulative>{{ endpoint.cumulative_count|default:endpoint.cumulative|default:0 }}</b> из {{ total|default:0 }} · <b data-chart-summary-percent>{{ endpoint.cumulative_percent|default:0|floatformat:"0" }}</b>%</strong></div>
+                    <div class="adoption-chart-selection-action"><a data-chart-drilldown data-server-filter href="{{ endpoint.url|default:'?' }}#people-list" {% if not endpoint.new_count %}hidden{% endif %}>Показать сотрудников</a><span data-chart-no-drilldown {% if endpoint.new_count %}hidden{% endif %}>В выбранном интервале новых готовых нет</span></div>
                 </div>
             </div>
+            {% endwith %}
+            {% endwith %}
+            <p class="adoption-visually-hidden" id="adoption-chart-keyboard-help">Используйте стрелки влево и вправо для выбора интервала, Home и End — для перехода к краям периода, Enter — чтобы открыть список сотрудников.</p>
         </section>
 
         <div class="adoption-tooltip" data-adoption-tooltip-popup role="tooltip" hidden></div>
@@ -276,7 +304,7 @@
             <nav class="adoption-state-tabs" aria-label="Статус сотрудников">
                 {% for item in state_tabs %}<a class="{% if item.is_active %}is-active{% endif %}" data-server-filter data-state-code="{{ item.code }}" href="{{ item.url }}#people-list" {% if item.is_active %}aria-current="page"{% endif %}><span>{% if item.code == 'prepared' %}Доступ подготовлен (включая готовых){% else %}{{ item.label }}{% endif %}</span><strong>{{ item.count }}</strong></a>{% empty %}<span class="is-active">Все сотрудники <strong>{{ visible_total|default:"0" }}</strong></span>{% endfor %}
             </nav>
-            {% if selected_ready_on %}<div class="adoption-selected-day"><span>Стали готовы {{ selected_ready_on|date:"d.m.Y" }}</span><a data-server-filter href="{{ ready_on_clear_url|default:'?' }}#people-list">Снять фильтр дня</a></div>{% endif %}
+            {% if selected_ready_on or selected_ready_range_label %}<div class="adoption-selected-day">{% if selected_ready_range_label %}<span>Стали готовы за интервал {{ selected_ready_range_label }}</span><a data-server-filter href="{{ ready_filter_clear_url|default:ready_on_clear_url|default:'?' }}#people-list">Снять фильтр интервала</a>{% else %}<span>Стали готовы {{ selected_ready_on|date:"d.m.Y" }}</span><a data-server-filter href="{{ ready_filter_clear_url|default:ready_on_clear_url|default:'?' }}#people-list">Снять фильтр дня</a>{% endif %}</div>{% endif %}
             <div class="adoption-table-wrap">
                 <table class="adoption-table" id="adoption-people-table">
                     <thead><tr><th>Сотрудник</th><th>Роль и смена</th><th>Техника</th><th>Статус</th><th>Что требуется</th><th>Готов с</th></tr></thead>
@@ -324,5 +352,5 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% endif %}
-<script src="{% static 'js/registration-dashboard-v2.js' %}?v=20260909-5" defer></script>
+<script src="{% static 'js/registration-dashboard-v2.js' %}?v=20260909-6" defer></script>
 {% endblock %}
