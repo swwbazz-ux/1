@@ -13231,30 +13231,36 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equ
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
-    align-self: stretch;
+    align-self: end;
     column-gap: 8px;
-    margin-top: 7px;
-    padding: 0 2px 6px;
-    border-bottom: 2px solid var(--gd-line-soft);
+    height: 34px;
+    margin-bottom: 3px;
+    padding: 0 10px;
+    border: 1px solid rgba(52, 194, 211, .45);
+    border-radius: 8px;
+    background: rgba(52, 194, 211, .07);
+    color: var(--gd-muted);
     cursor: text;
-    transition: border-color .14s ease;
+    transition: border-color .14s ease, box-shadow .14s ease;
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search:focus-within,
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search.has-query {
-    border-bottom-color: var(--gd-cyan);
+    border-color: var(--gd-cyan);
+    box-shadow: 0 0 0 2px rgba(52, 194, 211, .22);
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search-cap {
-    color: var(--gd-muted);
-    font-size: 13px;
-    font-weight: 900;
-    line-height: 1;
+    display: block;
+    width: 16px;
+    height: 16px;
+    color: var(--gd-cyan);
+    opacity: .85;
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search:focus-within .dispatcher-equipment-search-cap,
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search.has-query .dispatcher-equipment-search-cap {
-    color: var(--gd-cyan);
+    opacity: 1;
 }
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search input {
@@ -13279,11 +13285,11 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equ
 
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search input::placeholder {
     color: var(--gd-muted);
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: .06em;
-    text-transform: uppercase;
-    opacity: .8;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    text-transform: none;
+    opacity: .9;
 }
 
 /* Крестик браузера убран: очистка — Esc, вид поля должен совпадать со
