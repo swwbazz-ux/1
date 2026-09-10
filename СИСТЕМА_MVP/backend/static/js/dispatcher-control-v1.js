@@ -5214,6 +5214,9 @@ document.addEventListener("DOMContentLoaded", function () {
        один экскаватор — уже за гранью обычной смены, поэтому такой перегруз
        честнее показать счётчиком «+N», чем мельчить все десять карточек. */
     var COMPLEX_TILE_FLOOR = { w: 88, h: 63 };
+    /* Минимум информационной панели слева; всё, что шире, отдаётся ей же,
+       когда сетка плиток не занимает ширину целиком. */
+    var COMPLEX_INFO_MIN_W = 176;
     var COMPLEX_TILE_ASPECT = { min: 1.15, max: 1.55 };
     var COMPLEX_TILE_RICH_MIN_H = 42;
 
@@ -5245,9 +5248,11 @@ document.addEventListener("DOMContentLoaded", function () {
         return best;
     }
 
-    /* Применяет к полю готовый размер плитки и раскладывает по нему машины. */
-    function applyComplexTruckLayout(rack, tiles, empty, size, rackWidth, rackHeight) {
-        var cols = Math.max(1, Math.floor((rackWidth + COMPLEX_TILE_GAP) / (size.w + COMPLEX_TILE_GAP)));
+    /* Применяет к полю готовый размер плитки и число колонок и раскладывает
+       по ним машины. Число колонок общее на всю доску: тогда сетки всех
+       карточек одной ширины, прижаты к правому краю, а информационные панели
+       слева получают одинаковую ширину и выстраиваются по одной вертикали. */
+    function applyComplexTruckLayout(rack, tiles, empty, size, cols, rackHeight) {
         var rows = Math.max(1, Math.floor((rackHeight + COMPLEX_TILE_GAP) / (size.h + COMPLEX_TILE_GAP)));
         var capacity = cols * rows;
         var visible = tiles.length <= capacity ? tiles.length : Math.max(1, capacity - 1);
@@ -5271,9 +5276,32 @@ document.addEventListener("DOMContentLoaded", function () {
             more.hidden = true;
         }
 
+        /* Пустые ячейки под недостающие машины: сколько нужно по составу
+           сверх назначенных, но не больше свободных ячеек. Диспетчер видит,
+           куда ещё ставить, а не просто пустое поле. Ячейки инертны и стоят
+           сразу за плитками: сортировка вставляет плитки перед подписью
+           пустого поля, поэтому и ячейки идут перед ней. На телефоне горного
+           мастера у поля своя вёрстка, там ячеек нет. */
+        var need = parseInt(rack.getAttribute("data-truck-need"), 10) || 0;
+        var mobile = document.body.classList.contains("mining-master-mobile-screen");
+        var free = capacity - visible - (hiddenCount > 0 ? 1 : 0);
+        var slots = (mobile || !tiles.length) ? 0 : Math.max(0, Math.min(need - tiles.length, free));
+        var ghosts = Array.from(rack.querySelectorAll(".complex-truck-slot"));
+        while (ghosts.length < slots) {
+            var ghost = document.createElement("i");
+            ghost.className = "complex-truck-slot";
+            ghost.setAttribute("aria-hidden", "true");
+            ghost.textContent = "+";
+            ghosts.push(ghost);
+        }
+        ghosts.forEach(function (ghost, index) {
+            ghost.hidden = index >= slots;
+            rack.insertBefore(ghost, empty && empty.parentNode === rack ? empty : null);
+        });
+
         rack.classList.remove("truck-fill-1", "truck-fill-2", "truck-fill-3", "truck-fill-4");
         rack.classList.toggle("is-rich-trucks", size.h >= COMPLEX_TILE_RICH_MIN_H);
-        rack.style.setProperty("--complex-truck-cols", String(Math.min(cols, Math.max(1, visible))));
+        rack.style.setProperty("--complex-truck-cols", String(cols));
         rack.style.setProperty("--complex-truck-gap", COMPLEX_TILE_GAP + "px");
         rack.style.setProperty("--complex-truck-w", size.w + "px");
         rack.style.setProperty("--complex-truck-h", size.h + "px");
@@ -5282,8 +5310,20 @@ document.addEventListener("DOMContentLoaded", function () {
         if (empty) empty.hidden = tiles.length > 0;
     }
 
+    /* Ширина, которую поле может занять: внутренняя ширина карточки минус
+       минимум информационной панели и зазор между ними. Поле стоит в колонке
+       auto и само не знает, сколько ему можно, — считаем от карточки. */
+    function complexTruckFieldWidth(rack) {
+        var card = rack.closest(".dispatcher-complex-card");
+        if (!card) return rack.clientWidth || 0;
+        var cs = getComputedStyle(card);
+        var inner = card.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+        var gap = parseFloat(cs.columnGap) || 0;
+        return Math.max(0, inner - COMPLEX_INFO_MIN_W - gap);
+    }
+
     /* Готовит поле к расчёту: сортирует плитки, заводит подпись пустого поля,
-       возвращает измерения или null, если поле ещё не разложено. */
+       возвращает измерения или null, если карточка ещё не разложена. */
     function measureComplexTruckRack(rack) {
         if (!rack) return null;
         sortDesktopEquipmentList(rack, ".complex-truck-tile");
@@ -5295,7 +5335,7 @@ document.addEventListener("DOMContentLoaded", function () {
             empty.textContent = "самосвалы не назначены";
             rack.appendChild(empty);
         }
-        var width = rack.clientWidth || rack.getBoundingClientRect().width || 0;
+        var width = complexTruckFieldWidth(rack);
         var height = rack.clientHeight || rack.getBoundingClientRect().height || 0;
         /* До первой раскладки карточки поле ещё нулевое. Считать по таким
            размерам нельзя: ёмкость выходит в одну ячейку и все машины
@@ -5306,23 +5346,21 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function refreshComplexTruckRack(rack) {
-        var m = measureComplexTruckRack(rack);
-        if (!m) return;
-        var size = m.tiles.length
-            ? (complexTruckLayout(m.width, m.height, m.tiles.length) || COMPLEX_TILE_MIN)
-            : COMPLEX_TILE_MIN;
-        applyComplexTruckLayout(m.rack, m.tiles, m.empty, size, m.width, m.height);
+        /* Одиночный пересчёт всё равно идёт через доску: размер и число
+           колонок общие, иначе одна карточка выбьется из строя. */
+        refreshAllComplexTruckRacks();
     }
 
-    /* Плитки одного размера на всей доске.
+    /* Плитки одного размера и сетка одной ширины на всей доске.
 
        Если считать размер по каждой карточке отдельно, рядом оказываются
        плитки 168px и 70px: поле каждой карточки заполнено, но доска выглядит
        коллажем, и по размеру плиток уже нельзя на глаз сравнить загрузку
        комплексов — а диспетчер смотрит именно на доску целиком. Поэтому
        размер выбирается один на всех — самый скромный из нужных, то есть по
-       самому загруженному комплексу. Карточки с одной-двумя машинами при этом
-       не «раздуваются»: пустое место в них честно показывает недогрузку. */
+       самому загруженному комплексу, но не мельче нижней границы. Число
+       колонок тоже общее — по нему CSS задаёт ширину сетки, а всё, что
+       осталось слева, достаётся информационной панели. */
     function refreshAllComplexTruckRacks() {
         var measured = [];
         document.querySelectorAll(".complex-assigned-trucks").forEach(function (rack) {
@@ -5332,8 +5370,10 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!measured.length) return;
 
         var common = null;
+        var maxCount = 0;
         measured.forEach(function (m) {
             if (!m.tiles.length) return;
+            maxCount = Math.max(maxCount, m.tiles.length);
             var size = complexTruckLayout(m.width, m.height, m.tiles.length);
             if (!size) size = COMPLEX_TILE_MIN;
             if (!common || (size.w * size.h) < (common.w * common.h)) common = size;
@@ -5343,8 +5383,18 @@ document.addEventListener("DOMContentLoaded", function () {
             common = COMPLEX_TILE_FLOOR;
         }
 
+        /* Колонок столько, сколько влезает по ширине, но не больше, чем нужно
+           самой загруженной карточке: при шести машинах и четырёх колонках
+           получалось бы 4+2, а 3+3 ровнее и отдаёт лишнюю ширину панели. */
+        var width = measured[0].width;
+        var height = measured[0].height;
+        var fitCols = Math.max(1, Math.floor((width + COMPLEX_TILE_GAP) / (common.w + COMPLEX_TILE_GAP)));
+        var fitRows = Math.max(1, Math.floor((height + COMPLEX_TILE_GAP) / (common.h + COMPLEX_TILE_GAP)));
+        var needCols = Math.max(1, Math.ceil(Math.max(1, maxCount) / fitRows));
+        var cols = Math.max(1, Math.min(fitCols, needCols));
+
         measured.forEach(function (m) {
-            applyComplexTruckLayout(m.rack, m.tiles, m.empty, common, m.width, m.height);
+            applyComplexTruckLayout(m.rack, m.tiles, m.empty, common, cols, m.height);
         });
     }
 

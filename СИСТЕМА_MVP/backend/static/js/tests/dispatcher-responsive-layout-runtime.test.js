@@ -213,3 +213,62 @@ test("длинный текст не выдавливает поле машин"
     assert.match(CSS, /\.complex-context \{[^}]*overflow: hidden;/s);
     assert.match(CSS, /\.dispatcher-complex-card:not\(\.status-empty\) > \* \{[^}]*min-height: 0;/s);
 });
+
+test("число колонок общее на доску и не больше нужного самой загруженной карточке", () => {
+    for (const source of [TEMPLATE, SCRIPT]) {
+        assert.match(source, /var cols = Math\.max\(1, Math\.min\(fitCols, needCols\)\);/);
+        assert.match(source, /applyComplexTruckLayout\(m\.rack, m\.tiles, m\.empty, common, cols, m\.height\)/);
+        /* Ширина поля считается от карточки за вычетом минимума панели:
+           само поле стоит в колонке auto и своей ширины не знает. */
+        assert.match(source, /function complexTruckFieldWidth\(rack\)/);
+        assert.match(source, /inner - COMPLEX_INFO_MIN_W - gap/);
+    }
+});
+
+test("сетка машин фиксированной ширины прижата к правому краю, остаток — панели", () => {
+    assert.match(CSS, /grid-template-columns: minmax\(176px, 1fr\) auto;/);
+    assert.match(CSS, /\.complex-assigned-trucks \{[^}]*justify-self: end;/s);
+    assert.match(
+        CSS,
+        /\.complex-assigned-trucks \{[^}]*width: calc\(var\(--complex-truck-cols, \d+\) \* var\(--complex-truck-w, \d+px\) \+ \(var\(--complex-truck-cols, \d+\) - 1\) \* var\(--complex-truck-gap, \d+px\)\);/s
+    );
+    /* Поле сверху, справа и снизу одно и то же: карточка с равным отступом. */
+    assert.match(CSS, /\.dispatcher-complex-card:not\(\.status-empty\) \{[^}]*padding: 14px;/s);
+});
+
+test("панель показаний: подписи в левом поле, ключевые цифры у нижнего края", () => {
+    assert.match(CSS, /grid-template-areas:\s*\n?\s*"head trucks"\s*\n?\s*"info trucks"\s*\n?\s*"kpis trucks"/);
+    assert.match(CSS, /\.complex-kpis \{[^}]*grid-area: kpis;/s);
+    assert.match(CSS, /\.complex-kpis \{[^}]*align-self: end;/s);
+    for (const caption of ["Забой", "Порода", "Разгрузка", "План"]) {
+        assert.match(CSS, new RegExp(`::before \\{ content: "${caption}"; \\}`));
+    }
+    /* Показание выдвинуто в поле подписей своим же отступом: подпись внутри
+       бокса, и overflow: hidden с многоточием её не срезает. */
+    assert.match(CSS, /\.complex-context > \* \{[^}]*margin: 0 0 0 calc\(-1 \* var\(--complex-readout-cap, \d+px\)\);/s);
+    assert.match(CSS, /\.complex-context > \* \{[^}]*padding: 0 0 0 var\(--complex-readout-cap, \d+px\);/s);
+    /* Базовая сетка панели оставляла justify-items: end, и в блочной
+       раскладке Chromium показания сжимались и уезжали вправо. */
+    assert.match(CSS, /\.complex-context \{[^}]*justify-items: normal;/s);
+    /* Шаблон отдаёт три показателя: машин, объём, план. */
+    assert.match(TEMPLATE, /class="complex-kpis"/);
+    for (const kpi of ["trucks", "volume", "plan"]) {
+        assert.match(TEMPLATE, new RegExp(`data-kpi="${kpi}"`));
+    }
+    /* Нехватка машин считается в шаблоне, у карточки такого поля нет. */
+    assert.match(TEMPLATE, /\{% if complex\.assigned < complex\.need %\} is-minus/);
+    assert.doesNotMatch(TEMPLATE, /balance_status|attention_label/);
+});
+
+test("недостающие по составу машины показаны пустыми ячейками", () => {
+    assert.match(TEMPLATE, /data-truck-need="\{\{ complex\.need\|default:0 \}\}"/);
+    for (const source of [TEMPLATE, SCRIPT]) {
+        const fn = rackFunction(source);
+        assert.match(fn, /rack\.getAttribute\("data-truck-need"\)/);
+        /* Не больше свободных ячеек и только на настольном пульте. */
+        assert.match(fn, /Math\.min\(need - tiles\.length, free\)/);
+        assert.match(fn, /mining-master-mobile-screen/);
+        assert.match(fn, /ghost\.className = "complex-truck-slot"/);
+    }
+    assert.match(CSS, /\.complex-truck-slot \{[^}]*pointer-events: none;/s);
+});
