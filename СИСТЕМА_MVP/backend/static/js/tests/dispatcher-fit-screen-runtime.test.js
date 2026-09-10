@@ -29,9 +29,18 @@ const CSS = fs.readFileSync(
     path.join(BACKEND, "static", "css", "dispatcher-control-v1.css"),
     "utf8"
 );
-const FIT_SCRIPT = TEMPLATE.slice(
-    TEMPLATE.indexOf("var CANVAS_HEIGHT"),
-    TEMPLATE.indexOf("fitDispatcherCanvas();")
+/* Скрипт и стили холста общие для пульта, аналитики, журнала и отчётов. */
+const CANVAS_JS = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-canvas-v1.js"),
+    "utf8"
+);
+const CANVAS_CSS = fs.readFileSync(
+    path.join(BACKEND, "static", "css", "dispatcher-canvas-v1.css"),
+    "utf8"
+);
+const FIT_SCRIPT = CANVAS_JS.slice(
+    CANVAS_JS.indexOf("var CANVAS_HEIGHT"),
+    CANVAS_JS.indexOf("fitDispatcherCanvas();")
 );
 
 const CANVAS_HEIGHT = 1108;
@@ -50,10 +59,10 @@ function fit(width, height) {
 
 test("пульт завёрнут в холст и масштабируется одним transform: scale", () => {
     assert.match(TEMPLATE, /<div class="dispatcher-canvas" data-dispatcher-canvas="off">/);
-    assert.match(TEMPLATE, /var CANVAS_HEIGHT = 1108;/);
-    assert.match(TEMPLATE, /var CANVAS_WIDTH_MIN = 1400;/);
+    assert.match(CANVAS_JS, /var CANVAS_HEIGHT = 1108;/);
+    assert.match(CANVAS_JS, /var CANVAS_WIDTH_MIN = 1400;/);
     assert.match(
-        CSS,
+        CANVAS_CSS,
         /\.dispatcher-canvas\[data-dispatcher-canvas="on"\]\s*\{[^}]*transform: translate\(-50%, -50%\) scale\(var\(--dispatcher-canvas-scale, 1\)\);/s
     );
 });
@@ -75,29 +84,29 @@ test("ни zoom, ни единиц вьюпорта в расчёте масшт
 });
 
 test("масштаб пересчитывается на все три события изменения размера", () => {
-    assert.match(TEMPLATE, /window\.addEventListener\("resize", fitDispatcherCanvas\)/);
-    assert.match(TEMPLATE, /window\.addEventListener\("orientationchange"/);
-    assert.match(TEMPLATE, /window\.visualViewport\.addEventListener\("resize", fitDispatcherCanvas\)/);
+    assert.match(CANVAS_JS, /window\.addEventListener\("resize", fitDispatcherCanvas\)/);
+    assert.match(CANVAS_JS, /window\.addEventListener\("orientationchange"/);
+    assert.match(CANVAS_JS, /window\.visualViewport\.addEventListener\("resize", fitDispatcherCanvas\)/);
 });
 
 test("JS отдаёт в CSS доли опорного размера вместо vw/vh", () => {
     assert.match(FIT_SCRIPT, /setProperty\("--gd-vw", \(canvasWidth \/ 100\) \+ "px"\)/);
     assert.match(FIT_SCRIPT, /setProperty\("--gd-vh", \(CANVAS_HEIGHT \/ 100\) \+ "px"\)/);
     assert.ok(
-        CSS.split("var(--gd-vw)").length - 1 >= 20,
+        CANVAS_CSS.split("var(--gd-vw)").length - 1 >= 20,
         "закреплённые значения должны опираться на --gd-vw, а не на пиксели"
     );
 });
 
 test("телефонная заготовка из app.css внутри холста снята", () => {
     assert.match(
-        CSS,
+        CANVAS_CSS,
         /\.dispatcher-canvas\[data-dispatcher-canvas="on"\] > \.dispatcher-shell\s*\{[^}]*transform: none;/s
     );
 });
 
 test("порог телефонного режима не ниже мобильных брейкпоинтов пульта", () => {
-    const gate = TEMPLATE.match(
+    const gate = CANVAS_JS.match(
         /"\(orientation: landscape\) and \(max-width: (\d+)px\)"/
     );
     assert.ok(gate, "телефонный порог должен быть задан явно");
@@ -154,4 +163,19 @@ test("на опорной пропорции масштаб совпадает �
 test("диагностическая плашка убрана", () => {
     assert.doesNotMatch(TEMPLATE, /data-dispatcher-fit-badge/);
     assert.doesNotMatch(TEMPLATE, /showDiagnostics/);
+});
+
+test("экраны аналитики, журнала и отчётов завёрнуты в тот же холст", () => {
+    for (const name of ["dispatcher_management", "dispatcher_shift_log", "dispatcher_reports", "dispatcher_shift_report", "volume_report"]) {
+        const page = fs.readFileSync(path.join(BACKEND, "templates", "reports", name + ".html"), "utf8");
+        assert.match(page, /<div class="dispatcher-canvas" data-dispatcher-canvas="off">\s*<main class="dispatcher-shell dispatcher-analytics-shell/, name);
+        assert.match(page, /js\/dispatcher-canvas-v1\.js/, name);
+        assert.match(page, /css\/dispatcher-canvas-v1\.css/, name);
+    }
+    /* Пульт пользуется тем же файлом; встроенной копии скрипта больше нет. */
+    assert.match(TEMPLATE, /js\/dispatcher-canvas-v1\.js/);
+    assert.doesNotMatch(TEMPLATE, /var CANVAS_HEIGHT/);
+    assert.doesNotMatch(CSS, /ХОЛСТ ПУЛЬТА/);
+    /* Значения экранов аналитики (стили в app.css) закреплены от опорного размера. */
+    assert.match(CANVAS_CSS, /\.dispatcher-report-tile h2 \{[^}]*var\(--gd-vw\)/s);
 });

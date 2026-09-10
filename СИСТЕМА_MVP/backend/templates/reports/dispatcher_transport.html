@@ -1,9 +1,16 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Автотранспорт{% endblock %}
 {% block body_class %}dispatcher-control-screen{% endblock %}
 
+{% block app_stylesheets %}
+<link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v={{ static_asset_release }}">
+{% endblock %}
+
 {% block body %}
+{# Холст: экран масштабируется под окно целиком, как пульт (static/js/dispatcher-canvas-v1.js). #}
+<div class="dispatcher-canvas" data-dispatcher-canvas="off">
 <main class="dispatcher-shell dispatcher-analytics-shell" data-dispatcher-theme>
     <section class="dispatcher-analytics-board" aria-label="Автотранспорт диспетчера">
         <header class="dispatcher-topbar dispatcher-unified-topbar">
@@ -151,6 +158,8 @@
         </section>
     </section>
 </main>
+<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v={{ static_asset_release }}"></script>
+</div>
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {

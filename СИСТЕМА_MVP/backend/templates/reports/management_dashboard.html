@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Витрина руководства{% endblock %}
 {% block body_class %}dispatcher-control-screen{% endblock %}
@@ -6,7 +7,13 @@
 {% include "includes/role_app_pwa_head.html" with role_code="manager" manifest_url="/management.webmanifest" service_worker_url="/management-sw.js" legacy_scope="/reports/management/" theme_color="#5058A4" apple_title="Руководство" icon_180="img/pwa/management-180.png" %}
 {% endblock %}
 
+{% block app_stylesheets %}
+<link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v={{ static_asset_release }}">
+{% endblock %}
+
 {% block body %}
+{# Холст: экран масштабируется под окно целиком, как пульт (static/js/dispatcher-canvas-v1.js). #}
+<div class="dispatcher-canvas" data-dispatcher-canvas="off">
 <main class="dispatcher-shell dispatcher-analytics-shell" data-dispatcher-theme>
     <section class="dispatcher-analytics-board management-dashboard-board" aria-label="Витрина руководства">
         <header class="management-dashboard-header">
@@ -402,6 +409,8 @@
         </section>
     </section>
 </main>
+<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v={{ static_asset_release }}"></script>
+</div>
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {

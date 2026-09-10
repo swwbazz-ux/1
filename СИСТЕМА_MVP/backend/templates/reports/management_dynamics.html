@@ -1,9 +1,16 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Динамика экскаваторов{% endblock %}
 {% block body_class %}dispatcher-control-screen management-dynamics-page{% endblock %}
 
+{% block app_stylesheets %}
+<link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v={{ static_asset_release }}">
+{% endblock %}
+
 {% block body %}
+{# Холст: экран масштабируется под окно целиком, как пульт (static/js/dispatcher-canvas-v1.js). #}
+<div class="dispatcher-canvas" data-dispatcher-canvas="off">
 <main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme>
     <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Динамика экскаваторов" data-management-dynamics-refresh-root>
         {% include "reports/includes/management_report_header.html" with active="dynamics" title="Динамика экскаваторов" subtitle="Выработка экскаваторов по периоду, сменам, часам и месяцам." section_label="Динамика" %}
@@ -217,6 +224,8 @@
         </div>
     </section>
 </main>
+<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v={{ static_asset_release }}"></script>
+</div>
 {% include "reports/includes/management_report_theme.html" %}
 <script>
 (function () {
