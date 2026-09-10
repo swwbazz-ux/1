@@ -5475,13 +5475,54 @@ document.addEventListener("DOMContentLoaded", function () {
             applyEquipmentSearch();
         });
         input.addEventListener("keydown", function (event) {
-            if (event.key === "Escape") {
-                input.value = "";
-                query = "";
-                applyEquipmentSearch();
-                input.blur();
-            }
+            if (event.key === "Escape") clearEquipmentSearch();
         });
+
+        function clearEquipmentSearch() {
+            input.value = "";
+            query = "";
+            applyEquipmentSearch();
+            if (document.activeElement === input) input.blur();
+        }
+
+        /* Набор без клика по полю: цифра или буква, нажатая когда фокус не в
+           другом поле ввода и не открыт диалог, уходит в поиск — диспетчер
+           просто начинает печатать номер. Backspace стирает так же. */
+        function isTypingElsewhere() {
+            var active = document.activeElement;
+            if (!active || active === document.body || active === input) return false;
+            var tag = active.tagName;
+            return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || active.isContentEditable;
+        }
+        function isDialogOpen() {
+            if (document.querySelector("dialog[open]")) return true;
+            var modal = document.getElementById("app-confirm-modal");
+            return !!(modal && !modal.hidden && getComputedStyle(modal).display !== "none");
+        }
+        document.addEventListener("keydown", function (event) {
+            if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+            if (document.activeElement === input || isTypingElsewhere() || isDialogOpen()) return;
+            var key = event.key;
+            if (key.length === 1 && /[0-9a-zа-яё\-]/i.test(key)) {
+                input.value += key;
+            } else if (key === "Backspace" && input.value) {
+                input.value = input.value.slice(0, -1);
+            } else {
+                return;
+            }
+            event.preventDefault();
+            query = input.value;
+            applyEquipmentSearch();
+            input.focus({ preventScroll: true });
+            input.setSelectionRange(input.value.length, input.value.length);
+        });
+
+        /* Клик или захват мышью в любом месте вне поля снимает поиск:
+           техника найдена, диспетчер тянет её или работает дальше. */
+        document.addEventListener("pointerdown", function (event) {
+            if (query === "" || box.contains(event.target)) return;
+            clearEquipmentSearch();
+        }, true);
 
         var pending = null;
         var observer = new MutationObserver(function () {

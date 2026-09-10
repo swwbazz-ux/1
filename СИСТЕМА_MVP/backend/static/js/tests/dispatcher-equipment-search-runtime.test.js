@@ -64,3 +64,15 @@ test("вкладки ужаты к левому краю, поле стоит в
     assert.match(CSS, /\.dispatcher-command-main:has\(\.dispatcher-equipment-search\) \{[^}]*"nav search"/s);
     assert.match(CSS, /\.dispatcher-equipment-search \{[^}]*grid-area: search;/s);
 });
+
+test("поиск работает с клавиатуры без клика по полю и снимается кликом", () => {
+    for (const source of [TEMPLATE, SCRIPT]) {
+        /* Цифра или буква вне полей ввода уходит в поиск. */
+        assert.match(source, /document\.addEventListener\("keydown", function \(event\) \{\s*if \(event\.defaultPrevented \|\| event\.ctrlKey/);
+        assert.match(source, /key\.length === 1 && \/\[0-9a-zа-яё\\-\]\/i\.test\(key\)/);
+        /* Но не когда печатают в другом поле или открыт диалог. */
+        assert.match(source, /isTypingElsewhere\(\) \|\| isDialogOpen\(\)/);
+        /* Клик или захват в любом месте вне поля снимает подсветку. */
+        assert.match(source, /document\.addEventListener\("pointerdown", function \(event\) \{\s*if \(query === "" \|\| box\.contains\(event\.target\)\) return;\s*clearEquipmentSearch\(\);/);
+    }
+});
