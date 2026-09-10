@@ -3,10 +3,23 @@ from datetime import datetime, timedelta
 from statistics import median
 from urllib.parse import urlencode
 
-from django.db.models import Max, Q
+from django.db.models import Q
+from django.urls import reverse
 from django.utils import timezone
 
-from assignments.models import CrewPlan, CrewPlanSlot, CrewPlanStatus, WorkShiftType
+from assignments.models import (
+    AssignmentStatus,
+    CrewPlan,
+    CrewPlanSlot,
+    CrewPlanStatus,
+    EquipmentAssignment,
+    WorkShiftType,
+)
+from assignments.services import (
+    CREW_PLAN_ROLE_CODES,
+    employee_matches_work_role,
+    secondary_employee_matches_work_role,
+)
 
 from .models import Employee, EmployeeAccess, Role
 
@@ -18,12 +31,13 @@ CHART_PLOT_TOP = 12
 CHART_PLOT_BOTTOM = 228
 CHART_AXIS_PERCENTS = (100, 75, 50, 25, 0)
 REGISTRATION_STATES = {
-    'needs_attention': 'Требуют внимания',
+    'needs_attention': 'Не завершили подключение',
     'prepared': 'Доступ подготовлен',
-    'ready': 'Готовы к работе',
+    'ready': 'Доступ активирован',
     'awaiting_activation': 'Ждут активации',
     'missing_access': 'Нет рабочего доступа',
     'blocked': 'Доступ заблокирован',
+    'scope_conflict': 'Конфликт расстановки',
 }
 REGISTRATION_INTERNAL_STATES = {
     'deactivated': 'Доступ отключён',
@@ -95,7 +109,7 @@ def _role_access_status(accesses):
         return {
             'code': 'ready',
             'reason_code': 'ready',
-            'label': 'Готов к работе',
+            'label': 'Доступ активирован',
             'tone': 'ok',
             'is_prepared': True,
             'is_ready': True,
@@ -184,6 +198,7 @@ def _build_issue_summary(role_statuses):
         'missing_access': 'Нет доступа',
         'missing_pin': 'PIN не сформирован',
         'awaiting_activation': 'Ожидает активации',
+        'scope_conflict': 'Конфликт расстановки',
     }
     grouped = defaultdict(list)
     for item in role_statuses:
@@ -206,9 +221,9 @@ def _person_status(role_statuses):
 
     if is_ready:
         code = 'ready'
-        label = 'Готов к работе'
+        label = 'Доступ активирован'
         tone = 'ok'
-        issue_summary = 'Все требуемые роли активированы'
+        issue_summary = 'Доступ активирован по всем требуемым ролям'
     elif any(item['code'] == 'blocked' for item in role_statuses):
         code = 'blocked'
         label = 'Доступ заблокирован'
@@ -497,17 +512,17 @@ def _build_daily_chart(rows, period_days):
         },
         'axis_ticks': axis_ticks,
         'semantics_code': 'current_ready_cohort_by_ready_date',
-        'semantics_title': 'Текущие готовые сотрудники по дате готовности',
+        'semantics_title': 'Текущие активации доступа по дате активации',
         'semantics_note': (
-            'График распределяет готовых сейчас сотрудников выбранной '
-            'расстановки по дате достижения готовности; это не исторический '
+            'График распределяет сотрудников с активированным сейчас доступом '
+            'по дате активации; это не исторический '
             'снимок состояния на каждую дату.'
         ),
-        'cumulative_label': 'Подтверждённая готовность нарастающим итогом',
+        'cumulative_label': 'Активация доступа нарастающим итогом',
         'increment_label': (
-            'Стали готовы за интервал'
+            'Активировали доступ за интервал'
             if granularity == 'week'
-            else 'Стали готовы за день'
+            else 'Активировали доступ за день'
         ),
     }
 
@@ -609,40 +624,257 @@ def _state_matches(row, selected_state):
         return row['code'] == 'deactivated'
     if selected_state == 'inactive_employee':
         return row['code'] == 'inactive_employee'
+    if selected_state == 'scope_conflict':
+        return row['code'] == 'scope_conflict'
     return True
 
 
-def build_registration_dashboard(params):
-    published_plans = CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED)
+def _registration_source_scope(params):
+    """Resolve the published crew-plan sources without letting drafts win.
+
+    An omitted date means the latest published plan of every production role.
+    A syntactically valid explicit date is an exact historical scope, including
+    an honest empty scope when nothing was published on that date.
+    """
+    published_plans = CrewPlan.objects.filter(
+        status=CrewPlanStatus.PUBLISHED,
+        role__code__in=CREW_PLAN_ROLE_CODES,
+    )
     available_dates = list(
         published_plans.order_by('-work_date')
         .values_list('work_date', flat=True)
         .distinct()
     )
+    raw_date = str(params.get('date', '') or '').strip()
+    requested_date = _parse_date(raw_date)
+    source_date_invalid = bool(raw_date and requested_date is None)
+    source_mode = 'exact_date' if requested_date is not None else 'latest_by_role'
+    selected_date = requested_date if source_mode == 'exact_date' else None
 
-    selected_date = _parse_date(params.get('date', ''))
-    if selected_date not in available_dates:
-        selected_date = available_dates[0] if available_dates else timezone.localdate()
+    roles = list(
+        Role.objects.filter(code__in=CREW_PLAN_ROLE_CODES).order_by('name', 'code')
+    )
+    source_plans = []
+    selected_plan_ids = []
+    for role in roles:
+        role_plans = published_plans.filter(role=role)
+        if source_mode == 'exact_date':
+            plan = (
+                role_plans.filter(work_date=selected_date)
+                .order_by('-revision', '-pk')
+                .first()
+            )
+        else:
+            plan = role_plans.order_by(
+                '-work_date', '-revision', '-published_at', '-pk'
+            ).first()
+        if plan:
+            selected_plan_ids.append(plan.pk)
+            assigned_employee_ids = {
+                employee_id
+                for pair in plan.slots.values_list(
+                    'employee_id', 'secondary_employee_id'
+                )
+                for employee_id in pair
+                if employee_id
+            }
+        else:
+            assigned_employee_ids = set()
+        source_plans.append({
+            'plan_id': plan.pk if plan else None,
+            'role_id': role.pk,
+            'role_code': role.code,
+            'role_label': role.name,
+            'has_plan': bool(plan),
+            'work_date': plan.work_date if plan else None,
+            'published_at': plan.published_at if plan else None,
+            'slot_count': plan.slots.count() if plan else 0,
+            'employee_count': len(assigned_employee_ids),
+        })
 
+    source_dates = {
+        item['work_date'] for item in source_plans if item['work_date'] is not None
+    }
+    return {
+        'published_plans': published_plans,
+        'available_dates': available_dates,
+        'source_mode': source_mode,
+        'source_mode_label': (
+            'Точная дата расстановки'
+            if source_mode == 'exact_date'
+            else 'Последние опубликованные расстановки по ролям'
+        ),
+        'source_date_invalid': source_date_invalid,
+        'selected_date': selected_date,
+        'source_plans': source_plans,
+        'selected_plan_ids': selected_plan_ids,
+        'is_mixed_source_dates': len(source_dates) > 1,
+        'has_published_plans': bool(available_dates),
+        'missing_source_roles': [
+            item for item in source_plans if not item['has_plan']
+        ],
+    }
+
+
+def _resolve_scope_occurrences(item, active_assignment):
+    """Resolve only cross-date, cross-role duplicates using domain truth.
+
+    Multi-role assignments from one exact production date keep their existing
+    meaning.  For mixed-date sources an official active assignment is
+    authoritative; if its role is outside the candidates the result is a
+    conflict.  Only when no such assignment exists do candidates reuse the
+    position-aware effective-specialization validation from deputy crew
+    planning.  Anything else remains visible instead of guessing from access
+    state or publication recency.
+    """
+    occurrences = item['occurrences']
+    role_codes = {occurrence['role_code'] for occurrence in occurrences}
+    work_dates = {occurrence['work_date'] for occurrence in occurrences}
+    if len(role_codes) <= 1 or len(work_dates) <= 1:
+        return occurrences, None
+
+    if active_assignment:
+        resolved_role_code = active_assignment.role.code
+        resolved = [
+            occurrence
+            for occurrence in occurrences
+            if occurrence['role_code'] == resolved_role_code
+        ]
+        if resolved:
+            return resolved, None
+    else:
+        compatible_role_codes = set()
+        for occurrence in occurrences:
+            matches_role = (
+                employee_matches_work_role(
+                    item['employee'], occurrence['role']
+                )
+                if occurrence['position'] == 'primary'
+                else secondary_employee_matches_work_role(
+                    item['employee'], occurrence['role']
+                )
+            )
+            if matches_role:
+                compatible_role_codes.add(occurrence['role_code'])
+        if len(compatible_role_codes) == 1:
+            resolved_role_code = next(iter(compatible_role_codes))
+            return [
+                occurrence
+                for occurrence in occurrences
+                if occurrence['role_code'] == resolved_role_code
+            ], None
+
+    conflict_sources = sorted(
+        {
+            (
+                occurrence['role_code'],
+                occurrence['role_label'],
+                occurrence['work_date'],
+            )
+            for occurrence in occurrences
+        },
+        key=lambda value: (value[2], value[1].casefold()),
+        reverse=True,
+    )
+    conflict = {
+        'code': 'scope_conflict',
+        'sources': [
+            {
+                'role_code': role_code,
+                'role_label': role_label,
+                'work_date': work_date,
+            }
+            for role_code, role_label, work_date in conflict_sources
+        ],
+    }
+    conflict['detail'] = 'Одновременно указан в разных последних публикациях: ' + '; '.join(
+        f"{source['role_label']} — {source['work_date']:%d.%m.%Y}"
+        for source in conflict['sources']
+    )
+    return occurrences, conflict
+
+
+def _next_step_for_row(row):
+    if row.get('is_scope_conflict'):
+        return {
+            'code': 'scope_conflict',
+            'title': 'Проверить актуальную расстановку',
+            'detail': row.get('scope_conflict_detail', ''),
+        }
+    if row['is_ready']:
+        return {
+            'code': 'ready',
+            'title': 'Действий не требуется',
+            'detail': 'Доступ активирован по всем требуемым ролям.',
+        }
+    if row['code'] == 'blocked':
+        return {
+            'code': 'blocked',
+            'title': 'Проверить причину блокировки',
+            'detail': 'Если основание снято, разблокировать доступ в карточке.',
+        }
+    if row['code'] == 'inactive_employee':
+        return {
+            'code': 'inactive_employee',
+            'title': 'Проверить карточку и расстановку',
+            'detail': 'Восстановить сотрудника либо передать расстановку на исправление.',
+        }
+    if row['code'] == 'deactivated':
+        return {
+            'code': 'deactivated',
+            'title': 'Проверить отключённый доступ',
+            'detail': 'При необходимости перевыпустить первичный PIN в карточке.',
+        }
+    if row['code'] == 'missing_access':
+        missing_reasons = {
+            status['reason_code'] for status in row['role_statuses']
+        }
+        if missing_reasons == {'missing_pin'}:
+            title = 'Сформировать первичный PIN'
+        elif 'missing_pin' in missing_reasons:
+            title = 'Оформить доступ и первичный PIN'
+        else:
+            title = 'Оформить доступ'
+        return {
+            'code': 'missing_access',
+            'title': title,
+            'detail': 'Открыть карточку и проверить доступ для указанных ролей.',
+        }
+    return {
+        'code': 'awaiting_activation',
+        'title': 'Передать данные для первого входа',
+        'detail': 'Активацию завершает сотрудник, создавая постоянный PIN.',
+    }
+
+
+def build_registration_dashboard(params):
+    source_scope = _registration_source_scope(params)
+    available_dates = source_scope['available_dates']
+    selected_date = source_scope['selected_date']
+    source_plans = source_scope['source_plans']
+    selected_plan_ids = source_scope['selected_plan_ids']
+
+    available_role_ids = {item['role_id'] for item in source_plans}
     role_options = list(
-        Role.objects.filter(
-            crew_plans__status=CrewPlanStatus.PUBLISHED,
-            crew_plans__work_date=selected_date,
-        )
-        .distinct()
-        .order_by('name')
+        Role.objects.filter(id__in=available_role_ids).order_by('name', 'code')
     )
     valid_role_codes = {role.code for role in role_options}
     selected_role = params.get('role', '')
     if selected_role not in valid_role_codes:
         selected_role = ''
-
-    selected_plan_scope = published_plans.filter(work_date=selected_date)
-    if selected_role:
-        selected_plan_scope = selected_plan_scope.filter(role__code=selected_role)
-    plan_published_at = selected_plan_scope.aggregate(
-        latest=Max('published_at'),
-    )['latest']
+    for item in source_plans:
+        item['is_selected'] = not selected_role or item['role_code'] == selected_role
+    has_selected_plans = any(
+        item['has_plan'] and item['is_selected'] for item in source_plans
+    )
+    selected_publication_times = [
+        item['published_at']
+        for item in source_plans
+        if item['published_at'] and item['is_selected']
+    ]
+    plan_published_at = (
+        max(selected_publication_times) if selected_publication_times else None
+    )
 
     shift_labels = dict(WorkShiftType.choices)
     selected_shift = params.get('shift', '')
@@ -669,50 +901,114 @@ def build_registration_dashboard(params):
         selected_ready_from = None
         selected_ready_to = None
 
-    slots = (
+    slots = list(
         CrewPlanSlot.objects.filter(
             Q(employee__isnull=False) | Q(secondary_employee__isnull=False),
-            plan__status=CrewPlanStatus.PUBLISHED,
-            plan__work_date=selected_date,
+            plan_id__in=selected_plan_ids,
         )
         .select_related(
             'employee',
+            'employee__base_specialization',
+            'employee__base_specialization__access_role',
             'secondary_employee',
+            'secondary_employee__base_specialization',
+            'secondary_employee__base_specialization__access_role',
             'plan__role',
             'equipment',
         )
         .order_by('plan__role__name', 'shift_type', 'equipment__garage_number')
     )
-    if selected_role:
-        slots = slots.filter(plan__role__code=selected_role)
-    if selected_shift:
-        slots = slots.filter(shift_type=selected_shift)
 
-    cohort = {}
+    candidate_cohort = {}
     for slot in slots:
         equipment_label = slot.equipment.garage_number or str(slot.equipment)
-        for employee in (slot.employee, slot.secondary_employee):
+        for position, employee in (
+            ('primary', slot.employee),
+            ('secondary', slot.secondary_employee),
+        ):
             if employee is None:
                 continue
-            item = cohort.setdefault(
+            item = candidate_cohort.setdefault(
                 employee.pk,
                 {
                     'employee': employee,
-                    'roles': {},
-                    'shift_role_ids': defaultdict(set),
-                    'equipment_labels': set(),
+                    'occurrences': [],
                 },
             )
+            item['occurrences'].append({
+                'plan_id': slot.plan_id,
+                'work_date': slot.plan.work_date,
+                'role': slot.plan.role,
+                'role_id': slot.plan.role_id,
+                'role_code': slot.plan.role.code,
+                'role_label': slot.plan.role.name,
+                'shift_type': slot.shift_type,
+                'equipment_label': equipment_label,
+                'position': position,
+            })
+
+    active_assignments_by_employee = {}
+    if candidate_cohort:
+        active_assignments = (
+            EquipmentAssignment.objects.filter(
+                employee_id__in=candidate_cohort,
+                status=AssignmentStatus.ACCEPTED,
+                ended_at__isnull=True,
+                shift__isnull=True,
+                shift_type__in=WorkShiftType.values,
+                role__code__in=CREW_PLAN_ROLE_CODES,
+                source_kind=EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN,
+                source_crew_plan_slot__isnull=False,
+            )
+            .select_related('role', 'source_crew_plan_slot__plan')
+            .order_by('employee_id', '-assigned_at', '-pk')
+        )
+        for assignment in active_assignments:
+            active_assignments_by_employee.setdefault(
+                assignment.employee_id, assignment
+            )
+
+    cohort = {}
+    for employee_id, candidate in candidate_cohort.items():
+        resolved_occurrences, scope_conflict = _resolve_scope_occurrences(
+            candidate,
+            active_assignments_by_employee.get(employee_id),
+        )
+        visible_occurrences = [
+            occurrence
+            for occurrence in resolved_occurrences
+            if (
+                not selected_role
+                or occurrence['role_code'] == selected_role
+            )
+            and (
+                not selected_shift
+                or occurrence['shift_type'] == selected_shift
+            )
+        ]
+        if not visible_occurrences:
+            continue
+        item = {
+            'employee': candidate['employee'],
+            'roles': {},
+            'shift_role_ids': defaultdict(set),
+            'equipment_labels': set(),
+            'scope_conflict': scope_conflict,
+        }
+        for occurrence in visible_occurrences:
             item['roles'].setdefault(
-                slot.plan.role_id,
+                occurrence['role_id'],
                 {
-                    'role_id': slot.plan.role_id,
-                    'role_code': slot.plan.role.code,
-                    'role_label': slot.plan.role.name,
+                    'role_id': occurrence['role_id'],
+                    'role_code': occurrence['role_code'],
+                    'role_label': occurrence['role_label'],
                 },
             )
-            item['shift_role_ids'][slot.shift_type].add(slot.plan.role_id)
-            item['equipment_labels'].add(equipment_label)
+            item['shift_role_ids'][occurrence['shift_type']].add(
+                occurrence['role_id']
+            )
+            item['equipment_labels'].add(occurrence['equipment_label'])
+        cohort[employee_id] = item
 
     employee_ids = set(cohort)
     relevant_role_ids = {
@@ -737,22 +1033,39 @@ def build_registration_dashboard(params):
     activation_delays = []
     for employee_id, item in cohort.items():
         role_statuses = []
+        scope_conflict = item.get('scope_conflict')
         for role in sorted(
             item['roles'].values(),
             key=lambda value: value['role_label'].casefold(),
         ):
-            status = _role_access_status(
-                accesses_by_pair.get((employee_id, role['role_id']), ()),
-            )
+            if scope_conflict:
+                status = {
+                    'code': 'scope_conflict',
+                    'reason_code': 'scope_conflict',
+                    'label': 'Конфликт расстановки',
+                    'tone': 'danger',
+                    'is_prepared': False,
+                    'is_ready': False,
+                    'access_id': None,
+                    'primary_code_issued_at': None,
+                    'activated_at': None,
+                }
+            else:
+                status = _role_access_status(
+                    accesses_by_pair.get((employee_id, role['role_id']), ()),
+                )
             role_status = {**role, **status}
             if (
-                not item['employee'].is_active
-                or item['employee'].status in {
-                    Employee.Status.DEACTIVATED,
-                    Employee.Status.ARCHIVED,
-                    Employee.Status.DISMISSED,
-                    Employee.Status.DELETED,
-                }
+                not scope_conflict
+                and (
+                    not item['employee'].is_active
+                    or item['employee'].status in {
+                        Employee.Status.DEACTIVATED,
+                        Employee.Status.ARCHIVED,
+                        Employee.Status.DISMISSED,
+                        Employee.Status.DELETED,
+                    }
+                )
             ):
                 role_status.update({
                     'code': 'missing_access',
@@ -766,13 +1079,33 @@ def build_registration_dashboard(params):
             role_statuses.append(role_status)
             issued_at = role_status['primary_code_issued_at']
             activated_at = role_status['activated_at']
-            if issued_at and activated_at and activated_at >= issued_at:
+            if (
+                not scope_conflict
+                and issued_at
+                and activated_at
+                and activated_at >= issued_at
+            ):
                 activation_delays.append(
                     (activated_at - issued_at).total_seconds() / 3600,
                 )
 
         person_status = _person_status(role_statuses)
-        if any(
+        if scope_conflict:
+            person_status.update({
+                'code': 'scope_conflict',
+                'label': 'Конфликт расстановки',
+                'tone': 'danger',
+                'is_prepared': False,
+                'is_ready': False,
+                'requires_action': True,
+                'issue_summary': scope_conflict['detail'],
+                'ready_at': None,
+                'ready_on': None,
+                'waiting_since': None,
+                'waiting_hours': None,
+                'waiting_label': None,
+            })
+        elif any(
             status['reason_code'] == 'inactive_employee'
             for status in role_statuses
         ):
@@ -800,21 +1133,34 @@ def build_registration_dashboard(params):
             'equipment_labels': sorted(item['equipment_labels']),
             'role_statuses': role_statuses,
             '_shift_role_ids': dict(item['shift_role_ids']),
+            'is_scope_conflict': bool(scope_conflict),
+            'scope_conflict_sources': (
+                scope_conflict['sources'] if scope_conflict else []
+            ),
+            'scope_conflict_detail': (
+                scope_conflict['detail'] if scope_conflict else ''
+            ),
             **person_status,
         }
         row['has_access'] = row['is_prepared']
         row['is_activated'] = row['is_ready']
         row['activated_at'] = row['ready_at']
         row['last_login_at'] = None
+        row['next_step'] = _next_step_for_row(row)
+        row['action_label'] = 'Открыть карточку' if row['requires_action'] else ''
+        row['action_url'] = reverse(
+            'system_admin_employee_detail', args=[item['employee'].pk]
+        )
         rows.append(row)
 
     status_order = {
-        'blocked': 0,
-        'inactive_employee': 1,
-        'deactivated': 2,
-        'missing_access': 3,
-        'awaiting_activation': 4,
-        'ready': 5,
+        'scope_conflict': 0,
+        'blocked': 1,
+        'inactive_employee': 2,
+        'deactivated': 3,
+        'missing_access': 4,
+        'awaiting_activation': 5,
+        'ready': 6,
     }
     rows.sort(key=lambda row: (
         status_order[row['code']],
@@ -835,6 +1181,7 @@ def build_registration_dashboard(params):
     awaiting_activation = sum(
         1 for row in rows if row['code'] == 'awaiting_activation'
     )
+    scope_conflict = sum(1 for row in rows if row['code'] == 'scope_conflict')
 
     chart = _build_daily_chart(rows, period_days)
     role_breakdown, shift_breakdown = _build_breakdowns(rows, shift_labels)
@@ -863,10 +1210,9 @@ def build_registration_dashboard(params):
         else None
     )
 
-    base_query = {
-        'date': selected_date.isoformat(),
-        'period': period_days,
-    }
+    base_query = {'period': period_days}
+    if source_scope['source_mode'] == 'exact_date' and selected_date:
+        base_query['date'] = selected_date.isoformat()
     if selected_role:
         base_query['role'] = selected_role
     if selected_shift:
@@ -879,6 +1225,13 @@ def build_registration_dashboard(params):
         base_query['ready_from'] = selected_ready_from.isoformat()
         base_query['ready_to'] = selected_ready_to.isoformat()
 
+    for item in source_plans:
+        item['url'] = _query_url_without_ready_filter(
+            base_query,
+            role=item['role_code'],
+        )
+        item['filter_url'] = item['url']
+
     state_counts = {
         'all': total,
         'needs_attention': requires_action,
@@ -889,6 +1242,7 @@ def build_registration_dashboard(params):
         'inactive_employee': inactive_employee,
         'deactivated': deactivated,
         'blocked': blocked,
+        'scope_conflict': scope_conflict,
     }
     state_labels = {
         'all': 'Все сотрудники',
@@ -906,6 +1260,7 @@ def build_registration_dashboard(params):
         'inactive_employee',
         'deactivated',
         'blocked',
+        'scope_conflict',
     ):
         state_value = '' if code == 'all' else code
         url = _query_url_without_ready_filter(base_query, state=state_value)
@@ -988,7 +1343,7 @@ def build_registration_dashboard(params):
         },
         {
             'code': 'ready',
-            'label': 'Готовы к работе',
+            'label': 'Доступ активирован',
             'count': ready,
             'percent': _percent(ready, total),
             'loss_count': 0,
@@ -998,6 +1353,17 @@ def build_registration_dashboard(params):
     ]
 
     attention_items = [
+        {
+            'code': 'scope_conflict',
+            'label': 'Конфликт расстановки',
+            'detail': 'Актуальная рабочая роль не определяется однозначно.',
+            'count': scope_conflict,
+            'tone': 'danger',
+            'url': _query_url_without_ready_filter(
+                base_query,
+                state='scope_conflict',
+            ),
+        },
         {
             'code': 'blocked',
             'label': 'Доступ заблокирован',
@@ -1050,6 +1416,56 @@ def build_registration_dashboard(params):
     for item in funnel_steps:
         item['filter_url'] = item['url']
 
+    state_tabs_by_code = {item['code']: item for item in state_tabs}
+    primary_state_tabs = [
+        {
+            **state_tabs_by_code[code],
+            'is_active': (
+                selected_state in {
+                    'needs_attention',
+                    'scope_conflict',
+                    'blocked',
+                    'inactive_employee',
+                    'deactivated',
+                    'missing_access',
+                    'awaiting_activation',
+                }
+                if code == 'needs_attention'
+                else state_tabs_by_code[code]['is_active']
+            ),
+        }
+        for code in ('needs_attention', 'all', 'ready')
+    ]
+    all_reasons_url = _query_url_without_ready_filter(
+        base_query,
+        state='needs_attention',
+    )
+    reason_options = [{
+        'code': 'needs_attention',
+        'label': 'Все причины',
+        'count': requires_action,
+        'url': all_reasons_url,
+        'filter_url': all_reasons_url,
+        'is_active': selected_state == 'needs_attention',
+    }]
+    for code in (
+        'scope_conflict',
+        'blocked',
+        'inactive_employee',
+        'deactivated',
+        'missing_access',
+        'awaiting_activation',
+    ):
+        tab = state_tabs_by_code[code]
+        reason_options.append({
+            'code': code,
+            'label': tab['label'],
+            'count': tab['count'],
+            'url': tab['url'],
+            'filter_url': tab['url'],
+            'is_active': tab['is_active'],
+        })
+
     visible_rows = [row for row in rows if _state_matches(row, selected_state)]
     if selected_ready_on:
         visible_rows = [
@@ -1065,7 +1481,13 @@ def build_registration_dashboard(params):
 
     ready_percent = _percent(ready, total)
     prepared_percent = _percent(prepared, total)
-    unavailable = blocked + inactive_employee + deactivated + missing_access
+    unavailable = (
+        blocked
+        + inactive_employee
+        + deactivated
+        + missing_access
+        + scope_conflict
+    )
     unavailable_percent = _percent(unavailable, total)
     awaiting_percent = _percent(awaiting_activation, total)
     median_activation_hours = (
@@ -1077,6 +1499,13 @@ def build_registration_dashboard(params):
     return {
         'available_dates': available_dates,
         'selected_date': selected_date,
+        'source_mode': source_scope['source_mode'],
+        'source_mode_label': source_scope['source_mode_label'],
+        'source_date_invalid': source_scope['source_date_invalid'],
+        'source_plans': source_plans,
+        'is_mixed_source_dates': source_scope['is_mixed_source_dates'],
+        'has_selected_plans': has_selected_plans,
+        'missing_source_roles': source_scope['missing_source_roles'],
         'plan_published_at': plan_published_at,
         'dashboard_generated_at': timezone.now(),
         'role_options': role_options,
@@ -1100,6 +1529,8 @@ def build_registration_dashboard(params):
         'period_days': period_days,
         'period_links': period_links,
         'state_tabs': state_tabs,
+        'primary_state_tabs': primary_state_tabs,
+        'reason_options': reason_options,
         'funnel_steps': funnel_steps,
         'attention_items': attention_items,
         'total': total,
@@ -1116,6 +1547,7 @@ def build_registration_dashboard(params):
         'deactivated': deactivated,
         'missing_access': missing_access,
         'awaiting_activation': awaiting_activation,
+        'scope_conflict': scope_conflict,
         'new_ready_today': new_ready_today,
         'new_ready_7': new_ready_7,
         'previous_ready_7': previous_ready_7,
@@ -1129,7 +1561,7 @@ def build_registration_dashboard(params):
         'rows': visible_rows,
         'all_rows': rows,
         'visible_total': len(visible_rows),
-        'has_published_plans': bool(available_dates),
+        'has_published_plans': source_scope['has_published_plans'],
         'access_issued': prepared,
         'activated': ready,
         'logged_in': 0,

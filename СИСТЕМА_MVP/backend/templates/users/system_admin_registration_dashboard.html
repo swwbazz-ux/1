@@ -5,7 +5,7 @@
 {% block body_class %}{% if management_mode %}dispatcher-control-screen management-registration-dashboard-screen{% else %}system-admin-registration-dashboard-screen{% endif %}{% endblock %}
 {% block extra_head %}
 {% if not management_mode %}{% include "users/includes/system_admin_workspace_styles.html" %}{% endif %}
-<link rel="stylesheet" href="{% static 'css/system-admin-registration-dashboard-v1.css' %}?v=20260909-6">
+<link rel="stylesheet" href="{% static 'css/system-admin-registration-dashboard-v1.css' %}?v=20260910-3">
 {% if management_mode %}
     {% include "includes/role_app_pwa_head.html" with role_code="manager" manifest_url="/management.webmanifest" service_worker_url="/management-sw.js" legacy_scope="/reports/management/" theme_color="#5058A4" apple_title="Руководство" icon_180="img/pwa/management-180.png" %}
 {% else %}
@@ -17,25 +17,27 @@
 {% if management_mode %}
 <main class="dispatcher-shell dispatcher-analytics-shell management-registration-shell" data-dispatcher-theme>
     <section class="dispatcher-analytics-board management-dashboard-board" aria-label="Подключение сотрудников">
-        {% include "reports/includes/management_report_header.html" with active="registrations" title="Подключение" subtitle="Готовность сотрудников из опубликованной расстановки к работе в приложении." section_label="Подключение" %}
+        {% include "reports/includes/management_report_header.html" with active="registrations" title="Подключение" subtitle="Кому из опубликованных расстановок уже активирован доступ к приложению." section_label="Подключение" %}
         <section class="admin-registration-page management-registration-page" data-registration-dashboard aria-busy="false">
 {% else %}
 <div class="admin-shell admin-exports-shell admin-registration-shell admin-day" data-admin-theme>
     <header class="admin-console-header" aria-label="Административная шапка">
         <section class="admin-console-identity">
             {% include "users/includes/system_admin_avatar.html" %}
-            <span>
-                <strong>{{ access.employee.full_name }}</strong>
-                <em>Системный администратор</em>
-            </span>
+            <span><strong>{{ access.employee.full_name }}</strong><em>Системный администратор</em></span>
         </section>
         <section class="admin-console-main">
             <div class="admin-console-title">
                 <span>Админка MVP</span>
                 <h1>Подключение</h1>
-                <p>Готовность сотрудников из опубликованной расстановки к работе в приложении.</p>
+                <p>Кому уже можно входить, а кому требуется помощь администратора.</p>
             </div>
-            {% include "users/includes/system_admin_nav.html" %}
+            <div class="admin-registration-nav-wrap" data-admin-registration-nav-wrap>
+                <button class="admin-registration-nav-toggle" type="button" data-admin-registration-nav-toggle aria-expanded="false" aria-controls="admin-registration-nav-body">
+                    <span>Разделы</span><strong>Подключение</strong><i aria-hidden="true"></i>
+                </button>
+                <div class="admin-registration-nav-body" id="admin-registration-nav-body" data-admin-registration-nav-body>{% include "users/includes/system_admin_nav.html" %}</div>
+            </div>
         </section>
         <section class="admin-console-actions">
             <button type="button" class="admin-theme-button" data-admin-theme-toggle data-theme-icon="sun" aria-label="Переключить дневной и ночной режим" title="Переключить дневной и ночной режим"></button>
@@ -45,285 +47,168 @@
     </header>
     <main class="admin-console-page admin-registration-page" data-registration-dashboard aria-busy="false">
 {% endif %}
-        <div class="adoption-loading" data-adoption-loading hidden role="status" aria-live="polite">
-            <span aria-hidden="true"></span>
-            <strong>Обновляем данные…</strong>
-        </div>
+        <div class="adoption-loading" data-adoption-loading hidden role="status" aria-live="polite"><span aria-hidden="true"></span><strong>Обновляем данные…</strong></div>
 
-        <section class="adoption-filter-panel" data-adoption-filters aria-label="Фильтры отчёта">
+        <section class="adoption-filter-panel" data-adoption-filters aria-label="Источник и фильтры отчёта">
             <div class="adoption-filter-heading">
                 <div>
-                    <span>Расстановка</span>
-                    {% if has_published_plans %}
-                        <h2>{{ selected_date|date:"d.m.Y" }}</h2>
-                        <p>{% if plan_published_at %}Опубликована {{ plan_published_at|date:"d.m.Y H:i" }}{% else %}Опубликованная расстановка{% endif %}</p>
+                    <span>Источник данных</span>
+                    {% if source_mode == "exact_date" %}
+                        <h2>Расстановка {{ selected_date|date:"d.m.Y" }}</h2><p>Точный срез за выбранную дату</p>
                     {% else %}
-                        <h2>Нет данных</h2>
-                        <p class="is-warning">Опубликованная расстановка не найдена</p>
+                        <h2>Последние по каждой роли</h2><p>{% if is_mixed_source_dates %}Даты публикаций различаются — они показаны ниже{% else %}Актуальные опубликованные расстановки{% endif %}</p>
                     {% endif %}
                 </div>
                 <button class="adoption-filter-toggle" type="button" data-adoption-filter-toggle aria-expanded="true" aria-controls="adoption-filter-body">
                     <span>Фильтры</span>
-                    <strong>
-                        {% if selected_role or selected_shift %}
-                            {% if selected_role %}{% for role in role_options %}{% if role.code == selected_role %}{{ role.name }}{% endif %}{% endfor %}{% else %}Все роли{% endif %}
-                            ·
-                            {% if selected_shift %}{% for value, label in shift_options %}{% if value == selected_shift %}{{ label }}{% endif %}{% endfor %}{% else %}обе смены{% endif %}
-                        {% else %}Все роли и смены{% endif %}
-                    </strong>
+                    <strong>{% if selected_role %}{% for role in role_options %}{% if role.code == selected_role %}{{ role.name }}{% endif %}{% endfor %}{% else %}Все роли{% endif %} · {% if selected_shift %}{% for value, label in shift_options %}{% if value == selected_shift %}{{ label }}{% endif %}{% endfor %}{% else %}обе смены{% endif %}</strong>
                     <i aria-hidden="true"></i>
                 </button>
             </div>
+
+            <div class="adoption-source-plans" aria-label="Расстановки, вошедшие в отчёт">
+                {% for plan in source_plans %}
+                    {% if plan.has_plan %}
+                        <a class="adoption-source-plan{% if plan.is_selected %} is-selected{% endif %}" data-server-filter href="{{ plan.filter_url|default:plan.url }}">
+                            <span>{{ plan.role_label }}</span><strong>{{ plan.work_date|date:"d.m.Y" }}</strong><small>{{ plan.employee_count|default:0 }} чел. · опубликована {{ plan.published_at|date:"d.m H:i" }}</small>
+                        </a>
+                    {% else %}
+                        <span class="adoption-source-plan is-missing"><span>{{ plan.role_label }}</span><strong>Нет публикации</strong><small>{% if source_mode == "exact_date" %}На выбранную дату{% else %}Опубликованная расстановка не найдена{% endif %}</small></span>
+                    {% endif %}
+                {% empty %}<span class="adoption-source-plan is-missing"><span>Расстановки</span><strong>Нет данных</strong><small>Опубликованные источники не найдены</small></span>{% endfor %}
+            </div>
+
             <div class="adoption-filter-body" id="adoption-filter-body" data-adoption-filter-body>
                 <form class="adoption-filter-form" method="get" data-adoption-filter-form>
                     <input type="hidden" name="period" value="{{ period_days|default:30 }}">
                     <input type="hidden" name="state" value="{{ selected_state|default:'' }}">
-                    <label>
-                        <span>Дата расстановки</span>
-                        <select name="date">
-                            {% for item in available_dates %}
-                                <option value="{{ item|date:'Y-m-d' }}" {% if item == selected_date %}selected{% endif %}>{{ item|date:"d.m.Y" }}</option>
-                            {% empty %}<option value="">Нет данных</option>{% endfor %}
-                        </select>
-                    </label>
-                    <label>
-                        <span>Рабочая роль</span>
-                        <select name="role">
-                            <option value="">Все роли</option>
-                            {% for role in role_options %}<option value="{{ role.code }}" {% if role.code == selected_role %}selected{% endif %}>{{ role.name }}</option>{% endfor %}
-                        </select>
-                    </label>
-                    <label>
-                        <span>Смена</span>
-                        <select name="shift">
-                            <option value="">Обе смены</option>
-                            {% for value, label in shift_options %}<option value="{{ value }}" {% if value == selected_shift %}selected{% endif %}>{{ label }}</option>{% endfor %}
-                        </select>
-                    </label>
+                    <label><span>Источник</span><select name="date"><option value="" {% if source_mode != "exact_date" %}selected{% endif %}>Последние по каждой роли</option>{% for item in available_dates %}<option value="{{ item|date:'Y-m-d' }}" {% if source_mode == "exact_date" and item == selected_date %}selected{% endif %}>Точная дата · {{ item|date:"d.m.Y" }}</option>{% endfor %}</select></label>
+                    <label><span>Рабочая роль</span><select name="role"><option value="">Все роли</option>{% for role in role_options %}<option value="{{ role.code }}" {% if role.code == selected_role %}selected{% endif %}>{{ role.name }}</option>{% endfor %}</select></label>
+                    <label><span>Смена</span><select name="shift"><option value="">Обе смены</option>{% for value, label in shift_options %}<option value="{{ value }}" {% if value == selected_shift %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
                     <button class="admin-button admin-button-primary" type="submit">Применить</button>
                     <a class="adoption-filter-reset" data-server-filter href="{% if management_mode %}{% url 'management_registration_dashboard' %}{% else %}{% url 'system_admin_registration_dashboard' %}{% endif %}">Сбросить</a>
                 </form>
-                <div class="adoption-filter-chips" aria-label="Текущий срез">
-                    {% if has_published_plans %}<span>{{ selected_date|date:"d.m.Y" }}</span>{% endif %}
-                    {% if selected_role %}{% for role in role_options %}{% if role.code == selected_role %}<span>{{ role.name }}</span>{% endif %}{% endfor %}{% endif %}
-                    {% if selected_shift %}{% for value, label in shift_options %}{% if value == selected_shift %}<span>{{ label }}</span>{% endif %}{% endfor %}{% endif %}
-                </div>
             </div>
+
             <div class="adoption-data-context" role="note">
+                {% if source_date_invalid %}<strong class="is-warning">Некорректная дата отброшена.</strong>{% endif %}
                 {% if dashboard_generated_at %}<strong class="adoption-data-freshness">Данные на {{ dashboard_generated_at|date:"H:i" }}.</strong>{% endif %}
-                <span>Считаем готовность по активации доступа; установки PWA/APK пока не отслеживаются.</span>
+                <span>Регистрация здесь — активация персонального доступа. Установка PWA/APK пока не отслеживается.</span>
             </div>
         </section>
 
-        {% if not has_published_plans %}
+        {% if not has_selected_plans %}
         <section class="adoption-dashboard-empty" role="status" aria-labelledby="adoption-empty-title">
             <i aria-hidden="true"></i>
-            <span>Нет источника данных</span>
-            <h2 id="adoption-empty-title">Опубликованная расстановка не найдена</h2>
-            <p>Показатели подключения появятся после публикации расстановки заместителем начальника участка.</p>
+            {% if selected_role %}
+                <span>Нет источника для роли</span>
+                <h2 id="adoption-empty-title">Для выбранной роли нет опубликованной расстановки{% if source_mode == "exact_date" %} на {{ selected_date|date:"d.m.Y" }}{% endif %}</h2>
+                <p>По другой производственной роли данные могут быть доступны в полном срезе.</p>
+                <a class="adoption-filter-reset" data-server-filter href="{% if management_mode %}{% url 'management_registration_dashboard' %}{% else %}{% url 'system_admin_registration_dashboard' %}{% endif %}{% if source_mode == 'exact_date' %}?date={{ selected_date|date:'Y-m-d' }}{% endif %}">Показать все роли</a>
+            {% elif source_mode == "exact_date" %}
+                <span>Нет источника данных</span><h2 id="adoption-empty-title">На {{ selected_date|date:"d.m.Y" }} нет опубликованных расстановок</h2><p>Выберите режим «Последние по каждой роли» или другую дату.</p>
+            {% else %}
+                <span>Нет источника данных</span><h2 id="adoption-empty-title">Опубликованные расстановки не найдены</h2><p>Показатели появятся после публикации расстановки заместителем начальника участка.</p>
+            {% endif %}
         </section>
         {% elif not total %}
         <section class="adoption-dashboard-empty" role="status" aria-labelledby="adoption-empty-title">
             <i aria-hidden="true"></i>
             {% if selected_role or selected_shift %}
-                <span>Пустой срез</span>
-                <h2 id="adoption-empty-title">По выбранным фильтрам сотрудников нет</h2>
-                <p>Измените рабочую роль или смену либо верните полный срез.</p>
-                <a class="adoption-filter-reset" data-server-filter href="{% if management_mode %}{% url 'management_registration_dashboard' %}?date={{ selected_date|date:'Y-m-d' }}{% else %}{% url 'system_admin_registration_dashboard' %}?date={{ selected_date|date:'Y-m-d' }}{% endif %}">Показать всех за эту дату</a>
-            {% else %}
-                <span>Расстановка пуста</span>
-                <h2 id="adoption-empty-title">В расстановке за эту дату нет сотрудников</h2>
-                <p>Показатели подключения появятся после добавления сотрудников в опубликованную расстановку.</p>
-            {% endif %}
+                <span>Пустой срез</span><h2 id="adoption-empty-title">По выбранным фильтрам сотрудников нет</h2><p>Снимите фильтр роли или смены, чтобы вернуться к полному охвату.</p>
+                <a class="adoption-filter-reset" data-server-filter href="{% if management_mode %}{% url 'management_registration_dashboard' %}{% else %}{% url 'system_admin_registration_dashboard' %}{% endif %}{% if source_mode == 'exact_date' %}?date={{ selected_date|date:'Y-m-d' }}{% endif %}">Показать полный срез</a>
+            {% else %}<span>Расстановка пуста</span><h2 id="adoption-empty-title">В выбранных расстановках нет сотрудников</h2><p>Показатели появятся после добавления сотрудников в опубликованную расстановку.</p>{% endif %}
         </section>
         {% else %}
-        <section class="adoption-executive-grid" aria-label="Готовность сотрудников">
-            <button type="button" class="adoption-executive-card is-primary" data-state-target="ready">
-                <span>Готовы к работе</span><strong>{{ ready_percent|default:"0" }}%</strong>
-                <span class="adoption-executive-copy">{{ ready|default:"0" }} из {{ total|default:"0" }} сотрудников</span>
-                <i class="adoption-executive-progress" aria-hidden="true"><b style="width: {{ ready_percent|default:0 }}%"></b></i>
-                <small>Открыть готовых сотрудников</small>
-            </button>
-            <button type="button" class="adoption-executive-card is-attention{% if requires_action %} has-alert{% endif %}" data-state-target="needs_attention">
-                <span>Требуют внимания</span><strong>{{ requires_action|default:"0" }}</strong>
-                <span class="adoption-executive-copy">{% if requires_action %}Нужно организовать подключение{% else %}Проблем не найдено{% endif %}</span>
-                <small>Открыть рабочий список</small>
-            </button>
-            <article class="adoption-executive-card is-dynamic">
-                <span>Стали готовы за 7 дней</span><strong>{{ new_ready_7|default:"0" }}</strong>
-                <p>{% if delta_abs is not None %}{% if delta_abs > 0 %}+{% endif %}{{ delta_abs }} к предыдущим 7 дням{% if delta_percent is not None %} ({{ delta_percent }}%){% endif %}{% else %}Предыдущий период: {{ previous_ready_7|default:"0" }}{% endif %}</p>
-                <small>Сегодня: {{ new_ready_today|default:"0" }} · прошлые 7 дней: {{ previous_ready_7|default:"0" }}</small>
-            </article>
-            <article class="adoption-executive-card is-time{% if median_activation_hours is None and role_breakdown.0.not_ready %} is-lag{% endif %}">
-                {% if median_activation_hours is not None %}
-                    <span>Медиана активации доступа</span>
-                    <strong>{{ median_activation_hours|floatformat:"1" }} ч</strong><p>по ролям: от выдачи до активации</p><small>Выборка: {{ median_activation_sample|default:"0" }} активаций ролей</small>
-                {% else %}
-                    {% with lead=role_breakdown.0 %}
-                        {% if lead and lead.not_ready %}
-                            <span>Главное отставание</span><strong>{{ lead.not_ready }}</strong><p>{{ lead.label }}</p><small>{{ lead.ready }} из {{ lead.total }} готовы</small>
-                        {% else %}
-                            <span>Медиана активации доступа</span><strong>—</strong><p>Недостаточно данных по ролям</p><small>Нужно не менее 3 активаций</small>
-                        {% endif %}
-                    {% endwith %}
-                {% endif %}
-            </article>
-        </section>
-
-        <section class="adoption-decision-grid">
-            <article class="adoption-panel adoption-funnel-panel">
-                <header class="adoption-panel-heading">
-                    <div><span>Путь сотрудника</span><h2>От расстановки до готовности</h2><p>Конверсия считается между соседними этапами.</p></div>
-                    <strong class="adoption-panel-result">{{ ready|default:"0" }} готовы</strong>
-                </header>
-                <div class="adoption-funnel" aria-label="Воронка подготовки сотрудников">
-                    {% for step in funnel_steps %}
-                        <a class="adoption-funnel-step is-{{ step.code }}" data-server-filter href="{{ step.url|default:'?' }}#people-list">
-                            <span>{{ step.label }}</span><strong>{{ step.count }}</strong><small>{{ step.percent }}% от расстановки</small>
-                        </a>
-                        {% if not forloop.last %}<div class="adoption-funnel-transition" aria-label="Потеря {{ step.loss_count }}, конверсия {{ step.conversion_percent }} процентов"><span aria-hidden="true"></span><strong>−{{ step.loss_count|default:"0" }}</strong><small>{{ step.conversion_percent|default:"0" }}% прошли дальше</small></div>{% endif %}
-                    {% empty %}
-                        <button type="button" class="adoption-funnel-step is-total" data-state-target="all"><span>В расстановке</span><strong>{{ total|default:"0" }}</strong><small>100% от расстановки</small></button>
-                        <div class="adoption-funnel-transition"><span aria-hidden="true"></span><strong>−{{ lost_before_prepared|default:"0" }}</strong><small>{{ prepared_percent|default:"0" }}% получили доступ</small></div>
-                        <button type="button" class="adoption-funnel-step is-prepared" data-state-target="prepared"><span>Доступ подготовлен</span><strong>{{ prepared|default:"0" }}</strong><small>{{ prepared_percent|default:"0" }}% от расстановки</small></button>
-                        <div class="adoption-funnel-transition"><span aria-hidden="true"></span><strong>−{{ lost_after_prepared|default:"0" }}</strong><small>{{ activation_conversion_percent|default:"0" }}% стали готовы</small></div>
-                        <button type="button" class="adoption-funnel-step is-ready" data-state-target="ready"><span>Готовы к работе</span><strong>{{ ready|default:"0" }}</strong><small>{{ ready_percent|default:"0" }}% от расстановки</small></button>
-                    {% endfor %}
-                </div>
-            </article>
-
-            <article class="adoption-panel adoption-attention-panel" id="attention-summary">
-                <header class="adoption-panel-heading compact">
-                    <div><span>Контроль</span><h2>Требуют внимания</h2><p>Категории не пересекаются.</p></div>
-                    <strong class="adoption-attention-total{% if requires_action %} has-alert{% endif %}">{{ requires_action|default:"0" }}</strong>
-                </header>
-                {% if requires_action %}
-                    <div class="adoption-attention-list">
-                        {% for item in attention_items %}{% if item.count %}
-                            <a class="adoption-attention-item is-{{ item.tone|default:'warning' }}" data-server-filter href="{{ item.url|default:'?' }}#people-list">
-                                <i aria-hidden="true"></i><span><strong>{{ item.label }}</strong><small>{{ item.detail|default:"Открыть список сотрудников" }}</small></span><b>{{ item.count }}</b>
-                            </a>
-                        {% endif %}{% endfor %}
-                    </div>
-                {% else %}
-                    <div class="adoption-attention-empty"><i aria-hidden="true"></i><strong>Все сотрудники готовы</strong><span>По выбранному срезу действий не требуется.</span></div>
-                {% endif %}
-            </article>
-        </section>
-
-        <details class="adoption-method-note">
-            <summary>Как считаются показатели</summary>
-            <p><strong>Доступ подготовлен</strong> — по всем требуемым ролям есть действующий персональный доступ: PIN сформирован или доступ уже активирован; готовые сотрудники также входят в этот этап. <strong>Готов к работе</strong> — сотрудник активировал доступ для каждой рабочей роли, требуемой выбранной расстановкой. Установка PWA или APK пока не фиксируется отдельно; после появления достоверного события первого запуска будет добавлен самостоятельный показатель.</p>
-        </details>
-
-        <section class="adoption-panel adoption-growth-panel" data-adoption-chart data-chart-total="{{ total|default:0 }}" data-chart-granularity="{{ chart.granularity|default:'day' }}" aria-labelledby="adoption-growth-title">
-            <header class="adoption-panel-heading adoption-chart-heading">
-                <div><span>Распределение готовности</span><h2 id="adoption-growth-title">Когда сотрудники достигли готовности</h2><p>{{ chart.start_date|date:"d.m.Y" }} — {{ chart.end_date|date:"d.m.Y" }} · {{ chart.granularity_label|default:"По дням" }}</p></div>
-                <div class="adoption-chart-header-actions">
-                    <p class="adoption-chart-headline-metrics"><strong>Готовы {{ ready|default:0 }} из {{ total|default:0 }} · {{ ready_percent|default:0|floatformat:"0" }}%</strong><span>По подтверждённым датам за период +{{ chart.period_increment|default:0 }}</span></p>
-                    <nav class="adoption-period-switcher" aria-label="Период графика">
-                        {% for item in period_links %}<a class="{% if item.is_active %}is-active{% endif %}" data-server-filter href="{{ item.url }}#adoption-growth-title" {% if item.is_active %}aria-current="true"{% endif %}>{{ item.label }}</a>{% empty %}<span class="is-active">{{ period_days|default:30 }} дней</span>{% endfor %}
-                    </nav>
-                </div>
-            </header>
-            <p class="adoption-chart-semantics" id="adoption-chart-semantics">{{ chart.semantics_note|default:"График распределяет готовых сейчас сотрудников выбранной расстановки по дате достижения готовности; это не исторический снимок состояния на каждую дату." }}</p>
-            {% if chart.undated_ready or chart.future_ready %}<div class="adoption-chart-caveats" aria-label="Особенности данных графика">{% if chart.undated_ready %}<span>Без даты готовности: {{ chart.undated_ready }}</span>{% endif %}{% if chart.future_ready %}<span>Дата готовности позже текущей: {{ chart.future_ready }}</span>{% endif %}</div>{% endif %}
-            {% with series=chart.buckets|default:chart.days %}
-            {% with endpoint=series|last %}
-            <div class="adoption-chart-figure" style="--chart-points: {{ series|length|default:1 }};">
-                <div class="adoption-chart-legend" aria-label="Обозначения графика">
-                    <span class="is-line">{{ chart.cumulative_label|default:"Подтверждённая готовность нарастающим итогом" }}</span>
-                    <span class="is-bars">{{ chart.increment_label|default:"Стали готовы за день" }}</span>
-                </div>
-                <div class="adoption-percentage-axis" aria-hidden="true">
-                    {% for tick in chart.axis_ticks %}<span>{{ tick.label }}</span>{% empty %}<span>100%</span><span>75%</span><span>50%</span><span>25%</span><span>0%</span>{% endfor %}
-                </div>
-                <div class="adoption-readiness-plot" data-chart-control data-chart-hit-area role="slider" tabindex="0" aria-label="Распределение готовности по времени" aria-orientation="horizontal" aria-valuemin="1" aria-valuemax="{{ series|length|default:1 }}" aria-valuenow="{{ series|length|default:1 }}" aria-valuetext="{{ endpoint.long_label|default:endpoint.label }}: стали готовы {{ endpoint.increment_count|default:endpoint.new_count }}, накоплено {{ endpoint.cumulative_count|default:endpoint.cumulative }} из {{ total|default:0 }}, {{ endpoint.cumulative_percent|default:0 }} процентов" aria-describedby="adoption-chart-semantics adoption-chart-keyboard-help">
-                    <svg class="adoption-readiness-svg" viewBox="0 0 1000 240" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-                        <g class="adoption-chart-gridlines">
-                            {% for tick in chart.axis_ticks %}<line x1="0" x2="1000" y1="{{ tick.svg_y|unlocalize }}" y2="{{ tick.svg_y|unlocalize }}"></line>{% empty %}<line x1="0" x2="1000" y1="12" y2="12"></line><line x1="0" x2="1000" y1="66" y2="66"></line><line x1="0" x2="1000" y1="120" y2="120"></line><line x1="0" x2="1000" y1="174" y2="174"></line><line x1="0" x2="1000" y1="228" y2="228"></line>{% endfor %}
-                        </g>
-                        <path class="adoption-readiness-area" d="{{ chart.area_path|default:'' }}"></path>
-                        <path class="adoption-readiness-step" pathLength="1" d="{{ chart.step_path|default:'' }}"></path>
-                    </svg>
-                    <i class="adoption-chart-crosshair" aria-hidden="true"></i>
-                    <i class="adoption-chart-cursor-dot" aria-hidden="true"></i>
-                    {% if endpoint %}{% widthratio endpoint.svg_x 1000 100 as endpoint_x %}{% widthratio endpoint.svg_y 240 100 as endpoint_y %}<span class="adoption-chart-endpoint" data-chart-endpoint data-chart-x="{{ endpoint.svg_x|unlocalize }}" data-chart-y="{{ endpoint.svg_y|unlocalize }}" style="--endpoint-x: {{ endpoint_x }}%; --endpoint-y: {{ endpoint_y }}%;" aria-hidden="true"><strong><b>{{ chart.endpoint_count|default:endpoint.cumulative_count|default:endpoint.cumulative|default:0 }}</b> из {{ total|default:0 }} · {{ chart.endpoint_percent|default:endpoint.cumulative_percent|default:0|floatformat:"0" }}%</strong></span>{% endif %}
-                </div>
-
-                <div class="adoption-histogram-scale">
-                    <strong>{{ chart.increment_label|default:"Стали готовы за день" }}</strong>
-                    {% if chart.max_increment %}<span>Отдельная шкала · максимум {{ chart.max_increment }}</span>{% else %}<span class="is-empty">За период нет подтверждённых дат достижения готовности</span>{% endif %}
-                </div>
-                <div class="adoption-count-axis" aria-hidden="true"><span>{{ chart.max_increment|default:chart.max_daily|default:"0" }}</span><span>0</span></div>
-                <div class="adoption-histogram" data-chart-hit-area aria-hidden="true">
-                    <i class="adoption-chart-crosshair" aria-hidden="true"></i>
-                    {% for item in series %}<span class="adoption-histogram-column{% if item.is_selected %} is-selected{% endif %}" data-chart-bucket data-chart-index="{{ forloop.counter0 }}" data-chart-label="{{ item.long_label|default:item.label }}" data-chart-new="{{ item.increment_count|default:item.new_count }}" data-chart-cumulative="{{ item.cumulative_count|default:item.cumulative }}" data-chart-percent="{{ item.cumulative_percent|default:0|unlocalize }}" data-chart-x="{{ item.svg_x|unlocalize }}" data-chart-y="{{ item.svg_y|unlocalize }}" data-chart-url="{{ item.url|default:'?' }}"><i class="adoption-histogram-bar{% if not item.new_count %} is-zero{% endif %}" style="--bar-height: {{ item.bar_height|default:item.bar_percent|default:0|unlocalize }}%; --bar-delay: {{ forloop.counter0 }};"></i></span>{% empty %}<span class="adoption-empty">Для выбранного периода нет данных.</span>{% endfor %}
-                </div>
-                <span class="adoption-axis-spacer" aria-hidden="true"></span>
-                <div class="adoption-chart-dates" aria-hidden="true">
-                    {% for item in series %}<time data-chart-label data-chart-index="{{ forloop.counter0 }}" datetime="{{ item.start_iso|default:item.date_iso|default:'' }}" {% if not item.show_label %}hidden{% endif %}>{{ item.label|default:item.date }}</time>{% endfor %}
-                </div>
-
-                <div class="adoption-chart-selection" data-chart-summary aria-live="polite" aria-atomic="true">
-                    <div class="adoption-chart-selection-date"><span>{% if chart.granularity == "week" %}Выбранный интервал{% else %}Выбранный день{% endif %}</span><strong data-chart-summary-date>{{ endpoint.long_label|default:endpoint.label }}</strong></div>
-                    <div><span>{{ chart.increment_label|default:"Стали готовы за день" }}</span><strong data-chart-summary-new>{{ endpoint.increment_count|default:endpoint.new_count|default:0 }}</strong></div>
-                    <div><span>С подтверждённой датой к концу интервала</span><strong><b data-chart-summary-cumulative>{{ endpoint.cumulative_count|default:endpoint.cumulative|default:0 }}</b> из {{ total|default:0 }} · <b data-chart-summary-percent>{{ endpoint.cumulative_percent|default:0|floatformat:"0" }}</b>%</strong></div>
-                    <div class="adoption-chart-selection-action"><a data-chart-drilldown data-server-filter href="{{ endpoint.url|default:'?' }}#people-list" {% if not endpoint.new_count %}hidden{% endif %}>Показать сотрудников</a><span data-chart-no-drilldown {% if endpoint.new_count %}hidden{% endif %}>В выбранном интервале новых готовых нет</span></div>
-                </div>
-            </div>
-            {% endwith %}
-            {% endwith %}
-            <p class="adoption-visually-hidden" id="adoption-chart-keyboard-help">Используйте стрелки влево и вправо для выбора интервала, Home и End — для перехода к краям периода, Enter — чтобы открыть список сотрудников.</p>
-        </section>
-
-        <div class="adoption-tooltip" data-adoption-tooltip-popup role="tooltip" hidden></div>
-
-        <section class="adoption-breakdown-grid">
-            <article class="adoption-panel adoption-breakdown-panel">
-                <header class="adoption-panel-heading compact"><div><span>Где отстают</span><h2>По рабочим ролям</h2><p>Сначала — роли с наибольшим числом неготовых.</p></div></header>
-                <div class="adoption-breakdown-list" data-breakdown-list>
-                    {% for item in role_breakdown %}<a class="adoption-breakdown-row" data-server-filter href="{{ item.url }}#people-list" data-adoption-tooltip="{{ item.label }}: готовы {{ item.ready }} из {{ item.total }}, доступ подготовлен у {{ item.prepared }}"><div><span>{{ item.label }}</span><strong>{{ item.ready }} из {{ item.total }} готовы</strong></div><div class="adoption-progress"><i style="width: {{ item.percent }}%"></i></div><small>{{ item.percent }}%</small><em>{% if item.not_ready %}требуется {{ item.not_ready }}{% else %}готовы все{% endif %}</em></a>{% empty %}<div class="adoption-empty">Для выбранных фильтров нет сотрудников.</div>{% endfor %}
-                </div>
-                {% if role_breakdown|length > 5 %}<button class="adoption-breakdown-toggle" type="button" data-breakdown-toggle hidden>Показать все роли</button>{% endif %}
-            </article>
-            <article class="adoption-panel adoption-breakdown-panel">
-                <header class="adoption-panel-heading compact"><div><span>Где отстают</span><h2>По сменам</h2><p>Срез учитывает выбранную дату и рабочую роль.</p></div></header>
-                <div class="adoption-breakdown-list" data-breakdown-list>
-                    {% for item in shift_breakdown %}<a class="adoption-breakdown-row" data-server-filter href="{{ item.url }}#people-list" data-adoption-tooltip="{{ item.label }}: готовы {{ item.ready }} из {{ item.total }}, доступ подготовлен у {{ item.prepared }}"><div><span>{{ item.label }}</span><strong>{{ item.ready }} из {{ item.total }} готовы</strong></div><div class="adoption-progress"><i style="width: {{ item.percent }}%"></i></div><small>{{ item.percent }}%</small><em>{% if item.not_ready %}требуется {{ item.not_ready }}{% else %}готовы все{% endif %}</em></a>{% empty %}<div class="adoption-empty">Для выбранных фильтров нет сотрудников.</div>{% endfor %}
-                </div>
-                {% if shift_breakdown|length > 5 %}<button class="adoption-breakdown-toggle" type="button" data-breakdown-toggle hidden>Показать все смены</button>{% endif %}
-            </article>
+        <section class="adoption-summary-strip" aria-labelledby="adoption-summary-title">
+            <header><span>Сводка подключения</span><h2 id="adoption-summary-title">От расстановки до активного доступа</h2></header>
+            <nav class="adoption-stage-track" aria-label="Этапы подключения">
+                {% for step in funnel_steps %}<a class="adoption-stage is-{{ step.code }}" data-server-filter href="{{ step.url|default:'?' }}#people-list"><span>{{ step.label }}</span><strong>{{ step.count }}</strong><small>{{ step.percent }}% от расстановки</small></a>{% if not forloop.last %}<i class="adoption-stage-arrow" aria-hidden="true"></i>{% endif %}{% endfor %}
+            </nav>
+            <button type="button" class="adoption-attention-brief{% if requires_action %} has-alert{% endif %}" data-state-target="needs_attention"><span>Требуют внимания</span><strong>{{ requires_action|default:0 }}</strong><small>{% if requires_action %}Открыть задачи администратора{% else %}Действий не требуется{% endif %}</small></button>
         </section>
 
         <section class="adoption-panel adoption-people-panel" id="people-list" aria-labelledby="people-list-title">
             <header class="adoption-panel-heading adoption-people-heading">
-                <div><span>Рабочий список</span><h2 id="people-list-title">Сотрудники из расстановки</h2><p>Показано <b data-visible-people>{% if visible_total is not None %}{{ visible_total }}{% else %}{{ rows|length }}{% endif %}</b> из {{ total|default:"0" }}. Сначала — сотрудники, которым требуется действие.</p></div>
+                <div><span>Рабочий список</span><h2 id="people-list-title">Кого подключить</h2><p>Показано <b data-visible-people>{% if visible_total is not None %}{{ visible_total }}{% else %}{{ rows|length }}{% endif %}</b> из {{ total|default:0 }}. Сначала — сотрудники, которым требуется действие.</p></div>
                 <label class="adoption-search" hidden><span>Поиск сотрудника</span><input type="search" data-adoption-search placeholder="ФИО, роль, техника…" autocomplete="off" aria-controls="adoption-people-table"></label>
             </header>
-            <nav class="adoption-state-tabs" aria-label="Статус сотрудников">
-                {% for item in state_tabs %}<a class="{% if item.is_active %}is-active{% endif %}" data-server-filter data-state-code="{{ item.code }}" href="{{ item.url }}#people-list" {% if item.is_active %}aria-current="page"{% endif %}><span>{% if item.code == 'prepared' %}Доступ подготовлен (включая готовых){% else %}{{ item.label }}{% endif %}</span><strong>{{ item.count }}</strong></a>{% empty %}<span class="is-active">Все сотрудники <strong>{{ visible_total|default:"0" }}</strong></span>{% endfor %}
-            </nav>
-            {% if selected_ready_on or selected_ready_range_label %}<div class="adoption-selected-day">{% if selected_ready_range_label %}<span>Стали готовы за интервал {{ selected_ready_range_label }}</span><a data-server-filter href="{{ ready_filter_clear_url|default:ready_on_clear_url|default:'?' }}#people-list">Снять фильтр интервала</a>{% else %}<span>Стали готовы {{ selected_ready_on|date:"d.m.Y" }}</span><a data-server-filter href="{{ ready_filter_clear_url|default:ready_on_clear_url|default:'?' }}#people-list">Снять фильтр дня</a>{% endif %}</div>{% endif %}
+            <div class="adoption-list-controls">
+                <nav class="adoption-state-tabs" aria-label="Основной статус сотрудников">{% for item in primary_state_tabs %}<a class="{% if item.is_active %}is-active{% endif %}" data-server-filter data-state-code="{{ item.code }}" href="{{ item.url }}#people-list" {% if item.is_active %}aria-current="page"{% endif %}><span>{{ item.label }}</span><strong>{{ item.count }}</strong></a>{% empty %}<span class="is-active">Все сотрудники <strong>{{ visible_total|default:0 }}</strong></span>{% endfor %}</nav>
+                <label class="adoption-reason-filter"><span>Причина внимания</span><select data-adoption-state-select aria-label="Уточнить причину внимания"><option value="" disabled hidden {% if not selected_state or selected_state == "ready" %}selected{% endif %}>Уточнить причину</option>{% for item in reason_options %}<option value="{{ item.url }}#people-list" {% if item.is_active %}selected{% endif %}>{{ item.label }} · {{ item.count }}</option>{% endfor %}</select></label>
+            </div>
+            {% if selected_ready_on or selected_ready_range_label %}<div class="adoption-selected-day">{% if selected_ready_range_label %}<span>Активировали доступ за интервал {{ selected_ready_range_label }}</span><a data-server-filter href="{{ ready_filter_clear_url|default:ready_on_clear_url|default:'?' }}#people-list">Снять фильтр интервала</a>{% else %}<span>Активировали доступ {{ selected_ready_on|date:"d.m.Y" }}</span><a data-server-filter href="{{ ready_filter_clear_url|default:ready_on_clear_url|default:'?' }}#people-list">Снять фильтр дня</a>{% endif %}</div>{% endif %}
             <div class="adoption-table-wrap">
                 <table class="adoption-table" id="adoption-people-table">
-                    <thead><tr><th>Сотрудник</th><th>Роль и смена</th><th>Техника</th><th>Статус</th><th>Что требуется</th><th>Готов с</th></tr></thead>
+                    <thead><tr><th scope="col">Сотрудник</th><th scope="col">Назначение</th><th scope="col">Статус</th><th scope="col">Следующий шаг</th><th scope="col">Активирован с</th></tr></thead>
                     <tbody data-adoption-people-body>
                         {% for row in rows %}
                             <tr data-adoption-person>
-                                <td data-label="Сотрудник">{% if management_mode %}<strong>{{ row.employee.full_name }}</strong>{% else %}<a href="{% url 'system_admin_employee_detail' row.employee.id %}">{{ row.employee.full_name }}</a><small>{{ row.employee.phone|default:"Телефон не указан" }}</small>{% endif %}</td>
-                                <td data-label="Роль и смена"><strong>{{ row.role_labels|join:", " }}</strong><small>{{ row.shift_labels|join:", " }}</small></td>
-                                <td data-label="Техника">{{ row.equipment_labels|join:", "|default:"—" }}</td>
+                                <td data-label="Сотрудник">{% if management_mode %}<strong>{{ row.employee.full_name }}</strong>{% else %}<a class="adoption-employee-link" href="{{ row.action_url }}"><strong>{{ row.employee.full_name }}</strong></a><small>{{ row.employee.phone|default:"Телефон не указан" }}</small>{% endif %}</td>
+                                <td data-label="Назначение"><strong>{{ row.role_labels|join:", " }}</strong><small>{{ row.shift_labels|join:", " }} · {{ row.equipment_labels|join:", "|default:"Техника не указана" }}</small>{% if row.is_scope_conflict %}<small class="adoption-assignment-warning">{{ row.scope_conflict_detail }}</small>{% endif %}</td>
                                 <td data-label="Статус"><span class="adoption-status is-{{ row.tone|default:'neutral' }}">{{ row.label }}</span></td>
-                                <td data-label="Что требуется" class="adoption-issue{% if row.requires_action %} has-action{% endif %}"><span class="adoption-issue-copy">{{ row.issue_summary|default:"Действий не требуется" }}{% if row.code == 'awaiting_activation' and row.waiting_hours is not None %}<small class="adoption-waiting-age" data-waiting-hours="{{ row.waiting_hours|unlocalize }}">{% if row.waiting_label %}{{ row.waiting_label }}{% else %}Ждёт {{ row.waiting_hours }} ч{% endif %}</small>{% endif %}</span></td>
-                                <td data-label="Готов с">{{ row.ready_at|date:"d.m.Y H:i"|default:"—" }}</td>
+                                <td data-label="Следующий шаг" class="adoption-next-step{% if row.requires_action %} has-action{% endif %}">
+                                    <strong>{{ row.next_step.title|default:row.issue_summary|default:"Действий не требуется" }}</strong>{% if row.next_step.detail %}<small>{{ row.next_step.detail }}</small>{% endif %}
+                                    {% if row.code == 'awaiting_activation' and row.waiting_hours is not None %}<small class="adoption-waiting-age" data-waiting-hours="{{ row.waiting_hours|unlocalize }}">{% if row.waiting_label %}{{ row.waiting_label }}{% else %}Ждёт {{ row.waiting_hours }} ч{% endif %}</small>{% endif %}
+                                    {% if not management_mode and row.action_label %}<a class="adoption-row-action" href="{{ row.action_url }}">{{ row.action_label }}</a>{% endif %}
+                                </td>
+                                <td data-label="Активирован с">{{ row.ready_at|date:"d.m.Y H:i"|default:"—" }}</td>
                             </tr>
-                        {% empty %}<tr class="adoption-server-empty"><td colspan="6"><div class="adoption-empty">По выбранным фильтрам сотрудники не найдены.</div></td></tr>{% endfor %}
+                        {% empty %}<tr class="adoption-server-empty"><td colspan="5"><div class="adoption-empty">По выбранным фильтрам сотрудники не найдены.</div></td></tr>{% endfor %}
                     </tbody>
                 </table>
             </div>
             <div class="adoption-empty adoption-search-empty" data-adoption-search-empty hidden>По этому запросу сотрудники не найдены.</div>
         </section>
+
+        {% if management_mode %}
+        <section class="adoption-analytics-shell is-management" data-adoption-analytics aria-labelledby="adoption-analytics-title">
+            <header class="adoption-analytics-heading"><div><span>Аналитика подключения</span><h2 id="adoption-analytics-title">Динамика, роли и смены</h2><p>Общая картина и зоны отставания без персональных контактов.</p></div></header>
+        {% else %}
+        <details class="adoption-analytics-shell" data-adoption-analytics>
+            <summary><span><b>Дополнительная аналитика</b><small>График, роли, смены и скорость активации</small></span><i aria-hidden="true"></i></summary>
+        {% endif %}
+            <div class="adoption-analytics-body">
+                <section class="adoption-insight-strip" aria-label="Динамика и скорость подключения">
+                    <article class="adoption-insight-card"><span>Активировали за 7 дней</span><strong>{{ new_ready_7|default:0 }}</strong><small>{% if delta_abs is not None %}{% if delta_abs > 0 %}+{% endif %}{{ delta_abs }} к предыдущим 7 дням{% if delta_percent is not None %} · {{ delta_percent }}%{% endif %}{% else %}Предыдущие 7 дней: {{ previous_ready_7|default:0 }}{% endif %}</small></article>
+                    <article class="adoption-insight-card"><span>Сегодня</span><strong>{{ new_ready_today|default:0 }}</strong><small>Новых активаций доступа</small></article>
+                    <article class="adoption-insight-card is-wide"><span>Медиана активации доступа</span>{% if median_activation_hours is not None %}<strong>{{ median_activation_hours|floatformat:"1" }} ч</strong><small>От выдачи первичного PIN до активации · {{ median_activation_sample|default:0 }} событий</small>{% else %}<strong>—</strong><small>Нужно не менее 3 подтверждённых активаций</small>{% endif %}</article>
+                </section>
+
+                <section class="adoption-panel adoption-growth-panel" data-adoption-chart data-chart-total="{{ total|default:0 }}" data-chart-granularity="{{ chart.granularity|default:'day' }}" aria-labelledby="adoption-growth-title">
+                    <header class="adoption-panel-heading adoption-chart-heading">
+                        <div><span>Динамика</span><h2 id="adoption-growth-title">Когда активировали доступ</h2><p>{{ chart.start_date|date:"d.m.Y" }} — {{ chart.end_date|date:"d.m.Y" }} · {{ chart.granularity_label|default:"По дням" }}</p></div>
+                        <div class="adoption-chart-header-actions"><p class="adoption-chart-headline-metrics"><strong>Активирован доступ: {{ chart.current_ready|default:ready|default:0 }}</strong><span>С подтверждённой датой: {{ chart.known_ready|default:0 }}{% if chart.undated_ready %} · без даты: {{ chart.undated_ready }}{% endif %}{% if chart.future_ready %} · дата в будущем: {{ chart.future_ready }}{% endif %}</span></p><nav class="adoption-period-switcher" aria-label="Период графика">{% for item in period_links %}<a class="{% if item.is_active %}is-active{% endif %}" data-server-filter href="{{ item.url }}#adoption-growth-title" {% if item.is_active %}aria-current="true"{% endif %}>{{ item.label }}</a>{% empty %}<span class="is-active">{{ period_days|default:30 }} дней</span>{% endfor %}</nav></div>
+                    </header>
+                    <p class="adoption-chart-semantics" id="adoption-chart-semantics">Линия показывает накопительный итог сотрудников с подтверждённой датой активации, столбцы — новые активации в интервале. Это не исторический снимок всей расстановки.</p>
+                    {% with series=chart.buckets|default:chart.days %}{% with endpoint=series|last %}
+                    <div class="adoption-chart-figure" style="--chart-points: {{ series|length|default:1 }};">
+                        <div class="adoption-chart-legend" aria-label="Обозначения графика"><span class="is-line">Активирован доступ нарастающим итогом</span><span class="is-bars">Новые активации</span></div>
+                        <div class="adoption-percentage-axis" aria-hidden="true">{% for tick in chart.axis_ticks %}<span>{{ tick.label }}</span>{% empty %}<span>100%</span><span>75%</span><span>50%</span><span>25%</span><span>0%</span>{% endfor %}</div>
+                        <div class="adoption-readiness-plot" data-chart-control data-chart-hit-area role="slider" tabindex="0" aria-label="Распределение активаций по времени" aria-orientation="horizontal" aria-valuemin="1" aria-valuemax="{{ series|length|default:1 }}" aria-valuenow="{{ series|length|default:1 }}" aria-valuetext="{{ endpoint.long_label|default:endpoint.label }}: активировали {{ endpoint.increment_count|default:endpoint.new_count }}, накоплено {{ endpoint.cumulative_count|default:endpoint.cumulative }} из {{ total|default:0 }}, {{ endpoint.cumulative_percent|default:0 }} процентов" aria-describedby="adoption-chart-semantics adoption-chart-keyboard-help">
+                            <svg class="adoption-readiness-svg" viewBox="0 0 1000 240" preserveAspectRatio="none" aria-hidden="true" focusable="false"><g class="adoption-chart-gridlines">{% for tick in chart.axis_ticks %}<line x1="0" x2="1000" y1="{{ tick.svg_y|unlocalize }}" y2="{{ tick.svg_y|unlocalize }}"></line>{% empty %}<line x1="0" x2="1000" y1="12" y2="12"></line><line x1="0" x2="1000" y1="66" y2="66"></line><line x1="0" x2="1000" y1="120" y2="120"></line><line x1="0" x2="1000" y1="174" y2="174"></line><line x1="0" x2="1000" y1="228" y2="228"></line>{% endfor %}</g><path class="adoption-readiness-area" d="{{ chart.area_path|default:'' }}"></path><path class="adoption-readiness-step" pathLength="1" d="{{ chart.step_path|default:'' }}"></path></svg>
+                            <i class="adoption-chart-crosshair" aria-hidden="true"></i><i class="adoption-chart-cursor-dot" aria-hidden="true"></i>
+                            {% if endpoint %}{% widthratio endpoint.svg_x 1000 100 as endpoint_x %}{% widthratio endpoint.svg_y 240 100 as endpoint_y %}<span class="adoption-chart-endpoint" data-chart-endpoint data-chart-x="{{ endpoint.svg_x|unlocalize }}" data-chart-y="{{ endpoint.svg_y|unlocalize }}" style="--endpoint-x: {{ endpoint_x }}%; --endpoint-y: {{ endpoint_y }}%;" aria-hidden="true"><strong><b>{{ chart.endpoint_count|default:endpoint.cumulative_count|default:endpoint.cumulative|default:0 }}</b> из {{ total|default:0 }} · {{ chart.endpoint_percent|default:endpoint.cumulative_percent|default:0|floatformat:"0" }}%</strong></span>{% endif %}
+                        </div>
+                        <div class="adoption-histogram-scale"><strong>Новые активации</strong>{% if chart.max_increment %}<span>Отдельная шкала · максимум {{ chart.max_increment }}</span>{% else %}<span class="is-empty">В периоде нет подтверждённых дат активации</span>{% endif %}</div>
+                        <div class="adoption-count-axis" aria-hidden="true"><span>{{ chart.max_increment|default:chart.max_daily|default:"0" }}</span><span>0</span></div>
+                        <div class="adoption-histogram" data-chart-hit-area aria-hidden="true"><i class="adoption-chart-crosshair" aria-hidden="true"></i>{% for item in series %}<span class="adoption-histogram-column{% if item.is_selected %} is-selected{% endif %}" data-chart-bucket data-chart-index="{{ forloop.counter0 }}" data-chart-label="{{ item.long_label|default:item.label }}" data-chart-new="{{ item.increment_count|default:item.new_count }}" data-chart-cumulative="{{ item.cumulative_count|default:item.cumulative }}" data-chart-percent="{{ item.cumulative_percent|default:0|unlocalize }}" data-chart-x="{{ item.svg_x|unlocalize }}" data-chart-y="{{ item.svg_y|unlocalize }}" data-chart-url="{{ item.url|default:'?' }}"><i class="adoption-histogram-bar{% if not item.new_count %} is-zero{% endif %}" style="--bar-height: {{ item.bar_height|default:item.bar_percent|default:0|unlocalize }}%; --bar-delay: {{ forloop.counter0 }};"></i></span>{% empty %}<span class="adoption-empty">Для выбранного периода нет данных.</span>{% endfor %}</div>
+                        <span class="adoption-axis-spacer" aria-hidden="true"></span>
+                        <div class="adoption-chart-dates" aria-hidden="true">{% for item in series %}<time class="{% if not item.show_label %}is-suppressed{% endif %}" data-chart-label data-chart-index="{{ forloop.counter0 }}" datetime="{{ item.start_iso|default:item.date_iso|default:'' }}" style="grid-column: {{ forloop.counter }};">{{ item.label|default:item.date }}</time>{% endfor %}</div>
+                        <div class="adoption-chart-selection" data-chart-summary aria-live="polite" aria-atomic="true"><div class="adoption-chart-selection-date"><span>{% if chart.granularity == "week" %}Выбранный интервал{% else %}Выбранный день{% endif %}</span><strong data-chart-summary-date>{{ endpoint.long_label|default:endpoint.label }}</strong></div><div><span>Новые активации</span><strong data-chart-summary-new>{{ endpoint.increment_count|default:endpoint.new_count|default:0 }}</strong></div><div><span>С подтверждённой датой к концу интервала</span><strong><b data-chart-summary-cumulative>{{ endpoint.cumulative_count|default:endpoint.cumulative|default:0 }}</b> из {{ total|default:0 }} · <b data-chart-summary-percent>{{ endpoint.cumulative_percent|default:0|floatformat:"0" }}</b>%</strong></div><div class="adoption-chart-selection-action"><a data-chart-drilldown data-server-filter href="{{ endpoint.url|default:'?' }}#people-list" {% if not endpoint.new_count %}hidden{% endif %}>Показать сотрудников</a><span data-chart-no-drilldown {% if endpoint.new_count %}hidden{% endif %}>В выбранном интервале новых активаций нет</span></div></div>
+                    </div>
+                    {% endwith %}{% endwith %}
+                    <p class="adoption-visually-hidden" id="adoption-chart-keyboard-help">Используйте стрелки влево и вправо для выбора интервала, Home и End — для перехода к краям периода, Enter — чтобы открыть список сотрудников.</p>
+                </section>
+
+                <div class="adoption-tooltip" data-adoption-tooltip-popup role="tooltip" hidden></div>
+                <section class="adoption-breakdown-grid">
+                    <article class="adoption-panel adoption-breakdown-panel"><header class="adoption-panel-heading compact"><div><span>Разрез</span><h2>По рабочим ролям</h2><p>Сначала — роли с наибольшим числом неактивированных.</p></div></header><div class="adoption-breakdown-list" data-breakdown-list>{% for item in role_breakdown %}<a class="adoption-breakdown-row" data-server-filter href="{{ item.url }}#people-list" data-adoption-tooltip="{{ item.label }}: активирован доступ у {{ item.ready }} из {{ item.total }}, подготовлен у {{ item.prepared }}"><div><span>{{ item.label }}</span><strong>{{ item.ready }} из {{ item.total }} активировали</strong></div><div class="adoption-progress"><i style="width: {{ item.percent }}%"></i></div><small>{{ item.percent }}%</small><em>{% if item.not_ready %}требуется {{ item.not_ready }}{% else %}активировали все{% endif %}</em></a>{% empty %}<div class="adoption-empty">Для выбранных фильтров нет сотрудников.</div>{% endfor %}</div>{% if role_breakdown|length > 5 %}<button class="adoption-breakdown-toggle" type="button" data-breakdown-toggle hidden>Показать все роли</button>{% endif %}</article>
+                    <article class="adoption-panel adoption-breakdown-panel"><header class="adoption-panel-heading compact"><div><span>Разрез</span><h2>По сменам</h2><p>Срез учитывает выбранный источник и рабочую роль.</p></div></header><div class="adoption-breakdown-list" data-breakdown-list>{% for item in shift_breakdown %}<a class="adoption-breakdown-row" data-server-filter href="{{ item.url }}#people-list" data-adoption-tooltip="{{ item.label }}: активирован доступ у {{ item.ready }} из {{ item.total }}, подготовлен у {{ item.prepared }}"><div><span>{{ item.label }}</span><strong>{{ item.ready }} из {{ item.total }} активировали</strong></div><div class="adoption-progress"><i style="width: {{ item.percent }}%"></i></div><small>{{ item.percent }}%</small><em>{% if item.not_ready %}требуется {{ item.not_ready }}{% else %}активировали все{% endif %}</em></a>{% empty %}<div class="adoption-empty">Для выбранных фильтров нет сотрудников.</div>{% endfor %}</div>{% if shift_breakdown|length > 5 %}<button class="adoption-breakdown-toggle" type="button" data-breakdown-toggle hidden>Показать все смены</button>{% endif %}</article>
+                </section>
+                <details class="adoption-method-note"><summary>Как считаются показатели</summary><p><strong>Доступ подготовлен</strong> — по всем требуемым ролям есть действующий персональный доступ: первичный PIN сформирован или доступ уже активирован. <strong>Доступ активирован</strong> — сотрудник выполнил первый вход и создал постоянный PIN для каждой требуемой роли. Установка PWA или APK пока не фиксируется отдельно.</p></details>
+            </div>
+        {% if management_mode %}</section>{% else %}</details>{% endif %}
         {% endif %}
 {% if management_mode %}
         </section>
@@ -352,5 +237,5 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% endif %}
-<script src="{% static 'js/registration-dashboard-v2.js' %}?v=20260909-6" defer></script>
+<script src="{% static 'js/registration-dashboard-v2.js' %}?v=20260910-3" defer></script>
 {% endblock %}

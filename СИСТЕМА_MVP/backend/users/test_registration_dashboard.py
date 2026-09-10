@@ -1,15 +1,25 @@
 from datetime import date, timedelta
+import re
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from django.test import TestCase
 from django.utils import timezone
 
-from assignments.models import CrewPlan, CrewPlanSlot, CrewPlanStatus, WorkShiftType
+from assignments.models import (
+    AssignmentStatus,
+    CrewPlan,
+    CrewPlanSlot,
+    CrewPlanStatus,
+    EquipmentAssignment,
+    WorkShiftType,
+)
+from assignments.services import _bulk_create_published_plan_assignments
 from references.models import Equipment, EquipmentType
 
 from .models import Employee, EmployeeAccess, Role
-from .registration_dashboard import _build_daily_chart
+from .registration_dashboard import _build_daily_chart, _resolve_scope_occurrences
 
 
 class AdminRegistrationDashboardTests(TestCase):
@@ -160,6 +170,51 @@ class AdminRegistrationDashboardTests(TestCase):
             HTTP_HOST='localhost',
         )
 
+    def create_plan(
+        self,
+        *,
+        work_date,
+        role,
+        status=CrewPlanStatus.PUBLISHED,
+        employee=None,
+        secondary_employee=None,
+        equipment=None,
+        shift_type=WorkShiftType.SHIFT_1,
+        revision=1,
+    ):
+        plan = CrewPlan.objects.create(
+            work_date=work_date,
+            role=role,
+            revision=revision,
+            status=status,
+            published_by=self.admin if status == CrewPlanStatus.PUBLISHED else None,
+            published_at=self.now if status == CrewPlanStatus.PUBLISHED else None,
+        )
+        slot = None
+        if employee is not None or secondary_employee is not None:
+            slot = CrewPlanSlot.objects.create(
+                plan=plan,
+                equipment=equipment,
+                shift_type=shift_type,
+                employee=employee,
+                secondary_employee=secondary_employee,
+            )
+        return plan, slot
+
+    def create_official_assignment(self, slot):
+        assignment = EquipmentAssignment(
+            employee=slot.employee,
+            role=slot.plan.role,
+            equipment=slot.equipment,
+            shift_type=slot.shift_type,
+            assigned_by=self.admin,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=self.now,
+            source_kind=EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN,
+            source_crew_plan_slot=slot,
+        )
+        return _bulk_create_published_plan_assignments([assignment])[0]
+
     @staticmethod
     def row_by_name(context, full_name):
         return next(
@@ -186,6 +241,7 @@ class AdminRegistrationDashboardTests(TestCase):
         self.assertEqual(context['blocked'], 0)
         self.assertEqual(context['inactive_employee'], 0)
         self.assertEqual(context['deactivated'], 0)
+        self.assertEqual(context['scope_conflict'], 0)
         self.assertEqual(context['prepared_percent'], 75)
         self.assertEqual(context['ready_percent'], 50)
         self.assertEqual(context['activation_conversion_percent'], 67)
@@ -199,7 +255,8 @@ class AdminRegistrationDashboardTests(TestCase):
             + context['inactive_employee']
             + context['deactivated']
             + context['missing_access']
-            + context['awaiting_activation'],
+            + context['awaiting_activation']
+            + context['scope_conflict'],
             context['total'],
         )
         self.assertEqual(
@@ -233,6 +290,23 @@ class AdminRegistrationDashboardTests(TestCase):
                 'inactive_employee',
                 'deactivated',
                 'blocked',
+                'scope_conflict',
+            ],
+        )
+        self.assertEqual(
+            [item['code'] for item in context['primary_state_tabs']],
+            ['needs_attention', 'all', 'ready'],
+        )
+        self.assertEqual(
+            [item['code'] for item in context['reason_options']],
+            [
+                'needs_attention',
+                'scope_conflict',
+                'blocked',
+                'inactive_employee',
+                'deactivated',
+                'missing_access',
+                'awaiting_activation',
             ],
         )
         self.assertEqual(
@@ -292,8 +366,320 @@ class AdminRegistrationDashboardTests(TestCase):
         self.assertIsNone(context['delta_percent'])
         self.assertEqual(context['plan_published_at'], self.now)
         waiting_row = self.row_by_name(context, self.driver_waiting.full_name)
+        ready_row = self.row_by_name(context, self.driver_active.full_name)
         self.assertEqual(waiting_row['waiting_hours'], 30)
         self.assertEqual(waiting_row['waiting_label'], 'Ждёт 1 д')
+        self.assertEqual(waiting_row['next_step']['code'], 'awaiting_activation')
+        self.assertEqual(waiting_row['action_label'], 'Открыть карточку')
+        self.assertEqual(ready_row['label'], 'Доступ активирован')
+        self.assertEqual(ready_row['next_step']['code'], 'ready')
+        self.assertEqual(ready_row['action_label'], '')
+
+    def test_latest_mode_combines_each_roles_latest_publication_and_ignores_draft(self):
+        today = timezone.localdate()
+        excavator_date = today + timedelta(days=1)
+        draft_date = today + timedelta(days=2)
+        latest_excavator_plan, _ = self.create_plan(
+            work_date=excavator_date,
+            role=self.excavator_role,
+            employee=self.excavator_activated,
+            equipment=self.equipment[3],
+        )
+        draft_driver_plan, _ = self.create_plan(
+            work_date=draft_date,
+            role=self.driver_role,
+            status=CrewPlanStatus.DRAFT,
+            employee=self.driver_without_access,
+            equipment=self.equipment[0],
+        )
+
+        context = self.admin_dashboard().context
+        sources = {item['role_code']: item for item in context['source_plans']}
+
+        self.assertEqual(context['source_mode'], 'latest_by_role')
+        self.assertIsNone(context['selected_date'])
+        self.assertTrue(context['is_mixed_source_dates'])
+        self.assertTrue(context['has_selected_plans'])
+        self.assertEqual(context['missing_source_roles'], [])
+        self.assertEqual(context['total'], 4)
+        self.assertEqual(sources['driver']['plan_id'], self.driver_plan.pk)
+        self.assertEqual(sources['driver']['work_date'], today)
+        self.assertEqual(sources['driver']['employee_count'], 3)
+        self.assertEqual(
+            sources['excavator_operator']['plan_id'],
+            latest_excavator_plan.pk,
+        )
+        self.assertEqual(
+            sources['excavator_operator']['work_date'],
+            excavator_date,
+        )
+        self.assertNotEqual(sources['driver']['plan_id'], draft_driver_plan.pk)
+        for collection_name in ('source_plans', 'state_tabs', 'period_links'):
+            with self.subTest(collection=collection_name):
+                self.assertTrue(all(
+                    'date' not in parse_qs(urlsplit(item['url']).query)
+                    for item in context[collection_name]
+                ))
+
+        exact = self.admin_dashboard(f'date={excavator_date.isoformat()}').context
+        exact_sources = {
+            item['role_code']: item for item in exact['source_plans']
+        }
+        self.assertEqual(exact['source_mode'], 'exact_date')
+        self.assertEqual(exact['selected_date'], excavator_date)
+        self.assertFalse(exact['is_mixed_source_dates'])
+        self.assertEqual(exact['total'], 1)
+        self.assertFalse(exact_sources['driver']['has_plan'])
+        self.assertTrue(exact_sources['excavator_operator']['has_plan'])
+        self.assertEqual(
+            parse_qs(urlsplit(exact['period_links'][0]['url']).query)['date'],
+            [excavator_date.isoformat()],
+        )
+
+        exact_driver = self.admin_dashboard(
+            f'date={excavator_date.isoformat()}&role=driver',
+        ).context
+        self.assertEqual(exact_driver['selected_role'], 'driver')
+        self.assertFalse(exact_driver['has_selected_plans'])
+        self.assertEqual(exact_driver['total'], 0)
+        self.assertEqual(exact_driver['plan_published_at'], None)
+
+        draft_only = self.admin_dashboard(f'date={draft_date.isoformat()}').context
+        self.assertTrue(draft_only['has_published_plans'])
+        self.assertFalse(draft_only['has_selected_plans'])
+        self.assertEqual(draft_only['total'], 0)
+        self.assertTrue(all(
+            not item['has_plan'] for item in draft_only['source_plans']
+        ))
+
+    def test_invalid_source_date_falls_back_to_latest_mode_without_stale_date_urls(self):
+        context = self.admin_dashboard('date=not-a-date&period=7').context
+
+        self.assertEqual(context['source_mode'], 'latest_by_role')
+        self.assertTrue(context['source_date_invalid'])
+        self.assertIsNone(context['selected_date'])
+        self.assertEqual(context['total'], 4)
+        for collection_name in ('source_plans', 'state_tabs', 'period_links'):
+            with self.subTest(collection=collection_name):
+                self.assertTrue(all(
+                    'date' not in parse_qs(urlsplit(item['url']).query)
+                    for item in context[collection_name]
+                ))
+
+    def test_empty_latest_published_plan_does_not_resurrect_older_role_roster(self):
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        latest_driver_plan, _ = self.create_plan(
+            work_date=tomorrow,
+            role=self.driver_role,
+        )
+
+        context = self.admin_dashboard().context
+        driver_source = next(
+            item
+            for item in context['source_plans']
+            if item['role_code'] == 'driver'
+        )
+
+        self.assertEqual(driver_source['plan_id'], latest_driver_plan.pk)
+        self.assertTrue(driver_source['has_plan'])
+        self.assertEqual(driver_source['slot_count'], 0)
+        self.assertEqual(driver_source['employee_count'], 0)
+        self.assertEqual(context['total'], 1)
+        self.assertEqual(
+            self.admin_dashboard(f'date={timezone.localdate().isoformat()}').context['total'],
+            4,
+        )
+
+    def test_primary_cross_date_duplicate_uses_active_official_assignment_before_filters(self):
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        _, official_slot = self.create_plan(
+            work_date=tomorrow,
+            role=self.excavator_role,
+            employee=self.driver_active,
+            equipment=self.equipment[3],
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        self.create_official_assignment(official_slot)
+
+        context = self.admin_dashboard().context
+        row = self.row_by_name(context, self.driver_active.full_name)
+
+        self.assertEqual(row['role_codes'], ['excavator_operator'])
+        self.assertEqual(row['shift_codes'], [WorkShiftType.SHIFT_2])
+        self.assertFalse(row['is_scope_conflict'])
+        self.assertEqual(context['scope_conflict'], 0)
+        driver_context = self.admin_dashboard('role=driver').context
+        self.assertNotIn(
+            self.driver_active.pk,
+            {item['employee'].pk for item in driver_context['all_rows']},
+        )
+        day_context = self.admin_dashboard('shift=day').context
+        self.assertNotIn(
+            self.driver_active.pk,
+            {item['employee'].pk for item in day_context['all_rows']},
+        )
+
+    def test_primary_cross_date_duplicate_without_official_assignment_uses_effective_role(self):
+        employee = Employee.objects.create(
+            full_name='Гаврилов По Специализации',
+            status=Employee.Status.ACTIVE,
+            work_category=Employee.WorkCategory.DRIVER,
+        )
+        CrewPlanSlot.objects.create(
+            plan=self.driver_plan,
+            equipment=self.equipment[0],
+            shift_type=WorkShiftType.SHIFT_2,
+            employee=employee,
+        )
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        self.create_plan(
+            work_date=tomorrow,
+            role=self.excavator_role,
+            employee=employee,
+            equipment=self.equipment[3],
+        )
+
+        context = self.admin_dashboard().context
+        row = self.row_by_name(context, employee.full_name)
+
+        self.assertEqual(row['role_codes'], ['driver'])
+        self.assertFalse(row['is_scope_conflict'])
+        self.assertEqual(context['scope_conflict'], 0)
+        excavator_context = self.admin_dashboard('role=excavator_operator').context
+        self.assertNotIn(
+            employee.pk,
+            {item['employee'].pk for item in excavator_context['all_rows']},
+        )
+
+    def test_secondary_cross_date_duplicate_uses_effective_role_compatibility(self):
+        secondary = Employee.objects.create(
+            full_name='Дорофеев Стажёр',
+            status=Employee.Status.ACTIVE,
+            work_category=Employee.WorkCategory.DRIVER,
+        )
+        self.driver_day_slot.secondary_employee = secondary
+        self.driver_day_slot.save(update_fields=['secondary_employee'])
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        self.create_plan(
+            work_date=tomorrow,
+            role=self.excavator_role,
+            employee=self.excavator_activated,
+            secondary_employee=secondary,
+            equipment=self.equipment[3],
+        )
+
+        context = self.admin_dashboard().context
+        row = self.row_by_name(context, secondary.full_name)
+
+        self.assertEqual(row['role_codes'], ['driver'])
+        self.assertFalse(row['is_scope_conflict'])
+        self.assertEqual(context['scope_conflict'], 0)
+        excavator_context = self.admin_dashboard('role=excavator_operator').context
+        self.assertNotIn(
+            secondary.pk,
+            {item['employee'].pk for item in excavator_context['all_rows']},
+        )
+
+    def test_official_assignment_outside_candidates_is_conflict_without_specialization_fallback(self):
+        secondary = Employee.objects.create(
+            full_name='Дубов Внешнее назначение',
+            status=Employee.Status.ACTIVE,
+            work_category=Employee.WorkCategory.DRIVER,
+        )
+        item = {
+            'employee': secondary,
+            'occurrences': [
+                {
+                    'role_id': self.driver_role.pk,
+                    'role_code': self.driver_role.code,
+                    'role_label': self.driver_role.name,
+                    'role': self.driver_role,
+                    'work_date': timezone.localdate(),
+                    'position': 'secondary',
+                },
+                {
+                    'role_id': self.excavator_role.pk,
+                    'role_code': self.excavator_role.code,
+                    'role_label': self.excavator_role.name,
+                    'role': self.excavator_role,
+                    'work_date': timezone.localdate() + timedelta(days=1),
+                    'position': 'secondary',
+                },
+            ],
+        }
+
+        with patch(
+            'users.registration_dashboard.secondary_employee_matches_work_role',
+            side_effect=AssertionError('specialization fallback must not run'),
+        ):
+            resolved, conflict = _resolve_scope_occurrences(
+                item,
+                SimpleNamespace(role=self.manager_role),
+            )
+
+        self.assertEqual(resolved, item['occurrences'])
+        self.assertEqual(conflict['code'], 'scope_conflict')
+
+    def test_unresolved_primary_cross_date_duplicate_stays_visible_as_scope_conflict(self):
+        conflicted = Employee.objects.create(
+            full_name='Ефимов Конфликтный',
+            status=Employee.Status.ACTIVE,
+            work_category=Employee.WorkCategory.OTHER,
+        )
+        CrewPlanSlot.objects.create(
+            plan=self.driver_plan,
+            equipment=self.equipment[0],
+            shift_type=WorkShiftType.SHIFT_2,
+            employee=conflicted,
+        )
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        self.create_plan(
+            work_date=tomorrow,
+            role=self.excavator_role,
+            employee=conflicted,
+            equipment=self.equipment[3],
+        )
+
+        context = self.admin_dashboard().context
+        row = self.row_by_name(context, conflicted.full_name)
+
+        self.assertEqual(context['scope_conflict'], 1)
+        self.assertEqual(row['code'], 'scope_conflict')
+        self.assertTrue(row['requires_action'])
+        self.assertTrue(row['is_scope_conflict'])
+        self.assertEqual(
+            set(row['role_codes']),
+            {'driver', 'excavator_operator'},
+        )
+        self.assertEqual(
+            [item['role_code'] for item in row['scope_conflict_sources']],
+            ['excavator_operator', 'driver'],
+        )
+        self.assertIn(tomorrow.strftime('%d.%m.%Y'), row['scope_conflict_detail'])
+        self.assertEqual(row['next_step']['code'], 'scope_conflict')
+        self.assertEqual(row['action_label'], 'Открыть карточку')
+        self.assertEqual(
+            row['action_url'],
+            f'/system-admin/employees/{conflicted.pk}/',
+        )
+        conflict_context = self.admin_dashboard('state=scope_conflict').context
+        self.assertEqual(conflict_context['visible_total'], 1)
+        self.assertEqual(
+            conflict_context['rows'][0]['employee'].pk,
+            conflicted.pk,
+        )
+        attention_tab = next(
+            item
+            for item in conflict_context['primary_state_tabs']
+            if item['code'] == 'needs_attention'
+        )
+        reason = next(
+            item
+            for item in conflict_context['reason_options']
+            if item['code'] == 'scope_conflict'
+        )
+        self.assertTrue(attention_tab['is_active'])
+        self.assertTrue(reason['is_active'])
 
     def test_chart_uses_daily_buckets_for_short_periods(self):
         for period_days in (7, 14, 30):
@@ -326,7 +712,7 @@ class AdminRegistrationDashboardTests(TestCase):
 
         self.assertEqual(chart['granularity'], 'week')
         self.assertEqual(chart['granularity_label'], 'По интервалам до 7 дней')
-        self.assertEqual(chart['increment_label'], 'Стали готовы за интервал')
+        self.assertEqual(chart['increment_label'], 'Активировали доступ за интервал')
         self.assertEqual(len(chart['daily_series']), 90)
         self.assertEqual(len(buckets), 13)
         self.assertEqual([item['span_days'] for item in buckets], [6] + [7] * 12)
@@ -936,6 +1322,38 @@ class AdminRegistrationDashboardTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'href="/system-admin/registrations/"')
         self.assertContains(response, 'Подключение сотрудников')
+
+    def test_admin_ready_employee_name_links_to_card_but_management_hides_admin_details(self):
+        self.driver_active.phone = '+7 900 123-45-67'
+        self.driver_active.save(update_fields=['phone'])
+        self.authenticate_admin()
+
+        admin_response = self.client.get(
+            '/system-admin/registrations/',
+            HTTP_HOST='localhost',
+        )
+        employee_url = f'/system-admin/employees/{self.driver_active.pk}/'
+        linked_name_pattern = re.compile(
+            rf'<a\b(?=[^>]*\bhref=["\']{re.escape(employee_url)}["\'])[^>]*>'
+            rf'.*?{re.escape(self.driver_active.full_name)}.*?</a>',
+            re.DOTALL,
+        )
+
+        self.assertEqual(admin_response.status_code, 200)
+        self.assertRegex(admin_response.content.decode(), linked_name_pattern)
+
+        self.authenticate_manager()
+        management_response = self.client.get(
+            '/reports/management/registrations/',
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(management_response.status_code, 200)
+        self.assertNotContains(
+            management_response,
+            'href="/system-admin/employees/',
+        )
+        self.assertNotContains(management_response, self.driver_active.phone)
 
     def test_manager_opens_same_dashboard_in_management_shell(self):
         self.authenticate_manager()
