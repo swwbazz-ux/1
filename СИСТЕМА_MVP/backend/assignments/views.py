@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
@@ -17,6 +17,7 @@ from core.models import lock_production_state
 from references.models import Equipment
 from shifts.models import EmployeeShift, ShiftType
 from shifts.services import lock_active_employee_for_shift
+from trips.dispatcher_header import WORKPLACE_ROLE_LABELS
 from trips.views import dispatcher_control_view as render_dispatcher_control_view
 from users.access_auth import find_employee_access_by_credentials
 from users.active_role import activate_role_session
@@ -584,13 +585,39 @@ def handle_shift_action(request, action, access, current_shift, blocking_shift):
                 lock_production_state()
                 current_shift, blocking_shift = get_shift_state(employee)
                 if not current_shift and not blocking_shift:
-                    EmployeeShift.objects.create(
-                        employee=employee,
-                        shift_type=get_shift_type_for_now(now),
-                        workplace_code='mining_master',
-                        opened_at=now,
-                        opened_by=employee,
+                    # get_shift_state видит только смены мастера, а база
+                    # запрещает две открытые смены у одного сотрудника в любых
+                    # контурах (unique_open_shift_per_employee). Открытая смена
+                    # диспетчера или водителя того же человека раньше кончалась
+                    # IntegrityError и белым экраном 500 — теперь это понятное
+                    # сообщение, как у диспетчера (open_dispatcher_shift).
+                    other_shift = (
+                        EmployeeShift.objects
+                        .select_for_update()
+                        .filter(employee=employee, closed_at__isnull=True)
+                        .order_by('-opened_at')
+                        .first()
                     )
+                    if other_shift:
+                        workplace_label = WORKPLACE_ROLE_LABELS.get(other_shift.workplace_code, 'другая роль')
+                        raise ValidationError(
+                            f'У вас уже открыта смена «{workplace_label}». '
+                            'Завершите её перед началом смены Горного мастера.'
+                        )
+                    try:
+                        with transaction.atomic():
+                            EmployeeShift.objects.create(
+                                employee=employee,
+                                shift_type=get_shift_type_for_now(now),
+                                workplace_code='mining_master',
+                                opened_at=now,
+                                opened_by=employee,
+                            )
+                    except IntegrityError:
+                        raise ValidationError(
+                            'Смена не открыта: у вас уже есть открытая смена. '
+                            'Обновите экран и попробуйте снова.'
+                        )
         except ValidationError as error:
             messages.error(request, '; '.join(error.messages))
             return

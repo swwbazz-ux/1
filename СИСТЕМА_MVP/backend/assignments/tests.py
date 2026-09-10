@@ -1539,6 +1539,38 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertRedirects(response, reverse('mining_master_assignments'))
         self.assertFalse(EmployeeShift.objects.filter(employee=self.master, closed_at__isnull=True).exists())
 
+    def test_mining_master_start_is_refused_while_other_role_shift_is_open(self):
+        # Боевой инцидент 10.09.2026: у сотрудника с несколькими ролями была
+        # открыта смена диспетчера, старт смены мастера падал в IntegrityError
+        # (unique_open_shift_per_employee) и отдавал белый экран 500.
+        self.shift.workplace_code = 'dispatcher'
+        self.shift.save(update_fields=['workplace_code'])
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+
+        response = self.client.post(
+            reverse('mining_master_assignments'),
+            {'action': 'start_shift', 'device_kind': 'personal'},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            EmployeeShift.objects.filter(employee=self.master, closed_at__isnull=True).count(),
+            1,
+        )
+        self.assertFalse(
+            EmployeeShift.objects.filter(
+                employee=self.master, workplace_code='mining_master', closed_at__isnull=True,
+            ).exists()
+        )
+        message_texts = [str(message) for message in response.context['messages']]
+        self.assertIn(
+            'У вас уже открыта смена «Горный диспетчер». Завершите её перед началом смены Горного мастера.',
+            message_texts,
+        )
+
     def test_mining_master_cannot_restart_shift_after_employee_is_dismissed(self):
         self.shift.closed_at = timezone.now()
         self.shift.closed_by = self.master
