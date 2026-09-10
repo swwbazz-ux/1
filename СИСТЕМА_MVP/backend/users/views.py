@@ -610,7 +610,10 @@ def _multi_role_phone_response(request, candidates, *, role_app, allowed_role_co
     человек выбирает нужную роль и входит уже в её приложении (там номер ищется
     только среди этой роли)."""
     if not _phone_accesses_have_duplicate_role(candidates) and role_app is None and not allowed_role_codes:
-        return redirect(f'{app_catalog_public_url(request)}?choose=1')
+        # Шаг с номером страница входа шлёт fetch-ом и подменяет только <main>;
+        # каталог — отдельная страница со своими стилями, поэтому ей нужен
+        # JSON-редирект, который скрипт входа выполняет полной навигацией.
+        return _login_redirect_response(request, f'{app_catalog_public_url(request)}?choose=1')
     return render(
         request,
         'users/login_phone_not_found.html',

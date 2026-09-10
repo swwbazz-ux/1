@@ -1169,6 +1169,22 @@ class RoleAppLoginTests(TestCase):
         self.assertTrue(response['Location'].endswith('/apps/?choose=1'), response['Location'])
         self.assertNotIn('employee_access_id', self.client.session)
 
+        # Страница входа шлёт шаг с номером fetch-ом и подменяет только <main>:
+        # ей нужен JSON-редирект, чтобы каталог открылся полной навигацией.
+        in_place = self.client.post(
+            '/',
+            {
+                'phone': self.driver_access.employee.phone,
+                'action': 'continue',
+                'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
+            },
+            HTTP_HOST='localhost',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+        self.assertEqual(in_place.status_code, 200)
+        self.assertTrue(in_place.json()['redirect_url'].endswith('/apps/?choose=1'))
+
         catalog = self.client.get('/apps/?choose=1', HTTP_HOST='localhost')
         self.assertContains(catalog, 'У вашего номера несколько ролей')
 
