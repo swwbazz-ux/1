@@ -1141,6 +1141,53 @@ class RoleAppLoginTests(TestCase):
                 self.assertNotIn('employee_access_id', client.session)
                 self.assertNotIn('pending_activation_access_id', client.session)
 
+    def test_unified_login_sends_multi_role_phone_to_the_app_catalog(self):
+        # Один номер и один PIN на несколько ролей (владелец, администратор) —
+        # это не дубль записи, а сотрудник с несколькими ролями: на общем входе
+        # driverform.ru ему показывают каталог приложений, а не «нужна помощь».
+        EmployeeAccess.objects.create(
+            employee=self.driver_access.employee,
+            role=self.excavator_access.role,
+            access_code=self.driver_access.access_code,
+            status=EmployeeAccess.Status.ACTIVATED,
+            activated_at=timezone.now(),
+            is_active=True,
+        )
+
+        response = self.client.post(
+            '/',
+            {
+                'phone': self.driver_access.employee.phone,
+                'action': 'continue',
+                'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
+            },
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response['Location'].endswith('/apps/?choose=1'), response['Location'])
+        self.assertNotIn('employee_access_id', self.client.session)
+
+        catalog = self.client.get('/apps/?choose=1', HTTP_HOST='localhost')
+        self.assertContains(catalog, 'У вашего номера несколько ролей')
+
+        # В приложении конкретной роли номер ищется только среди этой роли —
+        # вход как обычно, без каталога и без конфликта.
+        role_host = Client()
+        role_response = role_host.post(
+            '/',
+            {
+                'phone': self.driver_access.employee.phone,
+                'action': 'continue',
+                'device_kind': 'personal',
+                'privacy_consent': PRIVACY_POLICY_VERSION,
+            },
+            HTTP_HOST='driver.localhost',
+        )
+        self.assertEqual(role_response.status_code, 200)
+        self.assertNotContains(role_response, 'Нужна помощь администратора')
+
     def test_change_phone_clears_pre_auth_consent_from_the_previous_employee(self):
         pin_step = self.client.post(
             '/',

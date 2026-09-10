@@ -591,6 +591,39 @@ def interface_map_view(request):
     )
 
 
+def _phone_accesses_have_duplicate_role(candidates):
+    """Настоящий конфликт записей — две записи доступа на одну и ту же роль.
+    Несколько ролей у одного номера — это просто сотрудник с несколькими ролями."""
+    seen_roles = set()
+    for candidate in candidates:
+        if candidate.role_id in seen_roles:
+            return True
+        seen_roles.add(candidate.role_id)
+    return False
+
+
+def _multi_role_phone_response(request, candidates, *, role_app, allowed_role_codes, login_role_app, phone):
+    """Номер с несколькими записями доступа на едином входе.
+
+    Дубли одной роли — по-прежнему «нужна помощь администратора». Разные роли
+    на общем входе driverform.ru — не ошибка: ведём в каталог приложений, где
+    человек выбирает нужную роль и входит уже в её приложении (там номер ищется
+    только среди этой роли)."""
+    if not _phone_accesses_have_duplicate_role(candidates) and role_app is None and not allowed_role_codes:
+        return redirect(f'{app_catalog_public_url(request)}?choose=1')
+    return render(
+        request,
+        'users/login_phone_not_found.html',
+        {
+            'login_role_app': login_role_app,
+            'submitted_phone': format_phone_for_display(phone),
+            'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
+            'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
+            'access_conflict': True,
+        },
+    )
+
+
 @require_GET
 def app_catalog_view(request):
     if get_role_app_for_request(request):
@@ -607,6 +640,8 @@ def app_catalog_view(request):
         {
             'catalog_apps': catalog_apps,
             'selected_app': selected_app,
+            # Сюда попадают с единого входа, когда у номера несколько ролей.
+            'choose_role': request.GET.get('choose') == '1',
         },
     )
     response['Cache-Control'] = 'no-cache'
@@ -824,16 +859,10 @@ def login_view(
             if candidate.status == EmployeeAccess.Status.ACTIVATED
         ]
         if len(activated) > 1:
-            return render(
-                request,
-                'users/login_phone_not_found.html',
-                {
-                    'login_role_app': login_role_app,
-                    'submitted_phone': format_phone_for_display(phone),
-                    'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
-                    'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
-                    'access_conflict': True,
-                },
+            return _multi_role_phone_response(
+                request, activated,
+                role_app=role_app, allowed_role_codes=allowed_role_codes,
+                login_role_app=login_role_app, phone=phone,
             )
         already_registered = bool(activated)
         pending = [
@@ -842,16 +871,10 @@ def login_view(
             if candidate.status == EmployeeAccess.Status.NOT_ACTIVATED
         ]
         if len(pending) > 1 and not already_registered:
-            return render(
-                request,
-                'users/login_phone_not_found.html',
-                {
-                    'login_role_app': login_role_app,
-                    'submitted_phone': format_phone_for_display(phone),
-                    'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
-                    'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
-                    'access_conflict': True,
-                },
+            return _multi_role_phone_response(
+                request, pending,
+                role_app=role_app, allowed_role_codes=allowed_role_codes,
+                login_role_app=login_role_app, phone=phone,
             )
         privacy_consent_accepted_now = False
         consent_access = (
@@ -1000,16 +1023,10 @@ def login_view(
                 )
             ]
             if len(activated_for_phone) > 1:
-                return render(
-                    request,
-                    'users/login_phone_not_found.html',
-                    {
-                        'login_role_app': login_role_app,
-                        'submitted_phone': format_phone_for_display(phone),
-                        'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
-                        'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
-                        'access_conflict': True,
-                    },
+                return _multi_role_phone_response(
+                    request, activated_for_phone,
+                    role_app=role_app, allowed_role_codes=allowed_role_codes,
+                    login_role_app=login_role_app, phone=phone,
                 )
         privacy_consent_accepted_now = False
         if combined_mobile_login and access:
@@ -1123,16 +1140,10 @@ def login_view(
             if candidate.status == EmployeeAccess.Status.NOT_ACTIVATED
         ]
         if combined_mobile_login and len(first_time) > 1:
-            return render(
-                request,
-                'users/login_phone_not_found.html',
-                {
-                    'login_role_app': login_role_app,
-                    'submitted_phone': format_phone_for_display(phone),
-                    'support_chat_url': getattr(settings, 'SUPPORT_CHAT_URL', ''),
-                    'support_chat_label': getattr(settings, 'SUPPORT_CHAT_LABEL', ''),
-                    'access_conflict': True,
-                },
+            return _multi_role_phone_response(
+                request, first_time,
+                role_app=role_app, allowed_role_codes=allowed_role_codes,
+                login_role_app=login_role_app, phone=phone,
             )
         if first_time:
             pending_access = first_time[0]
