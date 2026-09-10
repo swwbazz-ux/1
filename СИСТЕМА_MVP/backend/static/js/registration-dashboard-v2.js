@@ -26,6 +26,48 @@
         if (indicator) indicator.hidden = true;
     }
 
+    function initAdminNavigation() {
+        var wrap = document.querySelector("[data-admin-registration-nav-wrap]");
+        var toggle = document.querySelector("[data-admin-registration-nav-toggle]");
+        var body = document.querySelector("[data-admin-registration-nav-body]");
+        if (!wrap || !toggle || !body || wrap.dataset.navigationReady === "true") return;
+
+        wrap.dataset.navigationReady = "true";
+        var compactQuery = window.matchMedia("(max-width: 720px)");
+        var compactExpanded = false;
+
+        function setExpanded(expanded) {
+            body.hidden = !expanded;
+            toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+        }
+
+        function syncNavigation() {
+            wrap.classList.toggle("is-collapsible", compactQuery.matches);
+            setExpanded(compactQuery.matches ? compactExpanded : true);
+        }
+
+        toggle.addEventListener("click", function () {
+            compactExpanded = toggle.getAttribute("aria-expanded") !== "true";
+            setExpanded(compactExpanded);
+        });
+
+        if (typeof compactQuery.addEventListener === "function") {
+            compactQuery.addEventListener("change", syncNavigation);
+        } else if (typeof compactQuery.addListener === "function") {
+            compactQuery.addListener(syncNavigation);
+        }
+        syncNavigation();
+    }
+
+    function initManagementLayout(root) {
+        if (!root.classList.contains("management-registration-page")) return;
+        var analytics = root.querySelector("[data-adoption-analytics]");
+        var people = root.querySelector("#people-list");
+        if (analytics && people && people.previousElementSibling !== analytics) {
+            root.insertBefore(analytics, people);
+        }
+    }
+
     function initFilterDisclosure(root) {
         var panel = root.querySelector("[data-adoption-filters]");
         var toggle = root.querySelector("[data-adoption-filter-toggle]");
@@ -74,6 +116,15 @@
         if (filterForm) {
             filterForm.addEventListener("submit", function () {
                 setLoading(root);
+            });
+        }
+
+        var stateSelect = root.querySelector("[data-adoption-state-select]");
+        if (stateSelect) {
+            stateSelect.addEventListener("change", function () {
+                if (!stateSelect.value) return;
+                setLoading(root);
+                window.location.assign(new URL(stateSelect.value, window.location.href).toString());
             });
         }
 
@@ -220,8 +271,8 @@
 
         function tooltipText(data) {
             return data.label
-                + ": стали готовы " + data.newCount
-                + "; накоплено " + data.cumulative + " из " + total
+                + ": активировали доступ " + data.newCount
+                + "; с подтверждённой датой накоплено " + data.cumulative + " из " + total
                 + " (" + Math.round(data.percent) + "%).";
         }
 
@@ -256,8 +307,8 @@
                 noDrilldown.textContent = data.newCount > 0
                     ? "Ссылка на выбранный интервал недоступна"
                     : (granularity === "week"
-                        ? "В выбранном интервале новых готовых нет"
-                        : "В выбранный день новых готовых нет");
+                        ? "В выбранном интервале новых активаций нет"
+                        : "В выбранный день новых активаций нет");
             }
         }
 
@@ -368,7 +419,11 @@
                 }
             }
             labels.forEach(function (label) {
-                label.hidden = !visible[Number(label.getAttribute("data-chart-index"))];
+                label.hidden = false;
+                label.classList.toggle(
+                    "is-suppressed",
+                    !visible[Number(label.getAttribute("data-chart-index"))]
+                );
             });
         }
 
@@ -378,14 +433,29 @@
                 syncVisibleLabels();
                 var svgRect = svg.getBoundingClientRect();
                 if (!svgRect.width) return;
-                var maxError = 0;
+                var plotError = 0;
+                var labelError = 0;
                 buckets.forEach(function (bucket) {
                     var projectedCenter = svgRect.left
                         + (numberFrom(bucket, "data-chart-x") / viewBoxWidth) * svgRect.width;
                     var bucketRect = bucket.getBoundingClientRect();
                     var bucketCenter = bucketRect.left + bucketRect.width / 2;
-                    maxError = Math.max(maxError, Math.abs(projectedCenter - bucketCenter));
+                    plotError = Math.max(plotError, Math.abs(projectedCenter - bucketCenter));
                 });
+                labels.forEach(function (label) {
+                    if (label.classList.contains("is-suppressed")) return;
+                    var index = Number(label.getAttribute("data-chart-index"));
+                    var bucket = buckets[index];
+                    if (!bucket) return;
+                    var labelRect = label.getBoundingClientRect();
+                    var bucketRect = bucket.getBoundingClientRect();
+                    var labelCenter = labelRect.left + labelRect.width / 2;
+                    var bucketCenter = bucketRect.left + bucketRect.width / 2;
+                    labelError = Math.max(labelError, Math.abs(labelCenter - bucketCenter));
+                });
+                var maxError = Math.max(plotError, labelError);
+                chart.setAttribute("data-chart-plot-error", plotError.toFixed(2));
+                chart.setAttribute("data-chart-label-error", labelError.toFixed(2));
                 chart.setAttribute("data-chart-alignment-error", maxError.toFixed(2));
                 chart.setAttribute("data-chart-alignment", maxError <= 0.75 ? "aligned" : "misaligned");
             });
@@ -406,6 +476,12 @@
             observer.observe(histogram);
         } else {
             window.addEventListener("resize", measureAlignment, { passive: true });
+        }
+        var analyticsDisclosure = chart.closest("details");
+        if (analyticsDisclosure) {
+            analyticsDisclosure.addEventListener("toggle", function () {
+                if (analyticsDisclosure.open) measureAlignment();
+            });
         }
     }
 
@@ -503,6 +579,7 @@
         if (!root || root.dataset.registrationDashboardReady === "true") return;
         root.dataset.registrationDashboardReady = "true";
         clearLoading(root);
+        initManagementLayout(root);
         initFilterDisclosure(root);
         initServerNavigation(root);
         initTableSearch(root);
@@ -515,6 +592,7 @@
     }
 
     function initAllDashboards() {
+        initAdminNavigation();
         document.querySelectorAll("[data-registration-dashboard]").forEach(initDashboard);
     }
 
