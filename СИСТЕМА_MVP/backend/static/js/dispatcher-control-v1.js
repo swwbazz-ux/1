@@ -5422,6 +5422,79 @@ document.addEventListener("DOMContentLoaded", function () {
             complexRackResizeObserver.observe(rack);
         });
     }
+    /* Живой поиск техники: набранный номер подсвечивает все плитки этой
+       машины — в комплексе, в гараже, карточку комплекса по экскаватору.
+       Совпадение по началу номера, чтобы набор сужал круг; «к-2» и «k-2»
+       одинаково находят комплекс по имени зоны. Доска после ответа сервера
+       перерисовывается целиком — MutationObserver возвращает подсветку. */
+    function bindDispatcherEquipmentSearch() {
+        var input = document.querySelector("[data-dispatcher-equipment-search]");
+        if (!input || document.body.classList.contains("mining-master-mobile-screen")) return;
+        var box = input.closest("[data-dispatcher-equipment-search-box]") || input.parentElement;
+        var count = document.querySelector("[data-dispatcher-equipment-search-count]");
+        var query = "";
+
+        function normalizeSearchText(value) {
+            return String(value || "").trim().toLowerCase().replace(/k/g, "к").replace(/\s+/g, "");
+        }
+
+        function matchesSearch(node, needle) {
+            var name = normalizeSearchText(node.getAttribute("data-equipment-name"));
+            if (name && name.indexOf(needle) === 0) return true;
+            var zone = normalizeSearchText(node.getAttribute("data-zone-label"));
+            return !!zone && zone.indexOf(needle) === 0;
+        }
+
+        function applyEquipmentSearch() {
+            var needle = normalizeSearchText(query);
+            var hits = 0;
+            var first = null;
+            document.querySelectorAll(".dispatcher-shell [data-equipment-name]").forEach(function (node) {
+                var hit = needle !== "" && matchesSearch(node, needle);
+                node.classList.toggle("is-search-hit", hit);
+                if (hit) {
+                    hits += 1;
+                    if (!first) first = node;
+                }
+            });
+            document.body.classList.toggle("is-equipment-search", needle !== "");
+            box.classList.toggle("has-query", needle !== "");
+            if (count) {
+                count.hidden = needle === "";
+                count.textContent = String(hits);
+                count.classList.toggle("is-none", hits === 0);
+            }
+            /* Гараж прокручивается — первое совпадение подтягиваем в кадр. */
+            if (first && typeof first.scrollIntoView === "function") {
+                first.scrollIntoView({ block: "nearest", inline: "nearest" });
+            }
+        }
+
+        input.addEventListener("input", function () {
+            query = input.value;
+            applyEquipmentSearch();
+        });
+        input.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") {
+                input.value = "";
+                query = "";
+                applyEquipmentSearch();
+                input.blur();
+            }
+        });
+
+        var pending = null;
+        var observer = new MutationObserver(function () {
+            if (query === "" || pending) return;
+            pending = setTimeout(function () {
+                pending = null;
+                applyEquipmentSearch();
+            }, 60);
+        });
+        observer.observe(document.querySelector(".dispatcher-shell") || document.body, { childList: true, subtree: true });
+    }
+    bindDispatcherEquipmentSearch();
+
     watchComplexTruckRacks();
     function findTruckGarageList() {
         return document.querySelector(".dispatcher-trucks");

@@ -11,6 +11,14 @@
             <span class="dispatcher-command-time-range">{% if dispatcher_header_time_range %}{{ dispatcher_header_time_range }}{% elif dispatcher_header.dispatcher_header_time_range %}{{ dispatcher_header.dispatcher_header_time_range }}{% else %}07:00-19:00{% endif %}</span>
         </div>
         {% include "includes/dispatcher_nav.html" %}
+        {% if dispatcher_nav_active == "control" and not mining_master_mobile_enabled %}
+        {# Живой поиск техники: набранный номер подсвечивает машину везде, где она стоит на пульте. Только на пульте смены — на других экранах доски нет. #}
+        <label class="dispatcher-equipment-search" data-dispatcher-equipment-search-box>
+            <span class="dispatcher-equipment-search-cap" aria-hidden="true">№</span>
+            <input type="search" autocomplete="off" spellcheck="false" placeholder="найти технику" aria-label="Найти технику по номеру" data-dispatcher-equipment-search>
+            <b class="dispatcher-equipment-search-count" data-dispatcher-equipment-search-count hidden></b>
+        </label>
+        {% endif %}
     </section>
 
     <section class="dispatcher-command-actions" aria-label="{% if dispatcher_actions_label %}{{ dispatcher_actions_label }}{% else %}Действия смены{% endif %}">
