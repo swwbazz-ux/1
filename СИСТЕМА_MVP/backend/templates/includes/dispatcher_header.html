@@ -15,7 +15,7 @@
         {# Живой поиск техники: набранный номер подсвечивает машину везде, где она стоит на пульте. Только на пульте смены — на других экранах доски нет. #}
         <label class="dispatcher-equipment-search" data-dispatcher-equipment-search-box>
             <svg class="dispatcher-equipment-search-cap" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" stroke-width="2.2"></circle><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path></svg>
-            <input type="search" autocomplete="off" spellcheck="false" placeholder="Номер техники" aria-label="Найти технику по номеру" data-dispatcher-equipment-search>
+            <input type="search" autocomplete="off" spellcheck="false" maxlength="3" aria-label="Найти технику по номеру" title="Номер техники: начните печатать в любом месте пульта" data-dispatcher-equipment-search>
             <b class="dispatcher-equipment-search-count" data-dispatcher-equipment-search-count hidden></b>
         </label>
         {% endif %}

@@ -61,7 +61,11 @@ test("совпадение мерцает, остальные плитки пр�
 });
 
 test("вкладки ужаты к левому краю, поле стоит в их строке", () => {
-    assert.match(CSS, /\.dispatcher-command-main:has\(\.dispatcher-equipment-search\) \{[^}]*"nav search"/s);
+    assert.match(CSS, /\.dispatcher-command-main:has\(\.dispatcher-equipment-search\) \{[^}]*"nav search \."/s);
+    /* Поле — пятый пункт строки вкладок: без слов, лупа и три знака. */
+    assert.match(HEADER, /maxlength="3"/);
+    assert.doesNotMatch(HEADER, /data-dispatcher-equipment-search[^>]*placeholder="[^"]+"/);
+    assert.match(CSS, /\.dispatcher-equipment-search \{[^}]*border-bottom: 2px solid var\(--gd-line-soft\);/s);
     assert.match(CSS, /\.dispatcher-equipment-search \{[^}]*grid-area: search;/s);
 });
 

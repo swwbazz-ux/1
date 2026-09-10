@@ -5504,6 +5504,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (document.activeElement === input || isTypingElsewhere() || isDialogOpen()) return;
             var key = event.key;
             if (key.length === 1 && /[0-9a-zа-яё\-]/i.test(key)) {
+                if (input.maxLength > 0 && input.value.length >= input.maxLength) return;
                 input.value += key;
             } else if (key === "Backspace" && input.value) {
                 input.value = input.value.slice(0, -1);
