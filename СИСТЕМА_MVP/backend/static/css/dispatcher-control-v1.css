@@ -8755,7 +8755,7 @@ body.management-dynamics-chart-modal-open {
     z-index: -1;
     border-radius: inherit;
     background: conic-gradient(
-        from -90deg,
+        from 0deg,
         var(--dispatcher-plan-color) 0 var(--tile-progress),
         var(--dispatcher-plan-track) var(--tile-progress) 100%
     );
@@ -9152,7 +9152,7 @@ body.management-dynamics-chart-modal-open {
 .dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before,
 .dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {
     background: conic-gradient(
-        from -90deg,
+        from 0deg,
         var(--dispatcher-plan-color) 0 var(--tile-progress),
         var(--dispatcher-plan-track) var(--tile-progress) 100%
     );
@@ -9162,16 +9162,16 @@ body.management-dynamics-chart-modal-open {
 .dispatcher-truck-tile.is-plan-overrun[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {
     background:
         conic-gradient(
-            from -90deg,
+            from 0deg,
             var(--dispatcher-plan-color) 0 var(--tile-progress),
             rgba(0, 0, 0, 0) var(--tile-progress) 100%
         ),
         conic-gradient(
-            from -90deg,
+            from 0deg,
             var(--dispatcher-plan-complete-color) 0 100%,
             rgba(0, 0, 0, 0) 0 100%
         ),
-        conic-gradient(from -90deg, var(--dispatcher-plan-track) 0 100%);
+        conic-gradient(from 0deg, var(--dispatcher-plan-track) 0 100%);
 }
 
 .dispatcher-complex-card[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {

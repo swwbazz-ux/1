@@ -88,3 +88,18 @@ test("заливка плана самосвала — на заднем пла�
     assert.match(rule, /conic-gradient\(/);
     assert.doesNotMatch(rule, /mask/);
 });
+
+test("заливка начинается сверху и растёт по часовой — не с левого края", () => {
+    /* conic-gradient по умолчанию (и с "from -90deg", который тут был
+       раньше) отсчитывает 0% от 9 часов — при малом проценте это читалось
+       как зелёная полоса у левого края плитки, а не рост от верхней точки.
+       Общее с .dispatcher-excavator-garage-tile — рамка гаражной плитки
+       экскаватора использует то же правило. */
+    const from = CSS.indexOf(
+        '.dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before,\n.dispatcher-truck-tile[data-plan-progress-phase]'
+    );
+    assert.notEqual(from, -1);
+    const rule = CSS.slice(from, CSS.indexOf("}", from) + 1);
+    assert.match(rule, /from 0deg/);
+    assert.doesNotMatch(rule, /from -90deg/);
+});
