@@ -8754,11 +8754,20 @@ body.management-dynamics-chart-modal-open {
     inset: 0;
     z-index: -1;
     border-radius: inherit;
+    padding: 0;
     background: conic-gradient(
         from 0deg,
         var(--dispatcher-plan-color) 0 var(--tile-progress),
         transparent var(--tile-progress) 100%
     );
+    /* app.css несёт СВОЮ версию этого правила с маской тонкого кольца
+       (border-box XOR content-box). Убрать объявление из нашего файла
+       недостаточно — правило из app.css продолжает действовать, и сектор
+       обрезается в полоску по контуру плитки. Маску нужно гасить явно,
+       ровно как это делает .mm-mobile-plan-ring-layer в приложении
+       горного мастера. */
+    -webkit-mask: none;
+    mask: none;
     pointer-events: none;
 }
 
@@ -9233,6 +9242,12 @@ body.dispatcher-control-screen :is(.dispatcher-excavator-garage-tile, .dispatche
     --dispatcher-plan-color: rgba(251, 146, 60, 1);
     --dispatcher-plan-glow: rgba(251, 146, 60, .6);
     --dispatcher-plan-complete-color: rgba(56, 189, 248, .56);
+}
+
+body.dispatcher-control-screen .dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {
+    padding: 0;
+    -webkit-mask: none;
+    mask: none;
 }
 
 body.dispatcher-control-screen .dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before,

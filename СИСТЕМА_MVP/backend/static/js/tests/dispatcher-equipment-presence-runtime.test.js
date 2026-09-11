@@ -86,7 +86,12 @@ test("заливка плана самосвала — на заднем пла�
     const rule = CSS.slice(from, CSS.indexOf("}", from) + 1);
     assert.match(rule, /z-index: -1;/);
     assert.match(rule, /conic-gradient\(/);
-    assert.doesNotMatch(rule, /mask/);
+    /* Маску мало НЕ объявлять: app.css несёт свою версию этого же правила
+       с маской тонкого кольца (border-box XOR content-box), и она
+       продолжает действовать — сектор обрезался в полоску по контуру
+       плитки. Гасим явно, как .mm-mobile-plan-ring-layer у мастера. */
+    assert.match(rule, /mask: none;/);
+    assert.doesNotMatch(rule, /mask-composite/);
 });
 
 test("заливка начинается сверху и растёт по часовой — не с левого края", () => {
