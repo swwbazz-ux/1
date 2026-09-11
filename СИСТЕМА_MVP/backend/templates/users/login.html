@@ -52,7 +52,7 @@
     {% if not login_role_app %}
     {# Общий вход driverform.ru — фирменный стиль (фотополоса карьера, медная кромка). #}
     <link rel="preload" as="image" href="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
-    <link rel="stylesheet" href="{% static 'css/login-v2.css' %}?v=3">
+    <link rel="stylesheet" href="{% static 'css/login-v2.css' %}?v=4">
     {% endif %}
 {% endblock %}
 {% comment %}
@@ -537,11 +537,14 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
     <section class="login-v2__hero" aria-label="Коппер Рисорсез — горнотранспортная компания">
         <div class="login-v2__hero-backdrop" aria-hidden="true"></div>
         <picture class="login-v2__hero-picture">
-            {# JPG, а не webp: у webp-версии сильнее сжатие, на большом экране это заметно. #}
+            {# Оригиналы 1672×941 (десктоп) и 941×1672 (телефон) — без увеличения, чётко. #}
+            <source media="(min-width: 761px)" srcset="{% static 'img/start/login-hero-wide-v2.webp' %}" type="image/webp">
+            <source media="(min-width: 761px)" srcset="{% static 'img/start/login-hero-wide-v2.jpg' %}">
+            <source srcset="{% static 'img/start/login-hero-tall-v2.webp' %}" type="image/webp">
             <img class="login-v2__hero-image"
-                 src="{% static 'img/start/start-hero-v1.jpg' %}"
-                 width="853" height="373"
-                 alt="Коппер Рисорсез: карьер, экскаватор и карьерный самосвал"
+                 src="{% static 'img/start/login-hero-tall-v2.jpg' %}"
+                 width="941" height="1672"
+                 alt="Коппер Рисорсез: карьер и экскаватор на закате"
                  fetchpriority="high" decoding="async">
         </picture>
         <svg class="login-v2__hero-lines" viewBox="0 0 390 430" preserveAspectRatio="none" aria-hidden="true">

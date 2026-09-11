@@ -69,21 +69,15 @@ body.login-page.login-unified-v2 .login-v2 > .shared-shift-accent {
     position: relative;
     z-index: 0;
     width: 100%;
-    height: clamp(230px, 34dvh, 360px);
+    height: clamp(250px, 38dvh, 400px);
     overflow: hidden;
     background: #101719;
     isolation: isolate;
 }
 
+/* Подложка не нужна: оригиналы заливают полосу целиком без увеличения. */
 .login-v2__hero-backdrop {
-    position: absolute;
-    inset: -18px;
-    z-index: 0;
-    background-image:
-        linear-gradient(180deg, rgba(1, 5, 7, .18), rgba(1, 6, 9, .62)),
-        url("../img/start/start-hero-v1.webp");
-    background-position: 61% center;
-    background-size: cover;
+    display: none;
 }
 
 .login-v2__hero-picture {
@@ -95,12 +89,14 @@ body.login-page.login-unified-v2 .login-v2 > .shared-shift-accent {
     height: 100%;
 }
 
+/* Телефон: вертикальный оригинал 941×1672, показываем верх кадра — небо,
+   логотип и стрела экскаватора. */
 .login-v2__hero-image {
     display: block;
     width: 100%;
     height: 100%;
-    object-fit: contain;
-    object-position: center 16%;
+    object-fit: cover;
+    object-position: center 22%;
 }
 
 .login-v2__hero-shade {
@@ -538,17 +534,17 @@ body.login-page.login-unified-v2.is-login-keyboard-active .login-v2__hero {
         min-height: 480px;
     }
 
-    /* Узкая колонка (ноутбук 1280): кадр целиком, поля сверху и снизу — тот же
-       кадр, размытый до однородного тёмного тона, без читаемых букв. */
+    /* Горизонтальный оригинал 1672×941 заливает колонку почти без увеличения;
+       кадрируется правый край, логотип (левая треть кадра) остаётся виден. */
     .login-v2__hero-image {
-        object-fit: contain;
-        object-position: center 42%;
+        object-fit: cover;
+        /* 48%: и на 1280×800, и на 1920×1000 логотип с надписью целиком в кадре,
+           обрезаются камни слева и дорога справа. */
+        object-position: 48% 50%;
     }
 
     .login-v2__hero-backdrop {
-        inset: -40px;
-        filter: blur(34px) saturate(.7) brightness(.42);
-        transform: scale(1.15);
+        display: none;
     }
 
     .login-v2__hero-lines {
@@ -573,22 +569,6 @@ body.login-page.login-unified-v2.is-login-keyboard-active .login-v2__hero {
     body.login-page.login-unified-v2 .login-v2 .unified-login-form {
         max-width: 520px;
         justify-self: center;
-    }
-}
-
-/* Исходник фото всего 853×373: заливать им колонку 1100×1100 нельзя — это
-   трёхкратное увеличение и «мыло». На любом мониторе фото показывается не
-   больше чем в 1,3 раза от оригинала, остальное — тёмный тон подложки. */
-@media (min-width: 1024px) {
-    .login-v2__hero-image {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        width: min(100%, 1100px);
-        height: auto;
-        max-height: 100%;
-        object-fit: contain;
-        transform: translate(-50%, -50%);
     }
 }
 
