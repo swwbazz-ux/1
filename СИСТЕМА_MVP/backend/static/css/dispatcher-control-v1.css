@@ -12345,288 +12345,6 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     }
 }
 
-
-/* ============================================================================
-   ХОЛСТ ПУЛЬТА — масштабирование всей страницы как картинки.
-
-   Ни одно правило выше не изменено. Всё, что ниже, включается только когда
-   скрипт в dispatcher_control.html выставил на обёртке
-   data-dispatcher-canvas="on" (настольное окно). На телефоне в landscape и
-   на мобильном экране горного мастера атрибут остаётся "off" и раскладка
-   работает ровно так же, как раньше.
-
-   Логический размер холста 1920x1108 — подобран под реальную машину
-   пользователя (монитор 1920x1200 при масштабе дисплея Windows 125%,
-   то есть окно приложения 1536x886 логических точек, dpr 1.25). При
-   прежнем зуме 80% страница собиралась ровно на 1920x1108.
-
-   Отдельная секция ниже фиксирует те немногие значения, которые в исходной
-   геометрии заданы через vw/vh: внутри transform: scale() эти единицы
-   продолжают считаться от НАСТОЯЩЕГО окна, а не от логического размера
-   холста, поэтому иначе картинка «плыла» бы при изменении размера окна.
-   Каждое значение здесь — это исходный clamp(), посчитанный ровно для
-   1920x1108, а не новая величина.
-   ============================================================================ */
-
-.dispatcher-canvas[data-dispatcher-canvas="on"] {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    width: var(--dispatcher-canvas-w, 1920px);
-    height: var(--dispatcher-canvas-h, 1108px);
-    /* Сотые доли опорного размера — замена vw/vh внутри холста.
-       Значения по умолчанию соответствуют пропорции 1920x1108; настоящие
-       выставляет JS при каждом пересчёте. */
-    --gd-vw: 19.2px;
-    --gd-vh: 11.08px;
-    transform: translate(-50%, -50%) scale(var(--dispatcher-canvas-scale, 1));
-}
-
-.dispatcher-canvas[data-dispatcher-canvas="on"] > .dispatcher-shell {
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-    /* app.css в @media (orientation: landscape) and (max-width: 1700px)
-       принудительно делает пульт 1400x800 и transform: scale(.5) —
-       это телефонная заготовка на случай, если её JS не выполнится.
-       Внутри холста масштаб считает холст, поэтому здесь трансформация
-       обнуляется, иначе пульт уменьшался бы дважды и занимал четверть
-       холста. Само правило в app.css не тронуто. */
-    transform: none;
-}
-
-.dispatcher-canvas[data-dispatcher-canvas="on"] .dispatcher-board {
-    height: 100%;
-}
-
-
-
-/* --- Значения, пересчитанные от опорного размера холста ---------------------
-   Внутри transform: scale() единицы vw/vh продолжают мерить НАСТОЯЩЕЕ окно, а
-   не опорный размер холста. Поэтому каждое правило ниже — копия ПОБЕДИВШЕГО в
-   каскаде правила (из app.css или из этого файла), где vw/vh заменены на
-   var(--gd-vw)/var(--gd-vh) — доли опорного размера, которые выставляет JS.
-   Исходное выражение оставлено в комментарии рядом. Значения не «прибиты» к
-   конкретному экрану: опорная ширина считается от пропорции окна, и все эти
-   правила пересчитываются вместе с ней.
-
-   Набор получен не вручную: в браузере для каждого элемента пульта вычислен
-   реальный победитель каскада по каждому свойству, и закреплены только они —
-   поэтому мёртвые правила (в файле есть два блока .dispatcher-board подряд,
-   работает второй) сюда не попали и не могут перебить живые.
-
-   Префикс завёрнут в :where() — он не добавляет веса селектору, поэтому
-   каждое правило сохраняет ровно ту специфичность, что была у исходного,
-   и все существующие переопределения продолжают выигрывать как раньше.
-   ------------------------------------------------------------------------ */
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-header-row .dispatcher-title > strong {
-    /* clamp(21px, 1.25vw, 26px) */
-    font-size: clamp(21px, calc(1.25 * var(--gd-vw)), 26px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .equipment-progress-complex {
-    /* clamp(2px, .8vh, 12px) */
-    margin-top: clamp(2px, calc(.8 * var(--gd-vh)), 12px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .equipment-progress-complex strong {
-    /* clamp(17px, 1.18vw, 24px) */
-    font-size: clamp(17px, calc(1.18 * var(--gd-vw)), 24px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-shell .shared-shift-dialog {
-    /* calc(100vh - 48px) */
-    max-height: calc(calc(100 * var(--gd-vh)) - 48px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-shell .shared-shift-dialog {
-    /* min(500px, calc(100vw - 40px)) */
-    width: min(500px, calc(calc(100 * var(--gd-vw)) - 40px));
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-shell {
-    /* clamp(108px, 11vh, 126px) */
-    --gd-header-h: clamp(108px, calc(11 * var(--gd-vh)), 126px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-notice-dialog {
-    /* min(520px, calc(100vw - 32px)) */
-    width: min(520px, calc(calc(100 * var(--gd-vw)) - 32px));
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-tools {
-    /* min(1376px, calc(100vw - 16px)) */
-    width: min(1376px, calc(calc(100 * var(--gd-vw)) - 16px));
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-board {
-    /* clamp(68px, calc(5.4vw - 14px), 92px) */
-    --gd-equipment-slot-w: clamp(68px, calc(calc(5.4 * var(--gd-vw)) - 14px), 92px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-board {
-    /* clamp(82px, 5.4vw, 106px) */
-    --gd-excavator-garage-width: clamp(82px, calc(5.4 * var(--gd-vw)), 106px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-board {
-    /* та же формула, но 43vw считается от текущей опорной ширины */
-    --truck-garage-width: min(
-        calc(
-            (var(--truck-garage-columns) * var(--gd-truck-slot-w)) +
-            ((var(--truck-garage-columns) - 1) * var(--gd-truck-slot-gap)) +
-            14px +
-            var(--truck-garage-scrollbar-w)
-        ),
-        calc(43 * var(--gd-vw))
-    );
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-unified-topbar {
-    /* clamp(290px, 22vw, 430px) */
-    --gd-header-actions-width: clamp(290px, calc(22 * var(--gd-vw)), 430px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-unified-topbar {
-    /* clamp(176px, 11.4vw, 218px) */
-    --gd-header-clock-width: clamp(176px, calc(11.4 * var(--gd-vw)), 218px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-unified-topbar {
-    /* clamp(330px, 24vw, 462px) */
-    --gd-header-identity-width: clamp(330px, calc(24 * var(--gd-vw)), 462px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-command-identity .dispatcher-active-role,
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-command-identity .dispatcher-active-text em {
-    /* clamp(12px, .85vw, 15px) */
-    font-size: clamp(12px, calc(.85 * var(--gd-vw)), 15px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-command-identity .dispatcher-active-text strong {
-    /* clamp(18px, 1.35vw, 23px) */
-    font-size: clamp(18px, calc(1.35 * var(--gd-vw)), 23px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-command-context strong {
-    /* clamp(20px, 1.5vw, 26px) */
-    font-size: clamp(20px, calc(1.5 * var(--gd-vw)), 26px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-command-shift-name,
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-command-date,
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-command-time-range {
-    /* clamp(12px, .8vw, 15px) */
-    font-size: clamp(12px, calc(.8 * var(--gd-vw)), 15px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-header-row .dispatcher-nav {
-    /* clamp(18px, 2.15vw, 34px) */
-    gap: clamp(18px, calc(2.15 * var(--gd-vw)), 34px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-header-row .dispatcher-nav a {
-    /* clamp(12px, .85vw, 15px) */
-    font-size: clamp(12px, calc(.85 * var(--gd-vw)), 15px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-command-actions .dispatcher-shift-button {
-    /* clamp(12px, .9vw, 15px) */
-    font-size: clamp(12px, calc(.9 * var(--gd-vw)), 15px);
-}
-
-/* .dispatcher-radial-clock span/em намеренно НЕ закреплены: у часов есть
-   более позднее правило той же специфичности, и закрепление перебивало бы
-   его. Расхождение — три мелкие надписи в часах, 14px против 12px. */
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-radial-clock strong,
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-header-row .dispatcher-clock strong {
-    /* clamp(24px, 1.78vw, 30px) */
-    font-size: clamp(24px, calc(1.78 * var(--gd-vw)), 30px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-panel-head h2,
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-zone-head h2 {
-    /* clamp(16px, 1vw, 20px) */
-    font-size: clamp(16px, calc(1 * var(--gd-vw)), 20px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-excavator-garage-tile img {
-    /* clamp(26px, 2vw, 32px) */
-    height: clamp(26px, calc(2 * var(--gd-vw)), 32px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-excavator-garage-tile img {
-    /* clamp(34px, 2.6vw, 42px) */
-    width: clamp(34px, calc(2.6 * var(--gd-vw)), 42px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .complex-assigned-trucks {
-    /* clamp(31px, 3.4vh, 40px) */
-    bottom: clamp(31px, calc(3.4 * var(--gd-vh)), 40px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .complex-assigned-trucks {
-    /* clamp(14px, 1vw, 18px) */
-    left: clamp(14px, calc(1 * var(--gd-vw)), 18px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .complex-assigned-trucks {
-    /* clamp(14px, 1vw, 18px) */
-    right: clamp(14px, calc(1 * var(--gd-vw)), 18px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-complex-card {
-    /* clamp(12px, .9vw, 16px) */
-    padding: clamp(12px, calc(.9 * var(--gd-vw)), 16px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .complex-work-head h2 {
-    /* clamp(30px, 2.4vw, 42px) */
-    font-size: clamp(30px, calc(2.4 * var(--gd-vw)), 42px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .complex-downtime-status > span {
-    /* clamp(9px, .62vw, 11px) */
-    font-size: clamp(9px, calc(.62 * var(--gd-vw)), 11px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .complex-downtime-status > time {
-    /* clamp(10px, .7vw, 12px) */
-    font-size: clamp(10px, calc(.7 * var(--gd-vw)), 12px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .complex-info-chip {
-    /* clamp(9px, .64vw, 12px) */
-    font-size: clamp(9px, calc(.64 * var(--gd-vw)), 12px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .complex-info-chip.chip-horizon,
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .complex-info-chip.chip-block {
-    /* clamp(10px, .74vw, 13px) */
-    font-size: clamp(10px, calc(.74 * var(--gd-vw)), 13px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-plan-strip strong {
-    /* clamp(12px, .9vw, 16px) */
-    font-size: clamp(12px, calc(.9 * var(--gd-vw)), 16px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-plan-strip span {
-    /* clamp(10px, .72vw, 12px) */
-    font-size: clamp(10px, calc(.72 * var(--gd-vw)), 12px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-truck-tile strong {
-    /* clamp(11px, .8vw, 14px) */
-    font-size: clamp(11px, calc(.8 * var(--gd-vw)), 14px);
-}
-
-:where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .gd-equipment-detail .mm-equipment-detail-panel {
-    /* min(1020px, calc(100vw - 32px)) */
-    width: min(1020px, calc(calc(100 * var(--gd-vw)) - 32px));
-}
-
 /* ============================================================================
    КАРТОЧКА КОМПЛЕКСА: ПАНЕЛЬ ПОКАЗАНИЙ СЛЕВА, СЕТКА МАШИН СПРАВА
 
@@ -13191,4 +12909,250 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
     font-size: var(--complex-truck-font, 15px);
     font-weight: 900;
     line-height: 1;
+}
+
+/* ============================================================================
+   ЖИВОЙ ПОИСК ТЕХНИКИ
+
+   Поле стоит в строке вкладок шапки, справа от них: набранный номер
+   подсвечивает машину везде, где она стоит на пульте — плитку в комплексе,
+   плитку в гараже, карточку комплекса по экскаватору. Вкладки на пульте
+   ужаты к левому краю, всё оставшееся в строке отдано полю; на других
+   экранах диспетчера поля нет и строка вкладок остаётся прежней.
+
+   Совпадение мерцает голубым ободом и свечением; остальные плитки на время
+   поиска притушены, чтобы найденное читалось через комнату. Карточки
+   комплексов не притушаются — по ним диспетчер продолжает ориентироваться.
+   ============================================================================ */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-command-main:has(.dispatcher-equipment-search) {
+    grid-template-columns: auto 88px minmax(0, 1fr);
+    grid-template-areas:
+        "ctx ctx ctx"
+        "nav search .";
+    column-gap: 18px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-command-main:has(.dispatcher-equipment-search) .dispatcher-command-context {
+    grid-area: ctx;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-command-main:has(.dispatcher-equipment-search) .dispatcher-nav {
+    grid-area: nav;
+    grid-template-columns: repeat(4, minmax(0, 118px));
+    gap: 18px;
+    width: auto;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search {
+    grid-area: search;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    align-self: stretch;
+    column-gap: 4px;
+    margin-top: 7px;
+    padding: 0 4px 8px;
+    border: 0;
+    border-bottom: 2px solid var(--gd-line-soft);
+    border-radius: 0;
+    background: transparent;
+    color: var(--gd-muted);
+    cursor: text;
+    transition: border-color .14s ease;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search:focus-within,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search.has-query {
+    border-bottom-color: var(--gd-cyan);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search-cap {
+    display: block;
+    width: 16px;
+    height: 16px;
+    color: var(--gd-cyan);
+    opacity: .85;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search:focus-within .dispatcher-equipment-search-cap,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search.has-query .dispatcher-equipment-search-cap {
+    opacity: 1;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search input {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--gd-ink);
+    font: inherit;
+    font-size: 16px;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: .06em;
+    text-align: center;
+    outline: none;
+    box-shadow: none;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search input::placeholder {
+    color: var(--gd-muted);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    text-transform: none;
+    opacity: .9;
+}
+
+/* Крестик браузера убран: очистка — Esc, вид поля должен совпадать со
+   вкладками рядом. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search input::-webkit-search-cancel-button,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search input::-webkit-search-decoration {
+    display: none;
+    -webkit-appearance: none;
+}
+
+/* Счётчик совпадений; ноль — красным: номера нет на пульте. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search-count {
+    min-width: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: rgba(52, 194, 211, .16);
+    color: var(--gd-cyan);
+    font-size: 9px;
+    font-weight: 900;
+    line-height: 15px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-equipment-search-count.is-none {
+    background: rgba(226, 63, 63, .16);
+    color: var(--gd-red, #e23f3f);
+}
+
+/* --- Подсветка совпадений ------------------------------------------------- */
+
+@keyframes dispatcher-search-blink {
+    0%, 100% {
+        box-shadow: 0 0 0 3px var(--gd-cyan), 0 0 12px 2px rgba(52, 194, 211, .55);
+        filter: brightness(1.05);
+    }
+    50% {
+        box-shadow: 0 0 0 4px #8df3ff, 0 0 26px 8px rgba(141, 243, 255, .85);
+        filter: brightness(1.45);
+    }
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .is-search-hit {
+    position: relative;
+    z-index: 3;
+    animation: dispatcher-search-blink .7s ease-in-out infinite;
+}
+
+/* Подсветка лежит поверх статусной заливки: исходный цвет состояния плитки
+   остаётся под ней и возвращается без пересчёта после очистки поиска. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage .is-search-hit::after,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-garage .is-search-hit::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    background: rgba(52, 194, 211, .22);
+    background: color-mix(in srgb, var(--gd-cyan) 22%, transparent);
+    box-shadow: inset 0 0 0 3px #8df3ff;
+    pointer-events: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage .is-search-hit img,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-garage .is-search-hit img {
+    opacity: 1;
+    filter: grayscale(0);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage .is-search-hit strong,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage .is-search-hit span,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-garage .is-search-hit strong,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-garage .is-search-hit span {
+    color: #ffffff;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen).is-equipment-search .complex-truck-tile:not(.is-search-hit),
+body.dispatcher-control-screen:not(.mining-master-mobile-screen).is-equipment-search .dispatcher-truck-tile:not(.is-search-hit),
+body.dispatcher-control-screen:not(.mining-master-mobile-screen).is-equipment-search .dispatcher-equipment-tile:not(.is-search-hit) {
+    opacity: .38;
+    transition: opacity .14s ease;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen).is-equipment-search .dispatcher-excavator-garage .dispatcher-excavator-garage-tile:not(.is-search-hit),
+body.dispatcher-control-screen:not(.mining-master-mobile-screen).is-equipment-search .dispatcher-truck-garage .dispatcher-truck-tile:not(.is-search-hit) {
+    opacity: .22;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .is-search-hit {
+        animation: none;
+        box-shadow: 0 0 0 3px #8df3ff, 0 0 18px 4px rgba(141, 243, 255, .7);
+    }
+}
+
+/* ============================================================================
+   ПРИСУТСТВИЕ ТЕХНИКИ В СЕТИ — та же точка, что у горного мастера.
+
+   .mm-mobile-presence-dot из app.css задаёт ровно ту же палитру (зелёная —
+   в сети, голубая — в фоне, жёлтая — давно не выходила на связь, оранжевая —
+   не в сети, серая — открыла смену, но приложение ни разу не отвечало), но
+   вся её вёрстка живёт внутри @media (max-width: 760px) — она рисовалась
+   только для мобильного контура горного мастера и на ширине пульта не
+   действует вовсе (посчитано: без своего правила точка остаётся 0×0).
+   Поэтому у пульта — свой класс с той же палитрой, самостоятельным размером
+   и раскладкой под настольные плитки: они мельче мобильных, точка не
+   мельчает вместе с ними (те же 8px), просто встаёт в другой угол, чтобы не
+   спорить с бейджем циклов плана (он уже занял верхний правый угол).
+
+   Кольцо выполнения плана по контуру плитки — тот же приём conic-gradient,
+   что и в приложении мастера, — на пульте уже реализован
+   (.dispatcher-truck-tile::before), это не новая механика. */
+
+.dispatcher-presence-dot {
+    --dispatcher-presence-color: #95a7b0;
+    display: block;
+    box-sizing: border-box;
+    width: 8px;
+    height: 8px;
+    border: 1px solid rgba(3, 14, 18, .92);
+    border-radius: 999px;
+    background: var(--dispatcher-presence-color);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--dispatcher-presence-color) 72%, transparent);
+    pointer-events: none;
+}
+
+.dispatcher-presence-dot.is-online { --dispatcher-presence-color: #58df52; }
+.dispatcher-presence-dot.is-background { --dispatcher-presence-color: #38bdf8; }
+.dispatcher-presence-dot.is-recent { --dispatcher-presence-color: #ffd166; }
+.dispatcher-presence-dot.is-offline { --dispatcher-presence-color: #ff8a24; }
+.dispatcher-presence-dot.is-not_registered {
+    --dispatcher-presence-color: #95a7b0;
+    box-shadow: none;
+}
+
+.dispatcher-excavator-garage-tile .dispatcher-presence-dot,
+.dispatcher-truck-tile .dispatcher-presence-dot {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    z-index: 6;
+}
+
+.dispatcher-complex-card .complex-title-state h2 .dispatcher-presence-dot {
+    position: relative;
+    top: -2px;
+    margin-left: 6px;
 }

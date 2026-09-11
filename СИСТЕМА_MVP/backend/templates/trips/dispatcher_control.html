@@ -74,6 +74,7 @@
                         {% if tile.display_name %}<strong>{{ tile.display_name }}</strong>{% endif %}
                         <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
                         {% if not tile.is_placeholder %}<span>{{ tile.label }}</span>{% endif %}
+                        {% if not tile.is_placeholder and tile.has_current_shift %}<i class="dispatcher-presence-dot is-{{ tile.presence_status }}" title="{{ tile.presence_label }}" aria-label="{{ tile.presence_label }}"></i>{% endif %}
                         {% if not tile.is_placeholder %}
                             <em class="dispatcher-tile-plan-percent">{{ tile.plan_percent_label|default:"Не назначен" }}</em>
                             <small class="dispatcher-tile-plan-label{% if not tile.plan_has_plan %} is-plan-missing{% endif %}">{% if tile.plan_has_plan %}{{ tile.plan_fact_label }}{% else %}{{ tile.plan_status_label|default:"План не назначен" }}{% endif %}</small>
@@ -103,7 +104,7 @@
                         <div class="complex-work-head">
                         {% endif %}
                         <div class="complex-title-state">
-                            <h2>{{ complex.id }}</h2>
+                            <h2>{{ complex.id }}{% if not mining_master_mobile_enabled and complex.has_current_shift %}<i class="dispatcher-presence-dot is-{{ complex.presence_status }}" title="{{ complex.presence_label }}" aria-label="{{ complex.presence_label }}"></i>{% endif %}</h2>
                             {% if not mining_master_mobile_enabled and complex.active_downtime.active %}
                                 <span class="complex-downtime-status" title="{{ complex.active_downtime.reason }}" data-card-single-line-badge>
                                     <span>{{ complex.active_downtime.reason }}</span>
@@ -159,6 +160,7 @@
                                     <strong>{{ truck.name }}</strong>
                                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                                     <span>{{ truck.label }}</span>
+                                    {% if truck.has_current_shift %}<i class="dispatcher-presence-dot is-{{ truck.presence_status }}" title="{{ truck.presence_label }}" aria-label="{{ truck.presence_label }}"></i>{% endif %}
                                     {% if truck.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ truck.plan_visual.completed_loops }}">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
                                 </article>
                             {% empty %}
@@ -183,6 +185,7 @@
                         <strong>{{ tile.name }}</strong>
                         <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                         <span>{{ tile.label }}</span>
+                        {% if tile.has_current_shift %}<i class="dispatcher-presence-dot is-{{ tile.presence_status }}" title="{{ tile.presence_label }}" aria-label="{{ tile.presence_label }}"></i>{% endif %}
                         {% if tile.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ tile.plan_visual.completed_loops }}">×{{ tile.plan_visual.completed_loops }}</b>{% endif %}
                     </article>
                 {% endfor %}
