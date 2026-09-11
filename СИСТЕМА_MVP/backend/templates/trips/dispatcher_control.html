@@ -946,85 +946,200 @@
     <div class="gd-equipment-detail mm-equipment-detail" data-gd-equipment-detail hidden>
         <div class="mm-equipment-detail-backdrop" data-gd-detail-close></div>
         <section class="mm-equipment-detail-panel" role="dialog" aria-modal="true" aria-labelledby="gd-detail-title">
+            {% comment %}Карточка техники/комплекса на пульте. Разметка сгруппирована по областям сетки
+               (шапка · левый столбец: люди и действия · правый столбец: настройки и смена);
+               все data-gd-* якоря сохранены — скрипт наполняет их как раньше.{% endcomment %}
             <button type="button" class="mm-detail-close" data-gd-detail-close aria-label="Закрыть карточку">×</button>
-            <div class="mm-detail-head">
+
+            <header class="gd-detail-hero">
                 <div class="gd-detail-garage-slot" data-gd-detail-icon-slot></div>
-                <div>
-                    <span data-gd-detail-type></span>
+                <div class="gd-detail-hero-copy">
+                    <span class="gd-detail-hero-type" data-gd-detail-type></span>
                     <h2 id="gd-detail-title" data-gd-detail-title></h2>
-                    <div class="mm-detail-tags">
+                    <div class="gd-detail-hero-tags">
                         <mark data-gd-detail-status></mark>
                         <small data-gd-detail-zone></small>
                     </div>
+                    <p class="gd-detail-meta" data-gd-detail-meta></p>
                 </div>
-            </div>
-            <div class="mm-detail-employee" data-gd-detail-employee hidden>
-                <div class="mm-detail-employee-photo">
-                    <img data-gd-detail-employee-img src="" alt="">
-                    <span data-gd-detail-employee-initials></span>
+                <div class="gd-detail-hero-plan" data-gd-detail-plan hidden>
+                    <span>План смены</span>
+                    <strong data-gd-detail-plan-percent>—</strong>
+                    <small data-gd-detail-plan-fact></small>
                 </div>
-                <div class="mm-detail-employee-info">
-                    <span data-gd-detail-employee-presence>В смене</span>
-                    <strong data-gd-detail-employee-name></strong>
-                    <a data-gd-detail-employee-phone href=""></a>
-                </div>
-            </div>
-            <section class="gd-detail-downtime" data-gd-detail-downtime hidden>
-                <div class="gd-detail-downtime-copy">
-                    <span>Текущий простой</span>
-                    <strong data-gd-detail-downtime-reason></strong>
-                    <small data-gd-detail-downtime-started></small>
-                </div>
-                <time data-gd-detail-downtime-timer data-gd-downtime-timer>00:00:00</time>
-                <button type="button" data-gd-detail-downtime-close>Завершить простой</button>
-                <span class="gd-detail-downtime-result" data-gd-detail-downtime-result role="status" aria-live="polite"></span>
-            </section>
-            <section class="gd-detail-settings" data-gd-detail-settings hidden>
-                <div class="gd-detail-settings-head">
-                    <div>
-                        <strong data-gd-detail-settings-title>Рабочие параметры комплекса</strong>
-                        <span data-gd-detail-settings-hint></span>
-                    </div>
-                    <span class="gd-detail-settings-status" data-gd-detail-settings-status role="status" aria-live="polite"></span>
-                </div>
-                <div class="gd-detail-settings-face">
-                    <label>
-                        <span>Горизонт</span>
-                        <input type="text" inputmode="numeric" maxlength="16" data-gd-setting-horizon>
-                    </label>
-                    <label>
-                        <span>Блок</span>
-                        <input type="text" inputmode="numeric" maxlength="16" data-gd-setting-block>
-                    </label>
-                    <label>
-                        <span>Порода</span>
-                        <select data-gd-setting-rock></select>
-                    </label>
-                </div>
-                <div class="gd-detail-destinations">
-                    <div class="gd-detail-destinations-head">
-                        <div>
-                            <strong>Точки разгрузки</strong>
-                            <span data-gd-destination-count></span>
+            </header>
+
+            <div class="gd-detail-columns">
+                <div class="gd-detail-col gd-detail-col-people">
+                    <section class="gd-detail-crew" data-gd-detail-employee hidden>
+                        <div class="gd-detail-section-title"><span data-gd-detail-crew-title>Машинист</span> <span class="gd-detail-shift-verdict" data-gd-detail-shift-verdict hidden></span></div>
+                        <div class="gd-detail-crew-person">
+                            <div class="mm-detail-employee-photo">
+                                <img data-gd-detail-employee-img src="" alt="">
+                                <span data-gd-detail-employee-initials></span>
+                            </div>
+                            <div class="mm-detail-employee-info">
+                                <strong data-gd-detail-employee-name></strong>
+                                <a data-gd-detail-employee-phone href=""></a>
+                                <span class="gd-detail-crew-presence" data-gd-detail-employee-presence>В смене</span>
+                            </div>
                         </div>
-                        <button type="button" class="gd-detail-destination-add" data-gd-destination-add>+ Добавить точку</button>
+                        <p class="gd-detail-shift-alert" data-gd-detail-shift-alert hidden></p>
+                        <dl class="gd-detail-crew-shift" data-gd-detail-shift hidden>
+                            <dt>Смена</dt><dd data-gd-detail-shift-period></dd>
+                            <dt>Открыта</dt><dd data-gd-detail-shift-opened></dd>
+                            <dt>Длится</dt><dd data-gd-detail-shift-duration></dd>
+                            <dt>Связь</dt><dd data-gd-detail-shift-presence></dd>
+                            <dt>Последняя связь</dt><dd data-gd-detail-shift-seen></dd>
+                            <dt hidden>Вид</dt><dd data-gd-detail-shift-type hidden></dd>
+                        </dl>
+                        <form class="gd-detail-shift-close" data-gd-detail-service-close method="post" action="" hidden>
+                            {% csrf_token %}
+                            <button type="button" class="gd-detail-shift-close-toggle" data-gd-detail-service-close-toggle>Завершить смену</button>
+                            <div class="gd-detail-shift-close-body" data-gd-detail-service-close-body hidden>
+                                <p>Смена закроется служебно от имени диспетчера. Открытые рейсы уйдут в перенос, показания попадут в отчёт.</p>
+                                <label>
+                                    <span>Причина</span>
+                                    <input type="text" name="reason" maxlength="200" required placeholder="Например: машинист не вышел на связь">
+                                </label>
+                                <div class="gd-detail-shift-close-readings">
+                                    <label>
+                                        <span>Топливо, л</span>
+                                        <input type="number" name="end_fuel" min="0" step="1" inputmode="numeric" required>
+                                    </label>
+                                    <label data-gd-detail-service-close-mileage hidden>
+                                        <span>Одометр, км</span>
+                                        <input type="number" name="end_mileage" min="0" step="1" inputmode="numeric">
+                                    </label>
+                                    <label>
+                                        <span>Моточасы</span>
+                                        <input type="number" name="end_engine_hours" min="0" step="1" inputmode="numeric" required>
+                                    </label>
+                                </div>
+                                <small class="gd-detail-shift-close-hint" data-gd-detail-service-close-hint hidden></small>
+                                <div class="gd-detail-shift-close-actions">
+                                    <button type="button" class="gd-detail-shift-close-cancel" data-gd-detail-service-close-cancel>Отмена</button>
+                                    <button type="submit" class="gd-detail-shift-close-submit">Закрыть смену</button>
+                                </div>
+                            </div>
+                        </form>
+                    </section>
+
+                    <section class="gd-detail-downtime" data-gd-detail-downtime hidden>
+                        <div class="gd-detail-downtime-copy">
+                            <span>Текущий простой</span>
+                            <strong data-gd-detail-downtime-reason></strong>
+                            <small data-gd-detail-downtime-started></small>
+                        </div>
+                        <time data-gd-detail-downtime-timer data-gd-downtime-timer>00:00:00</time>
+                        <button type="button" data-gd-detail-downtime-close>Завершить простой</button>
+                        <span class="gd-detail-downtime-result" data-gd-detail-downtime-result role="status" aria-live="polite"></span>
+                    </section>
+
+                    <section class="gd-detail-trucks" data-gd-detail-trucks hidden>
+                        <div class="gd-detail-section-title">Состав <span data-gd-detail-trucks-count></span></div>
+                        <div class="gd-detail-truck-chips" data-gd-detail-trucks-list></div>
+                        <div class="gd-detail-truck-chips is-removed" data-gd-detail-trucks-removed hidden></div>
+                    </section>
+
+                    <dl class="mm-detail-list" data-gd-detail-list></dl>
+                </div>
+
+                <div class="gd-detail-col gd-detail-col-work">
+                    <section class="gd-detail-settings" data-gd-detail-settings hidden>
+                        <div class="gd-detail-settings-head">
+                            <div>
+                                <strong data-gd-detail-settings-title>Настройки работы</strong>
+                                <span data-gd-detail-settings-hint></span>
+                            </div>
+                            <span class="gd-detail-settings-status" data-gd-detail-settings-status role="status" aria-live="polite"></span>
+                        </div>
+                        <div class="gd-detail-settings-face">
+                            <label>
+                                <span>Горизонт</span>
+                                <input type="text" inputmode="numeric" maxlength="16" data-gd-setting-horizon>
+                            </label>
+                            <label>
+                                <span>Блок</span>
+                                <input type="text" inputmode="numeric" maxlength="16" data-gd-setting-block>
+                            </label>
+                            <label>
+                                <span>Порода</span>
+                                <select data-gd-setting-rock></select>
+                            </label>
+                        </div>
+                        <div class="gd-detail-destinations">
+                            <div class="gd-detail-destinations-head">
+                                <div>
+                                    <strong>Точки разгрузки</strong>
+                                    <span data-gd-destination-count></span>
+                                </div>
+                                <button type="button" class="gd-detail-destination-add" data-gd-destination-add>+ Добавить точку</button>
+                            </div>
+                            <div class="gd-detail-destination-list" data-gd-destination-list></div>
+                        </div>
+                        <div class="gd-detail-settings-actions">
+                            <button type="button" class="gd-detail-settings-save" data-gd-setting-save>Сохранить настройки</button>
+                        </div>
+                    </section>
+
+                    <section class="gd-detail-manual-trip" data-gd-detail-manual-trip hidden>
+                        <div class="gd-detail-settings-head">
+                            <div>
+                                <strong>Ручной рейс</strong>
+                                <span data-gd-detail-manual-trip-hint></span>
+                            </div>
+                        </div>
+                        <p class="gd-detail-manual-trip-blocked" data-gd-detail-manual-trip-blocked hidden></p>
+                        <form class="gd-detail-shift-close gd-detail-manual-trip-form" data-gd-detail-manual-trip-form method="post" action="" hidden>
+                            {% csrf_token %}
+                            <input type="hidden" name="excavator_id" value="">
+                            <button type="button" class="gd-detail-shift-close-toggle gd-detail-manual-trip-toggle" data-gd-detail-manual-trip-toggle>+ Добавить рейс вручную</button>
+                            <div class="gd-detail-shift-close-body" data-gd-detail-manual-trip-body hidden>
+                                <p>Рейс запишется выполненным водителю открытой смены и попадёт в план. Отменить его потом нельзя — проверьте точку и время.</p>
+                                <div class="gd-detail-shift-close-readings gd-detail-manual-trip-fields">
+                                    <label>
+                                        <span>Точка разгрузки</span>
+                                        <select name="dump_point_id" required data-gd-detail-manual-trip-dump></select>
+                                    </label>
+                                    <label>
+                                        <span>Порода</span>
+                                        <select name="rock_type_id" required data-gd-detail-manual-trip-rock></select>
+                                    </label>
+                                    <label>
+                                        <span>Рейсов</span>
+                                        <input type="number" name="trips_count" min="1" max="10" step="1" value="1" inputmode="numeric" required>
+                                    </label>
+                                    <label>
+                                        <span>Время разгрузки</span>
+                                        <input type="datetime-local" name="completed_at" data-gd-detail-manual-trip-time>
+                                    </label>
+                                </div>
+                                <small class="gd-detail-shift-close-hint">Время пустое — рейс запишется текущим моментом. Несколько рейсов лягут подряд на это время.</small>
+                                <label>
+                                    <span>Причина</span>
+                                    <input type="text" name="reason" maxlength="200" required placeholder="Например: водитель не отметил разгрузку, нет связи">
+                                </label>
+                                <div class="gd-detail-shift-close-actions">
+                                    <button type="button" class="gd-detail-shift-close-cancel" data-gd-detail-manual-trip-cancel>Отмена</button>
+                                    <button type="submit" class="gd-detail-shift-close-submit gd-detail-manual-trip-submit">Добавить рейс</button>
+                                </div>
+                            </div>
+                        </form>
+                    </section>
+
+                    <div class="gd-detail-load-state" data-gd-detail-load-state hidden>
+                        <span data-gd-detail-load-message>Загружаю свежие данные…</span>
+                        <button type="button" data-gd-detail-retry hidden>Повторить</button>
                     </div>
-                    <div class="gd-detail-destination-list" data-gd-destination-list></div>
+
+                    <div class="gd-detail-shift-report" data-gd-detail-shift-report hidden>
+                        <div class="gd-detail-section-title">Смена на текущий момент</div>
+                        <div class="gd-detail-metrics" data-gd-detail-metrics></div>
+                        <div class="gd-detail-tabs" data-gd-detail-tabs></div>
+                        <div class="gd-detail-dashboard" data-gd-detail-dashboard></div>
+                    </div>
                 </div>
-                <div class="gd-detail-settings-actions">
-                    <button type="button" class="gd-detail-settings-save" data-gd-setting-save>Сохранить настройки</button>
-                </div>
-            </section>
-            <dl class="mm-detail-list" data-gd-detail-list></dl>
-            <div class="gd-detail-load-state" data-gd-detail-load-state hidden>
-                <span data-gd-detail-load-message>Загружаю свежие данные…</span>
-                <button type="button" data-gd-detail-retry hidden>Повторить</button>
-            </div>
-            <div class="gd-detail-shift-report" data-gd-detail-shift-report hidden>
-                <div class="gd-detail-section-title">Смена на текущий момент</div>
-                <div class="gd-detail-metrics" data-gd-detail-metrics></div>
-                <div class="gd-detail-tabs" data-gd-detail-tabs></div>
-                <div class="gd-detail-dashboard" data-gd-detail-dashboard></div>
             </div>
         </section>
     </div>
@@ -7331,6 +7446,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v80" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v88" defer></script>
 {% endif %}
 {% endblock %}

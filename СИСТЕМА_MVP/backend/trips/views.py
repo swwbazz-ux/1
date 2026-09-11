@@ -105,6 +105,7 @@ from .trip_creation import (
     calculate_trip_volume_and_tonnage,
     create_loaded_waiting_unload_trip,
     lock_trip_participant_equipment,
+    resolve_required_trip_measurements,
 )
 
 logger = logging.getLogger(__name__)
@@ -1714,6 +1715,159 @@ def dispatcher_complex_shift_report(card):
     }
 
 
+def dispatcher_shift_reading_label(value):
+    """Показание на начало смены для подсказки в карточке: целое — без хвоста."""
+    if value is None:
+        return ''
+    try:
+        number = Decimal(value)
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+    if number == number.to_integral_value():
+        return str(int(number))
+    return format(number.normalize(), 'f').replace('.', ',')
+
+
+def dispatcher_duration_label(delta):
+    total_minutes = int(max(delta.total_seconds(), 0) // 60)
+    hours, minutes = divmod(total_minutes, 60)
+    if hours and minutes:
+        return f'{hours} ч {minutes} мин'
+    if hours:
+        return f'{hours} ч'
+    return f'{minutes} мин'
+
+
+def dispatcher_shift_period_fields(shift, *, now=None):
+    """Чья это смена: текущего периода или хвост, который не закрыл прошлый водитель.
+
+    Сравниваем производственный период смены (дата + первая/вторая) с
+    текущим по часам предприятия; окно пересменки считаем допустимым по тем
+    же правилам, что и горный мастер (mining_master_equipment_shift_is_current).
+    """
+    now = now or timezone.now()
+    if not shift or not shift.opened_at:
+        return {
+            'verdict': 'unknown',
+            'verdict_label': '',
+            'alert': '',
+            'duration_label': '',
+            'period_label': '',
+            'current_period_label': '',
+        }
+    shift_type_labels = dict(EmployeeShift._meta.get_field('shift_type').choices)
+    context = production_shift_context(now)
+    work_date = production_work_date_for_shift(shift.opened_at, shift.shift_type)
+    period_label = f'{shift_type_labels.get(shift.shift_type, shift.shift_type)} {work_date.strftime("%d.%m")}'
+    current_period_label = (
+        f'{shift_type_labels.get(context.shift_type, context.shift_type)} '
+        f'{context.production_date.strftime("%d.%m")}'
+    )
+    duration_label = dispatcher_duration_label(now - shift.opened_at)
+    same_period = work_date == context.production_date and shift.shift_type == context.shift_type
+    if same_period:
+        verdict, verdict_label, alert = 'current', 'Текущая смена', ''
+    elif mining_master_equipment_shift_is_current(shift, now=now):
+        verdict, verdict_label = 'overlap', 'Открыта в пересменку'
+        alert = (
+            f'Смена открыта {format_dispatcher_datetime(shift.opened_at)} ({period_label.lower()}), '
+            f'сейчас идёт {current_period_label.lower()}. Проверьте, что это нынешний водитель.'
+        )
+    else:
+        verdict, verdict_label = 'stale', 'Прошлая смена — не закрыта'
+        alert = (
+            f'Смена открыта {format_dispatcher_datetime(shift.opened_at)} ({period_label.lower()}) '
+            f'и длится уже {duration_label}. Сейчас идёт {current_period_label.lower()}: '
+            f'водитель прошлой смены не закрыл её — закройте служебно.'
+        )
+    return {
+        'verdict': verdict,
+        'verdict_label': verdict_label,
+        'alert': alert,
+        'duration_label': duration_label,
+        'period_label': period_label,
+        'current_period_label': current_period_label,
+    }
+
+
+DISPATCHER_MANUAL_TRIP_MAX_COUNT = 10
+
+
+def dispatcher_manual_trip_payload(truck, *, excavator, placement, truck_shift, rock_types, dump_points):
+    """Данные для ручного рейса в карточке самосвала на пульте.
+
+    Рейс создаётся сразу выполненным от имени водителя открытой смены на
+    экскаватор, к которому самосвал назначен; точки и порода берутся из
+    настроек забоя, но диспетчер может выбрать любые активные.
+    """
+    if not truck:
+        return None
+    blocked_reason = ''
+    if not excavator:
+        blocked_reason = 'Самосвал не назначен в комплекс — рейс добавить нельзя.'
+    elif not truck_shift:
+        blocked_reason = 'У самосвала нет открытой смены водителя — рейс некому записать.'
+    destination_rows = excavator_configured_destinations(placement) if placement else []
+    if not destination_rows and placement and placement.work_dump_point_id:
+        destination_rows = [{
+            'dump_point': placement.work_dump_point,
+            'transport_distance_km': placement.transport_distance_km,
+        }]
+    return {
+        'url': reverse('dispatcher_manual_trip', args=[truck.id]),
+        'can_add': not blocked_reason,
+        'blocked_reason': blocked_reason,
+        'excavator_id': getattr(excavator, 'id', None),
+        'excavator_label': equipment_short_name(excavator) if excavator else '',
+        'rock_type_id': getattr(placement, 'work_rock_type_id', None),
+        'rock_types': [{'id': item.id, 'name': str(item)} for item in rock_types],
+        'destinations': [
+            {
+                'dump_point_id': row['dump_point'].id,
+                'name': str(row['dump_point']),
+                'transport_distance_km': (
+                    format(row['transport_distance_km'], 'f')
+                    if row['transport_distance_km'] is not None
+                    else ''
+                ),
+            }
+            for row in destination_rows
+        ],
+        'dump_points': [{'id': item.id, 'name': str(item)} for item in dump_points],
+        'max_count': DISPATCHER_MANUAL_TRIP_MAX_COUNT,
+    }
+
+
+def dispatcher_shift_card_payload(shift):
+    """Открытая смена сотрудника на этой технике — для карточки пульта.
+
+    Диспетчер завершает смену машиниста/водителя из карточки через уже
+    существующий служебный маршрут dispatcher_service_close_shift; отсюда
+    карточке нужны id смены, вид техники (какие показания спрашивать) и
+    сведения о связи, чтобы не искать их в общем списке деталей.
+    """
+    if not shift:
+        return None
+    presence = getattr(shift, 'application_presence', None) or {}
+    is_truck = bool(shift.equipment_id and equipment_is_truck(shift.equipment))
+    return {
+        'id': shift.id,
+        'type_label': shift.get_shift_type_display(),
+        'opened_at': shift.opened_at.isoformat() if shift.opened_at else '',
+        'opened_at_label': format_dispatcher_datetime(shift.opened_at),
+        'is_truck': is_truck,
+        'presence_status': presence.get('status_code') or 'not_registered',
+        'presence_label': presence.get('status_label') or 'Не подключался',
+        'last_seen_label': format_dispatcher_datetime(presence.get('last_seen_at')),
+        'plan_group_name': shift.plan_group_name or '',
+        **dispatcher_shift_period_fields(shift),
+        'start_fuel': dispatcher_shift_reading_label(shift.start_fuel),
+        'start_mileage': dispatcher_shift_reading_label(shift.start_mileage),
+        'start_engine_hours': dispatcher_shift_reading_label(shift.start_engine_hours),
+        'service_close_url': reverse('dispatcher_service_close_shift', args=[shift.id]),
+    }
+
+
 def build_dispatcher_equipment_card(
     *,
     card_id,
@@ -1733,6 +1887,8 @@ def build_dispatcher_equipment_card(
     plan=None,
     settings=None,
     downtime=None,
+    shift=None,
+    manual_trip=None,
     include_equipment_metadata=True,
 ):
     card_details = []
@@ -1766,6 +1922,8 @@ def build_dispatcher_equipment_card(
         'plan': dispatcher_plan_api_payload(plan),
         'settings': settings,
         'downtime': dispatcher_downtime_card_payload(downtime),
+        'shift': dispatcher_shift_card_payload(shift),
+        'manual_trip': manual_trip,
     }
 
 
@@ -2961,6 +3119,7 @@ def build_dispatcher_dashboard_context(
             percent=tile.get('percent', 0),
             employee=equipment_employee,
             employee_presence_label=employee_presence_label,
+            shift=open_shift_by_equipment_id.get(equipment.id),
             details=details,
             shift_report=dispatcher_shift_report_for_equipment(
                 equipment,
@@ -3015,6 +3174,7 @@ def build_dispatcher_dashboard_context(
             plan=card.get('plan'),
             employee=equipment_employee,
             employee_presence_label=employee_presence_label,
+            shift=open_shift_by_equipment_id.get(complex_excavator.id),
             settings=dispatcher_excavator_settings(
                 complex_excavator,
                 placement_by_excavator_id.get(complex_excavator.id),
@@ -3057,6 +3217,15 @@ def build_dispatcher_dashboard_context(
                 zone=f'{complex_card.get("id")} / в составе',
                 percent=tile.get('percent', 0),
                 employee=dispatcher_employee_for_equipment(equipment.id)[0] if equipment else None,
+                shift=open_shift_by_equipment_id.get(equipment.id) if equipment else None,
+                manual_trip=dispatcher_manual_trip_payload(
+                    equipment,
+                    excavator=complex_card.get('excavator'),
+                    placement=placement_by_excavator_id.get(getattr(complex_card.get('excavator'), 'id', None)),
+                    truck_shift=open_shift_by_equipment_id.get(equipment.id),
+                    rock_types=dispatcher_rock_types,
+                    dump_points=dispatcher_dump_points,
+                ) if equipment else None,
                 employee_presence_label=(
                     dispatcher_employee_for_equipment(equipment.id)[1]
                     if equipment else 'Сотрудник не назначен'
@@ -3119,6 +3288,15 @@ def build_dispatcher_dashboard_context(
                 percent=tile.get('percent', 0),
                 employee=equipment_employee,
                 employee_presence_label=employee_presence_label,
+                shift=open_shift_by_equipment_id.get(equipment.id),
+                manual_trip=dispatcher_manual_trip_payload(
+                    equipment,
+                    excavator=getattr(assignment, 'excavator', None),
+                    placement=placement_by_excavator_id.get(getattr(assignment, 'excavator_id', None)),
+                    truck_shift=open_shift_by_equipment_id.get(equipment.id),
+                    rock_types=dispatcher_rock_types,
+                    dump_points=dispatcher_dump_points,
+                ),
                 details=details,
                 shift_report=dispatcher_shift_report_for_equipment(
                     equipment,
@@ -5778,6 +5956,7 @@ def excavator_work_view(request):
             zone=card.get('target_label') or equipment_short_name(assignment.excavator),
             percent=card['plan'].get('css_percent', 0),
             employee=getattr(truck_shift, 'employee', None),
+            shift=truck_shift,
             details=detail_rows,
             shift_report=dispatcher_shift_report_for_equipment(
                 truck,
@@ -7023,6 +7202,210 @@ def dispatcher_cancel_trip_view(request, trip_id):
         },
     )
     messages.success(request, f'Рейс {trip.truck} -> {trip.dump_point} отменен.')
+    return redirect(redirect_url)
+
+
+def parse_dispatcher_manual_trip_time(raw_value, *, now):
+    """datetime-local из формы (часы предприятия) -> aware datetime; пусто -> сейчас."""
+    from datetime import datetime as _datetime
+    from core.production_time import BUSINESS_TIME_ZONE
+    raw = str(raw_value or '').strip()
+    if not raw:
+        return now
+    parsed = None
+    for pattern in ('%Y-%m-%dT%H:%M', '%Y-%m-%dT%H:%M:%S', '%d.%m.%Y %H:%M'):
+        try:
+            parsed = _datetime.strptime(raw, pattern)
+            break
+        except ValueError:
+            continue
+    if parsed is None:
+        raise ValueError('Время рейса: укажите дату и время в формате ДД.ММ.ГГГГ ЧЧ:ММ.')
+    return parsed.replace(tzinfo=BUSINESS_TIME_ZONE)
+
+
+@transaction.atomic
+def dispatcher_manual_trip_view(request, equipment_id):
+    """Ручной рейс диспетчера: сразу выполненный рейс водителю открытой смены.
+
+    Тот же путь, что у служебного завершения: обычная форма из карточки,
+    редирект с сообщением, запись в журнал действий диспетчера и толчок
+    операционного состояния, чтобы пульт и приложения обновились.
+    """
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return redirect('login')
+    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    if not access or access.role.code not in {'dispatcher', 'admin'}:
+        return redirect('role_home')
+    redirect_url = get_dispatcher_control_url(request)
+    if request.method != 'POST':
+        return redirect(redirect_url)
+    shift_error = dispatcher_shift_required_redirect(request, access, redirect_url)
+    if shift_error:
+        return shift_error
+
+    reason = request.POST.get('reason', '').strip()
+    if not reason:
+        messages.error(request, 'Укажите причину ручного рейса.')
+        return redirect(redirect_url)
+    try:
+        trips_count = int(request.POST.get('trips_count', '1') or 1)
+    except (TypeError, ValueError):
+        trips_count = 0
+    if not 1 <= trips_count <= DISPATCHER_MANUAL_TRIP_MAX_COUNT:
+        messages.error(request, f'Количество рейсов: от 1 до {DISPATCHER_MANUAL_TRIP_MAX_COUNT}.')
+        return redirect(redirect_url)
+    now = timezone.now()
+    try:
+        completed_at = parse_dispatcher_manual_trip_time(request.POST.get('completed_at'), now=now)
+    except ValueError as error:
+        messages.error(request, str(error))
+        return redirect(redirect_url)
+    if completed_at > now + timedelta(minutes=5):
+        messages.error(request, 'Время рейса не может быть в будущем.')
+        return redirect(redirect_url)
+    try:
+        excavator_id = int(request.POST.get('excavator_id', '') or 0)
+    except (TypeError, ValueError):
+        excavator_id = 0
+
+    list(Employee.objects.select_for_update().filter(pk=access.employee_id).values_list('pk', flat=True))
+    if not role_session_state(request, access)['is_active']:
+        messages.error(request, 'Роль неактивна — доступен только просмотр.')
+        return redirect(redirect_url)
+
+    truck = (
+        Equipment.objects
+        .select_for_update(of=('self',))
+        .select_related('equipment_type', 'model')
+        .filter(pk=equipment_id, is_active=True)
+        .first()
+    )
+    if not truck or not equipment_is_truck(truck):
+        messages.error(request, 'Самосвал для ручного рейса не найден.')
+        return redirect(redirect_url)
+    truck_shift = (
+        EmployeeShift.objects
+        .select_for_update(of=('self',))
+        .select_related('employee')
+        .filter(equipment=truck, closed_at__isnull=True)
+        .order_by('-opened_at')
+        .first()
+    )
+    if not truck_shift:
+        messages.error(request, f'{truck}: нет открытой смены водителя — рейс некому записать.')
+        return redirect(redirect_url)
+    if truck_shift.opened_at and completed_at < truck_shift.opened_at:
+        messages.error(
+            request,
+            f'Время рейса раньше начала смены водителя ({format_dispatcher_datetime(truck_shift.opened_at)}).',
+        )
+        return redirect(redirect_url)
+    assignment = (
+        HaulAssignment.objects
+        .select_related('excavator')
+        .filter(
+            truck=truck,
+            excavator_id=excavator_id,
+            status__in=[AssignmentStatus.ACCEPTED, AssignmentStatus.PENDING],
+            ended_at__isnull=True,
+        )
+        .order_by('-assigned_at')
+        .first()
+    )
+    if not assignment:
+        messages.error(request, f'{truck} больше не назначен на выбранный экскаватор — обновите пульт.')
+        return redirect(redirect_url)
+    excavator = assignment.excavator
+    rock_type = RockType.objects.filter(id=request.POST.get('rock_type_id'), is_active=True).first()
+    dump_point = DumpPoint.objects.filter(id=request.POST.get('dump_point_id'), is_active=True).first()
+    if not rock_type or not dump_point:
+        messages.error(request, 'Выберите породу и точку разгрузки для ручного рейса.')
+        return redirect(redirect_url)
+    try:
+        volume_m3, tonnage = resolve_required_trip_measurements(truck, rock_type)
+    except ValidationError as error:
+        messages.error(request, '; '.join(getattr(error, 'messages', None) or [str(error)]))
+        return redirect(redirect_url)
+
+    placement = (
+        ExcavatorPlacement.objects
+        .select_related('work_dump_point')
+        .filter(excavator=excavator)
+        .first()
+    )
+    transport_distance_km = None
+    if placement:
+        setting = (
+            ExcavatorDumpPointSetting.objects
+            .filter(placement=placement, dump_point=dump_point)
+            .first()
+        )
+        if setting and setting.transport_distance_km is not None:
+            transport_distance_km = setting.transport_distance_km
+        elif placement.work_dump_point_id == dump_point.id:
+            transport_distance_km = placement.transport_distance_km
+    loading_shift = (
+        EmployeeShift.objects
+        .select_related('employee')
+        .filter(equipment=excavator, closed_at__isnull=True)
+        .order_by('-opened_at')
+        .first()
+    )
+    note = f'Добавлен диспетчером вручную: {reason}'[:1000]
+    created = []
+    for index in range(trips_count):
+        trip = Trip.objects.create(
+            excavator=excavator,
+            truck=truck,
+            excavator_operator=getattr(loading_shift, 'employee', None),
+            driver=truck_shift.employee,
+            loading_shift=loading_shift,
+            unloading_shift=truck_shift,
+            rock_type=rock_type,
+            dump_point=dump_point,
+            assigned_dump_point=dump_point,
+            actual_dump_point=dump_point,
+            volume_m3=volume_m3,
+            tonnage=tonnage,
+            loading_horizon=str(getattr(placement, 'loading_horizon', '') or '')[:64],
+            loading_block=str(getattr(placement, 'loading_block', '') or '')[:64],
+            transport_distance_km=transport_distance_km,
+            note=note,
+            status=TripStatus.COMPLETED,
+            completed_at=completed_at - timedelta(seconds=trips_count - 1 - index),
+            is_carryover=bool(loading_shift and loading_shift.shift_type != truck_shift.shift_type),
+        )
+        log_dispatcher_action(
+            actor=access.employee,
+            action_type=DispatcherActionType.MANUAL_TRIP,
+            trip=trip,
+            target_summary=f'{truck} -> {dump_point}',
+            reason=reason,
+        )
+        created.append(trip)
+    bump_operational_state(
+        'Trip:dispatcher_manual_trip',
+        event_type='trip_changed',
+        object_type='Trip',
+        object_id=created[-1].id,
+        payload={
+            'action': 'dispatcher_manual_trip',
+            'trip_ids': [trip.id for trip in created],
+            'truck_id': truck.id,
+            'excavator_id': excavator.id,
+            'assigned_dump_point_id': dump_point.id,
+            'actual_dump_point_id': dump_point.id,
+            'status': TripStatus.COMPLETED,
+        },
+    )
+    count_label = 'рейс' if trips_count == 1 else 'рейса' if trips_count < 5 else 'рейсов'
+    messages.success(
+        request,
+        f'{truck}: добавлено {trips_count} {count_label} вручную — {dump_point}, {rock_type}, '
+        f'водитель {truck_shift.employee}.',
+    )
     return redirect(redirect_url)
 
 

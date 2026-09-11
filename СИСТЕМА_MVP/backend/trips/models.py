@@ -14,6 +14,7 @@ class DispatcherActionType(models.TextChoices):
     CANCEL_ASSIGNMENT = 'cancel_assignment', 'Снятие назначения'
     CANCEL_TRIP = 'cancel_trip', 'Отмена рейса'
     COMPLETE_TRIP = 'complete_trip', 'Служебное завершение рейса'
+    MANUAL_TRIP = 'manual_trip', 'Ручной рейс диспетчера'
 
 
 class Trip(models.Model):

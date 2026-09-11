@@ -13188,3 +13188,755 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen).is-equipment-se
     vertical-align: middle;
     margin-left: 8px;
 }
+
+
+
+/* ============================================================================
+   КАРТОЧКА ТЕХНИКИ / КОМПЛЕКСА НА ПУЛЬТЕ — раскладка в два столбца.
+
+   Прежняя карточка была одной колонкой шириной 1020px: имя, человек,
+   простой, настройки, список фактов, отчёт — друг под другом, с прокруткой,
+   при этом справа от каждого блока пустовало полэкрана. Теперь:
+
+   +----------------------------------------------------------------------+
+   | [икон] КОМПЛЕКС · K-9  [НАЗНАЧЕНА] [Скальная порода]     ПЛАН СМЕНЫ  |
+   |        Экскаватор Э-9 · Cat 395 · ковш 5,7 м³               12%     |
+   +--------------------------+-------------------------------------------+
+   | МАШИНИСТ                 | НАСТРОЙКИ РАБОТЫ                          |
+   |  [фото] Полижаев Е. А.   |  Горизонт | Блок | Порода                 |
+   |         +7 963 …         |  Точки разгрузки  [+ Добавить]            |
+   |         ● В сети         |   ККД  ▾   плечо 4,2 км   ×               |
+   |  Смена  Вторая           |   СКДР ▾   плечо —        ×               |
+   |  Открыта 11.09 19:05     |                       [Сохранить]         |
+   |  [Завершить смену]       |-------------------------------------------|
+   |--------------------------| СМЕНА НА ТЕКУЩИЙ МОМЕНТ                   |
+   | ПРОСТОЙ  27:49:33        |  План · Факт · Самосвалы · Работали …     |
+   | Ожидание самосвалов      |  [План/факт] [Порода] [Разгрузка] …       |
+   |          [Завершить]     |  … диаграммы …                            |
+   |--------------------------|                                           |
+   | СОСТАВ  5 машин          |                                           |
+   |  20  21  24  30  47      |                                           |
+   +--------------------------+-------------------------------------------+
+
+   Левый столбец — люди и действия (машинист, завершение смены, простой,
+   состав). Правый — работа (настройки забоя и разгрузки, отчёт смены).
+   Всё, что диспетчер делает руками, собрано слева; всё, что он читает, —
+   справа. Только настольный пульт: у горного мастера своя карточка.
+   ============================================================================ */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-equipment-detail .mm-equipment-detail-panel {
+    /* Внутри холста vw/vh меряют настоящее окно, а панель живёт в
+       логических точках холста — берём доли опорного размера (--gd-vw/--gd-vh
+       выставляет скрипт холста), как у остальных закреплённых правил. */
+    width: min(1120px, calc(100 * var(--gd-vw, 1vw) - 32px));
+    max-height: min(900px, calc(100 * var(--gd-vh, 1vh) - 40px));
+    padding: 18px 20px 20px;
+}
+
+/* --- Шапка ----------------------------------------------------------------- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero {
+    display: grid;
+    grid-template-columns: 104px minmax(0, 1fr) auto;
+    gap: 14px 16px;
+    align-items: center;
+    padding: 0 40px 14px 0;
+    border-bottom: 1px solid var(--gd-detail-line);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-copy {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-type {
+    color: var(--gd-detail-muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero h2 {
+    margin: 0;
+    color: var(--gd-detail-ink);
+    font-size: 30px;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: -.01em;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 2px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-tags mark,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-tags small {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 900;
+    line-height: 1.1;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-tags mark {
+    background: rgba(107, 231, 20, .14);
+    color: var(--gd-green);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-tags small {
+    background: rgba(142, 158, 166, .14);
+    color: var(--gd-detail-ink);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-tags mark:empty,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-tags small:empty {
+    display: none;
+}
+
+/* Паспортная строка: модель, ГП, ковш/кузов — то, что раньше лежало в
+   общем списке под настройками. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-meta {
+    margin: 2px 0 0;
+    color: var(--gd-detail-muted);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-meta:empty {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-plan {
+    display: grid;
+    justify-items: end;
+    gap: 3px;
+    padding-left: 16px;
+    border-left: 1px solid var(--gd-detail-line);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-plan[hidden] {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-plan > span {
+    color: var(--gd-detail-muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-plan > strong {
+    color: var(--gd-green);
+    font-size: 30px;
+    font-weight: 900;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-plan.is-muted > strong {
+    color: var(--gd-detail-muted);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-hero-plan > small {
+    color: var(--gd-detail-muted);
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+/* --- Два столбца ------------------------------------------------------------ */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-columns {
+    display: grid;
+    grid-template-columns: 360px minmax(0, 1fr);
+    gap: 0 20px;
+    align-items: start;
+    padding-top: 14px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-col {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    align-content: start;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-col-people {
+    padding-right: 20px;
+    border-right: 1px solid var(--gd-detail-line);
+}
+
+/* Общий заголовок раздела: капитель как в шапке пульта. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-equipment-detail .gd-detail-section-title {
+    margin: 0 0 8px;
+    color: var(--gd-detail-muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-equipment-detail .gd-detail-section-title > span {
+    margin-left: 6px;
+    color: var(--gd-detail-ink);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+/* --- Машинист и смена ------------------------------------------------------- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--gd-detail-line);
+    border-radius: 8px;
+    background: var(--gd-detail-employee);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew[hidden] {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew .gd-detail-section-title {
+    margin-bottom: 0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-person {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew .mm-detail-employee-photo {
+    width: 52px;
+    height: 52px;
+    margin: 0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew .mm-detail-employee-info {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew .mm-detail-employee-info strong {
+    color: var(--gd-detail-ink);
+    font-size: 15px;
+    font-weight: 900;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew .mm-detail-employee-info a {
+    color: var(--gd-blue);
+    font-size: 13px;
+    font-weight: 800;
+    text-decoration: none;
+    font-variant-numeric: tabular-nums;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew .mm-detail-employee-info a[aria-disabled="true"] {
+    color: var(--gd-detail-muted);
+    pointer-events: none;
+}
+
+/* Точка присутствия перед словом состояния — та же палитра, что на плитках. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-presence {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--gd-detail-muted);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-presence::before {
+    content: "";
+    flex: 0 0 8px;
+    width: 8px;
+    height: 8px;
+    border: 1px solid rgba(3, 14, 18, .92);
+    border-radius: 999px;
+    background: #95a7b0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-presence.is-online::before { background: #58df52; box-shadow: 0 0 6px rgba(88, 223, 82, .7); }
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-presence.is-background::before { background: #38bdf8; box-shadow: 0 0 6px rgba(56, 189, 248, .7); }
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-presence.is-recent::before { background: #ffd166; box-shadow: 0 0 6px rgba(255, 209, 102, .7); }
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-presence.is-offline::before { background: #ff8a24; box-shadow: 0 0 6px rgba(255, 138, 36, .7); }
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-presence.is-online { color: #58df52; }
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-presence.is-offline { color: #ff8a24; }
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-shift {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 4px 12px;
+    margin: 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--gd-detail-line);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-shift[hidden] {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-shift dt {
+    color: var(--gd-detail-muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: .06em;
+    line-height: 16px;
+    text-transform: uppercase;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-shift dd {
+    margin: 0;
+    color: var(--gd-detail-ink);
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 16px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-shift dd:empty,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-shift dd:empty + dt,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-crew-shift dt:has(+ dd:empty) {
+    display: none;
+}
+
+/* Служебное завершение смены: одна кнопка, по ней раскрывается форма с
+   причиной и показаниями. Форма обычная (POST + редирект) — тот же маршрут,
+   что у «Незакрытых смен» в журнале, никакой новой серверной логики. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close[hidden] {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close button {
+    box-sizing: border-box;
+    min-height: 34px;
+    padding: 0 14px;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-toggle {
+    width: 100%;
+    border: 1px solid color-mix(in srgb, var(--gd-red) 60%, var(--gd-detail-line));
+    background: transparent;
+    color: var(--gd-red);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-toggle:hover,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-toggle:focus-visible {
+    background: var(--gd-red-soft);
+    outline: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-toggle:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close.is-open .gd-detail-shift-close-toggle {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-body {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid color-mix(in srgb, var(--gd-red) 50%, var(--gd-detail-line));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--gd-red) 8%, var(--gd-detail-panel));
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-body[hidden] {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-body p {
+    margin: 0;
+    color: var(--gd-detail-muted);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-body label {
+    display: block;
+    min-width: 0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-body label > span {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--gd-detail-muted);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-body input {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 32px;
+    padding: 6px 8px;
+    border: 1px solid rgba(129, 154, 166, .32);
+    border-radius: 6px;
+    background: #101f28;
+    color: #e8f2f5;
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.1;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-body input:focus {
+    border-color: var(--gd-red);
+    outline: 1px solid color-mix(in srgb, var(--gd-red) 30%, transparent);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-readings {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 8px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-readings label[hidden] {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-actions {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-cancel {
+    border: 1px solid var(--gd-detail-line);
+    background: transparent;
+    color: var(--gd-detail-muted);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-submit {
+    border: 1px solid var(--gd-red);
+    background: var(--gd-red-soft);
+    color: var(--gd-red);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-submit:hover,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-submit:focus-visible {
+    background: color-mix(in srgb, var(--gd-red-soft) 70%, var(--gd-red) 14%);
+    outline: none;
+}
+
+/* --- Простой: тот же блок, но в узком столбце — двумя рядами ------------ */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-downtime {
+    grid-template-columns: minmax(0, 1fr) auto;
+    margin-top: 0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-downtime > button {
+    grid-column: 1 / -1;
+    width: 100%;
+}
+
+/* --- Состав комплекса ------------------------------------------------------- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-trucks[hidden] {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-truck-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-truck-chips[hidden] {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-truck-chips.is-removed {
+    margin-top: 6px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-truck-chips > span {
+    display: inline-grid;
+    place-items: center;
+    min-width: 40px;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid rgba(42, 169, 216, .5);
+    border-radius: 6px;
+    background: rgba(42, 169, 216, .12);
+    color: var(--gd-detail-ink);
+    font-size: 14px;
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-truck-chips.is-removed > span {
+    border-color: rgba(142, 158, 166, .3);
+    background: transparent;
+    color: var(--gd-detail-muted);
+    text-decoration: line-through;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-truck-chips > em {
+    align-self: center;
+    color: var(--gd-detail-muted);
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 700;
+}
+
+/* --- Оставшиеся факты (рейс, план, разгрузки…) — компактный список ------- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-equipment-detail .mm-detail-list {
+    grid-template-columns: minmax(96px, auto) minmax(0, 1fr);
+    gap: 0 12px;
+    margin: 0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-equipment-detail .mm-detail-list:empty {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-equipment-detail .mm-detail-list dt,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-equipment-detail .mm-detail-list dd {
+    min-height: 0;
+    padding: 6px 0;
+    font-size: 12px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-equipment-detail .mm-detail-list dd {
+    font-size: 13px;
+}
+
+/* --- Правый столбец: настройки и отчёт ------------------------------------- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-shell .gd-equipment-detail .gd-detail-settings {
+    margin-top: 0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-shell .gd-equipment-detail .gd-detail-settings-face {
+    grid-template-columns: 96px 96px minmax(200px, 1fr);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-shell .gd-equipment-detail .gd-detail-destination-row {
+    grid-template-columns: minmax(200px, 1fr) 120px 32px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-report {
+    margin-top: 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--gd-detail-line);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-report[hidden] {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-load-state {
+    margin-top: 0;
+}
+
+/* На узком окне (когда холст выключен) столбцы складываются. */
+@media (max-width: 1180px) {
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-columns {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-col-people {
+        padding-right: 0;
+        border-right: 0;
+    }
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-hint {
+    display: block;
+    margin: 2px 0 0;
+    font-size: 12px;
+    line-height: 1.35;
+    color: rgba(255, 255, 255, 0.58);
+}
+
+/* --- Чья смена: метка у заголовка и предупреждение о незакрытом хвосте --- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-verdict {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.3;
+    text-transform: none;
+    letter-spacing: 0;
+    vertical-align: middle;
+    border: 1px solid var(--gd-detail-line);
+    color: var(--gd-detail-muted);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-verdict[hidden] {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-verdict.is-current {
+    border-color: color-mix(in srgb, var(--gd-green) 60%, transparent);
+    background: color-mix(in srgb, var(--gd-green) 14%, transparent);
+    color: var(--gd-green);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-verdict.is-overlap {
+    border-color: color-mix(in srgb, var(--gd-yellow) 60%, transparent);
+    background: color-mix(in srgb, var(--gd-yellow) 14%, transparent);
+    color: var(--gd-yellow);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-verdict.is-stale {
+    border-color: color-mix(in srgb, var(--gd-red) 70%, transparent);
+    background: color-mix(in srgb, var(--gd-red) 16%, transparent);
+    color: var(--gd-red);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-alert {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--gd-yellow) 55%, transparent);
+    background: color-mix(in srgb, var(--gd-yellow) 10%, var(--gd-detail-panel));
+    color: #f3e7c0;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-alert[hidden] {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-alert.is-stale {
+    border-color: color-mix(in srgb, var(--gd-red) 70%, transparent);
+    background: color-mix(in srgb, var(--gd-red) 14%, var(--gd-detail-panel));
+    color: #ffd9d4;
+}
+
+/* --- Номер самосвала в клоне плитки: базовое правило плитки центрирует
+   номер через transform, а правило слота сдвигает его в угол — вместе они
+   утаскивали половину номера за край («01» вместо «101»). --- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-garage-slot .dispatcher-truck-tile strong {
+    top: 6px;
+    left: 8px;
+    right: auto;
+    max-width: calc(100% - 16px);
+    transform: none;
+    font-size: 18px;
+}
+
+/* --- Ручной рейс: свой блок в правом столбце, форма как у закрытия смены --- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip {
+    display: grid;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--gd-detail-line);
+    border-radius: 10px;
+    background: var(--gd-detail-panel);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip[hidden] {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip-blocked {
+    margin: 0;
+    color: var(--gd-detail-muted);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip-blocked[hidden] {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip-toggle {
+    border-color: color-mix(in srgb, var(--gd-green) 60%, var(--gd-detail-line));
+    color: var(--gd-green);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip-form .gd-detail-shift-close-body {
+    border-color: color-mix(in srgb, var(--gd-green) 45%, var(--gd-detail-line));
+    background: color-mix(in srgb, var(--gd-green) 7%, var(--gd-detail-panel));
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip-form select {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 32px;
+    padding: 6px 8px;
+    border: 1px solid rgba(129, 154, 166, .32);
+    border-radius: 6px;
+    background: #101f28;
+    color: #e8f2f5;
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.1;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip-form input:focus,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip-form select:focus {
+    border-color: var(--gd-green);
+    outline: 1px solid color-mix(in srgb, var(--gd-green) 30%, transparent);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip-form input[type="datetime-local"] {
+    color-scheme: dark;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip-submit {
+    border-color: var(--gd-green);
+    background: color-mix(in srgb, var(--gd-green) 16%, transparent);
+    color: var(--gd-green);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip-submit:hover,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manual-trip-submit:focus-visible {
+    background: color-mix(in srgb, var(--gd-green) 28%, transparent);
+    outline: none;
+}
