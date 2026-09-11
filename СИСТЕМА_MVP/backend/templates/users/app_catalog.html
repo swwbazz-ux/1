@@ -23,9 +23,9 @@
         <div class="app-catalog-heading">
             <p class="app-catalog-eyebrow">Выберите своё приложение</p>
             <h1>Приложения для работы</h1>
-            {% if choose_role %}
-            <p class="app-catalog-instruction" data-choose-role-hint>
-                У вашего номера несколько ролей. Откройте приложение нужной роли и войдите в нём — номер и PIN те же.
+            {% if own_apps_url %}
+            <p class="app-catalog-instruction" data-own-apps-hint>
+                Вы вошли в систему — <a href="{{ own_apps_url }}" style="color: var(--catalog-copper); font-weight: 700;">открыть своё приложение →</a>
             </p>
             {% endif %}
             <p class="app-catalog-instruction app-catalog-instruction--desktop">

@@ -1141,11 +1141,11 @@ class RoleAppLoginTests(TestCase):
                 self.assertNotIn('employee_access_id', client.session)
                 self.assertNotIn('pending_activation_access_id', client.session)
 
-    def test_unified_login_sends_multi_role_phone_to_the_app_catalog(self):
+    def test_unified_login_multi_role_phone_goes_pin_then_app_choice(self):
         # Один номер и один PIN на несколько ролей (владелец, администратор) —
-        # это не дубль записи, а сотрудник с несколькими ролями: на общем входе
-        # driverform.ru ему показывают каталог приложений, а не «нужна помощь».
-        EmployeeAccess.objects.create(
+        # это не дубль записи, а сотрудник с несколькими ролями: единый вход
+        # ведёт номер → PIN → экран выбора приложения, одно нажатие — и в работе.
+        second_access = EmployeeAccess.objects.create(
             employee=self.driver_access.employee,
             role=self.excavator_access.role,
             access_code=self.driver_access.access_code,
@@ -1153,43 +1153,57 @@ class RoleAppLoginTests(TestCase):
             activated_at=timezone.now(),
             is_active=True,
         )
+        phone = self.driver_access.employee.phone
+        pin = self.driver_access.access_code
 
-        response = self.client.post(
+        phone_step = self.client.post(
             '/',
-            {
-                'phone': self.driver_access.employee.phone,
-                'action': 'continue',
-                'device_kind': 'personal',
-                'privacy_consent': PRIVACY_POLICY_VERSION,
-            },
+            {'phone': phone, 'action': 'continue', 'device_kind': 'personal',
+             'privacy_consent': PRIVACY_POLICY_VERSION},
             HTTP_HOST='localhost',
         )
+        self.assertEqual(phone_step.status_code, 200)
+        self.assertNotContains(phone_step, 'Нужна помощь администратора')
+        self.assertEqual(phone_step.context['login_step'], 'pin')
 
-        self.assertEqual(response.status_code, 302)
-        self.assertTrue(response['Location'].endswith('/apps/?choose=1'), response['Location'])
-        self.assertNotIn('employee_access_id', self.client.session)
-
-        # Страница входа шлёт шаг с номером fetch-ом и подменяет только <main>:
-        # ей нужен JSON-редирект, чтобы каталог открылся полной навигацией.
-        in_place = self.client.post(
+        pin_step = self.client.post(
             '/',
-            {
-                'phone': self.driver_access.employee.phone,
-                'action': 'continue',
-                'device_kind': 'personal',
-                'privacy_consent': PRIVACY_POLICY_VERSION,
-            },
+            {'phone': phone, 'access_code': pin, 'action': 'login', 'device_kind': 'personal'},
             HTTP_HOST='localhost',
-            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
         )
-        self.assertEqual(in_place.status_code, 200)
-        self.assertTrue(in_place.json()['redirect_url'].endswith('/apps/?choose=1'))
+        self.assertEqual(pin_step.status_code, 302)
+        self.assertEqual(pin_step['Location'], '/apps/choose/')
+        self.assertIn('employee_access_id', self.client.session)
 
-        catalog = self.client.get('/apps/?choose=1', HTTP_HOST='localhost')
-        self.assertContains(catalog, 'У вашего номера несколько ролей')
+        choose = self.client.get('/apps/choose/', HTTP_HOST='localhost')
+        self.assertContains(choose, 'Выберите приложение')
+        self.assertContains(choose, 'data-app-choose="driver"')
+        self.assertContains(choose, 'data-app-choose="excavator_operator"')
+
+        opened = self.client.post(
+            '/apps/choose/',
+            {'role_code': 'excavator_operator'},
+            HTTP_HOST='localhost',
+        )
+        self.assertEqual(opened.status_code, 302)
+        self.assertEqual(opened['Location'], '/excavator/work/')
+        self.assertEqual(self.client.session['employee_access_id'], second_access.id)
+
+        # Переключение на другое приложение — снова через тот же экран, без PIN.
+        switched = self.client.post('/apps/choose/', {'role_code': 'driver'}, HTTP_HOST='localhost')
+        self.assertEqual(switched['Location'], '/driver/')
+        self.assertEqual(self.client.session['employee_access_id'], self.driver_access.id)
+
+        # Чужую роль выбрать нельзя.
+        forbidden = self.client.post('/apps/choose/', {'role_code': 'admin'}, HTTP_HOST='localhost')
+        self.assertEqual(forbidden['Location'], '/apps/choose/')
+
+        # Без сессии экран выбора ведёт на вход и возвращает обратно.
+        anonymous = Client().get('/apps/choose/', HTTP_HOST='localhost')
+        self.assertEqual(anonymous['Location'], '/?form=1&next=/apps/choose/')
 
         # В приложении конкретной роли номер ищется только среди этой роли —
-        # вход как обычно, без каталога и без конфликта.
+        # вход как обычно, без выбора и без конфликта.
         role_host = Client()
         role_response = role_host.post(
             '/',

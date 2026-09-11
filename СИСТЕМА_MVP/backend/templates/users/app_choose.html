@@ -1,0 +1,94 @@
+{% load static %}
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0b1722">
+    <title>Выбор приложения · Коппер Рисорсез</title>
+    <link rel="icon" href="{% static 'favicon.ico' %}">
+    <link rel="stylesheet" href="{% static 'css/app-catalog-v1.css' %}?v=7">
+    <style>
+        /* Плитка выбора — та же карточка каталога, но это кнопка формы, а не ссылка. */
+        .app-choose-form { display: contents; }
+        button.app-catalog-card {
+            width: 100%;
+            appearance: none;
+            font: inherit;
+            color: inherit;
+            text-align: center;
+            cursor: pointer;
+        }
+        .app-catalog-card.is-current { outline: 2px solid var(--catalog-copper); outline-offset: -2px; }
+        .app-choose-note {
+            margin: 0 0 18px;
+            color: var(--catalog-muted);
+            font-size: 15px;
+        }
+        .app-choose-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 22px;
+            margin-top: 8px;
+            color: var(--catalog-muted);
+            font-size: 14px;
+        }
+        .app-choose-links a { color: var(--catalog-text); }
+        .app-choose-message { margin: 0 0 16px; color: #ffb4a8; font-weight: 600; }
+    </style>
+</head>
+<body class="app-catalog-page">
+<main class="app-catalog-shell">
+    <header class="app-catalog-header">
+        <div class="app-catalog-brand" aria-label="ООО Коппер Рисорсез">
+            <span class="app-catalog-brand__mark" aria-hidden="true">CR</span>
+            <span>
+                <strong>Коппер Рисорсез</strong>
+                <small>Рабочие приложения</small>
+            </span>
+        </div>
+        <div class="app-catalog-heading">
+            <p class="app-catalog-eyebrow">{{ employee.full_name }}</p>
+            <h1>Выберите приложение</h1>
+            <p class="app-choose-note">Одно нажатие — и вы в работе. Номер и PIN вводить больше не нужно; сюда можно вернуться, чтобы переключиться на другое приложение.</p>
+        </div>
+    </header>
+
+    {% if messages %}
+        {% for message in messages %}<p class="app-choose-message">{{ message }}</p>{% endfor %}
+    {% endif %}
+
+    <section class="app-catalog-grid" aria-label="Ваши приложения">
+        {% for app in own_apps %}
+        <form method="post" class="app-choose-form" data-app-choose-form>
+            {% csrf_token %}
+            <input type="hidden" name="role_code" value="{{ app.role_code }}">
+            <button
+                type="submit"
+                class="app-catalog-card{% if app.role_code == current_role_code %} is-current{% endif %}"
+                data-app-choose="{{ app.role_code }}"
+                style="--app-accent: {{ app.theme_color }}"
+                aria-label="Открыть приложение {{ app.label }}"
+            >
+                <span class="app-catalog-card__icon-wrap" aria-hidden="true">
+                    <img class="app-catalog-card__icon" src="{{ app.icon_url }}" width="112" height="112" alt="">
+                </span>
+                <span class="app-catalog-card__name">{{ app.label }}</span>
+                <span class="app-catalog-card__action">
+                    <span>Открыть</span>
+                    <span aria-hidden="true">→</span>
+                </span>
+            </button>
+        </form>
+        {% endfor %}
+    </section>
+
+    <footer class="app-catalog-footer">
+        <div class="app-choose-links">
+            <a href="{% url 'app_catalog' %}">Все приложения и QR-коды</a>
+            <a href="{% url 'logout' %}">Это не я — выйти</a>
+        </div>
+    </footer>
+</main>
+</body>
+</html>

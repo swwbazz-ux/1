@@ -45,6 +45,7 @@ from .views import (
     activate_access_view,
     app_catalog_qr_view,
     app_catalog_view,
+    app_choose_view,
     driver_accept_assignment_view,
     driver_downtime_action_view,
     driver_close_shift_view,
@@ -96,6 +97,7 @@ urlpatterns = [
     # Общий вход: одна ссылка на всех, система сама подскажет нужное приложение.
     path('start/', universal_start_view, name='universal_start'),
     path('apps/', app_catalog_view, name='app_catalog'),
+    path('apps/choose/', app_choose_view, name='app_choose'),
     path('apps/qr/<slug:role_code>/', app_catalog_qr_view, name='app_catalog_qr'),
     path('interfaces/', interface_map_view, name='interface_map'),
     path('home/', role_home_view, name='role_home'),

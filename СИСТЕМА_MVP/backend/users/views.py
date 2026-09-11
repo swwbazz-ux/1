@@ -96,6 +96,7 @@ from .access_auth import (
 )
 from .app_catalog import (
     APP_CATALOG_ROLE_CODES,
+    APP_CATALOG_ROLES,
     app_catalog_public_url,
     app_catalog_items,
     role_app_qr_asset_path,
@@ -602,18 +603,15 @@ def _phone_accesses_have_duplicate_role(candidates):
     return False
 
 
-def _multi_role_phone_response(request, candidates, *, role_app, allowed_role_codes, login_role_app, phone):
-    """Номер с несколькими записями доступа на едином входе.
+def _phone_access_conflict_response(request, candidates, *, role_app, allowed_role_codes, login_role_app, phone):
+    """Номер с несколькими записями доступа.
 
-    Дубли одной роли — по-прежнему «нужна помощь администратора». Разные роли
-    на общем входе driverform.ru — не ошибка: ведём в каталог приложений, где
-    человек выбирает нужную роль и входит уже в её приложении (там номер ищется
-    только среди этой роли)."""
+    Дубли одной роли — «нужна помощь администратора». Разные роли на общем
+    входе driverform.ru — не ошибка, а сотрудник с несколькими ролями: вход
+    продолжается как обычно (номер → PIN), а после PIN он выбирает приложение
+    на экране /apps/choose/. Возвращает None, когда конфликта нет."""
     if not _phone_accesses_have_duplicate_role(candidates) and role_app is None and not allowed_role_codes:
-        # Шаг с номером страница входа шлёт fetch-ом и подменяет только <main>;
-        # каталог — отдельная страница со своими стилями, поэтому ей нужен
-        # JSON-редирект, который скрипт входа выполняет полной навигацией.
-        return _login_redirect_response(request, f'{app_catalog_public_url(request)}?choose=1')
+        return None
     return render(
         request,
         'users/login_phone_not_found.html',
@@ -627,10 +625,85 @@ def _multi_role_phone_response(request, candidates, *, role_app, allowed_role_co
     )
 
 
+def _own_catalog_apps(employee):
+    """Активированные роли сотрудника, у которых есть приложение в каталоге,
+    в порядке каталога: [(app, access), ...]."""
+    accesses = {
+        access.role.code: access
+        for access in EmployeeAccess.objects
+        .select_related('role', 'employee')
+        .filter(
+            employee=employee,
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+            role__is_active=True,
+            role__code__in=APP_CATALOG_ROLE_CODES,
+        )
+        if employee_has_effective_access_role(access.employee, access.role.code)
+    }
+    result = []
+    for role_code in APP_CATALOG_ROLE_CODES:
+        app = get_role_app(role_code)
+        if app is not None and role_code in accesses:
+            result.append((app, accesses[role_code]))
+    return result
+
+
+def app_choose_view(request):
+    """Выбор приложения после единого входа для сотрудника с несколькими ролями.
+
+    Одно нажатие на плитку делает роль активной в этой же сессии и открывает её
+    рабочий экран на этом же хосте — без повторного ввода номера и PIN. Сюда же
+    можно вернуться, чтобы переключиться на другое приложение."""
+    if get_role_app_for_request(request):
+        return redirect(app_catalog_public_url(request))
+    access = get_current_access(request)
+    if not access:
+        return redirect(f"{reverse('login')}?form=1&next={reverse('app_choose')}")
+    own_apps = _own_catalog_apps(access.employee)
+    if request.method == 'POST':
+        role_code = (request.POST.get('role_code') or '').strip()
+        target = next((item_access for app, item_access in own_apps if app.role_code == role_code), None)
+        if target is None:
+            messages.error(request, 'Это приложение вам не назначено.')
+            return redirect('app_choose')
+        try:
+            with transaction.atomic():
+                activate_role_session(request, target)
+        except ValidationError as error:
+            messages.error(request, '; '.join(error.messages))
+            return redirect('app_choose')
+        request.session.cycle_key()
+        return redirect(_role_landing_url(target))
+    if not own_apps:
+        return redirect(_role_landing_url(access))
+    response = render(
+        request,
+        'users/app_choose.html',
+        {
+            'employee': access.employee,
+            'current_role_code': access.role.code,
+            'own_apps': [
+                {
+                    'role_code': app.role_code,
+                    'label': dict(APP_CATALOG_ROLES).get(app.role_code, app.short_name),
+                    'description': app.description,
+                    'icon_url': app.icon_192_url,
+                    'theme_color': app.theme_color,
+                }
+                for app, _item_access in own_apps
+            ],
+        },
+    )
+    response['Cache-Control'] = 'no-store'
+    return response
+
+
 @require_GET
 def app_catalog_view(request):
     if get_role_app_for_request(request):
         return redirect(app_catalog_public_url(request))
+    current_access = get_current_access(request)
     catalog_apps = app_catalog_items(request)
     selected_role_code = (request.GET.get('app') or '').strip()
     selected_app = next(
@@ -643,8 +716,8 @@ def app_catalog_view(request):
         {
             'catalog_apps': catalog_apps,
             'selected_app': selected_app,
-            # Сюда попадают с единого входа, когда у номера несколько ролей.
-            'choose_role': request.GET.get('choose') == '1',
+            # Вошедшему сотруднику — прямой путь в свои приложения без QR.
+            'own_apps_url': reverse('app_choose') if current_access else '',
         },
     )
     response['Cache-Control'] = 'no-cache'
@@ -862,11 +935,13 @@ def login_view(
             if candidate.status == EmployeeAccess.Status.ACTIVATED
         ]
         if len(activated) > 1:
-            return _multi_role_phone_response(
+            conflict = _phone_access_conflict_response(
                 request, activated,
                 role_app=role_app, allowed_role_codes=allowed_role_codes,
                 login_role_app=login_role_app, phone=phone,
             )
+            if conflict is not None:
+                return conflict
         already_registered = bool(activated)
         pending = [
             candidate
@@ -874,11 +949,13 @@ def login_view(
             if candidate.status == EmployeeAccess.Status.NOT_ACTIVATED
         ]
         if len(pending) > 1 and not already_registered:
-            return _multi_role_phone_response(
+            conflict = _phone_access_conflict_response(
                 request, pending,
                 role_app=role_app, allowed_role_codes=allowed_role_codes,
                 login_role_app=login_role_app, phone=phone,
             )
+            if conflict is not None:
+                return conflict
         privacy_consent_accepted_now = False
         consent_access = (
             pending[0]
@@ -1026,11 +1103,13 @@ def login_view(
                 )
             ]
             if len(activated_for_phone) > 1:
-                return _multi_role_phone_response(
+                conflict = _phone_access_conflict_response(
                     request, activated_for_phone,
                     role_app=role_app, allowed_role_codes=allowed_role_codes,
                     login_role_app=login_role_app, phone=phone,
                 )
+                if conflict is not None:
+                    return conflict
         privacy_consent_accepted_now = False
         if combined_mobile_login and access:
             consent_ready, privacy_consent_accepted_now = (
@@ -1107,10 +1186,17 @@ def login_view(
                 )
             request.session.cycle_key()
             set_session_device_kind(request, selected_device_kind)
-            response = _login_redirect_response(
-                request,
-                next_url or _role_landing_url(access),
-            )
+            landing_url = next_url or _role_landing_url(access)
+            # Единый вход, несколько ролей на одном номере и PIN: после PIN —
+            # выбор приложения одним нажатием, а не первая попавшаяся роль.
+            if (
+                not next_url
+                and role_app is None
+                and not allowed_role_codes
+                and len(_own_catalog_apps(locked_access.employee)) > 1
+            ):
+                landing_url = reverse('app_choose')
+            response = _login_redirect_response(request, landing_url)
             return _attach_mobile_privacy_consent_cookie(
                 response,
                 request,
@@ -1143,11 +1229,13 @@ def login_view(
             if candidate.status == EmployeeAccess.Status.NOT_ACTIVATED
         ]
         if combined_mobile_login and len(first_time) > 1:
-            return _multi_role_phone_response(
+            conflict = _phone_access_conflict_response(
                 request, first_time,
                 role_app=role_app, allowed_role_codes=allowed_role_codes,
                 login_role_app=login_role_app, phone=phone,
             )
+            if conflict is not None:
+                return conflict
         if first_time:
             pending_access = first_time[0]
             privacy_consent_accepted_now = False
