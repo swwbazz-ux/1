@@ -52,7 +52,7 @@
     {% if not login_role_app %}
     {# Общий вход driverform.ru — фирменный стиль (фотополоса карьера, медная кромка). #}
     <link rel="preload" as="image" href="{% static 'img/start/start-hero-v1.webp' %}" type="image/webp">
-    <link rel="stylesheet" href="{% static 'css/login-v2.css' %}?v=4">
+    <link rel="stylesheet" href="{% static 'css/login-v2.css' %}?v=5">
     {% endif %}
 {% endblock %}
 {% comment %}
@@ -538,8 +538,11 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         <div class="login-v2__hero-backdrop" aria-hidden="true"></div>
         <picture class="login-v2__hero-picture">
             {# Оригиналы 1672×941 (десктоп) и 941×1672 (телефон) — без увеличения, чётко. #}
-            <source media="(min-width: 761px)" srcset="{% static 'img/start/login-hero-wide-v2.webp' %}" type="image/webp">
-            <source media="(min-width: 761px)" srcset="{% static 'img/start/login-hero-wide-v2.jpg' %}">
+            {# Горизонталь — только когда левая колонка шире, чем выше (широкие окна и #}
+            {# горизонтальный телефон); в узком/квадратном окне колонка почти вертикальная — #}
+            {# ей подходит вертикальный кадр, иначе логотип обрезается. #}
+            <source media="(min-width: 1024px) and (min-aspect-ratio: 7/4), (min-width: 761px) and (max-height: 520px)" srcset="{% static 'img/start/login-hero-wide-v2.webp' %}" type="image/webp">
+            <source media="(min-width: 1024px) and (min-aspect-ratio: 7/4), (min-width: 761px) and (max-height: 520px)" srcset="{% static 'img/start/login-hero-wide-v2.jpg' %}">
             <source srcset="{% static 'img/start/login-hero-tall-v2.webp' %}" type="image/webp">
             <img class="login-v2__hero-image"
                  src="{% static 'img/start/login-hero-tall-v2.jpg' %}"

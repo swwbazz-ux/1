@@ -40,6 +40,18 @@ body.login-page.login-unified-v2 *::after {
     box-sizing: border-box;
 }
 
+/* app.css в landscape до 1180px ужимает любой .dispatcher-shell в холст
+   1400×800 с transform: scale(.5) — для пульта это нужно, для входа это
+   «страница в четверть экрана». Здесь холста нет: обычная адаптивная страница. */
+@media (orientation: landscape) and (max-width: 1180px) {
+    body.login-page.login-unified-v2.dispatcher-shell {
+        width: 100%;
+        height: auto;
+        min-height: 100dvh;
+        transform: none;
+    }
+}
+
 /* Полотно: фотополоса сверху, карточка под ней. Сбрасываем всё, что
    dispatcher-shell навешивает на .shared-shift-dialog. */
 body.login-page.login-unified-v2 .unified-login-dialog.login-v2 {
@@ -531,16 +543,16 @@ body.login-page.login-unified-v2.is-login-keyboard-active .login-v2__hero {
         position: sticky;
         top: 0;
         height: 100dvh;
-        min-height: 480px;
+        min-height: 100dvh;
     }
 
     /* Горизонтальный оригинал 1672×941 заливает колонку почти без увеличения;
        кадрируется правый край, логотип (левая треть кадра) остаётся виден. */
+    /* В две колонки, но окно узкое/квадратное (ноутбук 1024×700, 1280×800):
+       колонка почти вертикальная — стоит вертикальный кадр, показываем верх. */
     .login-v2__hero-image {
         object-fit: cover;
-        /* 48%: и на 1280×800, и на 1920×1000 логотип с надписью целиком в кадре,
-           обрезаются камни слева и дорога справа. */
-        object-position: 48% 50%;
+        object-position: center 12%;
     }
 
     .login-v2__hero-backdrop {
@@ -569,6 +581,14 @@ body.login-page.login-unified-v2.is-login-keyboard-active .login-v2__hero {
     body.login-page.login-unified-v2 .login-v2 .unified-login-form {
         max-width: 520px;
         justify-self: center;
+    }
+}
+
+/* Широкое окно (16:9 и шире) и горизонтальный телефон: горизонтальный кадр,
+   48% по горизонтали держит логотип с надписью целиком на 1366–1920. */
+@media (min-width: 1024px) and (min-aspect-ratio: 7/4), (min-width: 761px) and (max-height: 520px) {
+    .login-v2__hero-image {
+        object-position: 48% 50%;
     }
 }
 
