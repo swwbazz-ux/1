@@ -1,6 +1,10 @@
 (function () {
     "use strict";
 
+    var navigationRequest = null;
+    var loadingTimer = null;
+    var retryNavigation = null;
+
     function normalizeSearchValue(value) {
         return String(value || "")
             .toLocaleLowerCase("ru-RU")
@@ -18,12 +22,47 @@
         if (indicator) indicator.hidden = false;
     }
 
+    function scheduleLoading(root) {
+        if (loadingTimer) window.clearTimeout(loadingTimer);
+        loadingTimer = window.setTimeout(function () {
+            loadingTimer = null;
+            setLoading(root);
+        }, 180);
+    }
+
     function clearLoading(root) {
+        if (loadingTimer) {
+            window.clearTimeout(loadingTimer);
+            loadingTimer = null;
+        }
         if (!root) return;
         root.classList.remove("is-loading");
         root.setAttribute("aria-busy", "false");
         var indicator = root.querySelector("[data-adoption-loading]");
         if (indicator) indicator.hidden = true;
+    }
+
+    function showNavigationError(root, retry) {
+        clearLoading(root);
+        var panel = root && root.querySelector("[data-adoption-navigation-error]");
+        var button = panel && panel.querySelector("[data-adoption-navigation-retry]");
+        retryNavigation = retry;
+        if (!panel) return;
+        panel.hidden = false;
+        if (button) {
+            button.onclick = function () {
+                panel.hidden = true;
+                if (typeof retryNavigation === "function") retryNavigation();
+            };
+            try { button.focus({ preventScroll: true }); }
+            catch (error) { button.focus(); }
+        }
+    }
+
+    function supportsEnhancedNavigation() {
+        return typeof window.fetch === "function"
+            && typeof window.DOMParser === "function"
+            && typeof window.URL === "function";
     }
 
     function initAdminNavigation() {
@@ -111,11 +150,145 @@
         syncDisclosure();
     }
 
+    function focusDescriptor(element) {
+        if (!element || !element.closest) return null;
+        var donut = element.closest("[data-donut-code]");
+        if (donut) return { type: "donut", value: donut.getAttribute("data-donut-code") };
+        var state = element.closest("[data-state-code]");
+        if (state) return { type: "state", value: state.getAttribute("data-state-code") };
+        if (element.closest("[data-adoption-state-select]")) return { type: "reason" };
+        if (element.closest("[data-adoption-filter-form]")) return { type: "filters" };
+        if (element.closest("[data-adoption-analytics-trigger]")) return { type: "analytics" };
+        if (element.closest("[data-server-filter]")) return { type: "destination" };
+        return null;
+    }
+
+    function normalizeCanonicalUrl(root) {
+        if (!root || !window.history || typeof window.history.replaceState !== "function") return;
+        var canonical = root.getAttribute("data-canonical-query-url");
+        if (canonical === null) return;
+        var expectedSearch = canonical ? (canonical.charAt(0) === "?" ? canonical : "?" + canonical) : "";
+        if (window.location.search === expectedSearch) return;
+        var meaningfulHash = /^(#people-list|#adoption-growth-title)$/.test(window.location.hash) ? window.location.hash : "";
+        window.history.replaceState(window.history.state, "", window.location.pathname + expectedSearch + meaningfulHash);
+    }
+
+    function focusAfterNavigation(root, url, descriptor) {
+        if (!root || !descriptor) return;
+        var target = null;
+        if (descriptor.type === "donut") {
+            target = Array.prototype.slice.call(root.querySelectorAll("[data-donut-legend]")).find(function (item) {
+                return item.getAttribute("data-donut-code") === descriptor.value;
+            });
+        } else if (descriptor.type === "state") {
+            target = Array.prototype.slice.call(root.querySelectorAll("[data-state-code]")).find(function (item) {
+                return item.getAttribute("data-state-code") === descriptor.value;
+            });
+        } else if (descriptor.type === "reason") {
+            target = root.querySelector("[data-adoption-state-select]");
+        } else if (descriptor.type === "filters") {
+            target = root.querySelector("[data-adoption-filter-toggle]")
+                || root.querySelector("[data-adoption-filter-form] select");
+        } else if (descriptor.type === "analytics") {
+            target = root.querySelector("[data-adoption-analytics-trigger]");
+        }
+        if (!target && url.hash === "#people-list") target = root.querySelector("#people-list-title");
+        if (!target && url.hash === "#adoption-growth-title") target = root.querySelector("#adoption-growth-title");
+        if (!target && descriptor.type === "destination") {
+            target = root.querySelector("#adoption-summary-title") || root.querySelector("h1, h2");
+        }
+        if (!target) return;
+        if (!target.matches("a, button, input, select, textarea, [tabindex]")) target.setAttribute("tabindex", "-1");
+        try { target.focus({ preventScroll: true }); }
+        catch (error) { target.focus(); }
+    }
+
+    function scrollAfterNavigation(root, url) {
+        if (!root) return;
+        var target = url.hash ? root.querySelector(url.hash) : null;
+        if (!target && url.hash === "#adoption-growth-title") {
+            target = root.querySelector("[data-adoption-analytics]");
+        }
+        if (target) {
+            window.requestAnimationFrame(function () {
+                target.scrollIntoView({ block: "start" });
+            });
+        }
+    }
+
+    function enhancedNavigate(root, destination, options) {
+        var settings = options || {};
+        var url = new URL(destination, window.location.href);
+        var restoreFocus = settings.focus
+            || focusDescriptor(document.activeElement)
+            || (settings.fromHistory ? null : { type: "destination" });
+        if (!supportsEnhancedNavigation() || url.origin !== window.location.origin) {
+            window.location.assign(url.toString());
+            return;
+        }
+
+        if (navigationRequest) navigationRequest.abort();
+        var controller = typeof window.AbortController === "function" ? new window.AbortController() : null;
+        navigationRequest = controller;
+        scheduleLoading(root);
+        var timeout = window.setTimeout(function () {
+            if (controller) controller.abort();
+        }, 12000);
+
+        window.fetch(url.toString(), {
+            method: "GET",
+            credentials: "same-origin",
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+            signal: controller ? controller.signal : undefined
+        }).then(function (response) {
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            return response.text();
+        }).then(function (html) {
+            var documentCopy = new window.DOMParser().parseFromString(html, "text/html");
+            var replacement = documentCopy.querySelector("[data-registration-dashboard]");
+            if (!replacement) throw new Error("Dashboard fragment missing");
+            if (root._adoptionDestroy) root._adoptionDestroy();
+            root.replaceWith(replacement);
+            if (!settings.fromHistory) {
+                window.history.pushState({ adoptionDashboard: true }, "", url.toString());
+            }
+            initDashboard(replacement);
+            document.title = documentCopy.title || document.title;
+            clearLoading(replacement);
+            focusAfterNavigation(replacement, url, restoreFocus);
+            scrollAfterNavigation(replacement, url);
+        }).catch(function (error) {
+            if (error && error.name === "AbortError" && navigationRequest !== controller) return;
+            var retryCount = Number(settings.retryCount || 0);
+            showNavigationError(root, function () {
+                if (retryCount >= 1) {
+                    window.location.assign(url.toString());
+                    return;
+                }
+                enhancedNavigate(root, url, {
+                    fromHistory: settings.fromHistory,
+                    retryCount: retryCount + 1,
+                    focus: restoreFocus
+                });
+            });
+        }).finally(function () {
+            window.clearTimeout(timeout);
+            if (navigationRequest === controller) navigationRequest = null;
+        });
+    }
+
     function initServerNavigation(root) {
         var filterForm = root.querySelector("[data-adoption-filter-form]");
         if (filterForm) {
-            filterForm.addEventListener("submit", function () {
-                setLoading(root);
+            filterForm.addEventListener("submit", function (event) {
+                if (!supportsEnhancedNavigation()) {
+                    setLoading(root);
+                    return;
+                }
+                event.preventDefault();
+                var targetUrl = new URL(filterForm.action || window.location.href, window.location.href);
+                targetUrl.search = new URLSearchParams(new window.FormData(filterForm)).toString();
+                enhancedNavigate(root, targetUrl, { focus: focusDescriptor(document.activeElement) });
             });
         }
 
@@ -123,8 +296,7 @@
         if (stateSelect) {
             stateSelect.addEventListener("change", function () {
                 if (!stateSelect.value) return;
-                setLoading(root);
-                window.location.assign(new URL(stateSelect.value, window.location.href).toString());
+                enhancedNavigate(root, stateSelect.value, { focus: { type: "reason" } });
             });
         }
 
@@ -155,8 +327,7 @@
                     if (window.location.hash !== "#people-list") window.history.replaceState(null, "", targetUrl.toString());
                     return;
                 }
-                setLoading(root);
-                window.location.assign(targetUrl.toString());
+                enhancedNavigate(root, targetUrl, { focus: focusDescriptor(stateButton) });
                 return;
             }
 
@@ -165,8 +336,18 @@
             if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             if (link.target && link.target !== "_self") return;
             var url = new URL(link.href, window.location.href);
-            if (url.origin !== window.location.origin || (url.pathname === window.location.pathname && url.search === window.location.search)) return;
-            setLoading(root);
+            if (url.origin !== window.location.origin) return;
+            if (url.pathname === window.location.pathname && url.search === window.location.search) {
+                event.preventDefault();
+                scrollAfterNavigation(root, url);
+                return;
+            }
+            if (!supportsEnhancedNavigation()) {
+                setLoading(root);
+                return;
+            }
+            event.preventDefault();
+            enhancedNavigate(root, url, { focus: focusDescriptor(link) });
         });
     }
 
@@ -215,6 +396,140 @@
                 toggle.textContent = willExpand ? "Свернуть список" : (panel.querySelector("h2") && panel.querySelector("h2").textContent.indexOf("смен") !== -1 ? "Показать все смены" : "Показать все роли");
             });
         });
+    }
+
+    function initDonut(root) {
+        var panel = root.querySelector("[data-adoption-donut]");
+        if (!panel) return;
+        var segments = Array.prototype.slice.call(panel.querySelectorAll("[data-donut-segment]"));
+        var legend = Array.prototype.slice.call(panel.querySelectorAll("[data-donut-legend]"));
+        var sectorLinks = Array.prototype.slice.call(panel.querySelectorAll("[data-donut-interactive]"));
+        var centerCount = panel.querySelector("[data-donut-center-count]");
+        var centerLabel = panel.querySelector("[data-donut-center-label]");
+        var total = Number(panel.getAttribute("data-donut-total")) || 0;
+        var ready = Number(panel.getAttribute("data-donut-ready")) || 0;
+        var readyPercent = Number(panel.getAttribute("data-donut-ready-percent")) || 0;
+        var offsetCount = 0;
+
+        function polarPoint(radius, percent) {
+            var angle = ((percent / 100) * Math.PI * 2) - (Math.PI / 2);
+            return {
+                x: 60 + (radius * Math.cos(angle)),
+                y: 60 + (radius * Math.sin(angle))
+            };
+        }
+
+        function segmentPath(start, end) {
+            var safeEnd = Math.min(99.9999, end);
+            var outerStart = polarPoint(50, start);
+            var outerEnd = polarPoint(50, safeEnd);
+            var innerEnd = polarPoint(34, safeEnd);
+            var innerStart = polarPoint(34, start);
+            var largeArc = safeEnd - start > 50 ? 1 : 0;
+            return [
+                "M", outerStart.x, outerStart.y,
+                "A", 50, 50, 0, largeArc, 1, outerEnd.x, outerEnd.y,
+                "L", innerEnd.x, innerEnd.y,
+                "A", 34, 34, 0, largeArc, 0, innerStart.x, innerStart.y,
+                "Z"
+            ].join(" ");
+        }
+
+        segments.forEach(function (segment) {
+            var count = Math.max(0, Number(segment.getAttribute("data-donut-count")) || 0);
+            var exactPercent = total > 0 ? (count / total) * 100 : 0;
+            var exactStart = total > 0 ? (offsetCount / total) * 100 : 0;
+            var exactEnd = total > 0 ? ((offsetCount + count) / total) * 100 : 0;
+            var gap = segments.length > 1 ? Math.min(0.35, exactPercent * 0.08) : 0;
+            var start = exactStart + gap;
+            var end = exactEnd - gap;
+            segment.setAttribute("d", segmentPath(start, Math.max(start, end)));
+            var midpoint = exactStart + (exactPercent / 2);
+            var shift = polarPoint(4.5, midpoint);
+            segment.style.setProperty("--donut-shift-x", (shift.x - 60).toFixed(2) + "px");
+            segment.style.setProperty("--donut-shift-y", (shift.y - 60).toFixed(2) + "px");
+            offsetCount += count;
+        });
+        panel.setAttribute("data-donut-geometry-percent", total > 0 ? ((offsetCount / total) * 100).toFixed(6) : "0");
+
+        function showSelection(item) {
+            if (!item) {
+                if (centerCount) centerCount.textContent = String(ready);
+                if (centerLabel) centerLabel.textContent = Math.round(readyPercent) + "% активировали";
+                return;
+            }
+            var code = item.getAttribute("data-donut-code");
+            var matchingSegment = segments.find(function (segment) {
+                return segment.getAttribute("data-donut-code") === code;
+            });
+            segments.forEach(function (segment) {
+                segment.classList.toggle("is-preview", segment === matchingSegment && !segment.classList.contains("is-selected"));
+            });
+            if (centerCount) centerCount.textContent = item.getAttribute("data-donut-count") || "0";
+            if (centerLabel) {
+                centerLabel.textContent = (Math.round(Number(item.getAttribute("data-donut-percent")) || 0))
+                    + "% · " + (item.getAttribute("data-donut-label") || "сотрудников");
+            }
+        }
+
+        function restoreSelection() {
+            segments.forEach(function (segment) { segment.classList.remove("is-preview"); });
+            showSelection(null);
+        }
+
+        legend.concat(sectorLinks).forEach(function (item) {
+            item.addEventListener("pointerenter", function () { showSelection(item); });
+            item.addEventListener("pointerleave", restoreSelection);
+            item.addEventListener("focus", function () { showSelection(item); });
+            item.addEventListener("blur", restoreSelection);
+        });
+        sectorLinks.forEach(function (item) {
+            item.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                enhancedNavigate(root, item.getAttribute("href"), {
+                    focus: { type: "donut", value: item.getAttribute("data-donut-code") }
+                });
+            });
+        });
+        restoreSelection();
+    }
+
+    function initAnalyticsTrigger(root) {
+        var trigger = root.querySelector("[data-adoption-analytics-trigger]");
+        var analytics = root.querySelector("[data-adoption-analytics]");
+        if (!trigger || !analytics) return function () {};
+        var isDisclosure = analytics.tagName.toLowerCase() === "details";
+        var highlightTimer = null;
+
+        function syncState() {
+            trigger.setAttribute("aria-expanded", isDisclosure ? (analytics.open ? "true" : "false") : "true");
+        }
+
+        function reveal() {
+            if (isDisclosure) analytics.open = !analytics.open;
+            syncState();
+            if (!isDisclosure || analytics.open) {
+                analytics.setAttribute("data-analytics-highlight", "true");
+                window.requestAnimationFrame(function () {
+                    var reduceMotion = window.matchMedia
+                        && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+                    analytics.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
+                });
+                if (highlightTimer) window.clearTimeout(highlightTimer);
+                highlightTimer = window.setTimeout(function () {
+                    analytics.removeAttribute("data-analytics-highlight");
+                }, 900);
+            }
+        }
+
+        trigger.addEventListener("click", reveal);
+        if (isDisclosure) analytics.addEventListener("toggle", syncState);
+        syncState();
+        return function () {
+            if (highlightTimer) window.clearTimeout(highlightTimer);
+            if (isDisclosure) analytics.removeEventListener("toggle", syncState);
+        };
     }
 
     function initUnifiedChart(root, tooltip) {
@@ -379,7 +694,7 @@
             });
         });
 
-        document.addEventListener("keydown", function (event) {
+        function handleChartEscape(event) {
             if (event.key !== "Escape") return;
             if (hoverFrame) {
                 window.cancelAnimationFrame(hoverFrame);
@@ -387,7 +702,8 @@
             }
             if (tooltip && typeof tooltip.hide === "function") tooltip.hide();
             setChartPosition(committedIndex, false);
-        });
+        }
+        document.addEventListener("keydown", handleChartEscape);
 
         control.addEventListener("keydown", function (event) {
             var targetIndex = committedIndex;
@@ -470,24 +786,34 @@
 
         commitIndex(committedIndex);
         measureAlignment();
+        var observer = null;
+        var analyticsDisclosure = chart.closest("details");
+        function handleAnalyticsToggle() {
+            if (analyticsDisclosure && analyticsDisclosure.open) measureAlignment();
+        }
         if (typeof window.ResizeObserver === "function") {
-            var observer = new window.ResizeObserver(measureAlignment);
+            observer = new window.ResizeObserver(measureAlignment);
             observer.observe(control);
             observer.observe(histogram);
         } else {
             window.addEventListener("resize", measureAlignment, { passive: true });
         }
-        var analyticsDisclosure = chart.closest("details");
         if (analyticsDisclosure) {
-            analyticsDisclosure.addEventListener("toggle", function () {
-                if (analyticsDisclosure.open) measureAlignment();
-            });
+            analyticsDisclosure.addEventListener("toggle", handleAnalyticsToggle);
         }
+        return function () {
+            document.removeEventListener("keydown", handleChartEscape);
+            if (observer) observer.disconnect();
+            else window.removeEventListener("resize", measureAlignment);
+            if (analyticsDisclosure) analyticsDisclosure.removeEventListener("toggle", handleAnalyticsToggle);
+            if (hoverFrame) window.cancelAnimationFrame(hoverFrame);
+            if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+        };
     }
 
     function initTooltips(root) {
         var popup = root.querySelector("[data-adoption-tooltip-popup]");
-        if (!popup) return { showAt: function () {}, hide: function () {} };
+        if (!popup) return { showAt: function () {}, hide: function () {}, destroy: function () {} };
         var activeTarget = null;
         var showFrame = null;
         var chartTarget = { type: "chart" };
@@ -567,25 +893,43 @@
             var target = event.target.closest("[data-adoption-tooltip]");
             if (target && (!event.relatedTarget || !target.contains(event.relatedTarget))) hideTooltip();
         });
-        document.addEventListener("keydown", function (event) {
+        function handleTooltipEscape(event) {
             if (event.key === "Escape") hideTooltip();
-        });
+        }
+        document.addEventListener("keydown", handleTooltipEscape);
         window.addEventListener("resize", hideTooltip, { passive: true });
         window.addEventListener("scroll", hideTooltip, { passive: true, capture: true });
-        return { showAt: showAt, hide: hideTooltip };
+        return {
+            showAt: showAt,
+            hide: hideTooltip,
+            destroy: function () {
+                document.removeEventListener("keydown", handleTooltipEscape);
+                window.removeEventListener("resize", hideTooltip);
+                window.removeEventListener("scroll", hideTooltip, true);
+                if (showFrame) window.cancelAnimationFrame(showFrame);
+            }
+        };
     }
 
     function initDashboard(root) {
         if (!root || root.dataset.registrationDashboardReady === "true") return;
         root.dataset.registrationDashboardReady = "true";
+        normalizeCanonicalUrl(root);
         clearLoading(root);
         initManagementLayout(root);
         initFilterDisclosure(root);
         initServerNavigation(root);
         initTableSearch(root);
         initBreakdownDisclosure(root);
+        initDonut(root);
+        var destroyAnalytics = initAnalyticsTrigger(root);
         var tooltip = initTooltips(root);
-        initUnifiedChart(root, tooltip);
+        var destroyChart = initUnifiedChart(root, tooltip);
+        root._adoptionDestroy = function () {
+            if (typeof destroyAnalytics === "function") destroyAnalytics();
+            if (typeof destroyChart === "function") destroyChart();
+            if (tooltip && typeof tooltip.destroy === "function") tooltip.destroy();
+        };
         window.requestAnimationFrame(function () {
             root.classList.add("is-ready");
         });
@@ -595,6 +939,16 @@
         initAdminNavigation();
         document.querySelectorAll("[data-registration-dashboard]").forEach(initDashboard);
     }
+
+    window.addEventListener("popstate", function () {
+        var root = document.querySelector("[data-registration-dashboard]");
+        if (!root) return;
+        if (!supportsEnhancedNavigation()) {
+            window.location.reload();
+            return;
+        }
+        enhancedNavigate(root, window.location.href, { fromHistory: true });
+    });
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", initAllDashboards);

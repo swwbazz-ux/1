@@ -929,6 +929,208 @@ class AdminRegistrationDashboardTests(TestCase):
         self.assertEqual(query['state'], ['ready'])
         self.assertEqual(ready_tab['url'], ready_tab['filter_url'])
 
+    def test_primary_attention_tab_uses_approved_label(self):
+        response = self.admin_dashboard()
+        attention_tab = next(
+            item for item in response.context['primary_state_tabs']
+            if item['code'] == 'needs_attention'
+        )
+        rendered_tab_pattern = re.compile(
+            r'<a\b(?=[^>]*\bdata-state-code=["\']needs_attention["\'])[^>]*>'
+            r'.*?<span>Требуют внимания</span>',
+            re.DOTALL,
+        )
+
+        self.assertEqual(attention_tab['label'], 'Требуют внимания')
+        self.assertRegex(response.content.decode(), rendered_tab_pattern)
+        self.assertNotContains(response, 'Не завершили подключение')
+
+    def test_metric_drilldowns_replace_incompatible_state_and_match_counts(self):
+        self.excavator_access.status = EmployeeAccess.Status.DEACTIVATED
+        self.excavator_access.is_active = False
+        self.excavator_access.deactivated_at = self.now
+        self.excavator_access.save(
+            update_fields=['status', 'is_active', 'deactivated_at'],
+        )
+
+        context = self.admin_dashboard('state=deactivated').context
+        driver = self.breakdown_by_code(context, 'role_breakdown', 'driver')
+        night = self.breakdown_by_code(
+            context,
+            'shift_breakdown',
+            WorkShiftType.SHIFT_2,
+        )
+        driver_source = next(
+            item for item in context['source_plans']
+            if item['role_code'] == 'driver'
+        )
+
+        self.assertEqual(context['visible_total'], 1)
+        self.assertEqual(driver['not_ready'], 2)
+        self.assertEqual(night['not_ready'], 1)
+        for item, dimension, value in (
+            (driver, 'role', 'driver'),
+            (night, 'shift', WorkShiftType.SHIFT_2),
+        ):
+            with self.subTest(dimension=dimension):
+                requires_query = parse_qs(urlsplit(item['requires_url']).query)
+                ready_query = parse_qs(urlsplit(item['ready_url']).query)
+                total_query = parse_qs(urlsplit(item['total_url']).query)
+                self.assertEqual(requires_query['state'], ['needs_attention'])
+                self.assertEqual(ready_query['state'], ['ready'])
+                self.assertNotIn('state', total_query)
+                self.assertEqual(requires_query[dimension], [value])
+                self.assertEqual(item['url'], item['requires_url'])
+                self.assertEqual(item['filter_url'], item['requires_url'])
+                self.assertEqual(
+                    self.admin_dashboard(
+                        urlsplit(item['requires_url']).query,
+                    ).context['visible_total'],
+                    item['not_ready'],
+                )
+                self.assertEqual(
+                    self.admin_dashboard(
+                        urlsplit(item['ready_url']).query,
+                    ).context['visible_total'],
+                    item['ready'],
+                )
+                self.assertEqual(
+                    self.admin_dashboard(
+                        urlsplit(item['total_url']).query,
+                    ).context['visible_total'],
+                    item['total'],
+                )
+
+        source_query = parse_qs(urlsplit(driver_source['url']).query)
+        self.assertNotIn('state', source_query)
+        self.assertEqual(source_query['role'], ['driver'])
+        self.assertEqual(driver_source['url'], driver_source['total_url'])
+        self.assertEqual(
+            self.admin_dashboard(
+                urlsplit(driver_source['url']).query,
+            ).context['visible_total'],
+            3,
+        )
+
+    def test_terminal_partition_is_exclusive_and_each_url_round_trips(self):
+        context = self.admin_dashboard().context
+        partition = context['terminal_partition']
+
+        self.assertEqual(
+            [item['code'] for item in partition],
+            [
+                'ready',
+                'awaiting_activation',
+                'missing_access',
+                'deactivated',
+                'blocked',
+                'inactive_employee',
+                'scope_conflict',
+            ],
+        )
+        self.assertEqual(
+            sum(item['count'] for item in partition),
+            context['total'],
+        )
+        self.assertEqual(context['terminal_partition_total'], context['total'])
+        self.assertEqual(context['donut_segments'], partition)
+        self.assertEqual(
+            sum(item['count'] for item in context['attention_items']),
+            context['requires_action'],
+        )
+        for item in partition:
+            with self.subTest(state=item['code']):
+                query = parse_qs(urlsplit(item['url']).query)
+                self.assertEqual(query['state'], [item['code']])
+                selected = self.admin_dashboard(
+                    urlsplit(item['url']).query,
+                ).context
+                self.assertEqual(selected['visible_total'], item['count'])
+                self.assertTrue(all(
+                    row['code'] == item['code'] for row in selected['rows']
+                ))
+
+    def test_ready_date_filters_are_accepted_only_for_ready_state(self):
+        ready_date = timezone.localdate(self.driver_active_access.activated_at)
+
+        without_ready_response = self.admin_dashboard(
+            f'ready_on={ready_date.isoformat()}',
+        )
+        incompatible_response = self.admin_dashboard(
+            'period=7&role=driver&shift=day&state=missing_access'
+            f'&ready_on={ready_date.isoformat()}',
+        )
+        ready_response = self.admin_dashboard(
+            'period=7&role=driver&state=ready'
+            f'&ready_on={ready_date.isoformat()}',
+        )
+        without_ready_state = without_ready_response.context
+        incompatible_state = incompatible_response.context
+        ready_state = ready_response.context
+
+        self.assertIsNone(without_ready_state['selected_ready_on'])
+        self.assertEqual(without_ready_state['visible_total'], without_ready_state['total'])
+        self.assertIsNone(incompatible_state['selected_ready_on'])
+        self.assertEqual(
+            incompatible_state['visible_total'],
+            incompatible_state['missing_access'],
+        )
+        self.assertEqual(ready_state['selected_ready_on'], ready_date)
+        self.assertEqual(ready_state['visible_total'], 1)
+
+        incompatible_canonical = parse_qs(
+            incompatible_state['canonical_query'],
+        )
+        self.assertEqual(incompatible_canonical['period'], ['7'])
+        self.assertEqual(incompatible_canonical['role'], ['driver'])
+        self.assertEqual(incompatible_canonical['shift'], ['day'])
+        self.assertEqual(incompatible_canonical['state'], ['missing_access'])
+        self.assertFalse(
+            {'ready_on', 'ready_from', 'ready_to'} & set(incompatible_canonical)
+        )
+        self.assertEqual(
+            parse_qs(
+                urlsplit(incompatible_state['canonical_query_url']).query,
+            ),
+            incompatible_canonical,
+        )
+        ready_canonical = parse_qs(ready_state['canonical_query'])
+        self.assertEqual(ready_canonical['state'], ['ready'])
+        self.assertEqual(
+            ready_canonical['ready_on'],
+            [ready_date.isoformat()],
+        )
+
+    def test_selected_filter_context_exposes_prepared_and_contextual_empty_state(self):
+        prepared = self.admin_dashboard(
+            'role=driver&shift=day&state=prepared',
+        ).context
+        empty = self.admin_dashboard(
+            'role=driver&state=blocked',
+        ).context
+
+        self.assertEqual(prepared['selected_state_label'], 'Доступ подготовлен')
+        self.assertTrue(prepared['selected_state_is_prepared'])
+        self.assertTrue(prepared['has_active_list_filter'])
+        chips = {item['code']: item for item in prepared['selected_filter_chips']}
+        self.assertEqual(chips['role']['value'], 'Водитель самосвала')
+        self.assertEqual(chips['shift']['value'], 'Первая смена')
+        self.assertEqual(chips['state']['value'], 'Доступ подготовлен')
+        self.assertNotIn(
+            'state',
+            parse_qs(urlsplit(chips['state']['clear_url']).query),
+        )
+
+        self.assertGreater(empty['total'], 0)
+        self.assertEqual(empty['visible_total'], 0)
+        self.assertTrue(empty['list_empty_state']['is_empty'])
+        self.assertIn('Доступ заблокирован', empty['list_empty_state']['title'])
+        self.assertIn('Водитель самосвала', empty['list_empty_state']['detail'])
+        self.assertNotIn(
+            'state',
+            parse_qs(urlsplit(empty['list_empty_state']['clear_url']).query),
+        )
+
     def test_inactive_blocked_and_deactivated_accesses_are_distinct(self):
         self.driver_waiting_access.status = EmployeeAccess.Status.BLOCKED
         self.driver_waiting_access.is_active = False

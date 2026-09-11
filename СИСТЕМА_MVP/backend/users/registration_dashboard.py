@@ -31,7 +31,7 @@ CHART_PLOT_TOP = 12
 CHART_PLOT_BOTTOM = 228
 CHART_AXIS_PERCENTS = (100, 75, 50, 25, 0)
 REGISTRATION_STATES = {
-    'needs_attention': 'Не завершили подключение',
+    'needs_attention': 'Требуют внимания',
     'prepared': 'Доступ подготовлен',
     'ready': 'Доступ активирован',
     'awaiting_activation': 'Ждут активации',
@@ -900,6 +900,10 @@ def build_registration_dashboard(params):
     ):
         selected_ready_from = None
         selected_ready_to = None
+    if selected_state != 'ready':
+        selected_ready_on = None
+        selected_ready_from = None
+        selected_ready_to = None
 
     slots = list(
         CrewPlanSlot.objects.filter(
@@ -1224,13 +1228,17 @@ def build_registration_dashboard(params):
     elif selected_ready_from and selected_ready_to:
         base_query['ready_from'] = selected_ready_from.isoformat()
         base_query['ready_to'] = selected_ready_to.isoformat()
+    canonical_query = urlencode(base_query)
+    canonical_query_url = _query_url(base_query)
 
     for item in source_plans:
         item['url'] = _query_url_without_ready_filter(
             base_query,
             role=item['role_code'],
+            state='',
         )
         item['filter_url'] = item['url']
+        item['total_url'] = item['url']
 
     state_counts = {
         'all': total,
@@ -1285,17 +1293,41 @@ def build_registration_dashboard(params):
         })
 
     for item in role_breakdown:
-        item['url'] = _query_url_without_ready_filter(
+        item['total_url'] = _query_url_without_ready_filter(
             base_query,
             role=item['code'],
+            state='',
         )
-        item['filter_url'] = item['url']
+        item['ready_url'] = _query_url_without_ready_filter(
+            base_query,
+            role=item['code'],
+            state='ready',
+        )
+        item['requires_url'] = _query_url_without_ready_filter(
+            base_query,
+            role=item['code'],
+            state='needs_attention',
+        )
+        item['url'] = item['requires_url']
+        item['filter_url'] = item['requires_url']
     for item in shift_breakdown:
-        item['url'] = _query_url_without_ready_filter(
+        item['total_url'] = _query_url_without_ready_filter(
             base_query,
             shift=item['code'],
+            state='',
         )
-        item['filter_url'] = item['url']
+        item['ready_url'] = _query_url_without_ready_filter(
+            base_query,
+            shift=item['code'],
+            state='ready',
+        )
+        item['requires_url'] = _query_url_without_ready_filter(
+            base_query,
+            shift=item['code'],
+            state='needs_attention',
+        )
+        item['url'] = item['requires_url']
+        item['filter_url'] = item['requires_url']
     for item in chart['buckets']:
         if item['granularity'] == 'week':
             item['url'] = _query_url_without_ready_filter(
@@ -1413,8 +1445,63 @@ def build_registration_dashboard(params):
     ]
     for item in attention_items:
         item['filter_url'] = item['url']
+        item['percent'] = _percent(item['count'], total)
+        item['is_active'] = selected_state == item['code']
     for item in funnel_steps:
         item['filter_url'] = item['url']
+
+    terminal_partition = [
+        {
+            'code': 'ready',
+            'label': REGISTRATION_STATES['ready'],
+            'count': ready,
+            'tone': 'success',
+        },
+        {
+            'code': 'awaiting_activation',
+            'label': REGISTRATION_STATES['awaiting_activation'],
+            'count': awaiting_activation,
+            'tone': 'warning',
+        },
+        {
+            'code': 'missing_access',
+            'label': REGISTRATION_STATES['missing_access'],
+            'count': missing_access,
+            'tone': 'neutral',
+        },
+        {
+            'code': 'deactivated',
+            'label': REGISTRATION_INTERNAL_STATES['deactivated'],
+            'count': deactivated,
+            'tone': 'danger',
+        },
+        {
+            'code': 'blocked',
+            'label': REGISTRATION_STATES['blocked'],
+            'count': blocked,
+            'tone': 'danger',
+        },
+        {
+            'code': 'inactive_employee',
+            'label': REGISTRATION_INTERNAL_STATES['inactive_employee'],
+            'count': inactive_employee,
+            'tone': 'danger',
+        },
+        {
+            'code': 'scope_conflict',
+            'label': REGISTRATION_STATES['scope_conflict'],
+            'count': scope_conflict,
+            'tone': 'danger',
+        },
+    ]
+    for item in terminal_partition:
+        item['percent'] = _percent(item['count'], total)
+        item['url'] = _query_url_without_ready_filter(
+            base_query,
+            state=item['code'],
+        )
+        item['filter_url'] = item['url']
+        item['is_active'] = selected_state == item['code']
 
     state_tabs_by_code = {item['code']: item for item in state_tabs}
     primary_state_tabs = [
@@ -1479,6 +1566,95 @@ def build_registration_dashboard(params):
             and selected_ready_from <= row['ready_on'] <= selected_ready_to
         ]
 
+    selected_role_label = next(
+        (role.name for role in role_options if role.code == selected_role),
+        '',
+    )
+    selected_shift_label = shift_labels.get(selected_shift, '')
+    selected_state_label = state_labels.get(
+        selected_state or 'all',
+        state_labels['all'],
+    )
+    selected_filter_chips = []
+    if source_scope['source_mode'] == 'exact_date' and selected_date:
+        selected_filter_chips.append({
+            'code': 'source',
+            'label': 'Источник',
+            'value': f"Расстановка {selected_date:%d.%m.%Y}",
+            'text': f"Источник: расстановка {selected_date:%d.%m.%Y}",
+            'clear_url': _query_url(base_query, date=None),
+        })
+    if selected_role:
+        selected_filter_chips.append({
+            'code': 'role',
+            'label': 'Роль',
+            'value': selected_role_label,
+            'text': f'Роль: {selected_role_label}',
+            'clear_url': _query_url(base_query, role=None),
+        })
+    if selected_shift:
+        selected_filter_chips.append({
+            'code': 'shift',
+            'label': 'Смена',
+            'value': selected_shift_label,
+            'text': f'Смена: {selected_shift_label}',
+            'clear_url': _query_url(base_query, shift=None),
+        })
+    if selected_state:
+        selected_filter_chips.append({
+            'code': 'state',
+            'label': 'Статус',
+            'value': selected_state_label,
+            'text': f'Статус: {selected_state_label}',
+            'clear_url': _query_url_without_ready_filter(base_query, state=''),
+        })
+    if selected_ready_on:
+        selected_filter_chips.append({
+            'code': 'ready_period',
+            'label': 'Дата активации',
+            'value': selected_ready_on.strftime('%d.%m.%Y'),
+            'text': f"Дата активации: {selected_ready_on:%d.%m.%Y}",
+            'clear_url': _query_url_without_ready_filter(base_query),
+        })
+    elif selected_ready_from and selected_ready_to:
+        ready_range_value = (
+            f"{selected_ready_from:%d.%m.%Y} — {selected_ready_to:%d.%m.%Y}"
+        )
+        selected_filter_chips.append({
+            'code': 'ready_period',
+            'label': 'Период активации',
+            'value': ready_range_value,
+            'text': f'Период активации: {ready_range_value}',
+            'clear_url': _query_url_without_ready_filter(base_query),
+        })
+
+    list_empty_state = {
+        'is_empty': bool(total and not visible_rows),
+        'title': '',
+        'detail': '',
+        'clear_url': '',
+    }
+    if list_empty_state['is_empty']:
+        scope_labels = [
+            value for value in (selected_role_label, selected_shift_label) if value
+        ]
+        scope_text = ' · '.join(scope_labels) or 'Все роли и смены'
+        if selected_ready_on or (selected_ready_from and selected_ready_to):
+            list_empty_state.update({
+                'title': 'За выбранный период новых активаций нет',
+                'detail': f'{scope_text}. В расстановке сотрудников: {total}.',
+                'clear_url': _query_url_without_ready_filter(base_query),
+            })
+        elif selected_state:
+            list_empty_state.update({
+                'title': f'По статусу «{selected_state_label}» сотрудники не найдены',
+                'detail': f'{scope_text}. В расстановке сотрудников: {total}.',
+                'clear_url': _query_url_without_ready_filter(
+                    base_query,
+                    state='',
+                ),
+            })
+
     ready_percent = _percent(ready, total)
     prepared_percent = _percent(prepared, total)
     unavailable = (
@@ -1514,9 +1690,18 @@ def build_registration_dashboard(params):
         'selected_shift': selected_shift,
         'state_options': (('', 'Все сотрудники'), *REGISTRATION_STATES.items()),
         'selected_state': selected_state,
+        'selected_state_label': selected_state_label,
+        'selected_state_is_prepared': selected_state == 'prepared',
+        'selected_role_label': selected_role_label,
+        'selected_shift_label': selected_shift_label,
+        'selected_filter_chips': selected_filter_chips,
+        'has_active_list_filter': bool(selected_filter_chips),
+        'list_empty_state': list_empty_state,
         'selected_ready_on': selected_ready_on,
         'selected_ready_from': selected_ready_from,
         'selected_ready_to': selected_ready_to,
+        'canonical_query': canonical_query,
+        'canonical_query_url': canonical_query_url,
         'selected_ready_range_label': (
             f"{selected_ready_from.strftime('%d.%m.%Y')} — "
             f"{selected_ready_to.strftime('%d.%m.%Y')}"
@@ -1533,6 +1718,14 @@ def build_registration_dashboard(params):
         'reason_options': reason_options,
         'funnel_steps': funnel_steps,
         'attention_items': attention_items,
+        'terminal_partition': terminal_partition,
+        'terminal_partition_total': sum(
+            item['count'] for item in terminal_partition
+        ),
+        'donut_segments': terminal_partition,
+        'donut_nonzero_segments': [
+            item for item in terminal_partition if item['count']
+        ],
         'total': total,
         'prepared': prepared,
         'ready': ready,
