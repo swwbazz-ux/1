@@ -13940,3 +13940,14 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manu
     background: color-mix(in srgb, var(--gd-green) 28%, transparent);
     outline: none;
 }
+
+/* --- Читаемость: карточка целиком крупнее на треть. Внутри все размеры в px,
+   поэтому масштабируем панель через zoom, а ширину/высоту делим на тот же
+   коэффициент — --gd-vw/--gd-vh заданы в px и внутри zoom тоже растут. --- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-equipment-detail .mm-equipment-detail-panel {
+    --gd-detail-zoom: 1.32;
+    zoom: var(--gd-detail-zoom);
+    width: min(1120px, calc((100 * var(--gd-vw, 1vw) - 32px) / var(--gd-detail-zoom)));
+    max-height: min(900px, calc((100 * var(--gd-vh, 1vh) - 40px) / var(--gd-detail-zoom)));
+}
