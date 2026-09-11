@@ -8757,7 +8757,7 @@ body.management-dynamics-chart-modal-open {
     background: conic-gradient(
         from 0deg,
         var(--dispatcher-plan-color) 0 var(--tile-progress),
-        var(--dispatcher-plan-track) var(--tile-progress) 100%
+        transparent var(--tile-progress) 100%
     );
     pointer-events: none;
 }
@@ -9153,11 +9153,17 @@ body.management-dynamics-chart-modal-open {
 .dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {
     /* На тесной плитке (≈70×53px в масштабе всей доски) 10-15% плана —
        клин в пару экранных пикселей, неотличимый от каймы. max() держит
-       видимый минимум ~7%, дальше растёт как обычно. */
+       видимый минимум ~7%, дальше растёт как обычно.
+
+       Незаполненный остаток — полностью прозрачный (не серая "дорожка"):
+       drop-shadow ниже обводит светом силуэт ЭТОГО слоя целиком, а не
+       только цветной клин. Полупрозрачная дорожка покрывала альфой всю
+       плитку без единого прозрачного пикселя — свечение обводило всю
+       плитку рамкой, а не сам клин прогресса. */
     background: conic-gradient(
         from 0deg,
         var(--dispatcher-plan-color) 0 max(var(--tile-progress), 7%),
-        var(--dispatcher-plan-track) max(var(--tile-progress), 7%) 100%
+        transparent max(var(--tile-progress), 7%) 100%
     );
 }
 
@@ -9174,7 +9180,7 @@ body.management-dynamics-chart-modal-open {
             var(--dispatcher-plan-complete-color) 0 100%,
             rgba(0, 0, 0, 0) 0 100%
         ),
-        conic-gradient(from 0deg, var(--dispatcher-plan-track) 0 100%);
+        conic-gradient(from 0deg, transparent 0 100%);
 }
 
 .dispatcher-complex-card[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before {

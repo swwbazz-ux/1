@@ -116,6 +116,12 @@ test("на тесной плитке заливка не пропадает пр
     );
     const fillRule = CSS.slice(fillFrom, CSS.indexOf("}", fillFrom) + 1);
     assert.match(fillRule, /max\(var\(--tile-progress\), 7%\)/);
+    /* Незаполненный остаток — прозрачный, а не серая "дорожка": слой без
+       единого прозрачного пикселя заставляет drop-shadow ниже обвести
+       светом ВСЮ плитку прямоугольником, а не сам клин прогресса
+       (воспроизведено и исправлено после жалобы с боевого). */
+    assert.match(fillRule, /transparent max\(var\(--tile-progress\), 7%\) 100%/);
+    assert.doesNotMatch(fillRule, /var\(--dispatcher-plan-track\)/);
 
     const glowFrom = CSS.indexOf(
         'body.dispatcher-control-screen .dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before,\nbody.dispatcher-control-screen .dispatcher-truck-tile[data-plan-progress-phase]'
