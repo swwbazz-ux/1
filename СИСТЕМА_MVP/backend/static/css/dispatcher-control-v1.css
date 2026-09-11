@@ -8752,22 +8752,13 @@ body.management-dynamics-chart-modal-open {
     content: "";
     position: absolute;
     inset: 0;
-    z-index: 0;
+    z-index: -1;
     border-radius: inherit;
-    padding: 3px;
     background: conic-gradient(
         from -90deg,
         var(--dispatcher-plan-color) 0 var(--tile-progress),
         var(--dispatcher-plan-track) var(--tile-progress) 100%
     );
-    -webkit-mask:
-        linear-gradient(#000 0 0) content-box,
-        linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor;
-    mask:
-        linear-gradient(#000 0 0) content-box,
-        linear-gradient(#000 0 0);
-    mask-composite: exclude;
     pointer-events: none;
 }
 
@@ -13147,12 +13138,25 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen).is-equipment-se
 .dispatcher-truck-tile .dispatcher-presence-dot {
     position: absolute;
     top: 3px;
-    left: 3px;
-    z-index: 6;
+    right: 3px;
+    z-index: 7;
+}
+
+/* Бейдж завершённых циклов плана держал именно этот угол — сдвинут вниз,
+   чтобы не спорить с точкой присутствия. */
+.dispatcher-truck-tile .dispatcher-plan-loop-badge {
+    top: 17px;
+}
+
+.complex-truck-tile .dispatcher-plan-loop-badge {
+    top: 17px;
+    right: 3px;
 }
 
 .dispatcher-complex-card .complex-title-state h2 .dispatcher-presence-dot {
+    display: inline-block;
     position: relative;
-    top: -2px;
-    margin-left: 6px;
+    top: auto;
+    vertical-align: middle;
+    margin-left: 8px;
 }

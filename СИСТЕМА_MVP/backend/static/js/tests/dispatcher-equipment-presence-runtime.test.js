@@ -1,14 +1,11 @@
 "use strict";
 
-/* Точка присутствия техники на пульте диспетчера.
+/* Точка присутствия техники и заливка плана на пульте диспетчера.
 
-   Данные (has_current_shift/presence_status/presence_label) уже считает
-   equipment_presence_fields() в trips/views.py — она общая с мобильным
-   контуром горного мастера и подмешивается в те же словари, что питают
-   плитки гаража и карточки комплекса. Здесь только разметка и стили для
-   настольных плиток: у .mm-mobile-presence-dot (app.css) вся вёрстка живёт
-   внутри @media (max-width: 760px) и на ширине пульта не действует —
-   поэтому свой класс .dispatcher-presence-dot с той же палитрой. */
+   Данные (has_current_shift/presence_status/presence_label, --tile-progress)
+   уже считает equipment_presence_fields()/dispatcher_plan_for_equipment() в
+   trips/views.py — общие с мобильным контуром горного мастера. Здесь только
+   разметка и стили для настольных плиток. */
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -49,7 +46,9 @@ test("своя палитра и размер точки, не завязанн�
     for (const state of ["is-online", "is-background", "is-recent", "is-offline", "is-not_registered"]) {
         assert.match(CSS, new RegExp(`\\.dispatcher-presence-dot\\.${state} \\{`));
     }
-    /* Не внутри @media — иначе на ширине пульта действовать не будет. */
+    /* Не внутри @media — иначе на ширине пульта действовать не будет
+       (.mm-mobile-presence-dot из app.css вся живёт внутри
+       @media (max-width: 760px), нарисованного под мобильный контур). */
     const from = CSS.indexOf(".dispatcher-presence-dot {");
     assert.notEqual(from, -1);
     const upto = CSS.slice(0, from);
@@ -58,17 +57,34 @@ test("своя палитра и размер точки, не завязанн�
     assert.equal(opens, closes, "правило должно быть на верхнем уровне файла, не внутри @media/блока");
 });
 
-test("точка встаёт в левый верхний угол плитки — бейдж циклов плана уже занял правый", () => {
+test("точка стоит в правом верхнем углу плитки — бейдж циклов плана сдвинут вниз, чтобы не спорить с ней", () => {
     assert.match(
         CSS,
-        /\.dispatcher-excavator-garage-tile \.dispatcher-presence-dot,\s*\n\.dispatcher-truck-tile \.dispatcher-presence-dot \{[^}]*position: absolute;[^}]*top: 3px;[^}]*left: 3px;/s
+        /\.dispatcher-excavator-garage-tile \.dispatcher-presence-dot,\s*\n\.dispatcher-truck-tile \.dispatcher-presence-dot \{[^}]*position: absolute;[^}]*top: 3px;[^}]*right: 3px;/s
     );
-    assert.match(CSS, /\.dispatcher-plan-loop-badge \{[^}]*top: 3px;[^}]*right: 3px;/s);
+    /* Экскаваторный гараж и без того держал бейдж на 17px — теперь то же
+       и у самосвалов (гараж и внутри комплекса), угол 3/3 остаётся точке. */
+    assert.match(CSS, /\.dispatcher-excavator-garage-tile \.dispatcher-plan-loop-badge \{[^}]*top: 17px;/s);
+    assert.match(CSS, /\.dispatcher-truck-tile \.dispatcher-plan-loop-badge \{[^}]*top: 17px;/s);
+    assert.match(CSS, /\.complex-truck-tile \.dispatcher-plan-loop-badge \{[^}]*top: 17px;/s);
 });
 
-test("на имени комплекса точка стоит инлайн, как у мобильной карточки", () => {
+test("на имени комплекса точка стоит инлайн, по центру строки", () => {
     assert.match(
         CSS,
-        /\.dispatcher-complex-card \.complex-title-state h2 \.dispatcher-presence-dot \{[^}]*position: relative;[^}]*margin-left: 6px;/s
+        /\.dispatcher-complex-card \.complex-title-state h2 \.dispatcher-presence-dot \{[^}]*vertical-align: middle;/s
     );
+});
+
+test("заливка плана самосвала — на заднем плане, во весь контур, как у горного мастера, а не тонким кольцом поверх", () => {
+    /* mm-mobile-truck-card .mm-mobile-plan-ring-layer тоже без маски
+       (mask: none) — та же идея: не тонкая кайма, а заливка всей плитки.
+       На пульте фон обязан быть НИЖЕ содержимого (отрицательный z-index),
+       иначе номер и иконку самосвала будет перекрывать цветом. */
+    const from = CSS.indexOf(".dispatcher-truck-tile::before {");
+    assert.notEqual(from, -1);
+    const rule = CSS.slice(from, CSS.indexOf("}", from) + 1);
+    assert.match(rule, /z-index: -1;/);
+    assert.match(rule, /conic-gradient\(/);
+    assert.doesNotMatch(rule, /mask/);
 });
