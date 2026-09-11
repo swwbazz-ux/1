@@ -538,16 +538,17 @@ body.login-page.login-unified-v2.is-login-keyboard-active .login-v2__hero {
         min-height: 480px;
     }
 
-    /* На фото уже стоит название компании — показываем кадр целиком,
-       подложка (размытое то же фото) закрывает поля сверху и снизу. */
+    /* Узкая колонка (ноутбук 1280): кадр целиком, поля сверху и снизу — тот же
+       кадр, размытый до однородного тёмного тона, без читаемых букв. */
     .login-v2__hero-image {
         object-fit: contain;
-        object-position: center center;
+        object-position: center 42%;
     }
 
     .login-v2__hero-backdrop {
-        filter: blur(9px) saturate(.9) brightness(.6);
-        transform: scale(1.08);
+        inset: -40px;
+        filter: blur(34px) saturate(.7) brightness(.42);
+        transform: scale(1.15);
     }
 
     .login-v2__hero-lines {
@@ -572,6 +573,19 @@ body.login-page.login-unified-v2.is-login-keyboard-active .login-v2__hero {
     body.login-page.login-unified-v2 .login-v2 .unified-login-form {
         max-width: 520px;
         justify-self: center;
+    }
+}
+
+/* Широкий монитор: колонка достаточно широкая, чтобы фото залило её целиком,
+   а логотип «Коппер Рисорсез» на левой части кадра остался в поле зрения. */
+@media (min-width: 1520px) {
+    .login-v2__hero-image {
+        object-fit: cover;
+        object-position: 8% 40%;
+    }
+
+    .login-v2__hero-backdrop {
+        display: none;
     }
 }
 
