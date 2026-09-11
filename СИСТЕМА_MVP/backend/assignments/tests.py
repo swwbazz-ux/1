@@ -312,15 +312,39 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'data-mm-truck-transfer-bar')
         self.assertContains(response, 'data-mm-mobile-open-truck-list')
         self.assertContains(response, 'var visibleLimit = 3;')
+        # Карточки комплексов больше не переставляются под пальцем: раньше
+        # исходная карточка занимала слот под указателем, цель уезжала на
+        # 77-302 px уже после выбора направления, и самосвал попадал в чужой
+        # комплекс.
+        self.assertNotContains(response, 'pinMobileTruckTransferSourceAtPoint')
         self.assertContains(response, 'function beginMobileTruckTransfer(node)')
+        self.assertContains(response, 'home.classList.add("is-transfer-overlay")')
+        self.assertContains(response, 'transferGrid.scrollTop = 0')
+        # Требование пройденного расстояния убрано: при входе в режим
+        # перестановки доска перекраивается, соседний комплекс подъезжает
+        # к пальцу, и правильный жест не дотягивал до порога.
+        self.assertNotContains(response, 'var travelDistance')
         self.assertContains(response, 'function completeMobileTruckTransfer(targetCard)')
         self.assertContains(response, 'expected_assignment_state_id: transfer.assignmentStateId')
         self.assertContains(response, 'function bindMobileTruckTransferDrag(mini)')
-        self.assertContains(response, 'Math.abs(dx) < 14')
+        self.assertContains(response, 'if (window.PointerEvent) return;')
+        self.assertNotContains(response, 'if (event.pointerType === "touch" || isMiningMasterMobileReadonly()) return;')
+        self.assertContains(response, 'ensureMobileTruckTransferHandle(mini);')
+        self.assertContains(response, 'data-mm-truck-transfer-handle')
+        # Жест начинается от смещения в любую сторону и по удержанию: у плитки
+        # touch-action: none, прокручивать нечего, а прежнее требование почти
+        # горизонтального движения делало соседние ряды недостижимыми.
+        self.assertNotContains(response, 'Math.abs(dx) < 14')
+        self.assertContains(response, 'var MOBILE_TRUCK_TRANSFER_START_PX = 16;')
+        self.assertContains(response, 'var MOBILE_TRUCK_TRANSFER_HOLD_MS = 260;')
+        self.assertContains(response, 'var MOBILE_TRUCK_TRANSFER_DWELL_MS = 120;')
+        self.assertContains(response, 'Math.hypot(dx, dy) < MOBILE_TRUCK_TRANSFER_START_PX')
+        self.assertContains(response, 'function armTransferHold()')
+        self.assertContains(response, 'dwelledOnTarget')
         self.assertContains(response, 'findTransferTarget(clientX, clientY)')
         self.assertContains(response, 'is-transfer-hover')
         self.assertContains(response, 'Отпустите на нужном экскаваторе')
-        self.assertContains(response, 'Самосвал в сторону — переставить')
+        self.assertContains(response, 'Удержите самосвал и ведите к экскаватору · задержитесь на нём и отпустите')
         self.assertContains(response, 'expected_assignment_state_id: transfer.assignmentStateId')
         self.assertContains(response, '[data-mm-mobile-home-truck-id], [data-mm-mobile-open-truck-list]')
         self.assertNotContains(response, '}, 460);')
@@ -619,7 +643,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v148')
+        self.assertContains(response, 'mining-master-mobile-shell-v164')
         self.assertContains(response, 'mining-master-mobile-sync-queue-v3')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v1")')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v2")')
@@ -639,7 +663,8 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>')
-        self.assertContains(response, '<div class="mm-mobile-version-strip" aria-label="Версия приложения">')
+        self.assertContains(response, '>версия v164</span>')
+        self.assertNotContains(response, '<div class="mm-mobile-version-strip" aria-label="Версия приложения">')
         self.assertContains(response, '<div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>')
         self.assertContains(response, '<span class="mm-mobile-update-badge" data-mm-pwa-update-badge')
         self.assertContains(response, 'data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target')
@@ -695,7 +720,15 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v148', script)
+        self.assertIn('mining-master-mobile-shell-v164', script)
+        self.assertEqual(
+            response['X-App-Shell-Version'],
+            'mining-master-mobile-shell-v164',
+        )
+        self.assertIn(
+            f'const CACHE_NAME = "{response["X-App-Shell-Version"]}";',
+            script,
+        )
         self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)

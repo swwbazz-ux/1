@@ -94,11 +94,15 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v163";
+const CACHE_NAME = "mining-master-mobile-shell-v164";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
 const EXCLUDED_NAVIGATION_PREFIXES = ["/deputy-mining-manager/"];
+/* Оболочка открывается сразу: если сеть не успела за 2,5 секунды, отдаём
+   сохранённую доску, а страница сама держит плашку «Загружаем пульт», пока
+   не придёт свежая расстановка (см. miningMasterStartupOverlay в шаблоне).
+   Без сети сохранённая доска отдаётся без ожидания. */
 const NETWORK_FIRST_TIMEOUT_MS = 2500;
 const CORE_ASSETS = [
   LOGIN_URL,
@@ -159,6 +163,9 @@ async function networkFirst(request, fallbackUrl, event) {
     event.waitUntil(networkRequest.then(() => undefined).catch(() => undefined));
   }
   if (cached) {
+    if (self.navigator && self.navigator.onLine === false) {
+      return cached;
+    }
     try {
       return await Promise.race([
         networkRequest,
