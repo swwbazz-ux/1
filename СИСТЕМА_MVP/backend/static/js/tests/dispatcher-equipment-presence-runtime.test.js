@@ -103,3 +103,24 @@ test("заливка начинается сверху и растёт по ча
     assert.match(rule, /from 0deg/);
     assert.doesNotMatch(rule, /from -90deg/);
 });
+
+test("на тесной плитке заливка не пропадает при малом проценте — минимум клина и заметное свечение", () => {
+    /* Плитка на доске ≈70×53px — 10-15% плана превращались в полоску в
+       пару экранных пикселей, на глаз неотличимую от каймы (жалоба
+       пользователя на бою: «где заливка?»). max() держит видимый
+       минимум клина; двойное drop-shadow (как у mm-mobile-plan-ring-layer)
+       даёт цветное свечение, которое читается издалека даже когда сам
+       клин узкий. */
+    const fillFrom = CSS.indexOf(
+        '.dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before,\n.dispatcher-truck-tile[data-plan-progress-phase]'
+    );
+    const fillRule = CSS.slice(fillFrom, CSS.indexOf("}", fillFrom) + 1);
+    assert.match(fillRule, /max\(var\(--tile-progress\), 7%\)/);
+
+    const glowFrom = CSS.indexOf(
+        'body.dispatcher-control-screen .dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""])::before,\nbody.dispatcher-control-screen .dispatcher-truck-tile[data-plan-progress-phase]'
+    );
+    assert.notEqual(glowFrom, -1);
+    const glowRule = CSS.slice(glowFrom, CSS.indexOf("}", glowFrom) + 1);
+    assert.equal((glowRule.match(/drop-shadow/g) || []).length, 2, "два слоя свечения, как у mm-mobile-plan-ring-layer");
+});
