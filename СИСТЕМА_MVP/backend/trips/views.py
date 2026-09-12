@@ -6558,10 +6558,9 @@ def dispatcher_control_view(
 ):
     requested_fragment = request.GET.get('_operational_fragment', '').strip()
     reconcile_due_haul_assignments()
-    try:
-        auto_close_expired_equipment_shifts()
-    except Exception:  # noqa: BLE001 — пульт важнее таймера, ошибку только пишем
-        logger.exception('auto_close_expired_equipment_shifts failed')
+    # Просроченные смены закрывает сервер по таймеру (close_expired_shifts),
+    # а не загрузка пульта: момент закрытия не должен зависеть от того, открыл
+    # ли кто-то браузер.
     if access_override is None:
         access_id = request.session.get('employee_access_id')
         if not access_id:

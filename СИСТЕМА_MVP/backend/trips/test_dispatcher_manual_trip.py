@@ -508,13 +508,20 @@ class DispatcherServiceCloseWithoutReadingsTests(TestCase):
         self.assertIsNone(start_excavator_auto_downtime(excavator, None, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS))
         self.assertFalse(DowntimeEvent.objects.filter(equipment=excavator).exists())
 
-    def test_dispatcher_board_load_closes_expired_shifts(self):
+    def test_dispatcher_board_does_not_close_shifts_itself(self):
+        """Закрытием управляет сервер по таймеру, а не загрузка пульта."""
         self.truck_shift.opened_at = timezone.now() - timedelta(hours=20)
         self.truck_shift.save(update_fields=['opened_at'])
 
         response = self.client.get(reverse('dispatcher_control'))
 
         self.assertEqual(response.status_code, 200)
+        self.truck_shift.refresh_from_db()
+        self.assertIsNone(self.truck_shift.closed_at, 'пульт только показывает состояние')
+
+        from trips.views import auto_close_expired_equipment_shifts
+
+        auto_close_expired_equipment_shifts()
         self.truck_shift.refresh_from_db()
         self.assertEqual(self.truck_shift.service_close_kind, 'auto_expired')
 
