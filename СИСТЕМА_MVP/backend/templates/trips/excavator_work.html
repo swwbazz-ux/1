@@ -15,7 +15,7 @@
 <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v223" defer></script>
 <script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v223" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
-<link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=2">
+<link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=3">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -2438,6 +2438,17 @@ window.initExcavatorWorkShell = function () {
         preview.style.transformOrigin = "center center";
         document.body.appendChild(preview);
         state.preview = preview;
+        if (!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+            var flare = document.createElement("div");
+            flare.className = "eo-truck-pickup-flare";
+            flare.setAttribute("aria-hidden", "true");
+            flare.style.left = (rect.left - rect.width / 2) + "px";
+            flare.style.top = (rect.top - rect.height / 2 - 8) + "px";
+            flare.style.width = (rect.width * 2) + "px";
+            flare.style.height = (rect.height * 2) + "px";
+            document.body.appendChild(flare);
+            state.pickupFlare = flare;
+        }
         moveTruckDragPreview(state, 0, 0);
     }
 
@@ -2472,7 +2483,7 @@ window.initExcavatorWorkShell = function () {
         comet.lastX = comet.x;
         comet.lastY = comet.y;
         // Фиксированный пул: ни клонов карточек, ни растущего DOM при движении.
-        for (var i = 0; i < 12; i += 1) {
+        for (var i = 0; i < 24; i += 1) {
             var dot = document.createElement("i");
             layer.appendChild(dot);
             comet.particles.push({node: dot, born: null});
@@ -2486,11 +2497,17 @@ window.initExcavatorWorkShell = function () {
             var distance = Math.hypot(dx, dy);
             if (distance >= 5) {
                 var count = Math.min(3, Math.max(1, Math.floor(distance / 28)));
+                // След начинается за краем карточки: при медленном движении
+                // частицы из её центра целиком скрывались под самой иконкой.
+                var directionX = dx / distance;
+                var directionY = dy / distance;
+                var tailOffset = (state.originRect.width * Math.abs(directionX) +
+                    state.originRect.height * Math.abs(directionY)) * .59 + 8;
                 for (var j = 0; j < count; j += 1) {
                     var particle = comet.particles[comet.cursor];
                     comet.cursor = (comet.cursor + 1) % comet.particles.length;
-                    particle.x = comet.lastX + dx * j / count;
-                    particle.y = comet.lastY + dy * j / count;
+                    particle.x = comet.lastX + dx * j / count - directionX * tailOffset;
+                    particle.y = comet.lastY + dy * j / count - directionY * tailOffset;
                     particle.angle = Math.atan2(dy, dx);
                     particle.born = now;
                 }
@@ -2499,8 +2516,8 @@ window.initExcavatorWorkShell = function () {
             }
             comet.particles.forEach(function (particle) {
                 if (particle.born === null) return;
-                var life = Math.max(0, 1 - (now - particle.born) / 320);
-                particle.node.style.opacity = String(life * .85);
+                var life = Math.max(0, 1 - (now - particle.born) / 700);
+                particle.node.style.opacity = String(Math.sqrt(life) * .95);
                 particle.node.style.transform = "translate3d(" + particle.x + "px," + particle.y + "px,0) rotate(" + particle.angle + "rad) scale(" + (.25 + life * .75) + ")";
                 if (!life) particle.born = null;
             });
@@ -2511,6 +2528,10 @@ window.initExcavatorWorkShell = function () {
 
     function removeTruckDragPreview(state) {
         if (!state) return;
+        if (state.pickupFlare) {
+            state.pickupFlare.remove();
+            state.pickupFlare = null;
+        }
         if (state.comet) {
             window.cancelAnimationFrame(state.comet.frame);
             state.comet.layer.remove();

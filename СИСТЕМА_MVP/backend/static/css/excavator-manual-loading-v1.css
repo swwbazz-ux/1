@@ -8,14 +8,14 @@ body.excavator-operator-screen .eo-dashboard-truck-card[data-eo-truck-card] > b.
     width: 9px;
     height: 9px;
     border-radius: 50%;
-    background: #8b929c;
+    background: var(--eo-presence-color, #8b929c);
     border: 1px solid #17212a;
     z-index: 3;
 }
-body.excavator-operator-screen .eo-dashboard-truck-card .eo-driver-presence.presence-online { background: #43d685; }
-body.excavator-operator-screen .eo-dashboard-truck-card .eo-driver-presence.presence-background { background: #409bff; }
-body.excavator-operator-screen .eo-dashboard-truck-card .eo-driver-presence.presence-recent { background: #f5cb51; }
-body.excavator-operator-screen .eo-dashboard-truck-card .eo-driver-presence.presence-offline { background: #ef6262; }
+body.excavator-operator-screen .eo-dashboard-truck-card .eo-driver-presence.presence-online { --eo-presence-color: #43d685; }
+body.excavator-operator-screen .eo-dashboard-truck-card .eo-driver-presence.presence-background { --eo-presence-color: #409bff; }
+body.excavator-operator-screen .eo-dashboard-truck-card .eo-driver-presence.presence-recent { --eo-presence-color: #f5cb51; }
+body.excavator-operator-screen .eo-dashboard-truck-card .eo-driver-presence.presence-offline { --eo-presence-color: #ef6262; }
 body.excavator-operator-screen .eo-dashboard-truck-card.is-manual-passive { opacity: .5; }
 /* В покое экран спокоен. Свет и движение появляются только в руке. */
 body.excavator-operator-screen .eo-dashboard-truck-card {
@@ -27,18 +27,18 @@ body.excavator-operator-screen .eo-dashboard-truck-card.is-picked-up:not(.is-dra
 body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview {
     opacity: 1 !important;
     filter: none !important;
-    border: 2px solid #ffe4a6 !important;
+    border: 2px solid #e1ffff !important;
     background:
-        radial-gradient(ellipse at 50% 0%, #ffd87970, transparent 68%),
-        linear-gradient(155deg, #73501d, #273b40 60%, #12262f) !important;
-    box-shadow: inset 0 1px 0 #fff5d8b3, inset 0 0 18px #ffbf4733,
-        0 16px 28px #0009, 0 0 0 3px #ffc45c38, 0 0 28px #ffb42d80 !important;
+        radial-gradient(ellipse at 50% 0%, #6beeff66, transparent 72%),
+        linear-gradient(155deg, #237887, #153c50 60%, #102635) !important;
+    box-shadow: inset 0 0 20px #b6ffff80,
+        0 0 0 2px #e0ffff, 0 0 12px 5px #71f7ffe6,
+        0 0 34px 12px #16dcff99, 0 0 66px 18px #008dff4d,
+        0 18px 32px #0009 !important;
     overflow: hidden !important;
     pointer-events: none !important;
     transition: none !important;
-    animation: none !important;
-    rotate: none !important;
-    translate: none !important;
+    animation: eo-truck-held-sway 1.4s ease-in-out infinite !important;
     will-change: transform;
     cursor: grabbing;
 }
@@ -50,18 +50,18 @@ body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview em {
     filter: none !important;
 }
 body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview strong {
-    color: #fffaf0 !important;
-    text-shadow: 0 2px 3px #000c, 0 0 12px #ffc85d70 !important;
+    color: #fff !important;
+    text-shadow: 0 2px 3px #001b27, 0 0 14px #a8ffff !important;
 }
-body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview img {
-    filter: brightness(1.2) saturate(1.25) drop-shadow(0 3px 4px #0006) !important;
+body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview i img {
+    filter: brightness(1.15) saturate(1.45) drop-shadow(0 2px 2px #062433) drop-shadow(0 0 5px #b9ffff99) !important;
 }
 /* Разовый блик вместо бесконечной пульсации и мигания. */
 body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview > .eo-truck-pickup-glint {
     position: absolute !important;
     inset: -30% !important;
     z-index: 8 !important;
-    background: linear-gradient(110deg, transparent 38%, #fff3cc66 50%, transparent 62%);
+    background: linear-gradient(110deg, transparent 36%, #e1ffffb3 50%, transparent 64%);
     pointer-events: none;
     animation: eo-truck-pickup-glint 360ms ease-out both;
 }
@@ -73,6 +73,24 @@ body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview > .eo-dr
     from { transform: translateX(-70%); opacity: 0; }
     25% { opacity: 1; }
     to { transform: translateX(70%); opacity: 0; }
+}
+@keyframes eo-truck-held-sway {
+    0%, 100% { rotate: -1.8deg; translate: 0 -3px; }
+    50% { rotate: 1.8deg; translate: 0 3px; }
+}
+/* Короткая вспышка при захвате, затем остаётся постоянный ореол. */
+.eo-truck-pickup-flare {
+    position: fixed;
+    z-index: 19998;
+    border-radius: 50%;
+    pointer-events: none;
+    background: radial-gradient(ellipse, #fff 0%, #d4ffffcc 28%, #50eaff88 46%, transparent 72%);
+    animation: eo-truck-star-flash 560ms ease-out both;
+}
+@keyframes eo-truck-star-flash {
+    from { transform: scale(.65); opacity: 0; }
+    18% { opacity: 1; }
+    to { transform: scale(1.25); opacity: 0; }
 }
 body.excavator-operator-screen .eo-dashboard-truck-card.is-manual-passive {
     touch-action: none;
@@ -88,17 +106,23 @@ body.excavator-operator-screen .eo-dashboard-truck-card.is-manual-passive {
 }
 .eo-truck-comet i {
     position: absolute;
-    top: -7px;
-    left: -21px;
-    width: 42px;
-    height: 14px;
+    top: -12px;
+    left: -32px;
+    width: 64px;
+    height: 24px;
     border-radius: 50%;
     opacity: 0;
-    background: radial-gradient(ellipse at 65% 50%, #fff4cb 0%, #ffd16ccc 25%, #ffac3555 55%, transparent 75%);
+    background: radial-gradient(ellipse at 60% 50%, #fff 0%, #d9ffff 16%, #52efffe6 38%, #13c7ff66 64%, transparent 78%);
+    box-shadow: 0 0 12px #43dfff99;
     will-change: transform, opacity;
 }
 @media (prefers-reduced-motion: reduce) {
     body.excavator-operator-screen .eo-dashboard-truck-card { transition: none; }
+    body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview {
+        animation: none !important;
+        rotate: none !important;
+        translate: none !important;
+    }
     body.excavator-operator-screen .eo-dashboard-truck-card.is-drag-preview > .eo-truck-pickup-glint { animation: none; display: none; }
-    .eo-truck-comet { display: none; }
+    .eo-truck-comet, .eo-truck-pickup-flare { display: none; }
 }

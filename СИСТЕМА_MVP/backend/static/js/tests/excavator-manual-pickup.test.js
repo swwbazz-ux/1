@@ -116,7 +116,8 @@ function effectsFixture(reducedMotion = false) {
     const end = template.indexOf('    function findDumpTargetIntersectingPreview', start);
     vm.runInContext(template.slice(start, end), context);
     const preview = makeNode(); nodes.push(preview);
-    const state = {preview, originRect: {left: 10, top: 20, width: 100, height: 100}};
+    const pickupFlare = makeNode(); nodes.push(pickupFlare);
+    const state = {preview, pickupFlare, originRect: {left: 10, top: 20, width: 100, height: 100}};
     function tick(now) {
         const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn(now));
     }
@@ -131,15 +132,18 @@ test('comet uses a bounded pool, fades while stationary and releases its RAF and
         f.context.moveTruckDragPreview(f.state, n * 8, n * 4);
         f.tick(n * 16);
     }
-    assert.equal(comet.layer.children.length, 12);
-    assert.equal(f.nodes.length, 2);
+    assert.equal(comet.layer.children.length, 24);
+    assert.equal(f.nodes.length, 3);
     assert.ok(comet.particles.some(p => Number(p.node.style.opacity) > 0));
     f.tick(2000);
+    assert.ok(comet.particles.some(p => Number(p.node.style.opacity) > 0));
+    f.tick(2400);
     assert.ok(comet.particles.every(p => Number(p.node.style.opacity || 0) === 0));
     f.context.removeTruckDragPreview(f.state);
     assert.equal(f.frames.size, 0);
     assert.equal(f.nodes.length, 0);
     assert.equal(f.state.comet, null);
+    assert.equal(f.state.pickupFlare, null);
 });
 
 test('larger visual preview preserves the nominal drop hitbox', () => {
@@ -147,6 +151,17 @@ test('larger visual preview preserves the nominal drop hitbox', () => {
     f.context.moveTruckDragPreview(f.state, 30, 40);
     assert.match(f.state.preview.style.transform, /scale\(1\.18\)/);
     assert.deepEqual({...f.state.previewHitRect}, {left: 45, right: 135, top: 65, bottom: 155});
+});
+
+test('slow movement emits the tail outside the card instead of hiding it underneath', () => {
+    const f = effectsFixture();
+    f.context.createTruckComet(f.state);
+    f.context.moveTruckDragPreview(f.state, 6, 0);
+    f.tick(16);
+    const particle = f.state.comet.particles.find(p => p.born !== null);
+    const trailingEdge = 60 + 6 - 100 * 1.18 / 2;
+    assert.ok(particle.x < trailingEdge);
+    f.context.removeTruckDragPreview(f.state);
 });
 
 test('reduced motion keeps static feedback without a comet or pending animation', () => {
