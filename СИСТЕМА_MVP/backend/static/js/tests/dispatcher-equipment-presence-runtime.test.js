@@ -135,3 +135,18 @@ test("на тесной плитке заливка не пропадает пр
     const glowRule = CSS.slice(glowFrom, CSS.indexOf("}", glowFrom) + 1);
     assert.equal((glowRule.match(/drop-shadow/g) || []).length, 2, "два слоя свечения, как у mm-mobile-plan-ring-layer");
 });
+
+test("плитка без рейсов не красится: пустая фаза снимает заливку", () => {
+    /* Сервер не отдаёт фазу, когда факта нет (progress_cycle_visual_context),
+       а скрипт обязан снять атрибут, иначе на перерисованной плитке остаётся
+       заливка от прошлого обновления. */
+    const JS = fs.readFileSync(
+        path.join(BACKEND, "static", "js", "dispatcher-control-v1.js"),
+        "utf8"
+    );
+    assert.match(JS, /else tile\.removeAttribute\("data-plan-progress-phase"\);/);
+    assert.match(
+        CSS,
+        /\[data-plan-progress-phase\]:not\(\[data-plan-progress-phase=""\]\)::before/
+    );
+});

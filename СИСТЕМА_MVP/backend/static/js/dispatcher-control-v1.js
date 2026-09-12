@@ -1610,7 +1610,11 @@ document.addEventListener("DOMContentLoaded", function () {
         tile.style.setProperty("--tile-total-progress", String(data.percent || 0) + "%");
         if (loopProgress !== null && loopProgress !== undefined && loopProgress !== "") tile.dataset.planLoopPercent = String(loopProgress);
         tile.dataset.planCompletedLoops = String(completedLoops);
+        /* Пустая фаза = рейсов по смене нет. Атрибут надо именно снять:
+           иначе на перерисованной плитке останется заливка от прошлого
+           обновления и пустой самосвал будет выглядеть работающим. */
         if (plan.progress_phase) tile.dataset.planProgressPhase = plan.progress_phase;
+        else tile.removeAttribute("data-plan-progress-phase");
         tile.innerHTML =
             "<strong>" + escapeHtml(data.number || "") + "</strong>" +
             '<img src="' + escapeHtml(dispatcherNeutralEquipmentIcon(isTruck ? "truck" : "excavator")) + '" alt="">' +

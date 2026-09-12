@@ -526,6 +526,29 @@ class DispatcherServiceCloseWithoutReadingsTests(TestCase):
         self.assertEqual(self.truck_shift.service_close_kind, 'auto_expired')
 
 
+class PlanProgressVisualTests(TestCase):
+    """Заливка плитки появляется с первым рейсом, а не с назначением плана."""
+
+    def test_zero_fact_has_no_phase_so_tile_stays_empty(self):
+        from shifts.services import progress_cycle_visual_context
+
+        empty = progress_cycle_visual_context(0)
+        self.assertEqual(empty['phase'], '', 'пустой самосвал не должен выглядеть работающим')
+        self.assertEqual(empty['loop_progress'], 0)
+        self.assertEqual(empty['completed_loops'], 0)
+
+    def test_first_trip_lights_the_tile_up(self):
+        from shifts.services import progress_cycle_visual_context
+
+        started = progress_cycle_visual_context(5)
+        self.assertEqual(started['phase'], 'green')
+        self.assertEqual(started['loop_progress'], 5)
+
+        overrun = progress_cycle_visual_context(145)
+        self.assertEqual(overrun['phase'], 'amber')
+        self.assertEqual(overrun['completed_loops'], 1)
+
+
 class DispatcherShiftPeriodFieldsTests(TestCase):
     """Чья смена: открыта в текущем периоде или это хвост прошлого водителя."""
 

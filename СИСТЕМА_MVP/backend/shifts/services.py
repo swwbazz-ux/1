@@ -852,7 +852,11 @@ def progress_cycle_visual_context(percent):
         loop_progress = 100
         completed_loops = max(0, completed_loops - 1)
 
-    if completed_loops == 0:
+    if not value:
+        # Факта нет — красить нечего. Иначе минимальная видимая заливка на
+        # плитке (max(--tile-progress, 7%)) читается как «рейс уже отвезли».
+        phase = ''
+    elif completed_loops == 0:
         phase = 'green'
     elif completed_loops == 1:
         phase = 'amber'
