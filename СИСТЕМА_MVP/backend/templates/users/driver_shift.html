@@ -6226,6 +6226,35 @@ function bindDriverShiftOpeningForm(shell) {
             }
             return;
         }
+        /* Одна открытая смена на сотрудника: если в другой роли смена ещё
+           открыта, после удержания спрашиваем «Завершить её и начать?» — как
+           у экскаваторщика, диспетчера и мастера. Ответ «да» добавляет в
+           форму подтверждение, и сервер закрывает ту смену служебно. */
+        var otherRoleQuestion = openShiftButton.dataset.otherRoleShiftQuestion || "";
+        if (
+            otherRoleQuestion
+            && openShiftForm.dataset.otherRoleShiftConfirmed !== "true"
+            && typeof window.openAppConfirmDialog === "function"
+        ) {
+            event.preventDefault();
+            delete openShiftForm.dataset.driverShiftHoldComplete;
+            window.openAppConfirmDialog(otherRoleQuestion, function () {
+                var confirmField = openShiftForm.querySelector("[data-other-role-shift-input]");
+                if (!confirmField) {
+                    confirmField = document.createElement("input");
+                    confirmField.type = "hidden";
+                    confirmField.name = openShiftButton.dataset.otherRoleShiftField || "close_other_role_shift";
+                    confirmField.setAttribute("data-other-role-shift-input", "");
+                    openShiftForm.appendChild(confirmField);
+                }
+                confirmField.value = "1";
+                openShiftForm.dataset.otherRoleShiftConfirmed = "true";
+                openShiftForm.dataset.driverShiftHoldComplete = "true";
+                openShiftForm.requestSubmit(openShiftButton);
+            }, 0, openShiftButton.dataset.otherRoleShiftAccept || "Завершить и начать");
+            return;
+        }
+        delete openShiftForm.dataset.otherRoleShiftConfirmed;
         delete openShiftForm.dataset.driverShiftHoldComplete;
         openShiftForm.dataset.driverShiftOpeningPending = "true";
         openShiftButton.disabled = true;

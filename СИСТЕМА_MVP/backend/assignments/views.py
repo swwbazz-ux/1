@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
@@ -16,7 +16,13 @@ from core.production_time import production_shift_context, production_shift_type
 from core.models import lock_production_state
 from references.models import Equipment
 from shifts.models import EmployeeShift, ShiftType
-from shifts.services import lock_active_employee_for_shift
+from shifts.services import (
+    find_other_role_open_shift,
+    lock_active_employee_for_shift,
+    other_role_shift_flag,
+    other_role_shift_prompt,
+    resolve_other_role_shift,
+)
 from trips.views import dispatcher_control_view as render_dispatcher_control_view
 from users.access_auth import find_employee_access_by_credentials
 from users.active_role import activate_role_session
@@ -88,11 +94,15 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v162";
+const CACHE_NAME = "mining-master-mobile-shell-v164";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
 const EXCLUDED_NAVIGATION_PREFIXES = ["/deputy-mining-manager/"];
+/* Оболочка открывается сразу: если сеть не успела за 2,5 секунды, отдаём
+   сохранённую доску, а страница сама держит плашку «Загружаем пульт», пока
+   не придёт свежая расстановка (см. miningMasterStartupOverlay в шаблоне).
+   Без сети сохранённая доска отдаётся без ожидания. */
 const NETWORK_FIRST_TIMEOUT_MS = 2500;
 const CORE_ASSETS = [
   LOGIN_URL,
@@ -153,6 +163,9 @@ async function networkFirst(request, fallbackUrl, event) {
     event.waitUntil(networkRequest.then(() => undefined).catch(() => undefined));
   }
   if (cached) {
+    if (self.navigator && self.navigator.onLine === false) {
+      return cached;
+    }
     try {
       return await Promise.race([
         networkRequest,
@@ -584,13 +597,32 @@ def handle_shift_action(request, action, access, current_shift, blocking_shift):
                 lock_production_state()
                 current_shift, blocking_shift = get_shift_state(employee)
                 if not current_shift and not blocking_shift:
-                    EmployeeShift.objects.create(
-                        employee=employee,
-                        shift_type=get_shift_type_for_now(now),
+                    # get_shift_state видит только смены мастера, а база
+                    # запрещает две открытые смены у одного сотрудника в любых
+                    # контурах (unique_open_shift_per_employee). Открытая смена
+                    # диспетчера или водителя того же человека раньше кончалась
+                    # IntegrityError и белым экраном 500 — теперь, как у всех
+                    # ролей, предлагается завершить её и начать эту.
+                    resolve_other_role_shift(
+                        employee,
                         workplace_code='mining_master',
-                        opened_at=now,
-                        opened_by=employee,
+                        close_other=other_role_shift_flag(request.POST),
+                        closed_by=employee,
                     )
+                    try:
+                        with transaction.atomic():
+                            EmployeeShift.objects.create(
+                                employee=employee,
+                                shift_type=get_shift_type_for_now(now),
+                                workplace_code='mining_master',
+                                opened_at=now,
+                                opened_by=employee,
+                            )
+                    except IntegrityError:
+                        raise ValidationError(
+                            'Смена не открыта: у вас уже есть открытая смена. '
+                            'Обновите экран и попробуйте снова.'
+                        )
         except ValidationError as error:
             messages.error(request, '; '.join(error.messages))
             return
@@ -795,6 +827,11 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
 
     can_start_shift = not current_shift and not blocking_shift
     requires_shift_reauth = can_start_shift and get_session_device_kind(request) == 'shared'
+    other_role_shift = (
+        find_other_role_open_shift(access.employee, workplace_code='mining_master', for_update=False)
+        if can_start_shift
+        else None
+    )
     production_context = production_shift_context()
     current_time = production_context.local_datetime.strftime('%H:%M')
     current_date = production_context.production_date.strftime('%d.%m.%Y')
@@ -836,8 +873,15 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
             'active_shift_title': 'Активная смена горного мастера',
             'inactive_shift_title': 'Смена горного мастера не открыта',
             'inactive_name': 'смена не открыта',
-            'shift_form_action': request.get_full_path(),
+            # Только путь: фрагмент доски рендерится тем же view с
+            # ?_operational_fragment=…, и полный адрес запекался в форму смены.
+            'shift_form_action': request.path,
             'shift_action_field_name': 'action',
+            'other_role_shift_prompt': (
+                other_role_shift_prompt(other_role_shift, target_workplace_code='mining_master')
+                if other_role_shift
+                else None
+            ),
             'shift_start_value': 'start_shift',
             'shift_end_value': 'end_shift',
             'shift_start_label': 'Начать смену',

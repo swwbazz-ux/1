@@ -60,6 +60,66 @@ document.addEventListener("DOMContentLoaded", function () {
     var detailDumpPointOptions = [];
     var detailShiftReport = document.querySelector("[data-gd-detail-shift-report]");
     var detailMetrics = document.querySelector("[data-gd-detail-metrics]");
+    var detailMeta = document.querySelector("[data-gd-detail-meta]");
+    var detailPlanBox = document.querySelector("[data-gd-detail-plan]");
+    var detailPlanPercent = document.querySelector("[data-gd-detail-plan-percent]");
+    var detailPlanFact = document.querySelector("[data-gd-detail-plan-fact]");
+    var detailShiftBox = document.querySelector("[data-gd-detail-shift]");
+    var detailShiftType = document.querySelector("[data-gd-detail-shift-type]");
+    var detailShiftOpened = document.querySelector("[data-gd-detail-shift-opened]");
+    var detailShiftPresence = document.querySelector("[data-gd-detail-shift-presence]");
+    var detailShiftSeen = document.querySelector("[data-gd-detail-shift-seen]");
+    var detailServiceClose = document.querySelector("[data-gd-detail-service-close]");
+    var detailServiceCloseToggle = document.querySelector("[data-gd-detail-service-close-toggle]");
+    var detailServiceCloseBody = document.querySelector("[data-gd-detail-service-close-body]");
+    var detailServiceCloseCancel = document.querySelector("[data-gd-detail-service-close-cancel]");
+    var detailServiceCloseMileage = document.querySelector("[data-gd-detail-service-close-mileage]");
+    var detailServiceCloseNeglect = document.querySelector("[data-gd-detail-service-close-neglect]");
+    var detailServiceCloseKind = document.querySelector("[data-gd-detail-service-close-kind]");
+    var detailShiftAutoClose = document.querySelector("[data-gd-detail-shift-autoclose]");
+    var detailServiceCloseHint = document.querySelector("[data-gd-detail-service-close-hint]");
+    var detailCrewTitle = document.querySelector("[data-gd-detail-crew-title]");
+    var detailShiftVerdict = document.querySelector("[data-gd-detail-shift-verdict]");
+    var detailShiftAlert = document.querySelector("[data-gd-detail-shift-alert]");
+    var detailShiftPeriod = document.querySelector("[data-gd-detail-shift-period]");
+    var detailShiftDuration = document.querySelector("[data-gd-detail-shift-duration]");
+    var detailManualTrip = document.querySelector("[data-gd-detail-manual-trip]");
+    var detailManualTripHint = document.querySelector("[data-gd-detail-manual-trip-hint]");
+    var detailManualTripBlocked = document.querySelector("[data-gd-detail-manual-trip-blocked]");
+    var detailManualTripForm = document.querySelector("[data-gd-detail-manual-trip-form]");
+    var detailManualTripToggle = document.querySelector("[data-gd-detail-manual-trip-toggle]");
+    var detailManualTripBody = document.querySelector("[data-gd-detail-manual-trip-body]");
+    var detailManualTripCancel = document.querySelector("[data-gd-detail-manual-trip-cancel]");
+    var detailManualTripDump = document.querySelector("[data-gd-detail-manual-trip-dump]");
+    var detailManualTripRock = document.querySelector("[data-gd-detail-manual-trip-rock]");
+    var detailManualTripTime = document.querySelector("[data-gd-detail-manual-trip-time]");
+    var detailScrollHint = document.querySelector("[data-gd-detail-scroll-hint]");
+    var detailScrollPanel = detailLayer ? detailLayer.querySelector(".mm-equipment-detail-panel") : null;
+    /* План показан крупно в шапке — те же строки в общем списке не повторяем. */
+    var DETAIL_PLAN_LABELS = ["Статус плана", "Факт / план", "Выполнение плана", "План смены", "Группа плана"];
+
+    /* Карточка выше окна листается внутри; без подсказки обрез внизу выглядит
+       как оторванный блок. Полоска видна, пока есть что листать. */
+    function syncDetailScrollHint() {
+        if (!detailScrollHint || !detailScrollPanel) return;
+        var rest = detailScrollPanel.scrollHeight - detailScrollPanel.clientHeight - detailScrollPanel.scrollTop;
+        detailScrollHint.hidden = rest <= 12;
+    }
+    if (detailScrollPanel) {
+        detailScrollPanel.addEventListener("scroll", syncDetailScrollHint, { passive: true });
+        window.addEventListener("resize", syncDetailScrollHint);
+        if (typeof ResizeObserver === "function") {
+            new ResizeObserver(syncDetailScrollHint).observe(detailScrollPanel);
+        }
+    }
+    var detailTrucks = document.querySelector("[data-gd-detail-trucks]");
+    var detailTrucksCount = document.querySelector("[data-gd-detail-trucks-count]");
+    var detailTrucksList = document.querySelector("[data-gd-detail-trucks-list]");
+    var detailTrucksRemoved = document.querySelector("[data-gd-detail-trucks-removed]");
+    /* Паспорт техники уходит в строку под именем, сведения о смене — в блок
+       машиниста; в общем списке остаётся только то, чему нет своего места. */
+    var DETAIL_META_LABELS = ["Экскаватор", "Модель", "ГП, т", "Кузов/ковш, м3", "Гаражный N"];
+    var DETAIL_SHIFT_LABELS = ["Смена", "Смена открыта", "Связь", "Последняя связь", "Приложение", "В составе"];
     var detailTabs = document.querySelector("[data-gd-detail-tabs]");
     var detailDashboard = document.querySelector("[data-gd-detail-dashboard]");
     var detailLoadState = document.querySelector("[data-gd-detail-load-state]");
@@ -1550,7 +1610,11 @@ document.addEventListener("DOMContentLoaded", function () {
         tile.style.setProperty("--tile-total-progress", String(data.percent || 0) + "%");
         if (loopProgress !== null && loopProgress !== undefined && loopProgress !== "") tile.dataset.planLoopPercent = String(loopProgress);
         tile.dataset.planCompletedLoops = String(completedLoops);
+        /* Пустая фаза = рейсов по смене нет. Атрибут надо именно снять:
+           иначе на перерисованной плитке останется заливка от прошлого
+           обновления и пустой самосвал будет выглядеть работающим. */
         if (plan.progress_phase) tile.dataset.planProgressPhase = plan.progress_phase;
+        else tile.removeAttribute("data-plan-progress-phase");
         tile.innerHTML =
             "<strong>" + escapeHtml(data.number || "") + "</strong>" +
             '<img src="' + escapeHtml(dispatcherNeutralEquipmentIcon(isTruck ? "truck" : "excavator")) + '" alt="">' +
@@ -1833,6 +1897,276 @@ document.addEventListener("DOMContentLoaded", function () {
         if (detailSettingsStatus) detailSettingsStatus.textContent = "";
         if (detailList) detailList.innerHTML = "";
         if (detailShiftReport) detailShiftReport.hidden = true;
+        if (detailMeta) detailMeta.textContent = "";
+        if (detailPlanBox) detailPlanBox.hidden = true;
+        if (detailShiftBox) detailShiftBox.hidden = true;
+        if (detailTrucks) detailTrucks.hidden = true;
+        if (detailShiftAlert) detailShiftAlert.hidden = true;
+        if (detailShiftVerdict) detailShiftVerdict.hidden = true;
+        if (detailManualTrip) detailManualTrip.hidden = true;
+        closeDetailManualTripForm();
+        closeDetailServiceCloseForm();
+        if (detailServiceClose) {
+            detailServiceClose.hidden = true;
+            detailServiceClose.removeAttribute("action");
+        }
+    }
+
+    function closeDetailServiceCloseForm() {
+        if (!detailServiceClose) return;
+        detailServiceClose.classList.remove("is-open");
+        if (detailServiceCloseBody) detailServiceCloseBody.hidden = true;
+        Array.prototype.forEach.call(detailServiceClose.querySelectorAll("input:not([type=hidden])"), function (input) {
+            input.value = "";
+        });
+    }
+
+    function openDetailServiceCloseForm() {
+        if (!detailServiceClose || !detailServiceCloseToggle || detailServiceCloseToggle.disabled) return;
+        detailServiceClose.classList.add("is-open");
+        if (detailServiceCloseBody) detailServiceCloseBody.hidden = false;
+        var reason = detailServiceClose.querySelector("[name=reason]");
+        if (reason) reason.focus();
+    }
+
+    /* Смена машиниста/водителя: сведения + служебное завершение. Форма
+       обычная: POST на dispatcher_service_close_shift и редирект с сообщением,
+       тот же путь, что у «Незакрытых смен» в журнале. */
+    function renderDetailShift(shift, employee) {
+        var presenceNode = detailEmployeePresence;
+        var presenceStatus = (shift && shift.presence_status) || (employee && employee.presence_status) || "";
+        if (presenceNode) {
+            presenceNode.className = "gd-detail-crew-presence" + (presenceStatus ? " is-" + presenceStatus : "");
+        }
+        if (!shift) {
+            if (detailShiftBox) detailShiftBox.hidden = true;
+            if (detailServiceClose) detailServiceClose.hidden = true;
+            if (detailShiftAlert) detailShiftAlert.hidden = true;
+            if (detailShiftVerdict) detailShiftVerdict.hidden = true;
+            return;
+        }
+        if (detailShiftType) detailShiftType.textContent = shift.type_label || "";
+        if (detailShiftOpened) detailShiftOpened.textContent = shift.opened_at_label || "";
+        if (detailShiftPresence) detailShiftPresence.textContent = shift.presence_label || "";
+        if (detailShiftSeen) detailShiftSeen.textContent = shift.last_seen_label || "";
+        if (detailShiftPeriod) detailShiftPeriod.textContent = shift.period_label || shift.type_label || "";
+        if (detailShiftDuration) detailShiftDuration.textContent = shift.duration_label || "";
+        /* Текущая смена — зелёная метка; хвост прошлой смены — красная и
+           развёрнутое предупреждение: диспетчер сразу видит, что водитель
+           прошлой смены не закрыл её, а не гадает по дате открытия. */
+        if (detailShiftVerdict) {
+            var verdict = shift.verdict || "";
+            detailShiftVerdict.className = "gd-detail-shift-verdict" + (verdict ? " is-" + verdict : "");
+            detailShiftVerdict.textContent = shift.verdict_label || "";
+            detailShiftVerdict.hidden = !shift.verdict_label;
+        }
+        if (detailShiftAlert) {
+            detailShiftAlert.textContent = shift.alert || "";
+            detailShiftAlert.className = "gd-detail-shift-alert" + (shift.verdict ? " is-" + shift.verdict : "");
+            detailShiftAlert.hidden = !shift.alert;
+        }
+        if (detailShiftBox) detailShiftBox.hidden = false;
+        if (detailServiceClose) {
+            closeDetailServiceCloseForm();
+            detailServiceClose.hidden = !shift.service_close_url;
+            if (shift.service_close_url) detailServiceClose.setAttribute("action", shift.service_close_url);
+            if (detailServiceCloseMileage) {
+                detailServiceCloseMileage.hidden = !shift.is_truck;
+                var mileage = detailServiceCloseMileage.querySelector("input");
+                if (mileage) mileage.required = false;
+            }
+            var closeLocked = dispatcherRoleIsReadonly() || !dispatcherShiftOpen;
+            if (detailServiceCloseToggle) detailServiceCloseToggle.disabled = closeLocked;
+            if (detailServiceCloseNeglect) detailServiceCloseNeglect.disabled = closeLocked;
+            if (detailShiftAutoClose) detailShiftAutoClose.textContent = shift.auto_close_at_label || "—";
+            renderDetailShiftReadingBounds(shift);
+        }
+    }
+
+    /* Подсказка по показаниям: сервер требует целые числа, моточасы не меньше
+       начальных и не больше +12 за смену — говорим это до отправки, а не после. */
+    function renderDetailShiftReadingBounds(shift) {
+        if (!detailServiceClose) return;
+        var hours = detailServiceClose.querySelector("[name=end_engine_hours]");
+        var mileage = detailServiceClose.querySelector("[name=end_mileage]");
+        var startHours = shift && shift.start_engine_hours ? Number(String(shift.start_engine_hours).replace(",", ".")) : NaN;
+        var startMileage = shift && shift.start_mileage ? Number(String(shift.start_mileage).replace(",", ".")) : NaN;
+        if (hours) {
+            if (!shift.is_truck && isFinite(startHours)) {
+                hours.min = String(Math.round(startHours));
+                hours.max = String(Math.round(startHours) + 12);
+            } else {
+                hours.min = "0";
+                hours.removeAttribute("max");
+            }
+        }
+        if (mileage) {
+            mileage.min = shift.is_truck && isFinite(startMileage) ? String(Math.floor(startMileage)) : "0";
+        }
+        if (!detailServiceCloseHint) return;
+        var parts = [];
+        if (shift.start_fuel) parts.push("топливо " + shift.start_fuel + " л");
+        if (shift.is_truck && shift.start_mileage) parts.push("одометр " + shift.start_mileage + " км");
+        if (shift.start_engine_hours) parts.push("моточасы " + shift.start_engine_hours);
+        var text = parts.length ? "На начало смены: " + parts.join(" · ") + ". " : "";
+        text += shift.is_truck
+            ? "Если показания известны — целые числа; иначе оставьте пустыми."
+            : "Если показания известны — целые числа, моточасы не меньше начальных и не более +12; иначе оставьте пустыми.";
+        detailServiceCloseHint.textContent = text;
+        detailServiceCloseHint.hidden = false;
+    }
+
+    /* Выполнение плана крупно в шапке: одна цифра, которую диспетчер ищет
+       первой; факт/план и группа — строкой под ней. */
+    function renderDetailPlan(plan) {
+        if (!detailPlanBox) return;
+        var hasPlan = plan && plan.progress_percent !== null && plan.progress_percent !== undefined;
+        if (!plan || (!hasPlan && !plan.plan_status_label)) {
+            detailPlanBox.hidden = true;
+            return;
+        }
+        detailPlanBox.hidden = false;
+        detailPlanBox.classList.toggle("is-muted", !hasPlan);
+        if (detailPlanPercent) detailPlanPercent.textContent = hasPlan ? String(plan.progress_percent) + "%" : "—";
+        if (detailPlanFact) {
+            detailPlanFact.textContent = hasPlan
+                ? [plan.fact_plan_label, plan.plan_group_name].filter(Boolean).join(" · ")
+                : (plan.plan_status_label || "");
+        }
+    }
+
+    function closeDetailManualTripForm() {
+        if (!detailManualTripForm) return;
+        detailManualTripForm.classList.remove("is-open");
+        if (detailManualTripBody) detailManualTripBody.hidden = true;
+        var reason = detailManualTripForm.querySelector("[name=reason]");
+        if (reason) reason.value = "";
+        if (detailManualTripTime) detailManualTripTime.value = "";
+    }
+
+    function detailLocalDateTimeValue(date) {
+        var pad = function (value) { return (value < 10 ? "0" : "") + value; };
+        return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate())
+            + "T" + pad(date.getHours()) + ":" + pad(date.getMinutes());
+    }
+
+    function openDetailManualTripForm() {
+        if (!detailManualTripForm || detailManualTripForm.hidden) return;
+        detailManualTripForm.classList.add("is-open");
+        if (detailManualTripBody) detailManualTripBody.hidden = false;
+        if (detailManualTripTime) detailManualTripTime.max = detailLocalDateTimeValue(new Date());
+        var reason = detailManualTripForm.querySelector("[name=reason]");
+        if (reason) reason.focus();
+    }
+
+    function appendDetailOption(parent, value, label, selected) {
+        var option = document.createElement("option");
+        option.value = String(value);
+        option.textContent = label;
+        if (selected) option.selected = true;
+        parent.appendChild(option);
+    }
+
+    /* Ручной рейс: сервер отдаёт точки забоя с плечом и остальные активные
+       точки, породу по умолчанию из настроек экскаватора. Отправка — обычной
+       формой на dispatcher_manual_trip с подтверждением. */
+    function renderDetailManualTrip(manual) {
+        if (!detailManualTrip) return;
+        closeDetailManualTripForm();
+        if (!manual) {
+            detailManualTrip.hidden = true;
+            return;
+        }
+        detailManualTrip.hidden = false;
+        if (detailManualTripHint) {
+            detailManualTripHint.textContent = manual.excavator_label
+                ? "На экскаватор " + manual.excavator_label + " от имени водителя открытой смены."
+                : "";
+        }
+        var blocked = manual.blocked_reason || "";
+        if (!blocked && (dispatcherRoleIsReadonly() || !dispatcherShiftOpen)) {
+            blocked = "Нужна открытая смена диспетчера.";
+        }
+        if (detailManualTripBlocked) {
+            detailManualTripBlocked.textContent = blocked;
+            detailManualTripBlocked.hidden = !blocked;
+        }
+        if (detailManualTripForm) {
+            detailManualTripForm.hidden = !!blocked || !manual.url;
+            if (manual.url) detailManualTripForm.setAttribute("action", manual.url);
+            else detailManualTripForm.removeAttribute("action");
+            var excavatorInput = detailManualTripForm.querySelector("[name=excavator_id]");
+            if (excavatorInput) excavatorInput.value = manual.excavator_id || "";
+            var countInput = detailManualTripForm.querySelector("[name=trips_count]");
+            if (countInput) {
+                countInput.max = String(manual.max_count || 10);
+                countInput.value = "1";
+            }
+        }
+        if (detailManualTripDump) {
+            detailManualTripDump.innerHTML = "";
+            var known = {};
+            (manual.destinations || []).forEach(function (row, index) {
+                known[String(row.dump_point_id)] = true;
+                var distance = row.transport_distance_km ? " · " + String(row.transport_distance_km).replace(".", ",") + " км" : "";
+                appendDetailOption(detailManualTripDump, row.dump_point_id, row.name + distance, index === 0);
+            });
+            var others = (manual.dump_points || []).filter(function (point) { return !known[String(point.id)]; });
+            if (others.length) {
+                var group = document.createElement("optgroup");
+                group.label = (manual.destinations || []).length ? "Другие точки" : "Точки разгрузки";
+                others.forEach(function (point) { appendDetailOption(group, point.id, point.name, false); });
+                detailManualTripDump.appendChild(group);
+            }
+        }
+        if (detailManualTripRock) {
+            detailManualTripRock.innerHTML = "";
+            (manual.rock_types || []).forEach(function (rock) {
+                appendDetailOption(detailManualTripRock, rock.id, rock.name, String(manual.rock_type_id || "") === String(rock.id));
+            });
+        }
+    }
+
+    function renderDetailTruckChips(container, numbers) {
+        if (!container) return;
+        container.innerHTML = "";
+        (numbers || []).forEach(function (number) {
+            var chip = document.createElement("span");
+            chip.textContent = String(number);
+            container.appendChild(chip);
+        });
+    }
+
+    function renderDetailTrucks(data) {
+        if (!detailTrucks) return;
+        var report = data.shift_report || {};
+        var current = Array.isArray(report.current_trucks) ? report.current_trucks : [];
+        var removed = Array.isArray(report.removed_trucks) ? report.removed_trucks : [];
+        if (data.category !== "complex" || (!current.length && !removed.length)) {
+            detailTrucks.hidden = true;
+            return;
+        }
+        renderDetailTruckChips(detailTrucksList, current);
+        if (!current.length && detailTrucksList) {
+            var empty = document.createElement("em");
+            empty.textContent = "самосвалы не назначены";
+            detailTrucksList.appendChild(empty);
+        }
+        renderDetailTruckChips(detailTrucksRemoved, removed);
+        if (detailTrucksRemoved) {
+            detailTrucksRemoved.hidden = !removed.length;
+            if (removed.length) {
+                var note = document.createElement("em");
+                note.textContent = "выведены за смену";
+                detailTrucksRemoved.insertBefore(note, detailTrucksRemoved.firstChild);
+            }
+        }
+        if (detailTrucksCount) {
+            detailTrucksCount.textContent = current.length
+                ? current.length + " " + (current.length === 1 ? "машина" : current.length < 5 ? "машины" : "машин")
+                : "";
+        }
+        detailTrucks.hidden = false;
     }
 
     function renderDetailDowntime(data) {
@@ -2191,12 +2525,38 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
             }
         }
+        if (detailCrewTitle) {
+            detailCrewTitle.textContent = (data.shift && data.shift.is_truck) || data.type === "Самосвал" ? "Водитель" : "Машинист";
+        }
+        renderDetailShift(data.shift || null, data.employee || null);
+        renderDetailPlan(data.plan || null);
+        renderDetailManualTrip(data.manual_trip || null);
+        window.setTimeout(syncDetailScrollHint, 0);
         renderDetailDowntime(data.downtime || null);
         renderDetailSettings(data.settings || null);
+        renderDetailTrucks(data);
+        if (detailMeta) {
+            var metaParts = [];
+            DETAIL_META_LABELS.forEach(function (label) {
+                (data.details || []).forEach(function (row) {
+                    if (!row || row.label !== label || !row.value) return;
+                    if (label === "Гаражный N" && String(row.value) === String(data.label || "")) return;
+                    metaParts.push(label === "ГП, т" ? "ГП " + row.value + " т"
+                        : label === "Кузов/ковш, м3" ? "ковш " + row.value + " м³"
+                        : label === "Гаражный N" ? "гаражный № " + row.value
+                        : String(row.value));
+                });
+            });
+            detailMeta.textContent = metaParts.join(" · ");
+        }
         if (detailList) {
             detailList.innerHTML = "";
             (data.details || []).forEach(function (row) {
                 if (!row || !row.value) return;
+                if (DETAIL_META_LABELS.indexOf(row.label) >= 0) return;
+                if (data.shift && DETAIL_SHIFT_LABELS.indexOf(row.label) >= 0) return;
+                if (data.category === "complex" && row.label === "В составе") return;
+                if (detailPlanBox && !detailPlanBox.hidden && DETAIL_PLAN_LABELS.indexOf(row.label) >= 0) return;
                 if (data.downtime && data.downtime.active && ["Простой", "С начала"].indexOf(row.label) >= 0) return;
                 var term = document.createElement("dt");
                 var value = document.createElement("dd");
@@ -2334,6 +2694,82 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     if (detailDowntimeClose) {
         detailDowntimeClose.addEventListener("click", requestDetailDowntimeClose);
+    }
+    if (detailServiceCloseToggle) {
+        detailServiceCloseToggle.addEventListener("click", openDetailServiceCloseForm);
+    }
+    if (detailServiceCloseCancel) {
+        detailServiceCloseCancel.addEventListener("click", closeDetailServiceCloseForm);
+    }
+    if (detailManualTripToggle) {
+        detailManualTripToggle.addEventListener("click", openDetailManualTripForm);
+    }
+    if (detailManualTripCancel) {
+        detailManualTripCancel.addEventListener("click", closeDetailManualTripForm);
+    }
+    if (detailManualTripForm) {
+        detailManualTripForm.addEventListener("submit", function (event) {
+            event.preventDefault();
+            if (!detailManualTripForm.getAttribute("action")) return;
+            if (typeof detailManualTripForm.reportValidity === "function" && !detailManualTripForm.reportValidity()) return;
+            var card = equipmentCards[String(detailLayer ? detailLayer.dataset.gdActiveCardId || "" : "")] || {};
+            var countInput = detailManualTripForm.querySelector("[name=trips_count]");
+            var count = parseInt(countInput ? countInput.value : "1", 10) || 1;
+            var dumpOption = detailManualTripDump && detailManualTripDump.selectedOptions ? detailManualTripDump.selectedOptions[0] : null;
+            var message = "Добавить " + count + " " + (count === 1 ? "рейс" : count < 5 ? "рейса" : "рейсов")
+                + " самосвалу " + (card.label || (detailTitle ? detailTitle.textContent : "")) + " → " + (dumpOption ? dumpOption.textContent : "точка")
+                + "? Рейс запишется выполненным, отменить его нельзя.";
+            if (typeof window.openAppConfirmDialog !== "function") {
+                detailManualTripForm.submit();
+                return;
+            }
+            window.openAppConfirmDialog(message, function () { detailManualTripForm.submit(); }, 0, "Добавить рейс", {
+                confirmTitle: "Добавить рейс вручную?",
+                confirmDescription: message
+            });
+        });
+    }
+    /* Два исхода: «не закрыл сам» — одно нажатие без полей (в журнале это
+       значит, что сотрудник не выполнил обязанность); «по согласованию» —
+       форма с причиной и показаниями по желанию. Вид уходит в close_kind. */
+    function submitDetailServiceClose(kind, title, message) {
+        if (!detailServiceClose || !detailServiceClose.getAttribute("action")) return;
+        if (detailServiceCloseKind) detailServiceCloseKind.value = kind;
+        if (typeof window.openAppConfirmDialog !== "function") {
+            detailServiceClose.submit();
+            return;
+        }
+        window.openAppConfirmDialog(message, function () { detailServiceClose.submit(); }, 0, "Закрыть смену", {
+            confirmTitle: title,
+            confirmDescription: message
+        });
+    }
+    function detailServiceCloseSubject() {
+        var card = equipmentCards[String(detailLayer ? detailLayer.dataset.gdActiveCardId || "" : "")] || {};
+        var employee = card.employee || {};
+        return (employee.name || "сотрудника") + " на " + (card.label || (detailTitle ? detailTitle.textContent : "") || "технике");
+    }
+    if (detailServiceCloseNeglect) {
+        detailServiceCloseNeglect.addEventListener("click", function () {
+            if (detailServiceCloseNeglect.disabled) return;
+            submitDetailServiceClose(
+                "neglected",
+                "Сотрудник не закрыл смену сам?",
+                "Закрыть смену " + detailServiceCloseSubject() + " как незакрытую сотрудником? Причина и показания не нужны; в журнале будет отмечено, что сотрудник не закрыл смену и не сообщил диспетчеру."
+            );
+        });
+    }
+    if (detailServiceClose) {
+        detailServiceClose.addEventListener("submit", function (event) {
+            event.preventDefault();
+            if (!detailServiceClose.getAttribute("action")) return;
+            if (typeof detailServiceClose.reportValidity === "function" && !detailServiceClose.reportValidity()) return;
+            submitDetailServiceClose(
+                "coordinated",
+                "Закрыть смену по согласованию?",
+                "Закрыть смену " + detailServiceCloseSubject() + " по согласованию с сотрудником? Открытые рейсы уйдут в перенос."
+            );
+        });
     }
 
     document.querySelectorAll("[data-gd-detail-close]").forEach(function (node) {
@@ -5422,6 +5858,121 @@ document.addEventListener("DOMContentLoaded", function () {
             complexRackResizeObserver.observe(rack);
         });
     }
+    /* Живой поиск техники: набранный номер подсвечивает все плитки этой
+       машины — в комплексе, в гараже, карточку комплекса по экскаватору.
+       Совпадение по началу номера, чтобы набор сужал круг; «к-2» и «k-2»
+       одинаково находят комплекс по имени зоны. Доска после ответа сервера
+       перерисовывается целиком — MutationObserver возвращает подсветку. */
+    function bindDispatcherEquipmentSearch() {
+        var input = document.querySelector("[data-dispatcher-equipment-search]");
+        if (!input || document.body.classList.contains("mining-master-mobile-screen")) return;
+        var box = input.closest("[data-dispatcher-equipment-search-box]") || input.parentElement;
+        var count = document.querySelector("[data-dispatcher-equipment-search-count]");
+        var query = "";
+
+        function normalizeSearchText(value) {
+            return String(value || "").trim().toLowerCase().replace(/k/g, "к").replace(/\s+/g, "");
+        }
+
+        function matchesSearch(node, needle) {
+            var name = normalizeSearchText(node.getAttribute("data-equipment-name"));
+            if (name && name.indexOf(needle) === 0) return true;
+            var zone = normalizeSearchText(node.getAttribute("data-zone-label"));
+            return !!zone && zone.indexOf(needle) === 0;
+        }
+
+        function applyEquipmentSearch() {
+            var needle = normalizeSearchText(query);
+            var hits = 0;
+            var first = null;
+            document.querySelectorAll(".dispatcher-shell [data-equipment-name]").forEach(function (node) {
+                var hit = needle !== "" && matchesSearch(node, needle);
+                node.classList.toggle("is-search-hit", hit);
+                if (hit) {
+                    hits += 1;
+                    if (!first) first = node;
+                }
+            });
+            document.body.classList.toggle("is-equipment-search", needle !== "");
+            box.classList.toggle("has-query", needle !== "");
+            if (count) {
+                count.hidden = needle === "";
+                count.textContent = String(hits);
+                count.classList.toggle("is-none", hits === 0);
+            }
+            /* Гараж прокручивается — первое совпадение подтягиваем в кадр. */
+            if (first && typeof first.scrollIntoView === "function") {
+                first.scrollIntoView({ block: "nearest", inline: "nearest" });
+            }
+        }
+
+        input.addEventListener("input", function () {
+            query = input.value;
+            applyEquipmentSearch();
+        });
+        input.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") clearEquipmentSearch();
+        });
+
+        function clearEquipmentSearch() {
+            input.value = "";
+            query = "";
+            applyEquipmentSearch();
+            if (document.activeElement === input) input.blur();
+        }
+
+        /* Набор без клика по полю: цифра или буква, нажатая когда фокус не в
+           другом поле ввода и не открыт диалог, уходит в поиск — диспетчер
+           просто начинает печатать номер. Backspace стирает так же. */
+        function isTypingElsewhere() {
+            var active = document.activeElement;
+            if (!active || active === document.body || active === input) return false;
+            var tag = active.tagName;
+            return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || active.isContentEditable;
+        }
+        function isDialogOpen() {
+            if (document.querySelector("dialog[open]")) return true;
+            var modal = document.getElementById("app-confirm-modal");
+            return !!(modal && !modal.hidden && getComputedStyle(modal).display !== "none");
+        }
+        document.addEventListener("keydown", function (event) {
+            if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+            if (document.activeElement === input || isTypingElsewhere() || isDialogOpen()) return;
+            var key = event.key;
+            if (key.length === 1 && /[0-9a-zа-яё\-]/i.test(key)) {
+                if (input.maxLength > 0 && input.value.length >= input.maxLength) return;
+                input.value += key;
+            } else if (key === "Backspace" && input.value) {
+                input.value = input.value.slice(0, -1);
+            } else {
+                return;
+            }
+            event.preventDefault();
+            query = input.value;
+            applyEquipmentSearch();
+            input.focus({ preventScroll: true });
+            input.setSelectionRange(input.value.length, input.value.length);
+        });
+
+        /* Клик или захват мышью в любом месте вне поля снимает поиск:
+           техника найдена, диспетчер тянет её или работает дальше. */
+        document.addEventListener("pointerdown", function (event) {
+            if (query === "" || box.contains(event.target)) return;
+            clearEquipmentSearch();
+        }, true);
+
+        var pending = null;
+        var observer = new MutationObserver(function () {
+            if (query === "" || pending) return;
+            pending = setTimeout(function () {
+                pending = null;
+                applyEquipmentSearch();
+            }, 60);
+        });
+        observer.observe(document.querySelector(".dispatcher-shell") || document.body, { childList: true, subtree: true });
+    }
+    bindDispatcherEquipmentSearch();
+
     watchComplexTruckRacks();
     function findTruckGarageList() {
         return document.querySelector(".dispatcher-trucks");

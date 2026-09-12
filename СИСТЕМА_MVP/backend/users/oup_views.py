@@ -10,6 +10,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from assignments.services import WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES, get_active_equipment_assignment
+from shifts.services import find_other_role_open_shift, other_role_shift_flag, other_role_shift_prompt
 
 from .employee_access_locks import (
     EmployeeAccessLockPlanError,
@@ -100,6 +101,11 @@ def require_oup_access(request):
 def _oup_base_context(access, *, active_nav):
     active_period = get_active_oup_period()
     owns_period = bool(active_period and active_period.employee_id == access.employee_id)
+    other_role_shift = (
+        find_other_role_open_shift(access.employee, workplace_code=OUP_ROLE_CODE, for_update=False)
+        if active_period is None
+        else None
+    )
     return {
         'access': access,
         'active_nav': active_nav,
@@ -109,6 +115,11 @@ def _oup_base_context(access, *, active_nav):
         'oup_period_is_occupied': bool(active_period and not owns_period),
         'can_start_oup_period': active_period is None,
         'can_change_employees': owns_period,
+        'other_role_shift_prompt': (
+            other_role_shift_prompt(other_role_shift, target_workplace_code=OUP_ROLE_CODE)
+            if other_role_shift
+            else None
+        ),
     }
 
 
@@ -814,7 +825,10 @@ def oup_shift_start_view(request):
     if not access:
         return redirect('role_home')
     try:
-        _shift, created = open_oup_shift(actor_access_id=access.pk)
+        _shift, created = open_oup_shift(
+            actor_access_id=access.pk,
+            close_other_role_shift=other_role_shift_flag(request.POST),
+        )
     except ValidationError as error:
         messages.error(request, '; '.join(error.messages))
     else:

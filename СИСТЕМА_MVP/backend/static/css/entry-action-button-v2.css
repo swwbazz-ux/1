@@ -90,8 +90,12 @@ body.login-page.login-fullscreen .role-app-install__button.entry-action {
 
 .entry-action.cr-button[disabled],
 fieldset[disabled] .entry-action.cr-button {
-    border-color: transparent;
-    background-color: var(--entry-action-accent);
+    /* На едином экране входа переменная --entry-action-accent не задана:
+       фон получался прозрачным, рамка тоже — и «Далее» до ввода номера
+       выглядела голым серым текстом без признаков кнопки. Запасные
+       значения оставляют кнопку видимой, но явно неактивной. */
+    border-color: rgba(255, 255, 255, .22);
+    background-color: var(--entry-action-accent, rgba(255, 255, 255, .06));
     box-shadow: none;
     cursor: not-allowed;
     filter: saturate(.65);

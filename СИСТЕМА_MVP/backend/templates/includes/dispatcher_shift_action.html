@@ -4,6 +4,10 @@
         {% if not dispatcher_header.shift_form_action %}
             <input type="hidden" name="next" value="{{ request.get_full_path }}">
         {% endif %}
+        {% if not dispatcher_header.shift_is_open and dispatcher_header.other_role_shift_prompt %}
+            {# Одна открытая смена на сотрудника: подтверждение в окне закрывает смену другой роли #}
+            <input type="hidden" name="{{ dispatcher_header.other_role_shift_prompt.field }}" value="1">
+        {% endif %}
         {% if dispatcher_header.shift_is_open %}
             <button
                 type="submit"
@@ -35,7 +39,7 @@
                 value="{{ dispatcher_header.shift_start_value|default:'start' }}"
                 class="dispatcher-shift-button"
                 {% if dispatcher_header.shift_button_marker %}data-mm-shift-control{% endif %}
-                data-confirm="{{ dispatcher_header.shift_start_confirm|default:'Начать смену горного диспетчера?' }}"
+                data-confirm="{% if dispatcher_header.other_role_shift_prompt %}{{ dispatcher_header.other_role_shift_prompt.question }}{% else %}{{ dispatcher_header.shift_start_confirm|default:'Начать смену горного диспетчера?' }}{% endif %}"
                 data-confirm-delay="10"
             >{{ dispatcher_header.shift_start_label|default:"Начать смену" }}</button>
         {% endif %}
@@ -206,17 +210,17 @@
             {% if dispatcher_header.blocking_shift.equipment %}
                 <label>
                     <span class="visually-hidden">Топливо на конец смены</span>
-                    <input type="number" name="end_fuel" min="0" step="0.01" required placeholder="Топливо на конец">
+                    <input type="number" name="end_fuel" min="0" step="1" inputmode="numeric" placeholder="Топливо на конец">
                 </label>
                 {% if dispatcher_header.blocking_shift.workplace_code == "driver" %}
                     <label>
                         <span class="visually-hidden">Одометр на конец смены</span>
-                        <input type="number" name="end_mileage" min="0" step="0.01" required placeholder="Одометр на конец">
+                        <input type="number" name="end_mileage" min="0" step="1" inputmode="numeric" placeholder="Одометр на конец">
                     </label>
                 {% endif %}
                 <label>
                     <span class="visually-hidden">Моточасы на конец смены</span>
-                    <input type="number" name="end_engine_hours" min="0" step="0.01" required placeholder="Моточасы на конец">
+                    <input type="number" name="end_engine_hours" min="0" step="1" inputmode="numeric" placeholder="Моточасы на конец">
                 </label>
             {% endif %}
             <button

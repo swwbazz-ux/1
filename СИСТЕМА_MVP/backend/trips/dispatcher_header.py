@@ -10,7 +10,13 @@ from core.production_time import (
     production_shift_type,
 )
 from shifts.models import EmployeeShift, ShiftType
-from shifts.services import lock_active_employee_for_shift
+from shifts.services import (
+    WORKPLACE_ROLE_LABELS,
+    find_other_role_open_shift,
+    lock_active_employee_for_shift,
+    other_role_shift_prompt,
+    resolve_other_role_shift,
+)
 from users.active_role import active_access_for_employee_role
 from users.models import EmployeeAccess
 from users.session_device import get_session_device_kind
@@ -26,13 +32,6 @@ WORKPLACE_ROLE_CODES = {
     'dispatcher',
     'mining_master',
     'oup',
-}
-WORKPLACE_ROLE_LABELS = {
-    'driver': 'Водитель',
-    'excavator_operator': 'Машинист экскаватора',
-    'dispatcher': 'Горный диспетчер',
-    'mining_master': 'Горный мастер',
-    'oup': 'ОУП',
 }
 
 
@@ -108,6 +107,11 @@ def build_dispatcher_header_context(access, request=None):
     )
     session_device_kind = get_session_device_kind(request) if request else 'shared'
     can_start_shift = bool(dispatcher_access and not own_shift and not active_shift)
+    other_role_shift = (
+        find_other_role_open_shift(dispatcher_access.employee, workplace_code='dispatcher', for_update=False)
+        if can_start_shift
+        else None
+    )
     dispatcher = active_shift.employee if active_shift else None
     dispatcher_photo = ''
     if dispatcher and getattr(dispatcher, 'photo', None):
@@ -145,6 +149,11 @@ def build_dispatcher_header_context(access, request=None):
         'shift_end_confirm_title': 'Завершение смены',
         'shift_end_confirm_description': 'Вы уверены, что хотите завершить текущую смену? После завершения смены будут сохранены результаты работы.',
         'shift_end_confirm_role': 'Диспетчер',
+        'other_role_shift_prompt': (
+            other_role_shift_prompt(other_role_shift, target_workplace_code='dispatcher')
+            if other_role_shift
+            else None
+        ),
     }
     effective_shift_type = active_shift.shift_type if active_shift else production_context.shift_type
     context.update({
@@ -157,11 +166,19 @@ def build_dispatcher_header_context(access, request=None):
 
 
 @transaction.atomic
-def open_dispatcher_shift(access):
+def open_dispatcher_shift(access, *, close_other_role_shift=False):
     employee = lock_active_employee_for_shift(access.employee, role_code='dispatcher')
     lock_production_state()
     if get_active_dispatcher_shift(access):
         return None
+    # Смена в другой роли того же человека: с подтверждением закрывается
+    # служебно и диспетчерская открывается, без подтверждения — OtherRoleShiftOpen.
+    resolve_other_role_shift(
+        employee,
+        workplace_code='dispatcher',
+        close_other=close_other_role_shift,
+        closed_by=employee,
+    )
     other_shift = (
         EmployeeShift.objects
         .select_for_update()

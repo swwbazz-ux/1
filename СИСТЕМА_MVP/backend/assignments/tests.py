@@ -312,15 +312,39 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'data-mm-truck-transfer-bar')
         self.assertContains(response, 'data-mm-mobile-open-truck-list')
         self.assertContains(response, 'var visibleLimit = 3;')
+        # Карточки комплексов больше не переставляются под пальцем: раньше
+        # исходная карточка занимала слот под указателем, цель уезжала на
+        # 77-302 px уже после выбора направления, и самосвал попадал в чужой
+        # комплекс.
+        self.assertNotContains(response, 'pinMobileTruckTransferSourceAtPoint')
         self.assertContains(response, 'function beginMobileTruckTransfer(node)')
+        self.assertContains(response, 'home.classList.add("is-transfer-overlay")')
+        self.assertContains(response, 'transferGrid.scrollTop = 0')
+        # Требование пройденного расстояния убрано: при входе в режим
+        # перестановки доска перекраивается, соседний комплекс подъезжает
+        # к пальцу, и правильный жест не дотягивал до порога.
+        self.assertNotContains(response, 'var travelDistance')
         self.assertContains(response, 'function completeMobileTruckTransfer(targetCard)')
         self.assertContains(response, 'expected_assignment_state_id: transfer.assignmentStateId')
         self.assertContains(response, 'function bindMobileTruckTransferDrag(mini)')
-        self.assertContains(response, 'Math.abs(dx) < 14')
+        self.assertContains(response, 'if (window.PointerEvent) return;')
+        self.assertNotContains(response, 'if (event.pointerType === "touch" || isMiningMasterMobileReadonly()) return;')
+        self.assertContains(response, 'ensureMobileTruckTransferHandle(mini);')
+        self.assertContains(response, 'data-mm-truck-transfer-handle')
+        # Жест начинается от смещения в любую сторону и по удержанию: у плитки
+        # touch-action: none, прокручивать нечего, а прежнее требование почти
+        # горизонтального движения делало соседние ряды недостижимыми.
+        self.assertNotContains(response, 'Math.abs(dx) < 14')
+        self.assertContains(response, 'var MOBILE_TRUCK_TRANSFER_START_PX = 16;')
+        self.assertContains(response, 'var MOBILE_TRUCK_TRANSFER_HOLD_MS = 260;')
+        self.assertContains(response, 'var MOBILE_TRUCK_TRANSFER_DWELL_MS = 120;')
+        self.assertContains(response, 'Math.hypot(dx, dy) < MOBILE_TRUCK_TRANSFER_START_PX')
+        self.assertContains(response, 'function armTransferHold()')
+        self.assertContains(response, 'dwelledOnTarget')
         self.assertContains(response, 'findTransferTarget(clientX, clientY)')
         self.assertContains(response, 'is-transfer-hover')
         self.assertContains(response, 'Отпустите на нужном экскаваторе')
-        self.assertContains(response, 'Самосвал в сторону — переставить')
+        self.assertContains(response, 'Удержите самосвал и ведите к экскаватору · задержитесь на нём и отпустите')
         self.assertContains(response, 'expected_assignment_state_id: transfer.assignmentStateId')
         self.assertContains(response, '[data-mm-mobile-home-truck-id], [data-mm-mobile-open-truck-list]')
         self.assertNotContains(response, '}, 460);')
@@ -619,7 +643,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v148')
+        self.assertContains(response, 'mining-master-mobile-shell-v164')
         self.assertContains(response, 'mining-master-mobile-sync-queue-v3')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v1")')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v2")')
@@ -639,7 +663,8 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>')
-        self.assertContains(response, '<div class="mm-mobile-version-strip" aria-label="Версия приложения">')
+        self.assertContains(response, '>версия v164</span>')
+        self.assertNotContains(response, '<div class="mm-mobile-version-strip" aria-label="Версия приложения">')
         self.assertContains(response, '<div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>')
         self.assertContains(response, '<span class="mm-mobile-update-badge" data-mm-pwa-update-badge')
         self.assertContains(response, 'data-mm-mobile-nav="reports" data-mm-pwa-update-nav-target')
@@ -695,7 +720,15 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v148', script)
+        self.assertIn('mining-master-mobile-shell-v164', script)
+        self.assertEqual(
+            response['X-App-Shell-Version'],
+            'mining-master-mobile-shell-v164',
+        )
+        self.assertIn(
+            f'const CACHE_NAME = "{response["X-App-Shell-Version"]}";',
+            script,
+        )
         self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
@@ -1538,6 +1571,68 @@ class MiningMasterAssignmentsViewTests(TestCase):
         response = self.client.post(reverse('mining_master_assignments'), {'action': 'end_shift'})
         self.assertRedirects(response, reverse('mining_master_assignments'))
         self.assertFalse(EmployeeShift.objects.filter(employee=self.master, closed_at__isnull=True).exists())
+
+    def test_mining_master_start_is_refused_while_other_role_shift_is_open(self):
+        # Боевой инцидент 10.09.2026: у сотрудника с несколькими ролями была
+        # открыта смена диспетчера, старт смены мастера падал в IntegrityError
+        # (unique_open_shift_per_employee) и отдавал белый экран 500.
+        self.shift.workplace_code = 'dispatcher'
+        self.shift.save(update_fields=['workplace_code'])
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+
+        response = self.client.post(
+            reverse('mining_master_assignments'),
+            {'action': 'start_shift', 'device_kind': 'personal'},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            EmployeeShift.objects.filter(employee=self.master, closed_at__isnull=True).count(),
+            1,
+        )
+        self.assertFalse(
+            EmployeeShift.objects.filter(
+                employee=self.master, workplace_code='mining_master', closed_at__isnull=True,
+            ).exists()
+        )
+        message_texts = [str(message) for message in response.context['messages']]
+        opened = timezone.localtime(self.shift.opened_at).strftime('%H:%M')
+        self.assertIn(
+            f'У вас открыта смена «Горный диспетчер» с {opened}. '
+            'Подтвердите её завершение, чтобы начать смену Горного мастера.',
+            message_texts,
+        )
+
+    def test_mining_master_offers_and_performs_other_role_shift_handover(self):
+        self.shift.workplace_code = 'dispatcher'
+        self.shift.save(update_fields=['workplace_code'])
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+
+        page = self.client.get(reverse('mining_master_assignments'))
+        self.assertContains(page, 'name="close_other_role_shift" value="1"')
+        self.assertContains(page, 'Завершить её и начать смену Горного мастера?')
+        self.assertContains(page, 'action="/mining-master/assignments/"')
+
+        response = self.client.post(
+            reverse('mining_master_assignments'),
+            {'action': 'start_shift', 'device_kind': 'personal', 'close_other_role_shift': '1'},
+        )
+
+        self.assertRedirects(response, reverse('mining_master_assignments'))
+        self.shift.refresh_from_db()
+        self.assertIsNotNone(self.shift.closed_at)
+        self.assertTrue(self.shift.is_service_closed)
+        self.assertEqual(self.shift.closed_by, self.master)
+        self.assertTrue(
+            EmployeeShift.objects.filter(
+                employee=self.master, workplace_code='mining_master', closed_at__isnull=True,
+            ).exists()
+        )
 
     def test_mining_master_cannot_restart_shift_after_employee_is_dismissed(self):
         self.shift.closed_at = timezone.now()

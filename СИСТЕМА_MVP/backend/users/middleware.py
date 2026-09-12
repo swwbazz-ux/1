@@ -201,6 +201,9 @@ class ActiveRoleSessionMiddleware:
         # Taking the session back is the one action an inactive role must still
         # be able to perform — otherwise there is no way out but retyping the PIN.
         '/reclaim-session/',
+        # Выбор приложения после единого входа сам делает роль активной —
+        # его нельзя блокировать, когда предыдущая роль уже неактивна.
+        '/apps/choose/',
         # Подписка на уведомления и отметка о показе ничего не меняют в работе,
         # но должны работать и когда роль переведена в просмотр.
         '/push/subscribe/',

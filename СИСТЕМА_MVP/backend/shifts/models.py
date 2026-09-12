@@ -395,6 +395,18 @@ class EmployeeShift(models.Model):
     opened_by = models.ForeignKey('users.Employee', verbose_name='Кто открыл', on_delete=models.PROTECT, related_name='opened_shifts', null=True, blank=True)
     closed_by = models.ForeignKey('users.Employee', verbose_name='Кто закрыл', on_delete=models.PROTECT, related_name='closed_shifts', null=True, blank=True)
     is_service_closed = models.BooleanField('Служебное закрытие', default=False)
+    service_close_kind = models.CharField(
+        'Вид служебного закрытия',
+        max_length=16,
+        blank=True,
+        choices=[
+            ('neglected', 'Сотрудник не закрыл сам'),
+            ('coordinated', 'По согласованию с диспетчером'),
+            ('auto_expired', 'Автоматически через 13 часов'),
+        ],
+        db_index=True,
+    )
+    service_close_note = models.CharField('Заметка о закрытии', max_length=255, blank=True)
     plan_group = models.ForeignKey(
         EquipmentPlanGroup,
         verbose_name='Группа плана',

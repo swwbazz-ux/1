@@ -384,12 +384,22 @@ def _lock_exact_oup_write_context(*, actor_access_id):
 
 
 @transaction.atomic
-def open_oup_shift(*, actor_access_id):
+def open_oup_shift(*, actor_access_id, close_other_role_shift=False):
+    from shifts.services import resolve_other_role_shift
+
     actor, _actor_access = _lock_exact_oup_actor(actor_access_id=actor_access_id)
     current = get_open_oup_shift(actor)
     if current:
         return current, False
 
+    # Смена в другой роли: с подтверждением закрывается служебно, без него —
+    # OtherRoleShiftOpen с вопросом «завершить её и начать?» (как у всех ролей).
+    resolve_other_role_shift(
+        actor,
+        workplace_code=OUP_ROLE_CODE,
+        close_other=close_other_role_shift,
+        closed_by=actor,
+    )
     other_workplace_shift = (
         EmployeeShift.objects.select_for_update()
         .filter(employee=actor, closed_at__isnull=True)

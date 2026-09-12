@@ -119,6 +119,142 @@ def open_shift_conflict_message(shift, *, equipment=None):
     return f'Смена на технике {equipment} уже открыта другим сотрудником.'
 
 
+# Одна открытая смена на сотрудника во всех контурах (unique_open_shift_per_employee).
+# Когда один человек с несколькими ролями открывает смену в новой роли, а в
+# старой она ещё открыта, все экраны предлагают одно и то же: «завершить её и
+# начать» — вместо отказа (или, как у мастера до 10.09.2026, белого экрана 500).
+WORKPLACE_ROLE_LABELS = {
+    'driver': 'Водитель',
+    'excavator_operator': 'Машинист экскаватора',
+    'dispatcher': 'Горный диспетчер',
+    'mining_master': 'Горный мастер',
+    'oup': 'ОУП',
+}
+WORKPLACE_ROLE_LABELS_GENITIVE = {
+    'driver': 'Водителя',
+    'excavator_operator': 'Машиниста экскаватора',
+    'dispatcher': 'Горного диспетчера',
+    'mining_master': 'Горного мастера',
+    'oup': 'ОУП',
+}
+OTHER_ROLE_SHIFT_OPEN_CODE = 'other_role_shift_open'
+OTHER_ROLE_SHIFT_FIELD = 'close_other_role_shift'
+
+
+def workplace_role_label(workplace_code):
+    return WORKPLACE_ROLE_LABELS.get(workplace_code or '', 'другая роль')
+
+
+def other_role_shift_prompt(shift, *, target_workplace_code):
+    """Текст вопроса и данные для окна «Завершить её и начать смену …?»."""
+    opened_at = timezone.localtime(shift.opened_at)
+    label = workplace_role_label(shift.workplace_code)
+    target = WORKPLACE_ROLE_LABELS_GENITIVE.get(target_workplace_code, 'этой роли')
+    return {
+        'shift_id': shift.pk,
+        'workplace_code': shift.workplace_code,
+        'workplace_label': label,
+        'opened_at_label': opened_at.strftime('%H:%M'),
+        'opened_date_label': opened_at.strftime('%d.%m.%Y'),
+        'question': (
+            f'У вас открыта смена «{label}» с {opened_at:%H:%M}. '
+            f'Завершить её и начать смену {target}?'
+        ),
+        'message': (
+            f'У вас открыта смена «{label}» с {opened_at:%H:%M}. '
+            f'Подтвердите её завершение, чтобы начать смену {target}.'
+        ),
+        'accept_label': 'Завершить и начать',
+        'field': OTHER_ROLE_SHIFT_FIELD,
+    }
+
+
+class OtherRoleShiftOpen(ValidationError):
+    """У сотрудника открыта смена в другой роли, а подтверждения на её закрытие нет."""
+
+    def __init__(self, shift, *, target_workplace_code):
+        self.shift = shift
+        self.prompt = other_role_shift_prompt(shift, target_workplace_code=target_workplace_code)
+        super().__init__(self.prompt['message'], code=OTHER_ROLE_SHIFT_OPEN_CODE)
+
+
+def find_other_role_open_shift(employee, *, workplace_code, for_update=True):
+    """Открытая смена сотрудника в другой роли (пустой workplace_code — старые
+    записи, их роль неизвестна, поэтому они не считаются «другой ролью»)."""
+    queryset = EmployeeShift.objects.select_related('employee', 'equipment', 'equipment__equipment_type')
+    if for_update:
+        queryset = queryset.select_for_update(of=('self',))
+    return (
+        queryset
+        .filter(employee=employee, closed_at__isnull=True)
+        .exclude(workplace_code__in=[workplace_code, ''])
+        .order_by('-opened_at')
+        .first()
+    )
+
+
+def handover_other_role_shift(shift, *, closed_by):
+    """Служебно закрыть смену в другой роли по подтверждению самого сотрудника.
+
+    Конечные показания техники не запрашиваются — их некому и негде ввести на
+    экране другой роли; смена помечается служебным закрытием, как при закрытии
+    диспетчером, незавершённые рейсы уходят в перенос."""
+    now = timezone.now()
+    shift.closed_at = now
+    shift.closed_by = closed_by
+    shift.is_service_closed = True
+    shift.save(update_fields=['closed_at', 'closed_by', 'is_service_closed'])
+    from downtimes.driver_workflow import close_workflow_downtimes
+    close_workflow_downtimes(shift.equipment, ended_at=now)
+    from trips.models import OPEN_TRIP_STATUSES
+    if shift.equipment_id:
+        if equipment_is_truck(shift.equipment):
+            Trip.objects.filter(truck=shift.equipment, status__in=OPEN_TRIP_STATUSES).update(is_carryover=True)
+            from reports.driver_shift_passport_snapshots import enqueue_driver_shift_passport_capture
+            from reports.models import DriverShiftPassportTrigger
+
+            enqueue_driver_shift_passport_capture(
+                shift=shift,
+                trigger=DriverShiftPassportTrigger.SERVICE_CLOSE,
+                captured_by=closed_by,
+            )
+        else:
+            Trip.objects.filter(loading_shift=shift, status__in=OPEN_TRIP_STATUSES).update(is_carryover=True)
+    from core.models import bump_operational_state
+
+    bump_operational_state(
+        'EmployeeShift:handover_closed',
+        event_type='shift_handover_closed',
+        object_type='EmployeeShift',
+        object_id=shift.pk,
+        payload={
+            'employee_id': shift.employee_id,
+            'workplace_code': shift.workplace_code,
+            'equipment_id': shift.equipment_id,
+        },
+    )
+    return shift
+
+
+def resolve_other_role_shift(employee, *, workplace_code, close_other, closed_by):
+    """Перед созданием смены: чужой по роли смены нет — None; есть и
+    подтверждено — закрыть и вернуть её; есть без подтверждения — OtherRoleShiftOpen."""
+    other_shift = find_other_role_open_shift(employee, workplace_code=workplace_code)
+    if other_shift is None:
+        return None
+    if not close_other:
+        raise OtherRoleShiftOpen(other_shift, target_workplace_code=workplace_code)
+    return handover_other_role_shift(other_shift, closed_by=closed_by)
+
+
+def other_role_shift_flag(payload):
+    """Флаг подтверждения из формы или JSON: '1', 'true', True."""
+    value = payload.get(OTHER_ROLE_SHIFT_FIELD) if payload is not None else None
+    if isinstance(value, bool):
+        return value
+    return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
 def shift_reading_is_whole(value):
     if value is None:
         return True
@@ -424,7 +560,7 @@ def resolve_published_watch_period_for_shift(
     return candidates[0]
 
 
-def open_driver_shift(*, employee, work_assignment, readings, client_action_id):
+def open_driver_shift(*, employee, work_assignment, readings, client_action_id, close_other_role_shift=False):
     existing_shift = _existing_driver_shift_action('driver_shift_opened', client_action_id)
     if existing_shift:
         return existing_shift, False
@@ -462,6 +598,12 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id):
                 .select_for_update(of=('self',))
                 .select_related('model')
                 .get(pk=locked_assignment.equipment_id)
+            )
+            resolve_other_role_shift(
+                employee,
+                workplace_code='driver',
+                close_other=close_other_role_shift,
+                closed_by=employee,
             )
             employee_open_shift = (
                 EmployeeShift.objects
@@ -622,6 +764,8 @@ def close_driver_shift(*, shift, employee, readings, client_action_id, confirmat
         locked_shift.closed_at = timezone.now()
         locked_shift.closed_by = employee
         locked_shift.save(update_fields=[*readings, 'closed_at', 'closed_by'])
+        from downtimes.driver_workflow import close_workflow_downtimes
+        close_workflow_downtimes(locked_shift.equipment, ended_at=locked_shift.closed_at)
         Trip.objects.filter(
             truck=locked_shift.equipment,
             status__in=OPEN_TRIP_STATUSES,
@@ -718,7 +862,11 @@ def progress_cycle_visual_context(percent):
         loop_progress = 100
         completed_loops = max(0, completed_loops - 1)
 
-    if completed_loops == 0:
+    if not value:
+        # Факта нет — красить нечего. Иначе минимальная видимая заливка на
+        # плитке (max(--tile-progress, 7%)) читается как «рейс уже отвезли».
+        phase = ''
+    elif completed_loops == 0:
         phase = 'green'
     elif completed_loops == 1:
         phase = 'amber'
@@ -1182,12 +1330,14 @@ def calculate_open_shift_progress(open_shift):
 
 
 class ExcavatorShiftError(Exception):
-    def __init__(self, message, *, field_errors=None, status=400, code='invalid_readings'):
+    def __init__(self, message, *, field_errors=None, status=400, code='invalid_readings', extra=None):
         super().__init__(message)
         self.message = message
         self.field_errors = field_errors or {}
         self.status = status
         self.code = code
+        # Дополнительные данные ответа (например, вопрос «завершить и начать»).
+        self.extra = extra or {}
 
 
 def parse_required_shift_integer(value, label, field_name):
@@ -1527,6 +1677,7 @@ def _open_excavator_shift_atomic(
     engine_hours_value,
     client_action_id,
     fuel_limit_override=None,
+    close_other_role_shift=False,
 ):
     from references.models import Equipment
 
@@ -1553,6 +1704,20 @@ def _open_excavator_shift_atomic(
     if existing:
         return existing
 
+    try:
+        resolve_other_role_shift(
+            employee,
+            workplace_code='excavator_operator',
+            close_other=close_other_role_shift,
+            closed_by=employee,
+        )
+    except OtherRoleShiftOpen as error:
+        raise ExcavatorShiftError(
+            error.prompt['message'],
+            status=409,
+            code=OTHER_ROLE_SHIFT_OPEN_CODE,
+            extra={'other_role_shift': error.prompt},
+        ) from error
     employee_open_shift = (
         EmployeeShift.objects
         .select_related('employee', 'equipment', 'equipment__equipment_type')
@@ -1686,6 +1851,7 @@ def open_excavator_shift(
     engine_hours_value,
     client_action_id,
     fuel_limit_override=None,
+    close_other_role_shift=False,
 ):
     try:
         return _open_excavator_shift_atomic(
@@ -1696,6 +1862,7 @@ def open_excavator_shift(
             engine_hours_value=engine_hours_value,
             client_action_id=client_action_id,
             fuel_limit_override=fuel_limit_override,
+            close_other_role_shift=close_other_role_shift,
         )
     except IntegrityError as error:
         existing = existing_shift_action_payload(
@@ -1876,6 +2043,8 @@ def close_excavator_shift(
     shift.closed_at = timezone.now()
     shift.closed_by = employee
     shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
+    from downtimes.driver_workflow import close_workflow_downtimes
+    close_workflow_downtimes(shift.equipment, ended_at=shift.closed_at)
     # Переходное право существует только до конца конкретной смены старого
     # экскаватора. После закрытия оно не должно всплыть в следующей смене.
     from assignments.services import expire_haul_handoffs_for_shift

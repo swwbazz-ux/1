@@ -1,0 +1,1184 @@
+/*
+ * Единый визуальный слой входа для мобильных производственных ролей.
+ * Значения палитры и геометрии перенесены из утверждённого start-page-v1.css.
+ * Селекторы намеренно ограничены .mobile-role-login: общие экраны и логика не затрагиваются.
+ */
+
+body.login-page.login-fullscreen.login-role-driver,
+body.login-page.login-fullscreen.login-role-excavator_operator,
+body.login-page.login-fullscreen.login-role-mining_master {
+    --start-bg: #03090d;
+    --start-bg-deep: #010609;
+    --start-surface: rgba(10, 18, 22, .94);
+    --start-surface-solid: #0b1317;
+    --start-input: #0c1418;
+    --start-text: #f4f7f5;
+    --start-muted: #a5afb3;
+    --start-muted-dark: #737e83;
+    --start-green: #48d879;
+    --start-green-deep: #195f35;
+    --start-lime: #d2ff58;
+    --start-copper: #9d714c;
+    --start-copper-light: #c18b5d;
+    --start-danger: #ff6b6b;
+    --mobile-login-accent: #48d879;
+    --mobile-login-panel-border: rgba(157, 113, 76, .57);
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 100dvh;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+    background:
+        radial-gradient(90% 58% at 50% 8%, rgba(72, 216, 121, .07), transparent 72%),
+        linear-gradient(180deg, var(--start-bg) 0%, var(--start-bg-deep) 100%);
+    color: var(--start-text);
+    color-scheme: dark;
+    font-family: "Segoe UI", Arial, sans-serif;
+    transform: none;
+    transform-origin: initial;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login *,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login *::before,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login *::after {
+    box-sizing: border-box;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login {
+    position: fixed;
+    inset-inline: 0;
+    top: var(--login-vv-top, 0px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: clamp(270px, 40dvh, 390px) max-content minmax(52px, 1fr);
+    align-content: stretch;
+    justify-items: stretch;
+    gap: 0;
+    width: 100%;
+    max-width: none;
+    height: var(--login-vv-height, 100dvh);
+    min-height: 0;
+    margin: 0;
+    padding: 0 max(16px, env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    border: 0;
+    border-radius: 0;
+    background:
+        radial-gradient(90% 58% at 50% 8%, rgba(72, 216, 121, .07), transparent 72%),
+        linear-gradient(180deg, var(--start-bg) 0%, var(--start-bg-deep) 100%);
+    box-shadow: none;
+    transform: none;
+    scrollbar-width: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__privacy-dialog {
+    --mobile-login-accent: #48d879;
+    --mobile-login-panel-border: rgba(157, 113, 76, .57);
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login::-webkit-scrollbar {
+    display: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .shared-shift-accent {
+    display: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero {
+    position: relative;
+    z-index: 0;
+    grid-column: 1;
+    grid-row: 1;
+    width: calc(100% + max(16px, env(safe-area-inset-left, 0px)) + max(16px, env(safe-area-inset-right, 0px)));
+    min-width: 0;
+    height: clamp(270px, 40dvh, 390px);
+    min-height: 0;
+    margin-left: calc(-1 * max(16px, env(safe-area-inset-left, 0px)));
+    overflow: hidden;
+    background: #101719;
+    isolation: isolate;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-backdrop {
+    position: absolute;
+    inset: -18px;
+    z-index: 0;
+    background-image:
+        linear-gradient(180deg, rgba(1, 5, 7, .18), rgba(1, 6, 9, .62)),
+        url("../img/start/start-hero-v1.webp");
+    background-position: 61% center;
+    background-size: cover;
+    background-repeat: no-repeat;
+    filter: none;
+    transform: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-picture,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-picture {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-image {
+    object-fit: contain;
+    object-position: center 16%;
+    filter: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-shade {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    background:
+        linear-gradient(90deg, rgba(2, 7, 9, .16), transparent 32%, transparent 72%, rgba(2, 7, 9, .12)),
+        linear-gradient(180deg, rgba(1, 5, 7, .08) 0%, rgba(2, 8, 11, .1) 45%, var(--start-bg) 100%);
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-lines {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 3;
+    width: clamp(42px, 15vw, 86px);
+    height: 100%;
+    fill: none;
+    stroke: rgba(193, 139, 93, .52);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-brand {
+    display: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .unified-login-form,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate {
+    position: relative;
+    z-index: 5;
+    grid-column: 1;
+    grid-row: 2;
+    align-self: start;
+    justify-self: center;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    width: min(100%, 560px);
+    max-width: 560px;
+    min-width: 0;
+    margin: -38px auto 0;
+    padding: clamp(22px, 5.6vw, 30px);
+    overflow: visible;
+    border: 1px solid rgba(157, 113, 76, .57);
+    border-radius: clamp(24px, 6vw, 30px);
+    background: var(--start-surface-solid);
+    background: linear-gradient(145deg, rgba(16, 27, 31, .96), rgba(5, 12, 16, .96));
+    box-shadow:
+        0 28px 64px rgba(0, 0, 0, .55),
+        inset 0 1px 0 rgba(255, 255, 255, .045);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    text-align: left;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .unified-login-form::before,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(115deg, rgba(193, 139, 93, .07), transparent 28%, transparent 78%, rgba(72, 216, 121, .035));
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .unified-login-form .unified-login-role-identity {
+    display: grid;
+    justify-items: start;
+    gap: 0;
+    margin: 0;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .unified-login-form .unified-login-role-identity img {
+    display: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-role-identity span {
+    max-width: 100%;
+    color: #72e48b;
+    font-size: clamp(11px, 3.2vw, 13px);
+    font-weight: 750;
+    line-height: 1.25;
+    letter-spacing: .08em;
+    text-align: left;
+    text-transform: uppercase;
+    overflow-wrap: anywhere;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-form > h1,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-form > h2 {
+    min-width: 0;
+    margin: 0;
+    color: var(--start-text);
+    font: 800 clamp(28px, 7.4vw, 36px)/1.12 "Segoe UI", Arial, sans-serif;
+    letter-spacing: -.028em;
+    text-align: left;
+    text-transform: none;
+    overflow-wrap: anywhere;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-form > .mobile-role-login__lead {
+    display: block;
+    margin: 0 0 8px;
+    color: var(--start-muted);
+    font: 500 clamp(16px, 4.35vw, 18px)/1.48 "Segoe UI", Arial, sans-serif;
+    text-align: left;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-login-field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    min-width: 0;
+    margin: 0;
+    color: #b4bdc0;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-login-field > span:first-child {
+    color: #b4bdc0;
+    font: 750 12px/1.2 "Segoe UI", Arial, sans-serif;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-phone-shell,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-pin-shell {
+    position: relative;
+    display: grid;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    min-height: 66px;
+    overflow: hidden;
+    border: 1px solid rgba(165, 175, 179, .42);
+    border-radius: 20px;
+    background: linear-gradient(180deg, rgba(16, 26, 31, .96), rgba(6, 14, 18, .98));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .035),
+        inset 0 -10px 22px rgba(0, 0, 0, .16);
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-phone-shell {
+    grid-template-columns: auto minmax(0, 1fr);
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-phone-shell::after {
+    content: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-phone-shell:focus-within,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-pin-shell:focus-within {
+    border-color: var(--start-green);
+    background: linear-gradient(180deg, rgba(16, 26, 31, .96), rgba(6, 14, 18, .98));
+    box-shadow:
+        0 0 0 3px rgba(72, 216, 121, .13),
+        0 0 26px rgba(72, 216, 121, .12),
+        inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-phone-shell:has(input.is-invalid),
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-pin-shell:has(input.is-invalid),
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-phone-shell:has(input[aria-invalid="true"]),
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-pin-shell:has(input[aria-invalid="true"]) {
+    border-color: var(--start-danger);
+    box-shadow: 0 0 0 3px rgba(255, 107, 107, .12);
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-phone-shell:has(input.is-valid):not(:focus-within),
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-pin-shell:has(input.is-valid):not(:focus-within) {
+    border-color: rgba(72, 216, 121, .58);
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-form.is-pin-step .shared-shift-phone-shell,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-form.is-pin-step .shared-shift-phone-shell:has(input.is-valid) {
+    border-color: rgba(165, 175, 179, .42);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .035),
+        inset 0 -10px 22px rgba(0, 0, 0, .16);
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-country-code {
+    align-self: stretch;
+    display: grid;
+    place-items: center;
+    min-width: 72px;
+    min-height: 36px;
+    padding: 0 16px;
+    border-right: 1px solid rgba(165, 175, 179, .24);
+    color: var(--start-text);
+    font: 800 20px/1 "Segoe UI", Arial, sans-serif;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-login-field input {
+    width: 100%;
+    min-width: 0;
+    min-height: 64px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--start-text);
+    caret-color: #79ea94;
+    font: 500 clamp(19px, 5.4vw, 23px)/1.1 "Segoe UI", Arial, sans-serif;
+    letter-spacing: .015em;
+    box-shadow: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-login-field input::placeholder {
+    color: #879196;
+    opacity: .86;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-phone-shell input {
+    padding-right: 16px;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-pin-shell input {
+    padding-right: 68px;
+    letter-spacing: .22em;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-pin-reveal {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 1px solid rgba(72, 216, 121, .48);
+    border-radius: 10px;
+    background: rgba(72, 216, 121, .1);
+    color: #83e89b;
+    box-shadow: none;
+    transform: translateY(-50%);
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-pin-reveal.is-revealing {
+    background: rgba(72, 216, 121, .24);
+    color: #f4fff6;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .input-hint {
+    display: block;
+    min-height: 34px;
+    margin: 0;
+    color: var(--start-muted);
+    font: 500 14px/1.3 "Segoe UI", Arial, sans-serif;
+    text-align: center;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .input-hint.is-invalid {
+    color: #ff9b9b;
+    font-weight: 650;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .input-hint.is-valid {
+    color: #83e89b;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__feedback {
+    display: grid;
+    align-items: center;
+    min-width: 0;
+    min-height: 20px;
+    margin: 0;
+    overflow: visible;
+    color: #ff9b9b;
+    font: 650 13px/1.3 "Segoe UI", Arial, sans-serif;
+    text-align: center;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__feedback .message.error {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    overflow-wrap: anywhere;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent-panel {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent {
+    position: relative;
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    min-height: 56px;
+    margin: 0;
+    padding: 11px 13px;
+    border: 1px solid rgba(157, 113, 76, .42);
+    border-radius: 16px;
+    background: rgba(12, 20, 24, .78);
+    color: var(--start-text);
+    font: 600 clamp(13px, 3.6vw, 15px)/1.32 "Segoe UI", Arial, sans-serif;
+    cursor: pointer;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent > input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent-box {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border: 1.5px solid rgba(210, 255, 88, .92);
+    border-radius: 8px;
+    background: var(--start-input);
+    color: #f7fff7;
+    transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent-box::after {
+    content: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent-box svg {
+    display: block;
+    width: 20px;
+    height: 16px;
+    stroke: currentColor;
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0;
+    transform: scale(.72);
+    transition: opacity 120ms ease, transform 120ms ease;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent > input:checked + .mobile-role-login__consent-box {
+    border-color: rgba(210, 255, 88, .92);
+    background: linear-gradient(180deg, #489b4d 0%, #2f7c3e 42%, #18532f 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22);
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent > input:checked + .mobile-role-login__consent-box svg {
+    opacity: 1;
+    transform: scale(1);
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent > input:focus-visible + .mobile-role-login__consent-box {
+    outline: 3px solid rgba(244, 247, 245, .92);
+    outline-offset: 3px;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent.is-invalid,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent:has(input[aria-invalid="true"]) {
+    border-color: var(--start-danger);
+    box-shadow: 0 0 0 3px rgba(255, 107, 107, .12);
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent-copy {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__privacy-link,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-change-phone,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-install-gate__skip {
+    display: grid;
+    place-items: center;
+    justify-self: center;
+    min-height: 44px;
+    margin: 0;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--start-muted);
+    font: 600 15px/1.25 "Segoe UI", Arial, sans-serif;
+    text-align: center;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    cursor: pointer;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-actions {
+    width: 100%;
+    min-width: 0;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-submit,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .role-app-install__button.entry-action {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr;
+    place-items: center;
+    width: 100%;
+    min-height: 72px;
+    margin: 8px 0 0;
+    padding: 0 70px;
+    border: 1.5px solid rgba(210, 255, 88, .92) !important;
+    border-radius: 38px;
+    background: #236a37 !important;
+    background: linear-gradient(180deg, #489b4d 0%, #2f7c3e 42%, #18532f 100%) !important;
+    color: #f7fff7 !important;
+    font: 800 clamp(21px, 5.8vw, 23px)/1 "Segoe UI", Arial, sans-serif;
+    letter-spacing: 0;
+    text-align: center;
+    text-decoration: none;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, .35);
+    box-shadow:
+        0 5px 0 #0b351b,
+        0 13px 28px rgba(55, 190, 90, .28),
+        0 0 24px rgba(72, 216, 121, .22),
+        inset 0 2px 0 rgba(255, 255, 255, .22),
+        inset 0 -10px 18px rgba(0, 0, 0, .2) !important;
+    opacity: 1;
+    filter: none;
+    transform: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    cursor: pointer;
+    white-space: normal;
+    transition: transform 120ms ease, box-shadow 120ms ease, filter 150ms ease, opacity 150ms ease;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-submit::before {
+    content: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__submit-arrow {
+    position: absolute;
+    right: 24px;
+    top: 50%;
+    display: block;
+    width: 32px;
+    height: 24px;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transform: translateY(-50%);
+}
+
+body.login-page.login-fullscreen.login-step-consent .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-submit {
+    padding: 0 52px 0 18px;
+    font-size: clamp(15px, 4.2vw, 18px);
+    line-height: 1.1;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .role-app-install__button.entry-action {
+    padding-inline: 24px;
+    font-size: clamp(18px, 5vw, 21px);
+    line-height: 1.1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-submit:not(:disabled):hover,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .role-app-install__button.entry-action:not(:disabled):hover {
+        filter: brightness(1.08);
+        transform: translateY(-1px);
+    }
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-submit:not(:disabled):active,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .role-app-install__button.entry-action:not(:disabled):active {
+    transform: translateY(2px);
+    box-shadow:
+        0 2px 0 #0b351b,
+        0 7px 16px rgba(55, 190, 90, .2),
+        0 0 16px rgba(72, 216, 121, .16),
+        inset 0 1px 0 rgba(255, 255, 255, .18),
+        inset 0 -7px 15px rgba(0, 0, 0, .22) !important;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-submit:focus-visible,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .role-app-install__button.entry-action:focus-visible,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__privacy-link:focus-visible,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-change-phone:focus-visible,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-install-gate__skip:focus-visible,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-pin-reveal:focus-visible {
+    outline: 3px solid rgba(244, 247, 245, .92);
+    outline-offset: 4px;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-submit:disabled,
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-submit[disabled],
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .role-app-install__button.entry-action:disabled {
+    border-color: rgba(184, 209, 110, .54) !important;
+    background: linear-gradient(180deg, #489b4d 0%, #2f7c3e 42%, #18532f 100%) !important;
+    color: #f7fff7 !important;
+    filter: grayscale(.16) saturate(.64) brightness(.78) !important;
+    box-shadow:
+        0 4px 0 #0b2a18,
+        0 8px 18px rgba(21, 94, 48, .18),
+        inset 0 1px 0 rgba(255, 255, 255, .1),
+        inset 0 -8px 16px rgba(0, 0, 0, .2) !important;
+    cursor: not-allowed;
+    opacity: .9 !important;
+    transform: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate {
+    justify-items: center;
+    gap: 12px;
+    text-align: center;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate .unified-login-role-identity {
+    display: grid;
+    justify-items: center;
+    gap: 9px;
+    margin: 0;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate .unified-login-role-identity img {
+    display: block;
+    width: 72px;
+    height: 72px;
+    padding: 7px;
+    border: 1px solid rgba(210, 255, 88, .44);
+    border-radius: 20px;
+    background: #2fbf71;
+    object-fit: contain;
+    box-shadow: 0 14px 32px rgba(0, 0, 0, .36), inset 0 1px 0 rgba(255, 255, 255, .18);
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate > h1 {
+    margin: 0;
+    color: var(--start-text);
+    font: 800 clamp(28px, 7.4vw, 36px)/1.12 "Segoe UI", Arial, sans-serif;
+    letter-spacing: -.028em;
+    text-align: center;
+    text-transform: none;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-install-gate__lead {
+    margin: 0;
+    color: var(--start-muted);
+    font: 500 clamp(16px, 4.35vw, 18px)/1.48 "Segoe UI", Arial, sans-serif;
+    text-align: center;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .role-app-install {
+    display: grid;
+    justify-items: stretch;
+    gap: 10px;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .role-app-install__status {
+    min-height: 34px;
+    margin: 0;
+    color: var(--start-muted-dark);
+    font: 500 13px/1.35 "Segoe UI", Arial, sans-serif;
+    text-align: center;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .role-app-install--ios {
+    padding: 12px 14px;
+    border: 1px solid rgba(157, 113, 76, .35);
+    border-radius: 16px;
+    background: rgba(12, 20, 24, .72);
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .role-app-install__ios-steps {
+    margin: 0;
+    padding-left: 22px;
+    color: var(--start-muted);
+    font-size: 14px;
+    line-height: 1.38;
+    text-align: left;
+}
+
+body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .max-support-link {
+    position: static;
+    inset: auto;
+    z-index: 4;
+    grid-column: 1;
+    grid-row: 3;
+    align-self: end;
+    justify-self: center;
+    width: min(100%, 420px);
+    max-width: 420px;
+    min-height: 44px;
+    margin: 10px 0 0;
+    transform: none;
+}
+
+/* Короткий портрет: сохраняем основную геометрию, сжимаем только внутренние отступы. */
+@media (orientation: portrait) and (max-height: 700px) {
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .unified-login-form,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate {
+        gap: 6px;
+        padding: clamp(17px, 4.6vw, 20px);
+        border-radius: 22px;
+        box-shadow:
+            0 18px 42px rgba(0, 0, 0, .5),
+            inset 0 1px 0 rgba(255, 255, 255, .045);
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-role-identity span {
+        font-size: clamp(10px, 2.8vw, 11px);
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-form > h1,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-form > h2,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate > h1 {
+        font-size: clamp(26px, 7.4vw, 30px);
+        line-height: 1.08;
+    }
+
+}
+
+@media (max-width: 360px) {
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login {
+        padding-right: max(12px, env(safe-area-inset-right, 0px));
+        padding-left: max(12px, env(safe-area-inset-left, 0px));
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero {
+        width: calc(100% + max(12px, env(safe-area-inset-left, 0px)) + max(12px, env(safe-area-inset-right, 0px)));
+        margin-left: calc(-1 * max(12px, env(safe-area-inset-left, 0px)));
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-country-code {
+        min-width: 62px;
+        padding-inline: 12px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-login-field input {
+        padding-inline: 12px;
+        font-size: 19px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-pin-shell input {
+        padding-right: 64px;
+    }
+}
+
+/* Низкий landscape: фотополоса слева, рабочая карточка справа. */
+@media (orientation: landscape) and (max-height: 500px) {
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login {
+        grid-template-columns: minmax(0, .92fr) minmax(360px, 1.08fr);
+        grid-template-rows: minmax(0, 1fr) 44px;
+        column-gap: 0;
+        width: 100%;
+        padding: 0 max(12px, env(safe-area-inset-right, 0px)) max(4px, env(safe-area-inset-bottom, 0px)) 0;
+        overflow: hidden;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero {
+        grid-column: 1;
+        grid-row: 1 / span 2;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-image {
+        object-fit: cover;
+        object-position: 56% center;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-brand {
+        position: absolute;
+        right: 22px;
+        bottom: 22px;
+        left: clamp(38px, 9vw, 74px);
+        z-index: 4;
+        display: grid;
+        gap: 5px;
+        color: var(--start-text);
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-brand span {
+        color: #72e48b;
+        font-size: clamp(10px, 1.45vw, 12px);
+        font-weight: 750;
+        line-height: 1.25;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-brand strong {
+        color: var(--start-text);
+        font-size: clamp(20px, 3vw, 28px);
+        font-weight: 800;
+        line-height: 1.08;
+        letter-spacing: -.025em;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .unified-login-form,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate {
+        grid-column: 2;
+        grid-row: 1;
+        align-self: center;
+        width: min(calc(100% - 24px), 520px);
+        max-width: 520px;
+        max-height: calc(100% - 12px);
+        margin: 6px auto;
+        padding: 14px 18px;
+        gap: 5px;
+        border-radius: 24px;
+        overflow-x: hidden;
+        overflow-y: auto;
+        scrollbar-width: none;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .unified-login-form {
+        width: min(calc(100% - 24px), 520px) !important;
+        max-width: 520px !important;
+        height: auto !important;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate {
+        gap: 4px;
+        padding-block: 12px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .unified-login-form > * {
+        grid-column: 1 !important;
+        grid-row: auto !important;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .unified-login-form::-webkit-scrollbar,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate::-webkit-scrollbar {
+        display: none;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .unified-login-form .unified-login-role-identity,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-form > .mobile-role-login__lead {
+        display: none;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-form > h1,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-form > h2,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate > h1 {
+        font-size: 24px;
+        line-height: 1.06;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-login-field {
+        gap: 2px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-login-field > span:first-child {
+        font-size: 10px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-phone-shell,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-pin-shell {
+        min-height: 54px;
+        border-radius: 16px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-login-field input {
+        min-height: 52px;
+        font-size: 18px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-country-code {
+        min-width: 58px;
+        padding-inline: 12px;
+        font-size: 18px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .input-hint {
+        display: none;
+        min-height: 0;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__feedback {
+        min-height: 14px;
+        font-size: 11px;
+        line-height: 1.2;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent {
+        min-height: 48px;
+        padding: 7px 10px;
+        font-size: 12px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__privacy-link {
+        min-height: 38px;
+        padding-block: 4px;
+        font-size: 13px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-submit,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .role-app-install__button.entry-action {
+        min-height: 54px;
+        margin-top: 3px;
+        padding-inline: 58px;
+        border-radius: 28px;
+        font-size: 18px;
+        box-shadow:
+            0 3px 0 #0b351b,
+            0 7px 18px rgba(55, 190, 90, .24),
+            0 0 16px rgba(72, 216, 121, .18),
+            inset 0 1px 0 rgba(255, 255, 255, .2),
+            inset 0 -7px 14px rgba(0, 0, 0, .18) !important;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__submit-arrow {
+        right: 20px;
+        width: 28px;
+        height: 21px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate .unified-login-role-identity {
+        grid-column: auto;
+        grid-row: auto;
+        align-self: auto;
+        gap: 5px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate .unified-login-role-identity img {
+        width: 56px;
+        height: 56px;
+        padding: 5px;
+        border-radius: 16px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-install-gate__lead {
+        font-size: 14px;
+        line-height: 1.3;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .role-app-install__status {
+        min-height: 26px;
+        font-size: 11px;
+        line-height: 1.25;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .max-support-link {
+        grid-column: 2;
+        grid-row: 2;
+        min-height: 40px;
+        margin: 2px auto 0;
+    }
+}
+
+/* При реальной клавиатуре visualViewport задаёт высоту; декор уходит, поля и кнопка остаются видимыми. */
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    align-content: start;
+    padding: max(6px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+    overflow: hidden;
+}
+
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero,
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login > .max-support-link,
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login > .unified-login-form .unified-login-role-identity,
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-form > .mobile-role-login__lead,
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .input-hint,
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-change-phone {
+    display: none;
+}
+
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login > .unified-login-form,
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: start;
+    width: min(100%, 560px);
+    max-width: 560px;
+    max-height: 100%;
+    margin: 0 auto;
+    padding: 10px 14px;
+    gap: 5px;
+    border-radius: 18px;
+    overflow: hidden;
+}
+
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-form > h1,
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-form > h2 {
+    font-size: 22px;
+    line-height: 1.05;
+}
+
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-login-field {
+    gap: 2px;
+    margin: 0;
+}
+
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-login-field > span:first-child {
+    font-size: 10px;
+}
+
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-phone-shell,
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .login-pin-shell {
+    min-height: 54px;
+    border-radius: 16px;
+}
+
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-login-field input {
+    min-height: 52px;
+    font-size: 18px;
+}
+
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .shared-shift-country-code {
+    min-width: 58px;
+    padding-inline: 12px;
+    font-size: 18px;
+}
+
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__feedback {
+    min-height: 14px;
+    font-size: 11px;
+    line-height: 1.2;
+}
+
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__consent {
+    min-height: 46px;
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__privacy-link {
+    min-height: 40px;
+    padding-block: 4px;
+    font-size: 13px;
+}
+
+body.login-page.login-fullscreen.is-login-keyboard-active .shared-shift-dialog.unified-login-dialog.mobile-role-login .unified-login-submit {
+    min-height: 54px;
+    margin-top: 2px;
+    padding-inline: 58px;
+    border-radius: 28px;
+    font-size: 18px;
+    box-shadow:
+        0 3px 0 #0b351b,
+        0 7px 18px rgba(55, 190, 90, .24),
+        inset 0 1px 0 rgba(255, 255, 255, .18),
+        inset 0 -7px 14px rgba(0, 0, 0, .18) !important;
+}
+
+/* Полноразмерный экран сохраняет ту же двухколоночную композицию. */
+@media (min-width: 1024px) and (min-height: 560px) {
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login {
+        grid-template-columns: minmax(0, 1.15fr) minmax(480px, .85fr);
+        grid-template-rows: minmax(0, 1fr) auto;
+        padding: 0 clamp(34px, 4vw, 62px) 24px 0;
+        overflow: hidden;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero {
+        grid-column: 1;
+        grid-row: 1 / span 2;
+        width: 100%;
+        height: calc(100% + 24px);
+        margin: 0 0 -24px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-image {
+        object-position: center center;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-lines {
+        width: 110px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-brand {
+        position: absolute;
+        right: 42px;
+        bottom: 42px;
+        left: 74px;
+        z-index: 4;
+        display: grid;
+        gap: 7px;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-brand span {
+        color: #72e48b;
+        font-size: 13px;
+        font-weight: 750;
+        line-height: 1.25;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login .mobile-role-login__hero-brand strong {
+        color: var(--start-text);
+        font-size: 34px;
+        font-weight: 800;
+        line-height: 1.08;
+        letter-spacing: -.025em;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .unified-login-form,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .login-install-gate {
+        grid-column: 2;
+        grid-row: 1;
+        align-self: center;
+        width: min(100%, 520px);
+        max-width: 520px;
+        margin: 24px auto 0;
+    }
+
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login > .max-support-link {
+        grid-column: 2;
+        grid-row: 2;
+        margin-inline: auto;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login *,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login *::before,
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}
+
+@supports not (overflow: clip) {
+    body.login-page.login-fullscreen .shared-shift-dialog.unified-login-dialog.mobile-role-login {
+        overflow-x: hidden;
+    }
+}

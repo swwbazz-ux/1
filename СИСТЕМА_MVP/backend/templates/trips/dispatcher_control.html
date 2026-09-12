@@ -7,6 +7,7 @@
         {{ block.super }}
     {% else %}
         <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v={{ static_asset_release }}">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v={{ static_asset_release }}">
     {% endif %}
 {% endblock %}
 {% block viewport_extra %}{% if mining_master_mobile_enabled %}, viewport-fit=cover{% endif %}{% endblock %}
@@ -20,6 +21,7 @@
         <meta name="apple-mobile-web-app-title" content="Горный мастер">
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
         <script src="{% static 'js/role-app-install-v1.js' %}?v=4" defer></script>
+        <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v164" defer></script>
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
         <meta name="theme-color" content="#B33A4C">
@@ -72,6 +74,7 @@
                         {% if tile.display_name %}<strong>{{ tile.display_name }}</strong>{% endif %}
                         <img src="{% static 'img/equipment/excavator-gray.png' %}" alt="">
                         {% if not tile.is_placeholder %}<span>{{ tile.label }}</span>{% endif %}
+                        {% if not tile.is_placeholder and tile.has_current_shift %}<i class="dispatcher-presence-dot is-{{ tile.presence_status }}" title="{{ tile.presence_label }}" aria-label="{{ tile.presence_label }}"></i>{% endif %}
                         {% if not tile.is_placeholder %}
                             <em class="dispatcher-tile-plan-percent">{{ tile.plan_percent_label|default:"Не назначен" }}</em>
                             <small class="dispatcher-tile-plan-label{% if not tile.plan_has_plan %} is-plan-missing{% endif %}">{% if tile.plan_has_plan %}{{ tile.plan_fact_label }}{% else %}{{ tile.plan_status_label|default:"План не назначен" }}{% endif %}</small>
@@ -101,7 +104,7 @@
                         <div class="complex-work-head">
                         {% endif %}
                         <div class="complex-title-state">
-                            <h2>{{ complex.id }}</h2>
+                            <h2>{{ complex.id }}{% if not mining_master_mobile_enabled and complex.has_current_shift %}<i class="dispatcher-presence-dot is-{{ complex.presence_status }}" title="{{ complex.presence_label }}" aria-label="{{ complex.presence_label }}"></i>{% endif %}</h2>
                             {% if not mining_master_mobile_enabled and complex.active_downtime.active %}
                                 <span class="complex-downtime-status" title="{{ complex.active_downtime.reason }}" data-card-single-line-badge>
                                     <span>{{ complex.active_downtime.reason }}</span>
@@ -137,13 +140,18 @@
                         </div>
                         {% else %}
                         <div class="complex-kpis" aria-label="Показатели комплекса">
-                            <span class="complex-kpi{% if complex.assigned < complex.need %} is-minus{% elif complex.assigned > complex.need %} is-plus{% else %} is-zero{% endif %}" data-kpi="trucks" title="Назначено самосвалов / нужно по составу">
+                            <span class="complex-kpi{% if complex.assigned < complex.need %} is-minus{% elif complex.assigned > complex.need %} is-plus{% else %} is-zero{% endif %}" data-kpi="trucks" title="Машин в составе / приняли назначение">
                                 <i>Машин</i>
-                                <b>{{ complex.assigned|default:0 }}<small>/{{ complex.need|default:0 }}</small></b>
+                                {% comment %}Крупно — сколько машин в комплексе: счётчик «3/7» читался как
+                                   «три самосвала», хотя в составе их семь.{% endcomment %}
+                                <b>{{ complex.need|default:0 }}<small>/{{ complex.assigned|default:0 }}</small></b>
                             </span>
-                            <span class="complex-kpi" data-kpi="volume" title="Погружено за смену">
+                            <span class="complex-kpi" data-kpi="volume" title="{% if complex.plan_has_plan %}{{ complex.plan_fact_label }}{% else %}Погружено за смену{% endif %}">
                                 <i>Объём</i>
-                                <b>{{ complex.fact_tons|default:"0" }}<small>{{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</small></b>
+                                {% comment %}Тот же факт, что в карточке комплекса: fact_tons считался по
+                                   активным рейсам и только при открытой смене диспетчера, из-за чего доска
+                                   показывала ноль там, где карточка показывала выполненный объём.{% endcomment %}
+                                <b>{% if complex.plan_has_plan %}{{ complex.plan_fact_value|default:"0" }}<small>{{ complex.plan_unit|default:"м³" }}</small>{% else %}{{ complex.fact_tons|default:"0" }}<small>{{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</small>{% endif %}</b>
                             </span>
                             <span class="complex-kpi{% if not complex.plan_has_plan %} is-muted{% endif %}" data-kpi="plan" title="{% if complex.plan_has_plan %}{{ complex.plan_fact_label }}{% else %}План не назначен{% endif %}">
                                 <i>План</i>
@@ -157,6 +165,7 @@
                                     <strong>{{ truck.name }}</strong>
                                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                                     <span>{{ truck.label }}</span>
+                                    {% if truck.has_current_shift %}<i class="dispatcher-presence-dot is-{{ truck.presence_status }}" title="{{ truck.presence_label }}" aria-label="{{ truck.presence_label }}"></i>{% endif %}
                                     {% if truck.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ truck.plan_visual.completed_loops }}">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
                                 </article>
                             {% empty %}
@@ -181,6 +190,7 @@
                         <strong>{{ tile.name }}</strong>
                         <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                         <span>{{ tile.label }}</span>
+                        {% if tile.has_current_shift %}<i class="dispatcher-presence-dot is-{{ tile.presence_status }}" title="{{ tile.presence_label }}" aria-label="{{ tile.presence_label }}"></i>{% endif %}
                         {% if tile.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ tile.plan_visual.completed_loops }}">×{{ tile.plan_visual.completed_loops }}</b>{% endif %}
                     </article>
                 {% endfor %}
@@ -475,10 +485,15 @@
             </div>
             {% endif %}
 
+            <div class="mm-mobile-shift-actions">
             <form class="mm-mobile-shift-form" method="post" action="{% if dispatcher_header.shift_form_action %}{{ dispatcher_header.shift_form_action }}{% else %}{% url 'dispatcher_toggle_shift' %}{% endif %}">
                 {% csrf_token %}
                 {% if not dispatcher_header.shift_is_open %}
                     <input type="hidden" name="device_kind" value="personal">
+                    {% if dispatcher_header.other_role_shift_prompt %}
+                        {# Одна открытая смена на сотрудника: подтверждение в окне закрывает смену другой роли #}
+                        <input type="hidden" name="{{ dispatcher_header.other_role_shift_prompt.field }}" value="1">
+                    {% endif %}
                 {% endif %}
                 {% if dispatcher_header.shift_is_open %}
                     <button
@@ -503,11 +518,13 @@
                         value="{{ dispatcher_header.shift_start_value|default:'start' }}"
                         class="mm-mobile-shift-button"
                         {% if not dispatcher_header.can_toggle_shift %}disabled{% endif %}
-                        data-confirm="{{ dispatcher_header.shift_start_confirm|default:'Начать смену горного мастера?' }}"
+                        data-confirm="{% if dispatcher_header.other_role_shift_prompt %}{{ dispatcher_header.other_role_shift_prompt.question }}{% else %}{{ dispatcher_header.shift_start_confirm|default:'Начать смену горного мастера?' }}{% endif %}"
                         data-confirm-delay="10"
                     >Начать смену</button>
                 {% endif %}
             </form>
+            <button type="button" class="mm-mobile-logout-button" data-mm-mobile-logout data-mm-logout-url="{% url 'logout' %}" aria-label="Выйти из приложения, удерживайте кнопку"><span data-mobile-shift-label>Выйти</span></button>
+            </div>
 
             <nav class="mm-mobile-bottom-nav" aria-label="Навигация Горного мастера">
                 <a class="mm-mobile-nav-item" href="#" data-mm-mobile-nav="home">
@@ -537,7 +554,7 @@
                         <button type="button" class="mm-mobile-back-button" data-mm-mobile-fill-back aria-label="Назад">←</button>
                         <div class="mm-mobile-detail-title mm-mobile-fill-title">
                             <h1>Комплекс {{ complex.id|cut:"K-"|cut:"К-" }}</h1>
-                            <span>Тяните самосвал в сторону · ↗ — выбрать экскаватор</span>
+                            <span>Удержите самосвал и ведите к экскаватору · задержитесь на нём и отпустите</span>
                         </div>
                         <div class="mm-mobile-header-actions">
                             <button type="button" class="mm-mobile-plan-ring" data-connection-indicator data-mm-open-shift-plan-detail style="--mm-mobile-plan-progress: {{ dispatcher_dashboard.shift_plan_detail.completion_percent_css|default:0 }}%;" aria-label="Выполнение плана смены {{ dispatcher_dashboard.shift_plan_detail.completion_percent_label|default:0 }}%. Нажмите, чтобы открыть отчёт">
@@ -934,86 +951,207 @@
     <div class="gd-equipment-detail mm-equipment-detail" data-gd-equipment-detail hidden>
         <div class="mm-equipment-detail-backdrop" data-gd-detail-close></div>
         <section class="mm-equipment-detail-panel" role="dialog" aria-modal="true" aria-labelledby="gd-detail-title">
+            {% comment %}Карточка техники/комплекса на пульте. Разметка сгруппирована по областям сетки
+               (шапка · левый столбец: люди и действия · правый столбец: настройки и смена);
+               все data-gd-* якоря сохранены — скрипт наполняет их как раньше.{% endcomment %}
             <button type="button" class="mm-detail-close" data-gd-detail-close aria-label="Закрыть карточку">×</button>
-            <div class="mm-detail-head">
+
+            <header class="gd-detail-hero">
                 <div class="gd-detail-garage-slot" data-gd-detail-icon-slot></div>
-                <div>
-                    <span data-gd-detail-type></span>
+                <div class="gd-detail-hero-copy">
+                    <span class="gd-detail-hero-type" data-gd-detail-type></span>
                     <h2 id="gd-detail-title" data-gd-detail-title></h2>
-                    <div class="mm-detail-tags">
+                    <div class="gd-detail-hero-tags">
                         <mark data-gd-detail-status></mark>
                         <small data-gd-detail-zone></small>
                     </div>
+                    <p class="gd-detail-meta" data-gd-detail-meta></p>
                 </div>
-            </div>
-            <div class="mm-detail-employee" data-gd-detail-employee hidden>
-                <div class="mm-detail-employee-photo">
-                    <img data-gd-detail-employee-img src="" alt="">
-                    <span data-gd-detail-employee-initials></span>
+                <div class="gd-detail-hero-plan" data-gd-detail-plan hidden>
+                    <span>План смены</span>
+                    <strong data-gd-detail-plan-percent>—</strong>
+                    <small data-gd-detail-plan-fact></small>
                 </div>
-                <div class="mm-detail-employee-info">
-                    <span data-gd-detail-employee-presence>В смене</span>
-                    <strong data-gd-detail-employee-name></strong>
-                    <a data-gd-detail-employee-phone href=""></a>
-                </div>
-            </div>
-            <section class="gd-detail-downtime" data-gd-detail-downtime hidden>
-                <div class="gd-detail-downtime-copy">
-                    <span>Текущий простой</span>
-                    <strong data-gd-detail-downtime-reason></strong>
-                    <small data-gd-detail-downtime-started></small>
-                </div>
-                <time data-gd-detail-downtime-timer data-gd-downtime-timer>00:00:00</time>
-                <button type="button" data-gd-detail-downtime-close>Завершить простой</button>
-                <span class="gd-detail-downtime-result" data-gd-detail-downtime-result role="status" aria-live="polite"></span>
-            </section>
-            <section class="gd-detail-settings" data-gd-detail-settings hidden>
-                <div class="gd-detail-settings-head">
-                    <div>
-                        <strong data-gd-detail-settings-title>Рабочие параметры комплекса</strong>
-                        <span data-gd-detail-settings-hint></span>
-                    </div>
-                    <span class="gd-detail-settings-status" data-gd-detail-settings-status role="status" aria-live="polite"></span>
-                </div>
-                <div class="gd-detail-settings-face">
-                    <label>
-                        <span>Горизонт</span>
-                        <input type="text" inputmode="numeric" maxlength="16" data-gd-setting-horizon>
-                    </label>
-                    <label>
-                        <span>Блок</span>
-                        <input type="text" inputmode="numeric" maxlength="16" data-gd-setting-block>
-                    </label>
-                    <label>
-                        <span>Порода</span>
-                        <select data-gd-setting-rock></select>
-                    </label>
-                </div>
-                <div class="gd-detail-destinations">
-                    <div class="gd-detail-destinations-head">
-                        <div>
-                            <strong>Точки разгрузки</strong>
-                            <span data-gd-destination-count></span>
+            </header>
+
+            <div class="gd-detail-columns">
+                <div class="gd-detail-col gd-detail-col-people">
+                    <section class="gd-detail-crew" data-gd-detail-employee hidden>
+                        <div class="gd-detail-section-title"><span data-gd-detail-crew-title>Машинист</span> <span class="gd-detail-shift-verdict" data-gd-detail-shift-verdict hidden></span></div>
+                        <div class="gd-detail-crew-person">
+                            <div class="mm-detail-employee-photo">
+                                <img data-gd-detail-employee-img src="" alt="">
+                                <span data-gd-detail-employee-initials></span>
+                            </div>
+                            <div class="mm-detail-employee-info">
+                                <strong data-gd-detail-employee-name></strong>
+                                <a data-gd-detail-employee-phone href=""></a>
+                                <span class="gd-detail-crew-presence" data-gd-detail-employee-presence>В смене</span>
+                            </div>
                         </div>
-                        <button type="button" class="gd-detail-destination-add" data-gd-destination-add>+ Добавить точку</button>
+                        <p class="gd-detail-shift-alert" data-gd-detail-shift-alert hidden></p>
+                        <dl class="gd-detail-crew-shift" data-gd-detail-shift hidden>
+                            <dt>Смена</dt><dd data-gd-detail-shift-period></dd>
+                            <dt>Открыта</dt><dd data-gd-detail-shift-opened></dd>
+                            <dt>Длится</dt><dd data-gd-detail-shift-duration></dd>
+                            <dt>Связь</dt><dd data-gd-detail-shift-presence></dd>
+                            <dt>Последняя связь</dt><dd data-gd-detail-shift-seen></dd>
+                            <dt>Автозакрытие</dt><dd data-gd-detail-shift-autoclose></dd>
+                            <dt hidden>Вид</dt><dd data-gd-detail-shift-type hidden></dd>
+                        </dl>
+                        <form class="gd-detail-shift-close" data-gd-detail-service-close method="post" action="" hidden>
+                            {% csrf_token %}
+                            <input type="hidden" name="close_kind" value="neglected" data-gd-detail-service-close-kind>
+                            <div class="gd-detail-shift-close-choice">
+                                <button type="button" class="gd-detail-shift-close-toggle gd-detail-shift-close-neglect" data-gd-detail-service-close-neglect><strong>Закрыть смену</strong><small>сотрудник не закрыл сам и не сообщил</small></button>
+                                <button type="button" class="gd-detail-shift-close-toggle gd-detail-shift-close-agree" data-gd-detail-service-close-toggle><strong>Закрыть по согласованию</strong><small>сотрудник попросил по рации</small></button>
+                            </div>
+                            <div class="gd-detail-shift-close-body" data-gd-detail-service-close-body hidden>
+                                <p>Сотрудник попросил закрыть смену (нет связи, сел телефон). Причина обязательна, показания — если он их продиктовал. Открытые рейсы уйдут в перенос.</p>
+                                <label>
+                                    <span>Причина</span>
+                                    <input type="text" name="reason" maxlength="200" required placeholder="Например: попросил по рации, нет интернета">
+                                </label>
+                                <div class="gd-detail-shift-close-readings">
+                                    <label>
+                                        <span>Топливо, л</span>
+                                        <input type="number" name="end_fuel" min="0" step="1" inputmode="numeric" placeholder="—">
+                                    </label>
+                                    <label data-gd-detail-service-close-mileage hidden>
+                                        <span>Одометр, км</span>
+                                        <input type="number" name="end_mileage" min="0" step="1" inputmode="numeric" placeholder="—">
+                                    </label>
+                                    <label>
+                                        <span>Моточасы</span>
+                                        <input type="number" name="end_engine_hours" min="0" step="1" inputmode="numeric" placeholder="—">
+                                    </label>
+                                </div>
+                                <small class="gd-detail-shift-close-hint" data-gd-detail-service-close-hint hidden></small>
+                                <div class="gd-detail-shift-close-actions">
+                                    <button type="button" class="gd-detail-shift-close-cancel" data-gd-detail-service-close-cancel>Отмена</button>
+                                    <button type="submit" class="gd-detail-shift-close-submit">Закрыть по согласованию</button>
+                                </div>
+                            </div>
+                        </form>
+                    </section>
+
+                    <section class="gd-detail-downtime" data-gd-detail-downtime hidden>
+                        <div class="gd-detail-downtime-copy">
+                            <span>Текущий простой</span>
+                            <strong data-gd-detail-downtime-reason></strong>
+                            <small data-gd-detail-downtime-started></small>
+                        </div>
+                        <time data-gd-detail-downtime-timer data-gd-downtime-timer>00:00:00</time>
+                        <button type="button" data-gd-detail-downtime-close>Завершить простой</button>
+                        <span class="gd-detail-downtime-result" data-gd-detail-downtime-result role="status" aria-live="polite"></span>
+                    </section>
+
+                    <section class="gd-detail-trucks" data-gd-detail-trucks hidden>
+                        <div class="gd-detail-section-title">Состав <span data-gd-detail-trucks-count></span></div>
+                        <div class="gd-detail-truck-chips" data-gd-detail-trucks-list></div>
+                        <div class="gd-detail-truck-chips is-removed" data-gd-detail-trucks-removed hidden></div>
+                    </section>
+
+                    <dl class="mm-detail-list" data-gd-detail-list></dl>
+                </div>
+
+                <div class="gd-detail-col gd-detail-col-work">
+                    <section class="gd-detail-settings" data-gd-detail-settings hidden>
+                        <div class="gd-detail-settings-head">
+                            <div>
+                                <strong data-gd-detail-settings-title>Настройки работы</strong>
+                                <span data-gd-detail-settings-hint></span>
+                            </div>
+                            <span class="gd-detail-settings-status" data-gd-detail-settings-status role="status" aria-live="polite"></span>
+                        </div>
+                        <div class="gd-detail-settings-face">
+                            <label>
+                                <span>Горизонт</span>
+                                <input type="text" inputmode="numeric" maxlength="16" data-gd-setting-horizon>
+                            </label>
+                            <label>
+                                <span>Блок</span>
+                                <input type="text" inputmode="numeric" maxlength="16" data-gd-setting-block>
+                            </label>
+                            <label>
+                                <span>Порода</span>
+                                <select data-gd-setting-rock></select>
+                            </label>
+                        </div>
+                        <div class="gd-detail-destinations">
+                            <div class="gd-detail-destinations-head">
+                                <div>
+                                    <strong>Точки разгрузки</strong>
+                                    <span data-gd-destination-count></span>
+                                </div>
+                                <button type="button" class="gd-detail-destination-add" data-gd-destination-add>+ Добавить точку</button>
+                            </div>
+                            <div class="gd-detail-destination-list" data-gd-destination-list></div>
+                        </div>
+                        <div class="gd-detail-settings-actions">
+                            <button type="button" class="gd-detail-settings-save" data-gd-setting-save>Сохранить настройки</button>
+                        </div>
+                    </section>
+
+                    <section class="gd-detail-manual-trip" data-gd-detail-manual-trip hidden>
+                        <div class="gd-detail-settings-head">
+                            <div>
+                                <strong>Ручной рейс</strong>
+                                <span data-gd-detail-manual-trip-hint></span>
+                            </div>
+                        </div>
+                        <p class="gd-detail-manual-trip-blocked" data-gd-detail-manual-trip-blocked hidden></p>
+                        <form class="gd-detail-shift-close gd-detail-manual-trip-form" data-gd-detail-manual-trip-form method="post" action="" hidden>
+                            {% csrf_token %}
+                            <input type="hidden" name="excavator_id" value="">
+                            <button type="button" class="gd-detail-shift-close-toggle gd-detail-manual-trip-toggle" data-gd-detail-manual-trip-toggle>+ Добавить рейс вручную</button>
+                            <div class="gd-detail-shift-close-body" data-gd-detail-manual-trip-body hidden>
+                                <p>Рейс запишется выполненным водителю открытой смены и попадёт в план. Отменить его потом нельзя — проверьте точку и время.</p>
+                                <div class="gd-detail-shift-close-readings gd-detail-manual-trip-fields">
+                                    <label>
+                                        <span>Точка разгрузки</span>
+                                        <select name="dump_point_id" required data-gd-detail-manual-trip-dump></select>
+                                    </label>
+                                    <label>
+                                        <span>Порода</span>
+                                        <select name="rock_type_id" required data-gd-detail-manual-trip-rock></select>
+                                    </label>
+                                    <label>
+                                        <span>Рейсов</span>
+                                        <input type="number" name="trips_count" min="1" max="10" step="1" value="1" inputmode="numeric" required>
+                                    </label>
+                                    <label>
+                                        <span>Время разгрузки</span>
+                                        <input type="datetime-local" name="completed_at" data-gd-detail-manual-trip-time>
+                                    </label>
+                                </div>
+                                <small class="gd-detail-shift-close-hint">Время пустое — рейс запишется текущим моментом. Несколько рейсов лягут подряд на это время.</small>
+                                <label>
+                                    <span>Причина</span>
+                                    <input type="text" name="reason" maxlength="200" required placeholder="Например: водитель не отметил разгрузку, нет связи">
+                                </label>
+                                <div class="gd-detail-shift-close-actions">
+                                    <button type="button" class="gd-detail-shift-close-cancel" data-gd-detail-manual-trip-cancel>Отмена</button>
+                                    <button type="submit" class="gd-detail-shift-close-submit gd-detail-manual-trip-submit">Добавить рейс</button>
+                                </div>
+                            </div>
+                        </form>
+                    </section>
+
+                    <div class="gd-detail-load-state" data-gd-detail-load-state hidden>
+                        <span data-gd-detail-load-message>Загружаю свежие данные…</span>
+                        <button type="button" data-gd-detail-retry hidden>Повторить</button>
                     </div>
-                    <div class="gd-detail-destination-list" data-gd-destination-list></div>
+
+                    <div class="gd-detail-shift-report" data-gd-detail-shift-report hidden>
+                        <div class="gd-detail-section-title">Смена на текущий момент</div>
+                        <div class="gd-detail-metrics" data-gd-detail-metrics></div>
+                        <div class="gd-detail-tabs" data-gd-detail-tabs></div>
+                        <div class="gd-detail-dashboard" data-gd-detail-dashboard></div>
+                    </div>
                 </div>
-                <div class="gd-detail-settings-actions">
-                    <button type="button" class="gd-detail-settings-save" data-gd-setting-save>Сохранить настройки</button>
-                </div>
-            </section>
-            <dl class="mm-detail-list" data-gd-detail-list></dl>
-            <div class="gd-detail-load-state" data-gd-detail-load-state hidden>
-                <span data-gd-detail-load-message>Загружаю свежие данные…</span>
-                <button type="button" data-gd-detail-retry hidden>Повторить</button>
             </div>
-            <div class="gd-detail-shift-report" data-gd-detail-shift-report hidden>
-                <div class="gd-detail-section-title">Смена на текущий момент</div>
-                <div class="gd-detail-metrics" data-gd-detail-metrics></div>
-                <div class="gd-detail-tabs" data-gd-detail-tabs></div>
-                <div class="gd-detail-dashboard" data-gd-detail-dashboard></div>
-            </div>
+            <div class="gd-detail-scroll-hint" data-gd-detail-scroll-hint hidden>Ниже ещё — листайте ▾</div>
         </section>
     </div>
 </main>
@@ -1092,101 +1230,8 @@
 })();
 </script>
 
-<script>
-(function () {
-    /* Пульт целиком масштабируется как картинка.
-
-       Раскладка пульта нарисована руками под конкретный размер и в
-       нескольких местах опирается на vw/vh. Поэтому пульт живёт внутри
-       холста постоянного логического размера, а под окно подгоняется
-       не раскладка, а весь холст сразу — одним transform: scale().
-       Внутренняя геометрия при этом не пересчитывается вообще: что на
-       большом мониторе, что на маленьком видно одну и ту же картинку,
-       только крупнее или мельче.
-
-       Постоянна только ВЫСОТА холста — 1108 точек. От неё зависит
-       читаемость: пульт нарисован под такую высоту, и на любом мониторе
-       он показывается именно в этой вертикальной пропорции, просто
-       крупнее или мельче. Ширина холста не фиксирована, а считается от
-       пропорции окна: designWidth = высота * innerWidth / innerHeight.
-       Поэтому масштаб выходит одинаковым по обеим осям, холст занимает
-       окно целиком без пустых полей, а лишнюю ширину раскладка
-       распределяет сама, как на широком мониторе. Растягивать пульт
-       отдельно по ширине нельзя — исказились бы буквы и значки.
-
-       Ниже 1400 опорная ширина не опускается: у́же раскладка пульта уже
-       не собирается, и там лучше честные поля сверху и снизу.
-
-       Откуда взялась высота 1108. Монитор 1920x1200, но в Windows включён
-       масштаб дисплея 125%, поэтому браузер при зуме 100% отдаёт странице
-       1536 точек, а не 1920 (окно приложения 1536x886, dpr 1.25 — измерено
-       диагностической плашкой, гадать тут бесполезно). Прежний вид при
-       зуме 80%, который просили повторить, собирался на 886/0.8 = 1108
-       точек по высоте.
-
-       Единицы вьюпорта внутри холста не работают: vw/vh продолжают мерить
-       настоящее окно. Поэтому JS отдаёт в CSS --gd-vw и --gd-vh — сотые
-       доли опорного размера, — а правила, которые от них зависят,
-       перечислены в dispatcher-control-v1.css (секция про опорный размер).
-
-       Единицы вьюпорта внутри холста не помогают: vw/vh считаются от
-       настоящего окна, а не от логического размера, поэтому те немногие
-       правила, которые от них зависят, зафиксированы отдельными
-       правилами в dispatcher-control-v1.css (секция "Холст пульта") —
-       посчитанными ровно для 2400x1500. Существующие правила при этом
-       не переписаны ни одного.
-
-       Телефонный landscape-режим пульта (скрипт выше) и мобильный
-       экран горного мастера сюда не попадают — там холст выключен и
-       раскладка остаётся ровно прежней. */
-    var CANVAS_HEIGHT = 1108;
-    var CANVAS_WIDTH_MIN = 1400;
-
-    function fitDispatcherCanvas() {
-        var canvas = document.querySelector("[data-dispatcher-canvas]");
-        if (!canvas) return;
-        var isMiningMasterMobile = document.body.classList.contains(
-            "mining-master-mobile-screen"
-        );
-        var isPhoneLandscape = window.matchMedia(
-            "(orientation: landscape) and (max-width: 1180px)"
-        ).matches;
-        if (isMiningMasterMobile || isPhoneLandscape) {
-            canvas.setAttribute("data-dispatcher-canvas", "off");
-            canvas.style.removeProperty("--dispatcher-canvas-w");
-            canvas.style.removeProperty("--dispatcher-canvas-h");
-            canvas.style.removeProperty("--dispatcher-canvas-scale");
-            canvas.style.removeProperty("--gd-vw");
-            canvas.style.removeProperty("--gd-vh");
-            return;
-        }
-        var canvasWidth = Math.max(
-            CANVAS_WIDTH_MIN,
-            Math.round(CANVAS_HEIGHT * window.innerWidth / window.innerHeight)
-        );
-        var scale = Math.min(
-            window.innerWidth / canvasWidth,
-            window.innerHeight / CANVAS_HEIGHT
-        );
-        canvas.style.setProperty("--dispatcher-canvas-w", canvasWidth + "px");
-        canvas.style.setProperty("--dispatcher-canvas-h", CANVAS_HEIGHT + "px");
-        canvas.style.setProperty("--dispatcher-canvas-scale", String(scale));
-        /* Замена vw/vh внутри холста: сотые доли опорного размера. */
-        canvas.style.setProperty("--gd-vw", (canvasWidth / 100) + "px");
-        canvas.style.setProperty("--gd-vh", (CANVAS_HEIGHT / 100) + "px");
-        canvas.setAttribute("data-dispatcher-canvas", "on");
-    }
-
-    fitDispatcherCanvas();
-    window.addEventListener("resize", fitDispatcherCanvas);
-    window.addEventListener("orientationchange", function () {
-        setTimeout(fitDispatcherCanvas, 60);
-    });
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener("resize", fitDispatcherCanvas);
-    }
-})();
-</script>
+{# Холст: общий скрипт диспетчерских экранов (static/js/dispatcher-canvas-v1.js). #}
+<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v={{ static_asset_release }}"></script>
 {% else %}
 <script>
 (function () {
@@ -1351,7 +1396,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v162";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v164";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
@@ -1539,6 +1584,14 @@ document.addEventListener("DOMContentLoaded", function () {
                     return item.id !== request.id;
                 });
                 writeDispatcherSyncQueue(freshQueue);
+                /* Сервер отверг команду: локально самосвал уже нарисован в
+                   целевом комплексе, а на сервере он там не появился. Само
+                   обновление ниже отложится, пока открыто окно с ошибкой
+                   (isMobileOperationalRefreshUnsafe), поэтому помечаем доску
+                   устаревшей: её перечитает закрытие окна или ближайший тик
+                   таймера. Замер на телефоне: после 409 самосвал №101 висел в
+                   K-1, хотя по базе оставался в K-5. */
+                markMiningMasterBoardStale();
                 showDispatcherDnDError(error);
                 if (request.refreshMobileBoard && !freshQueue.length) {
                     Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
@@ -1657,8 +1710,33 @@ document.addEventListener("DOMContentLoaded", function () {
             window.location.reload();
         }, 80);
     }
+    /* Версия состояния смены, которой соответствует ТО, ЧТО СЕЙЧАС НА ЭКРАНЕ.
+       Отличается от miningMasterRealtimeLastVersion: та отмечает, до какой
+       версии клиент дошёл, в том числе когда обновление доски было признано
+       ненужным или отложено. Разница между ними и есть «доску надо
+       перечитать». */
+    var miningMasterBoardCurrentUpTo = 0;
+    /* Доска показывает оптимистичное состояние, которого на сервере нет
+       (команда отклонена) — её надо перечитать независимо от версии смены:
+       отклонённая команда версию не двигает, и таймер сам бы не проснулся. */
+    var miningMasterBoardStale = false;
+    function markMiningMasterBoardStale() {
+        miningMasterBoardStale = true;
+        miningMasterBoardCurrentUpTo = 0;
+    }
+    function markMiningMasterBoardCurrent(version) {
+        var parsed = parseInt(version || "0", 10);
+        if (Number.isFinite(parsed) && parsed > miningMasterBoardCurrentUpTo) {
+            miningMasterBoardCurrentUpTo = parsed;
+        }
+        /* Стартовая плашка ждёт именно этого: доска соответствует серверу.
+           Сигнал уходит всегда, даже если версия не выросла — при старте
+           сервер чаще всего отвечает «изменений нет». */
+        window.dispatchEvent(new CustomEvent("mm-mobile-board-current", { detail: { version: parsed } }));
+    }
     var miningMasterRealtimeStorageKey = "operational-state-version";
     var miningMasterRealtimeLastVersion = readRenderedOperationalStateVersion() || readMiningMasterRealtimeVersion();
+    markMiningMasterBoardCurrent(readRenderedOperationalStateVersion());
     function readRenderedOperationalStateVersion() {
         var parsed = parseInt(document.body ? document.body.dataset.operationalStateVersion || "0" : "0", 10);
         return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
@@ -1774,10 +1852,40 @@ document.addEventListener("DOMContentLoaded", function () {
         freshShell.scrollTop = state.scrollTop || 0;
     }
     var miningMasterMobileRefreshPromise = null;
+    var miningMasterMobileRefreshFollowUp = null;
+    var miningMasterMobileRefreshRetryTimer = null;
+    var MINING_MASTER_REFRESH_RETRY_MAX = 5;
+    function scheduleMiningMasterRefreshRetry(options, attempt) {
+        /* Ответ мог попасть в следующий жест — тогда ждём ещё, но не вечно:
+           после пяти попыток остаются таймер и realtime. */
+        if (miningMasterMobileRefreshRetryTimer || attempt >= MINING_MASTER_REFRESH_RETRY_MAX) return;
+        miningMasterMobileRefreshRetryTimer = window.setTimeout(function () {
+            miningMasterMobileRefreshRetryTimer = null;
+            if (isMobileOperationalRefreshUnsafe()) {
+                scheduleMiningMasterRefreshRetry(options, attempt + 1);
+                return;
+            }
+            Promise.resolve(refreshMobileBoardFromServer(options)).catch(function () {});
+        }, 1200);
+    }
     function refreshMobileBoardFromServer(options) {
         options = options || {};
         if (miningMasterMobileRefreshPromise) {
-            return miningMasterMobileRefreshPromise;
+            /* Запрос доски уже летит — но он мог уйти ДО команды мастера и
+               принести состояние без неё. Раньше здесь просто возвращался
+               старый промис, и результат команды затирался устаревшей
+               доской: на телефоне самосвал «отпрыгивал» в прежний комплекс,
+               мастер тянул снова и получал 409 «Состояние изменилось».
+               Поэтому вслед за летящим запросом ставим ещё один. */
+            if (!miningMasterMobileRefreshFollowUp) {
+                miningMasterMobileRefreshFollowUp = miningMasterMobileRefreshPromise
+                    .catch(function () { return false; })
+                    .then(function () {
+                        miningMasterMobileRefreshFollowUp = null;
+                        return refreshMobileBoardFromServer(options);
+                    });
+            }
+            return miningMasterMobileRefreshFollowUp;
         }
         var currentShell = document.querySelector(".mm-mobile-shell");
         if (!currentShell || !window.AppOperationalFragment) return Promise.resolve(false);
@@ -1786,7 +1894,15 @@ document.addEventListener("DOMContentLoaded", function () {
             "mining_master",
             Number(options.version || 0)
         ).then(function (payload) {
-            if (isMobileOperationalRefreshUnsafe()) return false;
+            if (isMobileOperationalRefreshUnsafe()) {
+                /* Ответ пришёл посреди жеста — применять нельзя, но и терять
+                   нельзя: иначе доска остаётся с состоянием ДО команды, и
+                   следующий жест уходит с устаревшим id (409). Одна повторная
+                   попытка после жеста; таймер и realtime остаются страховкой. */
+                markMiningMasterBoardStale();
+                scheduleMiningMasterRefreshRetry(options, 0);
+                return false;
+            }
             var freshShell = window.AppOperationalFragment.parseRoot(
                 payload.html,
                 ".mm-mobile-shell"
@@ -1794,7 +1910,9 @@ document.addEventListener("DOMContentLoaded", function () {
             var currentShell = document.querySelector(".mm-mobile-shell");
             if (!freshShell || !currentShell) return false;
             var freshVersion = parseInt(payload.version || "0", 10);
+            miningMasterBoardStale = false;
             if (Number.isFinite(freshVersion) && freshVersion > 0) {
+                markMiningMasterBoardCurrent(freshVersion);
                 storeMiningMasterRealtimeVersion(freshVersion);
                 if (window.AppRealtime && typeof window.AppRealtime.markApplied === "function") {
                     window.AppRealtime.markApplied(freshVersion);
@@ -1822,7 +1940,19 @@ document.addEventListener("DOMContentLoaded", function () {
             return true;
         }).finally(function () {
             miningMasterMobileRefreshPromise = null;
+            /* Сверка завершилась — успехом или отказом; стартовой плашке
+               этого достаточно, дальше доску держит обычный realtime. */
+            window.dispatchEvent(new CustomEvent("mm-mobile-board-refresh-done"));
         });
+        /* Без этого return функция отдавала undefined, и единственный вызов,
+           который ждал промис напрямую — window.applyOperationalStateRefresh —
+           падал с TypeError: Cannot read properties of undefined (reading
+           'then'). То есть путь обновления доски ПО СОБЫТИЮ realtime не
+           работал вообще: экран оживал только по таймеру, а сам realtime-клиент
+           после исключения оставался в состоянии applyingUpdate и переставал
+           применять последующие версии. Остальные вызовы прикрыты
+           Promise.resolve(...) и ошибку не показывали. */
+        return miningMasterMobileRefreshPromise;
     }
     function isMobileOperationalRefreshUnsafe() {
         var mobileShell = document.querySelector(".mm-mobile-shell");
@@ -2083,6 +2213,8 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         }
         if (!hasMiningMasterRelevantEvents(events)) {
+            /* Событий, меняющих доску, не было — перечитывать её незачем. */
+            markMiningMasterBoardCurrent(targetVersion);
             storeMiningMasterRealtimeVersion(targetVersion);
             return Promise.resolve({ applied: true });
         }
@@ -2099,6 +2231,9 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherNoticeClose = document.querySelector("[data-dispatcher-notice-close]");
     function closeDispatcherNotice() {
         if (dispatcherNotice) dispatcherNotice.hidden = true;
+        if (miningMasterBoardStale && isMiningMasterMobilePage()) {
+            Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
+        }
     }
     function showDispatcherNotice(message) {
         if (!dispatcherNotice || !dispatcherNoticeMessage) return false;
@@ -3865,292 +4000,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 card.classList.remove("is-mobile-truck-drop-target");
             });
         }
-        function bindMobileHomeTruckDragLegacy(mini) {
-            if (!mini || mini.dataset.mmMobileHomeTruckBound === "true") return;
-            mini.dataset.mmMobileHomeTruckBound = "true";
-            var activeTouchId = null;
-            var activePointerId = null;
-            var startX = 0;
-            var startY = 0;
-            var lastY = 0;
-            var holdTimer = null;
-            var holdReady = false;
-            var dragging = false;
-            var ghost = null;
-            var currentTargetCard = null;
-            var currentDropMode = "";
-            var scrollGrid = null;
-            function clearHoldTimer() {
-                if (holdTimer) {
-                    window.clearTimeout(holdTimer);
-                    holdTimer = null;
-                }
-            }
-            function resetState() {
-                if (activePointerId !== null && mini.releasePointerCapture) {
-                    try {
-                        mini.releasePointerCapture(activePointerId);
-                    } catch (error) {}
-                }
-                clearHoldTimer();
-                holdReady = false;
-                dragging = false;
-                activeTouchId = null;
-                activePointerId = null;
-                currentTargetCard = null;
-                currentDropMode = "";
-                mini.classList.remove("is-hold-pending", "is-hold-ready", "is-dragging");
-                if (ghost) ghost.remove();
-                ghost = null;
-                clearMobileHomeTruckDropState();
-            }
-            function resetOnInactiveRole(event) {
-                if (!mini.isConnected) {
-                    window.removeEventListener("active-role-state-changed", resetOnInactiveRole);
-                    return;
-                }
-                if (!event.detail || event.detail.active === false) {
-                    resetState();
-                }
-            }
-            window.addEventListener("active-role-state-changed", resetOnInactiveRole);
-            function getTrackedTouch(event) {
-                var touches = event.changedTouches || event.touches || [];
-                for (var index = 0; index < touches.length; index += 1) {
-                    if (touches[index].identifier === activeTouchId) return touches[index];
-                }
-                return null;
-            }
-            function startDrag(clientX, clientY) {
-                if (isMiningMasterMobileReadonly()) {
-                    resetState();
-                    return;
-                }
-                if (dragging || !holdReady) return;
-                dragging = true;
-                mini.classList.remove("is-hold-pending");
-                mini.classList.add("is-dragging");
-                ghost = mini.cloneNode(true);
-                ghost.classList.add("mm-mobile-home-truck-ghost");
-                ghost.style.width = mini.getBoundingClientRect().width + "px";
-                ghost.style.height = mini.getBoundingClientRect().height + "px";
-                ghost.style.left = clientX + "px";
-                ghost.style.top = clientY + "px";
-                document.body.appendChild(ghost);
-            }
-            function findDropCard(clientX, clientY) {
-                var nodes = document.elementsFromPoint(clientX, clientY);
-                for (var index = 0; index < nodes.length; index += 1) {
-                    var card = nodes[index].closest && nodes[index].closest("[data-mm-mobile-open-complex]");
-                    if (!card || card.classList.contains("status-empty")) continue;
-                    if (card.dataset.mmMobileExcavatorId === mini.dataset.mmMobileHomeSourceExcavatorId) continue;
-                    return card;
-                }
-                return null;
-            }
-            function updateDrag(clientX, clientY, dx) {
-                if (ghost) {
-                    ghost.style.left = clientX + "px";
-                    ghost.style.top = clientY + "px";
-                    ghost.style.setProperty("--mm-mobile-home-truck-ghost-rotate", Math.max(-11, Math.min(11, dx * .08)) + "deg");
-                }
-                clearMobileHomeTruckDropState();
-                currentTargetCard = null;
-                currentDropMode = "";
-                var inTruckGarage = clientX >= window.innerWidth - 86;
-                if (inTruckGarage) {
-                    currentDropMode = "garage";
-                    shell.classList.add("is-truck-garage-peeking", "is-truck-garage-ready");
-                    return;
-                }
-                var targetCard = findDropCard(clientX, clientY);
-                if (targetCard) {
-                    currentDropMode = "complex";
-                    currentTargetCard = targetCard;
-                    targetCard.classList.add("is-mobile-truck-drop-target");
-                }
-            }
-            function finish(clientX, clientY, cancelled) {
-                if (isMiningMasterMobileReadonly()) {
-                    resetState();
-                    return;
-                }
-                if (!dragging || cancelled) {
-                    resetState();
-                    return;
-                }
-                updateDrag(clientX, clientY, clientX - startX);
-                var truckId = mini.dataset.mmMobileHomeTruckId;
-                var sourceExcavatorId = mini.dataset.mmMobileHomeSourceExcavatorId || "";
-                var payload = null;
-                if (currentDropMode === "garage") {
-                    payload = {
-                        action: "release",
-                        truck_id: truckId,
-                        expected_assignment_state_id: haulAssignmentStateId(mini)
-                    };
-                } else if (currentDropMode === "complex" && currentTargetCard) {
-                    payload = {
-                        action: "assign",
-                        truck_id: truckId,
-                        excavator_id: currentTargetCard.dataset.mmMobileExcavatorId,
-                        expected_assignment_state_id: haulAssignmentStateId(mini)
-                    };
-                }
-                if (!payload || !truckId) {
-                    resetState();
-                    return;
-                }
-                var rollbackOptimisticMove = moveMobileHomeTruckLocal(mini, currentDropMode === "complex" ? currentTargetCard : null);
-                if (ghost) ghost.classList.add("is-dropping");
-                clearMobileHomeTruckDropState();
-                window.setTimeout(resetState, 140);
-                dispatcherPostQueued(dispatcherAssignTruckUrl, payload)
-                    .then(function () {
-                        if (rollbackOptimisticMove && rollbackOptimisticMove.commit) rollbackOptimisticMove.commit();
-                    })
-                    .catch(function (error) {
-                        if (rollbackOptimisticMove) rollbackOptimisticMove();
-                        showDispatcherDnDError(error);
-                    });
-            }
-            mini.addEventListener("touchstart", function (event) {
-                if (isMiningMasterMobileReadonly()) return;
-                if (activeTouchId !== null || mini.classList.contains("is-moving")) return;
-                if (!event.changedTouches || !event.changedTouches.length) return;
-                event.stopPropagation();
-                var touch = event.changedTouches[0];
-                activeTouchId = touch.identifier;
-                activePointerId = null;
-                startX = touch.clientX;
-                startY = touch.clientY;
-                lastY = touch.clientY;
-                scrollGrid = mini.closest(".mm-mobile-complex-grid");
-                holdReady = false;
-                dragging = false;
-                mini.classList.add("is-hold-pending");
-                clearHoldTimer();
-                holdTimer = window.setTimeout(function () {
-                    if (
-                        activeTouchId === touch.identifier
-                        && !isMiningMasterMobileReadonly()
-                    ) {
-                        holdReady = true;
-                        mini.classList.add("is-hold-ready");
-                    }
-                }, 220);
-            }, { passive: true });
-            mini.addEventListener("touchmove", function (event) {
-                if (isMiningMasterMobileReadonly()) {
-                    resetState();
-                    return;
-                }
-                if (activeTouchId === null) return;
-                var touch = getTrackedTouch(event);
-                if (!touch) return;
-                var dx = touch.clientX - startX;
-                var dy = touch.clientY - startY;
-                if (!dragging) {
-                    if (!holdReady) {
-                        if (Math.hypot(dx, dy) > 8) {
-                            clearHoldTimer();
-                            mini.classList.remove("is-hold-pending", "is-hold-ready");
-                            if (scrollGrid) {
-                                scrollGrid.scrollTop += lastY - touch.clientY;
-                            }
-                            lastY = touch.clientY;
-                        }
-                        return;
-                    }
-                    if (Math.hypot(dx, dy) < 8) {
-                        event.preventDefault();
-                        return;
-                    }
-                    startDrag(touch.clientX, touch.clientY);
-                }
-                event.preventDefault();
-                event.stopPropagation();
-                updateDrag(touch.clientX, touch.clientY, dx);
-            }, { passive: false });
-            mini.addEventListener("touchend", function (event) {
-                if (activeTouchId === null) return;
-                event.stopPropagation();
-                var touch = getTrackedTouch(event);
-                if (!touch && event.changedTouches && event.changedTouches.length) touch = event.changedTouches[0];
-                finish(touch ? touch.clientX : startX, touch ? touch.clientY : startY, false);
-            }, { passive: false });
-            mini.addEventListener("touchcancel", function (event) {
-                if (activeTouchId === null) return;
-                event.stopPropagation();
-                var touch = getTrackedTouch(event);
-                finish(touch ? touch.clientX : startX, touch ? touch.clientY : startY, true);
-            }, { passive: false });
-            mini.addEventListener("pointerdown", function (event) {
-                if (isMiningMasterMobileReadonly()) return;
-                if (event.pointerType === "touch") return;
-                if (event.pointerType === "mouse" && event.button !== 0) return;
-                if (mini.classList.contains("is-moving")) return;
-                event.stopPropagation();
-                activePointerId = event.pointerId;
-                activeTouchId = null;
-                startX = event.clientX;
-                startY = event.clientY;
-                holdReady = false;
-                dragging = false;
-                mini.classList.add("is-hold-pending");
-                clearHoldTimer();
-                holdTimer = window.setTimeout(function () {
-                    if (
-                        activePointerId === event.pointerId
-                        && !isMiningMasterMobileReadonly()
-                    ) {
-                        holdReady = true;
-                        mini.classList.add("is-hold-ready");
-                    }
-                }, 220);
-                if (mini.setPointerCapture) {
-                    try {
-                        mini.setPointerCapture(activePointerId);
-                    } catch (error) {}
-                }
-            });
-            mini.addEventListener("pointermove", function (event) {
-                if (isMiningMasterMobileReadonly()) {
-                    resetState();
-                    return;
-                }
-                if (event.pointerType === "touch") return;
-                if (activePointerId === null || event.pointerId !== activePointerId) return;
-                var dx = event.clientX - startX;
-                var dy = event.clientY - startY;
-                if (!dragging) {
-                    if (!holdReady) {
-                        if (Math.hypot(dx, dy) > 8) {
-                            resetState();
-                        }
-                        return;
-                    }
-                    if (Math.hypot(dx, dy) < 8) return;
-                    startDrag(event.clientX, event.clientY);
-                }
-                event.preventDefault();
-                event.stopPropagation();
-                updateDrag(event.clientX, event.clientY, dx);
-            });
-            mini.addEventListener("pointerup", function (event) {
-                if (event.pointerType === "touch") return;
-                if (activePointerId === null || event.pointerId !== activePointerId) return;
-                event.stopPropagation();
-                finish(event.clientX, event.clientY, false);
-            });
-            mini.addEventListener("pointercancel", function (event) {
-                if (event.pointerType === "touch") return;
-                if (activePointerId === null || event.pointerId !== activePointerId) return;
-                event.stopPropagation();
-                finish(event.clientX, event.clientY, true);
-            });
-            mini.addEventListener("mm-mobile-complex-swipe-takeover", resetState);
-        }
+        /* Прежний обработчик перетаскивания bindMobileHomeTruckDragLegacy удалён:
+           он не вызывался ниоткуда с перехода на режим перестановки, но его
+           286 строк уезжали клиенту в каждой загрузке экрана. */
         var mobileTruckTransfer = null;
         var mobileTruckTransferNoticeTimer = null;
         var mobileTruckTransferBar = shell.querySelector("[data-mm-truck-transfer-bar]");
@@ -4221,54 +4073,26 @@ document.addEventListener("DOMContentLoaded", function () {
             };
         }
 
-        function pinMobileTruckTransferSourceAtPoint(sourceCard, clientX, clientY) {
-            var grid = home && home.querySelector(".mm-mobile-complex-grid");
-            if (!grid || !sourceCard || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
-            var cards = Array.from(grid.querySelectorAll(".mm-mobile-complex-card:not(.status-empty)")).filter(function (card) {
-                return !card.hidden && card.style.display !== "none";
-            });
-            var sourceIndex = cards.indexOf(sourceCard);
-            if (sourceIndex < 0 || cards.length < 2) return;
-            cards.forEach(function (card, index) {
-                card.style.order = String(index);
-            });
-            var rect = grid.getBoundingClientRect();
-            if (!rect.width || !rect.height) return;
-            var gridStyle = window.getComputedStyle(grid);
-            var columnGap = parseFloat(gridStyle.columnGap) || 0;
-            var rowGap = parseFloat(gridStyle.rowGap) || 0;
-            var rowCount = Math.max(1, Math.ceil(cards.length / 2));
-            var columnWidth = Math.max(1, (rect.width - columnGap) / 2);
-            var viewportBottom = window.visualViewport
-                ? window.visualViewport.offsetTop + window.visualViewport.height
-                : window.innerHeight;
-            var stableGridHeight = Math.max(rect.height, viewportBottom - rect.top);
-            var rowHeight = Math.max(1, (stableGridHeight - rowGap * (rowCount - 1)) / rowCount);
-            var column = clientX >= rect.left + columnWidth + columnGap / 2 ? 1 : 0;
-            var row = Math.max(0, Math.min(rowCount - 1, Math.floor((clientY - rect.top) / (rowHeight + rowGap))));
-            var slotIndex = Math.min(cards.length - 1, row * 2 + column);
-            if (slotIndex === sourceIndex) return;
-            var slotCard = cards[slotIndex];
-            sourceCard.style.order = String(slotIndex);
-            slotCard.style.order = String(sourceIndex);
-        }
-
-        function schedulePinMobileTruckTransferSourceAtPoint(transfer, clientX, clientY) {
-            window.requestAnimationFrame(function () {
-                window.requestAnimationFrame(function () {
-                    if (mobileTruckTransfer !== transfer) return;
-                    pinMobileTruckTransferSourceAtPoint(transfer.sourceCard, clientX, clientY);
-                });
-            });
-        }
-
         function beginMobileTruckTransfer(node) {
-            if (isMiningMasterMobileReadonly() || !node || node.classList.contains("is-transfer-pending")) return false;
+            if (isMiningMasterMobileReadonly() || !node) return false;
+            if (node.classList.contains("is-transfer-pending")) {
+                /* Пометку ставит СЕРВЕР по уже запланированной, но ещё не
+                   применённой перестановке: пока она не вступила в силу,
+                   двигать самосвал второй раз нельзя. Раньше жест просто
+                   молча не срабатывал, и экран выглядел зависшим — теперь
+                   видно и плитку, и причину. */
+                pulseMiningMasterInfoTarget(node);
+                showDispatcherNotice(
+                    "Самосвал " + (node.dataset.mmMobileHomeTruckNumber
+                        || node.dataset.mmMobileAssignedTruckNumber || "")
+                    + " уже переставляется" +
+                    (node.dataset.mmTransferLabel ? " (" + node.dataset.mmTransferLabel + ")" : "")
+                    + ". Дождитесь, пока перестановка вступит в силу."
+                );
+                return false;
+            }
             var transfer = mobileTruckTransferSource(node);
             if (!transfer || !transfer.sourceCard) return false;
-            var sourceRect = node.getBoundingClientRect();
-            var sourceAnchorX = sourceRect.left + sourceRect.width / 2;
-            var sourceAnchorY = sourceRect.top + sourceRect.height / 2;
             transfer.sourceFillScreen = node.closest("[data-mm-mobile-fill]");
             if (mobileTruckTransferNoticeTimer) window.clearTimeout(mobileTruckTransferNoticeTimer);
             mobileTruckTransfer = transfer;
@@ -4284,9 +4108,12 @@ document.addEventListener("DOMContentLoaded", function () {
                 card.classList.toggle("is-transfer-source", isSource);
                 card.classList.toggle("is-transfer-target", !isSource);
             });
-            schedulePinMobileTruckTransferSourceAtPoint(transfer, sourceAnchorX, sourceAnchorY);
+            /* Карточки комплексов больше НЕ переставляются под пальцем.
+               Раскладка и так меняется один раз при входе в режим перестановки,
+               а перенос исходной карточки в слот под пальцем сдвигал цель ещё
+               на 77-254 px — уже после того, как мастер выбрал направление. */
             if (mobileTruckTransferCaption) mobileTruckTransferCaption.textContent = "Перестановка самосвала";
-            if (mobileTruckTransferTitle) mobileTruckTransferTitle.textContent = "№" + transfer.truckNumber + " из " + transfer.sourceLabel + " — отпустите на экскаваторе";
+            if (mobileTruckTransferTitle) mobileTruckTransferTitle.textContent = "№" + transfer.truckNumber + " из " + transfer.sourceLabel + " — задержитесь на экскаваторе и отпустите";
             if (mobileTruckTransferCancel) mobileTruckTransferCancel.hidden = false;
             if (mobileTruckTransferBar) mobileTruckTransferBar.hidden = false;
             if (window.navigator && typeof window.navigator.vibrate === "function") window.navigator.vibrate(35);
@@ -4346,21 +4173,85 @@ document.addEventListener("DOMContentLoaded", function () {
             }, true);
         }
 
+        /* Порог начала перестановки самосвала.
+
+           До этого перестановка стартовала только от почти горизонтального
+           движения: нужно было |dx| >= 14 И |dx| > |dy| * 1.05, а первое же
+           вертикальное смещение на 12 px намертво ставило scrollIntent и
+           убивало жест до конца касания. Прокрутка при этом всё равно не
+           начиналась — у плитки самосвала touch-action: none, — то есть
+           запрет ничего не защищал, а комплексы в соседних рядах были
+           недостижимы перетаскиванием вообще. Замер на 375x812: из 11
+           выполненных попыток жест не распознан 3 раза, все — с углом
+           больше 60 градусов.
+
+           Теперь жест стартует от смещения в ЛЮБУЮ сторону. Порог чуть
+           больше прежнего, чтобы случайное дрожание пальца по-прежнему
+           читалось как нажатие, а не как перетаскивание. */
+        var MOBILE_TRUCK_TRANSFER_START_PX = 16;
+        var MOBILE_TRUCK_TRANSFER_HOLD_MS = 260;
+        var MOBILE_TRUCK_TRANSFER_DWELL_MS = 120;
+        /* Минимальное движение ПОСЛЕ входа в режим перестановки. Доска в этот
+           момент перекраивается, и под неподвижным пальцем может оказаться
+           соседний комплекс (сдвиг до 202 px на 392x732). Без этого порога
+           «удержал — подумал — отпустил» уносило самосвал к соседу: на
+           Redmi 22011119UY так уехали №104 и №107. Считается от точки, где
+           режим включился, а не от касания — поэтому короткий путь до
+           подъехавшего комплекса по-прежнему проходит. */
+        var MOBILE_TRUCK_TRANSFER_MOVE_PX = 24;
+
         function bindMobileTruckTransferDrag(mini) {
             if (!mini || mini.dataset.mmTruckTransferDragBound === "true") return;
             mini.dataset.mmTruckTransferDragBound = "true";
             mini.setAttribute("role", "button");
             mini.setAttribute("tabindex", "0");
             var truckNumber = mini.dataset.mmMobileHomeTruckNumber || mini.dataset.mmMobileAssignedTruckNumber || mini.textContent || "";
-            mini.setAttribute("aria-label", "Самосвал " + String(truckNumber).trim() + ". Нажмите для карточки или потяните в сторону для перестановки");
+            mini.setAttribute("aria-label", "Самосвал " + String(truckNumber).trim() + ". Нажмите для карточки, удержите или потяните для перестановки");
             var startX = 0;
             var startY = 0;
+            var lastX = 0;
+            var lastY = 0;
             var activeTouchId = null;
             var activePointerId = null;
             var scrollIntent = false;
             var dragging = false;
             var ghost = null;
             var hoverTarget = null;
+            var hoverTargetSince = 0;
+            var holdTimer = null;
+            var transferOriginX = 0;
+            var transferOriginY = 0;
+
+            function clearTransferHold() {
+                if (holdTimer !== null) {
+                    window.clearTimeout(holdTimer);
+                    holdTimer = null;
+                }
+            }
+
+            function armTransferHold() {
+                /* Удержание запускает перестановку ДО того, как палец пошёл к
+                   цели.
+
+                   Вход в режим перестановки перекраивает доску: прячется
+                   шапка и нижняя навигация, карточки растягиваются на всю
+                   высоту. Замер на 375x812 показал сдвиг карточки-цели до
+                   302 px — то есть комплекс уезжал из-под пальца уже после
+                   того, как мастер выбрал направление, и самосвал попадал в
+                   соседний комплекс (5 промахов из 20 попыток).
+
+                   При удержании раскладка меняется, пока палец стоит на
+                   месте: мастер видит итоговое расположение комплексов и
+                   только потом ведёт палец. Быстрый рывок тоже работает —
+                   его защищает выдержка над целью в finishTransferDrag. */
+                clearTransferHold();
+                holdTimer = window.setTimeout(function () {
+                    holdTimer = null;
+                    if (dragging || scrollIntent) return;
+                    if (activePointerId === null && activeTouchId === null) return;
+                    startTransferDrag(lastX, lastY);
+                }, MOBILE_TRUCK_TRANSFER_HOLD_MS);
+            }
 
             function trackedTouch(event) {
                 var touches = event.changedTouches || event.touches || [];
@@ -4394,6 +4285,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (nextTarget === hoverTarget) return;
                 clearHoverTarget();
                 hoverTarget = nextTarget;
+                hoverTargetSince = Date.now();
                 if (hoverTarget) {
                     hoverTarget.classList.add("is-transfer-hover");
                     if (window.navigator && typeof window.navigator.vibrate === "function") window.navigator.vibrate(12);
@@ -4416,6 +4308,8 @@ document.addEventListener("DOMContentLoaded", function () {
                     return false;
                 }
                 dragging = true;
+                transferOriginX = clientX;
+                transferOriginY = clientY;
                 mini.classList.add("is-dragging");
                 document.body.classList.add("mm-mobile-transfer-dragging");
                 document.body.appendChild(ghost);
@@ -4432,7 +4326,9 @@ document.addEventListener("DOMContentLoaded", function () {
             }
 
             function resetTransferDrag() {
+                clearTransferHold();
                 clearHoverTarget();
+                hoverTargetSince = 0;
                 mini.classList.remove("is-dragging");
                 document.body.classList.remove("mm-mobile-transfer-dragging");
                 if (ghost) ghost.remove();
@@ -4454,12 +4350,42 @@ document.addEventListener("DOMContentLoaded", function () {
                 }
                 var target = hoverTarget;
                 var pointTarget = findTransferTarget(clientX, clientY);
-                if (pointTarget) target = pointTarget;
-                suppressTransferClick(mobileTruckTransfer && mobileTruckTransfer.sourceCard);
-                suppressTransferClick(target);
+                if (pointTarget !== target) {
+                    /* Палец ушёл на другой комплекс прямо в момент отпускания —
+                       наведения на него не было, засчитываем как новое. */
+                    target = pointTarget;
+                    hoverTargetSince = Date.now();
+                }
                 if (ghost) ghost.classList.add("is-dropping");
-                var travelDistance = Math.hypot(clientX - startX, clientY - startY);
-                if (!cancelled && target && travelDistance >= 36) {
+                /* Комплекс должен побыть под пальцем: без этого быстрый рывок
+                   сквозь доску назначал самосвал на тот комплекс, который в
+                   момент отпускания случайно оказался под пальцем после
+                   перекройки раскладки. Отказ безопаснее молчаливой
+                   перестановки в чужой комплекс: мастер сразу видит, что
+                   ничего не произошло, и повторяет жест.
+
+                   Требования пройденного расстояния здесь больше нет.
+                   Раньше стояло travelDistance >= 36, и на живом телефоне это
+                   отклоняло правильный жест: при входе в режим перестановки
+                   доска перекраивается, соседний комплекс подъезжает к пальцу,
+                   и путь до него оказывается короче порога. Замер на Redmi
+                   22011119UY: K-5 -> K-3 стабильно не срабатывал, палец
+                   проходил 30 CSS-пикселей при подсвеченной цели на всём
+                   протяжении жеста. Порог ничего не защищал: случайное
+                   касание отсекает удержание и выдержка, а целью может быть
+                   только ЧУЖОЙ комплекс — исходный помечен is-transfer-source
+                   и в цели не попадает. */
+                var dwelledOnTarget = target && (Date.now() - hoverTargetSince) >= MOBILE_TRUCK_TRANSFER_DWELL_MS;
+                var movedSinceStart = Math.hypot(clientX - transferOriginX, clientY - transferOriginY) >= MOBILE_TRUCK_TRANSFER_MOVE_PX;
+                if (!cancelled && target && (!dwelledOnTarget || !movedSinceStart)) {
+                    pulseMiningMasterInfoTarget(target);
+                }
+                if (!cancelled && target && dwelledOnTarget && movedSinceStart) {
+                    /* Клик гасим только по факту перестановки: иначе короткий
+                       жест, который не дотянул до цели, ещё и не давал открыть
+                       карточку комплекса. */
+                    suppressTransferClick(mobileTruckTransfer && mobileTruckTransfer.sourceCard);
+                    suppressTransferClick(target);
                     completeMobileTruckTransfer(target);
                 } else {
                     cancelMobileTruckTransfer();
@@ -4474,22 +4400,24 @@ document.addEventListener("DOMContentLoaded", function () {
                 activeTouchId = touch.identifier;
                 startX = touch.clientX;
                 startY = touch.clientY;
+                lastX = touch.clientX;
+                lastY = touch.clientY;
                 scrollIntent = false;
                 dragging = false;
+                armTransferHold();
             }, { passive: true });
             mini.addEventListener("touchmove", function (event) {
                 if (window.PointerEvent) return;
                 if (activeTouchId === null) return;
                 var touch = trackedTouch(event);
                 if (!touch) return;
+                lastX = touch.clientX;
+                lastY = touch.clientY;
                 var dx = touch.clientX - startX;
                 var dy = touch.clientY - startY;
                 if (!dragging) {
-                    if (Math.abs(dy) >= 12 && Math.abs(dy) > Math.abs(dx)) {
-                        scrollIntent = true;
-                        return;
-                    }
-                    if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy) * 1.05) return;
+                    if (Math.hypot(dx, dy) < MOBILE_TRUCK_TRANSFER_START_PX) return;
+                    clearTransferHold();
                     if (!startTransferDrag(touch.clientX, touch.clientY)) return;
                 }
                 event.preventDefault();
@@ -4514,22 +4442,24 @@ document.addEventListener("DOMContentLoaded", function () {
                 activePointerId = event.pointerId;
                 startX = event.clientX;
                 startY = event.clientY;
+                lastX = event.clientX;
+                lastY = event.clientY;
                 scrollIntent = false;
                 dragging = false;
                 if (mini.setPointerCapture) {
                     try { mini.setPointerCapture(activePointerId); } catch (error) {}
                 }
+                armTransferHold();
             });
             mini.addEventListener("pointermove", function (event) {
                 if (activePointerId === null || event.pointerId !== activePointerId) return;
+                lastX = event.clientX;
+                lastY = event.clientY;
                 var dx = event.clientX - startX;
                 var dy = event.clientY - startY;
                 if (!dragging) {
-                    if (Math.abs(dy) >= 12 && Math.abs(dy) > Math.abs(dx)) {
-                        scrollIntent = true;
-                        return;
-                    }
-                    if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy) * 1.05) return;
+                    if (Math.hypot(dx, dy) < MOBILE_TRUCK_TRANSFER_START_PX) return;
+                    clearTransferHold();
                     if (!startTransferDrag(event.clientX, event.clientY)) return;
                 }
                 event.preventDefault();
@@ -6131,31 +6061,87 @@ document.addEventListener("DOMContentLoaded", function () {
                 setDispatcherSyncPending(true);
             });
         });
-        window.addEventListener("mm-mobile-sync-garage-nav", syncMobileGarageNavState);
-        window.addEventListener("resize", function () {
-            updateMobileHomeComplexGridLayout();
-            scheduleMobileLocalLayoutReconcile();
+        /* Выход — удержанием, как у водителя и экскаваторщика: случайное
+           касание в перчатках не должно выбрасывать мастера из смены. */
+        shell.querySelectorAll("[data-mm-mobile-logout]").forEach(function (button) {
+            if (!window.MobileShiftHold || button.dataset.mobileShiftHoldBound === "true") return;
+            window.MobileShiftHold.bind(button, {
+                holdMs: 2000,
+                readyLabel: "Выйти",
+                onShortPress: function () {
+                    showDispatcherNotice("Удерживайте кнопку, чтобы выйти");
+                },
+                onComplete: function (api) {
+                    button.classList.add("is-pending");
+                    button.disabled = true;
+                    api.setLabel("Выходим");
+                    var stopPromise = window.NativeBackgroundConnection
+                        && typeof window.NativeBackgroundConnection.stop === "function"
+                        ? window.NativeBackgroundConnection.stop()
+                        : null;
+                    Promise.resolve(stopPromise).finally(function () {
+                        window.location.href = button.dataset.mmLogoutUrl || "/logout/";
+                    });
+                }
+            });
         });
-        if (window.ResizeObserver) {
-            var mobileLayoutObserver = new ResizeObserver(scheduleMobileLocalLayoutReconcile);
+        /* Слушатели window/document и ResizeObserver вешаются РОВНО ОДИН РАЗ.
+
+           bindMiningMasterMobileScreens() вызывается заново после каждой
+           замены доски (фоновое обновление раз в 30 секунд плюс событие
+           realtime), поэтому раньше на каждое обновление добавлялись новый
+           resize, новый keydown, новый mm-mobile-sync-garage-nav и новый
+           ResizeObserver — и ни один не снимался. Замер: после трёх проходов
+           уже 3 resize, 3 keydown, 3 наблюдателя; за 12-часовую смену это
+           больше тысячи копий, каждая со ссылкой на давно оторванный DOM.
+           Именно они пересчитывали раскладку по тысяче раз на каждое
+           появление адресной строки — экран «тормозил» тем сильнее, чем
+           дольше был открыт.
+
+           Обработчики намеренно не замыкаются на shell/shiftPlanDetail этого
+           прохода, а каждый раз берут актуальные узлы через window.* —
+           поэтому переживают замену доски. */
+        if (!window.__mmMobileGlobalHandlersBound) {
+            window.__mmMobileGlobalHandlersBound = true;
+            window.addEventListener("mm-mobile-sync-garage-nav", function () {
+                if (window.__mmMobileSyncGarageNav) window.__mmMobileSyncGarageNav();
+            });
+            window.addEventListener("resize", function () {
+                if (window.__mmMobileUpdateGridLayout) window.__mmMobileUpdateGridLayout();
+                if (window.__mmMobileScheduleReconcile) window.__mmMobileScheduleReconcile();
+            });
+            document.addEventListener("keydown", function (event) {
+                if (event.key !== "Escape") return;
+                if (window.__mmMobileHandleEscape) window.__mmMobileHandleEscape();
+            });
+            if (window.ResizeObserver) {
+                window.__mmMobileLayoutObserver = new ResizeObserver(function () {
+                    if (window.__mmMobileScheduleReconcile) window.__mmMobileScheduleReconcile();
+                });
+            }
+        }
+        window.__mmMobileSyncGarageNav = syncMobileGarageNavState;
+        window.__mmMobileUpdateGridLayout = updateMobileHomeComplexGridLayout;
+        window.__mmMobileScheduleReconcile = scheduleMobileLocalLayoutReconcile;
+        window.__mmMobileHandleEscape = function () {
+            if (shiftPlanDetail && !shiftPlanDetail.hidden) {
+                closeShiftPlanDetail();
+                return;
+            }
+            if (shell.dataset.mobileScreen === "fill") closeDetails();
+        };
+        if (window.__mmMobileLayoutObserver) {
+            /* Наблюдатель один на страницу: старые узлы отпускаем, новые берём. */
+            window.__mmMobileLayoutObserver.disconnect();
             var mobileComplexGrid = shell.querySelector(".mm-mobile-complex-grid");
-            if (mobileComplexGrid) mobileLayoutObserver.observe(mobileComplexGrid);
+            if (mobileComplexGrid) window.__mmMobileLayoutObserver.observe(mobileComplexGrid);
             shell.querySelectorAll(".mm-mobile-truck-preview, [data-mm-mobile-fill-assigned], .mm-mobile-complex-card").forEach(function (node) {
-                mobileLayoutObserver.observe(node);
+                window.__mmMobileLayoutObserver.observe(node);
             });
         }
         sortMobileTruckGarageViews();
         syncMobileGarageNavState();
         scheduleMobileLocalLayoutReconcile();
-        document.addEventListener("keydown", function (event) {
-            if (event.key === "Escape" && shiftPlanDetail && !shiftPlanDetail.hidden) {
-                closeShiftPlanDetail();
-                return;
-            }
-            if (event.key === "Escape" && shell.dataset.mobileScreen === "fill") {
-                closeDetails();
-            }
-        });
         try {
             var returnPanel = window.sessionStorage.getItem("mm-mobile-return-panel");
             if (returnPanel) {
@@ -6170,8 +6156,95 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     bindMiningMasterMobileScreens();
     {% if mining_master_mobile_enabled %}
+    /* Плашка «Загружаем пульт» при старте.
+
+       Service worker открывает приложение сразу и, если сеть не успела за
+       2,5 секунды, показывает сохранённую доску — вчерашнюю расстановку.
+       Через пару секунд сверка с сервером подменяла её на свежую, и мастер
+       видел «всё перемешано, потом расставилось». Теперь доска закрыта
+       стандартной плашкой с кружком, пока не подтверждена актуальность:
+       свежая доска применена или сервер сказал, что изменений нет. Без сети
+       или при молчании сервера плашка снимается сама через 6 секунд. */
+    (function miningMasterStartupOverlay(attempt) {
+        /* Плашку определяет base.html уже после нашего DOMContentLoaded —
+           поэтому не сдаёмся с первого раза, а ждём её появления до 2 с. */
+        if (typeof window.showAppSyncOverlay !== "function" || typeof window.hideAppSyncOverlay !== "function") {
+            if ((attempt || 0) < 40) window.setTimeout(function () { miningMasterStartupOverlay((attempt || 0) + 1); }, 50);
+            return;
+        }
+        var done = false;
+        /* Время постановки плашки: ответ сервера считается настоящим, только
+           если получен позже него — при старте realtime публикует «связь
+           есть» с временем успеха ещё с предыдущей страницы. */
+        var armedAt = Date.now();
+        function finish() {
+            if (done) return;
+            done = true;
+            window.hideAppSyncOverlay();
+            window.removeEventListener("operational-state-refresh", finish);
+            window.removeEventListener("operational-state-refresh-skipped", finish);
+            window.removeEventListener("operational-state-refresh-deferred", finish);
+            window.removeEventListener("mm-mobile-board-current", finish);
+            window.removeEventListener("mm-mobile-board-refresh-done", finish);
+            window.removeEventListener("operational-state-connection", onConnection);
+        }
+        function onConnection(event) {
+            var detail = event && event.detail || {};
+            if (detail.connected === false) {
+                finish();
+                return;
+            }
+            /* Realtime сообщает «связь есть» и при старте, до первого опроса —
+               это ещё не ответ сервера, пропускаем. Настоящий ответ помечен
+               временем последнего успеха. Версию он разбирает уже ПОСЛЕ
+               этого события, поэтому даём ему тик и только потом смотрим:
+               если сервер не знает версии новее отрисованной — доска
+               актуальна, плашку снимаем; если новее — идёт обновление, ждём
+               его завершения (mm-mobile-board-refresh-done). */
+            if (!detail.lastSuccessAt || Number(detail.lastSuccessAt) < armedAt) return;
+            window.setTimeout(function () {
+                if (done) return;
+                var state = window.AppRealtime && typeof window.AppRealtime.getDebugState === "function"
+                    ? window.AppRealtime.getDebugState()
+                    : null;
+                var rendered = readRenderedOperationalStateVersion();
+                var known = state ? Math.max(Number(state.currentVersion || 0), Number(state.pendingVersion || 0)) : 0;
+                if (!state || (known <= rendered && !state.applyingUpdate)) finish();
+            }, 80);
+        }
+        window.showAppSyncOverlay({
+            title: "Загружаем пульт",
+            text: "Сверяем расстановку с сервером."
+        });
+        window.addEventListener("operational-state-refresh", finish);
+        window.addEventListener("operational-state-refresh-skipped", finish);
+        window.addEventListener("operational-state-refresh-deferred", finish);
+        window.addEventListener("mm-mobile-board-current", finish);
+        window.addEventListener("mm-mobile-board-refresh-done", finish);
+        window.addEventListener("operational-state-connection", onConnection);
+        window.setTimeout(finish, 8000);
+    })(0);
+    /* Фоновое обновление доски раньше шло каждые 30 секунд безусловно.
+
+       Один такой ответ — 324 КБ JSON (из них 224 КБ — карточки техники,
+       которые на экране не открыты), полный разбор 80 КБ разметки, замена
+       всей оболочки и повторная привязка всех обработчиков. Замер на
+       локальном стенде: 4 запроса в минуту и 1.33 МБ/мин в простое, когда на
+       карьере вообще ничего не происходит.
+
+       Версия состояния смены и так приходит опросом realtime каждые 5 секунд
+       (554 байта). Поэтому обновляем доску только когда версия ушла вперёд.
+       Полная сверка раз в 5 минут остаётся страховкой на случай пропущенного
+       события — без неё экран мог бы застрять на устаревших данных. */
+    var miningMasterLastFullReconcileAt = Date.now();
+    var MINING_MASTER_FULL_RECONCILE_MS = 300000;
     window.setInterval(function () {
         if (document.hidden || !isMiningMasterMobilePage() || isMobileOperationalRefreshUnsafe()) return;
+        var knownVersion = miningMasterRealtimeLastVersion || readMiningMasterRealtimeVersion();
+        var stateChanged = Number(knownVersion || 0) > Number(miningMasterBoardCurrentUpTo || 0);
+        var reconcileDue = Date.now() - miningMasterLastFullReconcileAt >= MINING_MASTER_FULL_RECONCILE_MS;
+        if (!stateChanged && !reconcileDue) return;
+        miningMasterLastFullReconcileAt = Date.now();
         Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
     }, 30000);
     {% endif %}
@@ -6656,6 +6729,135 @@ document.addEventListener("DOMContentLoaded", function () {
             complexRackResizeObserver.observe(rack);
         });
     }
+    /* Живой поиск техники: набранный номер подсвечивает все плитки этой
+       машины — в комплексе, в гараже, карточку комплекса по экскаватору.
+       Совпадение по началу номера, чтобы набор сужал круг; «к-2» и «k-2»
+       одинаково находят комплекс по имени зоны. Доска после ответа сервера
+       перерисовывается целиком — MutationObserver возвращает подсветку. */
+    function bindDispatcherEquipmentSearch() {
+        var input = document.querySelector("[data-dispatcher-equipment-search]");
+        if (!input || document.body.classList.contains("mining-master-mobile-screen")) return;
+        var box = input.closest("[data-dispatcher-equipment-search-box]") || input.parentElement;
+        var count = document.querySelector("[data-dispatcher-equipment-search-count]");
+        var query = "";
+
+        function normalizeSearchText(value) {
+            return String(value || "").trim().toLowerCase().replace(/k/g, "к").replace(/\s+/g, "");
+        }
+
+        function matchesSearch(node, needle) {
+            var name = normalizeSearchText(node.getAttribute("data-equipment-name"));
+            if (name && name.indexOf(needle) === 0) return true;
+            var zone = normalizeSearchText(node.getAttribute("data-zone-label"));
+            return !!zone && zone.indexOf(needle) === 0;
+        }
+
+        function applyEquipmentSearch() {
+            var needle = normalizeSearchText(query);
+            var hits = 0;
+            var firstGarageHit = null;
+            document.querySelectorAll(".dispatcher-shell [data-equipment-name]").forEach(function (node) {
+                var hit = needle !== "" && matchesSearch(node, needle);
+                node.classList.toggle("is-search-hit", hit);
+                if (hit) {
+                    hits += 1;
+                    if (!firstGarageHit && node.hasAttribute("data-garage-item") && !node.classList.contains("is-assigned")) {
+                        firstGarageHit = node;
+                    }
+                }
+            });
+            document.body.classList.toggle("is-equipment-search", needle !== "");
+            box.classList.toggle("has-query", needle !== "");
+            if (count) {
+                count.hidden = needle === "";
+                count.textContent = String(hits);
+                count.classList.toggle("is-none", hits === 0);
+            }
+            /* Центрируем только скрытое совпадение боковой рейки: видимую
+               плитку не дёргаем и не смещаем весь холст без необходимости. */
+            if (firstGarageHit && typeof firstGarageHit.scrollIntoView === "function") {
+                var rail = firstGarageHit.closest(".dispatcher-excavators, .dispatcher-trucks");
+                if (rail) {
+                    var tileRect = firstGarageHit.getBoundingClientRect();
+                    var railRect = rail.getBoundingClientRect();
+                    var isOutsideRail = tileRect.top < railRect.top
+                        || tileRect.bottom > railRect.bottom
+                        || tileRect.left < railRect.left
+                        || tileRect.right > railRect.right;
+                    if (isOutsideRail) {
+                        firstGarageHit.scrollIntoView({ block: "center", inline: "nearest" });
+                    }
+                }
+            }
+        }
+
+        input.addEventListener("input", function () {
+            query = input.value;
+            applyEquipmentSearch();
+        });
+        input.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") clearEquipmentSearch();
+        });
+
+        function clearEquipmentSearch() {
+            input.value = "";
+            query = "";
+            applyEquipmentSearch();
+            if (document.activeElement === input) input.blur();
+        }
+
+        /* Набор без клика по полю: цифра или буква, нажатая когда фокус не в
+           другом поле ввода и не открыт диалог, уходит в поиск — диспетчер
+           просто начинает печатать номер. Backspace стирает так же. */
+        function isTypingElsewhere() {
+            var active = document.activeElement;
+            if (!active || active === document.body || active === input) return false;
+            var tag = active.tagName;
+            return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || active.isContentEditable;
+        }
+        function isDialogOpen() {
+            if (document.querySelector("dialog[open]")) return true;
+            var modal = document.getElementById("app-confirm-modal");
+            return !!(modal && !modal.hidden && getComputedStyle(modal).display !== "none");
+        }
+        document.addEventListener("keydown", function (event) {
+            if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+            if (document.activeElement === input || isTypingElsewhere() || isDialogOpen()) return;
+            var key = event.key;
+            if (key.length === 1 && /[0-9a-zа-яё\-]/i.test(key)) {
+                if (input.maxLength > 0 && input.value.length >= input.maxLength) return;
+                input.value += key;
+            } else if (key === "Backspace" && input.value) {
+                input.value = input.value.slice(0, -1);
+            } else {
+                return;
+            }
+            event.preventDefault();
+            query = input.value;
+            applyEquipmentSearch();
+            input.focus({ preventScroll: true });
+            input.setSelectionRange(input.value.length, input.value.length);
+        });
+
+        /* Клик или захват мышью в любом месте вне поля снимает поиск:
+           техника найдена, диспетчер тянет её или работает дальше. */
+        document.addEventListener("pointerdown", function (event) {
+            if (query === "" || box.contains(event.target)) return;
+            clearEquipmentSearch();
+        }, true);
+
+        var pending = null;
+        var observer = new MutationObserver(function () {
+            if (query === "" || pending) return;
+            pending = setTimeout(function () {
+                pending = null;
+                applyEquipmentSearch();
+            }, 60);
+        });
+        observer.observe(document.querySelector(".dispatcher-shell") || document.body, { childList: true, subtree: true });
+    }
+    bindDispatcherEquipmentSearch();
+
     watchComplexTruckRacks();
     function findTruckGarageList() {
         return document.querySelector(".dispatcher-trucks");
@@ -7255,6 +7457,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v74" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v98" defer></script>
 {% endif %}
 {% endblock %}

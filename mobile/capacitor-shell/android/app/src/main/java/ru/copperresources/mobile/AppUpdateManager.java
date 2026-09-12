@@ -37,8 +37,18 @@ import java.util.concurrent.Executors;
 final class AppUpdateManager {
     private static final String PREFS_NAME = "native_app_updates";
     private static final String DEFERRED_VERSION_CODE = "deferred_version_code";
+    private static final String CACHED_VERSION_CODE = "cached_version_code";
+    private static final String CACHED_VERSION_NAME = "cached_version_name";
+    private static final String CACHED_APK_URL = "cached_apk_url";
+    private static final String CACHED_SHA256 = "cached_sha256";
+    private static final String CACHED_RELEASE_NOTES = "cached_release_notes";
+    private static final String LAST_CHECK_COMPLETED_AT = "last_check_completed_at";
+    private static final String LAST_CHECK_SUCCEEDED = "last_check_succeeded";
     private static final int MAX_MANIFEST_BYTES = 64 * 1024;
     private static final int MAX_APK_BYTES = 200 * 1024 * 1024;
+    static final long SUCCESS_RESUME_MIN_INTERVAL_MS = 5L * 60L * 1000L;
+    static final long FAILURE_RETRY_INTERVAL_MS = 60L * 1000L;
+    private static final long PAGE_INDICATOR_RETRY_MS = 1_500L;
 
     private final MainActivity activity;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -48,6 +58,7 @@ final class AppUpdateManager {
         return thread;
     });
     private final Runnable periodicCheck = () -> checkForUpdates(true);
+    private final Runnable delayedIndicatorRefresh = this::refreshPageIndicator;
 
     private WebView webView;
     private UpdateInfo latestUpdate;
@@ -58,9 +69,24 @@ final class AppUpdateManager {
     private boolean hostResumed;
     private boolean pageLoaded;
     private boolean destroyed;
+    private long lastCheckCompletedAtMs;
+    private boolean lastCheckSucceeded;
 
     AppUpdateManager(MainActivity activity) {
         this.activity = activity;
+        SharedPreferences preferences = updatePreferences();
+        latestUpdate = restoreCachedUpdate(preferences, BuildConfig.VERSION_CODE);
+        lastCheckCompletedAtMs = preferences.getLong(LAST_CHECK_COMPLETED_AT, 0L);
+        lastCheckSucceeded = preferences.getBoolean(LAST_CHECK_SUCCEEDED, false);
+        long nowMs = System.currentTimeMillis();
+        if (lastCheckCompletedAtMs < 0L || lastCheckCompletedAtMs > nowMs) {
+            lastCheckCompletedAtMs = 0L;
+            lastCheckSucceeded = false;
+            preferences.edit()
+                .remove(LAST_CHECK_COMPLETED_AT)
+                .remove(LAST_CHECK_SUCCEEDED)
+                .apply();
+        }
     }
 
     void attach(WebView attachedWebView) {
@@ -72,12 +98,15 @@ final class AppUpdateManager {
     void onPageStarted(WebView loadingWebView) {
         webView = loadingWebView;
         pageLoaded = false;
+        mainHandler.removeCallbacks(delayedIndicatorRefresh);
     }
 
     void onPageLoaded(WebView loadedWebView) {
         webView = loadedWebView;
         pageLoaded = true;
         refreshPageIndicator();
+        mainHandler.removeCallbacks(delayedIndicatorRefresh);
+        mainHandler.postDelayed(delayedIndicatorRefresh, PAGE_INDICATOR_RETRY_MS);
         if (latestUpdate != null && shouldPrompt(latestUpdate)) {
             showUpdatePrompt(false);
         }
@@ -85,12 +114,18 @@ final class AppUpdateManager {
 
     void onHostResumed() {
         hostResumed = true;
+        refreshPageIndicator();
         if (pendingInstallerFile != null && canInstallPackages()) {
             File readyFile = pendingInstallerFile;
             pendingInstallerFile = null;
             launchSystemInstaller(readyFile);
         }
-        checkForUpdates(true);
+        long nowMs = System.currentTimeMillis();
+        if (shouldCheckOnResume(lastCheckCompletedAtMs, lastCheckSucceeded, nowMs)) {
+            checkForUpdates(true);
+        } else {
+            scheduleNextCheck(nowMs);
+        }
     }
 
     void onHostPaused() {
@@ -101,6 +136,7 @@ final class AppUpdateManager {
     void destroy() {
         destroyed = true;
         mainHandler.removeCallbacks(periodicCheck);
+        mainHandler.removeCallbacks(delayedIndicatorRefresh);
         executor.shutdownNow();
         if (webView != null) {
             webView.removeJavascriptInterface("CopperResourcesUpdate");
@@ -115,21 +151,35 @@ final class AppUpdateManager {
         checkRunning = true;
         executor.execute(() -> {
             UpdateInfo result = null;
+            boolean manifestReadSucceeded = false;
             try {
                 result = readUpdateManifest();
+                manifestReadSucceeded = true;
             } catch (Exception ignored) {
-                // Сбой проверки не мешает работе смены. Повтор будет по интервалу.
+                // Сбой сети не отменяет последнее подтверждённое обновление.
             }
             UpdateInfo finalResult = result;
+            boolean finalManifestReadSucceeded = manifestReadSucceeded;
             mainHandler.post(() -> {
                 checkRunning = false;
                 if (destroyed) {
                     return;
                 }
-                latestUpdate = finalResult != null
-                    && finalResult.versionCode > BuildConfig.VERSION_CODE
-                    ? finalResult
-                    : null;
+                long completedAtMs = System.currentTimeMillis();
+                recordCheckResult(finalManifestReadSucceeded, completedAtMs);
+                latestUpdate = resolveLatestUpdate(
+                    latestUpdate,
+                    finalManifestReadSucceeded,
+                    finalResult,
+                    BuildConfig.VERSION_CODE
+                );
+                if (finalManifestReadSucceeded) {
+                    if (latestUpdate != null) {
+                        persistCachedUpdate(updatePreferences(), latestUpdate);
+                    } else {
+                        clearCachedUpdate(updatePreferences());
+                    }
+                }
                 refreshPageIndicator();
                 if (allowPrompt && latestUpdate != null && shouldPrompt(latestUpdate)) {
                     showUpdatePrompt(false);
@@ -140,10 +190,114 @@ final class AppUpdateManager {
     }
 
     private void scheduleNextCheck() {
+        scheduleNextCheck(System.currentTimeMillis());
+    }
+
+    private void scheduleNextCheck(long nowMs) {
         mainHandler.removeCallbacks(periodicCheck);
         if (hostResumed && !destroyed) {
-            mainHandler.postDelayed(periodicCheck, BuildConfig.UPDATE_CHECK_INTERVAL_MS);
+            mainHandler.postDelayed(
+                periodicCheck,
+                nextScheduledDelay(
+                    lastCheckCompletedAtMs,
+                    lastCheckSucceeded,
+                    nowMs,
+                    BuildConfig.UPDATE_CHECK_INTERVAL_MS
+                )
+            );
         }
+    }
+
+    private void recordCheckResult(boolean succeeded, long completedAtMs) {
+        lastCheckCompletedAtMs = completedAtMs;
+        lastCheckSucceeded = succeeded;
+        updatePreferences().edit()
+            .putLong(LAST_CHECK_COMPLETED_AT, completedAtMs)
+            .putBoolean(LAST_CHECK_SUCCEEDED, succeeded)
+            .apply();
+    }
+
+    private SharedPreferences updatePreferences() {
+        return activity.getSharedPreferences(PREFS_NAME, MainActivity.MODE_PRIVATE);
+    }
+
+    static UpdateInfo resolveLatestUpdate(
+        UpdateInfo previous,
+        boolean manifestReadSucceeded,
+        UpdateInfo manifest,
+        int currentVersionCode
+    ) {
+        if (!manifestReadSucceeded) {
+            return previous;
+        }
+        return manifest != null && manifest.versionCode > currentVersionCode ? manifest : null;
+    }
+
+    static boolean shouldCheckOnResume(
+        long lastCompletedAtMs,
+        boolean lastSucceeded,
+        long nowMs
+    ) {
+        if (lastCompletedAtMs <= 0L || nowMs < lastCompletedAtMs) {
+            return true;
+        }
+        long minimumIntervalMs = lastSucceeded
+            ? SUCCESS_RESUME_MIN_INTERVAL_MS
+            : FAILURE_RETRY_INTERVAL_MS;
+        return nowMs - lastCompletedAtMs >= minimumIntervalMs;
+    }
+
+    static long nextScheduledDelay(
+        long lastCompletedAtMs,
+        boolean lastSucceeded,
+        long nowMs,
+        long successIntervalMs
+    ) {
+        if (lastCompletedAtMs <= 0L || nowMs < lastCompletedAtMs) {
+            return 0L;
+        }
+        long intervalMs = lastSucceeded ? successIntervalMs : FAILURE_RETRY_INTERVAL_MS;
+        return Math.max(0L, intervalMs - (nowMs - lastCompletedAtMs));
+    }
+
+    static void persistCachedUpdate(SharedPreferences preferences, UpdateInfo update) {
+        preferences.edit()
+            .putInt(CACHED_VERSION_CODE, update.versionCode)
+            .putString(CACHED_VERSION_NAME, update.versionName)
+            .putString(CACHED_APK_URL, update.apkUrl)
+            .putString(CACHED_SHA256, update.sha256)
+            .putString(CACHED_RELEASE_NOTES, update.releaseNotes)
+            .apply();
+    }
+
+    static UpdateInfo restoreCachedUpdate(SharedPreferences preferences, int currentVersionCode) {
+        int versionCode = preferences.getInt(CACHED_VERSION_CODE, 0);
+        String versionName = preferences.getString(CACHED_VERSION_NAME, "");
+        String apkUrl = preferences.getString(CACHED_APK_URL, "");
+        String sha256 = preferences.getString(CACHED_SHA256, "");
+        String releaseNotes = preferences.getString(CACHED_RELEASE_NOTES, "");
+        versionName = versionName == null ? "" : versionName.trim();
+        apkUrl = apkUrl == null ? "" : apkUrl.trim();
+        sha256 = sha256 == null ? "" : sha256.trim().toLowerCase(Locale.ROOT);
+        releaseNotes = releaseNotes == null ? "" : releaseNotes.trim();
+        if (versionCode <= currentVersionCode
+                || versionName.isEmpty()
+                || !apkUrl.startsWith("https://")
+                || !sha256.matches("[0-9a-f]{64}")) {
+            clearCachedUpdate(preferences);
+            return null;
+        }
+        return new UpdateInfo(versionCode, versionName, apkUrl, sha256, releaseNotes);
+    }
+
+    static void clearCachedUpdate(SharedPreferences preferences) {
+        preferences.edit()
+            .remove(CACHED_VERSION_CODE)
+            .remove(CACHED_VERSION_NAME)
+            .remove(CACHED_APK_URL)
+            .remove(CACHED_SHA256)
+            .remove(CACHED_RELEASE_NOTES)
+            .apply();
     }
 
     private UpdateInfo readUpdateManifest() throws Exception {
@@ -476,9 +630,14 @@ final class AppUpdateManager {
         public void requestUpdate() {
             mainHandler.post(() -> showUpdatePrompt(true));
         }
+
+        @JavascriptInterface
+        public void refreshIndicator() {
+            mainHandler.post(AppUpdateManager.this::refreshPageIndicator);
+        }
     }
 
-    private static final class UpdateInfo {
+    static final class UpdateInfo {
         final int versionCode;
         final String versionName;
         final String apkUrl;

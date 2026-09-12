@@ -412,6 +412,14 @@ LOGGING = {
             'level': 'WARNING',
             'propagate': False,
         },
+        # Трассировки 500 на бою. Стандартный обработчик Django пишет их в
+        # консоль только при DEBUG=True, поэтому инцидент 10.09.2026 (белый
+        # экран у горного мастера) в journalctl не оставил ни строки.
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
     },
 }
 

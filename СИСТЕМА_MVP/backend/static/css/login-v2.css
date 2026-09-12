@@ -1,0 +1,608 @@
+/* Единый вход driverform.ru в фирменном стиле Коппер Рисорсез.
+   Визуальный язык — /start/ (start-page-v1.css): фотополоса карьера с медной
+   жилой, карточка с медной кромкой, поля 66px / 20px, зелёная кнопка 72px.
+   Подключается только на общем входе (body.login-unified-v2); входы
+   отдельных ролей (subdomain-приложения) не трогает. */
+
+body.login-page.login-unified-v2 {
+    --lv2-bg: #03090d;
+    --lv2-bg-deep: #010609;
+    --lv2-surface: #0b1317;
+    --lv2-input-top: rgba(16, 26, 31, .96);
+    --lv2-input-bottom: rgba(6, 14, 18, .98);
+    --lv2-text: #f4f7f5;
+    --lv2-muted: #a5afb3;
+    --lv2-green: #48d879;
+    --lv2-lime: #d2ff58;
+    --lv2-copper: #9d714c;
+    --lv2-copper-light: #c18b5d;
+    --lv2-danger: #ff6b6b;
+    --lv2-field-h: 66px;
+    --lv2-radius: 20px;
+    display: block;
+    width: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    background:
+        radial-gradient(90% 58% at 50% 8%, rgba(72, 216, 121, .07), transparent 72%),
+        linear-gradient(180deg, var(--lv2-bg) 0%, var(--lv2-bg-deep) 100%);
+    color: var(--lv2-text);
+    font-family: "Segoe UI", Arial, sans-serif;
+    color-scheme: dark;
+}
+
+body.login-page.login-unified-v2 *,
+body.login-page.login-unified-v2 *::before,
+body.login-page.login-unified-v2 *::after {
+    box-sizing: border-box;
+}
+
+/* app.css в landscape до 1180px ужимает любой .dispatcher-shell в холст
+   1400×800 с transform: scale(.5) — для пульта это нужно, для входа это
+   «страница в четверть экрана». Здесь холста нет: обычная адаптивная страница. */
+@media (orientation: landscape) and (max-width: 1180px) {
+    body.login-page.login-unified-v2.dispatcher-shell {
+        width: 100%;
+        height: auto;
+        min-height: 100dvh;
+        transform: none;
+    }
+}
+
+/* Полотно: фотополоса сверху, карточка под ней. Сбрасываем всё, что
+   dispatcher-shell навешивает на .shared-shift-dialog. */
+body.login-page.login-unified-v2 .unified-login-dialog.login-v2 {
+    position: relative;
+    display: block;
+    width: 100%;
+    max-width: none;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background:
+        radial-gradient(76% 34% at 50% 40%, rgba(35, 99, 58, .11), transparent 75%),
+        var(--lv2-bg);
+    box-shadow: none;
+    transform: none;
+    overflow: hidden;
+}
+
+body.login-page.login-unified-v2 .login-v2 > .shared-shift-accent {
+    display: none;
+}
+
+/* Фотополоса */
+.login-v2__hero {
+    position: relative;
+    z-index: 0;
+    width: 100%;
+    height: clamp(250px, 38dvh, 400px);
+    overflow: hidden;
+    background: #101719;
+    isolation: isolate;
+}
+
+/* Подложка не нужна: оригиналы заливают полосу целиком без увеличения. */
+.login-v2__hero-backdrop {
+    display: none;
+}
+
+.login-v2__hero-picture {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* Телефон: вертикальный оригинал 941×1672, показываем верх кадра — небо,
+   логотип и стрела экскаватора. */
+.login-v2__hero-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 22%;
+}
+
+.login-v2__hero-shade {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    background:
+        linear-gradient(90deg, rgba(2, 7, 9, .16), transparent 32%, transparent 72%, rgba(2, 7, 9, .12)),
+        linear-gradient(180deg, rgba(1, 5, 7, .08) 0%, rgba(2, 8, 11, .1) 45%, var(--lv2-bg) 100%);
+}
+
+.login-v2__hero-lines {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 3;
+    width: clamp(42px, 15vw, 86px);
+    height: 100%;
+    fill: none;
+    stroke: rgba(193, 139, 93, .52);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+}
+
+/* Карточка */
+body.login-page.login-unified-v2 .login-v2__inner {
+    position: relative;
+    z-index: 3;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+    gap: 22px;
+    width: min(100%, 560px);
+    margin: -38px auto 0;
+    padding: 0 16px calc(env(safe-area-inset-bottom, 0px) + 28px);
+}
+
+/* Общий стиль пульта ставит .app-confirm-content во вторую колонку —
+   здесь колонка одна, форма растягивается на всю ширину карточки. */
+body.login-page.login-unified-v2 .login-v2 .unified-login-form {
+    position: relative;
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    display: grid;
+    gap: 8px;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    margin: 0;
+    padding: clamp(22px, 5.6vw, 30px);
+    border: 1px solid rgba(157, 113, 76, .57);
+    border-radius: clamp(24px, 6vw, 30px);
+    background: linear-gradient(145deg, rgba(16, 27, 31, .96), rgba(5, 12, 16, .96));
+    box-shadow:
+        0 28px 64px rgba(0, 0, 0, .55),
+        inset 0 1px 0 rgba(255, 255, 255, .045);
+    color: var(--lv2-text);
+}
+
+body.login-page.login-unified-v2 .login-v2 .unified-login-form::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(115deg, rgba(193, 139, 93, .07), transparent 28%, transparent 78%, rgba(72, 216, 121, .035));
+}
+
+.login-v2__kicker {
+    margin: 0;
+    color: #72e48b;
+    font-size: clamp(11px, 3.2vw, 13px);
+    font-weight: 750;
+    line-height: 1.25;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+body.login-page.login-unified-v2 .login-v2 .unified-login-form h1 {
+    margin: 0 0 4px;
+    color: var(--lv2-text);
+    font-size: clamp(28px, 7.4vw, 36px);
+    font-weight: 800;
+    line-height: 1.12;
+    letter-spacing: -.028em;
+}
+
+body.login-page.login-unified-v2 .login-v2 .unified-login-form p.login-v2__lead {
+    max-width: none;
+    margin: 0 0 14px;
+    color: var(--lv2-muted);
+    font-size: clamp(15px, 4.2vw, 17px);
+    font-weight: 400;
+    line-height: 1.45;
+}
+
+body.login-page.login-unified-v2 .login-v2 .unified-login-form p.login-v2__kicker {
+    max-width: none;
+}
+
+/* Поля: телефон и PIN одной геометрии */
+body.login-page.login-unified-v2 .login-v2 .shared-shift-login-field {
+    display: grid;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    color: #b4bdc0;
+    font-size: 12px;
+    font-weight: 750;
+    line-height: 1.2;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+}
+
+body.login-page.login-unified-v2 .login-v2 .shared-shift-phone-shell,
+body.login-page.login-unified-v2 .login-v2 .login-pin-shell {
+    position: relative;
+    display: grid;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    min-height: var(--lv2-field-h);
+    border: 1px solid rgba(165, 175, 179, .42);
+    border-radius: var(--lv2-radius);
+    background: linear-gradient(180deg, var(--lv2-input-top), var(--lv2-input-bottom));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .035),
+        inset 0 -10px 22px rgba(0, 0, 0, .16);
+    overflow: hidden;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+body.login-page.login-unified-v2 .login-v2 .shared-shift-phone-shell {
+    grid-template-columns: auto minmax(0, 1fr);
+}
+
+body.login-page.login-unified-v2 .login-v2 .login-pin-shell {
+    grid-template-columns: minmax(0, 1fr) 64px;
+}
+
+body.login-page.login-unified-v2 .login-v2 .shared-shift-phone-shell:focus-within,
+body.login-page.login-unified-v2 .login-v2 .login-pin-shell:focus-within {
+    border-color: var(--lv2-green);
+    box-shadow:
+        0 0 0 3px rgba(72, 216, 121, .13),
+        0 0 26px rgba(72, 216, 121, .12),
+        inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+
+body.login-page.login-unified-v2 .login-v2 .shared-shift-phone-shell:has(input.is-valid):not(:focus-within),
+body.login-page.login-unified-v2 .login-v2 .login-pin-shell:has(input.is-valid):not(:focus-within) {
+    border-color: rgba(72, 216, 121, .58);
+}
+
+body.login-page.login-unified-v2 .login-v2 .shared-shift-phone-shell:has(input.is-invalid),
+body.login-page.login-unified-v2 .login-v2 .login-pin-shell:has(input.is-invalid) {
+    border-color: var(--lv2-danger);
+    box-shadow: 0 0 0 3px rgba(255, 107, 107, .12);
+}
+
+body.login-page.login-unified-v2 .login-v2 .shared-shift-country-code {
+    display: grid;
+    place-items: center;
+    min-width: 72px;
+    min-height: 36px;
+    padding: 0 16px;
+    border-right: 1px solid rgba(165, 175, 179, .24);
+    color: var(--lv2-text);
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+body.login-page.login-unified-v2 .login-v2 .shared-shift-login-field input {
+    width: 100%;
+    min-width: 0;
+    min-height: calc(var(--lv2-field-h) - 2px);
+    padding: 0 16px;
+    border: 0;
+    outline: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--lv2-text);
+    caret-color: #79ea94;
+    font: 500 clamp(19px, 5.4vw, 23px)/1.1 "Segoe UI", Arial, sans-serif;
+    letter-spacing: .015em;
+    text-transform: none;
+    box-shadow: none;
+}
+
+body.login-page.login-unified-v2 .login-v2 .shared-shift-login-field input:read-only {
+    color: #cfd7da;
+}
+
+body.login-page.login-unified-v2 .login-v2 .shared-shift-login-field input::placeholder {
+    color: #879196;
+    opacity: .86;
+}
+
+body.login-page.login-unified-v2 .login-v2 .login-pin-shell input {
+    letter-spacing: .32em;
+}
+
+/* Глаз — внутри поля, справа, а не блоком под ним */
+body.login-page.login-unified-v2 .login-v2 .login-pin-reveal {
+    display: grid;
+    place-items: center;
+    width: 64px;
+    height: 100%;
+    min-height: calc(var(--lv2-field-h) - 2px);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-left: 1px solid rgba(165, 175, 179, .24);
+    border-radius: 0;
+    background: transparent;
+    color: #b4bdc0;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body.login-page.login-unified-v2 .login-v2 .login-pin-reveal svg {
+    width: 26px;
+    height: 26px;
+}
+
+body.login-page.login-unified-v2 .login-v2 .login-pin-reveal.is-revealing,
+body.login-page.login-unified-v2 .login-v2 .login-pin-reveal:active {
+    color: var(--lv2-green);
+    background: rgba(72, 216, 121, .1);
+}
+
+body.login-page.login-unified-v2 .login-v2 .login-pin-reveal:focus-visible {
+    outline: 2px solid rgba(72, 216, 121, .7);
+    outline-offset: -2px;
+}
+
+/* Подсказки под полями */
+body.login-page.login-unified-v2 .login-v2 .shared-shift-login-field small.input-hint {
+    display: block;
+    min-height: 18px;
+    margin: 0;
+    color: var(--lv2-muted);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.3;
+    letter-spacing: 0;
+    text-transform: none;
+    text-align: left;
+}
+
+body.login-page.login-unified-v2 .login-v2 .shared-shift-login-field small.input-hint.is-invalid {
+    color: #ff9b9b;
+    font-weight: 650;
+}
+
+body.login-page.login-unified-v2 .login-v2 .shared-shift-login-field small.input-hint.is-valid {
+    color: #83e89b;
+}
+
+/* Ошибки сервера (неверный PIN и т.п.) */
+body.login-page.login-unified-v2 .login-v2 .login-v2__messages {
+    display: grid;
+    gap: 8px;
+    width: 100%;
+}
+
+body.login-page.login-unified-v2 .login-v2 .login-v2__messages .message {
+    display: block;
+    min-width: 0;
+    max-width: none;
+    margin: 0;
+    padding: 12px 14px;
+    border: 1px solid rgba(255, 107, 107, .5);
+    border-radius: 14px;
+    background: rgba(255, 107, 107, .1);
+    color: #ffb4b4;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: left;
+}
+
+body.login-page.login-unified-v2 .login-v2 .unified-login-form > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+body.login-page.login-unified-v2 .login-v2 .login-v2__messages:empty {
+    display: none;
+}
+
+/* Кнопка — зелёная, как на /start/ */
+body.login-page.login-unified-v2 .login-v2 .unified-login-actions {
+    width: 100%;
+    margin: 6px 0 0;
+    padding: 0;
+}
+
+body.login-page.login-unified-v2 .login-v2 .unified-login-submit.cr-button {
+    --bulma-radius-rounded: 38px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 100%;
+    min-height: 72px;
+    padding: 0 24px;
+    border: 1.5px solid rgba(210, 255, 88, .92);
+    border-radius: 38px;
+    background: linear-gradient(180deg, #489b4d 0%, #2f7c3e 42%, #18532f 100%);
+    color: #f7fff7;
+    font: 800 clamp(20px, 5.6vw, 23px)/1 "Segoe UI", Arial, sans-serif;
+    text-align: center;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, .35);
+    box-shadow:
+        0 5px 0 #0b351b,
+        0 13px 28px rgba(55, 190, 90, .28),
+        0 0 24px rgba(72, 216, 121, .22),
+        inset 0 2px 0 rgba(255, 255, 255, .22),
+        inset 0 -10px 18px rgba(0, 0, 0, .2);
+    cursor: pointer;
+    filter: none;
+    opacity: 1;
+    transform: none;
+    transition: transform 120ms ease, box-shadow 120ms ease, filter 150ms ease, opacity 150ms ease;
+}
+
+body.login-page.login-unified-v2 .login-v2 .unified-login-submit.cr-button:not(:disabled):hover {
+    filter: brightness(1.08);
+    transform: none;
+}
+
+body.login-page.login-unified-v2 .login-v2 .unified-login-submit.cr-button:not(:disabled):active {
+    transform: translateY(2px);
+    box-shadow:
+        0 2px 0 #0b351b,
+        0 7px 16px rgba(55, 190, 90, .2),
+        0 0 16px rgba(72, 216, 121, .16),
+        inset 0 1px 0 rgba(255, 255, 255, .18),
+        inset 0 -7px 15px rgba(0, 0, 0, .22);
+}
+
+body.login-page.login-unified-v2 .login-v2 .unified-login-submit.cr-button:focus-visible {
+    outline: 3px solid rgba(244, 247, 245, .92);
+    outline-offset: 4px;
+    box-shadow:
+        0 5px 0 #0b351b,
+        0 13px 28px rgba(55, 190, 90, .28);
+}
+
+body.login-page.login-unified-v2 .login-v2 .unified-login-submit.cr-button:disabled,
+body.login-page.login-unified-v2 .login-v2 .unified-login-submit.cr-button[disabled] {
+    border-color: rgba(184, 209, 110, .54);
+    background: linear-gradient(180deg, #489b4d 0%, #2f7c3e 42%, #18532f 100%);
+    filter: grayscale(.16) saturate(.64) brightness(.78);
+    box-shadow:
+        0 4px 0 #0b2a18,
+        0 8px 18px rgba(21, 94, 48, .18),
+        inset 0 1px 0 rgba(255, 255, 255, .1),
+        inset 0 -8px 16px rgba(0, 0, 0, .2);
+    cursor: not-allowed;
+    opacity: .9;
+    transform: none;
+}
+
+/* Ссылка «Ввести другой номер» */
+body.login-page.login-unified-v2 .login-v2 .unified-login-change-phone {
+    justify-self: center;
+    margin-top: 10px;
+    color: #cfd7da;
+    font-size: 15px;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+body.login-page.login-unified-v2 .login-v2 .unified-login-change-phone:hover {
+    color: var(--lv2-text);
+}
+
+/* Подпись под карточкой */
+.login-v2__footer {
+    margin: 0;
+    color: #737e83;
+    font-size: 13px;
+    line-height: 1.4;
+    text-align: center;
+}
+
+.login-v2__footer a {
+    color: #a5afb3;
+}
+
+/* Клавиатура открыта: прячем фотополосу, чтобы поле и кнопка оставались видны */
+body.login-page.login-unified-v2.is-login-keyboard-active .login-v2__hero {
+    height: clamp(96px, 14dvh, 150px);
+}
+
+/* Низкие экраны */
+@media (max-height: 640px) {
+    .login-v2__hero {
+        height: clamp(150px, 26dvh, 240px);
+    }
+}
+
+/* Узкие телефоны */
+@media (max-width: 360px) {
+    body.login-page.login-unified-v2 .login-v2__inner {
+        padding-inline: 12px;
+    }
+
+    body.login-page.login-unified-v2 .login-v2 .shared-shift-country-code {
+        min-width: 60px;
+        padding: 0 12px;
+    }
+}
+
+/* Горизонталь и планшет: две колонки */
+@media (min-width: 761px) and (max-height: 520px), (min-width: 1024px) {
+    body.login-page.login-unified-v2 .unified-login-dialog.login-v2 {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(440px, .85fr);
+        align-items: stretch;
+        min-height: 100dvh;
+    }
+
+    .login-v2__hero {
+        position: sticky;
+        top: 0;
+        height: 100dvh;
+        min-height: 100dvh;
+    }
+
+    /* Горизонтальный оригинал 1672×941 заливает колонку почти без увеличения;
+       кадрируется правый край, логотип (левая треть кадра) остаётся виден. */
+    /* В две колонки, но окно узкое/квадратное (ноутбук 1024×700, 1280×800):
+       колонка почти вертикальная — стоит вертикальный кадр, показываем верх. */
+    .login-v2__hero-image {
+        object-fit: cover;
+        object-position: center 12%;
+    }
+
+    .login-v2__hero-backdrop {
+        display: none;
+    }
+
+    .login-v2__hero-lines {
+        width: 110px;
+    }
+
+    .login-v2__hero-shade {
+        background:
+            linear-gradient(90deg, rgba(1, 5, 7, .12), transparent 35%, rgba(2, 8, 11, .45) 100%),
+            linear-gradient(180deg, rgba(1, 5, 7, .08), rgba(2, 8, 11, .22));
+    }
+
+    body.login-page.login-unified-v2 .login-v2__inner {
+        align-content: center;
+        width: 100%;
+        max-width: 620px;
+        min-height: 100dvh;
+        margin: 0;
+        padding: 48px clamp(28px, 4vw, 62px);
+    }
+
+    body.login-page.login-unified-v2 .login-v2 .unified-login-form {
+        max-width: 520px;
+        justify-self: center;
+    }
+}
+
+/* Широкое окно (16:9 и шире) и горизонтальный телефон: горизонтальный кадр,
+   48% по горизонтали держит логотип с надписью целиком на 1366–1920. */
+@media (min-width: 1024px) and (min-aspect-ratio: 7/4), (min-width: 761px) and (max-height: 520px) {
+    .login-v2__hero-image {
+        object-position: 48% 50%;
+    }
+}
+
+@media (min-width: 1024px) and (max-height: 760px) {
+    body.login-page.login-unified-v2 .login-v2__inner {
+        align-content: start;
+        padding-block: 28px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.login-page.login-unified-v2 .login-v2 .unified-login-submit.cr-button,
+    body.login-page.login-unified-v2 .login-v2 .shared-shift-phone-shell,
+    body.login-page.login-unified-v2 .login-v2 .login-pin-shell {
+        transition: none;
+    }
+}

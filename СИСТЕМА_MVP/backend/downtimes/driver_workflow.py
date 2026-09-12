@@ -19,6 +19,12 @@ TRUCK_UNLOADING_WAIT_REASON_NAMES = (
 )
 
 
+EXCAVATOR_WORKFLOW_REASON_NAMES = (
+    'Ожидание самосвалов',
+    'Перегон экскаватора',
+)
+
+
 def _reason_name_key(value):
     if hasattr(value, 'name'):
         value = value.name
@@ -30,6 +36,38 @@ TRUCK_UNLOADING_WAIT_REASON_KEYS = frozenset(
     _reason_name_key(name)
     for name in TRUCK_UNLOADING_WAIT_REASON_NAMES
 )
+
+
+WORKFLOW_REASON_KEYS = frozenset(
+    _reason_name_key(name)
+    for name in (
+        TRUCK_WAITING_LOADING_REASON_NAME,
+        *TRUCK_UNLOADING_WAIT_REASON_NAMES,
+        *EXCAVATOR_WORKFLOW_REASON_NAMES,
+    )
+)
+
+
+def is_workflow_downtime_reason(reason):
+    """Простой рабочего процесса (ожидание, перегон), а не состояние техники."""
+    return _reason_name_key(reason) in WORKFLOW_REASON_KEYS
+
+
+def close_workflow_downtimes(equipment, *, ended_at=None):
+    """Закрыть простои рабочего процесса у техники — например, при конце смены.
+
+    Ремонт и другие состояния техники остаются открытыми: они переживают смену
+    и передаются сменщику вместе с техникой.
+    """
+    return close_open_truck_downtimes_for_reasons(
+        equipment,
+        (
+            TRUCK_WAITING_LOADING_REASON_NAME,
+            *TRUCK_UNLOADING_WAIT_REASON_NAMES,
+            *EXCAVATOR_WORKFLOW_REASON_NAMES,
+        ),
+        ended_at=ended_at,
+    )
 
 
 def driver_downtime_flow(reason):

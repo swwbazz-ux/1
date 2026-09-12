@@ -849,7 +849,7 @@ class OupWorkplaceTests(TestCase):
         ) as open_shift:
             response = self.client.post(reverse('oup_shift_start'))
 
-        open_shift.assert_called_once_with(actor_access_id=self.oup_access.pk)
+        open_shift.assert_called_once_with(actor_access_id=self.oup_access.pk, close_other_role_shift=False)
         self.assertIn(
             'Редактирование кадровых данных включено.',
             [str(message) for message in get_messages(response.wsgi_request)],
@@ -1137,6 +1137,35 @@ class OupWorkplaceTests(TestCase):
         self.client.post(reverse('oup_shift_close'))
         other_shift.refresh_from_db()
         self.assertIsNone(other_shift.closed_at)
+
+    def test_oup_offers_and_performs_other_role_shift_handover(self):
+        other_shift = EmployeeShift.objects.create(
+            employee=self.oup_employee,
+            shift_type=ShiftType.DAY,
+            workplace_code='dispatcher',
+            opened_at=timezone.now(),
+            opened_by=self.oup_employee,
+        )
+
+        page = self.client.get(reverse('oup_employees'))
+        self.assertContains(page, 'name="close_other_role_shift" value="1"')
+        self.assertContains(page, 'Завершить её и начать смену ОУП?')
+
+        refused = self.client.post(reverse('oup_shift_start'), follow=True)
+        self.assertContains(refused, 'Подтвердите её завершение, чтобы начать смену ОУП.')
+        other_shift.refresh_from_db()
+        self.assertIsNone(other_shift.closed_at)
+
+        response = self.client.post(reverse('oup_shift_start'), {'close_other_role_shift': '1'})
+        self.assertEqual(response.status_code, 302)
+        other_shift.refresh_from_db()
+        self.assertIsNotNone(other_shift.closed_at)
+        self.assertTrue(other_shift.is_service_closed)
+        self.assertTrue(EmployeeShift.objects.filter(
+            employee=self.oup_employee,
+            workplace_code='oup',
+            closed_at__isnull=True,
+        ).exists())
 
     def test_shift_return_target_rejects_external_url(self):
         response = self.client.post(reverse('oup_shift_start'), {'next': 'https://example.com/phishing'})
