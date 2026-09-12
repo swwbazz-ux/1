@@ -7253,8 +7253,10 @@ def finish_service_closed_shift(shift, *, closed_by, close_kind, note, reading_f
     ])
     if not shift.equipment_id:
         return
-    from shifts.services import close_equipment_open_downtimes
-    close_equipment_open_downtimes(shift.equipment, ended_at=shift.closed_at)
+    # Ожидания рабочего процесса не живут дольше смены; ремонт и прочие
+    # состояния техники остаются и передаются сменщику.
+    from downtimes.driver_workflow import close_workflow_downtimes
+    close_workflow_downtimes(shift.equipment, ended_at=shift.closed_at)
     if equipment_is_truck(shift.equipment):
         Trip.objects.filter(
             truck=shift.equipment,
@@ -7307,10 +7309,12 @@ def auto_close_expired_equipment_shifts(now=None):
                 now=now,
             )
             closed.append(shift)
-        # Осиротевшие простои: техника без открытой смены, а простой всё идёт.
-        # Поставленные диспетчером вручную (ремонт и т.п.) не трогаем.
+        # Осиротевшие ожидания: техника без открытой смены, а «ожидание
+        # самосвалов» всё идёт. Ремонт и прочие состояния техники живут между
+        # сменами — их не трогаем, как и ручные простои диспетчера.
+        from downtimes.driver_workflow import is_workflow_downtime_reason
         from downtimes.models import DowntimeEvent, DowntimeEventSource
-        orphan_downtimes = (
+        orphan_candidates = (
             DowntimeEvent.objects
             .filter(ended_at__isnull=True)
             .exclude(source=DowntimeEventSource.DISPATCHER_OVERRIDE)
@@ -7319,8 +7323,17 @@ def auto_close_expired_equipment_shifts(now=None):
                 .filter(closed_at__isnull=True, equipment__isnull=False)
                 .values('equipment_id')
             )
+            .select_related('reason')
         )
-        orphan_count = orphan_downtimes.update(ended_at=now)
+        orphan_ids = [
+            event.id
+            for event in orphan_candidates
+            if is_workflow_downtime_reason(event.reason)
+        ]
+        orphan_count = (
+            DowntimeEvent.objects.filter(id__in=orphan_ids).update(ended_at=now)
+            if orphan_ids else 0
+        )
         if closed or orphan_count:
             bump_operational_state(
                 'Shift:auto_close_expired',

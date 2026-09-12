@@ -425,15 +425,20 @@ class TripTerminalSequentialRegressionTests(TripTerminalFixtureMixin, TestCase):
                 self.assertIn(action_url, parser.reason_inputs)
                 self.assertIn('required', parser.reason_inputs[action_url])
 
-    def test_service_close_shift_reason_validation_is_preserved(self):
+    def test_service_close_reason_is_required_only_for_coordinated_close(self):
+        """Причина нужна, когда сотрудник сам попросил закрыть смену.
+
+        Если он просто не закрыл смену и не вышел на связь, диспетчер
+        закрывает её одним нажатием: причина и показания не нужны, вид
+        закрытия остаётся в смене и в журнале.
+        """
         dispatcher_client = self.client_for_access(self.dispatcher_access)
-        invalid_payloads = (
-            ('missing', {}),
-            ('blank', {'reason': ''}),
-            ('whitespace', {'reason': ' \t\r\n '}),
+        coordinated_payloads = (
+            ('blank', {'close_kind': 'coordinated', 'reason': ''}),
+            ('whitespace', {'close_kind': 'coordinated', 'reason': ' \t\r\n '}),
         )
 
-        for payload_name, payload in invalid_payloads:
+        for payload_name, payload in coordinated_payloads:
             with self.subTest(payload=payload_name):
                 response = dispatcher_client.post(
                     reverse(
@@ -451,7 +456,7 @@ class TripTerminalSequentialRegressionTests(TripTerminalFixtureMixin, TestCase):
                 ]
                 self.assertEqual(response.status_code, 302)
                 self.assertIn(
-                    'Укажите причину служебного закрытия смены.',
+                    'Укажите причину закрытия смены по согласованию с сотрудником.',
                     response_messages,
                 )
                 self.assertIsNone(self.driver_one_shift.closed_at)
@@ -462,6 +467,27 @@ class TripTerminalSequentialRegressionTests(TripTerminalFixtureMixin, TestCase):
                         action_type=DispatcherActionType.SERVICE_CLOSE_SHIFT,
                     ).exists()
                 )
+
+        response = dispatcher_client.post(
+            reverse(
+                'dispatcher_service_close_shift',
+                args=[self.driver_one_shift.pk],
+            ),
+            data={'close_kind': 'neglected'},
+            HTTP_HOST='localhost',
+        )
+
+        self.driver_one_shift.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNotNone(self.driver_one_shift.closed_at)
+        self.assertTrue(self.driver_one_shift.is_service_closed)
+        self.assertEqual(self.driver_one_shift.service_close_kind, 'neglected')
+        self.assertTrue(
+            DispatcherActionLog.objects.filter(
+                shift=self.driver_one_shift,
+                action_type=DispatcherActionType.SERVICE_CLOSE_SHIFT,
+            ).exists()
+        )
 
     def test_dispatcher_cancel_reconciles_waiting_when_truck_becomes_loadable(self):
         HaulAssignment.objects.create(
