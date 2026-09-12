@@ -140,9 +140,11 @@
                         </div>
                         {% else %}
                         <div class="complex-kpis" aria-label="Показатели комплекса">
-                            <span class="complex-kpi{% if complex.assigned < complex.need %} is-minus{% elif complex.assigned > complex.need %} is-plus{% else %} is-zero{% endif %}" data-kpi="trucks" title="Назначено самосвалов / нужно по составу">
+                            <span class="complex-kpi{% if complex.assigned < complex.need %} is-minus{% elif complex.assigned > complex.need %} is-plus{% else %} is-zero{% endif %}" data-kpi="trucks" title="Машин в составе / приняли назначение">
                                 <i>Машин</i>
-                                <b>{{ complex.assigned|default:0 }}<small>/{{ complex.need|default:0 }}</small></b>
+                                {% comment %}Крупно — сколько машин в комплексе: счётчик «3/7» читался как
+                                   «три самосвала», хотя в составе их семь.{% endcomment %}
+                                <b>{{ complex.need|default:0 }}<small>/{{ complex.assigned|default:0 }}</small></b>
                             </span>
                             <span class="complex-kpi" data-kpi="volume" title="{% if complex.plan_has_plan %}{{ complex.plan_fact_label }}{% else %}Погружено за смену{% endif %}">
                                 <i>Объём</i>

@@ -159,5 +159,19 @@ test("карточка комплекса заливается мягким си
         CSS,
         /\.dispatcher-complex-card\[data-plan-progress-phase\]:not\(\[data-plan-progress-phase=""\]\) \{[^}]*--gd-complex-plan-fill: color-mix\(in srgb, var\(--gd-blue\) 32%, transparent\);/s
     );
-    assert.match(CSS, /--dispatcher-plan-color: rgba\(74, 222, 128, \.38\);/);
+    /* Плиткам техники заливку ещё смягчили, чтобы номер и подпись читались. */
+    assert.match(CSS, /--dispatcher-plan-color: rgba\(74, 222, 128, \.24\);/);
+});
+
+test("в гараже номер самосвала стоит над картинкой, как в составе комплекса", () => {
+    /* Раньше номер лежал поверх иконки (абсолютное позиционирование), а в
+       комплексе — над ней; одна и та же плитка выглядела по-разному. */
+    assert.match(
+        CSS,
+        /\.dispatcher-truck-garage \.dispatcher-truck-tile \{[^}]*grid-template-rows: auto minmax\(0, 1fr\) auto;/s
+    );
+    assert.match(
+        CSS,
+        /\.dispatcher-truck-garage \.dispatcher-truck-tile strong \{[^}]*position: static;/s
+    );
 });

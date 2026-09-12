@@ -14182,3 +14182,86 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-com
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card[data-plan-progress-phase="orange"] {
     --gd-complex-plan-fill: color-mix(in srgb, var(--gd-blue) 42%, transparent);
 }
+
+
+/* === Плитка самосвала в гараже: та же раскладка, что в составе комплекса === */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-garage .dispatcher-truck-tile {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    align-items: center;
+    justify-items: center;
+    gap: 1px;
+    padding: 4px 4px 3px;
+}
+
+/* Номер выходит из-под картинки в первую строку сетки. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-garage .dispatcher-truck-tile strong {
+    position: static;
+    top: auto;
+    left: auto;
+    max-width: 100%;
+    transform: none;
+    font-size: clamp(12px, .82vw, 15px);
+    line-height: 1;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-garage .dispatcher-truck-tile img {
+    position: static;
+    top: auto;
+    left: auto;
+    width: auto;
+    max-width: 100%;
+    height: auto;
+    max-height: 26px;
+    transform: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-garage .dispatcher-truck-tile span {
+    position: static;
+    right: auto;
+    bottom: auto;
+    left: auto;
+    max-width: 100%;
+    line-height: 1.1;
+}
+
+/* === Заливка плана на плитке: мягче фон, читаемее текст ================== */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]),
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]) {
+    --dispatcher-plan-color: rgba(74, 222, 128, .24);
+    --dispatcher-plan-glow: rgba(74, 222, 128, .18);
+    --dispatcher-plan-complete-color: rgba(74, 222, 128, .2);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage-tile[data-plan-progress-phase="amber"],
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile[data-plan-progress-phase="amber"] {
+    --dispatcher-plan-color: rgba(250, 204, 21, .24);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage-tile[data-plan-progress-phase="cyan"],
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile[data-plan-progress-phase="cyan"] {
+    --dispatcher-plan-color: rgba(56, 189, 248, .24);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage-tile[data-plan-progress-phase="orange"],
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile[data-plan-progress-phase="orange"] {
+    --dispatcher-plan-color: rgba(251, 146, 60, .24);
+}
+
+/* Текст поверх заливки: своя тень вместо расчёта на контраст фона. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]) strong,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]) strong {
+    text-shadow: 0 1px 2px rgba(4, 13, 18, .95), 0 0 8px rgba(4, 13, 18, .85);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]) span,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]) span {
+    text-shadow: 0 1px 2px rgba(4, 13, 18, .9);
+}
+
+/* Картинка не спорит с заливкой: чуть плотнее силуэт. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]) img {
+    opacity: .88;
+}
