@@ -1173,6 +1173,78 @@ def _cancel_assignments(assignments, now):
     return changed
 
 
+def release_haul_assignments_for_excavator(excavator, *, now=None, reason='shift_closed'):
+    """Снять назначения экскаватора: его смена закончилась, задание тоже.
+
+    Возвращает закрытые назначения. Экраны обновляются толчком операционного
+    состояния — тем же, что и при ручном снятии назначения диспетчером.
+    """
+    excavator_id = getattr(excavator, 'id', excavator)
+    if not excavator_id:
+        return []
+    now = now or timezone.now()
+    assignments = list(
+        HaulAssignment.objects
+        .select_for_update(of=('self',))
+        .filter(excavator_id=excavator_id, ended_at__isnull=True)
+        .order_by('id')
+    )
+    changed = _cancel_assignments(assignments, now)
+    if changed:
+        bump_operational_state(
+            'HaulAssignment:shift_closed',
+            event_type='assignment_changed',
+            object_type='HaulAssignment',
+            object_id=changed[-1].id,
+            payload={
+                'action': 'release_assignments_on_shift_close',
+                'reason': reason,
+                'excavator_id': excavator_id,
+                'closed_count': len(changed),
+                'truck_ids': sorted({item.truck_id for item in changed}),
+            },
+        )
+    return changed
+
+
+def release_orphan_haul_assignments(now=None):
+    """Назначения экскаваторов, у которых уже нет открытой смены.
+
+    Такие задания остались от прошлых смен: комплекс не работает, а самосвалы
+    всё ещё числятся за ним и на пульте, и в приложении машиниста.
+    """
+    from shifts.models import EmployeeShift
+
+    now = now or timezone.now()
+    open_excavator_ids = set(
+        EmployeeShift.objects
+        .filter(closed_at__isnull=True, equipment__isnull=False)
+        .values_list('equipment_id', flat=True)
+    )
+    assignments = list(
+        HaulAssignment.objects
+        .select_for_update(of=('self',), skip_locked=True)
+        .filter(ended_at__isnull=True)
+        .exclude(excavator_id__in=open_excavator_ids)
+        .order_by('id')
+    )
+    changed = _cancel_assignments(assignments, now)
+    if changed:
+        bump_operational_state(
+            'HaulAssignment:orphan_release',
+            event_type='assignment_changed',
+            object_type='HaulAssignment',
+            object_id=changed[-1].id,
+            payload={
+                'action': 'release_orphan_assignments',
+                'closed_count': len(changed),
+                'excavator_ids': sorted({item.excavator_id for item in changed}),
+                'truck_ids': sorted({item.truck_id for item in changed}),
+            },
+        )
+    return changed
+
+
 class HaulAssignmentStateConflict(Exception):
     """Команда была сформирована по уже устаревшему состоянию самосвала."""
 

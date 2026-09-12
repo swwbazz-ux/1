@@ -7346,6 +7346,15 @@ def finish_service_closed_shift(shift, *, closed_by, close_kind, note, reading_f
     # состояния техники остаются и передаются сменщику.
     from downtimes.driver_workflow import close_workflow_downtimes
     close_workflow_downtimes(shift.equipment, ended_at=shift.closed_at)
+    # Назначение самосвала — задание на смену экскаватора: смена кончилась,
+    # значит и состав комплекса больше не действует.
+    if not equipment_is_truck(shift.equipment):
+        from assignments.services import release_haul_assignments_for_excavator
+        release_haul_assignments_for_excavator(
+            shift.equipment,
+            now=shift.closed_at,
+            reason='excavator_shift_closed',
+        )
     if equipment_is_truck(shift.equipment):
         Trip.objects.filter(
             truck=shift.equipment,
@@ -7428,7 +7437,11 @@ def auto_close_expired_equipment_shifts(now=None):
             DowntimeEvent.objects.filter(id__in=orphan_ids).update(ended_at=now)
             if orphan_ids else 0
         )
-        if closed or orphan_count:
+        # Осиротевшие назначения: комплекс не работает, а самосвалы всё ещё
+        # числятся за ним у диспетчера и у машиниста.
+        from assignments.services import release_orphan_haul_assignments
+        orphan_assignments = release_orphan_haul_assignments(now=now)
+        if closed or orphan_count or orphan_assignments:
             bump_operational_state(
                 'Shift:auto_close_expired',
                 event_type='shift_changed',
@@ -7439,6 +7452,7 @@ def auto_close_expired_equipment_shifts(now=None):
                     'shift_ids': [shift.id for shift in closed],
                     'equipment_ids': [shift.equipment_id for shift in closed],
                     'orphan_downtimes_closed': orphan_count,
+                    'orphan_assignments_closed': len(orphan_assignments),
                 },
             )
     return closed
