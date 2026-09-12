@@ -7232,22 +7232,88 @@ SERVICE_CLOSE_AUTO_NOTE = (
 # для второй. Ранние комплексы (06:00-18:00) попадают в ту же отсечку.
 EQUIPMENT_SHIFT_AUTO_CLOSE_GRACE = timedelta(minutes=30)
 # Страховка для смен с неожиданным периодом — не дольше суток без малого.
-EQUIPMENT_SHIFT_AUTO_CLOSE_HARD_LIMIT = timedelta(hours=14)
+EQUIPMENT_SHIFT_AUTO_CLOSE_HARD_LIMIT = timedelta(hours=16)
+# Часы, в которые отрубаются незакрытые смены техники.
+EQUIPMENT_SHIFT_AUTO_CLOSE_HOURS = (8, 20)
 
 
-def equipment_shift_auto_close_at(shift):
-    """Когда смена закроется сама: конец её производственной смены плюс полчаса."""
+def next_shift_auto_close_cutoff(moment):
+    """Ближайшие 08:00 или 20:00 начиная с этого момента (часы предприятия)."""
+    from datetime import datetime as _datetime, time as _time, timedelta as _timedelta
+    from core.production_time import BUSINESS_TIME_ZONE, business_localtime
+
+    local = business_localtime(moment)
+    for day_shift in (0, 1):
+        for hour in EQUIPMENT_SHIFT_AUTO_CLOSE_HOURS:
+            candidate = _datetime.combine(
+                local.date() + _timedelta(days=day_shift),
+                _time(hour, 0),
+                tzinfo=BUSINESS_TIME_ZONE,
+            )
+            if candidate >= local:
+                return candidate
+    return local
+
+
+# Роли, у которых своё рабочее время, не совпадающее с производственной сменой
+# техники. Часы роли меняются здесь одной строкой.
+WORKPLACE_SHIFT_SCHEDULE = {
+    'dispatcher': (8, 20),
+    'mining_master': (8, 20),
+}
+
+
+def workplace_shift_period_end(shift):
+    """Конец смены роли со своим расписанием (диспетчер, горный мастер).
+
+    Окно определяем по времени открытия: смена, начатая днём, кончается вечером,
+    начатая вечером — утром следующего дня, начатая ночью — этим же утром.
+    Для техники вернётся None: у неё производственные часы.
+    """
+    from datetime import datetime as _datetime, time as _time, timedelta as _timedelta
+    from core.production_time import BUSINESS_TIME_ZONE, business_localtime
+
+    schedule = WORKPLACE_SHIFT_SCHEDULE.get(shift.workplace_code or '')
+    if not schedule or not shift.opened_at:
+        return None
+    day_hour, night_hour = schedule
+    local = business_localtime(shift.opened_at)
+    opened_time = local.time().replace(tzinfo=None)
+    day_start = _time(day_hour, 0)
+    night_start = _time(night_hour, 0)
+    if day_start <= opened_time < night_start:
+        end_date, end_time = local.date(), night_start
+    elif opened_time >= night_start:
+        end_date, end_time = local.date() + _timedelta(days=1), day_start
+    else:
+        end_date, end_time = local.date(), day_start
+    return _datetime.combine(end_date, end_time, tzinfo=BUSINESS_TIME_ZONE)
+
+
+def shift_auto_close_at(shift):
+    """Когда смена закроется сама: конец своей смены плюс полчаса."""
     if not shift or not shift.opened_at:
         return None
-    work_date = production_work_date_for_shift(shift.opened_at, shift.shift_type)
-    try:
-        _, period_end = production_shift_bounds(work_date, shift.shift_type)
-    except (TypeError, ValueError):
-        return shift.opened_at + EQUIPMENT_SHIFT_AUTO_CLOSE_HARD_LIMIT
-    return min(
-        period_end + EQUIPMENT_SHIFT_AUTO_CLOSE_GRACE,
-        shift.opened_at + EQUIPMENT_SHIFT_AUTO_CLOSE_HARD_LIMIT,
-    )
+    period_end = workplace_shift_period_end(shift)
+    if period_end is not None:
+        # Диспетчер и горный мастер заканчивают ровно в отсечку, поэтому им
+        # полчаса на сдачу дел, иначе пульт погаснет в момент пересменки.
+        close_at = period_end + EQUIPMENT_SHIFT_AUTO_CLOSE_GRACE
+    else:
+        work_date = production_work_date_for_shift(shift.opened_at, shift.shift_type)
+        try:
+            _, period_end = production_shift_bounds(work_date, shift.shift_type)
+        except (TypeError, ValueError):
+            return shift.opened_at + EQUIPMENT_SHIFT_AUTO_CLOSE_HARD_LIMIT
+        # Смена техники доживает до ближайшей отсечки после своего конца: у
+        # первой смены это двадцать часов, у второй — восемь утра. Сменщика,
+        # заступившего в восемь, отсечка этого же утра не касается.
+        close_at = next_shift_auto_close_cutoff(period_end)
+    return min(close_at, shift.opened_at + EQUIPMENT_SHIFT_AUTO_CLOSE_HARD_LIMIT)
+
+
+# Прежнее имя оставлено: карточка техники зовёт его напрямую.
+equipment_shift_auto_close_at = shift_auto_close_at
 
 
 def normalize_service_close_kind(raw_kind, reason):
@@ -7316,7 +7382,7 @@ def auto_close_expired_equipment_shifts(now=None):
             .select_for_update(of=('self',), skip_locked=True)
             .select_related('employee', 'equipment', 'equipment__equipment_type')
             .filter(
-                equipment__isnull=False,
+                Q(equipment__isnull=False) | Q(workplace_code__in=WORKPLACE_SHIFT_SCHEDULE),
                 closed_at__isnull=True,
                 opened_at__lte=now - EQUIPMENT_SHIFT_AUTO_CLOSE_GRACE,
             )
@@ -7325,7 +7391,7 @@ def auto_close_expired_equipment_shifts(now=None):
         expired = [
             shift
             for shift in expired
-            if (equipment_shift_auto_close_at(shift) or now) <= now
+            if (shift_auto_close_at(shift) or now) <= now
         ]
         for shift in expired:
             finish_service_closed_shift(

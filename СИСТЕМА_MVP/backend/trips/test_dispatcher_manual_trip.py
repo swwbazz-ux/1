@@ -314,40 +314,41 @@ class DispatcherServiceCloseWithoutReadingsTests(TestCase):
         self.truck_shift.refresh_from_db()
         self.assertEqual(self.truck_shift.service_close_kind, 'coordinated')
 
-    def test_shift_closes_automatically_half_an_hour_after_its_shift_ends(self):
-        """Первая смена закрывается в 19:30, вторая — в 07:30 следующего утра."""
-        from trips.views import auto_close_expired_equipment_shifts, equipment_shift_auto_close_at
+    def test_equipment_shifts_are_cut_off_at_eight_and_twenty(self):
+        """Смены техники отрубаются в 08:00 и 20:00; сменщика отсечка не задевает."""
+        from trips.views import auto_close_expired_equipment_shifts, shift_auto_close_at
 
-        self.truck_shift.shift_type = 'day'
-        self.truck_shift.opened_at = datetime(2026, 9, 12, 7, 5, tzinfo=BUSINESS_TZ)
-        self.truck_shift.save(update_fields=['shift_type', 'opened_at'])
-        self.assertEqual(
-            equipment_shift_auto_close_at(self.truck_shift),
-            datetime(2026, 9, 12, 19, 30, tzinfo=BUSINESS_TZ),
-        )
+        def equipment_shift(opened_at, shift_type='day'):
+            return EmployeeShift(
+                employee=self.driver,
+                equipment=self.truck,
+                workplace_code='driver',
+                shift_type=shift_type,
+                opened_at=opened_at,
+            )
 
-        # Ранний комплекс открывает смену в шесть — отсечка та же.
-        early = EmployeeShift(
-            employee=self.driver,
-            equipment=self.truck,
-            shift_type='day',
-            opened_at=datetime(2026, 9, 12, 6, 10, tzinfo=BUSINESS_TZ),
-        )
-        self.assertEqual(
-            equipment_shift_auto_close_at(early),
-            datetime(2026, 9, 12, 19, 30, tzinfo=BUSINESS_TZ),
-        )
-
-        night = EmployeeShift(
-            employee=self.driver,
-            equipment=self.truck,
-            shift_type='night',
-            opened_at=datetime(2026, 9, 12, 19, 5, tzinfo=BUSINESS_TZ),
-        )
-        self.assertEqual(
-            equipment_shift_auto_close_at(night),
-            datetime(2026, 9, 13, 7, 30, tzinfo=BUSINESS_TZ),
-        )
+        cases = [
+            # обычная первая смена: работа до 19:00, отсечка в 20:00
+            (equipment_shift(datetime(2026, 9, 12, 7, 5, tzinfo=BUSINESS_TZ)),
+             datetime(2026, 9, 12, 20, 0, tzinfo=BUSINESS_TZ)),
+            # ранний комплекс: работа до 18:00, отсечка та же
+            (equipment_shift(datetime(2026, 9, 12, 6, 10, tzinfo=BUSINESS_TZ)),
+             datetime(2026, 9, 12, 20, 0, tzinfo=BUSINESS_TZ)),
+            # сменщик заступил в восемь утра — его нельзя рубить этим же утром
+            (equipment_shift(datetime(2026, 9, 12, 8, 10, tzinfo=BUSINESS_TZ)),
+             datetime(2026, 9, 12, 20, 0, tzinfo=BUSINESS_TZ)),
+            # вторая смена: работа до 07:00, отсечка в 08:00 следующего утра
+            (equipment_shift(datetime(2026, 9, 12, 19, 5, tzinfo=BUSINESS_TZ), 'night'),
+             datetime(2026, 9, 13, 8, 0, tzinfo=BUSINESS_TZ)),
+            # ранняя вторая смена и сменщик, заступивший после восьми вечера
+            (equipment_shift(datetime(2026, 9, 12, 18, 10, tzinfo=BUSINESS_TZ), 'night'),
+             datetime(2026, 9, 13, 8, 0, tzinfo=BUSINESS_TZ)),
+            (equipment_shift(datetime(2026, 9, 12, 20, 10, tzinfo=BUSINESS_TZ), 'night'),
+             datetime(2026, 9, 13, 8, 0, tzinfo=BUSINESS_TZ)),
+        ]
+        for shift, expected in cases:
+            with self.subTest(opened=shift.opened_at.astimezone(BUSINESS_TZ).strftime('%H:%M')):
+                self.assertEqual(shift_auto_close_at(shift), expected)
 
         # Живая смена текущего периода не трогается, просроченная закрывается.
         self.truck_shift.shift_type, self.truck_shift.opened_at = current_period_opened_at(1)
@@ -366,19 +367,78 @@ class DispatcherServiceCloseWithoutReadingsTests(TestCase):
         self.assertIn('не закрыл её сам', self.truck_shift.service_close_note)
         self.assertEqual(auto_close_expired_equipment_shifts(), [], 'повторный запуск ничего не трогает')
 
+    def test_dispatcher_and_mining_master_close_half_an_hour_after_their_own_shift(self):
+        """У диспетчера и горного мастера смена с 8 до 20, отсечка 20:30 и 08:30."""
+        from trips.views import shift_auto_close_at
+
+        cases = [
+            ('dispatcher', datetime(2026, 9, 12, 8, 5, tzinfo=BUSINESS_TZ), datetime(2026, 9, 12, 20, 30, tzinfo=BUSINESS_TZ)),
+            ('dispatcher', datetime(2026, 9, 12, 10, 0, tzinfo=BUSINESS_TZ), datetime(2026, 9, 12, 20, 30, tzinfo=BUSINESS_TZ)),
+            ('dispatcher', datetime(2026, 9, 12, 20, 5, tzinfo=BUSINESS_TZ), datetime(2026, 9, 13, 8, 30, tzinfo=BUSINESS_TZ)),
+            ('dispatcher', datetime(2026, 9, 12, 2, 0, tzinfo=BUSINESS_TZ), datetime(2026, 9, 12, 8, 30, tzinfo=BUSINESS_TZ)),
+            ('mining_master', datetime(2026, 9, 12, 8, 10, tzinfo=BUSINESS_TZ), datetime(2026, 9, 12, 20, 30, tzinfo=BUSINESS_TZ)),
+            ('mining_master', datetime(2026, 9, 12, 20, 10, tzinfo=BUSINESS_TZ), datetime(2026, 9, 13, 8, 30, tzinfo=BUSINESS_TZ)),
+        ]
+        for workplace_code, opened_at, expected in cases:
+            with self.subTest(workplace=workplace_code, opened=opened_at.strftime('%H:%M')):
+                shift = EmployeeShift(
+                    employee=self.driver,
+                    workplace_code=workplace_code,
+                    shift_type='day',
+                    opened_at=opened_at,
+                )
+                self.assertEqual(shift_auto_close_at(shift), expected)
+
+        # У техники своя отсечка: ровно 20:00, без получаса на сдачу дел.
+        equipment_shift = EmployeeShift(
+            employee=self.driver,
+            equipment=self.truck,
+            workplace_code='driver',
+            shift_type='day',
+            opened_at=datetime(2026, 9, 12, 7, 5, tzinfo=BUSINESS_TZ),
+        )
+        self.assertEqual(
+            shift_auto_close_at(equipment_shift),
+            datetime(2026, 9, 12, 20, 0, tzinfo=BUSINESS_TZ),
+        )
+
+    def test_overdue_dispatcher_shift_is_closed_by_the_auto_pass(self):
+        from trips.views import auto_close_expired_equipment_shifts
+
+        stale_dispatcher = Employee.objects.create(
+            full_name='Диспетчер прошлой смены',
+            phone='79000000502',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        stale_shift = EmployeeShift.objects.create(
+            employee=stale_dispatcher,
+            workplace_code='dispatcher',
+            shift_type='day',
+            opened_at=timezone.now() - timedelta(hours=20),
+        )
+
+        closed_ids = [shift.id for shift in auto_close_expired_equipment_shifts()]
+
+        self.assertIn(stale_shift.id, closed_ids)
+        stale_shift.refresh_from_db()
+        self.assertIsNotNone(stale_shift.closed_at)
+        self.assertEqual(stale_shift.service_close_kind, 'auto_expired')
+
     def test_shift_opened_late_still_closes_at_its_shift_boundary(self):
         """Опоздавший не получает лишних часов: окно определяется периодом смены."""
-        from trips.views import equipment_shift_auto_close_at
+        from trips.views import shift_auto_close_at
 
         late = EmployeeShift(
             employee=self.driver,
             equipment=self.truck,
+            workplace_code='driver',
             shift_type='day',
             opened_at=datetime(2026, 9, 12, 9, 30, tzinfo=BUSINESS_TZ),
         )
         self.assertEqual(
-            equipment_shift_auto_close_at(late),
-            datetime(2026, 9, 12, 19, 30, tzinfo=BUSINESS_TZ),
+            shift_auto_close_at(late),
+            datetime(2026, 9, 12, 20, 0, tzinfo=BUSINESS_TZ),
         )
 
     def test_service_close_ends_open_downtimes_of_the_equipment(self):

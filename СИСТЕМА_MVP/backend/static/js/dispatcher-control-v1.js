@@ -1974,7 +1974,7 @@ document.addEventListener("DOMContentLoaded", function () {
             var closeLocked = dispatcherRoleIsReadonly() || !dispatcherShiftOpen;
             if (detailServiceCloseToggle) detailServiceCloseToggle.disabled = closeLocked;
             if (detailServiceCloseNeglect) detailServiceCloseNeglect.disabled = closeLocked;
-            if (detailShiftAutoClose) detailShiftAutoClose.textContent = shift.auto_close_at_label ? shift.auto_close_at_label + " (полчаса после конца смены)" : "—";
+            if (detailShiftAutoClose) detailShiftAutoClose.textContent = shift.auto_close_at_label || "—";
             renderDetailShiftReadingBounds(shift);
         }
     }
