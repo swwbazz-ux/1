@@ -15,7 +15,7 @@
 <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v223" defer></script>
 <script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v223" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
-<link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=1">
+<link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=2">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -2410,12 +2410,17 @@ window.initExcavatorWorkShell = function () {
 
     function createTruckDragPreview(state) {
         if (!state || !state.card || state.preview) return;
-        var rect = state.card.getBoundingClientRect();
+        var rect = state.originRect;
         var preview = state.card.cloneNode(true);
         preview.classList.add("is-drag-preview", "truck-drag-preview");
-        preview.classList.remove("is-selected");
+        preview.classList.remove("is-selected", "is-dragging");
         preview.removeAttribute("id");
-        preview.style.position = "fixed";
+        preview.setAttribute("aria-hidden", "true");
+        preview.tabIndex = -1;
+        var glint = document.createElement("div");
+        glint.className = "eo-truck-pickup-glint";
+        preview.appendChild(glint);
+        preview.style.setProperty("position", "fixed", "important");
         preview.style.left = rect.left + "px";
         preview.style.top = rect.top + "px";
         preview.style.setProperty("width", rect.width + "px", "important");
@@ -2430,27 +2435,94 @@ window.initExcavatorWorkShell = function () {
         preview.style.zIndex = "20000";
         preview.style.boxSizing = "border-box";
         preview.style.setProperty("border-radius", window.getComputedStyle(state.card).borderRadius, "important");
-        preview.style.transform = "translate3d(0, 0, 0) scale(.9)";
         preview.style.transformOrigin = "center center";
         document.body.appendChild(preview);
         state.preview = preview;
+        moveTruckDragPreview(state, 0, 0);
     }
 
     function moveTruckDragPreview(state, dx, dy) {
         if (!state || !state.preview) return;
         var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        state.preview.style.transform = "translate3d(" + dx + "px, " + dy + "px, 0) scale(" + (reduceMotion ? "1" : ".9") + ")";
+        state.preview.style.transform = "translate3d(" + dx + "px, " + (dy - (reduceMotion ? 0 : 8)) + "px, 0) scale(" + (reduceMotion ? "1" : "1.18") + ")";
+        var rect = state.originRect;
+        var centerX = rect.left + rect.width / 2 + dx;
+        var centerY = rect.top + rect.height / 2 + dy;
+        // Свечение и увеличение не расширяют прежнюю область попадания в точку.
+        var hitScale = reduceMotion ? 1 : .9;
+        state.previewHitRect = {
+            left: centerX - rect.width * hitScale / 2, right: centerX + rect.width * hitScale / 2,
+            top: centerY - rect.height * hitScale / 2, bottom: centerY + rect.height * hitScale / 2
+        };
+        if (state.comet) {
+            state.comet.x = centerX;
+            state.comet.y = centerY - 8;
+        }
+    }
+
+    function createTruckComet(state) {
+        if (state.comet || !window.requestAnimationFrame ||
+            (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) return;
+        var layer = document.createElement("div");
+        layer.className = "eo-truck-comet";
+        layer.setAttribute("aria-hidden", "true");
+        var comet = {layer: layer, particles: [], cursor: 0, frame: null,
+            x: state.originRect.left + state.originRect.width / 2,
+            y: state.originRect.top + state.originRect.height / 2 - 8};
+        comet.lastX = comet.x;
+        comet.lastY = comet.y;
+        // Фиксированный пул: ни клонов карточек, ни растущего DOM при движении.
+        for (var i = 0; i < 12; i += 1) {
+            var dot = document.createElement("i");
+            layer.appendChild(dot);
+            comet.particles.push({node: dot, born: null});
+        }
+        document.body.appendChild(layer);
+        state.comet = comet;
+        function animate(now) {
+            if (state.comet !== comet) return;
+            var dx = comet.x - comet.lastX;
+            var dy = comet.y - comet.lastY;
+            var distance = Math.hypot(dx, dy);
+            if (distance >= 5) {
+                var count = Math.min(3, Math.max(1, Math.floor(distance / 28)));
+                for (var j = 0; j < count; j += 1) {
+                    var particle = comet.particles[comet.cursor];
+                    comet.cursor = (comet.cursor + 1) % comet.particles.length;
+                    particle.x = comet.lastX + dx * j / count;
+                    particle.y = comet.lastY + dy * j / count;
+                    particle.angle = Math.atan2(dy, dx);
+                    particle.born = now;
+                }
+                comet.lastX = comet.x;
+                comet.lastY = comet.y;
+            }
+            comet.particles.forEach(function (particle) {
+                if (particle.born === null) return;
+                var life = Math.max(0, 1 - (now - particle.born) / 320);
+                particle.node.style.opacity = String(life * .85);
+                particle.node.style.transform = "translate3d(" + particle.x + "px," + particle.y + "px,0) rotate(" + particle.angle + "rad) scale(" + (.25 + life * .75) + ")";
+                if (!life) particle.born = null;
+            });
+            comet.frame = window.requestAnimationFrame(animate);
+        }
+        comet.frame = window.requestAnimationFrame(animate);
     }
 
     function removeTruckDragPreview(state) {
-        if (!state || !state.preview) return;
-        state.preview.remove();
+        if (!state) return;
+        if (state.comet) {
+            window.cancelAnimationFrame(state.comet.frame);
+            state.comet.layer.remove();
+            state.comet = null;
+        }
+        if (state.preview) state.preview.remove();
         state.preview = null;
     }
 
     function findDumpTargetIntersectingPreview(state) {
         if (!state || !state.preview) return null;
-        var previewRect = state.preview.getBoundingClientRect();
+        var previewRect = state.previewHitRect;
         var previewCenterX = (previewRect.left + previewRect.right) / 2;
         var previewCenterY = (previewRect.top + previewRect.bottom) / 2;
         var bestTarget = null;
@@ -2484,6 +2556,7 @@ window.initExcavatorWorkShell = function () {
             activeTruckDrag.started = true;
             activeTruckDrag.card.classList.add("is-dragging");
             createTruckDragPreview(activeTruckDrag);
+            createTruckComet(activeTruckDrag);
         }
         moveTruckDragPreview(activeTruckDrag, dx, dy);
         var target = findDumpTargetIntersectingPreview(activeTruckDrag);
@@ -2585,6 +2658,7 @@ window.initExcavatorWorkShell = function () {
         });
         card.addEventListener("pointerdown", function (event) {
             if (card.disabled || card.classList.contains("is-pending")) return;
+            if (activeTruckDrag) return;
             if (event.button !== undefined && event.button !== 0) return;
             truckLongPressPointerId = event.pointerId;
             truckLongPressStartX = event.clientX;
@@ -2597,8 +2671,9 @@ window.initExcavatorWorkShell = function () {
                 card.classList.remove("is-pickup-waiting");
                 card.classList.add("is-picked-up");
                 if (activeTruckDrag) activeTruckDrag.waitingForHold = false;
+                createTruckDragPreview(activeTruckDrag);
                 if (navigator.vibrate) {
-                    try { navigator.vibrate(25); } catch (error) {}
+                    try { navigator.vibrate(70); } catch (error) {}
                 }
             }
             if (!manual && !loadable) {
@@ -2610,6 +2685,7 @@ window.initExcavatorWorkShell = function () {
             }
             activeTruckDrag = {
                 card: card, pointerId: event.pointerId,
+                originRect: card.getBoundingClientRect(),
                 startX: event.clientX, startY: event.clientY,
                 started: false, target: null, longPressOpened: false,
                 waitingForHold: manual
@@ -2620,7 +2696,7 @@ window.initExcavatorWorkShell = function () {
                     if (truckLongPressPointerId !== event.pointerId || !activeTruckDrag) return;
                     liftTruck();
                     suppressTruckClick();
-                }, 580);
+                }, 290);
             } else {
                 liftTruck();
                 selectTruck(card);
