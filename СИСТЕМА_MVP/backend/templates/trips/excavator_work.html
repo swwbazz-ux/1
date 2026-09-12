@@ -3521,6 +3521,7 @@ window.initExcavatorWorkShell = function () {
 
     var shiftPendingActionKey = "";
     var shiftPendingActionId = "";
+    var shiftOtherRoleConfirmed = false;
 
     function resetShiftSubmissionUi(action) {
         shiftConfirmationRequesting = false;
@@ -3552,6 +3553,18 @@ window.initExcavatorWorkShell = function () {
         if (!validation.valid) {
             return Promise.resolve(false);
         }
+        /* Одна открытая смена на сотрудника: смена в другой роли ещё открыта —
+           после удержания спрашиваем «Завершить её и начать?», как у водителя,
+           диспетчера и мастера; «да» добавляет подтверждение в запрос. */
+        var otherRoleQuestion = action !== "close" ? (shiftButton.dataset.otherRoleShiftQuestion || "") : "";
+        if (otherRoleQuestion && !shiftOtherRoleConfirmed && typeof window.openAppConfirmDialog === "function") {
+            resetShiftHold();
+            window.openAppConfirmDialog(otherRoleQuestion, function () {
+                shiftOtherRoleConfirmed = true;
+                submitExcavatorShiftAction();
+            }, 0, shiftButton.dataset.otherRoleShiftAccept || "Завершить и начать");
+            return Promise.resolve(false);
+        }
         var shiftActionKey = [
             action,
             shell.dataset.eoShiftExcavatorId || shell.dataset.eoCurrentExcavatorId || "",
@@ -3574,11 +3587,13 @@ window.initExcavatorWorkShell = function () {
             excavator_id: shell.dataset.eoShiftExcavatorId || shell.dataset.eoCurrentExcavatorId || "",
             fuel_percent: shell.querySelector("[data-eo-shift-fuel]") ? shell.querySelector("[data-eo-shift-fuel]").value : "",
             fuel: validation.fuelLiters === null ? "" : String(validation.fuelLiters),
-            engine_hours: shell.querySelector("[data-eo-shift-engine-hours]") ? shell.querySelector("[data-eo-shift-engine-hours]").value : ""
+            engine_hours: shell.querySelector("[data-eo-shift-engine-hours]") ? shell.querySelector("[data-eo-shift-engine-hours]").value : "",
+            close_other_role_shift: !!shiftOtherRoleConfirmed
         };
         if (options.confirmationToken) {
             payload.confirmation_token = String(options.confirmationToken);
         }
+        shiftOtherRoleConfirmed = false;
         resetShiftHold();
         shiftButton.disabled = true;
         shiftButton.classList.add("is-pending");
@@ -3637,6 +3652,19 @@ window.initExcavatorWorkShell = function () {
                 return false;
             }
             hideShiftConfirmation();
+            /* Экран отрисован до того, как в другой роли открыли смену:
+               сервер сам прислал вопрос — задаём его и повторяем с ответом. */
+            var otherRole = error && error.code === "other_role_shift_open" ? error.other_role_shift : null;
+            if (otherRole && otherRole.question && typeof window.openAppConfirmDialog === "function") {
+                resetShiftSubmissionUi(action);
+                shiftButton.dataset.otherRoleShiftQuestion = otherRole.question;
+                shiftButton.dataset.otherRoleShiftAccept = otherRole.accept_label || "Завершить и начать";
+                window.openAppConfirmDialog(otherRole.question, function () {
+                    shiftOtherRoleConfirmed = true;
+                    submitExcavatorShiftAction();
+                }, 0, otherRole.accept_label || "Завершить и начать");
+                return false;
+            }
             showShiftErrors(error.error || error.message || "Смена не сохранена", error.field_errors || {});
             resetShiftSubmissionUi(action);
             return false;
