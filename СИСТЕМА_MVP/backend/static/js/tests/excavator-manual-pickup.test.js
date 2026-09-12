@@ -98,7 +98,7 @@ function effectsFixture(reducedMotion = false) {
     const frames = new Map(), nodes = [];
     let nextFrame = 0;
     const makeNode = () => ({
-        style: {}, children: [], setAttribute() {},
+        style: {}, children: [], attributes: {}, setAttribute(key, value) { this.attributes[key] = String(value); },
         appendChild(node) { this.children.push(node); },
         remove() { nodes.splice(nodes.indexOf(this), 1); },
     });
@@ -109,7 +109,7 @@ function effectsFixture(reducedMotion = false) {
             requestAnimationFrame: fn => { frames.set(++nextFrame, fn); return nextFrame; },
             cancelAnimationFrame: id => frames.delete(id),
         },
-        document: {createElement: makeNode, body: {appendChild: node => nodes.push(node)}},
+        document: {createElement: makeNode, createElementNS: makeNode, body: {appendChild: node => nodes.push(node)}},
     };
     vm.createContext(context);
     const start = template.indexOf('    function moveTruckDragPreview(state, dx, dy)');
@@ -124,7 +124,7 @@ function effectsFixture(reducedMotion = false) {
     return {context, state, frames, nodes, tick};
 }
 
-test('comet uses a bounded pool, fades while stationary and releases its RAF and DOM', () => {
+test('comet follows one continuous bounded path, fades and releases its RAF and DOM', () => {
     const f = effectsFixture();
     f.context.createTruckComet(f.state);
     const comet = f.state.comet;
@@ -132,13 +132,19 @@ test('comet uses a bounded pool, fades while stationary and releases its RAF and
         f.context.moveTruckDragPreview(f.state, n * 8, n * 4);
         f.tick(n * 16);
     }
-    assert.equal(comet.layer.children.length, 24);
+    assert.ok(comet.points.length <= 48);
+    const d = comet.paths[0].attributes.d;
+    assert.equal((d.match(/M /g) || []).length, 1);
+    assert.ok(comet.paths.every(p => p.attributes.d === d));
+    let length = 0;
+    for (let i = 1; i < comet.points.length; i++) length += Math.hypot(comet.points[i].x - comet.points[i-1].x, comet.points[i].y - comet.points[i-1].y);
+    assert.ok(length <= 240.001);
     assert.equal(f.nodes.length, 3);
-    assert.ok(comet.particles.some(p => Number(p.node.style.opacity) > 0));
+    assert.ok(Number(comet.layer.style.opacity) > 0);
     f.tick(2000);
-    assert.ok(comet.particles.some(p => Number(p.node.style.opacity) > 0));
+    assert.ok(Number(comet.layer.style.opacity) > 0);
     f.tick(2400);
-    assert.ok(comet.particles.every(p => Number(p.node.style.opacity || 0) === 0));
+    assert.equal(Number(comet.layer.style.opacity), 0);
     f.context.removeTruckDragPreview(f.state);
     assert.equal(f.frames.size, 0);
     assert.equal(f.nodes.length, 0);
@@ -158,9 +164,9 @@ test('slow movement emits the tail outside the card instead of hiding it underne
     f.context.createTruckComet(f.state);
     f.context.moveTruckDragPreview(f.state, 6, 0);
     f.tick(16);
-    const particle = f.state.comet.particles.find(p => p.born !== null);
+    const tail = f.state.comet.points[0];
     const trailingEdge = 60 + 6 - 100 * 1.18 / 2;
-    assert.ok(particle.x < trailingEdge);
+    assert.ok(tail.x < trailingEdge);
     f.context.removeTruckDragPreview(f.state);
 });
 
@@ -173,4 +179,29 @@ test('reduced motion keeps static feedback without a comet or pending animation'
     assert.match(f.state.preview.style.transform, /scale\(1\)/);
     f.context.removeTruckDragPreview(f.state);
     assert.equal(f.nodes.length, 0);
+});
+
+test('drag copy sheds blocking decoration while the real truck retains its state and plan', () => {
+    const sourceClasses = ['eo-dashboard-truck-card', 'is-load-blocked', 'is-shift-pending', 'is-manual-passive', 'is-plan-overrun'];
+    const cloneClasses = new Set(sourceClasses);
+    const preview = {
+        classList: {add: (...names) => names.forEach(n => cloneClasses.add(n)), remove: (...names) => names.forEach(n => cloneClasses.delete(n))},
+        style: {setProperty() {}}, removeAttribute() {}, setAttribute() {}, appendChild() {},
+    };
+    const card = {classes: sourceClasses, cloneNode: () => preview};
+    const context = {
+        window: {matchMedia: () => ({matches: true}), getComputedStyle: () => ({borderRadius: '12px'})},
+        document: {body: {appendChild() {}}, createElement: () => ({})},
+        moveTruckDragPreview() {},
+    };
+    vm.createContext(context);
+    const start = template.indexOf('    function createTruckDragPreview(state)');
+    vm.runInContext(template.slice(start, template.indexOf('    function moveTruckDragPreview', start)), context);
+    context.createTruckDragPreview({card, originRect: {left: 0, top: 0, width: 100, height: 100}});
+    assert.ok(card.classes.includes('is-load-blocked'));
+    assert.ok(card.classes.includes('is-shift-pending'));
+    assert.ok(cloneClasses.has('is-plan-overrun'));
+    assert.ok(cloneClasses.has('is-drag-preview'));
+    assert.equal(cloneClasses.has('is-load-blocked'), false);
+    assert.equal(cloneClasses.has('is-shift-pending'), false);
 });

@@ -15,7 +15,7 @@
 <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v223" defer></script>
 <script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v223" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
-<link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=3">
+<link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -2413,7 +2413,9 @@ window.initExcavatorWorkShell = function () {
         var rect = state.originRect;
         var preview = state.card.cloneNode(true);
         preview.classList.add("is-drag-preview", "truck-drag-preview");
-        preview.classList.remove("is-selected", "is-dragging");
+        // Только копия для перетаскивания: состояния исходного самосвала сохраняются.
+        preview.classList.remove("is-selected", "is-dragging", "is-load-blocked",
+            "is-shift-pending", "is-no-driver", "is-inactive", "is-manual-passive");
         preview.removeAttribute("id");
         preview.setAttribute("aria-hidden", "true");
         preview.tabIndex = -1;
@@ -2474,20 +2476,33 @@ window.initExcavatorWorkShell = function () {
     function createTruckComet(state) {
         if (state.comet || !window.requestAnimationFrame ||
             (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) return;
-        var layer = document.createElement("div");
-        layer.className = "eo-truck-comet";
-        layer.setAttribute("aria-hidden", "true");
-        var comet = {layer: layer, particles: [], cursor: 0, frame: null,
+        function svgNode(name, attributes) {
+            var node = document.createElementNS("http://www.w3.org/2000/svg", name);
+            Object.keys(attributes || {}).forEach(function (key) { node.setAttribute(key, attributes[key]); });
+            return node;
+        }
+        var layer = svgNode("svg", {"class": "eo-truck-comet", "aria-hidden": "true", "focusable": "false"});
+        var defs = svgNode("defs");
+        var gradient = svgNode("linearGradient", {id: "eo-drag-comet-light", gradientUnits: "userSpaceOnUse"});
+        [["0%", "#17cfff", "0"], ["40%", "#43eaff", ".65"], ["100%", "#efffff", "1"]].forEach(function (stop) {
+            gradient.appendChild(svgNode("stop", {offset: stop[0], "stop-color": stop[1], "stop-opacity": stop[2]}));
+        });
+        defs.appendChild(gradient);
+        layer.appendChild(defs);
+        var paths = [24, 10, 3].map(function (width, index) {
+            var path = svgNode("path", {fill: "none", stroke: "url(#eo-drag-comet-light)",
+                "stroke-width": width, "stroke-linecap": "round", "stroke-linejoin": "round",
+                opacity: [.22, .55, 1][index]});
+            if (!index) path.style.filter = "blur(5px)";
+            layer.appendChild(path);
+            return path;
+        });
+        var comet = {layer: layer, paths: paths, gradient: gradient, frame: null, lastMoved: 0,
             x: state.originRect.left + state.originRect.width / 2,
             y: state.originRect.top + state.originRect.height / 2 - 8};
         comet.lastX = comet.x;
         comet.lastY = comet.y;
-        // Фиксированный пул: ни клонов карточек, ни растущего DOM при движении.
-        for (var i = 0; i < 24; i += 1) {
-            var dot = document.createElement("i");
-            layer.appendChild(dot);
-            comet.particles.push({node: dot, born: null});
-        }
+        comet.points = [{x: comet.x, y: comet.y}];
         document.body.appendChild(layer);
         state.comet = comet;
         function animate(now) {
@@ -2496,31 +2511,44 @@ window.initExcavatorWorkShell = function () {
             var dy = comet.y - comet.lastY;
             var distance = Math.hypot(dx, dy);
             if (distance >= 5) {
-                var count = Math.min(3, Math.max(1, Math.floor(distance / 28)));
-                // След начинается за краем карточки: при медленном движении
-                // частицы из её центра целиком скрывались под самой иконкой.
-                var directionX = dx / distance;
-                var directionY = dy / distance;
-                var tailOffset = (state.originRect.width * Math.abs(directionX) +
-                    state.originRect.height * Math.abs(directionY)) * .59 + 8;
-                for (var j = 0; j < count; j += 1) {
-                    var particle = comet.particles[comet.cursor];
-                    comet.cursor = (comet.cursor + 1) % comet.particles.length;
-                    particle.x = comet.lastX + dx * j / count - directionX * tailOffset;
-                    particle.y = comet.lastY + dy * j / count - directionY * tailOffset;
-                    particle.angle = Math.atan2(dy, dx);
-                    particle.born = now;
+                // Единая лента начинается за карточкой даже при медленном захвате.
+                if (comet.points.length === 1) {
+                    var reach = (state.originRect.width * Math.abs(dx / distance) +
+                        state.originRect.height * Math.abs(dy / distance)) * .59 + 60;
+                    comet.points[0] = {x: comet.lastX - dx / distance * reach, y: comet.lastY - dy / distance * reach};
                 }
+                comet.points.push({x: comet.x, y: comet.y});
+                if (comet.points.length > 48) comet.points.shift();
+                // Ограниченная история и длина: не накапливаем путь по всему экрану.
+                var remaining = 240;
+                for (var i = comet.points.length - 1; i > 0; i -= 1) {
+                    var head = comet.points[i], tail = comet.points[i - 1];
+                    var length = Math.hypot(head.x - tail.x, head.y - tail.y);
+                    if (length >= remaining) {
+                        comet.points[i - 1] = {x: head.x + (tail.x - head.x) * remaining / length,
+                            y: head.y + (tail.y - head.y) * remaining / length};
+                        comet.points.splice(0, i - 1);
+                        break;
+                    }
+                    remaining -= length;
+                }
+                var points = comet.points;
+                var d = "M " + points[0].x + " " + points[0].y;
+                for (var j = 1; j < points.length - 1; j += 1) {
+                    d += " Q " + points[j].x + " " + points[j].y + " " +
+                        (points[j].x + points[j + 1].x) / 2 + " " + (points[j].y + points[j + 1].y) / 2;
+                }
+                d += " L " + comet.x + " " + comet.y;
+                paths.forEach(function (path) { path.setAttribute("d", d); });
+                gradient.setAttribute("x1", points[0].x);
+                gradient.setAttribute("y1", points[0].y);
+                gradient.setAttribute("x2", comet.x + .01);
+                gradient.setAttribute("y2", comet.y + .01);
                 comet.lastX = comet.x;
                 comet.lastY = comet.y;
+                comet.lastMoved = now;
             }
-            comet.particles.forEach(function (particle) {
-                if (particle.born === null) return;
-                var life = Math.max(0, 1 - (now - particle.born) / 700);
-                particle.node.style.opacity = String(Math.sqrt(life) * .95);
-                particle.node.style.transform = "translate3d(" + particle.x + "px," + particle.y + "px,0) rotate(" + particle.angle + "rad) scale(" + (.25 + life * .75) + ")";
-                if (!life) particle.born = null;
-            });
+            layer.style.opacity = String(Math.max(0, 1 - (now - comet.lastMoved) / 700));
             comet.frame = window.requestAnimationFrame(animate);
         }
         comet.frame = window.requestAnimationFrame(animate);
