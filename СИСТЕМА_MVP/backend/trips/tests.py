@@ -1800,7 +1800,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
     def test_excavator_progress_cycle_visual_context_preserves_completed_boundaries(self):
         cases = {
-            0: (0, 0, 'green'),
+            # Факта нет — фазы нет: пустая плитка не должна выглядеть работающей.
+            0: (0, 0, ''),
             45: (45, 0, 'green'),
             99: (99, 0, 'green'),
             100: (100, 0, 'green'),

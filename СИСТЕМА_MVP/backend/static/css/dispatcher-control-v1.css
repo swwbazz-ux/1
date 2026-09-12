@@ -14068,3 +14068,94 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-equipment-d
     width: min(1120px, calc((100 * var(--gd-vw, 1vw) - 32px) / var(--gd-detail-zoom)));
     max-height: min(900px, calc((100 * var(--gd-vh, 1vh) - 40px) / var(--gd-detail-zoom)));
 }
+
+
+/* === Заливка плана: мягче цвет, у комплекса — фоном под данными ========== */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]),
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]),
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card[data-plan-progress-phase]:not([data-plan-progress-phase=""]) {
+    --dispatcher-plan-color: rgba(74, 222, 128, .38);
+    --dispatcher-plan-glow: rgba(74, 222, 128, .26);
+    --dispatcher-plan-complete-color: rgba(74, 222, 128, .3);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage-tile[data-plan-progress-phase="amber"],
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile[data-plan-progress-phase="amber"],
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card[data-plan-progress-phase="amber"] {
+    --dispatcher-plan-color: rgba(250, 204, 21, .38);
+    --dispatcher-plan-glow: rgba(250, 204, 21, .26);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage-tile[data-plan-progress-phase="cyan"],
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile[data-plan-progress-phase="cyan"],
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card[data-plan-progress-phase="cyan"] {
+    --dispatcher-plan-color: rgba(56, 189, 248, .38);
+    --dispatcher-plan-glow: rgba(56, 189, 248, .26);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage-tile[data-plan-progress-phase="orange"],
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile[data-plan-progress-phase="orange"],
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card[data-plan-progress-phase="orange"] {
+    --dispatcher-plan-color: rgba(251, 146, 60, .38);
+    --dispatcher-plan-glow: rgba(251, 146, 60, .26);
+}
+
+/* Карточка комплекса: сектор заливает фон, как у плитки самосвала. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card[data-plan-progress-phase]:not([data-plan-progress-phase=""]) {
+    background-image: conic-gradient(
+        from -90deg,
+        var(--dispatcher-plan-color) 0 var(--complex-progress),
+        transparent var(--complex-progress) 100%
+    );
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 100% 100%;
+}
+
+/* Кольцо по контуру больше не нужно: его копия живёт ещё и в app.css,
+   поэтому гасим явно, а не удалением объявления. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card::before {
+    background: none;
+    -webkit-mask: none;
+    mask: none;
+    padding: 0;
+}
+
+/* === Кнопки завершения смены: подпись в две строки, без тесноты ========== */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-choice {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-choice button {
+    display: grid;
+    gap: 2px;
+    width: 100%;
+    min-height: 0;
+    padding: 8px 12px;
+    text-align: left;
+    white-space: normal;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-choice button strong {
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1.2;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-choice button small {
+    color: var(--gd-detail-muted);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.25;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-neglect small {
+    color: color-mix(in srgb, var(--gd-red) 70%, var(--gd-detail-muted));
+}

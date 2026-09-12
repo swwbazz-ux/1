@@ -96,8 +96,10 @@ test("смена машиниста: сведения о смене и форм�
     assert.match(card, /data-gd-detail-service-close-hint hidden/);
     /* Два исхода: «не закрыл сам» одним нажатием, «по согласованию» — форма. */
     assert.match(card, /<input type="hidden" name="close_kind" value="neglected" data-gd-detail-service-close-kind>/);
-    assert.match(card, /data-gd-detail-service-close-neglect>Закрыть: сотрудник не закрыл сам</);
-    assert.match(card, /data-gd-detail-service-close-toggle>По согласованию…</);
+    /* Подпись кнопки разведена на две строки: действие и пояснение, иначе
+       текст ломался в три строки и сминался. */
+    assert.match(card, /data-gd-detail-service-close-neglect><strong>Закрыть смену<\/strong><small>сотрудник не закрыл сам и не сообщил<\/small></);
+    assert.match(card, /data-gd-detail-service-close-toggle><strong>Закрыть по согласованию<\/strong><small>сотрудник попросил по рации<\/small></);
     assert.match(card, /data-gd-detail-service-close-cancel>Отмена</);
     assert.match(card, /class="gd-detail-shift-close-submit">Закрыть по согласованию</);
     assert.match(card, /<dt>Автозакрытие<\/dt><dd data-gd-detail-shift-autoclose><\/dd>/);

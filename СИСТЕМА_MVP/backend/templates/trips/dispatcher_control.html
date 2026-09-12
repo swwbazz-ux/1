@@ -144,9 +144,12 @@
                                 <i>Машин</i>
                                 <b>{{ complex.assigned|default:0 }}<small>/{{ complex.need|default:0 }}</small></b>
                             </span>
-                            <span class="complex-kpi" data-kpi="volume" title="Погружено за смену">
+                            <span class="complex-kpi" data-kpi="volume" title="{% if complex.plan_has_plan %}{{ complex.plan_fact_label }}{% else %}Погружено за смену{% endif %}">
                                 <i>Объём</i>
-                                <b>{{ complex.fact_tons|default:"0" }}<small>{{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</small></b>
+                                {% comment %}Тот же факт, что в карточке комплекса: fact_tons считался по
+                                   активным рейсам и только при открытой смене диспетчера, из-за чего доска
+                                   показывала ноль там, где карточка показывала выполненный объём.{% endcomment %}
+                                <b>{% if complex.plan_has_plan %}{{ complex.plan_fact_value|default:"0" }}<small>{{ complex.plan_unit|default:"м³" }}</small>{% else %}{{ complex.fact_tons|default:"0" }}<small>{{ dispatcher_dashboard.shift_plan_detail.unit_label|default:"т" }}</small>{% endif %}</b>
                             </span>
                             <span class="complex-kpi{% if not complex.plan_has_plan %} is-muted{% endif %}" data-kpi="plan" title="{% if complex.plan_has_plan %}{{ complex.plan_fact_label }}{% else %}План не назначен{% endif %}">
                                 <i>План</i>
@@ -998,8 +1001,8 @@
                             {% csrf_token %}
                             <input type="hidden" name="close_kind" value="neglected" data-gd-detail-service-close-kind>
                             <div class="gd-detail-shift-close-choice">
-                                <button type="button" class="gd-detail-shift-close-toggle gd-detail-shift-close-neglect" data-gd-detail-service-close-neglect>Закрыть: сотрудник не закрыл сам</button>
-                                <button type="button" class="gd-detail-shift-close-toggle gd-detail-shift-close-agree" data-gd-detail-service-close-toggle>По согласованию…</button>
+                                <button type="button" class="gd-detail-shift-close-toggle gd-detail-shift-close-neglect" data-gd-detail-service-close-neglect><strong>Закрыть смену</strong><small>сотрудник не закрыл сам и не сообщил</small></button>
+                                <button type="button" class="gd-detail-shift-close-toggle gd-detail-shift-close-agree" data-gd-detail-service-close-toggle><strong>Закрыть по согласованию</strong><small>сотрудник попросил по рации</small></button>
                             </div>
                             <div class="gd-detail-shift-close-body" data-gd-detail-service-close-body hidden>
                                 <p>Сотрудник попросил закрыть смену (нет связи, сел телефон). Причина обязательна, показания — если он их продиктовал. Открытые рейсы уйдут в перенос.</p>
@@ -7452,6 +7455,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v97" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v98" defer></script>
 {% endif %}
 {% endblock %}
