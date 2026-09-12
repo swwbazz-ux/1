@@ -997,7 +997,7 @@
                             {% csrf_token %}
                             <button type="button" class="gd-detail-shift-close-toggle" data-gd-detail-service-close-toggle>Завершить смену</button>
                             <div class="gd-detail-shift-close-body" data-gd-detail-service-close-body hidden>
-                                <p>Смена закроется служебно от имени диспетчера. Открытые рейсы уйдут в перенос, показания попадут в отчёт.</p>
+                                <p>Смена закроется служебно от имени диспетчера. Открытые рейсы уйдут в перенос. Показания необязательны: если сотрудник их не сдал, оставьте поля пустыми.</p>
                                 <label>
                                     <span>Причина</span>
                                     <input type="text" name="reason" maxlength="200" required placeholder="Например: машинист не вышел на связь">
@@ -1005,15 +1005,15 @@
                                 <div class="gd-detail-shift-close-readings">
                                     <label>
                                         <span>Топливо, л</span>
-                                        <input type="number" name="end_fuel" min="0" step="1" inputmode="numeric" required>
+                                        <input type="number" name="end_fuel" min="0" step="1" inputmode="numeric" placeholder="—">
                                     </label>
                                     <label data-gd-detail-service-close-mileage hidden>
                                         <span>Одометр, км</span>
-                                        <input type="number" name="end_mileage" min="0" step="1" inputmode="numeric">
+                                        <input type="number" name="end_mileage" min="0" step="1" inputmode="numeric" placeholder="—">
                                     </label>
                                     <label>
                                         <span>Моточасы</span>
-                                        <input type="number" name="end_engine_hours" min="0" step="1" inputmode="numeric" required>
+                                        <input type="number" name="end_engine_hours" min="0" step="1" inputmode="numeric" placeholder="—">
                                     </label>
                                 </div>
                                 <small class="gd-detail-shift-close-hint" data-gd-detail-service-close-hint hidden></small>
@@ -7446,6 +7446,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v89" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v90" defer></script>
 {% endif %}
 {% endblock %}

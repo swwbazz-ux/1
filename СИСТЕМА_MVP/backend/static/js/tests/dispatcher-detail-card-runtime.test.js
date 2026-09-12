@@ -86,9 +86,13 @@ test("смена машиниста: сведения о смене и форм�
     assert.match(card, /<input type="text" name="reason" maxlength="200" required/);
     /* Сервер принимает только целые показания (parse_required_shift_integer /
        validate_driver_close_readings) — форма не должна предлагать дробные. */
-    assert.match(card, /name="end_fuel" min="0" step="1" inputmode="numeric" required/);
-    assert.match(card, /<label data-gd-detail-service-close-mileage hidden>\s*<span>Одометр, км<\/span>\s*<input type="number" name="end_mileage" min="0" step="1" inputmode="numeric">/);
-    assert.match(card, /name="end_engine_hours" min="0" step="1" inputmode="numeric" required/);
+    /* Показания необязательны: диспетчер закрывает смену за сотрудника,
+       который её не закрыл, и показаний у него обычно нет. */
+    assert.match(card, /name="end_fuel" min="0" step="1" inputmode="numeric" placeholder="—">/);
+    assert.match(card, /<label data-gd-detail-service-close-mileage hidden>\s*<span>Одометр, км<\/span>\s*<input type="number" name="end_mileage" min="0" step="1" inputmode="numeric" placeholder="—">/);
+    assert.match(card, /name="end_engine_hours" min="0" step="1" inputmode="numeric" placeholder="—">/);
+    assert.doesNotMatch(card, /name="end_(fuel|mileage|engine_hours)"[^>]*required/);
+    assert.match(card, /Показания необязательны: если сотрудник их не сдал, оставьте поля пустыми\./);
     assert.match(card, /data-gd-detail-service-close-hint hidden/);
     assert.match(card, /data-gd-detail-service-close-toggle>Завершить смену</);
     assert.match(card, /data-gd-detail-service-close-cancel>Отмена</);

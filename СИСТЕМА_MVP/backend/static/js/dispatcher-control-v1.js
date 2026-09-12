@@ -1949,7 +1949,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (detailServiceCloseMileage) {
                 detailServiceCloseMileage.hidden = !shift.is_truck;
                 var mileage = detailServiceCloseMileage.querySelector("input");
-                if (mileage) mileage.required = !!shift.is_truck;
+                if (mileage) mileage.required = false;
             }
             if (detailServiceCloseToggle) {
                 detailServiceCloseToggle.disabled = dispatcherRoleIsReadonly() || !dispatcherShiftOpen;
@@ -1985,8 +1985,8 @@ document.addEventListener("DOMContentLoaded", function () {
         if (shift.start_engine_hours) parts.push("моточасы " + shift.start_engine_hours);
         var text = parts.length ? "На начало смены: " + parts.join(" · ") + ". " : "";
         text += shift.is_truck
-            ? "Показания — целые числа."
-            : "Показания — целые числа, моточасы не меньше начальных и не более +12 за смену.";
+            ? "Если показания известны — целые числа; иначе оставьте пустыми."
+            : "Если показания известны — целые числа, моточасы не меньше начальных и не более +12; иначе оставьте пустыми.";
         detailServiceCloseHint.textContent = text;
         detailServiceCloseHint.hidden = false;
     }

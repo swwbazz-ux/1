@@ -210,17 +210,17 @@
             {% if dispatcher_header.blocking_shift.equipment %}
                 <label>
                     <span class="visually-hidden">Топливо на конец смены</span>
-                    <input type="number" name="end_fuel" min="0" step="0.01" required placeholder="Топливо на конец">
+                    <input type="number" name="end_fuel" min="0" step="1" inputmode="numeric" placeholder="Топливо на конец">
                 </label>
                 {% if dispatcher_header.blocking_shift.workplace_code == "driver" %}
                     <label>
                         <span class="visually-hidden">Одометр на конец смены</span>
-                        <input type="number" name="end_mileage" min="0" step="0.01" required placeholder="Одометр на конец">
+                        <input type="number" name="end_mileage" min="0" step="1" inputmode="numeric" placeholder="Одометр на конец">
                     </label>
                 {% endif %}
                 <label>
                     <span class="visually-hidden">Моточасы на конец смены</span>
-                    <input type="number" name="end_engine_hours" min="0" step="0.01" required placeholder="Моточасы на конец">
+                    <input type="number" name="end_engine_hours" min="0" step="1" inputmode="numeric" placeholder="Моточасы на конец">
                 </label>
             {% endif %}
             <button

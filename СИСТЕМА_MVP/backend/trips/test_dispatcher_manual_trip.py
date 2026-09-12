@@ -187,6 +187,83 @@ class DispatcherManualTripTests(TestCase):
         self.assertIn('не назначен в комплекс', blocked['blocked_reason'])
 
 
+class DispatcherServiceCloseWithoutReadingsTests(TestCase):
+    """Служебное закрытие смены: показания необязательны, введённые — проверяются."""
+
+    def setUp(self):
+        self.dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+        self.dispatcher = Employee.objects.create(
+            full_name='Дежурный диспетчер',
+            phone='79000000500',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.access = EmployeeAccess.objects.create(
+            employee=self.dispatcher,
+            role=self.dispatcher_role,
+            access_code='500000',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        session = self.client.session
+        session['employee_access_id'] = self.access.id
+        session['device_kind'] = 'personal'
+        session.save()
+        self.client.post(reverse('dispatcher_toggle_shift'), {'shift_action': 'start'})
+
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck_model = EquipmentModel.objects.create(equipment_type=truck_type, name='БелАЗ тест', fuel_capacity_limit_l=1500)
+        self.truck = Equipment.objects.create(equipment_type=truck_type, model=truck_model, garage_number='48')
+        self.driver = Employee.objects.create(
+            full_name='Водитель Прошлой Смены',
+            phone='79000000778',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.truck_shift = EmployeeShift.objects.create(
+            employee=self.driver,
+            equipment=self.truck,
+            shift_type='night',
+            opened_at=timezone.now() - timedelta(hours=40),
+            start_fuel=780,
+            start_mileage=63253,
+            start_engine_hours=5705,
+        )
+        self.url = reverse('dispatcher_service_close_shift', args=[self.truck_shift.id])
+
+    def messages_text(self, response):
+        return ' | '.join(str(message) for message in get_messages(response.wsgi_request))
+
+    def test_shift_closes_without_readings_when_fields_are_empty(self):
+        response = self.client.post(self.url, {
+            'reason': 'водитель не закрыл смену',
+            'end_fuel': '',
+            'end_mileage': '',
+            'end_engine_hours': '',
+        })
+
+        self.assertIn('закрыта служебно', self.messages_text(response))
+        self.truck_shift.refresh_from_db()
+        self.assertIsNotNone(self.truck_shift.closed_at)
+        self.assertTrue(self.truck_shift.is_service_closed)
+        self.assertEqual(self.truck_shift.closed_by, self.dispatcher)
+        self.assertIsNone(self.truck_shift.end_fuel)
+        self.assertIsNone(self.truck_shift.end_mileage)
+        self.assertIsNone(self.truck_shift.end_engine_hours)
+
+    def test_partial_readings_are_still_validated(self):
+        response = self.client.post(self.url, {
+            'reason': 'водитель не закрыл смену',
+            'end_fuel': '500',
+            'end_mileage': '',
+            'end_engine_hours': '',
+        })
+
+        self.assertIn('Укажите показание на конец смены', self.messages_text(response))
+        self.truck_shift.refresh_from_db()
+        self.assertIsNone(self.truck_shift.closed_at)
+
+
 class DispatcherShiftPeriodFieldsTests(TestCase):
     """Чья смена: открыта в текущем периоде или это хвост прошлого водителя."""
 

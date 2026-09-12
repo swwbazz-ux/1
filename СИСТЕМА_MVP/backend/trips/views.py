@@ -7007,7 +7007,18 @@ def dispatcher_service_close_shift_view(request, shift_id):
             return shift_error
 
     reading_fields = []
-    if shift.equipment_id:
+    # Показания необязательны: сотрудник, не закрывший смену, их не сдал, и
+    # требовать их с диспетчера нелогично. Введённые проверяем как раньше.
+    readings_provided = any(
+        str(request.POST.get(key) or '').strip()
+        for key in ('end_fuel', 'end_mileage', 'end_engine_hours')
+    )
+    if shift.equipment_id and not readings_provided:
+        shift.end_fuel = None
+        shift.end_mileage = None
+        shift.end_engine_hours = None
+        reading_fields = ['end_fuel', 'end_mileage', 'end_engine_hours']
+    elif shift.equipment_id:
         if equipment_is_truck(shift.equipment):
             try:
                 readings = {
