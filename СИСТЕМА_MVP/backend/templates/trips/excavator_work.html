@@ -6,14 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v223">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v223">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v223">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v223">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v223">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v223">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v223" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v223" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v227">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v227">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v227">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v227">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v227">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v227">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v227" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v227" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <meta name="theme-color" content="#D58B14">
@@ -416,7 +416,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v223";
+var excavatorShellVersion = "excavator-mobile-shell-v227";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -685,6 +685,56 @@ function playExcavatorAssignmentAlerts(operations) {
     }, function () {
         operationKeys.forEach(window.ExcavatorVoiceGuard.release);
     });
+}
+
+var excavatorPickupAudioContext = null;
+
+function prepareExcavatorPickupAudio() {
+    var AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return null;
+    try {
+        if (!excavatorPickupAudioContext || excavatorPickupAudioContext.state === "closed") {
+            excavatorPickupAudioContext = new AudioContextClass();
+        }
+        if (excavatorPickupAudioContext.state === "suspended") {
+            excavatorPickupAudioContext.resume().catch(function () {});
+        }
+        return excavatorPickupAudioContext;
+    } catch (error) {
+        return null;
+    }
+}
+
+function playExcavatorPickupTone() {
+    var context = prepareExcavatorPickupAudio();
+    if (!context) return;
+    try {
+        var startedAt = context.currentTime;
+        var duration = .17;
+        var oscillator = context.createOscillator();
+        var gain = context.createGain();
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(620, startedAt);
+        oscillator.frequency.exponentialRampToValueAtTime(1120, startedAt + duration);
+        gain.gain.setValueAtTime(.0001, startedAt);
+        gain.gain.exponentialRampToValueAtTime(.13, startedAt + .018);
+        gain.gain.exponentialRampToValueAtTime(.0001, startedAt + duration);
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start(startedAt);
+        oscillator.stop(startedAt + duration);
+        oscillator.addEventListener("ended", function () {
+            oscillator.disconnect();
+            gain.disconnect();
+        }, {once: true});
+    } catch (error) {}
+}
+
+function playExcavatorTruckGrabFeedback() {
+    if (navigator.vibrate) {
+        try { navigator.vibrate(70); } catch (error) {}
+    }
+    playExcavatorPickupTone();
 }
 
 function playExcavatorAssignmentAlert(action, truckNumber, voice, eventVersion, options) {
@@ -2716,14 +2766,13 @@ window.initExcavatorWorkShell = function () {
             clearTruckLongPress();
             var manual = card.dataset.eoManualAvailable === "1";
             var loadable = canTruckLoad(card);
+            if (manual || loadable) prepareExcavatorPickupAudio();
             function liftTruck() {
                 card.classList.remove("is-pickup-waiting");
                 card.classList.add("is-picked-up");
                 if (activeTruckDrag) activeTruckDrag.waitingForHold = false;
                 createTruckDragPreview(activeTruckDrag);
-                if (navigator.vibrate) {
-                    try { navigator.vibrate(70); } catch (error) {}
-                }
+                playExcavatorTruckGrabFeedback();
             }
             if (!manual && !loadable) {
                 truckLongPressTimer = window.setTimeout(function () {

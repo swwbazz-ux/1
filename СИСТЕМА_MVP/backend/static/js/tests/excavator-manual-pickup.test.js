@@ -7,7 +7,7 @@ const template = fs.readFileSync(path.join(__dirname, '../../../templates/trips/
 
 function fixture(manual) {
     const handlers = {}, classes = new Set(), timers = new Map();
-    let timerId = 0, vibrations = 0, details = 0, sends = 0;
+    let timerId = 0, vibrations = 0, pickupTones = 0, audioPrepares = 0, details = 0, sends = 0;
     const delays = [], haptics = [];
     const card = {
         disabled: false, style: {},
@@ -22,6 +22,8 @@ function fixture(manual) {
         shell: {querySelectorAll: () => [card]},
         window: {setTimeout: (fn, delay) => {delays.push(delay); timers.set(++timerId, fn); return timerId;}, clearTimeout: id => timers.delete(id)},
         navigator: {vibrate: duration => {haptics.push(duration); vibrations++;}},
+        prepareExcavatorPickupAudio: () => {audioPrepares++;},
+        playExcavatorTruckGrabFeedback: () => {haptics.push(70); vibrations++; pickupTones++;},
         isInactiveTruck: c => c.dataset.eoTruckInactive === '1',
         isTruckLoadBlocked: c => c.dataset.eoCanLoad === '0',
         selectTruck() {}, selectDump() {},
@@ -42,7 +44,7 @@ function fixture(manual) {
     function hold() {
         const current = [...timers.values()]; timers.clear(); current.forEach(fn => fn());
     }
-    return {card, classes, context, fire, hold, delays, haptics, counts: () => ({vibrations, details, sends})};
+    return {card, classes, context, fire, hold, delays, haptics, counts: () => ({vibrations, pickupTones, audioPrepares, details, sends})};
 }
 
 test('passive pickup needs hold, glows and vibrates without opening a modal', () => {
@@ -53,7 +55,7 @@ test('passive pickup needs hold, glows and vibrates without opening a modal', ()
     f.hold();
     assert.equal(f.context.canTruckLoad(f.card), true);
     assert.equal(f.classes.has('is-picked-up'), true);
-    assert.deepEqual(f.counts(), {vibrations: 1, details: 0, sends: 0});
+    assert.deepEqual(f.counts(), {vibrations: 1, pickupTones: 1, audioPrepares: 1, details: 0, sends: 0});
     assert.deepEqual(f.haptics, [70]);
 });
 
@@ -72,6 +74,8 @@ test('early release, movement and pointer cancellation cannot dispatch', () => {
         f.fire('pointerdown'); f.fire(action, {clientX: 70}); f.hold();
         assert.equal(f.classes.has('is-picked-up'), false, action);
         assert.equal(f.counts().sends, 0);
+        assert.equal(f.counts().pickupTones, 0, action);
+        assert.equal(f.counts().vibrations, 0, action);
     }
 });
 
@@ -80,8 +84,21 @@ test('active icons respond immediately with no hold requirement', () => {
     f.fire('pointerdown');
     assert.equal(f.classes.has('is-picked-up'), true);
     assert.equal(f.context.canTruckLoad(f.card), true);
+    assert.equal(f.counts().pickupTones, 1);
+    assert.equal(f.counts().vibrations, 1);
     f.fire('pointerup');
     assert.equal(f.classes.has('is-picked-up'), false);
+});
+
+test('pickup tone is local, rising and lasts about 170 ms without using the voice player', () => {
+    const start = template.indexOf('function playExcavatorPickupTone()');
+    const end = template.indexOf('function playExcavatorTruckGrabFeedback()', start);
+    const source = template.slice(start, end);
+    assert.match(source, /var duration = \.17;/);
+    assert.match(source, /frequency\.setValueAtTime\(620/);
+    assert.match(source, /frequency\.exponentialRampToValueAtTime\(1120/);
+    assert.match(source, /context\.createOscillator\(\)/);
+    assert.doesNotMatch(source, /fetch\(|new Audio\(|MobileOperationalSounds|playExcavatorVoice/);
 });
 
 test('held passive icon uses the existing dispatch once when dropped on destination', () => {

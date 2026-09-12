@@ -25,8 +25,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "40",
-    versionName: "0.1.24",
+    versionCode: "42",
+    versionName: "0.1.26",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -91,8 +91,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "42",
-    versionName: "0.1.24",
+    versionCode: "44",
+    versionName: "0.1.26",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -102,8 +102,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "41",
-    versionName: "0.1.24-rc",
+    versionCode: "43",
+    versionName: "0.1.26-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -512,7 +512,7 @@ test("recorded equipment numbers are packaged and routed through native sequence
   const excavatorShellVersion = excavatorTemplate.match(
     /var excavatorShellVersion = "(excavator-mobile-shell-v\d+)";/
   )?.[1];
-  assert.equal(excavatorShellVersion, "excavator-mobile-shell-v223");
+  assert.equal(excavatorShellVersion, "excavator-mobile-shell-v227");
   const excavatorAssetVersions = [
     ...excavatorTemplate.matchAll(/\?v=(excavator-mobile-shell-v\d+)/g),
   ].map((match) => match[1]);
@@ -581,6 +581,14 @@ test("Android backup cannot export persisted WebView sessions", () => {
   );
   assert.match(manifest, /android:allowBackup="false"/);
   assert.doesNotMatch(manifest, /android:allowBackup="true"/);
+});
+
+test("Android shell declares vibration permission for WebView pickup feedback", () => {
+  const manifest = readFileSync(
+    resolve(root, "android", "app", "src", "main", "AndroidManifest.xml"),
+    "utf8"
+  );
+  assert.match(manifest, /android\.permission\.VIBRATE/);
 });
 
 test("native heartbeat follows the active-shift lifecycle and reports the exact APK version", () => {
