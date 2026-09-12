@@ -1861,8 +1861,8 @@ def dispatcher_shift_card_payload(shift):
         'last_seen_label': format_dispatcher_datetime(presence.get('last_seen_at')),
         'plan_group_name': shift.plan_group_name or '',
         'auto_close_at_label': (
-            format_dispatcher_datetime(shift.opened_at + EQUIPMENT_SHIFT_AUTO_CLOSE_AFTER)
-            if shift.opened_at and shift.equipment_id else ''
+            format_dispatcher_datetime(equipment_shift_auto_close_at(shift))
+            if shift.equipment_id else ''
         ),
         **dispatcher_shift_period_fields(shift),
         'start_fuel': dispatcher_shift_reading_label(shift.start_fuel),
@@ -7224,8 +7224,30 @@ SERVICE_CLOSE_KIND_LABELS = {
     SERVICE_CLOSE_AUTO_EXPIRED: 'Автоматически через 13 часов',
 }
 SERVICE_CLOSE_NEGLECTED_NOTE = 'Сотрудник не закрыл смену сам и не сообщил диспетчеру.'
-SERVICE_CLOSE_AUTO_NOTE = 'Закрыта автоматически: 13 часов с открытия, сотрудник не закрыл смену и не сообщил диспетчеру.'
-EQUIPMENT_SHIFT_AUTO_CLOSE_AFTER = timedelta(hours=13)
+SERVICE_CLOSE_AUTO_NOTE = (
+    'Закрыта автоматически в конце смены: сотрудник не закрыл её сам '
+    'и не сообщил диспетчеру.'
+)
+# Полчаса после конца производственной смены: 19:30 для первой смены и 07:30
+# для второй. Ранние комплексы (06:00-18:00) попадают в ту же отсечку.
+EQUIPMENT_SHIFT_AUTO_CLOSE_GRACE = timedelta(minutes=30)
+# Страховка для смен с неожиданным периодом — не дольше суток без малого.
+EQUIPMENT_SHIFT_AUTO_CLOSE_HARD_LIMIT = timedelta(hours=14)
+
+
+def equipment_shift_auto_close_at(shift):
+    """Когда смена закроется сама: конец её производственной смены плюс полчаса."""
+    if not shift or not shift.opened_at:
+        return None
+    work_date = production_work_date_for_shift(shift.opened_at, shift.shift_type)
+    try:
+        _, period_end = production_shift_bounds(work_date, shift.shift_type)
+    except (TypeError, ValueError):
+        return shift.opened_at + EQUIPMENT_SHIFT_AUTO_CLOSE_HARD_LIMIT
+    return min(
+        period_end + EQUIPMENT_SHIFT_AUTO_CLOSE_GRACE,
+        shift.opened_at + EQUIPMENT_SHIFT_AUTO_CLOSE_HARD_LIMIT,
+    )
 
 
 def normalize_service_close_kind(raw_kind, reason):
@@ -7296,10 +7318,15 @@ def auto_close_expired_equipment_shifts(now=None):
             .filter(
                 equipment__isnull=False,
                 closed_at__isnull=True,
-                opened_at__lte=now - EQUIPMENT_SHIFT_AUTO_CLOSE_AFTER,
+                opened_at__lte=now - EQUIPMENT_SHIFT_AUTO_CLOSE_GRACE,
             )
             .order_by('opened_at', 'id')
         )
+        expired = [
+            shift
+            for shift in expired
+            if (equipment_shift_auto_close_at(shift) or now) <= now
+        ]
         for shift in expired:
             finish_service_closed_shift(
                 shift,
