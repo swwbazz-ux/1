@@ -238,6 +238,9 @@ test('transfer countdown uses server time and never grants rights at local zero'
     assert.match(source, /Ожидает подтверждения/);
     assert.match(source, /is-transfer-awaiting-confirmation/);
     assert.match(source, /eoTransferDeadlineRefreshInFlight/);
+    assert.match(source, /eoTransferDeadlineRefreshRetryAt/);
+    assert.match(source, /eoTransferDeadlineRefreshFailures/);
+    assert.match(source, /Math\.min\(\s*30000/);
     assert.doesNotMatch(source, /eoTransferLastWake/);
     assert.doesNotMatch(source, /dataset\.eoCanLoad\s*=/);
     assert.doesNotMatch(source, /\.remove\(\)/);

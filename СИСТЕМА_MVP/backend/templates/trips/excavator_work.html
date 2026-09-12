@@ -6,14 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v230">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v230">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v230">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v230">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v230">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v230">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v230" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v230" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v231">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v231">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v231">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v231">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v231">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v231">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v231" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v231" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <meta name="theme-color" content="#D58B14">
@@ -424,7 +424,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v230";
+var excavatorShellVersion = "excavator-mobile-shell-v231";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1174,8 +1174,13 @@ function bindExcavatorTransferCountdowns(shell) {
             needsServerConfirmation = true;
         });
         if (!needsServerConfirmation) return;
+        var retryAt = Number(window.eoTransferDeadlineRefreshRetryAt || 0);
         var lastWake = Number(window.eoTransferDeadlineLastWake || 0);
-        if (Date.now() - lastWake < 5000 || window.eoTransferDeadlineRefreshInFlight) return;
+        if (
+            Date.now() < retryAt
+            || Date.now() - lastWake < 5000
+            || window.eoTransferDeadlineRefreshInFlight
+        ) return;
         window.eoTransferDeadlineLastWake = Date.now();
         if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
             try {
@@ -1185,7 +1190,22 @@ function bindExcavatorTransferCountdowns(shell) {
             }
         }
         window.eoTransferDeadlineRefreshInFlight = true;
-        refreshExcavatorWorkFromServer({preserveTab: true}).finally(function () {
+        refreshExcavatorWorkFromServer({preserveTab: true}).then(function (applied) {
+            if (applied) {
+                window.eoTransferDeadlineRefreshFailures = 0;
+                window.eoTransferDeadlineRefreshRetryAt = Date.now() + 5000;
+                return;
+            }
+            var failures = Math.min(
+                4,
+                Number(window.eoTransferDeadlineRefreshFailures || 0) + 1
+            );
+            window.eoTransferDeadlineRefreshFailures = failures;
+            window.eoTransferDeadlineRefreshRetryAt = Date.now() + Math.min(
+                30000,
+                5000 * Math.pow(2, failures - 1)
+            );
+        }).finally(function () {
             window.eoTransferDeadlineRefreshInFlight = false;
         });
     }
