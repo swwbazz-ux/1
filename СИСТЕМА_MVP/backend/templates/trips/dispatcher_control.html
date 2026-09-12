@@ -991,16 +991,21 @@
                             <dt>Длится</dt><dd data-gd-detail-shift-duration></dd>
                             <dt>Связь</dt><dd data-gd-detail-shift-presence></dd>
                             <dt>Последняя связь</dt><dd data-gd-detail-shift-seen></dd>
+                            <dt>Автозакрытие</dt><dd data-gd-detail-shift-autoclose></dd>
                             <dt hidden>Вид</dt><dd data-gd-detail-shift-type hidden></dd>
                         </dl>
                         <form class="gd-detail-shift-close" data-gd-detail-service-close method="post" action="" hidden>
                             {% csrf_token %}
-                            <button type="button" class="gd-detail-shift-close-toggle" data-gd-detail-service-close-toggle>Завершить смену</button>
+                            <input type="hidden" name="close_kind" value="neglected" data-gd-detail-service-close-kind>
+                            <div class="gd-detail-shift-close-choice">
+                                <button type="button" class="gd-detail-shift-close-toggle gd-detail-shift-close-neglect" data-gd-detail-service-close-neglect>Закрыть: сотрудник не закрыл сам</button>
+                                <button type="button" class="gd-detail-shift-close-toggle gd-detail-shift-close-agree" data-gd-detail-service-close-toggle>По согласованию…</button>
+                            </div>
                             <div class="gd-detail-shift-close-body" data-gd-detail-service-close-body hidden>
-                                <p>Смена закроется служебно от имени диспетчера. Открытые рейсы уйдут в перенос. Показания необязательны: если сотрудник их не сдал, оставьте поля пустыми.</p>
+                                <p>Сотрудник попросил закрыть смену (нет связи, сел телефон). Причина обязательна, показания — если он их продиктовал. Открытые рейсы уйдут в перенос.</p>
                                 <label>
                                     <span>Причина</span>
-                                    <input type="text" name="reason" maxlength="200" required placeholder="Например: машинист не вышел на связь">
+                                    <input type="text" name="reason" maxlength="200" required placeholder="Например: попросил по рации, нет интернета">
                                 </label>
                                 <div class="gd-detail-shift-close-readings">
                                     <label>
@@ -1019,7 +1024,7 @@
                                 <small class="gd-detail-shift-close-hint" data-gd-detail-service-close-hint hidden></small>
                                 <div class="gd-detail-shift-close-actions">
                                     <button type="button" class="gd-detail-shift-close-cancel" data-gd-detail-service-close-cancel>Отмена</button>
-                                    <button type="submit" class="gd-detail-shift-close-submit">Закрыть смену</button>
+                                    <button type="submit" class="gd-detail-shift-close-submit">Закрыть по согласованию</button>
                                 </div>
                             </div>
                         </form>
@@ -7446,6 +7451,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v90" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v91" defer></script>
 {% endif %}
 {% endblock %}

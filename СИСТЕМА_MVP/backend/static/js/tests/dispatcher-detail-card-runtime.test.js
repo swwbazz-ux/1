@@ -92,11 +92,19 @@ test("смена машиниста: сведения о смене и форм�
     assert.match(card, /<label data-gd-detail-service-close-mileage hidden>\s*<span>Одометр, км<\/span>\s*<input type="number" name="end_mileage" min="0" step="1" inputmode="numeric" placeholder="—">/);
     assert.match(card, /name="end_engine_hours" min="0" step="1" inputmode="numeric" placeholder="—">/);
     assert.doesNotMatch(card, /name="end_(fuel|mileage|engine_hours)"[^>]*required/);
-    assert.match(card, /Показания необязательны: если сотрудник их не сдал, оставьте поля пустыми\./);
+    assert.match(card, /Причина обязательна, показания — если он их продиктовал\./);
     assert.match(card, /data-gd-detail-service-close-hint hidden/);
-    assert.match(card, /data-gd-detail-service-close-toggle>Завершить смену</);
+    /* Два исхода: «не закрыл сам» одним нажатием, «по согласованию» — форма. */
+    assert.match(card, /<input type="hidden" name="close_kind" value="neglected" data-gd-detail-service-close-kind>/);
+    assert.match(card, /data-gd-detail-service-close-neglect>Закрыть: сотрудник не закрыл сам</);
+    assert.match(card, /data-gd-detail-service-close-toggle>По согласованию…</);
     assert.match(card, /data-gd-detail-service-close-cancel>Отмена</);
-    assert.match(card, /class="gd-detail-shift-close-submit">Закрыть смену</);
+    assert.match(card, /class="gd-detail-shift-close-submit">Закрыть по согласованию</);
+    assert.match(card, /<dt>Автозакрытие<\/dt><dd data-gd-detail-shift-autoclose><\/dd>/);
+    assert.match(JS, /submitDetailServiceClose\(\s*"neglected",/);
+    assert.match(JS, /submitDetailServiceClose\(\s*"coordinated",/);
+    assert.match(JS, /detailServiceCloseKind\.value = kind;/);
+    assert.match(CSS, /\.gd-detail-shift-close\.is-open \.gd-detail-shift-close-choice \{\s*display: none;/);
 });
 
 test("скрипт: смена приходит в карточке, форма получает action, одометр только у самосвала, подтверждение перед отправкой", () => {
@@ -104,7 +112,8 @@ test("скрипт: смена приходит в карточке, форма 
     assert.match(JS, /detailServiceClose\.hidden = !shift\.service_close_url;/);
     assert.match(JS, /detailServiceClose\.setAttribute\("action", shift\.service_close_url\)/);
     assert.match(JS, /detailServiceCloseMileage\.hidden = !shift\.is_truck;/);
-    assert.match(JS, /detailServiceCloseToggle\.disabled = dispatcherRoleIsReadonly\(\) \|\| !dispatcherShiftOpen;/);
+    assert.match(JS, /var closeLocked = dispatcherRoleIsReadonly\(\) \|\| !dispatcherShiftOpen;/);
+    assert.match(JS, /detailServiceCloseNeglect\.disabled = closeLocked;/);
     assert.match(JS, /function renderDetailShiftReadingBounds\(shift\)/);
     assert.match(JS, /hours\.max = String\(Math\.round\(startHours\) \+ 12\);/);
     assert.match(JS, /renderDetailShift\(data\.shift \|\| null, data\.employee \|\| null\);/);

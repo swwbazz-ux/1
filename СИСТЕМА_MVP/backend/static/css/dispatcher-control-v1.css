@@ -13941,6 +13941,38 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-manu
     outline: none;
 }
 
+/* --- Закрытие смены: две кнопки — «не закрыл сам» (главная, красная) и
+   «по согласованию…» (второстепенная, раскрывает форму). --- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-choice {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close.is-open .gd-detail-shift-close-choice {
+    display: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-neglect {
+    background: var(--gd-red-soft);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-agree {
+    width: auto;
+    padding-left: 12px;
+    padding-right: 12px;
+    border-color: var(--gd-detail-line);
+    color: var(--gd-detail-muted);
+    white-space: nowrap;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-agree:hover,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-agree:focus-visible {
+    background: color-mix(in srgb, var(--gd-detail-muted) 14%, transparent);
+    color: var(--gd-detail-ink);
+}
+
 /* --- Читаемость: карточка целиком крупнее на треть. Внутри все размеры в px,
    поэтому масштабируем панель через zoom, а ширину/высоту делим на тот же
    коэффициент — --gd-vw/--gd-vh заданы в px и внутри zoom тоже растут. --- */

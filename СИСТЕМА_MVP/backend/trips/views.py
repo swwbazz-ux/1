@@ -1860,6 +1860,10 @@ def dispatcher_shift_card_payload(shift):
         'presence_label': presence.get('status_label') or 'Не подключался',
         'last_seen_label': format_dispatcher_datetime(presence.get('last_seen_at')),
         'plan_group_name': shift.plan_group_name or '',
+        'auto_close_at_label': (
+            format_dispatcher_datetime(shift.opened_at + EQUIPMENT_SHIFT_AUTO_CLOSE_AFTER)
+            if shift.opened_at and shift.equipment_id else ''
+        ),
         **dispatcher_shift_period_fields(shift),
         'start_fuel': dispatcher_shift_reading_label(shift.start_fuel),
         'start_mileage': dispatcher_shift_reading_label(shift.start_mileage),
@@ -6551,6 +6555,10 @@ def dispatcher_control_view(
 ):
     requested_fragment = request.GET.get('_operational_fragment', '').strip()
     reconcile_due_haul_assignments()
+    try:
+        auto_close_expired_equipment_shifts()
+    except Exception:  # noqa: BLE001 — пульт важнее таймера, ошибку только пишем
+        logger.exception('auto_close_expired_equipment_shifts failed')
     if access_override is None:
         access_id = request.session.get('employee_access_id')
         if not access_id:
@@ -6945,9 +6953,12 @@ def dispatcher_service_close_shift_view(request, shift_id):
     if request.method != 'POST':
         return redirect(redirect_url)
     reason = request.POST.get('reason', '').strip()
-    if not reason:
-        messages.error(request, 'Укажите причину служебного закрытия смены.')
+    close_kind = normalize_service_close_kind(request.POST.get('close_kind'), reason)
+    if close_kind == SERVICE_CLOSE_COORDINATED and not reason:
+        messages.error(request, 'Укажите причину закрытия смены по согласованию с сотрудником.')
         return redirect(redirect_url)
+    if not reason:
+        reason = SERVICE_CLOSE_NEGLECTED_NOTE
 
     shift_reference = (
         EmployeeShift.objects
@@ -7009,7 +7020,7 @@ def dispatcher_service_close_shift_view(request, shift_id):
     reading_fields = []
     # Показания необязательны: сотрудник, не закрывший смену, их не сдал, и
     # требовать их с диспетчера нелогично. Введённые проверяем как раньше.
-    readings_provided = any(
+    readings_provided = close_kind == SERVICE_CLOSE_COORDINATED and any(
         str(request.POST.get(key) or '').strip()
         for key in ('end_fuel', 'end_mileage', 'end_engine_hours')
     )
@@ -7053,31 +7064,13 @@ def dispatcher_service_close_shift_view(request, shift_id):
             shift.end_engine_hours = engine_hours
             reading_fields = ['end_fuel', 'end_mileage', 'end_engine_hours']
 
-    shift.closed_at = timezone.now()
-    shift.closed_by = access.employee
-    shift.is_service_closed = True
-    shift.save(update_fields=[*reading_fields, 'closed_at', 'closed_by', 'is_service_closed'])
-    if shift.equipment_id:
-        if equipment_is_truck(shift.equipment):
-            Trip.objects.filter(
-                truck=shift.equipment,
-                status__in=OPEN_TRIP_STATUSES,
-            ).update(is_carryover=True)
-            from reports.driver_shift_passport_snapshots import (
-                enqueue_driver_shift_passport_capture,
-            )
-            from reports.models import DriverShiftPassportTrigger
-
-            enqueue_driver_shift_passport_capture(
-                shift=shift,
-                trigger=DriverShiftPassportTrigger.SERVICE_CLOSE,
-                captured_by=access.employee,
-            )
-        else:
-            Trip.objects.filter(
-                loading_shift=shift,
-                status__in=OPEN_TRIP_STATUSES,
-            ).update(is_carryover=True)
+    finish_service_closed_shift(
+        shift,
+        closed_by=access.employee,
+        close_kind=close_kind,
+        note=reason,
+        reading_fields=reading_fields,
+    )
     log_dispatcher_action(
         actor=access.employee,
         action_type=DispatcherActionType.SERVICE_CLOSE_SHIFT,
@@ -7085,7 +7078,10 @@ def dispatcher_service_close_shift_view(request, shift_id):
         target_summary=f'{shift.employee} / {shift.equipment or "-"} / {shift.get_shift_type_display()}',
         reason=reason,
     )
-    messages.success(request, f'Смена сотрудника {shift.employee} закрыта служебно.')
+    if close_kind == SERVICE_CLOSE_COORDINATED:
+        messages.success(request, f'Смена сотрудника {shift.employee} закрыта по согласованию с ним.')
+    else:
+        messages.success(request, f'Смена сотрудника {shift.employee} закрыта: сотрудник не закрыл её сам.')
     return redirect(redirect_url)
 
 
@@ -7214,6 +7210,111 @@ def dispatcher_cancel_trip_view(request, trip_id):
     )
     messages.success(request, f'Рейс {trip.truck} -> {trip.dump_point} отменен.')
     return redirect(redirect_url)
+
+
+SERVICE_CLOSE_NEGLECTED = 'neglected'
+SERVICE_CLOSE_COORDINATED = 'coordinated'
+SERVICE_CLOSE_AUTO_EXPIRED = 'auto_expired'
+SERVICE_CLOSE_KIND_LABELS = {
+    SERVICE_CLOSE_NEGLECTED: 'Сотрудник не закрыл сам',
+    SERVICE_CLOSE_COORDINATED: 'По согласованию с диспетчером',
+    SERVICE_CLOSE_AUTO_EXPIRED: 'Автоматически через 13 часов',
+}
+SERVICE_CLOSE_NEGLECTED_NOTE = 'Сотрудник не закрыл смену сам и не сообщил диспетчеру.'
+SERVICE_CLOSE_AUTO_NOTE = 'Закрыта автоматически: 13 часов с открытия, сотрудник не закрыл смену и не сообщил диспетчеру.'
+EQUIPMENT_SHIFT_AUTO_CLOSE_AFTER = timedelta(hours=13)
+
+
+def normalize_service_close_kind(raw_kind, reason):
+    """Вид закрытия из формы; старые формы без поля — по наличию причины."""
+    kind = str(raw_kind or '').strip()
+    if kind in SERVICE_CLOSE_KIND_LABELS and kind != SERVICE_CLOSE_AUTO_EXPIRED:
+        return kind
+    return SERVICE_CLOSE_COORDINATED if reason else SERVICE_CLOSE_NEGLECTED
+
+
+def finish_service_closed_shift(shift, *, closed_by, close_kind, note, reading_fields=(), now=None):
+    """Общий хвост служебного закрытия: пометки на смене, перенос рейсов, паспорт."""
+    shift.closed_at = now or timezone.now()
+    shift.closed_by = closed_by
+    shift.is_service_closed = True
+    shift.service_close_kind = close_kind
+    shift.service_close_note = str(note or '')[:255]
+    shift.save(update_fields=[
+        *reading_fields,
+        'closed_at',
+        'closed_by',
+        'is_service_closed',
+        'service_close_kind',
+        'service_close_note',
+    ])
+    if not shift.equipment_id:
+        return
+    if equipment_is_truck(shift.equipment):
+        Trip.objects.filter(
+            truck=shift.equipment,
+            status__in=OPEN_TRIP_STATUSES,
+        ).update(is_carryover=True)
+        from reports.driver_shift_passport_snapshots import (
+            enqueue_driver_shift_passport_capture,
+        )
+        from reports.models import DriverShiftPassportTrigger
+
+        enqueue_driver_shift_passport_capture(
+            shift=shift,
+            trigger=DriverShiftPassportTrigger.SERVICE_CLOSE,
+            captured_by=closed_by,
+        )
+    else:
+        Trip.objects.filter(
+            loading_shift=shift,
+            status__in=OPEN_TRIP_STATUSES,
+        ).update(is_carryover=True)
+
+
+def auto_close_expired_equipment_shifts(now=None):
+    """13 часов с открытия — смена техники закрывается сама как незакрытая сотрудником.
+
+    Смена длится 12 часов; лишний час — запас, чтобы сотрудник без связи успел
+    попросить диспетчера закрыть смену по согласованию. Вызывается таймером
+    (close_expired_shifts) и при каждой загрузке пульта.
+    """
+    now = now or timezone.now()
+    closed = []
+    with transaction.atomic():
+        expired = list(
+            EmployeeShift.objects
+            .select_for_update(of=('self',), skip_locked=True)
+            .select_related('employee', 'equipment', 'equipment__equipment_type')
+            .filter(
+                equipment__isnull=False,
+                closed_at__isnull=True,
+                opened_at__lte=now - EQUIPMENT_SHIFT_AUTO_CLOSE_AFTER,
+            )
+            .order_by('opened_at', 'id')
+        )
+        for shift in expired:
+            finish_service_closed_shift(
+                shift,
+                closed_by=None,
+                close_kind=SERVICE_CLOSE_AUTO_EXPIRED,
+                note=SERVICE_CLOSE_AUTO_NOTE,
+                now=now,
+            )
+            closed.append(shift)
+        if closed:
+            bump_operational_state(
+                'Shift:auto_close_expired',
+                event_type='shift_changed',
+                object_type='EmployeeShift',
+                object_id=closed[-1].id,
+                payload={
+                    'action': 'auto_close_expired_shifts',
+                    'shift_ids': [shift.id for shift in closed],
+                    'equipment_ids': [shift.equipment_id for shift in closed],
+                },
+            )
+    return closed
 
 
 def parse_dispatcher_manual_trip_time(raw_value, *, now):

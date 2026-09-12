@@ -234,26 +234,55 @@ class DispatcherServiceCloseWithoutReadingsTests(TestCase):
     def messages_text(self, response):
         return ' | '.join(str(message) for message in get_messages(response.wsgi_request))
 
-    def test_shift_closes_without_readings_when_fields_are_empty(self):
-        response = self.client.post(self.url, {
-            'reason': 'водитель не закрыл смену',
-            'end_fuel': '',
-            'end_mileage': '',
-            'end_engine_hours': '',
-        })
+    def test_neglected_close_needs_only_one_click(self):
+        """«Не закрыл сам»: без причины и показаний, в журнале — отметка о невыполненной обязанности."""
+        response = self.client.post(self.url, {'close_kind': 'neglected'})
 
-        self.assertIn('закрыта служебно', self.messages_text(response))
+        self.assertIn('сотрудник не закрыл её сам', self.messages_text(response))
         self.truck_shift.refresh_from_db()
         self.assertIsNotNone(self.truck_shift.closed_at)
         self.assertTrue(self.truck_shift.is_service_closed)
         self.assertEqual(self.truck_shift.closed_by, self.dispatcher)
+        self.assertEqual(self.truck_shift.service_close_kind, 'neglected')
+        self.assertIn('не закрыл смену сам', self.truck_shift.service_close_note)
         self.assertIsNone(self.truck_shift.end_fuel)
         self.assertIsNone(self.truck_shift.end_mileage)
         self.assertIsNone(self.truck_shift.end_engine_hours)
+        log = DispatcherActionLog.objects.get(shift=self.truck_shift)
+        self.assertEqual(log.reason, self.truck_shift.service_close_note)
 
-    def test_partial_readings_are_still_validated(self):
+    def test_neglected_close_ignores_readings_even_if_sent(self):
+        response = self.client.post(self.url, {'close_kind': 'neglected', 'end_fuel': '500'})
+
+        self.assertIn('сотрудник не закрыл её сам', self.messages_text(response))
+        self.truck_shift.refresh_from_db()
+        self.assertIsNotNone(self.truck_shift.closed_at)
+        self.assertIsNone(self.truck_shift.end_fuel)
+
+    def test_coordinated_close_requires_reason_and_keeps_optional_readings(self):
+        response = self.client.post(self.url, {'close_kind': 'coordinated', 'reason': ''})
+        self.assertIn('Укажите причину закрытия смены по согласованию', self.messages_text(response))
+        self.truck_shift.refresh_from_db()
+        self.assertIsNone(self.truck_shift.closed_at)
+
         response = self.client.post(self.url, {
-            'reason': 'водитель не закрыл смену',
+            'close_kind': 'coordinated',
+            'reason': 'попросил по рации, нет интернета',
+            'end_fuel': '',
+            'end_mileage': '',
+            'end_engine_hours': '',
+        })
+        self.assertIn('закрыта по согласованию', self.messages_text(response))
+        self.truck_shift.refresh_from_db()
+        self.assertIsNotNone(self.truck_shift.closed_at)
+        self.assertEqual(self.truck_shift.service_close_kind, 'coordinated')
+        self.assertEqual(self.truck_shift.service_close_note, 'попросил по рации, нет интернета')
+        self.assertIsNone(self.truck_shift.end_fuel)
+
+    def test_coordinated_partial_readings_are_still_validated(self):
+        response = self.client.post(self.url, {
+            'close_kind': 'coordinated',
+            'reason': 'попросил по рации',
             'end_fuel': '500',
             'end_mileage': '',
             'end_engine_hours': '',
@@ -262,6 +291,44 @@ class DispatcherServiceCloseWithoutReadingsTests(TestCase):
         self.assertIn('Укажите показание на конец смены', self.messages_text(response))
         self.truck_shift.refresh_from_db()
         self.assertIsNone(self.truck_shift.closed_at)
+
+    def test_legacy_form_without_kind_is_coordinated_when_reason_given(self):
+        response = self.client.post(self.url, {'reason': 'из шапки пульта'})
+
+        self.assertIn('закрыта по согласованию', self.messages_text(response))
+        self.truck_shift.refresh_from_db()
+        self.assertEqual(self.truck_shift.service_close_kind, 'coordinated')
+
+    def test_expired_shift_closes_automatically_after_13_hours(self):
+        from trips.views import auto_close_expired_equipment_shifts
+
+        self.truck_shift.opened_at = timezone.now() - timedelta(hours=12, minutes=50)
+        self.truck_shift.save(update_fields=['opened_at'])
+        self.assertEqual(auto_close_expired_equipment_shifts(), [])
+        self.truck_shift.refresh_from_db()
+        self.assertIsNone(self.truck_shift.closed_at, 'до 13 часов смена остаётся открытой')
+
+        self.truck_shift.opened_at = timezone.now() - timedelta(hours=13, minutes=1)
+        self.truck_shift.save(update_fields=['opened_at'])
+        closed = auto_close_expired_equipment_shifts()
+        self.assertEqual([shift.id for shift in closed], [self.truck_shift.id])
+        self.truck_shift.refresh_from_db()
+        self.assertIsNotNone(self.truck_shift.closed_at)
+        self.assertTrue(self.truck_shift.is_service_closed)
+        self.assertIsNone(self.truck_shift.closed_by)
+        self.assertEqual(self.truck_shift.service_close_kind, 'auto_expired')
+        self.assertIn('13 часов', self.truck_shift.service_close_note)
+        self.assertEqual(auto_close_expired_equipment_shifts(), [], 'повторный запуск ничего не трогает')
+
+    def test_dispatcher_board_load_closes_expired_shifts(self):
+        self.truck_shift.opened_at = timezone.now() - timedelta(hours=14)
+        self.truck_shift.save(update_fields=['opened_at'])
+
+        response = self.client.get(reverse('dispatcher_control'))
+
+        self.assertEqual(response.status_code, 200)
+        self.truck_shift.refresh_from_db()
+        self.assertEqual(self.truck_shift.service_close_kind, 'auto_expired')
 
 
 class DispatcherShiftPeriodFieldsTests(TestCase):

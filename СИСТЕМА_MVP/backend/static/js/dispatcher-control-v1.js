@@ -74,6 +74,9 @@ document.addEventListener("DOMContentLoaded", function () {
     var detailServiceCloseBody = document.querySelector("[data-gd-detail-service-close-body]");
     var detailServiceCloseCancel = document.querySelector("[data-gd-detail-service-close-cancel]");
     var detailServiceCloseMileage = document.querySelector("[data-gd-detail-service-close-mileage]");
+    var detailServiceCloseNeglect = document.querySelector("[data-gd-detail-service-close-neglect]");
+    var detailServiceCloseKind = document.querySelector("[data-gd-detail-service-close-kind]");
+    var detailShiftAutoClose = document.querySelector("[data-gd-detail-shift-autoclose]");
     var detailServiceCloseHint = document.querySelector("[data-gd-detail-service-close-hint]");
     var detailCrewTitle = document.querySelector("[data-gd-detail-crew-title]");
     var detailShiftVerdict = document.querySelector("[data-gd-detail-shift-verdict]");
@@ -1951,9 +1954,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 var mileage = detailServiceCloseMileage.querySelector("input");
                 if (mileage) mileage.required = false;
             }
-            if (detailServiceCloseToggle) {
-                detailServiceCloseToggle.disabled = dispatcherRoleIsReadonly() || !dispatcherShiftOpen;
-            }
+            var closeLocked = dispatcherRoleIsReadonly() || !dispatcherShiftOpen;
+            if (detailServiceCloseToggle) detailServiceCloseToggle.disabled = closeLocked;
+            if (detailServiceCloseNeglect) detailServiceCloseNeglect.disabled = closeLocked;
+            if (detailShiftAutoClose) detailShiftAutoClose.textContent = shift.auto_close_at_label ? shift.auto_close_at_label + " (13 ч с открытия)" : "—";
             renderDetailShiftReadingBounds(shift);
         }
     }
@@ -2703,22 +2707,46 @@ document.addEventListener("DOMContentLoaded", function () {
             });
         });
     }
+    /* Два исхода: «не закрыл сам» — одно нажатие без полей (в журнале это
+       значит, что сотрудник не выполнил обязанность); «по согласованию» —
+       форма с причиной и показаниями по желанию. Вид уходит в close_kind. */
+    function submitDetailServiceClose(kind, title, message) {
+        if (!detailServiceClose || !detailServiceClose.getAttribute("action")) return;
+        if (detailServiceCloseKind) detailServiceCloseKind.value = kind;
+        if (typeof window.openAppConfirmDialog !== "function") {
+            detailServiceClose.submit();
+            return;
+        }
+        window.openAppConfirmDialog(message, function () { detailServiceClose.submit(); }, 0, "Закрыть смену", {
+            confirmTitle: title,
+            confirmDescription: message
+        });
+    }
+    function detailServiceCloseSubject() {
+        var card = equipmentCards[String(detailLayer ? detailLayer.dataset.gdActiveCardId || "" : "")] || {};
+        var employee = card.employee || {};
+        return (employee.name || "сотрудника") + " на " + (card.label || (detailTitle ? detailTitle.textContent : "") || "технике");
+    }
+    if (detailServiceCloseNeglect) {
+        detailServiceCloseNeglect.addEventListener("click", function () {
+            if (detailServiceCloseNeglect.disabled) return;
+            submitDetailServiceClose(
+                "neglected",
+                "Сотрудник не закрыл смену сам?",
+                "Закрыть смену " + detailServiceCloseSubject() + " как незакрытую сотрудником? Причина и показания не нужны; в журнале будет отмечено, что сотрудник не закрыл смену и не сообщил диспетчеру."
+            );
+        });
+    }
     if (detailServiceClose) {
         detailServiceClose.addEventListener("submit", function (event) {
             event.preventDefault();
             if (!detailServiceClose.getAttribute("action")) return;
             if (typeof detailServiceClose.reportValidity === "function" && !detailServiceClose.reportValidity()) return;
-            var card = equipmentCards[String(detailLayer ? detailLayer.dataset.gdActiveCardId || "" : "")] || {};
-            var employee = card.employee || {};
-            var message = "Служебно закрыть смену " + (employee.name || "сотрудника") + " на " + (card.label || (detailTitle ? detailTitle.textContent : "") || "технике") + "? Открытые рейсы уйдут в перенос.";
-            if (typeof window.openAppConfirmDialog !== "function") {
-                detailServiceClose.submit();
-                return;
-            }
-            window.openAppConfirmDialog(message, function () { detailServiceClose.submit(); }, 0, "Закрыть смену", {
-                confirmTitle: "Закрыть смену служебно?",
-                confirmDescription: message
-            });
+            submitDetailServiceClose(
+                "coordinated",
+                "Закрыть смену по согласованию?",
+                "Закрыть смену " + detailServiceCloseSubject() + " по согласованию с сотрудником? Открытые рейсы уйдут в перенос."
+            );
         });
     }
 
