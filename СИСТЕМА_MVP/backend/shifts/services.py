@@ -196,13 +196,6 @@ def handover_other_role_shift(shift, *, closed_by):
     shift.save(update_fields=['closed_at', 'closed_by', 'is_service_closed'])
     from downtimes.driver_workflow import close_workflow_downtimes
     close_workflow_downtimes(shift.equipment, ended_at=now)
-    if shift.equipment_id and not equipment_is_truck(shift.equipment):
-        from assignments.services import release_haul_assignments_for_excavator
-        release_haul_assignments_for_excavator(
-            shift.equipment,
-            now=now,
-            reason='role_handover',
-        )
     from trips.models import OPEN_TRIP_STATUSES
     if shift.equipment_id:
         if equipment_is_truck(shift.equipment):
@@ -1744,12 +1737,6 @@ def close_excavator_shift(
     shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
     from downtimes.driver_workflow import close_workflow_downtimes
     close_workflow_downtimes(shift.equipment, ended_at=shift.closed_at)
-    from assignments.services import release_haul_assignments_for_excavator
-    release_haul_assignments_for_excavator(
-        shift.equipment,
-        now=shift.closed_at,
-        reason='excavator_shift_closed',
-    )
     # Переходное право существует только до конца конкретной смены старого
     # экскаватора. После закрытия оно не должно всплыть в следующей смене.
     from assignments.services import expire_haul_handoffs_for_shift
