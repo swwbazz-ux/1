@@ -6,14 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v227">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v227">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v227">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v227">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v227">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v227">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v227" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v227" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v229">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v229">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v229">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v229">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v229">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v229">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v229" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v229" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <meta name="theme-color" content="#D58B14">
@@ -27,6 +27,7 @@
     class="eo-shell"
     data-eo-shell
     data-eo-active-tab="trucks"
+    data-eo-server-now="{{ server_now|date:'c' }}"
     data-eo-current-excavator-id="{% if current_excavator %}{{ current_excavator.id }}{% endif %}"
     data-eo-shift-excavator-id="{% if shift_start_excavator %}{{ shift_start_excavator.id }}{% endif %}"
     data-native-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}"
@@ -172,15 +173,16 @@
                 <div class="eo-truck-grid eo-dashboard-truck-grid{% if not truck_cards %} is-empty{% elif truck_cards|length > 9 %} is-many is-rows-4{% else %} is-rows-3{% endif %}" aria-label="Самосвалы">
                     {% for card in truck_cards %}
                             <button
-                                class="eo-truck-card eo-dashboard-truck-card{% if card.manual_available %} is-manual-passive{% endif %} status-{{ card.status_key }}{% if open_shift and card.is_selected %} is-selected{% endif %}{% if card.is_inactive %} is-inactive{% endif %}{% if card.is_load_blocked %} is-load-blocked{% endif %}{% if card.is_handoff_completion %} is-handoff-completion{% endif %}{% if card.load_block_reason_code == 'driver_shift_not_started' %} is-shift-pending{% endif %}{% if card.load_block_reason_code == 'no_driver' %} is-no-driver{% endif %}{% if card.plan_visual.is_overrun %} is-plan-overrun{% endif %}"
+                                class="eo-truck-card eo-dashboard-truck-card{% if card.manual_available %} is-manual-passive{% endif %} status-{{ card.status_key }}{% if open_shift and card.is_selected %} is-selected{% endif %}{% if card.is_inactive %} is-inactive{% endif %}{% if card.is_load_blocked %} is-load-blocked{% endif %}{% if card.transfer %} is-transfer-{{ card.transfer.direction }}{% endif %}{% if card.load_block_reason_code == 'driver_shift_not_started' %} is-shift-pending{% endif %}{% if card.load_block_reason_code == 'no_driver' %} is-no-driver{% endif %}{% if card.plan_visual.is_overrun %} is-plan-overrun{% endif %}"
                                 type="button"
                                 draggable="{% if open_shift and card.can_drag %}true{% else %}false{% endif %}"
-                                style="--eo-truck-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --eo-truck-total-progress: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}%; --plan-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --truck-plan-percent: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %};"
+                                style="--eo-truck-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --eo-truck-total-progress: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}%; --plan-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --truck-plan-percent: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}; --eo-transfer-progress: 0;"
                                 data-eo-truck-card
                                 data-eo-manual-available="{% if open_shift and card.manual_available %}1{% else %}0{% endif %}"
                                 data-eo-open-trip-id="{{ card.open_trip_id }}"
                                 data-eo-dashboard-truck
                                 data-assignment-id="{{ card.assignment.id }}"
+                                {% if card.transfer %}data-eo-transfer-direction="{{ card.transfer.direction }}" data-eo-transfer-created="{{ card.transfer.created_at|date:'c' }}" data-eo-transfer-deadline="{{ card.transfer.deadline|date:'c' }}"{% endif %}
                                 data-truck-id="{{ card.assignment.truck.id }}"
                                 data-eo-truck-number="{{ card.number }}"
                                 data-eo-truck-detail-id="{{ card.detail_card_id }}"
@@ -203,6 +205,12 @@
                                 <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
                                 <strong>{{ card.number }}</strong>
                                 <span>{{ card.status_label }}</span>
+                                {% if card.transfer %}
+                                    <span class="eo-transfer-status" role="status">
+                                        Перевод {% if card.transfer.direction == 'incoming' %}с {{ card.transfer.source_label }}{% else %}на {{ card.transfer.target_label }}{% endif %} · <b data-eo-transfer-countdown>--:--</b>
+                                    </span>
+                                    <u class="eo-transfer-glow" aria-hidden="true"></u>
+                                {% endif %}
                                 <small>{% if card.plan_has_plan %}{{ card.plan_percent }}%{% else %}{{ card.plan_short_label }}{% endif %}</small>
                                 {% if card.plan_visual.has_completed_loops %}<b class="eo-truck-progress-loop" aria-label="Завершено циклов: {{ card.plan_visual.completed_loops }}">×{{ card.plan_visual.completed_loops }}</b>{% endif %}
                                 {% if card.target_label %}<em>{{ card.target_label }}</em>{% endif %}
@@ -233,7 +241,7 @@
                             <span class="eo-dashboard-unload-label">Разгружено</span>
                             <span class="eo-dashboard-unload-badges" aria-label="Назначены, не разгружены">
                                 {% for truck in card.pending_trucks %}
-                                    <b class="status-{{ truck.status_key }}{% if truck.is_last_sent %} is-last-sent-truck{% endif %}" data-eo-queue-truck data-truck-id="{{ truck.truck_id }}" data-trip-id="{{ truck.trip_id }}" data-eo-truck-number="{{ truck.number }}" data-eo-last-sent-truck="{% if truck.is_last_sent %}true{% else %}false{% endif %}">{{ truck.number }}</b>
+                                    <b class="status-{{ truck.status_key }}{% if truck.is_last_sent %} is-last-sent-truck{% endif %}" data-eo-queue-truck data-truck-id="{{ truck.truck_id }}" data-trip-id="{{ truck.trip_id }}" data-eo-truck-number="{{ truck.number }}" data-eo-last-sent-truck="{% if truck.is_last_sent %}true{% else %}false{% endif %}"{% if truck.auto_hide_at %} data-eo-manual-preview-expires-at="{{ truck.auto_hide_at|date:'c' }}"{% endif %}>{{ truck.number }}</b>
                                 {% empty %}
                                     <b class="is-muted">нет</b>
                                 {% endfor %}
@@ -416,7 +424,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v227";
+var excavatorShellVersion = "excavator-mobile-shell-v229";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1108,6 +1116,57 @@ function refreshExcavatorWorkFromServer(options) {
 }
 
 window.refreshExcavatorWorkFromServer = refreshExcavatorWorkFromServer;
+
+function bindExcavatorTransferCountdowns(shell) {
+    if (window.eoTransferCountdownTimer) {
+        window.clearInterval(window.eoTransferCountdownTimer);
+        window.eoTransferCountdownTimer = null;
+    }
+    if (!shell) return;
+    var cards = Array.prototype.slice.call(shell.querySelectorAll("[data-eo-transfer-deadline]"));
+    if (!cards.length) return;
+    var serverEpoch = Date.parse(shell.dataset.eoServerNow || "");
+    var clientEpoch = Date.now();
+    if (!Number.isFinite(serverEpoch)) serverEpoch = clientEpoch;
+
+    function tick() {
+        var authoritativeNow = serverEpoch + (Date.now() - clientEpoch);
+        cards.forEach(function (card) {
+            if (!card.isConnected) return;
+            var createdAt = Date.parse(card.dataset.eoTransferCreated || "");
+            var deadline = Date.parse(card.dataset.eoTransferDeadline || "");
+            if (!Number.isFinite(deadline)) return;
+            var remainingMs = Math.max(0, deadline - authoritativeNow);
+            var remainingSeconds = Math.ceil(remainingMs / 1000);
+            var minutes = Math.floor(remainingSeconds / 60);
+            var seconds = remainingSeconds % 60;
+            var counter = card.querySelector("[data-eo-transfer-countdown]");
+            if (counter) counter.textContent = minutes + ":" + String(seconds).padStart(2, "0");
+            if (Number.isFinite(createdAt) && deadline > createdAt) {
+                var progress = Math.max(0, Math.min(1, (authoritativeNow - createdAt) / (deadline - createdAt)));
+                card.style.setProperty("--eo-transfer-progress", progress.toFixed(4));
+                if (card.dataset.eoTransferDirection === "outgoing") {
+                    card.style.setProperty("--eo-transfer-veil-opacity", (.08 + (.52 * progress)).toFixed(4));
+                } else {
+                    card.style.setProperty("--eo-transfer-veil-opacity", (.48 * (1 - progress)).toFixed(4));
+                }
+            }
+            if (remainingMs > 0) return;
+            // Ноль на клиентском таймере не меняет права и не удаляет карточку.
+            // Просим сервер применить срок и ждём подтверждённый фрагмент.
+            var lastWake = Number(card.dataset.eoTransferLastWake || 0);
+            if (Date.now() - lastWake < 5000) return;
+            card.dataset.eoTransferLastWake = String(Date.now());
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("haul_transfer_deadline");
+            }
+            refreshExcavatorWorkFromServer({preserveTab: true});
+        });
+    }
+    tick();
+    window.eoTransferCountdownTimer = window.setInterval(tick, 1000);
+}
+
 // Присутствие истекает без изменения рейса; обновляем его и при неизменной версии.
 if (!window.eoDriverPresenceRefreshTimer) {
     window.eoDriverPresenceRefreshTimer = window.setInterval(function () {
@@ -1152,6 +1211,7 @@ window.applyOperationalStateRefresh = function (context) {
 window.initExcavatorWorkShell = function () {
     var shell = document.querySelector("[data-eo-shell]");
     if (!shell) return;
+    bindExcavatorTransferCountdowns(shell);
     if (shell.dataset.eoInitialized === "1") return;
     shell.dataset.eoInitialized = "1";
 
@@ -1752,6 +1812,55 @@ window.initExcavatorWorkShell = function () {
             badge.dataset.tripId = String(tripId);
         }
     }
+
+    function bindManualDumpCardExpiry(shellRoot) {
+        if (window.eoManualQueuePreviewTimer) {
+            window.clearInterval(window.eoManualQueuePreviewTimer);
+            window.eoManualQueuePreviewTimer = null;
+        }
+        if (!shellRoot) return;
+        var badges = Array.prototype.slice.call(
+            shellRoot.querySelectorAll("[data-eo-queue-truck][data-eo-manual-preview-expires-at]")
+        ).map(function (badge) {
+            return {
+                badge: badge,
+                tripId: String(badge.dataset.tripId || ""),
+                deadline: Date.parse(badge.dataset.eoManualPreviewExpiresAt || "")
+            };
+        }).filter(function (entry) {
+            return entry.tripId && Number.isFinite(entry.deadline);
+        });
+        if (!badges.length) return;
+        var serverEpoch = Date.parse(shellRoot.dataset.eoServerNow || "");
+        var clientEpoch = Date.now();
+        if (!Number.isFinite(serverEpoch)) serverEpoch = clientEpoch;
+
+        function tick() {
+            var authoritativeNow = serverEpoch + (Date.now() - clientEpoch);
+            badges.forEach(function (entry) {
+                var badge = entry.badge;
+                if (!badge.isConnected || entry.deadline > authoritativeNow) return;
+                if (String(badge.dataset.tripId || "") !== entry.tripId) return;
+                var list = badge.closest ? badge.closest(".eo-dashboard-unload-badges") : null;
+                badge.remove();
+                shellRoot.querySelectorAll('[data-eo-dump-queue-list] [data-trip-id="' + entry.tripId + '"]').forEach(function (item) {
+                    item.remove();
+                });
+                markLatestPendingTruckBadge(list);
+                ensureMutedPendingBadge(list);
+            });
+            if (!badges.some(function (entry) { return entry.badge.isConnected; }) && window.eoManualQueuePreviewTimer) {
+                window.clearInterval(window.eoManualQueuePreviewTimer);
+                window.eoManualQueuePreviewTimer = null;
+            }
+        }
+        tick();
+        if (badges.some(function (entry) { return entry.badge.isConnected; })) {
+            window.eoManualQueuePreviewTimer = window.setInterval(tick, 1000);
+        }
+    }
+
+    bindManualDumpCardExpiry(shell);
 
     function restoreTruckAfterLoadedCancel(card, data) {
         if (!card) return;
@@ -2364,6 +2473,7 @@ window.initExcavatorWorkShell = function () {
         card.dataset.eoLoadActionId = loadActionId;
         var payload = {
             client_action_id: loadActionId,
+            assignment_id: card.dataset.assignmentId || "",
             manual_control: card.dataset.eoManualAvailable === "1",
             expected_open_trip_id: card.dataset.eoOpenTripId || "",
             truck_id: card.dataset.truckId || "",
@@ -2422,6 +2532,10 @@ window.initExcavatorWorkShell = function () {
             refreshExcavatorWorkFromServer({ preserveTab: true });
             markLastDumpTarget(dumpTarget);
             updatePendingTruckBadgeTrip(dumpTarget, truckId, data.trip_id || "");
+            if (optimisticBadge && data.dump_badge_auto_hide_at) {
+                optimisticBadge.dataset.eoManualPreviewExpiresAt = data.dump_badge_auto_hide_at;
+                bindManualDumpCardExpiry(shell);
+            }
             if (data.downtime_status) {
                 if (data.downtime_status.active) {
                     applyActiveDowntime(data.downtime_status);
@@ -2465,7 +2579,14 @@ window.initExcavatorWorkShell = function () {
         preview.classList.add("is-drag-preview", "truck-drag-preview");
         // Только копия для перетаскивания: состояния исходного самосвала сохраняются.
         preview.classList.remove("is-selected", "is-dragging", "is-load-blocked",
-            "is-shift-pending", "is-no-driver", "is-inactive", "is-manual-passive");
+            "is-shift-pending", "is-no-driver", "is-inactive", "is-manual-passive",
+            "is-transfer-incoming", "is-transfer-outgoing");
+        preview.querySelectorAll(".eo-transfer-status, .eo-transfer-glow").forEach(function (node) {
+            node.remove();
+        });
+        delete preview.dataset.eoTransferDirection;
+        delete preview.dataset.eoTransferCreated;
+        delete preview.dataset.eoTransferDeadline;
         preview.removeAttribute("id");
         preview.setAttribute("aria-hidden", "true");
         preview.tabIndex = -1;

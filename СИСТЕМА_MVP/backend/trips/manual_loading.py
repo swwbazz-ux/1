@@ -1,4 +1,6 @@
 """Переходное участие водителя. Связь не является состоянием техники."""
+from datetime import timedelta
+
 from django.conf import settings
 from django.db.models import Q
 
@@ -7,8 +9,46 @@ from users.live_monitor import application_presence_by_access_ids
 from users.models import EmployeeAccess
 
 
+MANUAL_DUMP_CARD_VISIBILITY = timedelta(
+    seconds=getattr(settings, 'EXCAVATOR_MANUAL_DUMP_CARD_SECONDS', 300)
+)
+
+
 def manual_loading_enabled():
     return getattr(settings, 'EXCAVATOR_MANUAL_LOADING_ENABLED', False)
+
+
+def passive_manual_trip(trip):
+    """Признак фиксируется при отправке и не зависит от последующего входа водителя."""
+    return bool(
+        trip
+        and trip.driver_participation_recorded
+        and not trip.driver_control_shift_id
+    )
+
+
+def manual_dump_card_expires_at(trip):
+    if not passive_manual_trip(trip) or not trip.created_at:
+        return None
+    return trip.created_at + MANUAL_DUMP_CARD_VISIBILITY
+
+
+def manual_dump_card_is_visible(trip, *, now=None):
+    expires_at = manual_dump_card_expires_at(trip)
+    if expires_at is None:
+        return True
+    from django.utils import timezone
+    return expires_at > (now or timezone.now())
+
+
+def manual_dump_card_visibility_filter(*, now):
+    """SQL-проекция очереди: скрываем только истёкшие пассивные ручные рейсы."""
+    cutoff = now - MANUAL_DUMP_CARD_VISIBILITY
+    return (
+        Q(driver_participation_recorded=False)
+        | Q(driver_control_shift_id__isnull=False)
+        | Q(created_at__gt=cutoff)
+    )
 
 
 def truck_driver_participation(truck_ids):

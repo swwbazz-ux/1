@@ -512,7 +512,7 @@ test("recorded equipment numbers are packaged and routed through native sequence
   const excavatorShellVersion = excavatorTemplate.match(
     /var excavatorShellVersion = "(excavator-mobile-shell-v\d+)";/
   )?.[1];
-  assert.equal(excavatorShellVersion, "excavator-mobile-shell-v227");
+  assert.equal(excavatorShellVersion, "excavator-mobile-shell-v229");
   const excavatorAssetVersions = [
     ...excavatorTemplate.matchAll(/\?v=(excavator-mobile-shell-v\d+)/g),
   ].map((match) => match[1]);

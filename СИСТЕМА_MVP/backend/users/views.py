@@ -23,7 +23,14 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_POST
 from openpyxl import Workbook
 
-from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
+from assignments.models import (
+    AssignmentStatus,
+    ExcavatorPlacement,
+    HaulAssignment,
+    HaulAssignmentAction,
+    HaulAssignmentHandoff,
+    HaulAssignmentHandoffStatus,
+)
 from assignments.services import (
     WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES,
     apply_pending_haul_assignment,
@@ -4431,16 +4438,39 @@ def driver_accept_assignment_view(request, assignment_id):
     # сначала блокировалось назначение, из-за чего параллельное принятие и DnD
     # могли упереться друг в друга.
     lock_production_state()
+    Equipment.objects.select_for_update().get(pk=open_shift.equipment_id)
     assignment = get_object_or_404(
-        HaulAssignment.objects,
+        HaulAssignment.objects.select_for_update(),
         id=assignment_id,
         truck_id=open_shift.equipment_id,
         status=AssignmentStatus.PENDING,
         ended_at__isnull=True,
     )
-    applied = apply_pending_haul_assignment(assignment.id)
+    transfer_pending = HaulAssignmentHandoff.objects.select_for_update(of=('self',)).filter(
+        target_assignment=assignment,
+        status=HaulAssignmentHandoffStatus.OPEN,
+        resolved_at__isnull=True,
+    ).exists()
+    kept_pending = bool(
+        transfer_pending
+        and assignment.effective_at
+        and assignment.effective_at > timezone.now()
+    )
+    if kept_pending:
+        # Подтверждение водителя не является подтверждением физического прибытия
+        # и не сокращает единый серверный срок перевода.
+        if assignment.accepted_at is None:
+            assignment.accepted_at = timezone.now()
+            assignment.save(update_fields=['accepted_at'])
+        applied = assignment
+    else:
+        applied = apply_pending_haul_assignment(assignment.id)
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        return JsonResponse({'ok': bool(applied), 'action': assignment.action})
+        return JsonResponse({
+            'ok': bool(applied),
+            'action': assignment.action,
+            'transfer_pending': kept_pending,
+        })
     return redirect('driver_work')
 
 

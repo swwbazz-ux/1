@@ -27,6 +27,8 @@ from assignments.models import (
     ExcavatorPlacement,
     HaulAssignment,
     HaulAssignmentAction,
+    HaulAssignmentHandoff,
+    HaulAssignmentHandoffStatus,
 )
 from assignments.services import (
     HaulAssignmentStateConflict,
@@ -96,8 +98,15 @@ from users.access_auth import find_employee_access_by_credentials
 from users.active_role import activate_role_session, active_access_for_employee_role
 from users.models import Employee, EmployeeAccess
 from users.live_monitor import attach_application_presence
-from .manual_loading import (manual_loading_enabled, truck_driver_participation,
-                             may_replace_open_trip, trip_driver_control_filter)
+from .manual_loading import (
+    manual_dump_card_expires_at,
+    manual_dump_card_is_visible,
+    manual_dump_card_visibility_filter,
+    manual_loading_enabled,
+    may_replace_open_trip,
+    trip_driver_control_filter,
+    truck_driver_participation,
+)
 from users.active_role import role_session_state
 from users.role_apps import role_app_manifest_response, role_app_service_worker_response
 from users.session_device import get_session_device_kind, set_session_device_kind
@@ -951,7 +960,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v227";
+const CACHE_NAME = "excavator-mobile-shell-v229";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -4848,6 +4857,7 @@ def trip_loaded_payload(trip, *, client_action_id=''):
         )['label']
     else:
         status_label = trip.get_status_display()
+    dump_badge_auto_hide_at = manual_dump_card_expires_at(trip)
     return {
         'ok': True,
         'action': 'truck_loaded',
@@ -4864,6 +4874,11 @@ def trip_loaded_payload(trip, *, client_action_id=''):
         'status': actual_status,
         'status_label': status_label,
         'refresh_required': refresh_required,
+        'dump_badge_auto_hide_at': (
+            dump_badge_auto_hide_at.isoformat()
+            if dump_badge_auto_hide_at is not None
+            else ''
+        ),
         'version': get_operational_state_version(),
     }
 
@@ -4960,6 +4975,7 @@ def excavator_truck_loaded_view(request):
         lock_production_state()
 
         try:
+            assignment_id = int(payload.get('assignment_id') or 0)
             truck_id = int(payload.get('truck_id') or 0)
             excavator_id = int(payload.get('excavator_id') or current_excavator.id)
             dump_point_id = int(payload.get('dump_point_id') or 0)
@@ -4989,6 +5005,7 @@ def excavator_truck_loaded_view(request):
             truck_id=locked_truck.id,
             excavator_id=current_excavator.id,
             source_shift=open_shift,
+            requested_assignment_id=assignment_id or None,
         )
         if not assignment:
             return JsonResponse({
@@ -5814,23 +5831,62 @@ def excavator_work_view(request):
             open_shift,
         )
 
-    handoff_assignment_ids = set(
-        open_haul_handoffs_for_shift(open_shift)
-        .values_list('source_assignment_id', flat=True)
-    )
+    transfer_by_assignment_id = {}
+    if open_shift and current_excavator:
+        open_transfers = (
+            HaulAssignmentHandoff.objects
+            .filter(
+                status=HaulAssignmentHandoffStatus.OPEN,
+                resolved_at__isnull=True,
+            )
+            .filter(
+                Q(source_shift=open_shift)
+                | Q(target_assignment__excavator=current_excavator)
+            )
+            .select_related(
+                'source_excavator',
+                'source_assignment',
+                'target_assignment',
+                'target_assignment__excavator',
+            )
+            .order_by('-created_at', '-id')
+        )
+        for transfer in open_transfers:
+            common = {
+                'id': transfer.id,
+                'created_at': transfer.created_at,
+                'deadline': transfer.target_assignment.effective_at,
+                'source_label': str(transfer.source_excavator.garage_number or transfer.source_excavator),
+                'target_label': str(
+                    transfer.target_assignment.excavator.garage_number
+                    or transfer.target_assignment.excavator
+                ),
+            }
+            if transfer.source_shift_id == open_shift.id:
+                transfer_by_assignment_id.setdefault(
+                    transfer.source_assignment_id,
+                    {**common, 'direction': 'outgoing'},
+                )
+            if transfer.target_assignment.excavator_id == current_excavator.id:
+                transfer_by_assignment_id.setdefault(
+                    transfer.target_assignment_id,
+                    {**common, 'direction': 'incoming'},
+                )
     available_assignments = []
     visible_assignment_index_by_truck = {}
     for assignment in form.fields['assignment'].queryset:
-        assignment.is_handoff_completion = assignment.id in handoff_assignment_ids
+        assignment.transfer_state = transfer_by_assignment_id.get(assignment.id)
+        assignment.is_handoff_completion = False
         existing_index = visible_assignment_index_by_truck.get(assignment.truck_id)
         if existing_index is None:
             visible_assignment_index_by_truck[assignment.truck_id] = len(available_assignments)
             available_assignments.append(assignment)
             continue
         existing = available_assignments[existing_index]
-        if existing.is_handoff_completion and not assignment.is_handoff_completion:
+        if existing.transfer_state and not assignment.transfer_state:
             available_assignments[existing_index] = assignment
     assignment_truck_ids = [assignment.truck_id for assignment in available_assignments if assignment.truck_id]
+    dump_card_now = timezone.now()
     active_trips_queryset = (
         Trip.objects
         .filter(status__in=OPEN_TRIP_STATUSES)
@@ -5842,6 +5898,10 @@ def excavator_work_view(request):
     else:
         active_trips_queryset = active_trips_queryset.filter(excavator_operator=access.employee)
     active_trips = list(active_trips_queryset[:20])
+    dump_badge_trips = list(
+        active_trips_queryset
+        .filter(manual_dump_card_visibility_filter(now=dump_card_now))[:20]
+    )
     last_sent_trip = None
     if open_shift:
         last_sent_trip = (
@@ -5949,6 +6009,14 @@ def excavator_work_view(request):
     driver_participation = truck_driver_participation(assignment_truck_ids)
 
     def assignment_load_block(assignment, active_trip=None, *, manual_control=False):
+        if (
+            getattr(assignment, 'transfer_state', None)
+            and assignment.transfer_state['direction'] == 'outgoing'
+        ):
+            return {
+                'code': 'transfer_outgoing',
+                'label': f"Перевод на {assignment.transfer_state['target_label']}",
+            }
         known_active_trip = active_trip
         if known_active_trip is None:
             known_active_trip = active_trip_by_truck_id.get(assignment.truck_id) or False
@@ -6054,7 +6122,10 @@ def excavator_work_view(request):
         )
         can_load = bool(not load_block and state_allows_load)
         is_locked = not can_load
-        is_inactive = bool((load_block and not soft_driver_block) or (not load_block and not state_allows_load))
+        is_inactive = bool(
+            (load_block and not soft_driver_block and load_block_reason_code != 'transfer_outgoing')
+            or (not load_block and not state_allows_load)
+        )
         status_key = state_ui['color_group']
         truck_cards.append({
             'assignment': assignment,
@@ -6086,7 +6157,8 @@ def excavator_work_view(request):
             'can_drag': can_load,
             'can_load': can_load,
             'is_waiting_for_loading': is_waiting_for_loading,
-            'is_handoff_completion': getattr(assignment, 'is_handoff_completion', False),
+            'is_handoff_completion': False,
+            'transfer': getattr(assignment, 'transfer_state', None),
             'driver_shift_started': assignment.truck_id in open_truck_shift_equipment_ids,
             'block_reason': block_reason,
             'load_block_reason_code': load_block_reason_code,
@@ -6286,7 +6358,9 @@ def excavator_work_view(request):
         truck_detail_cards[str(truck.id)] = detail_card
 
     active_trips_by_dump_id = defaultdict(list)
-    for trip in active_trips:
+    for trip in dump_badge_trips:
+        if not manual_dump_card_is_visible(trip, now=dump_card_now):
+            continue
         point_id = trip.assigned_dump_point_id or trip.actual_dump_point_id or trip.dump_point_id
         if point_id:
             active_trips_by_dump_id[point_id].append(trip)
@@ -6332,6 +6406,7 @@ def excavator_work_view(request):
                 'number': equipment_number(trip.truck),
                 'status_key': 'green',
                 'is_last_sent': index == 0,
+                'auto_hide_at': manual_dump_card_expires_at(trip),
             }
             for index, trip in enumerate(pending_trips)
         ]
@@ -6349,6 +6424,7 @@ def excavator_work_view(request):
             'form': form,
             'open_shift': open_shift,
             'current_excavator': current_excavator,
+            'server_now': timezone.now(),
             'shift_start_excavator': shift_start_excavator,
             'available_assignments': available_assignments,
             'active_trips': active_trips,

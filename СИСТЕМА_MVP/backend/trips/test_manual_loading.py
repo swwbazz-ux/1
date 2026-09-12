@@ -186,6 +186,82 @@ class ManualLoadingTests(TestCase):
         self.assertContains(response, 'data-eo-manual-available="1"')
         self.assertContains(response, 'eo-driver-presence')
 
+    def test_manual_dump_badge_expires_from_persisted_trip_without_changing_trip(self):
+        response = self.send(action='manual-preview-expiry')
+        self.assertEqual(response.status_code, 200, response.content)
+        trip = Trip.objects.get(pk=response.json()['trip_id'])
+        expected_deadline = trip.created_at + timedelta(minutes=5)
+        self.assertEqual(response.json()['dump_badge_auto_hide_at'], expected_deadline.isoformat())
+
+        fresh = self.client.get(reverse('excavator_work'))
+        dump_card = next(card for card in fresh.context['dump_cards'] if card['point'].id == self.dump_point.id)
+        self.assertEqual([row['trip_id'] for row in dump_card['pending_trucks']], [trip.id])
+        self.assertEqual(dump_card['pending_trucks'][0]['auto_hide_at'], expected_deadline)
+
+        Trip.objects.filter(pk=trip.pk).update(created_at=timezone.now() - timedelta(minutes=5, seconds=1))
+        expired = self.client.get(reverse('excavator_work'))
+        dump_card = next(card for card in expired.context['dump_cards'] if card['point'].id == self.dump_point.id)
+        self.assertEqual(dump_card['pending_trucks'], [])
+        self.assertEqual(expired.context['active_trips_count'], 1)
+        truck_card = next(
+            card for card in expired.context['truck_cards']
+            if card['assignment'].truck_id == self.truck.id
+        )
+        self.assertEqual(truck_card['open_trip_id'], trip.id)
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertIsNone(trip.completed_at)
+        self.assertIsNone(trip.unload_received_at)
+
+    def test_controlled_trip_badge_does_not_expire_after_five_minutes(self):
+        self.presence()
+        response = self.send(manual=False, action='controlled-preview')
+        self.assertEqual(response.status_code, 200, response.content)
+        trip = Trip.objects.get(pk=response.json()['trip_id'])
+        self.assertEqual(response.json()['dump_badge_auto_hide_at'], '')
+        Trip.objects.filter(pk=trip.pk).update(created_at=timezone.now() - timedelta(minutes=30))
+
+        screen = self.client.get(reverse('excavator_work'))
+        dump_card = next(card for card in screen.context['dump_cards'] if card['point'].id == self.dump_point.id)
+        self.assertEqual([row['trip_id'] for row in dump_card['pending_trucks']], [trip.id])
+        self.assertIsNone(dump_card['pending_trucks'][0]['auto_hide_at'])
+
+    def test_manual_dump_badge_retry_and_replacement_keep_trip_specific_deadlines(self):
+        action = 'manual-preview-retry'
+        first = self.send(action=action)
+        self.assertEqual(first.status_code, 200, first.content)
+        old = Trip.objects.get(pk=first.json()['trip_id'])
+        retry = self.send(action=action)
+        self.assertTrue(retry.json()['deduplicated'])
+        self.assertEqual(retry.json()['trip_id'], old.id)
+        self.assertEqual(retry.json()['dump_badge_auto_hide_at'], first.json()['dump_badge_auto_hide_at'])
+
+        replacement = self.send(previous=old, action='manual-preview-replacement')
+        self.assertEqual(replacement.status_code, 200, replacement.content)
+        new = Trip.objects.get(pk=replacement.json()['trip_id'])
+        old.refresh_from_db()
+        self.assertEqual(old.status, TripStatus.UNCONTROLLED)
+        self.assertGreater(new.created_at, old.created_at)
+        screen = self.client.get(reverse('excavator_work'))
+        dump_card = next(card for card in screen.context['dump_cards'] if card['point'].id == self.dump_point.id)
+        self.assertEqual([row['trip_id'] for row in dump_card['pending_trucks']], [new.id])
+
+    def test_driver_connection_and_reassignment_do_not_move_or_adopt_manual_preview(self):
+        response = self.send(action='manual-preview-owner')
+        self.assertEqual(response.status_code, 200, response.content)
+        trip = Trip.objects.get(pk=response.json()['trip_id'])
+        deadline = response.json()['dump_badge_auto_hide_at']
+        self.presence()
+        HaulAssignment.objects.filter(truck=self.truck).update(excavator=self.other_excavator)
+
+        screen = self.client.get(reverse('excavator_work'))
+        dump_card = next(card for card in screen.context['dump_cards'] if card['point'].id == self.dump_point.id)
+        self.assertEqual([row['trip_id'] for row in dump_card['pending_trucks']], [trip.id])
+        self.assertEqual(dump_card['pending_trucks'][0]['auto_hide_at'].isoformat(), deadline)
+        trip.refresh_from_db()
+        self.assertEqual(trip.excavator_id, self.excavator.id)
+        self.assertIsNone(trip.driver_control_shift_id)
+
     def test_driver_screen_does_not_inherit_old_manual_trip(self):
         self.assertEqual(self.send().status_code, 200)
         self.presence()

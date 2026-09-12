@@ -198,12 +198,14 @@ test('reduced motion keeps static feedback without a comet or pending animation'
     assert.equal(f.nodes.length, 0);
 });
 
-test('drag copy sheds blocking decoration while the real truck retains its state and plan', () => {
-    const sourceClasses = ['eo-dashboard-truck-card', 'is-load-blocked', 'is-shift-pending', 'is-manual-passive', 'is-plan-overrun'];
+test('drag copy sheds blocking and transfer decoration while the real truck retains its state and plan', () => {
+    const sourceClasses = ['eo-dashboard-truck-card', 'is-load-blocked', 'is-shift-pending', 'is-manual-passive', 'is-transfer-incoming', 'is-plan-overrun'];
     const cloneClasses = new Set(sourceClasses);
     const preview = {
         classList: {add: (...names) => names.forEach(n => cloneClasses.add(n)), remove: (...names) => names.forEach(n => cloneClasses.delete(n))},
+        dataset: {eoTransferDirection: 'incoming', eoTransferCreated: 'start', eoTransferDeadline: 'end'},
         style: {setProperty() {}}, removeAttribute() {}, setAttribute() {}, appendChild() {},
+        querySelectorAll: () => [{remove() {}}, {remove() {}}],
     };
     const card = {classes: sourceClasses, cloneNode: () => preview};
     const context = {
@@ -221,4 +223,38 @@ test('drag copy sheds blocking decoration while the real truck retains its state
     assert.ok(cloneClasses.has('is-drag-preview'));
     assert.equal(cloneClasses.has('is-load-blocked'), false);
     assert.equal(cloneClasses.has('is-shift-pending'), false);
+    assert.equal(cloneClasses.has('is-transfer-incoming'), false);
+    assert.equal(preview.dataset.eoTransferDirection, undefined);
+});
+
+test('transfer countdown uses server time and never grants rights at local zero', () => {
+    const start = template.indexOf('function bindExcavatorTransferCountdowns(shell)');
+    const end = template.indexOf('// Присутствие истекает', start);
+    const source = template.slice(start, end);
+    assert.match(source, /shell\.dataset\.eoServerNow/);
+    assert.match(source, /data-eo-transfer-deadline|eoTransferDeadline/);
+    assert.match(source, /haul_transfer_deadline/);
+    assert.match(source, /refreshExcavatorWorkFromServer/);
+    assert.doesNotMatch(source, /dataset\.eoCanLoad\s*=/);
+    assert.doesNotMatch(source, /\.remove\(\)/);
+});
+
+test('truck loaded request carries exact assignment state id', () => {
+    const start = template.indexOf('    function postTruckLoaded(card, dumpTarget)');
+    const end = template.indexOf('    function clearDropReady()', start);
+    const source = template.slice(start, end);
+    assert.match(source, /assignment_id:\s*card\.dataset\.assignmentId/);
+});
+
+test('manual dump preview expiry is trip-specific and independent from transfer countdown', () => {
+    const start = template.indexOf('    function bindManualDumpCardExpiry(shellRoot)');
+    const end = template.indexOf('    function restoreTruckAfterLoadedCancel', start);
+    const source = template.slice(start, end);
+    assert.match(source, /window\.eoManualQueuePreviewTimer/);
+    assert.match(source, /shellRoot\.dataset\.eoServerNow/);
+    assert.match(source, /entry\.badge\.isConnected/);
+    assert.match(source, /String\(badge\.dataset\.tripId \|\| ""\) !== entry\.tripId/);
+    assert.doesNotMatch(source, /removePendingTruckBadge\(/);
+    assert.match(template, /bindExcavatorTransferCountdowns\(shell\);/);
+    assert.match(template, /bindManualDumpCardExpiry\(shell\);/);
 });

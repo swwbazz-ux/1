@@ -16,7 +16,12 @@ from shifts.services import assign_shift_plan_snapshot
 from trips.models import Trip, TripStatus
 from users.models import Employee, EmployeeAccess, Role
 
-from .models import AssignmentStatus, ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
+from .models import (
+    AssignmentStatus,
+    ExcavatorPlacement,
+    HaulAssignment,
+    HaulAssignmentAction,
+)
 from .services import (
     apply_pending_haul_assignment,
     projected_haul_assignments_for_excavator,
@@ -1132,6 +1137,11 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(accepted.status, AssignmentStatus.ACCEPTED)
         self.assertIsNone(accepted.ended_at)
         self.assertEqual(pending.status, AssignmentStatus.PENDING)
+        self.assertAlmostEqual(
+            (pending.effective_at - pending.assigned_at).total_seconds(),
+            300,
+            delta=1,
+        )
 
         event = OperationalStateEvent.objects.filter(
             event_type='assignment_changed',

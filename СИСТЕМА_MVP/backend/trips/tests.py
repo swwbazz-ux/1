@@ -3,6 +3,7 @@ import re
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
@@ -1354,7 +1355,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v227')
+        self.assertContains(response, 'excavator-mobile-shell-v229')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
@@ -3659,7 +3660,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v227', script)
+        self.assertIn('excavator-mobile-shell-v229', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -4244,7 +4245,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
         return previous, pending
 
-    def test_driver_accept_applies_reassignment_and_preserves_old_one_shot(self):
+    def test_driver_accept_does_not_finish_timed_transfer(self):
         previous = HaulAssignment.objects.get(
             truck=self.truck,
             excavator=self.excavator,
@@ -4267,8 +4268,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         self.assertEqual(accepted.status_code, 200)
         self.assertTrue(accepted.json()['ok'])
+        self.assertTrue(accepted.json()['transfer_pending'])
         pending.refresh_from_db()
-        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+        self.assertEqual(pending.status, AssignmentStatus.PENDING)
+        self.assertIsNotNone(pending.accepted_at)
         self.assertTrue(
             HaulAssignmentHandoff.objects.filter(
                 truck=self.truck,
@@ -4278,7 +4281,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             ).exists()
         )
 
-    def test_timer_applies_reassignment_and_preserves_old_one_shot(self):
+    def test_timer_applies_reassignment_and_expires_transfer(self):
         previous = HaulAssignment.objects.get(
             truck=self.truck,
             excavator=self.excavator,
@@ -4302,12 +4305,21 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
                 truck=self.truck,
                 source_assignment=previous,
                 target_assignment=pending,
-                status=HaulAssignmentHandoffStatus.OPEN,
+                status=HaulAssignmentHandoffStatus.EXPIRED,
             ).exists()
         )
 
-    def test_old_excavator_finishes_loading_after_reassignment_without_extra_action(self):
-        previous, current = self.apply_reassignment_to_other_excavator()
+    def test_both_excavators_see_transfer_but_only_target_can_load(self):
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        current, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
         handoff = HaulAssignmentHandoff.objects.get(
             source_assignment=previous,
             target_assignment=current,
@@ -4316,44 +4328,41 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         projected = projected_haul_assignments()
         self.assertEqual(projected[self.truck.id].id, current.id)
-        self.assertEqual(projected[self.truck.id].excavator_id, self.other_excavator.id)
 
         old_screen = self.client.get(reverse('excavator_work'))
         handoff_card = next(
             card for card in old_screen.context['truck_cards']
             if card['assignment'].truck_id == self.truck.id
         )
-        self.assertTrue(handoff_card['is_handoff_completion'])
-        self.assertEqual(handoff_card['status_label'], 'Завершить погрузку')
-        self.assertTrue(handoff_card['can_load'])
-        self.assertContains(old_screen, 'data-eo-handoff-completion="1"')
+        self.assertEqual(handoff_card['transfer']['direction'], 'outgoing')
+        self.assertEqual(handoff_card['transfer']['target_label'], '13')
+        self.assertFalse(handoff_card['can_load'])
+        self.assertContains(old_screen, 'is-transfer-outgoing')
 
         loaded = self.post_truck_loaded(client_action_id='old-completes-handoff')
-        self.assertEqual(loaded.status_code, 200)
-        trip = Trip.objects.get(pk=loaded.json()['trip_id'])
-        self.assertEqual(trip.excavator, self.excavator)
-        self.assertEqual(trip.truck, self.truck)
+        self.assertEqual(loaded.status_code, 409)
         handoff.refresh_from_db()
-        self.assertEqual(handoff.status, HaulAssignmentHandoffStatus.RESOLVED)
-        self.assertEqual(handoff.resolved_by_trip, trip)
-        current.refresh_from_db()
-        self.assertEqual(current.status, AssignmentStatus.ACCEPTED)
-        self.assertIsNone(current.ended_at)
+        self.assertEqual(handoff.status, HaulAssignmentHandoffStatus.OPEN)
 
-        driver_client = Client()
-        driver_session = driver_client.session
-        driver_session['employee_access_id'] = self.driver_access.id
-        driver_session.save()
-        driver_screen = driver_client.get(reverse('driver_work'))
-        self.assertEqual(driver_screen.context['active_trip'], trip)
-        self.assertEqual(
-            driver_screen.context['current_assignment'].excavator_id,
-            self.other_excavator.id,
-        )
-        self.assertEqual(driver_screen.context['driver_excavator_label'], 'ЭКС-12')
+        new_client, _, _ = self.create_other_excavator_client()
+        new_screen = new_client.get(reverse('excavator_work'))
+        incoming = next(card for card in new_screen.context['truck_cards'] if card['assignment'].truck_id == self.truck.id)
+        self.assertEqual(incoming['transfer']['direction'], 'incoming')
+        self.assertEqual(incoming['transfer']['source_label'], '12')
+        self.assertTrue(incoming['can_load'])
+        self.assertContains(new_screen, 'is-transfer-incoming')
 
     def test_new_excavator_first_trip_atomically_consumes_old_handoff(self):
-        previous, current = self.apply_reassignment_to_other_excavator()
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        current, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
         handoff = HaulAssignmentHandoff.objects.get(
             source_assignment=previous,
             target_assignment=current,
@@ -4364,6 +4373,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             reverse('excavator_truck_loaded'),
             data=json.dumps({
                 'client_action_id': 'new-completes-first',
+                'assignment_id': current.id,
                 'truck_id': self.truck.id,
                 'excavator_id': self.other_excavator.id,
                 'dump_point_id': self.dump_point.id,
@@ -4388,6 +4398,79 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             Trip.objects.filter(truck=self.truck, status=TripStatus.LOADED_WAITING_UNLOAD).count(),
             1,
         )
+
+    def test_failed_target_trip_rolls_back_transfer_completion(self):
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        pending, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
+        handoff = HaulAssignmentHandoff.objects.get(
+            source_assignment=previous,
+            target_assignment=pending,
+        )
+        new_client, _, _ = self.create_other_excavator_client()
+        new_client.raise_request_exception = False
+
+        with patch('assignments.services._emit_assignment_changed', side_effect=RuntimeError('forced rollback')):
+            response = new_client.post(
+                reverse('excavator_truck_loaded'),
+                data=json.dumps({
+                    'client_action_id': 'target-forced-rollback',
+                    'assignment_id': pending.id,
+                    'truck_id': self.truck.id,
+                    'excavator_id': self.other_excavator.id,
+                    'dump_point_id': self.dump_point.id,
+                    'rock_type': self.rock.id,
+                    'loading_horizon': '125',
+                    'loading_block': '4',
+                }),
+                content_type='application/json',
+            )
+
+        self.assertEqual(response.status_code, 500)
+        previous.refresh_from_db()
+        pending.refresh_from_db()
+        handoff.refresh_from_db()
+        self.assertEqual(previous.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNone(previous.ended_at)
+        self.assertEqual(pending.status, AssignmentStatus.PENDING)
+        self.assertIsNone(pending.ended_at)
+        self.assertEqual(handoff.status, HaulAssignmentHandoffStatus.OPEN)
+        self.assertFalse(Trip.objects.filter(truck=self.truck).exists())
+
+    def test_transfer_deadline_is_stable_across_both_screens_and_reload(self):
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        pending, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
+        handoff = HaulAssignmentHandoff.objects.get(
+            source_assignment=previous,
+            target_assignment=pending,
+        )
+        new_client, _, _ = self.create_other_excavator_client()
+
+        old_first = self.client.get(reverse('excavator_work'))
+        old_reload = self.client.get(reverse('excavator_work'))
+        new_screen = new_client.get(reverse('excavator_work'))
+        old_card = next(card for card in old_first.context['truck_cards'] if card['assignment'].truck_id == self.truck.id)
+        old_reload_card = next(card for card in old_reload.context['truck_cards'] if card['assignment'].truck_id == self.truck.id)
+        new_card = next(card for card in new_screen.context['truck_cards'] if card['assignment'].truck_id == self.truck.id)
+        self.assertEqual(old_card['transfer']['deadline'], pending.effective_at)
+        self.assertEqual(old_reload_card['transfer']['deadline'], pending.effective_at)
+        self.assertEqual(new_card['transfer']['deadline'], pending.effective_at)
+        self.assertEqual(handoff.target_assignment.effective_at, pending.effective_at)
 
     def test_active_old_trip_needs_no_handoff_when_reassignment_applies(self):
         trip = Trip.objects.create(
@@ -4415,9 +4498,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
         self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
         self.assertEqual(trip.excavator, self.excavator)
-        self.assertFalse(HaulAssignmentHandoff.objects.filter(truck=self.truck).exists())
+        self.assertFalse(HaulAssignmentHandoff.objects.filter(
+            truck=self.truck,
+            status=HaulAssignmentHandoffStatus.OPEN,
+        ).exists())
 
-    def test_release_to_garage_keeps_one_shot_completion_for_old_excavator(self):
+    def test_release_to_garage_does_not_create_transfer_loading_right(self):
         previous = HaulAssignment.objects.get(
             truck=self.truck,
             excavator=self.excavator,
@@ -4431,21 +4517,24 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         apply_pending_haul_assignment(pending.id)
 
         self.assertNotIn(self.truck.id, projected_haul_assignments())
-        handoff = HaulAssignmentHandoff.objects.get(
+        self.assertFalse(HaulAssignmentHandoff.objects.filter(
             source_assignment=previous,
             target_assignment=pending,
-            status=HaulAssignmentHandoffStatus.OPEN,
-        )
+        ).exists())
         loaded = self.post_truck_loaded(client_action_id='old-completes-after-release')
-        self.assertEqual(loaded.status_code, 200)
-        trip = Trip.objects.get(pk=loaded.json()['trip_id'])
-        self.assertEqual(trip.excavator, self.excavator)
-        handoff.refresh_from_db()
-        self.assertEqual(handoff.status, HaulAssignmentHandoffStatus.RESOLVED)
-        self.assertEqual(handoff.resolved_by_trip, trip)
+        self.assertEqual(loaded.status_code, 409)
 
     def test_rapid_reassignments_leave_no_more_than_one_successful_loading(self):
-        first_previous, first_target = self.apply_reassignment_to_other_excavator()
+        first_previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        first_target, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
         other_client, _, _ = self.create_other_excavator_client()
         second_target, created = schedule_haul_assignment(
             truck=self.truck,
@@ -4453,18 +4542,18 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             assigned_by=self.operator,
             expected_state_id=first_target.id,
         )
-        self.assertTrue(created)
-        apply_pending_haul_assignment(second_target.id)
+        self.assertFalse(created)
+        self.assertEqual(second_target.id, first_previous.id)
 
         self.assertEqual(
             HaulAssignmentHandoff.objects.filter(
                 truck=self.truck,
                 status=HaulAssignmentHandoffStatus.OPEN,
             ).count(),
-            2,
+            0,
         )
         projected = projected_haul_assignments()
-        self.assertEqual(projected[self.truck.id].id, second_target.id)
+        self.assertEqual(projected[self.truck.id].id, first_previous.id)
         self.assertEqual(projected[self.truck.id].excavator_id, self.excavator.id)
         source_shift = EmployeeShift.objects.get(
             employee=self.operator,
@@ -4473,7 +4562,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         visible_load_assignments = excavator_load_assignment_queryset(source_shift)
         self.assertEqual(
             list(visible_load_assignments.values_list('id', flat=True)),
-            [second_target.id],
+            [first_previous.id],
         )
 
         current_loaded = self.post_truck_loaded(client_action_id='rapid-current-first')
@@ -4508,8 +4597,65 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             1,
         )
 
-    def test_closing_source_shift_expires_unused_handoff(self):
-        previous, current = self.apply_reassignment_to_other_excavator()
+    def test_reassignment_to_third_excavator_expires_old_target_and_notifies_all(self):
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        first_target, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
+        third_excavator = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            model=self.excavator_model,
+            garage_number='14',
+        )
+        second_target, created = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=third_excavator,
+            assigned_by=self.operator,
+            expected_state_id=first_target.id,
+        )
+
+        self.assertTrue(created)
+        first_target.refresh_from_db()
+        self.assertEqual(first_target.status, AssignmentStatus.CANCELLED)
+        self.assertTrue(HaulAssignmentHandoff.objects.filter(
+            source_assignment=previous,
+            target_assignment=first_target,
+            status=HaulAssignmentHandoffStatus.EXPIRED,
+        ).exists())
+        self.assertTrue(HaulAssignmentHandoff.objects.filter(
+            source_assignment=previous,
+            target_assignment=second_target,
+            status=HaulAssignmentHandoffStatus.OPEN,
+        ).exists())
+        event = OperationalStateEvent.objects.filter(
+            reason='HaulAssignment:assignment_pending',
+            object_id=str(second_target.id),
+        ).latest('version')
+        self.assertEqual(
+            set(event.payload['excavator_ids']),
+            {self.excavator.id, self.other_excavator.id, third_excavator.id},
+        )
+        self.assertEqual(event.payload['source_excavator_id'], self.excavator.id)
+        self.assertEqual(event.payload['target_excavator_id'], third_excavator.id)
+        self.assertEqual(event.payload['effective_at'], second_target.effective_at.isoformat())
+
+    def test_closing_source_shift_does_not_cancel_server_transfer(self):
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        current, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
         source_shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
         handoff = HaulAssignmentHandoff.objects.get(
             source_assignment=previous,
@@ -4529,8 +4675,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
         self.assertEqual(closed.status_code, 200)
         handoff.refresh_from_db()
-        self.assertEqual(handoff.status, HaulAssignmentHandoffStatus.EXPIRED)
-        self.assertIsNotNone(handoff.resolved_at)
+        self.assertEqual(handoff.status, HaulAssignmentHandoffStatus.OPEN)
+        self.assertIsNone(handoff.resolved_at)
         self.assertIsNone(handoff.resolved_by_trip)
 
     def test_database_rejects_two_open_trips_for_one_truck(self):
