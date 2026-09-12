@@ -414,3 +414,6 @@ LOGGING = {
         },
     },
 }
+
+# Временный режим внедрения; 0 возвращает запрет ручной отправки.
+EXCAVATOR_MANUAL_LOADING_ENABLED = os.getenv("EXCAVATOR_MANUAL_LOADING_ENABLED", "0") == "1"

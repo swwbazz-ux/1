@@ -80,6 +80,7 @@ TECHNICAL_STATE_CODES = {
 MIN_PLAUSIBLE_SHIFT_DURATION = timedelta(hours=1)
 MAX_PLAUSIBLE_SHIFT_DURATION = timedelta(hours=16)
 TRIP_SPAN_BLOCKING_FLAGS = {
+    'uncontrolled_unload',
     'invalid_trip_window',
     'completed_trip_without_completed_at',
     'open_status_trip_with_completed_at',
@@ -452,6 +453,9 @@ def _trip_output_credit_status(trip, shift, window_start, window_end):
 
 def _trip_is_open_at(trip, moment):
     if trip.created_at >= moment:
+        return False
+    if (trip.status == TripStatus.UNCONTROLLED and trip.operationally_closed_at
+            and trip.operationally_closed_at <= moment):
         return False
     if trip.completed_at is not None and trip.completed_at <= moment:
         return False
@@ -1171,6 +1175,9 @@ def _build_shift_passport(
 
 def _trip_quality_flags(trip):
     flags = set()
+    if trip.status == TripStatus.UNCONTROLLED:
+        # Следующая отгрузка не доказывает ни разгрузку, ни длительность движения.
+        flags.add('uncontrolled_unload')
     if trip.volume_m3 is not None and trip.volume_m3 < 0:
         flags.add('negative_trip_volume_m3')
     if trip.tonnage is not None and trip.tonnage < 0:

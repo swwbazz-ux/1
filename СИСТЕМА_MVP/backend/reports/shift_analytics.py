@@ -161,7 +161,7 @@ def trip_queryset_for_loading(selected_date):
     night_start, night_end = assigned_shift_open_bounds(selected_date, 'night')
     return (
         Trip.objects
-        .filter(status__in=(TripStatus.LOADED_WAITING_UNLOAD, TripStatus.COMPLETED))
+        .filter(status__in=(TripStatus.LOADED_WAITING_UNLOAD, TripStatus.COMPLETED, TripStatus.UNCONTROLLED))
         .filter(
             Q(loading_shift__shift_type='day', loading_shift__opened_at__gte=day_start, loading_shift__opened_at__lt=day_end)
             | Q(loading_shift__shift_type='night', loading_shift__opened_at__gte=night_start, loading_shift__opened_at__lt=night_end)
@@ -205,7 +205,7 @@ def trip_queryset_for_loading_range(date_from, date_to):
     night_end = assigned_shift_open_bounds(date_to, 'night')[1]
     return (
         Trip.objects
-        .filter(status__in=(TripStatus.LOADED_WAITING_UNLOAD, TripStatus.COMPLETED))
+        .filter(status__in=(TripStatus.LOADED_WAITING_UNLOAD, TripStatus.COMPLETED, TripStatus.UNCONTROLLED))
         .filter(
             Q(loading_shift__shift_type='day', loading_shift__opened_at__gte=day_start, loading_shift__opened_at__lt=day_end)
             | Q(loading_shift__shift_type='night', loading_shift__opened_at__gte=night_start, loading_shift__opened_at__lt=night_end)

@@ -157,10 +157,19 @@ def _personal_access_event(event_type, payload, access):
     return False
 
 
-def event_is_relevant(event, access, *, equipment_ids=None):
+def event_is_relevant(event, access, *, equipment_ids=None, driver_shift_ids=None):
     payload = event.payload if isinstance(event.payload, dict) else {}
     event_type = event.event_type
     role_code = access.role.code
+
+    if (role_code == 'driver' and event_type == 'trip_changed'
+            and payload.get('action') == 'truck_loaded'
+            and payload.get('driver_participation_recorded')):
+        if driver_shift_ids is None:
+            driver_shift_ids = set(EmployeeShift.objects.filter(
+                employee_id=access.employee_id, closed_at__isnull=True,
+            ).values_list('pk', flat=True))
+        return payload.get('driver_control_shift_id') in driver_shift_ids
 
     if _personal_access_event(event_type, payload, access):
         return True
@@ -279,10 +288,18 @@ def relevant_event_delta(events_queryset, access, *, limit):
     equipment_ids = None
     if access.role.code in {'driver', 'excavator_operator'}:
         equipment_ids = _worker_equipment_ids(access)
+    driver_shift_ids = None
+    if access.role.code == 'driver' and any(
+        isinstance(event.payload, dict) and event.payload.get('driver_participation_recorded')
+        for event in events
+    ):
+        driver_shift_ids = set(EmployeeShift.objects.filter(
+            employee_id=access.employee_id, closed_at__isnull=True,
+        ).values_list('pk', flat=True))
     relevant = [
         event
         for event in events
-        if event_is_relevant(event, access, equipment_ids=equipment_ids)
+        if event_is_relevant(event, access, equipment_ids=equipment_ids, driver_shift_ids=driver_shift_ids)
     ]
     return (
         [serialize_event(event) for event in relevant[:limit]],

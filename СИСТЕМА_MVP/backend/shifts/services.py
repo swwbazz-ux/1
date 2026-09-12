@@ -966,7 +966,10 @@ def equipment_shift_trip_queryset(equipment, date, shift_type):
         query = Q(loading_shift__equipment=equipment, **{f'loading_shift__{key}': value for key, value in shift_filter.items()})
     else:
         query = Q(unloading_shift__equipment=equipment, **{f'unloading_shift__{key}': value for key, value in shift_filter.items()})
-    return Trip.objects.filter(status=TripStatus.COMPLETED).filter(query)
+    trips = Trip.objects.filter(query)
+    if equipment_is_excavator(equipment):
+        return trips.exclude(status=TripStatus.CANCELLED)
+    return trips.filter(status=TripStatus.COMPLETED)
 
 
 def aggregate_trip_facts(trips):
@@ -995,12 +998,10 @@ def aggregate_completed_trip_facts_by_shift(*, unloading_shift_ids=(), loading_s
         if not shift_ids:
             return {}
         shift_key = f'{shift_field}_id'
+        trips = Trip.objects.filter(**{f'{shift_key}__in': shift_ids})
+        trips = trips.exclude(status=TripStatus.CANCELLED) if shift_field == 'loading_shift' else trips.filter(status=TripStatus.COMPLETED)
         rows = (
-            Trip.objects
-            .filter(
-                status=TripStatus.COMPLETED,
-                **{f'{shift_key}__in': shift_ids},
-            )
+            trips
             .values(shift_key)
             .annotate(
                 trip_count=Count('id'),
@@ -1168,7 +1169,7 @@ def calculate_open_shift_progress(open_shift):
         return None
     if open_shift.plan_status:
         if equipment_is_excavator(open_shift.equipment):
-            trips = Trip.objects.filter(status=TripStatus.COMPLETED, loading_shift=open_shift)
+            trips = Trip.objects.filter(loading_shift=open_shift).exclude(status=TripStatus.CANCELLED)
         else:
             trips = Trip.objects.filter(status=TripStatus.COMPLETED, unloading_shift=open_shift)
         return calculate_progress_from_snapshot(open_shift, trips)

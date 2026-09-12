@@ -6,6 +6,7 @@ class TripStatus(models.TextChoices):
     ACTIVE = 'active', 'Активный'
     LOADED_WAITING_UNLOAD = 'loaded_waiting_unload', 'На разгрузку'
     COMPLETED = 'completed', 'Выполнен'
+    UNCONTROLLED = 'uncontrolled', 'Разгрузка непроконтролированная'
     CANCELLED = 'cancelled', 'Отменен'
 
 
@@ -54,6 +55,26 @@ class Trip(models.Model):
     completed_at = models.DateTimeField('Выполнен', null=True, blank=True)
     cancelled_at = models.DateTimeField('Отменён', null=True, blank=True)
     is_carryover = models.BooleanField('Переходящий рейс', default=False)
+    driver_participation_recorded = models.BooleanField('Участие водителя зафиксировано при отправке', default=False)
+    driver_control_shift = models.ForeignKey(
+        'shifts.EmployeeShift', verbose_name='Смена водителя, получившая рейс',
+        on_delete=models.PROTECT, related_name='controlled_trips', null=True, blank=True,
+    )
+    operationally_closed_at = models.DateTimeField('Снят с оперативного контроля', null=True, blank=True)
+    closure_recorded_by = models.ForeignKey(
+        'users.Employee', verbose_name='Автор следующей отгрузки',
+        on_delete=models.PROTECT, related_name='uncontrolled_trip_closures', null=True, blank=True,
+    )
+    superseded_by = models.OneToOneField(
+        'self', verbose_name='Следующая отгрузка — основание снятия с контроля',
+        on_delete=models.PROTECT, related_name='superseded_trip', null=True, blank=True,
+    )
+    unload_received_at = models.DateTimeField('Подтверждение разгрузки получено сервером', null=True, blank=True)
+    unload_time_source = models.CharField(
+        'Источник времени разгрузки', max_length=24, default='unknown',
+        choices=[('unknown', 'Неизвестно'), ('driver_device', 'Часы устройства водителя'),
+                 ('server_receipt', 'Время получения сервером')],
+    )
 
     class Meta:
         verbose_name = 'Рейс'

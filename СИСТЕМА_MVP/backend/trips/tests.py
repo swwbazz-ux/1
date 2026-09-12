@@ -1354,7 +1354,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v222')
+        self.assertContains(response, 'excavator-mobile-shell-v223')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
@@ -2953,7 +2953,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.context['shift_fact_value'], '150 м³')
         self.assertEqual(response.context['shift_fact_meta'], '4 маш.')
         dump_card = next(card for card in response.context['dump_cards'] if card['point'] == self.dump_point)
-        self.assertEqual(dump_card['completed_count'], 2)
+        self.assertEqual(dump_card['completed_count'], 3)
 
     def test_excavator_shift_action_opens_shift_when_none_is_open(self):
         EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
@@ -3659,7 +3659,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v222', script)
+        self.assertIn('excavator-mobile-shell-v223', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,

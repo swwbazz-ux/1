@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from references.models import Equipment, TruckCapacityRule
 
@@ -83,6 +84,8 @@ def create_loaded_waiting_unload_trip(
     transport_distance_km=None,
     downtime_text='',
     note='',
+    supersede_trip=None,
+    participation=None,
 ):
     """Create the single server-side state used after an excavator loads a truck."""
     locked_truck = (
@@ -91,16 +94,31 @@ def create_loaded_waiting_unload_trip(
         .select_related('model')
         .get(pk=assignment.truck_id)
     )
-    if Trip.objects.select_for_update().filter(
+    open_trips = Trip.objects.select_for_update().filter(
         truck=locked_truck,
         status__in=OPEN_TRIP_STATUSES,
-    ).exists():
+    )
+    if supersede_trip:
+        if supersede_trip.truck_id != locked_truck.pk or supersede_trip.status not in OPEN_TRIP_STATUSES:
+            raise ValidationError('Предыдущий рейс изменился. Обновите экран.')
+        open_trips = open_trips.exclude(pk=supersede_trip.pk)
+    if open_trips.exists():
         raise ValidationError('Самосвал уже находится в незакрытом рейсе.')
     assignment.truck = locked_truck
     volume_m3, tonnage = resolve_required_trip_measurements(
         assignment.truck,
         rock_type,
     )
+    if supersede_trip:
+        supersede_trip.status = TripStatus.UNCONTROLLED
+        supersede_trip.operationally_closed_at = timezone.now()
+        supersede_trip.closure_recorded_by = excavator_operator
+        supersede_trip.save(update_fields=['status', 'operationally_closed_at', 'closure_recorded_by'])
+    if participation is None:
+        from .manual_loading import truck_driver_participation
+        participation = truck_driver_participation([locked_truck.pk])[locked_truck.pk]
+    from .manual_loading import manual_loading_enabled
+    control_shift = participation['control_shift'] if manual_loading_enabled() else participation['shift']
     trip = Trip.objects.create(
         excavator=assignment.excavator,
         truck=assignment.truck,
@@ -109,7 +127,9 @@ def create_loaded_waiting_unload_trip(
         rock_type=rock_type,
         dump_point=dump_point,
         assigned_dump_point=dump_point,
-        actual_dump_point=dump_point,
+        actual_dump_point=None if manual_loading_enabled() else dump_point,
+        driver_participation_recorded=manual_loading_enabled(),
+        driver_control_shift=control_shift,
         planned_volume_m3=planned_volume_m3,
         volume_m3=volume_m3,
         tonnage=tonnage,
@@ -120,6 +140,9 @@ def create_loaded_waiting_unload_trip(
         note=str(note or '')[:1000],
         status=TripStatus.LOADED_WAITING_UNLOAD,
     )
+    if supersede_trip:
+        supersede_trip.superseded_by = trip
+        supersede_trip.save(update_fields=['superseded_by'])
     # Импорт внутри функции не образует циклическую зависимость models/services.
     from assignments.services import resolve_haul_handoffs_for_trip
     resolve_haul_handoffs_for_trip(trip)

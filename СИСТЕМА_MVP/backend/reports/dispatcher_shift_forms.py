@@ -492,12 +492,12 @@ def build_dispatcher_shift_report(selected_date, shift_type):
     hourly_trips = load_shift_trips(
         selected_date,
         shift_type,
-        statuses=(TripStatus.LOADED_WAITING_UNLOAD, TripStatus.COMPLETED),
+        statuses=(TripStatus.LOADED_WAITING_UNLOAD, TripStatus.COMPLETED, TripStatus.UNCONTROLLED),
     )
     open_trips = load_shift_trips(selected_date, shift_type, statuses=OPEN_TRIP_STATUSES)
     downtimes = load_shift_downtimes(selected_date, shift_type)
     truck_rows, truck_totals = build_truck_rows(trips, downtimes, meta)
-    excavation_rows, excavation_totals, other_rows = build_excavation_rows(trips, downtimes, meta)
+    excavation_rows, excavation_totals, other_rows = build_excavation_rows(hourly_trips, downtimes, meta)
     hourly = build_hourly_shift_matrix(hourly_trips, meta)
     return {
         'date': selected_date,

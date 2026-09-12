@@ -17,6 +17,7 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods, require_POST
 
 from assignments.models import (
@@ -92,6 +93,8 @@ from users.access_auth import find_employee_access_by_credentials
 from users.active_role import activate_role_session, active_access_for_employee_role
 from users.models import Employee, EmployeeAccess
 from users.live_monitor import attach_application_presence
+from .manual_loading import (manual_loading_enabled, truck_driver_participation,
+                             may_replace_open_trip, trip_driver_control_filter)
 from users.active_role import role_session_state
 from users.role_apps import role_app_manifest_response, role_app_service_worker_response
 from users.session_device import get_session_device_kind, set_session_device_kind
@@ -785,7 +788,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v222";
+const CACHE_NAME = "excavator-mobile-shell-v223";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -799,6 +802,7 @@ const CORE_ASSETS = [
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
   "/static/css/app.css",
+  "/static/css/excavator-manual-loading-v1.css?v=1",
   "/static/css/excavator-work-v55.css",
   "/static/css/excavator-work-v55-final.css",
   "/static/css/excavator-work-v55-shift.css",
@@ -3741,6 +3745,7 @@ def restrict_excavator_trip_form(form, current_excavator, current_shift=None):
 
 
 EXCAVATOR_TRUCK_LOAD_BLOCK_LABELS = {
+    'driver_offline': 'Водитель без связи — удерживайте самосвал для ручной отправки',
     'missing_truck': 'Самосвал не назначен.',
     'wrong_excavator': 'Самосвал назначен другому экскаватору.',
     'inactive_truck': 'Самосвал неактивен.',
@@ -3792,6 +3797,8 @@ def excavator_truck_load_block(
     post_unload_cooldown=None,
     has_open_truck_shift=None,
     has_driver_assignment=None,
+    manual_control=False,
+    participation=None,
 ):
     if not assignment or not assignment.truck_id:
         return excavator_truck_load_block_payload('missing_truck')
@@ -3807,7 +3814,12 @@ def excavator_truck_load_block(
             .order_by('-created_at')
             .first()
         )
-    if active_trip:
+    participation = participation or truck_driver_participation([truck.pk])[truck.pk]
+    manual_control = bool(manual_control and manual_loading_enabled() and participation['passive'])
+    replace_trip = may_replace_open_trip(active_trip, participation) and (
+        manual_control or not participation['passive']
+    )
+    if active_trip and not replace_trip:
         return excavator_truck_load_block_payload('active_trip')
     if active_downtime is None:
         active_downtime = (
@@ -3820,19 +3832,21 @@ def excavator_truck_load_block(
         return excavator_truck_load_block_payload('active_downtime')
     if post_unload_cooldown is None:
         post_unload_cooldown = truck_post_unload_cooldown(truck)
-    if post_unload_cooldown:
+    if post_unload_cooldown and not manual_control and not replace_trip:
         return post_unload_cooldown
     if has_open_truck_shift is None:
         has_open_truck_shift = EmployeeShift.objects.filter(
             equipment=truck,
             closed_at__isnull=True,
         ).exists()
-    if not has_open_truck_shift:
+    if not has_open_truck_shift and not manual_control:
         if has_driver_assignment is None:
             has_driver_assignment = excavator_truck_has_driver_assignment(truck)
         if has_driver_assignment:
             return excavator_truck_load_block_payload('driver_shift_not_started')
         return excavator_truck_load_block_payload('no_driver')
+    if manual_loading_enabled() and participation['passive'] and not manual_control:
+        return excavator_truck_load_block_payload('driver_offline')
     return None
 
 
@@ -3986,7 +4000,7 @@ def excavator_assigned_truck_counts(excavator):
     loadable = sum(
         1
         for assignment in assignments
-        if not excavator_truck_load_block(assignment, current_excavator=excavator)
+        if not excavator_truck_load_block(assignment, current_excavator=excavator, manual_control=True)
     )
     return len(assignments), loadable
 
@@ -4379,22 +4393,21 @@ def excavator_json_payload(request):
     return request.POST
 
 
-def finalize_trip_unloaded(trip, *, driver, unloading_shift):
-    if trip.status not in OPEN_TRIP_STATUSES:
+def finalize_trip_unloaded(trip, *, driver, unloading_shift, occurred_at=None, late_confirmation=False):
+    if trip.status not in (*OPEN_TRIP_STATUSES, TripStatus.UNCONTROLLED):
         return False
     volume, tonnage = calculate_trip_volume_and_tonnage(
         trip.truck,
         trip.rock_type,
     )
-    if volume is not None and tonnage is not None:
-        trip.volume_m3 = volume
-        trip.tonnage = tonnage
-    elif trip.volume_m3 is None or trip.tonnage is None:
+    if trip.volume_m3 is None or trip.tonnage is None:
         trip.volume_m3 = trip.volume_m3 if trip.volume_m3 is not None else volume
         trip.tonnage = trip.tonnage if trip.tonnage is not None else tonnage
     trip.status = TripStatus.COMPLETED
     trip.driver = driver
-    trip.completed_at = timezone.now()
+    trip.unload_received_at = timezone.now()
+    trip.completed_at = occurred_at or (None if late_confirmation else trip.unload_received_at)
+    trip.unload_time_source = 'driver_device' if occurred_at else ('unknown' if late_confirmation else 'server_receipt')
     trip.unloading_shift = unloading_shift
     if trip.actual_dump_point_id is None:
         trip.actual_dump_point = trip.dump_point
@@ -4414,15 +4427,18 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift):
         'status',
         'driver',
         'completed_at',
+        'unload_received_at',
+        'unload_time_source',
         'unloading_shift',
         'assigned_dump_point',
         'actual_dump_point',
         'is_carryover',
     ])
-    close_truck_unloading_wait_downtimes(
-        trip.truck,
-        ended_at=trip.completed_at,
-    )
+    if not late_confirmation:
+        close_truck_unloading_wait_downtimes(
+            trip.truck,
+            ended_at=trip.completed_at,
+        )
     reconcile_excavator_waiting_for_trucks(trip.excavator)
     return True
 
@@ -4432,6 +4448,7 @@ def trip_loaded_payload(trip, *, client_action_id=''):
     refresh_required = actual_status in {
         TripStatus.COMPLETED,
         TripStatus.CANCELLED,
+        TripStatus.UNCONTROLLED,
     }
     if actual_status == TripStatus.LOADED_WAITING_UNLOAD:
         status_label = equipment_state_ui(
@@ -4443,6 +4460,8 @@ def trip_loaded_payload(trip, *, client_action_id=''):
     return {
         'ok': True,
         'action': 'truck_loaded',
+        'driver_participation_recorded': trip.driver_participation_recorded,
+        'driver_control_shift_id': trip.driver_control_shift_id,
         'client_action_id': client_action_id,
         'trip_id': trip.id,
         'truck_id': trip.truck_id,
@@ -4467,8 +4486,10 @@ def notify_driver_truck_loaded(trip):
     """
     from users.webpush import notify_employee
 
+    if trip.driver_participation_recorded and not trip.driver_control_shift_id:
+        return
     try:
-        driver_shift = (
+        driver_shift = trip.driver_control_shift if trip.driver_participation_recorded else (
             EmployeeShift.objects
             .select_related('employee')
             .filter(equipment_id=trip.truck_id, closed_at__isnull=True)
@@ -4517,6 +4538,8 @@ def excavator_truck_loaded_view(request):
             .filter(action_type='truck_loaded', client_action_id=client_action_id)
             .first()
         )
+        if existing_action and existing_action.actor_id != access.employee_id:
+            return JsonResponse({'ok': False, 'error': 'Действие принадлежит другому участнику.'}, status=409)
         if existing_action:
             response_payload = trip_loaded_payload(existing_action.trip, client_action_id=client_action_id)
             response_payload['deduplicated'] = True
@@ -4589,12 +4612,17 @@ def excavator_truck_loaded_view(request):
             .filter(truck_id=locked_truck.id, status__in=OPEN_TRIP_STATUSES)
             .first()
         )
-        if open_trip:
-            return JsonResponse({'ok': False, 'error': 'Самосвал уже находится в незакрытом рейсе.', 'trip_id': open_trip.id}, status=409)
+        participation = truck_driver_participation([locked_truck.pk])[locked_truck.pk]
+        manual_control = payload.get('manual_control') is True
+        if open_trip and may_replace_open_trip(open_trip, participation):
+            if str(payload.get('expected_open_trip_id') or '') != str(open_trip.pk):
+                return JsonResponse({'ok': False, 'error': 'Рейс изменился. Обновите экран.', 'code': 'trip_changed'}, status=409)
         load_block = excavator_truck_load_block(
             assignment,
             current_excavator=current_excavator,
             active_trip=open_trip or False,
+            manual_control=manual_control,
+            participation=participation,
         )
         if load_block:
             return JsonResponse({
@@ -4603,6 +4631,11 @@ def excavator_truck_loaded_view(request):
                 'load_block_reason_code': load_block['code'],
                 'load_block_reason_label': load_block['label'],
             }, status=409)
+
+        if manual_control and (not current_excavator.is_active or DowntimeEvent.objects.filter(
+            equipment=current_excavator, ended_at__isnull=True, reason__is_critical=True,
+        ).exists()):
+            return JsonResponse({'ok': False, 'error': 'Экскаватор недоступен для работы.'}, status=409)
 
         dump_point = get_object_or_404(DumpPoint.objects.filter(is_active=True), id=dump_point_id)
         rock_type = get_object_or_404(RockType.objects.filter(is_active=True), id=rock_type_id)
@@ -4636,6 +4669,8 @@ def excavator_truck_loaded_view(request):
                 ),
                 downtime_text=payload.get('downtime_text'),
                 note=payload.get('note'),
+                participation=participation,
+                supersede_trip=open_trip,
             )
         except ValidationError as error:
             return JsonResponse(
@@ -4661,6 +4696,9 @@ def excavator_truck_loaded_view(request):
             trip=trip,
             actor=access.employee,
         )
+        if open_trip:
+            TripClientAction.objects.create(action_type='truck_load_supersede', client_action_id=client_action_id,
+                                            trip=open_trip, actor=access.employee)
         close_truck_waiting_loading_downtimes(assignment.truck)
         close_excavator_open_downtimes(current_excavator)
         reconcile_excavator_waiting_for_trucks(
@@ -4675,6 +4713,8 @@ def excavator_truck_loaded_view(request):
             object_id=trip.id,
             payload={
                 'action': 'truck_loaded',
+                'driver_participation_recorded': trip.driver_participation_recorded,
+                'driver_control_shift_id': trip.driver_control_shift_id,
                 'trip_id': trip.id,
                 'truck_id': trip.truck_id,
                 'excavator_id': trip.excavator_id,
@@ -4754,6 +4794,8 @@ def excavator_truck_loaded_cancel_view(request):
         except (TypeError, ValueError):
             return JsonResponse({'ok': False, 'error': 'Некорректные параметры действия.'}, status=400)
 
+        lock_production_state()
+        Equipment.objects.select_for_update().filter(pk=truck_id).first()
         trip = (
             Trip.objects
             .select_for_update(of=('self',))
@@ -4775,6 +4817,13 @@ def excavator_truck_loaded_cancel_view(request):
         trip.status = TripStatus.CANCELLED
         trip.cancelled_at = timezone.now()
         trip.save(update_fields=['status', 'cancelled_at'])
+        previous = Trip.objects.select_for_update().filter(superseded_by=trip, status=TripStatus.UNCONTROLLED).first()
+        if previous:
+            previous.status = TripStatus.LOADED_WAITING_UNLOAD
+            previous.operationally_closed_at = None
+            previous.closure_recorded_by = None
+            previous.superseded_by = None
+            previous.save(update_fields=['status', 'operationally_closed_at', 'closure_recorded_by', 'superseded_by'])
         reconcile_excavator_waiting_for_trucks(current_excavator)
         TripClientAction.objects.create(
             action_type='truck_loaded_cancel',
@@ -5319,6 +5368,8 @@ def excavator_work_view(request):
                             object_id=trip.id,
                             payload={
                                 'action': 'truck_loaded',
+                                'driver_participation_recorded': trip.driver_participation_recorded,
+                                'driver_control_shift_id': trip.driver_control_shift_id,
                                 'trip_id': trip.id,
                                 'truck_id': trip.truck_id,
                                 'excavator_id': trip.excavator_id,
@@ -5490,13 +5541,17 @@ def excavator_work_view(request):
             .distinct()
         )
 
-    def assignment_load_block(assignment, active_trip=None):
+    driver_participation = truck_driver_participation(assignment_truck_ids)
+
+    def assignment_load_block(assignment, active_trip=None, *, manual_control=False):
         known_active_trip = active_trip
         if known_active_trip is None:
             known_active_trip = active_trip_by_truck_id.get(assignment.truck_id) or False
         return excavator_truck_load_block(
             assignment,
             current_excavator=current_excavator,
+            participation=driver_participation[assignment.truck_id],
+            manual_control=manual_control,
             active_trip=known_active_trip,
             active_downtime=truck_downtime_by_equipment_id.get(assignment.truck_id),
             post_unload_cooldown=post_unload_cooldown_by_truck_id.get(assignment.truck_id) or False,
@@ -5578,11 +5633,18 @@ def excavator_work_view(request):
         load_block = assignment_load_block(assignment, active_trip)
         block_reason = load_block['label'] if load_block else ''
         load_block_reason_code = load_block['code'] if load_block else ''
-        soft_driver_block = load_block_reason_code in {'no_driver', 'driver_shift_not_started'}
+        participation = driver_participation[assignment.truck_id]
+        manual_available = bool(manual_loading_enabled() and participation['passive']
+                                and not assignment_load_block(assignment, active_trip, manual_control=True))
+        unowned_previous = bool(active_trip and active_trip.driver_participation_recorded
+                                and not active_trip.driver_control_shift_id and not participation['passive']
+                                and manual_loading_enabled())
+        soft_driver_block = load_block_reason_code in {'no_driver', 'driver_shift_not_started', 'driver_offline'}
         active_truck_downtime = truck_downtime_by_equipment_id.get(assignment.truck_id)
         is_waiting_for_loading = truck_waiting_loading_downtime(active_truck_downtime)
         state_allows_load = bool(
             is_waiting_for_loading
+            or unowned_previous
             or (state_ui['allows_drag'] and not state_ui['blocks_operation'])
         )
         can_load = bool(not load_block and state_allows_load)
@@ -5591,6 +5653,10 @@ def excavator_work_view(request):
         status_key = state_ui['color_group']
         truck_cards.append({
             'assignment': assignment,
+            'manual_available': manual_available,
+            'driver_presence_code': participation['code'],
+            'driver_presence_label': participation['label'],
+            'open_trip_id': active_trip.pk if active_trip else '',
             'number': equipment_number(assignment.truck),
             'equipment_state_code': equipment_state_code,
             'status_key': status_key,
@@ -5832,7 +5898,7 @@ def excavator_work_view(request):
     shift_fact_meta = f'{completed_shift_count} маш.'
 
     completed_by_dump_id = defaultdict(int)
-    completed_face_queryset = shift_trip_queryset.filter(status=TripStatus.COMPLETED)
+    completed_face_queryset = shift_trip_queryset
     if face_horizon:
         completed_face_queryset = completed_face_queryset.filter(loading_horizon=face_horizon)
     if face_block:
@@ -5841,7 +5907,7 @@ def excavator_work_view(request):
         completed_face_queryset = completed_face_queryset.filter(rock_type=current_rock)
     for row in (
         completed_face_queryset
-        .annotate(effective_dump_point_id=Coalesce('actual_dump_point_id', 'assigned_dump_point_id', 'dump_point_id'))
+        .annotate(effective_dump_point_id=Coalesce('assigned_dump_point_id', 'dump_point_id'))
         .values('effective_dump_point_id')
         .annotate(total=Count('id'))
     ):
@@ -7147,6 +7213,19 @@ def dispatcher_complete_trip_view(request, trip_id):
 
 
 def driver_complete_trip_view(request, trip_id):
+    wants_json = 'application/json' in request.headers.get('Accept', '')
+
+    def reject(message):
+        if wants_json:
+            return JsonResponse({'ok': False, 'conflict': True, 'error': message}, status=409)
+        messages.error(request, message)
+        return redirect('driver_shift')
+
+    def accepted(trip):
+        if wants_json:
+            return JsonResponse({'ok': True, 'trip_id': trip.pk, 'client_action_id': client_action_id})
+        return redirect('driver_shift')
+
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return redirect('login')
@@ -7166,15 +7245,22 @@ def driver_complete_trip_view(request, trip_id):
             client_action_id=client_action_id,
         ).first()
         if existing_action:
-            return redirect('driver_shift')
+            if existing_action.actor_id != access.employee_id or existing_action.trip_id != trip_id:
+                return reject('Идентификатор подтверждения принадлежит другому действию.')
+            return accepted(existing_action.trip)
         Employee.objects.select_for_update().get(pk=access.employee_id)
         if not role_session_state(request, access)['is_active']:
             messages.error(request, 'Роль неактивна — доступен только просмотр.')
             return redirect('driver_shift')
+        reference = Trip.objects.filter(pk=trip_id).first()
+        if reference and reference.driver_participation_recorded:
+            shift_query = Q(pk=reference.driver_control_shift_id, employee=access.employee)
+        else:
+            shift_query = Q(employee=access.employee, closed_at__isnull=True)
         unloading_shift = (
             EmployeeShift.objects
             .select_for_update(of=('self',))
-            .filter(employee=access.employee, closed_at__isnull=True)
+            .filter(shift_query)
             .filter(
                 Q(workplace_code='driver')
                 | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
@@ -7186,14 +7272,32 @@ def driver_complete_trip_view(request, trip_id):
         if not unloading_shift or not unloading_shift.equipment_id:
             messages.error(request, 'Нельзя завершить рейс: открытая смена с самосвалом не найдена.')
             return redirect('driver_shift')
+        # Тот же порядок, что у отправки: состояние производства, техника, рейс.
+        lock_production_state()
+        if reference and reference.truck_id == unloading_shift.equipment_id:
+            lock_trip_participant_equipment(
+                excavator_id=reference.excavator_id, truck_id=reference.truck_id,
+            )
         trip = (
             Trip.objects
             .select_for_update()
-            .filter(id=trip_id, truck=unloading_shift.equipment, status__in=OPEN_TRIP_STATUSES)
+            .filter(trip_driver_control_filter(unloading_shift))
+            .filter(id=trip_id, truck=unloading_shift.equipment, status__in=(*OPEN_TRIP_STATUSES, TripStatus.UNCONTROLLED))
             .first()
         )
         if trip:
-            finalize_trip_unloaded(trip, driver=access.employee, unloading_shift=unloading_shift)
+            raw_time = str(request.POST.get('occurred_at') or '').strip()
+            try:
+                occurred_at = parse_datetime(raw_time) if raw_time else None
+            except ValueError:
+                occurred_at = None
+            late_confirmation = trip.status == TripStatus.UNCONTROLLED
+            latest = trip.operationally_closed_at if late_confirmation else timezone.now() + timedelta(minutes=2)
+            if raw_time and (occurred_at is None or timezone.is_naive(occurred_at)
+                             or occurred_at < trip.created_at or occurred_at > latest):
+                return reject('Время подтверждения не соответствует рейсу. Требуется сверка.')
+            finalize_trip_unloaded(trip, driver=access.employee, unloading_shift=unloading_shift,
+                                   occurred_at=occurred_at, late_confirmation=late_confirmation)
             TripClientAction.objects.create(
                 action_type='trip_unloaded',
                 client_action_id=client_action_id,
@@ -7216,8 +7320,8 @@ def driver_complete_trip_view(request, trip_id):
                 },
             )
         else:
-            messages.error(request, 'Активный рейс не найден или уже закрыт.')
-    return redirect('driver_shift')
+            return reject('Рейс не назначен этой смене, отменён или уже закрыт.')
+    return accepted(trip)
 
 
 def driver_change_unload_point_view(request, trip_id):
@@ -7273,6 +7377,7 @@ def driver_change_unload_point_view(request, trip_id):
         trip = (
             Trip.objects
             .select_for_update()
+            .filter(trip_driver_control_filter(unloading_shift))
             .filter(id=trip_id, truck=unloading_shift.equipment, status__in=OPEN_TRIP_STATUSES)
             .first()
         )

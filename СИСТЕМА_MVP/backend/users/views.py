@@ -84,6 +84,7 @@ from shifts.services import (
     progress_cycle_visual_context,
     recent_shift_reading_corrections,
 )
+from trips.manual_loading import trip_driver_control_filter
 from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 
 from .access_auth import (
@@ -261,7 +262,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v211'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v212'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -317,6 +318,7 @@ const CORE_ASSETS = [
     MANIFEST_URL,
     PRIVACY_POLICY_URL,
     "/static/portal/css/portal-shell-v5.css?v=7",
+    "/static/js/driver-unload-outbox-v1.js?v=1",
     "/static/portal/js/portal-shell-v5.js",
     "/static/css/app.css",
     "/static/css/mobile-role-login-v1.css",
@@ -3832,7 +3834,7 @@ def driver_shift_view(request):
         )
         current_assignment = accepted_assignment
         pending_assignment_action = pending_assignment
-        active_trip = Trip.objects.filter(
+        active_trip = Trip.objects.filter(trip_driver_control_filter(open_shift)).filter(
             truck=current_truck,
             status__in=OPEN_TRIP_STATUSES,
         ).select_related(

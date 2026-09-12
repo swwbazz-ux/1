@@ -6,15 +6,16 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v222">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v222">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v222">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v222">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v222">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v222">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v222" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v222" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v223">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v223">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v223">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v223">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v223">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v223">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v223" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v223" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
+<link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=1">
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -171,11 +172,13 @@
                 <div class="eo-truck-grid eo-dashboard-truck-grid{% if not truck_cards %} is-empty{% elif truck_cards|length > 9 %} is-many is-rows-4{% else %} is-rows-3{% endif %}" aria-label="Самосвалы">
                     {% for card in truck_cards %}
                             <button
-                                class="eo-truck-card eo-dashboard-truck-card status-{{ card.status_key }}{% if open_shift and card.is_selected %} is-selected{% endif %}{% if card.is_inactive %} is-inactive{% endif %}{% if card.is_load_blocked %} is-load-blocked{% endif %}{% if card.is_handoff_completion %} is-handoff-completion{% endif %}{% if card.load_block_reason_code == 'driver_shift_not_started' %} is-shift-pending{% endif %}{% if card.load_block_reason_code == 'no_driver' %} is-no-driver{% endif %}{% if card.plan_visual.is_overrun %} is-plan-overrun{% endif %}"
+                                class="eo-truck-card eo-dashboard-truck-card{% if card.manual_available %} is-manual-passive{% endif %} status-{{ card.status_key }}{% if open_shift and card.is_selected %} is-selected{% endif %}{% if card.is_inactive %} is-inactive{% endif %}{% if card.is_load_blocked %} is-load-blocked{% endif %}{% if card.is_handoff_completion %} is-handoff-completion{% endif %}{% if card.load_block_reason_code == 'driver_shift_not_started' %} is-shift-pending{% endif %}{% if card.load_block_reason_code == 'no_driver' %} is-no-driver{% endif %}{% if card.plan_visual.is_overrun %} is-plan-overrun{% endif %}"
                                 type="button"
                                 draggable="{% if open_shift and card.can_drag %}true{% else %}false{% endif %}"
                                 style="--eo-truck-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --eo-truck-total-progress: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}%; --plan-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --truck-plan-percent: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %};"
                                 data-eo-truck-card
+                                data-eo-manual-available="{% if open_shift and card.manual_available %}1{% else %}0{% endif %}"
+                                data-eo-open-trip-id="{{ card.open_trip_id }}"
                                 data-eo-dashboard-truck
                                 data-assignment-id="{{ card.assignment.id }}"
                                 data-truck-id="{{ card.assignment.truck.id }}"
@@ -196,6 +199,7 @@
                                 {% if card.is_inactive %}data-eo-truck-inactive="1"{% endif %}
                                 {% if not open_shift %}disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% elif card.is_locked %}aria-disabled="true"{% endif %}
                             >
+                                <b class="eo-driver-presence presence-{{ card.driver_presence_code }}" title="{{ card.driver_presence_label }}" aria-label="Водитель: {{ card.driver_presence_label }}"></b>
                                 <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
                                 <strong>{{ card.number }}</strong>
                                 <span>{{ card.status_label }}</span>
@@ -412,7 +416,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v222";
+var excavatorShellVersion = "excavator-mobile-shell-v223";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -967,7 +971,7 @@ function isExcavatorRefreshUnsafe(options) {
     )) {
         return true;
     }
-    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-dragging, .eo-dashboard-unload-card.is-return-swiping, .eo-dashboard-unload-card.is-return-rebounding, .eo-dashboard-unload-card.is-return-pending, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .eo-reading-confirmation:not([hidden])")) {
+    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-picked-up, .eo-truck-card.is-pickup-waiting, .eo-truck-card.is-dragging, .eo-dashboard-unload-card.is-return-swiping, .eo-dashboard-unload-card.is-return-rebounding, .eo-dashboard-unload-card.is-return-pending, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .eo-reading-confirmation:not([hidden])")) {
         return true;
     }
     return Array.prototype.some.call(
@@ -1054,6 +1058,14 @@ function refreshExcavatorWorkFromServer(options) {
 }
 
 window.refreshExcavatorWorkFromServer = refreshExcavatorWorkFromServer;
+// Присутствие истекает без изменения рейса; обновляем его и при неизменной версии.
+if (!window.eoDriverPresenceRefreshTimer) {
+    window.eoDriverPresenceRefreshTimer = window.setInterval(function () {
+        if (!document.hidden && !isExcavatorRefreshUnsafe({})) {
+            refreshExcavatorWorkFromServer({preserveTab: true});
+        }
+    }, 20000);
+}
 window.excavatorHasPendingWork = isExcavatorRefreshUnsafe;
 if (
     window.AppPwaContractGuard
@@ -1331,7 +1343,10 @@ window.initExcavatorWorkShell = function () {
     }
 
     function canTruckLoad(card) {
-        return !!(card && !isInactiveTruck(card) && !isTruckLoadBlocked(card));
+        return !!(card && !card.disabled && !card.classList.contains("is-pending") && (
+            (!isInactiveTruck(card) && !isTruckLoadBlocked(card))
+            || (card.dataset.eoManualAvailable === "1" && card.classList.contains("is-picked-up"))
+        ));
     }
 
     function generateClientActionId(prefix) {
@@ -1965,6 +1980,7 @@ window.initExcavatorWorkShell = function () {
         }).then(function (result) {
             if (options.dumpTarget) options.dumpTarget.classList.remove("is-return-pending");
             if (options.actionOwner) options.actionOwner.classList.remove("is-returning");
+            if (result) refreshExcavatorWorkFromServer({preserveTab: true});
             return result;
         });
     }
@@ -2200,6 +2216,9 @@ window.initExcavatorWorkShell = function () {
     }
 
     function confirmTruckLoaded(card, payload) {
+        card.dataset.eoOpenTripId = String(payload.trip_id || "");
+        delete card.dataset.eoLoadActionKey;
+        delete card.dataset.eoLoadActionId;
         card.classList.remove("is-pending");
         card.classList.remove("is-load-blocked", "is-shift-pending", "is-no-driver");
         card.classList.add("status-green", "is-inactive");
@@ -2274,6 +2293,7 @@ window.initExcavatorWorkShell = function () {
             return;
         }
         var snapshot = snapshotTruckCard(card);
+        snapshot.className = snapshot.className.replace(/\bis-picked-up\b/g, "");
         var optimisticBadge = null;
         var truckId = card.dataset.truckId || "";
         var truckNumber = card.dataset.eoTruckNumber || (card.querySelector("strong") ? card.querySelector("strong").textContent.trim() : "");
@@ -2294,6 +2314,8 @@ window.initExcavatorWorkShell = function () {
         card.dataset.eoLoadActionId = loadActionId;
         var payload = {
             client_action_id: loadActionId,
+            manual_control: card.dataset.eoManualAvailable === "1",
+            expected_open_trip_id: card.dataset.eoOpenTripId || "",
             truck_id: card.dataset.truckId || "",
             excavator_id: shell.dataset.eoCurrentExcavatorId || "",
             dump_point_id: dumpTarget.dataset.eoDumpTarget || "",
@@ -2347,6 +2369,7 @@ window.initExcavatorWorkShell = function () {
                 });
             }
             confirmTruckLoaded(card, data);
+            refreshExcavatorWorkFromServer({ preserveTab: true });
             markLastDumpTarget(dumpTarget);
             updatePendingTruckBadgeTrip(dumpTarget, truckId, data.trip_id || "");
             if (data.downtime_status) {
@@ -2451,7 +2474,7 @@ window.initExcavatorWorkShell = function () {
 
     function updateTruckDrag(event) {
         if (!activeTruckDrag || event.pointerId !== activeTruckDrag.pointerId) return;
-        if (activeTruckDrag.longPressOpened) return;
+        if (activeTruckDrag.longPressOpened || activeTruckDrag.waitingForHold) return;
         var dx = event.clientX - activeTruckDrag.startX;
         var dy = event.clientY - activeTruckDrag.startY;
         var movedEnough = Math.abs(dx) > 7 || Math.abs(dy) > 7;
@@ -2486,6 +2509,7 @@ window.initExcavatorWorkShell = function () {
             return;
         }
         if (!state.started) {
+            state.card.classList.remove("is-picked-up", "is-pickup-waiting");
             return;
         }
         event.preventDefault();
@@ -2498,13 +2522,14 @@ window.initExcavatorWorkShell = function () {
             selectDump(state.target.dataset.eoDumpTarget);
             postTruckLoaded(state.card, state.target);
         }
+        state.card.classList.remove("is-picked-up", "is-pickup-waiting");
     }
 
     function cancelTruckDrag(event) {
         if (!activeTruckDrag || event.pointerId !== activeTruckDrag.pointerId) return;
         var state = activeTruckDrag;
         activeTruckDrag = null;
-        state.card.classList.remove("is-dragging");
+        state.card.classList.remove("is-dragging", "is-picked-up", "is-pickup-waiting");
         state.card.style.transform = "";
         removeTruckDragPreview(state);
         clearDropReady();
@@ -2559,37 +2584,49 @@ window.initExcavatorWorkShell = function () {
             selectTruck(card);
         });
         card.addEventListener("pointerdown", function (event) {
+            if (card.disabled || card.classList.contains("is-pending")) return;
             if (event.button !== undefined && event.button !== 0) return;
             truckLongPressPointerId = event.pointerId;
             truckLongPressStartX = event.clientX;
             truckLongPressStartY = event.clientY;
             truckLongPressOpened = false;
             clearTruckLongPress();
-            truckLongPressTimer = window.setTimeout(function () {
-                if (truckLongPressPointerId !== event.pointerId) return;
-                truckLongPressOpened = openTruckDetailCard(card.dataset.eoTruckDetailId || card.dataset.truckId);
-                if (truckLongPressOpened) {
-                    suppressTruckClick();
-                    if (activeTruckDrag && activeTruckDrag.card === card && activeTruckDrag.pointerId === event.pointerId) {
-                        activeTruckDrag.longPressOpened = true;
-                    }
+            var manual = card.dataset.eoManualAvailable === "1";
+            var loadable = canTruckLoad(card);
+            function liftTruck() {
+                card.classList.remove("is-pickup-waiting");
+                card.classList.add("is-picked-up");
+                if (activeTruckDrag) activeTruckDrag.waitingForHold = false;
+                if (navigator.vibrate) {
+                    try { navigator.vibrate(25); } catch (error) {}
                 }
-            }, 580);
-            if (!canTruckLoad(card)) return;
-            selectTruck(card);
+            }
+            if (!manual && !loadable) {
+                truckLongPressTimer = window.setTimeout(function () {
+                    truckLongPressOpened = openTruckDetailCard(card.dataset.eoTruckDetailId || card.dataset.truckId);
+                    if (truckLongPressOpened) suppressTruckClick();
+                }, 580);
+                return;
+            }
             activeTruckDrag = {
-                card: card,
-                pointerId: event.pointerId,
-                startX: event.clientX,
-                startY: event.clientY,
-                started: false,
-                target: null,
-                longPressOpened: false
+                card: card, pointerId: event.pointerId,
+                startX: event.clientX, startY: event.clientY,
+                started: false, target: null, longPressOpened: false,
+                waitingForHold: manual
             };
+            if (manual) {
+                card.classList.add("is-pickup-waiting");
+                truckLongPressTimer = window.setTimeout(function () {
+                    if (truckLongPressPointerId !== event.pointerId || !activeTruckDrag) return;
+                    liftTruck();
+                    suppressTruckClick();
+                }, 580);
+            } else {
+                liftTruck();
+                selectTruck(card);
+            }
             if (card.setPointerCapture) {
-                try {
-                    card.setPointerCapture(event.pointerId);
-                } catch (error) {}
+                try { card.setPointerCapture(event.pointerId); } catch (error) {}
             }
         });
         card.addEventListener("pointermove", function (event) {
@@ -2598,6 +2635,7 @@ window.initExcavatorWorkShell = function () {
                 var dy = event.clientY - truckLongPressStartY;
                 if (Math.hypot(dx, dy) > 9) {
                     clearTruckLongPress();
+                    if (activeTruckDrag && activeTruckDrag.waitingForHold) cancelTruckDrag(event);
                 }
             }
             updateTruckDrag(event);
@@ -2621,6 +2659,11 @@ window.initExcavatorWorkShell = function () {
             }
             cancelTruckDrag(event);
             truckLongPressOpened = false;
+        });
+        card.addEventListener("lostpointercapture", function (event) {
+            clearTruckLongPress();
+            truckLongPressPointerId = null;
+            cancelTruckDrag(event);
         });
         card.addEventListener("pointerleave", function (event) {
             if (truckLongPressPointerId === event.pointerId && !activeTruckDrag) {

@@ -743,7 +743,9 @@ class BrigadePhaseActorMigrationCycleTests(TransactionTestCase):
         return executor.loader.project_state([migration_target]).apps
 
     def tearDown(self):
-        self._migrate(self.migrate_to)
+        # Откат shifts также откатывает зависящие миграции других приложений.
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
         super().tearDown()
 
     def test_migration_cycle_0014_0015_0014_0015(self):
