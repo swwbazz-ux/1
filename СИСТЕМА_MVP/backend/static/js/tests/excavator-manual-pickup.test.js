@@ -256,6 +256,9 @@ test('fragment refresh rejects older versions and late earlier requests', () => 
     assert.match(source, /requestGeneration < excavatorWorkAppliedRequestGeneration/);
     assert.match(source, /storeExcavatorRealtimeVersion\(payloadVersion\)/);
     assert.match(source, /Number\(document\.body\.dataset\.operationalStateVersion \|\| 0\)/);
+    assert.match(source, /window\.eoExcavatorWorkRefreshPromise/);
+    assert.match(source, /return window\.eoExcavatorWorkRefreshPromise/);
+    assert.match(source, /window\.eoExcavatorWorkRefreshPromise = null/);
 });
 
 test('truck loaded request carries exact assignment state id', () => {

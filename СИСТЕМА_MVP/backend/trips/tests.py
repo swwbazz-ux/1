@@ -1355,7 +1355,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v231')
+        self.assertContains(response, 'excavator-mobile-shell-v232')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
@@ -3660,7 +3660,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v231', script)
+        self.assertIn('excavator-mobile-shell-v232', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3915,29 +3915,38 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotIn('Проверить показания', partial)
         self.assertNotIn('mobile-shift__assignment', partial)
 
-    def test_excavator_work_hides_pending_assignment_until_driver_accepts(self):
+    def test_excavator_work_shows_timed_pending_assignment_from_free(self):
         pending_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='77')
         self.create_registered_driver_shift(
             pending_truck,
             full_name='Водитель 77',
             access_code='200077',
         )
-        HaulAssignment.objects.create(
+        pending = HaulAssignment.objects.create(
             truck=pending_truck,
             excavator=self.excavator,
+            assigned_by=self.operator,
+            action=HaulAssignmentAction.ASSIGN,
             status=AssignmentStatus.PENDING,
+            effective_at=timezone.now() + timedelta(minutes=5),
         )
 
         response = self.client.get(reverse('excavator_work'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([card['number'] for card in response.context['truck_cards']], ['21'])
+        self.assertEqual([card['number'] for card in response.context['truck_cards']], ['21', '77'])
         cards_by_number = {card['number']: card for card in response.context['truck_cards']}
         self.assertEqual(cards_by_number['21']['equipment_state_code'], 'assigned')
         self.assertEqual(cards_by_number['21']['status_key'], 'blue')
         self.assertEqual(cards_by_number['21']['status_label'], 'Назначена')
         self.assertTrue(cards_by_number['21']['can_drag'])
         self.assertTrue(cards_by_number['21']['can_load'])
+        self.assertEqual(cards_by_number['77']['assignment'].id, pending.id)
+        self.assertEqual(cards_by_number['77']['transfer']['kind'], 'from_free')
+        self.assertEqual(cards_by_number['77']['transfer']['route_label'], 'Назначается')
+        self.assertEqual(cards_by_number['77']['transfer']['deadline'], pending.effective_at)
+        self.assertContains(response, 'data-eo-transfer-countdown')
+        self.assertContains(response, 'Назначается')
 
     def test_excavator_work_marks_complex_truck_without_driver_assignment(self):
         no_shift_truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='78')
@@ -4281,6 +4290,64 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             ).exists()
         )
 
+    def test_driver_accept_keeps_from_free_assignment_pending_until_deadline(self):
+        free_truck = Equipment.objects.create(
+            equipment_type=self.truck_type,
+            garage_number='79',
+        )
+        _driver, access, _shift = self.create_registered_driver_shift(
+            free_truck,
+            full_name='Водитель 79',
+            access_code='200079',
+        )
+        pending, created = schedule_haul_assignment(
+            truck=free_truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
+        self.assertTrue(created)
+        deadline = pending.effective_at
+        driver_client = Client()
+        session = driver_client.session
+        session['employee_access_id'] = access.id
+        session.save()
+
+        accepted = driver_client.post(
+            reverse('driver_accept_assignment', args=[pending.id]),
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(accepted.status_code, 200)
+        self.assertTrue(accepted.json()['transition_pending'])
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.PENDING)
+        self.assertEqual(pending.effective_at, deadline)
+        self.assertIsNotNone(pending.accepted_at)
+
+    def test_driver_accept_keeps_release_pending_until_deadline(self):
+        pending, created = schedule_haul_release(
+            truck=self.truck,
+            assigned_by=self.operator,
+        )
+        self.assertTrue(created)
+        deadline = pending.effective_at
+        driver_client = Client()
+        session = driver_client.session
+        session['employee_access_id'] = self.driver_access.id
+        session.save()
+
+        accepted = driver_client.post(
+            reverse('driver_accept_assignment', args=[pending.id]),
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(accepted.status_code, 200)
+        self.assertTrue(accepted.json()['transition_pending'])
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.PENDING)
+        self.assertEqual(pending.effective_at, deadline)
+        self.assertIsNotNone(pending.accepted_at)
+
     def test_timer_applies_reassignment_and_expires_transfer(self):
         previous = HaulAssignment.objects.get(
             truck=self.truck,
@@ -4399,6 +4466,48 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             1,
         )
 
+    def test_new_excavator_first_trip_accepts_timed_assignment_from_free(self):
+        free_truck = Equipment.objects.create(
+            equipment_type=self.truck_type,
+            model=self.truck_model,
+            garage_number='80',
+        )
+        self.create_registered_driver_shift(
+            free_truck,
+            full_name='Водитель 80',
+            access_code='200080',
+        )
+        pending, created = schedule_haul_assignment(
+            truck=free_truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
+        self.assertTrue(created)
+        new_client, new_operator, _ = self.create_other_excavator_client()
+
+        loaded = new_client.post(
+            reverse('excavator_truck_loaded'),
+            data=json.dumps({
+                'client_action_id': 'from-free-first-trip',
+                'assignment_id': pending.id,
+                'truck_id': free_truck.id,
+                'excavator_id': self.other_excavator.id,
+                'dump_point_id': self.dump_point.id,
+                'rock_type': self.rock.id,
+                'loading_horizon': '125',
+                'loading_block': '4',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(loaded.status_code, 200, loaded.content)
+        pending.refresh_from_db()
+        trip = Trip.objects.get(pk=loaded.json()['trip_id'])
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+        self.assertEqual(trip.excavator, self.other_excavator)
+        self.assertEqual(trip.excavator_operator, new_operator)
+        self.assertFalse(HaulAssignmentHandoff.objects.filter(truck=free_truck).exists())
+
     def test_failed_target_trip_rolls_back_transfer_completion(self):
         previous = HaulAssignment.objects.get(
             truck=self.truck,
@@ -4514,6 +4623,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             assigned_by=self.operator,
         )
         self.assertTrue(created)
+        pending_response = self.client.get(reverse('excavator_work'))
+        pending_card = next(
+            card for card in pending_response.context['truck_cards']
+            if card['assignment'].truck_id == self.truck.id
+        )
+        self.assertEqual(pending_card['transfer']['kind'], 'release')
+        self.assertEqual(pending_card['transfer']['route_label'], 'В свободные')
+        self.assertEqual(pending_card['transfer']['deadline'], pending.effective_at)
         apply_pending_haul_assignment(pending.id)
 
         self.assertNotIn(self.truck.id, projected_haul_assignments())

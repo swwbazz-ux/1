@@ -961,7 +961,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v231";
+const CACHE_NAME = "excavator-mobile-shell-v232";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -2133,8 +2133,8 @@ def build_dispatcher_dashboard_context(
         if current is None:
             assignment_by_truck[assignment.truck_id] = assignment
             continue
-        current_time = current.accepted_at or current.assigned_at or current.created_at
-        assignment_time = assignment.accepted_at or assignment.assigned_at or assignment.created_at
+        current_time = current.assigned_at or current.created_at
+        assignment_time = assignment.assigned_at or assignment.created_at
         if (assignment_time, assignment.id or 0) >= (current_time, current.id or 0):
             assignment_by_truck[assignment.truck_id] = assignment
     active_assignments_list = list(assignment_by_truck.values())
@@ -5851,7 +5851,7 @@ def excavator_work_view(request):
         for transfer in open_transfers:
             common = {
                 'id': transfer.id,
-                'created_at': transfer.created_at,
+                'created_at': transfer.target_assignment.assigned_at or transfer.created_at,
                 'deadline': transfer.target_assignment.effective_at,
                 'source_label': str(transfer.source_excavator.garage_number or transfer.source_excavator),
                 'target_label': str(
@@ -5862,13 +5862,81 @@ def excavator_work_view(request):
             if transfer.source_shift_id == open_shift.id:
                 transfer_by_assignment_id.setdefault(
                     transfer.source_assignment_id,
-                    {**common, 'direction': 'outgoing'},
+                    {
+                        **common,
+                        'direction': 'outgoing',
+                        'kind': 'inter_excavator',
+                        'route_label': f"→ {common['target_label']}",
+                    },
                 )
             if transfer.target_assignment.excavator_id == current_excavator.id:
                 transfer_by_assignment_id.setdefault(
                     transfer.target_assignment_id,
-                    {**common, 'direction': 'incoming'},
+                    {
+                        **common,
+                        'direction': 'incoming',
+                        'kind': 'inter_excavator',
+                        'route_label': f"← {common['source_label']}",
+                    },
                 )
+        direct_pending_assignments = (
+            HaulAssignment.objects
+            .filter(
+                excavator=current_excavator,
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+                action=HaulAssignmentAction.ASSIGN,
+                effective_at__isnull=False,
+            )
+            .select_related('excavator')
+        )
+        for pending in direct_pending_assignments:
+            transfer_by_assignment_id.setdefault(
+                pending.id,
+                {
+                    'id': f'assignment-{pending.id}',
+                    'created_at': pending.assigned_at or pending.created_at,
+                    'deadline': pending.effective_at,
+                    'source_label': '',
+                    'target_label': str(current_excavator.garage_number or current_excavator),
+                    'direction': 'incoming',
+                    'kind': 'from_free',
+                    'route_label': 'Назначается',
+                },
+            )
+        pending_releases = list(
+            HaulAssignment.objects
+            .filter(
+                excavator=current_excavator,
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+                action=HaulAssignmentAction.RELEASE,
+                effective_at__isnull=False,
+            )
+            .order_by('-assigned_at', '-id')
+        )
+        release_by_truck_id = {item.truck_id: item for item in pending_releases}
+        accepted_sources = HaulAssignment.objects.filter(
+            truck_id__in=release_by_truck_id,
+            excavator=current_excavator,
+            status=AssignmentStatus.ACCEPTED,
+            ended_at__isnull=True,
+        )
+        for source in accepted_sources:
+            release = release_by_truck_id[source.truck_id]
+            transfer_by_assignment_id.setdefault(
+                source.id,
+                {
+                    'id': f'assignment-{release.id}',
+                    'created_at': release.assigned_at or release.created_at,
+                    'deadline': release.effective_at,
+                    'source_label': str(current_excavator.garage_number or current_excavator),
+                    'target_label': '',
+                    'direction': 'outgoing',
+                    'kind': 'release',
+                    'route_label': 'В свободные',
+                },
+            )
     available_assignments = []
     visible_assignment_index_by_truck = {}
     for assignment in form.fields['assignment'].queryset:
@@ -6010,9 +6078,10 @@ def excavator_work_view(request):
             getattr(assignment, 'transfer_state', None)
             and assignment.transfer_state['direction'] == 'outgoing'
         ):
+            transfer_label = assignment.transfer_state.get('route_label') or 'Назначение изменяется'
             return {
                 'code': 'transfer_outgoing',
-                'label': f"Перевод на {assignment.transfer_state['target_label']}",
+                'label': transfer_label,
             }
         known_active_trip = active_trip
         if known_active_trip is None:

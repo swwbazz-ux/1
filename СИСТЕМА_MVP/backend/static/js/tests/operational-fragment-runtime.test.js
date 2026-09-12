@@ -491,18 +491,15 @@ test("Excavator fragment refresh admits only its scoped pending Shift owner", as
 });
 
 
-test("late older Excavator fragment cannot restore a completed transfer", async () => {
+test("concurrent Excavator refresh triggers share one in-flight request", async () => {
     const runtime = createExcavatorRefreshRuntime({deferred: true});
-    const older = runtime.refresh({preserveTab: true, pendingOwner: "shift"});
-    const newer = runtime.refresh({preserveTab: true, pendingOwner: "shift"});
+    const first = runtime.refresh({preserveTab: true, pendingOwner: "shift"});
+    const second = runtime.refresh({preserveTab: true, pendingOwner: "shift"});
 
-    runtime.resolveRequest(1, {html: "completed", version: 11});
-    assert.equal(await newer, true);
-    assert.equal(runtime.replacementCount(), 1);
-    assert.equal(runtime.appliedVersion(), 11);
-
-    runtime.resolveRequest(0, {html: "pending", version: 10});
-    assert.equal(await older, false);
+    assert.equal(runtime.requestCount(), 1);
+    runtime.resolveRequest(0, {html: "completed", version: 11});
+    assert.equal(await first, true);
+    assert.equal(await second, true);
     assert.equal(runtime.replacementCount(), 1);
     assert.equal(runtime.appliedVersion(), 11);
 });

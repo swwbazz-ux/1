@@ -28,8 +28,6 @@ from assignments.models import (
     ExcavatorPlacement,
     HaulAssignment,
     HaulAssignmentAction,
-    HaulAssignmentHandoff,
-    HaulAssignmentHandoffStatus,
 )
 from assignments.services import (
     WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES,
@@ -4446,14 +4444,8 @@ def driver_accept_assignment_view(request, assignment_id):
         status=AssignmentStatus.PENDING,
         ended_at__isnull=True,
     )
-    transfer_pending = HaulAssignmentHandoff.objects.select_for_update(of=('self',)).filter(
-        target_assignment=assignment,
-        status=HaulAssignmentHandoffStatus.OPEN,
-        resolved_at__isnull=True,
-    ).exists()
     kept_pending = bool(
-        transfer_pending
-        and assignment.effective_at
+        assignment.effective_at
         and assignment.effective_at > timezone.now()
     )
     if kept_pending:
@@ -4470,6 +4462,7 @@ def driver_accept_assignment_view(request, assignment_id):
             'ok': bool(applied),
             'action': assignment.action,
             'transfer_pending': kept_pending,
+            'transition_pending': kept_pending,
         })
     return redirect('driver_work')
 

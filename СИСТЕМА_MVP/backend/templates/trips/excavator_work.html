@@ -6,14 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v231">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v231">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v231">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v231">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v231">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v231">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v231" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v231" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v232">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v232">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v232">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v232">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v232">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v232">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v232" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v232" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <meta name="theme-color" content="#D58B14">
@@ -204,13 +204,14 @@
                                 <b class="eo-driver-presence presence-{{ card.driver_presence_code }}" title="{{ card.driver_presence_label }}" aria-label="Водитель: {{ card.driver_presence_label }}"></b>
                                 <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
                                 <strong>{{ card.number }}</strong>
-                                <span>{{ card.status_label }}</span>
                                 {% if card.transfer %}
-                                    <span class="eo-transfer-status" role="status">
-                                        Перевод {% if card.transfer.direction == 'incoming' %}с {{ card.transfer.source_label }}{% else %}на {{ card.transfer.target_label }}{% endif %} · <b data-eo-transfer-countdown>--:--</b>
-                                    </span>
+                                    <div class="eo-transfer-meta" aria-label="{{ card.transfer.route_label }}">
+                                        <div class="eo-transfer-meta__route">{{ card.transfer.route_label }}</div>
+                                        <time class="eo-transfer-meta__time" data-eo-transfer-countdown aria-live="off">--:--</time>
+                                    </div>
                                     <u class="eo-transfer-glow" aria-hidden="true"></u>
                                 {% endif %}
+                                <span>{{ card.status_label }}</span>
                                 <small>{% if card.plan_has_plan %}{{ card.plan_percent }}%{% else %}{{ card.plan_short_label }}{% endif %}</small>
                                 {% if card.plan_visual.has_completed_loops %}<b class="eo-truck-progress-loop" aria-label="Завершено циклов: {{ card.plan_visual.completed_loops }}">×{{ card.plan_visual.completed_loops }}</b>{% endif %}
                                 {% if card.target_label %}<em>{{ card.target_label }}</em>{% endif %}
@@ -424,7 +425,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v231";
+var excavatorShellVersion = "excavator-mobile-shell-v232";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1067,6 +1068,9 @@ function refreshExcavatorWorkFromServer(options) {
     if (isExcavatorRefreshUnsafe(options)) {
         return Promise.resolve(false);
     }
+    if (window.eoExcavatorWorkRefreshPromise) {
+        return window.eoExcavatorWorkRefreshPromise;
+    }
     var oldShell = document.querySelector("[data-eo-shell]");
     if (!oldShell || !window.AppOperationalFragment) {
         return Promise.resolve(false);
@@ -1079,7 +1083,7 @@ function refreshExcavatorWorkFromServer(options) {
         Number(options.version || 0),
         Number(document.body.dataset.operationalStateVersion || 0)
     );
-    return window.AppOperationalFragment.request(
+    var refreshPromise = window.AppOperationalFragment.request(
         "excavator",
         minimumVersion
     ).then(function (payload) {
@@ -1126,6 +1130,13 @@ function refreshExcavatorWorkFromServer(options) {
     }).catch(function () {
         return false;
     });
+    window.eoExcavatorWorkRefreshPromise = refreshPromise.finally(function () {
+        if (window.eoExcavatorWorkRefreshPromise === refreshPromiseWithCleanup) {
+            window.eoExcavatorWorkRefreshPromise = null;
+        }
+    });
+    var refreshPromiseWithCleanup = window.eoExcavatorWorkRefreshPromise;
+    return refreshPromiseWithCleanup;
 }
 
 window.refreshExcavatorWorkFromServer = refreshExcavatorWorkFromServer;
@@ -1162,8 +1173,10 @@ function bindExcavatorTransferCountdowns(shell) {
                 card.style.setProperty("--eo-transfer-progress", progress.toFixed(4));
                 if (card.dataset.eoTransferDirection === "outgoing") {
                     card.style.setProperty("--eo-transfer-veil-opacity", (.08 + (.52 * progress)).toFixed(4));
+                    card.style.setProperty("--eo-transfer-media-opacity", (1 - (.55 * progress)).toFixed(4));
                 } else {
                     card.style.setProperty("--eo-transfer-veil-opacity", (.48 * (1 - progress)).toFixed(4));
+                    card.style.setProperty("--eo-transfer-media-opacity", (.45 + (.55 * progress)).toFixed(4));
                 }
             }
             if (remainingMs > 0) return;
@@ -2627,7 +2640,7 @@ window.initExcavatorWorkShell = function () {
         preview.classList.remove("is-selected", "is-dragging", "is-load-blocked",
             "is-shift-pending", "is-no-driver", "is-inactive", "is-manual-passive",
             "is-transfer-incoming", "is-transfer-outgoing");
-        preview.querySelectorAll(".eo-transfer-status, .eo-transfer-glow").forEach(function (node) {
+        preview.querySelectorAll(".eo-transfer-meta, .eo-transfer-glow").forEach(function (node) {
             node.remove();
         });
         delete preview.dataset.eoTransferDirection;

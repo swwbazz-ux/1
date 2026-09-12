@@ -1308,11 +1308,6 @@ def excavator_load_assignment_queryset(shift):
     """Карточки текущего экскаватора, включая обе стороны перевода."""
     if not shift or shift.closed_at or not shift.equipment_id:
         return HaulAssignment.objects.none()
-    incoming_assignment_ids = active_haul_handoffs().filter(
-        target_assignment__excavator_id=shift.equipment_id,
-    ).values(
-        'target_assignment_id'
-    )
     return (
         HaulAssignment.objects
         .filter(excavator_id=shift.equipment_id)
@@ -1321,7 +1316,12 @@ def excavator_load_assignment_queryset(shift):
                 status=AssignmentStatus.ACCEPTED,
                 ended_at__isnull=True,
             )
-            | Q(id__in=incoming_assignment_ids)
+            | Q(
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+                action=HaulAssignmentAction.ASSIGN,
+                effective_at__isnull=False,
+            )
         )
         .select_related('truck', 'truck__model', 'excavator')
         .order_by('truck__garage_number', '-assigned_at', '-id')
@@ -1361,6 +1361,7 @@ def resolve_excavator_load_authority(
         status=AssignmentStatus.PENDING,
         ended_at__isnull=True,
         action=HaulAssignmentAction.ASSIGN,
+        effective_at__isnull=False,
     ).first()
     if not pending:
         return None, None
@@ -1373,7 +1374,23 @@ def resolve_excavator_load_authority(
         handoffs = handoffs.filter(target_assignment_id=requested_assignment_id)
     handoff = handoffs.first()
     if not handoff:
-        return None, None
+        if requested_assignment_id is None or pending.id != requested_assignment_id:
+            return None, None
+        latest_open = (
+            HaulAssignment.objects.select_for_update(of=('self',))
+            .filter(truck_id=truck_id, ended_at__isnull=True)
+            .exclude(status=AssignmentStatus.CANCELLED)
+            .order_by('-assigned_at', '-id')
+            .first()
+        )
+        if latest_open is None or latest_open.id != pending.id:
+            return None, None
+        if HaulAssignment.objects.filter(
+            truck_id=truck_id,
+            status=AssignmentStatus.ACCEPTED,
+            ended_at__isnull=True,
+        ).exclude(pk=pending.pk).exists():
+            return None, None
     pending.is_handoff_completion = False
     pending.is_transfer_target = True
     return pending, handoff
@@ -1392,9 +1409,25 @@ def resolve_haul_handoffs_for_trip(trip, *, now=None):
         .order_by('-created_at', '-id')
         .first()
     )
-    if not handoff:
+    target = None
+    if handoff:
+        target = HaulAssignment.objects.select_for_update().get(pk=handoff.target_assignment_id)
+    else:
+        target = (
+            HaulAssignment.objects.select_for_update()
+            .filter(
+                truck_id=trip.truck_id,
+                excavator_id=trip.excavator_id,
+                status=AssignmentStatus.PENDING,
+                ended_at__isnull=True,
+                action=HaulAssignmentAction.ASSIGN,
+                effective_at__isnull=False,
+            )
+            .order_by('-assigned_at', '-id')
+            .first()
+        )
+    if not target:
         return 0
-    target = HaulAssignment.objects.select_for_update().get(pk=handoff.target_assignment_id)
     if (
         target.status != AssignmentStatus.PENDING
         or target.ended_at is not None
@@ -1406,25 +1439,41 @@ def resolve_haul_handoffs_for_trip(trip, *, now=None):
         .filter(truck_id=trip.truck_id, ended_at__isnull=True)
         .exclude(status=AssignmentStatus.CANCELLED)
     )
+    latest_open = max(
+        open_assignments,
+        key=lambda item: (item.assigned_at or item.created_at, item.id or 0),
+        default=None,
+    )
+    if latest_open is None or latest_open.id != target.id:
+        return 0
+    if not handoff and any(
+        item.id != target.id and item.status == AssignmentStatus.ACCEPTED
+        for item in open_assignments
+    ):
+        return 0
     _cancel_assignments([item for item in open_assignments if item.id != target.id], now)
     target.status = AssignmentStatus.ACCEPTED
     target.accepted_at = now
     target.save(update_fields=['status', 'accepted_at'])
-    handoff.status = HaulAssignmentHandoffStatus.RESOLVED
-    handoff.resolved_at = now
-    handoff.resolved_by_trip = trip
-    handoff.save(update_fields=['status', 'resolved_at', 'resolved_by_trip'])
-    HaulAssignmentHandoff.objects.filter(
+    if handoff:
+        handoff.status = HaulAssignmentHandoffStatus.RESOLVED
+        handoff.resolved_at = now
+        handoff.resolved_by_trip = trip
+        handoff.save(update_fields=['status', 'resolved_at', 'resolved_by_trip'])
+    other_handoffs = HaulAssignmentHandoff.objects.filter(
         truck_id=trip.truck_id,
         status=HaulAssignmentHandoffStatus.OPEN,
         resolved_at__isnull=True,
-    ).exclude(pk=handoff.pk).update(
+    )
+    if handoff:
+        other_handoffs = other_handoffs.exclude(pk=handoff.pk)
+    other_handoffs.update(
         status=HaulAssignmentHandoffStatus.EXPIRED,
         resolved_at=now,
         resolved_by_trip=None,
     )
     _emit_assignment_changed(
-        action='transfer_completed_by_trip',
+        action='transfer_completed_by_trip' if handoff else 'assignment_completed_by_trip',
         truck_id=trip.truck_id,
         excavator_ids=[item.excavator_id for item in open_assignments],
         assignment_id=target.id,
@@ -1650,6 +1699,7 @@ def schedule_haul_release(*, truck, assigned_by=None, now=None, expected_state_i
     _emit_assignment_changed(
         action='release_pending', truck_id=truck.id,
         excavator_ids=[source.excavator_id], assignment_id=assignment.id,
+        effective_at=assignment.effective_at,
     )
     return assignment, True
 
