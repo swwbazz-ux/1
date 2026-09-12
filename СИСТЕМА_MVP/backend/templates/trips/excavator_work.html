@@ -6,14 +6,14 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v229">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v229">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v229">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v229">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v229">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v229">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v229" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v229" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v230">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v230">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v230">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v230">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v230">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v230">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v230" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v230" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <meta name="theme-color" content="#D58B14">
@@ -424,7 +424,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v229";
+var excavatorShellVersion = "excavator-mobile-shell-v230";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1056,6 +1056,8 @@ function hasExcavatorRelevantEvents(events) {
 }
 
 var excavatorWorkMutationGeneration = 0;
+var excavatorWorkRefreshRequestGeneration = 0;
+var excavatorWorkAppliedRequestGeneration = 0;
 function invalidateExcavatorWorkRefresh() {
     excavatorWorkMutationGeneration += 1;
 }
@@ -1072,11 +1074,20 @@ function refreshExcavatorWorkFromServer(options) {
     var previousAssignments = readExcavatorAssignmentSnapshot(oldShell);
     var activeTab = oldShell.dataset.eoActiveTab || "trucks";
     var mutationGeneration = excavatorWorkMutationGeneration;
+    var requestGeneration = ++excavatorWorkRefreshRequestGeneration;
+    var minimumVersion = Math.max(
+        Number(options.version || 0),
+        Number(document.body.dataset.operationalStateVersion || 0)
+    );
     return window.AppOperationalFragment.request(
         "excavator",
-        Number(options.version || 0)
+        minimumVersion
     ).then(function (payload) {
         if (mutationGeneration !== excavatorWorkMutationGeneration || isExcavatorRefreshUnsafe(options)) return false;
+        var payloadVersion = Number(payload.version || 0);
+        var appliedVersion = Number(document.body.dataset.operationalStateVersion || 0);
+        if (payloadVersion < appliedVersion) return false;
+        if (requestGeneration < excavatorWorkAppliedRequestGeneration) return false;
         var newShell = window.AppOperationalFragment.parseRoot(
             payload.html,
             "[data-eo-shell]"
@@ -1092,6 +1103,8 @@ function refreshExcavatorWorkFromServer(options) {
             ? (newShell.dataset.eoActiveTab || "trucks")
             : latestActiveTab;
         currentShell.replaceWith(newShell);
+        excavatorWorkAppliedRequestGeneration = requestGeneration;
+        storeExcavatorRealtimeVersion(payloadVersion);
         if (typeof window.bindMobileShiftScreens === "function") {
             window.bindMobileShiftScreens();
         }
@@ -1131,6 +1144,7 @@ function bindExcavatorTransferCountdowns(shell) {
 
     function tick() {
         var authoritativeNow = serverEpoch + (Date.now() - clientEpoch);
+        var needsServerConfirmation = false;
         cards.forEach(function (card) {
             if (!card.isConnected) return;
             var createdAt = Date.parse(card.dataset.eoTransferCreated || "");
@@ -1142,6 +1156,7 @@ function bindExcavatorTransferCountdowns(shell) {
             var seconds = remainingSeconds % 60;
             var counter = card.querySelector("[data-eo-transfer-countdown]");
             if (counter) counter.textContent = minutes + ":" + String(seconds).padStart(2, "0");
+            card.classList.remove("is-transfer-awaiting-confirmation");
             if (Number.isFinite(createdAt) && deadline > createdAt) {
                 var progress = Math.max(0, Math.min(1, (authoritativeNow - createdAt) / (deadline - createdAt)));
                 card.style.setProperty("--eo-transfer-progress", progress.toFixed(4));
@@ -1154,13 +1169,24 @@ function bindExcavatorTransferCountdowns(shell) {
             if (remainingMs > 0) return;
             // Ноль на клиентском таймере не меняет права и не удаляет карточку.
             // Просим сервер применить срок и ждём подтверждённый фрагмент.
-            var lastWake = Number(card.dataset.eoTransferLastWake || 0);
-            if (Date.now() - lastWake < 5000) return;
-            card.dataset.eoTransferLastWake = String(Date.now());
-            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+            if (counter) counter.textContent = "Ожидает подтверждения";
+            card.classList.add("is-transfer-awaiting-confirmation");
+            needsServerConfirmation = true;
+        });
+        if (!needsServerConfirmation) return;
+        var lastWake = Number(window.eoTransferDeadlineLastWake || 0);
+        if (Date.now() - lastWake < 5000 || window.eoTransferDeadlineRefreshInFlight) return;
+        window.eoTransferDeadlineLastWake = Date.now();
+        if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+            try {
                 window.AppRealtime.wake("haul_transfer_deadline");
+            } catch (error) {
+                /* Прямой серверный refresh всё равно должен продолжиться. */
             }
-            refreshExcavatorWorkFromServer({preserveTab: true});
+        }
+        window.eoTransferDeadlineRefreshInFlight = true;
+        refreshExcavatorWorkFromServer({preserveTab: true}).finally(function () {
+            window.eoTransferDeadlineRefreshInFlight = false;
         });
     }
     tick();

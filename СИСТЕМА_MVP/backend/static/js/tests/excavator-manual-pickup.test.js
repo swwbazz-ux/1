@@ -235,8 +235,24 @@ test('transfer countdown uses server time and never grants rights at local zero'
     assert.match(source, /data-eo-transfer-deadline|eoTransferDeadline/);
     assert.match(source, /haul_transfer_deadline/);
     assert.match(source, /refreshExcavatorWorkFromServer/);
+    assert.match(source, /Ожидает подтверждения/);
+    assert.match(source, /is-transfer-awaiting-confirmation/);
+    assert.match(source, /eoTransferDeadlineRefreshInFlight/);
+    assert.doesNotMatch(source, /eoTransferLastWake/);
     assert.doesNotMatch(source, /dataset\.eoCanLoad\s*=/);
     assert.doesNotMatch(source, /\.remove\(\)/);
+});
+
+test('fragment refresh rejects older versions and late earlier requests', () => {
+    const start = template.indexOf('var excavatorWorkMutationGeneration = 0;');
+    const end = template.indexOf('window.refreshExcavatorWorkFromServer', start);
+    const source = template.slice(start, end);
+    assert.match(source, /excavatorWorkRefreshRequestGeneration/);
+    assert.match(source, /excavatorWorkAppliedRequestGeneration/);
+    assert.match(source, /payloadVersion < appliedVersion/);
+    assert.match(source, /requestGeneration < excavatorWorkAppliedRequestGeneration/);
+    assert.match(source, /storeExcavatorRealtimeVersion\(payloadVersion\)/);
+    assert.match(source, /Number\(document\.body\.dataset\.operationalStateVersion \|\| 0\)/);
 });
 
 test('truck loaded request carries exact assignment state id', () => {

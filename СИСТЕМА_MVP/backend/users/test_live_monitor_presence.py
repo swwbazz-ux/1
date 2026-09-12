@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.core.cache import cache
-from django.test import Client, TestCase, override_settings
+from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -15,6 +15,7 @@ from .live_monitor import (
     application_presence_by_access_ids,
     application_presence_by_employee_ids,
 )
+from .live_monitor_views import application_session_heartbeat_view
 
 
 @override_settings(ALLOWED_HOSTS=['testserver', '.localhost'])
@@ -197,6 +198,18 @@ class LiveMonitorPresenceTests(TestCase):
             HTTP_USER_AGENT='Mozilla/5.0 (Linux; Android 14) Chrome/140 Mobile',
         )
         self.assertEqual(response.status_code, 200)
+        self.assertFalse(ActiveApplicationSession.objects.exists())
+
+    def test_observer_screen_cannot_refresh_phone_presence(self):
+        request = RequestFactory().post(
+            reverse('application_session_heartbeat'),
+            {'path': '/excavator/work/', 'client_kind': 'browser'},
+        )
+        request.observer_mode = True
+
+        response = application_session_heartbeat_view(request)
+
+        self.assertEqual(response.status_code, 403)
         self.assertFalse(ActiveApplicationSession.objects.exists())
 
     def test_background_heartbeat_has_recovery_allowance_beyond_foreground_window(self):

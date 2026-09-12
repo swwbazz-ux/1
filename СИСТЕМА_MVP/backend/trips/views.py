@@ -32,6 +32,7 @@ from assignments.models import (
 )
 from assignments.services import (
     HaulAssignmentStateConflict,
+    active_haul_handoffs,
     excavator_load_assignment_queryset,
     get_active_equipment_assignment,
     open_haul_handoffs_for_shift,
@@ -960,7 +961,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v229";
+const CACHE_NAME = "excavator-mobile-shell-v230";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -5834,11 +5835,7 @@ def excavator_work_view(request):
     transfer_by_assignment_id = {}
     if open_shift and current_excavator:
         open_transfers = (
-            HaulAssignmentHandoff.objects
-            .filter(
-                status=HaulAssignmentHandoffStatus.OPEN,
-                resolved_at__isnull=True,
-            )
+            active_haul_handoffs()
             .filter(
                 Q(source_shift=open_shift)
                 | Q(target_assignment__excavator=current_excavator)

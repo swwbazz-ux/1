@@ -106,10 +106,11 @@ function extractBraceBlock(source, signature, label, fromIndex = 0) {
 }
 
 
-function createExcavatorRefreshRuntime() {
+function createExcavatorRefreshRuntime({deferred = false} = {}) {
     let currentShell = null;
     let requestCount = 0;
     let replacementCount = 0;
+    const pendingRequests = [];
     const shiftPendingButton = {
         matches(selector) {
             return selector === "[data-eo-shift-button]";
@@ -143,6 +144,7 @@ function createExcavatorRefreshRuntime() {
     currentShell = oldShell;
     const document = {
         activeElement: null,
+        body: {dataset: {operationalStateVersion: "0"}},
         getElementById() {
             return null;
         },
@@ -160,10 +162,13 @@ function createExcavatorRefreshRuntime() {
             request(screen) {
                 assert.equal(screen, "excavator");
                 requestCount += 1;
-                return Promise.resolve({html: "<main></main>"});
+                if (deferred) {
+                    return new Promise((resolve) => pendingRequests.push(resolve));
+                }
+                return Promise.resolve({html: "<main></main>", version: 1});
             },
-            parseRoot() {
-                return newShell;
+            parseRoot(html) {
+                return deferred ? {...newShell, marker: html} : newShell;
             },
         },
         bindMobileShiftScreens() {},
@@ -171,6 +176,9 @@ function createExcavatorRefreshRuntime() {
     };
     const source = [
         "var excavatorWorkMutationGeneration = 0;",
+        "var excavatorWorkRefreshRequestGeneration = 0;",
+        "var excavatorWorkAppliedRequestGeneration = 0;",
+        "function storeExcavatorRealtimeVersion(version) { document.body.dataset.operationalStateVersion = String(version); }",
         "function readExcavatorAssignmentSnapshot() { return {}; }",
         "function syncExcavatorAssignmentSnapshot() {}",
         "function scheduleExcavatorViewportHeightSync() {}",
@@ -197,6 +205,12 @@ function createExcavatorRefreshRuntime() {
         },
         replacementCount() {
             return replacementCount;
+        },
+        resolveRequest(index, payload) {
+            pendingRequests[index](payload);
+        },
+        appliedVersion() {
+            return Number(document.body.dataset.operationalStateVersion || 0);
         },
     };
 }
@@ -474,6 +488,23 @@ test("Excavator fragment refresh admits only its scoped pending Shift owner", as
     assert.equal(applied, true);
     assert.equal(runtime.requestCount(), 1);
     assert.equal(runtime.replacementCount(), 1);
+});
+
+
+test("late older Excavator fragment cannot restore a completed transfer", async () => {
+    const runtime = createExcavatorRefreshRuntime({deferred: true});
+    const older = runtime.refresh({preserveTab: true, pendingOwner: "shift"});
+    const newer = runtime.refresh({preserveTab: true, pendingOwner: "shift"});
+
+    runtime.resolveRequest(1, {html: "completed", version: 11});
+    assert.equal(await newer, true);
+    assert.equal(runtime.replacementCount(), 1);
+    assert.equal(runtime.appliedVersion(), 11);
+
+    runtime.resolveRequest(0, {html: "pending", version: 10});
+    assert.equal(await older, false);
+    assert.equal(runtime.replacementCount(), 1);
+    assert.equal(runtime.appliedVersion(), 11);
 });
 
 

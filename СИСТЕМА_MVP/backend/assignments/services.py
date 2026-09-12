@@ -11,7 +11,7 @@ import time
 from django.core.exceptions import ValidationError
 from django.core.files import locks
 from django.db import IntegrityError, connection, transaction
-from django.db.models import Max, Q
+from django.db.models import F, Max, Q
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -1258,17 +1258,36 @@ def projected_haul_assignments_for_excavator(excavator, *, for_update=False):
     ]
 
 
+def active_haul_handoffs(*, for_update=False):
+    """Единая серверная выборка только фактически действующих переводов."""
+    queryset = (
+        HaulAssignmentHandoff.objects
+        .filter(
+            status=HaulAssignmentHandoffStatus.OPEN,
+            resolved_at__isnull=True,
+            target_assignment__action=HaulAssignmentAction.ASSIGN,
+            target_assignment__status=AssignmentStatus.PENDING,
+            target_assignment__ended_at__isnull=True,
+            target_assignment__effective_at__isnull=False,
+            source_assignment__truck_id=F('truck_id'),
+            target_assignment__truck_id=F('truck_id'),
+        )
+        .exclude(source_excavator_id=F('target_assignment__excavator_id'))
+    )
+    if for_update:
+        queryset = queryset.select_for_update(of=('self',))
+    return queryset
+
+
 def open_haul_handoffs_for_shift(shift, *, for_update=False):
     """Открытые исходящие переходы, которые видит прежняя смена."""
     if not shift or shift.closed_at or not shift.equipment_id:
         return HaulAssignmentHandoff.objects.none()
     queryset = (
-        HaulAssignmentHandoff.objects
+        active_haul_handoffs()
         .filter(
             source_shift=shift,
             source_excavator_id=shift.equipment_id,
-            status=HaulAssignmentHandoffStatus.OPEN,
-            resolved_at__isnull=True,
         )
         .select_related(
             'truck',
@@ -1289,10 +1308,8 @@ def excavator_load_assignment_queryset(shift):
     """Карточки текущего экскаватора, включая обе стороны перевода."""
     if not shift or shift.closed_at or not shift.equipment_id:
         return HaulAssignment.objects.none()
-    incoming_assignment_ids = HaulAssignmentHandoff.objects.filter(
+    incoming_assignment_ids = active_haul_handoffs().filter(
         target_assignment__excavator_id=shift.equipment_id,
-        status=HaulAssignmentHandoffStatus.OPEN,
-        resolved_at__isnull=True,
     ).values(
         'target_assignment_id'
     )
@@ -1331,11 +1348,9 @@ def resolve_excavator_load_authority(
             and current.id != requested_assignment_id
         ):
             return None, None
-        outgoing_exists = HaulAssignmentHandoff.objects.select_for_update(of=('self',)).filter(
+        outgoing_exists = active_haul_handoffs(for_update=True).filter(
             source_assignment=current,
             source_shift=source_shift,
-            status=HaulAssignmentHandoffStatus.OPEN,
-            resolved_at__isnull=True,
         ).exists()
         if outgoing_exists:
             return None, None
@@ -1349,12 +1364,10 @@ def resolve_excavator_load_authority(
     ).first()
     if not pending:
         return None, None
-    handoffs = HaulAssignmentHandoff.objects.select_for_update(of=('self',)).filter(
+    handoffs = active_haul_handoffs(for_update=True).filter(
         truck_id=truck_id,
         target_assignment=pending,
         target_assignment__excavator_id=excavator_id,
-        status=HaulAssignmentHandoffStatus.OPEN,
-        resolved_at__isnull=True,
     )
     if requested_assignment_id is not None:
         handoffs = handoffs.filter(target_assignment_id=requested_assignment_id)
@@ -1370,13 +1383,11 @@ def resolve_haul_handoffs_for_trip(trip, *, now=None):
     """Рейс целевого экскаватора атомарно применяет перевод досрочно."""
     now = now or timezone.now()
     handoff = (
-        HaulAssignmentHandoff.objects.select_for_update(of=('self',))
+        active_haul_handoffs(for_update=True)
         .select_related('target_assignment')
         .filter(
             truck_id=trip.truck_id,
             target_assignment__excavator_id=trip.excavator_id,
-            status=HaulAssignmentHandoffStatus.OPEN,
-            resolved_at__isnull=True,
         )
         .order_by('-created_at', '-id')
         .first()
@@ -1498,6 +1509,23 @@ def _expire_handoffs_for_target_assignments(assignments, now):
         status=HaulAssignmentHandoffStatus.OPEN,
         resolved_at__isnull=True,
     ).update(
+        status=HaulAssignmentHandoffStatus.EXPIRED,
+        resolved_at=now,
+        resolved_by_trip=None,
+    )
+
+
+def expire_invalid_haul_handoffs(*, now=None, truck_id=None):
+    """Закрывает переходы, чьё целевое назначение уже не ожидает применения."""
+    now = now or timezone.now()
+    queryset = HaulAssignmentHandoff.objects.filter(
+        status=HaulAssignmentHandoffStatus.OPEN,
+        resolved_at__isnull=True,
+    )
+    if truck_id:
+        queryset = queryset.filter(truck_id=truck_id)
+    valid_ids = active_haul_handoffs().values('id')
+    return queryset.exclude(id__in=valid_ids).update(
         status=HaulAssignmentHandoffStatus.EXPIRED,
         resolved_at=now,
         resolved_by_trip=None,
@@ -1777,6 +1805,7 @@ def reconcile_due_haul_assignments(*, truck_id=None, now=None):
     for assignment_id in due.order_by('effective_at', 'id').values_list('id', flat=True):
         if apply_pending_haul_assignment(assignment_id, now=now):
             applied += 1
+    expire_invalid_haul_handoffs(now=now, truck_id=truck_id)
     return applied
 
 

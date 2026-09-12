@@ -1355,7 +1355,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v229')
+        self.assertContains(response, 'excavator-mobile-shell-v230')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
@@ -3660,7 +3660,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v229', script)
+        self.assertIn('excavator-mobile-shell-v230', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -4523,6 +4523,81 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         ).exists())
         loaded = self.post_truck_loaded(client_action_id='old-completes-after-release')
         self.assertEqual(loaded.status_code, 409)
+
+    def test_orphaned_release_handoff_is_expired_and_never_returns_old_card(self):
+        source = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        now = timezone.now()
+        source.status = AssignmentStatus.CANCELLED
+        source.ended_at = now
+        source.save(update_fields=['status', 'ended_at'])
+        released = HaulAssignment.objects.create(
+            truck=self.truck,
+            excavator=self.excavator,
+            assigned_by=self.operator,
+            action=HaulAssignmentAction.RELEASE,
+            status=AssignmentStatus.CANCELLED,
+            effective_at=now - timedelta(seconds=1),
+            ended_at=now,
+        )
+        shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        orphaned = HaulAssignmentHandoff.objects.create(
+            truck=self.truck,
+            source_assignment=source,
+            target_assignment=released,
+            source_excavator=self.excavator,
+            source_shift=shift,
+            status=HaulAssignmentHandoffStatus.OPEN,
+        )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(any(
+            card['assignment'].truck_id == self.truck.id
+            for card in response.context['truck_cards']
+        ))
+        self.assertNotContains(response, 'data-assignment-id="%s"' % released.id)
+        orphaned.refresh_from_db()
+        self.assertEqual(orphaned.status, HaulAssignmentHandoffStatus.EXPIRED)
+        self.assertIsNotNone(orphaned.resolved_at)
+
+    def test_stale_cancelled_transfer_target_cannot_mask_current_assignment(self):
+        source = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        target, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
+        handoff = HaulAssignmentHandoff.objects.get(target_assignment=target)
+        apply_pending_haul_assignment(target.id)
+
+        old_response = self.client.get(reverse('excavator_work'))
+        new_client, _, _ = self.create_other_excavator_client()
+        new_response = new_client.get(reverse('excavator_work'))
+
+        source.refresh_from_db()
+        target.refresh_from_db()
+        handoff.refresh_from_db()
+        self.assertEqual(source.status, AssignmentStatus.CANCELLED)
+        self.assertEqual(target.status, AssignmentStatus.ACCEPTED)
+        self.assertEqual(handoff.status, HaulAssignmentHandoffStatus.EXPIRED)
+        self.assertFalse(any(
+            card['assignment'].truck_id == self.truck.id
+            for card in old_response.context['truck_cards']
+        ))
+        current = next(
+            card for card in new_response.context['truck_cards']
+            if card['assignment'].truck_id == self.truck.id
+        )
+        self.assertIsNone(current['transfer'])
 
     def test_rapid_reassignments_leave_no_more_than_one_successful_loading(self):
         first_previous = HaulAssignment.objects.get(
