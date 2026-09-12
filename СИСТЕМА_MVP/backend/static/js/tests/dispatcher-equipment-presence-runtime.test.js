@@ -150,3 +150,14 @@ test("плитка без рейсов не красится: пустая фа�
         /\[data-plan-progress-phase\]:not\(\[data-plan-progress-phase=""\]\)::before/
     );
 });
+
+test("карточка комплекса заливается мягким синим из палитры, плитки остаются зелёными", () => {
+    /* На большой карточке зелёный сектор читался как статусная подсветка,
+       поэтому комплексу дан спокойный синий интерфейса, а плиткам техники
+       заливка плана оставлена зелёной. */
+    assert.match(
+        CSS,
+        /\.dispatcher-complex-card\[data-plan-progress-phase\]:not\(\[data-plan-progress-phase=""\]\) \{[^}]*--gd-complex-plan-fill: color-mix\(in srgb, var\(--gd-blue\) 32%, transparent\);/s
+    );
+    assert.match(CSS, /--dispatcher-plan-color: rgba\(74, 222, 128, \.38\);/);
+});

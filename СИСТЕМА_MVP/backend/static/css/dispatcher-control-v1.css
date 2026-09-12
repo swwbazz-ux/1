@@ -14159,3 +14159,26 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shif
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shift-close-neglect small {
     color: color-mix(in srgb, var(--gd-red) 70%, var(--gd-detail-muted));
 }
+
+
+/* === Заливка карточки комплекса: мягкий синий вместо зелёного ============ */
+
+/* Сектор прогресса на карточке комплекса — спокойный синий из палитры, а не
+   зелёный: на большой площади зелёный выглядел как статусная подсветка. Цвет
+   задаём отдельной переменной, чтобы фазовые правила (green/amber/cyan/orange)
+   не возвращали зелёный обратно. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card[data-plan-progress-phase]:not([data-plan-progress-phase=""]) {
+    --gd-complex-plan-fill: color-mix(in srgb, var(--gd-blue) 32%, transparent);
+    background-image: conic-gradient(
+        from -90deg,
+        var(--gd-complex-plan-fill) 0 var(--complex-progress),
+        transparent var(--complex-progress) 100%
+    );
+}
+
+/* Перевыполнение: тот же синий, чуть заметнее, без смены оттенка. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card[data-plan-progress-phase="amber"],
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card[data-plan-progress-phase="cyan"],
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card[data-plan-progress-phase="orange"] {
+    --gd-complex-plan-fill: color-mix(in srgb, var(--gd-blue) 42%, transparent);
+}
