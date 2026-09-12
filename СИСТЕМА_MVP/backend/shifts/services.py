@@ -168,6 +168,20 @@ class OtherRoleShiftOpen(ValidationError):
         super().__init__(self.prompt['message'], code=OTHER_ROLE_SHIFT_OPEN_CODE)
 
 
+def close_equipment_open_downtimes(equipment, *, ended_at=None):
+    """Простой не живёт дольше смены: при любом закрытии смены техники все её
+    открытые простои заканчиваются той же секундой."""
+    if not equipment:
+        return 0
+    from downtimes.models import DowntimeEvent
+    ended_at = ended_at or timezone.now()
+    return (
+        DowntimeEvent.objects
+        .filter(equipment=equipment, ended_at__isnull=True)
+        .update(ended_at=ended_at)
+    )
+
+
 def find_other_role_open_shift(employee, *, workplace_code, for_update=True):
     """Открытая смена сотрудника в другой роли (пустой workplace_code — старые
     записи, их роль неизвестна, поэтому они не считаются «другой ролью»)."""
@@ -194,6 +208,7 @@ def handover_other_role_shift(shift, *, closed_by):
     shift.closed_by = closed_by
     shift.is_service_closed = True
     shift.save(update_fields=['closed_at', 'closed_by', 'is_service_closed'])
+    close_equipment_open_downtimes(shift.equipment, ended_at=now)
     from trips.models import OPEN_TRIP_STATUSES
     if shift.equipment_id:
         if equipment_is_truck(shift.equipment):
@@ -752,6 +767,7 @@ def close_driver_shift(*, shift, employee, readings, client_action_id, confirmat
         locked_shift.closed_at = timezone.now()
         locked_shift.closed_by = employee
         locked_shift.save(update_fields=[*readings, 'closed_at', 'closed_by'])
+        close_equipment_open_downtimes(locked_shift.equipment, ended_at=locked_shift.closed_at)
         Trip.objects.filter(
             truck=locked_shift.equipment,
             status__in=OPEN_TRIP_STATUSES,
@@ -1727,6 +1743,7 @@ def close_excavator_shift(
     shift.closed_at = timezone.now()
     shift.closed_by = employee
     shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
+    close_equipment_open_downtimes(shift.equipment, ended_at=shift.closed_at)
     # Переходное право существует только до конца конкретной смены старого
     # экскаватора. После закрытия оно не должно всплыть в следующей смене.
     from assignments.services import expire_haul_handoffs_for_shift

@@ -320,6 +320,72 @@ class DispatcherServiceCloseWithoutReadingsTests(TestCase):
         self.assertIn('13 часов', self.truck_shift.service_close_note)
         self.assertEqual(auto_close_expired_equipment_shifts(), [], 'повторный запуск ничего не трогает')
 
+    def test_service_close_ends_open_downtimes_of_the_equipment(self):
+        from downtimes.models import DowntimeEvent, DowntimeReason
+
+        reason, _ = DowntimeReason.objects.get_or_create(name='Ожидание погрузки')
+        downtime = DowntimeEvent.objects.create(
+            equipment=self.truck,
+            employee=self.driver,
+            reason=reason,
+            started_at=timezone.now() - timedelta(hours=3),
+        )
+
+        self.client.post(self.url, {'close_kind': 'neglected'})
+
+        downtime.refresh_from_db()
+        self.truck_shift.refresh_from_db()
+        self.assertIsNotNone(downtime.ended_at)
+        self.assertEqual(downtime.ended_at, self.truck_shift.closed_at)
+
+    def test_auto_pass_ends_orphan_downtimes_but_keeps_dispatcher_ones(self):
+        from downtimes.models import DowntimeEvent, DowntimeEventSource, DowntimeReason
+        from trips.views import auto_close_expired_equipment_shifts
+
+        reason, _ = DowntimeReason.objects.get_or_create(name='Ожидание самосвалов')
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='9')
+        # смена водителя в этом тесте свежая — иначе её закроет сам проход
+        self.truck_shift.opened_at = timezone.now() - timedelta(hours=2)
+        self.truck_shift.save(update_fields=['opened_at'])
+        orphan = DowntimeEvent.objects.create(
+            equipment=excavator,
+            reason=reason,
+            started_at=timezone.now() - timedelta(hours=32),
+        )
+        manual = DowntimeEvent.objects.create(
+            equipment=excavator,
+            reason=reason,
+            source=DowntimeEventSource.DISPATCHER_OVERRIDE,
+            started_at=timezone.now() - timedelta(hours=32),
+        )
+        alive = DowntimeEvent.objects.create(
+            equipment=self.truck,
+            employee=self.driver,
+            reason=reason,
+            started_at=timezone.now() - timedelta(hours=1),
+        )
+
+        auto_close_expired_equipment_shifts()
+
+        orphan.refresh_from_db()
+        manual.refresh_from_db()
+        alive.refresh_from_db()
+        self.assertIsNotNone(orphan.ended_at, 'простой техники без смены закрывается')
+        self.assertIsNone(manual.ended_at, 'ручной простой диспетчера остаётся')
+        self.assertIsNone(alive.ended_at, 'простой при открытой смене живёт')
+
+    def test_excavator_auto_downtime_does_not_start_without_open_shift(self):
+        from downtimes.models import DowntimeEvent, DowntimeReason
+        from trips.views import EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS, start_excavator_auto_downtime
+
+        DowntimeReason.objects.get_or_create(name=EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='9')
+
+        self.assertIsNone(start_excavator_auto_downtime(excavator, None, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS))
+        self.assertFalse(DowntimeEvent.objects.filter(equipment=excavator).exists())
+
     def test_dispatcher_board_load_closes_expired_shifts(self):
         self.truck_shift.opened_at = timezone.now() - timedelta(hours=14)
         self.truck_shift.save(update_fields=['opened_at'])

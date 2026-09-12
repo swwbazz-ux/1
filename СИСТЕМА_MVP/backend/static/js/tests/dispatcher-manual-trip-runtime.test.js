@@ -72,6 +72,29 @@ test("маршрут ручного рейса объявлен рядом с д
     assert.match(URLS, /path\('dispatcher\/trucks\/<int:equipment_id>\/manual-trip\/', dispatcher_manual_trip_view, name='dispatcher_manual_trip'\)/);
 });
 
+test("подсказка о прокрутке: липкая полоска внизу карточки, скрипт прячет её на конце", () => {
+    assert.match(card, /<div class="gd-detail-scroll-hint" data-gd-detail-scroll-hint hidden>Ниже ещё — листайте ▾<\/div>\s*<\/section>/);
+    assert.match(CSS, /\.gd-detail-scroll-hint \{[^}]*position: sticky;/s);
+    assert.match(JS, /function syncDetailScrollHint\(\)/);
+    assert.match(JS, /detailScrollHint\.hidden = rest <= 12;/);
+    assert.match(JS, /window\.setTimeout\(syncDetailScrollHint, 0\);/);
+});
+
+test("карточка графика не схлопывается в полоску прогресса", () => {
+    /* Скрипт даёт карточке класс "gd-detail-chart-" + type, и для bar он
+       совпадает с классом тонкой полоски (height: 8px; overflow: hidden). */
+    assert.match(
+        CSS,
+        /\.gd-detail-chart-card\.gd-detail-chart-bar \{[^}]*height: auto;[^}]*overflow: visible;/s
+    );
+    assert.match(CSS, /\.gd-detail-chart-row \.gd-detail-chart-bar \{[^}]*height: 8px;/s);
+});
+
+test("клон плитки экскаватора: подпись под картинкой, крестик точки на уровне поля", () => {
+    assert.match(CSS, /\.gd-detail-garage-slot \.dispatcher-excavator-garage-tile span \{[^}]*position: static;/s);
+    assert.match(CSS, /\.gd-detail-settings \.gd-detail-destination-remove \{[^}]*margin-bottom: 6px;/s);
+});
+
 test("номер самосвала в клоне плитки не уезжает за край: сдвиг в угол без transform", () => {
     assert.match(
         CSS,

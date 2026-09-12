@@ -4076,6 +4076,9 @@ def start_excavator_auto_downtime(excavator, employee, reason_name, *, replace_a
     reason = excavator_auto_downtime_reason(excavator, reason_name)
     if not reason:
         return None
+    # Простой без смены бессмыслен: некому его учитывать и некому закрыть.
+    if not EmployeeShift.objects.filter(equipment=excavator, closed_at__isnull=True).exists():
+        return None
     with transaction.atomic():
         excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
         active_events = list(
@@ -7250,6 +7253,8 @@ def finish_service_closed_shift(shift, *, closed_by, close_kind, note, reading_f
     ])
     if not shift.equipment_id:
         return
+    from shifts.services import close_equipment_open_downtimes
+    close_equipment_open_downtimes(shift.equipment, ended_at=shift.closed_at)
     if equipment_is_truck(shift.equipment):
         Trip.objects.filter(
             truck=shift.equipment,
@@ -7302,16 +7307,31 @@ def auto_close_expired_equipment_shifts(now=None):
                 now=now,
             )
             closed.append(shift)
-        if closed:
+        # Осиротевшие простои: техника без открытой смены, а простой всё идёт.
+        # Поставленные диспетчером вручную (ремонт и т.п.) не трогаем.
+        from downtimes.models import DowntimeEvent, DowntimeEventSource
+        orphan_downtimes = (
+            DowntimeEvent.objects
+            .filter(ended_at__isnull=True)
+            .exclude(source=DowntimeEventSource.DISPATCHER_OVERRIDE)
+            .exclude(
+                equipment_id__in=EmployeeShift.objects
+                .filter(closed_at__isnull=True, equipment__isnull=False)
+                .values('equipment_id')
+            )
+        )
+        orphan_count = orphan_downtimes.update(ended_at=now)
+        if closed or orphan_count:
             bump_operational_state(
                 'Shift:auto_close_expired',
                 event_type='shift_changed',
                 object_type='EmployeeShift',
-                object_id=closed[-1].id,
+                object_id=closed[-1].id if closed else 0,
                 payload={
                     'action': 'auto_close_expired_shifts',
                     'shift_ids': [shift.id for shift in closed],
                     'equipment_ids': [shift.equipment_id for shift in closed],
+                    'orphan_downtimes_closed': orphan_count,
                 },
             )
     return closed

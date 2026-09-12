@@ -13973,6 +13973,91 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-shif
     color: var(--gd-detail-ink);
 }
 
+/* --- Клон плитки экскаватора в шапке: на доске подпись лежит поверх низа
+   картинки (там она короткая), в крупном слоте она наезжала на экскаватор.
+   Раскладываем столбиком: номер сверху, картинка по центру, подпись снизу. --- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-garage-slot .dispatcher-excavator-garage-tile {
+    grid-template-rows: minmax(0, 1fr) auto;
+    place-items: center;
+    padding: 16px 6px 6px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-garage-slot .dispatcher-excavator-garage-tile img {
+    width: 50px;
+    height: 34px;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-garage-slot .dispatcher-excavator-garage-tile span {
+    position: static;
+    width: 100%;
+    font-size: 9px;
+    line-height: 1.1;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* --- Крестик удаления точки разгрузки стоял ниже поля: у подписи поля есть
+   нижний отступ 6px, у кнопки его не было. --- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-settings .gd-detail-destination-remove {
+    align-self: end;
+    height: 32px;
+    margin-bottom: 6px;
+    line-height: 1;
+}
+
+/* --- Обрезанный график внизу карточки. Скрипт даёт карточке графика класс
+   по типу: "gd-detail-chart-" + type, и для типа bar это совпадает с классом
+   тонкой полоски прогресса (.gd-detail-chart-bar — height: 8px; overflow:
+   hidden). Карточка схлопывалась в полоску и резала содержимое. Правило с
+   двумя классами специфичнее и перебивает обе копии (своя и дубль в app.css);
+   гасим свойства явно, а не убираем объявление. --- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-chart-card.gd-detail-chart-bar {
+    height: auto;
+    overflow: visible;
+    border-radius: 7px;
+    background: rgba(8, 18, 24, .34);
+}
+
+body.dispatcher-control-screen.dispatcher-day:not(.mining-master-mobile-screen) .gd-detail-chart-card.gd-detail-chart-bar {
+    background: rgba(58, 78, 86, .045);
+}
+
+/* Полоска остаётся полоской только внутри строки графика. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-chart-row .gd-detail-chart-bar {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+}
+
+/* --- Подсказка, что карточка листается: липкая полоска у нижнего края,
+   исчезает, когда долистали до конца. --- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-scroll-hint {
+    position: sticky;
+    bottom: -20px;
+    z-index: 5;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    height: 44px;
+    margin: -24px -20px -20px;
+    padding-bottom: 6px;
+    background: linear-gradient(to bottom, transparent, var(--gd-detail-panel) 70%);
+    color: var(--gd-detail-muted);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    pointer-events: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-scroll-hint[hidden] {
+    display: none;
+}
+
 /* --- Читаемость: карточка целиком крупнее на треть. Внутри все размеры в px,
    поэтому масштабируем панель через zoom, а ширину/высоту делим на тот же
    коэффициент — --gd-vw/--gd-vh заданы в px и внутри zoom тоже растут. --- */

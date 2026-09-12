@@ -93,8 +93,25 @@ document.addEventListener("DOMContentLoaded", function () {
     var detailManualTripDump = document.querySelector("[data-gd-detail-manual-trip-dump]");
     var detailManualTripRock = document.querySelector("[data-gd-detail-manual-trip-rock]");
     var detailManualTripTime = document.querySelector("[data-gd-detail-manual-trip-time]");
+    var detailScrollHint = document.querySelector("[data-gd-detail-scroll-hint]");
+    var detailScrollPanel = detailLayer ? detailLayer.querySelector(".mm-equipment-detail-panel") : null;
     /* План показан крупно в шапке — те же строки в общем списке не повторяем. */
     var DETAIL_PLAN_LABELS = ["Статус плана", "Факт / план", "Выполнение плана", "План смены", "Группа плана"];
+
+    /* Карточка выше окна листается внутри; без подсказки обрез внизу выглядит
+       как оторванный блок. Полоска видна, пока есть что листать. */
+    function syncDetailScrollHint() {
+        if (!detailScrollHint || !detailScrollPanel) return;
+        var rest = detailScrollPanel.scrollHeight - detailScrollPanel.clientHeight - detailScrollPanel.scrollTop;
+        detailScrollHint.hidden = rest <= 12;
+    }
+    if (detailScrollPanel) {
+        detailScrollPanel.addEventListener("scroll", syncDetailScrollHint, { passive: true });
+        window.addEventListener("resize", syncDetailScrollHint);
+        if (typeof ResizeObserver === "function") {
+            new ResizeObserver(syncDetailScrollHint).observe(detailScrollPanel);
+        }
+    }
     var detailTrucks = document.querySelector("[data-gd-detail-trucks]");
     var detailTrucksCount = document.querySelector("[data-gd-detail-trucks-count]");
     var detailTrucksList = document.querySelector("[data-gd-detail-trucks-list]");
@@ -2510,6 +2527,7 @@ document.addEventListener("DOMContentLoaded", function () {
         renderDetailShift(data.shift || null, data.employee || null);
         renderDetailPlan(data.plan || null);
         renderDetailManualTrip(data.manual_trip || null);
+        window.setTimeout(syncDetailScrollHint, 0);
         renderDetailDowntime(data.downtime || null);
         renderDetailSettings(data.settings || null);
         renderDetailTrucks(data);
