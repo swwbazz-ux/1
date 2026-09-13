@@ -83,6 +83,9 @@ from shifts.services import (
     calculate_truck_shift_progress,
     close_driver_shift,
     DriverShiftCloseConfirmationRequired,
+    DriverShiftCloseIdempotencyConflict,
+    driver_close_request_signature,
+    ensure_driver_close_action_matches,
     find_other_role_open_shift,
     open_driver_shift,
     open_shift_conflict_message,
@@ -442,7 +445,13 @@ async function migratePreviousAuthenticatedShell() {{
         const source = await caches.open(name);
         const entries = await validatedShellEntries(source);
         if (!entries.length) continue;
-        for (const [request, response] of entries) await target.put(request, response.clone());
+        const requests = await source.keys();
+        for (const request of requests) {{
+            const url = new URL(request.url);
+            if (url.origin !== self.location.origin) continue;
+            const response = await source.match(request);
+            if (response && response.ok) await target.put(request, response.clone());
+        }}
         return true;
     }}
     return false;
@@ -4582,12 +4591,52 @@ def driver_close_shift_view(request):
         return redirect('role_home')
 
     client_action_id = request.POST.get('client_action_id', '').strip()
-    completed_action = lambda: ShiftClientAction.objects.filter(
+    existing_action = ShiftClientAction.objects.select_related('shift').filter(
         action_type='driver_shift_closed',
         client_action_id=client_action_id,
         employee=access.employee,
-    ).exists()
-    if client_action_id and completed_action():
+    ).first() if client_action_id else None
+    posted_shift_id = (request.POST.get('shift_id') or '').strip()
+    raw_occurred_at = (request.POST.get('occurred_at') or '').strip()
+    occurred_at = parse_datetime(raw_occurred_at) if raw_occurred_at else None
+    occurred_at_is_valid = not raw_occurred_at or (
+        occurred_at is not None and not timezone.is_naive(occurred_at)
+    )
+
+    def posted_request_signature(shift_id):
+        return driver_close_request_signature(
+            shift_id=shift_id,
+            employee_id=access.employee_id,
+            actor_access_id=access.pk,
+            readings={
+                'end_fuel': request.POST.get('end_fuel', ''),
+                'end_mileage': request.POST.get('end_mileage', ''),
+                'end_engine_hours': request.POST.get('end_engine_hours', ''),
+            },
+            occurred_at=occurred_at if occurred_at_is_valid else raw_occurred_at,
+        )
+
+    def idempotency_conflict_response(error):
+        error_messages = getattr(error, 'messages', None) or [str(error)]
+        if wants_json:
+            return JsonResponse({
+                'ok': False,
+                'code': 'client_action_conflict',
+                'error': str(error_messages[0]),
+                'has_active_shift': False,
+            }, status=409)
+        messages.error(request, 'Повтор действия содержит другие данные. Обновите экран.')
+        return redirect(f"{reverse('driver_work')}?tab=manifest")
+
+    if existing_action:
+        try:
+            ensure_driver_close_action_matches(
+                existing_action,
+                posted_request_signature(posted_shift_id or existing_action.shift_id),
+                access.employee_id,
+            )
+        except DriverShiftCloseIdempotencyConflict as error:
+            return idempotency_conflict_response(error)
         if wants_json:
             return JsonResponse({
                 'ok': True,
@@ -4600,16 +4649,6 @@ def driver_close_shift_view(request):
 
     open_shift = driver_open_shift_queryset(access.employee).order_by('-opened_at').first()
     if not open_shift:
-        if client_action_id and completed_action():
-            if wants_json:
-                return JsonResponse({
-                    'ok': True,
-                    'status': 'already_applied',
-                    'client_action_id': client_action_id,
-                    'redirect_url': f"{reverse('driver_work')}?tab=manifest",
-                })
-            messages.success(request, 'Смена закрыта.')
-            return redirect(f"{reverse('driver_work')}?tab=manifest")
         if wants_json:
             return JsonResponse({
                 'ok': False,
@@ -4619,7 +4658,6 @@ def driver_close_shift_view(request):
         messages.error(request, 'Открытая смена не найдена.')
         return redirect('driver_work')
 
-    posted_shift_id = (request.POST.get('shift_id') or '').strip()
     if posted_shift_id and posted_shift_id != str(open_shift.pk):
         if wants_json:
             return JsonResponse({
@@ -4636,13 +4674,9 @@ def driver_close_shift_view(request):
     form = DriverCloseShiftForm(form_data, instance=open_shift)
     request._driver_close_form = form
     form_is_valid = form.is_valid()
-    occurred_at = None
-    raw_occurred_at = (request.POST.get('occurred_at') or '').strip()
-    if form_is_valid and raw_occurred_at:
-        occurred_at = parse_datetime(raw_occurred_at)
-        if occurred_at is None or timezone.is_naive(occurred_at):
-            form.add_error(None, 'Время действия должно содержать часовой пояс.')
-            form_is_valid = False
+    if form_is_valid and not occurred_at_is_valid:
+        form.add_error(None, 'Время действия должно содержать часовой пояс.')
+        form_is_valid = False
     if form_is_valid:
         readings = {
             'end_fuel': form.cleaned_data['end_fuel'],
@@ -4650,6 +4684,13 @@ def driver_close_shift_view(request):
             'end_engine_hours': form.cleaned_data['end_engine_hours'],
         }
         resolved_client_action_id = form.cleaned_data['client_action_id']
+        request_signature = driver_close_request_signature(
+            shift_id=open_shift.pk,
+            employee_id=access.employee_id,
+            actor_access_id=access.pk,
+            readings=readings,
+            occurred_at=occurred_at,
+        )
         try:
             with transaction.atomic():
                 Employee.objects.select_for_update().get(pk=access.employee_id)
@@ -4662,6 +4703,8 @@ def driver_close_shift_view(request):
                     client_action_id=resolved_client_action_id,
                     confirmation_token=form.cleaned_data.get('reading_confirmation_token') or '',
                     occurred_at=occurred_at,
+                    actor_access_id=access.pk,
+                    request_signature=request_signature,
                 )
         except DriverShiftCloseConfirmationRequired as confirmation:
             warning_payload = {
@@ -4677,6 +4720,8 @@ def driver_close_shift_view(request):
             if wants_json:
                 return JsonResponse(warning_payload, status=422)
             request._driver_close_confirmation = warning_payload
+        except DriverShiftCloseIdempotencyConflict as error:
+            return idempotency_conflict_response(error)
         except ValidationError as error:
             form.add_error(None, error)
         else:

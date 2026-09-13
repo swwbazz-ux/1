@@ -509,6 +509,12 @@ class ShiftClientAction(models.Model):
         blank=True,
     )
     response_payload = models.JSONField('Ответ сервера', default=dict, blank=True)
+    request_signature = models.CharField(
+        'Подпись запроса',
+        max_length=64,
+        blank=True,
+        default='',
+    )
     created_at = models.DateTimeField('Создано', auto_now_add=True)
 
     class Meta:

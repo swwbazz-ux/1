@@ -1,5 +1,7 @@
 from collections import defaultdict
-from datetime import timedelta
+import hashlib
+import json
+from datetime import timedelta, timezone as datetime_timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.conf import settings
@@ -50,6 +52,62 @@ class DriverShiftCloseConfirmationRequired(Exception):
         super().__init__('Подтвердите подозрительные показания.')
         self.warnings = warnings
         self.confirmation_token = confirmation_token
+
+
+class DriverShiftCloseIdempotencyConflict(ValidationError):
+    pass
+
+
+def _canonical_driver_close_reading(value):
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return f'invalid:{str(value).strip()}'
+    if not number.is_finite():
+        return f'invalid:{str(value).strip()}'
+    normalized = format(number, 'f')
+    if '.' in normalized:
+        normalized = normalized.rstrip('0').rstrip('.')
+    return normalized or '0'
+
+
+def _canonical_driver_close_time(value):
+    if value in (None, ''):
+        return ''
+    if not hasattr(value, 'utcoffset') or timezone.is_naive(value):
+        return f'invalid:{str(value).strip()}'
+    return value.astimezone(datetime_timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+
+
+def driver_close_request_signature(
+    *, shift_id, employee_id, readings, occurred_at=None, actor_access_id=None,
+):
+    canonical = {
+        'action_type': 'driver_shift_closed',
+        'actor_access_id': str(actor_access_id or ''),
+        'employee_id': str(employee_id),
+        'occurred_at': _canonical_driver_close_time(occurred_at),
+        'readings': {
+            field: _canonical_driver_close_reading(readings.get(field))
+            for field in ('end_fuel', 'end_mileage', 'end_engine_hours')
+        },
+        'shift_id': str(shift_id),
+    }
+    encoded = json.dumps(canonical, ensure_ascii=True, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+
+
+def ensure_driver_close_action_matches(action, request_signature, employee_id):
+    if action.employee_id != employee_id:
+        raise DriverShiftCloseIdempotencyConflict(
+            'ID закрытия смены уже принадлежит другому водителю.'
+        )
+    # Legacy rows have no signature. Preserve their previous idempotent behavior;
+    # every newly created row is protected against payload reuse.
+    if action.request_signature and action.request_signature != request_signature:
+        raise DriverShiftCloseIdempotencyConflict(
+            'ID закрытия смены повторно использован с другими данными.'
+        )
 
 
 class ExcavatorShiftCloseConfirmationRequired(Exception):
@@ -710,15 +768,21 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id, 
 
 def close_driver_shift(
     *, shift, employee, readings, client_action_id, confirmation_token='',
-    occurred_at=None,
+    occurred_at=None, actor_access_id=None, request_signature=None,
 ):
+    request_signature = request_signature or driver_close_request_signature(
+        shift_id=shift.pk,
+        employee_id=employee.pk,
+        actor_access_id=actor_access_id,
+        readings=readings,
+        occurred_at=occurred_at,
+    )
     existing_action = ShiftClientAction.objects.select_related('shift').filter(
         action_type='driver_shift_closed',
         client_action_id=client_action_id,
     ).first()
     if existing_action:
-        if existing_action.employee_id != employee.pk:
-            raise ValidationError('ID закрытия смены уже принадлежит другому водителю.')
+        ensure_driver_close_action_matches(existing_action, request_signature, employee.pk)
         return existing_action.shift, False
     from references.models import Equipment
     from trips.models import OPEN_TRIP_STATUSES
@@ -730,8 +794,7 @@ def close_driver_shift(
             client_action_id=client_action_id,
         ).first()
         if existing_action:
-            if existing_action.employee_id != employee.pk:
-                raise ValidationError('ID закрытия смены уже принадлежит другому водителю.')
+            ensure_driver_close_action_matches(existing_action, request_signature, employee.pk)
             return existing_action.shift, False
         Employee.objects.select_for_update().get(pk=employee.pk)
         locked_shift = EmployeeShift.objects.select_for_update(of=('self',)).select_related('equipment__model').get(pk=shift.pk)
@@ -798,6 +861,7 @@ def close_driver_shift(
         ShiftClientAction.objects.create(
             action_type='driver_shift_closed', client_action_id=client_action_id,
             employee=employee, shift=locked_shift, response_payload=response,
+            request_signature=request_signature,
         )
         if warnings:
             DriverShiftReadingConfirmation.objects.create(

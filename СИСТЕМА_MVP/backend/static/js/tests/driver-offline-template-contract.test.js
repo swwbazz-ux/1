@@ -47,6 +47,8 @@ test("expired session update migrates a valid shell without touching a nonempty 
     assert.match(install, /throw new Error\("Authenticated driver shell/);
     assert.doesNotMatch(install, /caches\.delete/);
     assert.match(activate, /if \(!prepared\) return \[\]/);
+    assert.match(views, /const requests = await source\.keys\(\)/);
+    assert.match(views, /await target\.put\(request, response\.clone\(\)\)/);
     assert.match(offlineRuntime, /field-offline-events-v1/);
     assert.doesNotMatch(views, /deleteDatabase|indexedDB\.delete/);
 });

@@ -25,9 +25,11 @@
     function readShiftState() {
         if (roleCode === "driver") {
             var driverShift = document.querySelector("[data-driver-shift-close-form]");
+            var driverShell = document.querySelector("[data-driver-shell]");
             return {
                 required: !!driverShift,
-                shiftId: driverShift ? String(driverShift.dataset.nativeShiftId || "") : ""
+                shiftId: driverShift ? String(driverShift.dataset.nativeShiftId || "") : "",
+                authGeneration: driverShell ? String(driverShell.dataset.driverAuthGeneration || "") : ""
             };
         }
         var excavatorWork = document.querySelector('[data-eo-work-available="true"]');
@@ -40,7 +42,7 @@
 
     function runSync(reason) {
         var state = readShiftState();
-        var signature = (state.required ? "1" : "0") + ":" + state.shiftId;
+        var signature = (state.required ? "1" : "0") + ":" + state.shiftId + ":" + String(state.authGeneration || "");
         if (syncInFlight) {
             syncAgain = true;
             return;
@@ -52,6 +54,7 @@
         Promise.resolve(plugin.sync({
             required: state.required,
             shiftId: state.shiftId,
+            authGeneration: String(state.authGeneration || ""),
             reason: reason || (state.required ? "shift_active" : "shift_inactive")
         })).then(function () {
             lastSignature = signature;

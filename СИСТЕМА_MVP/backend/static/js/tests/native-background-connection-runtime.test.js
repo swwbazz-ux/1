@@ -59,6 +59,9 @@ function createRuntime(roleCode) {
     const document = {
         body,
         querySelector(selector) {
+            if (roleCode === "driver" && selector === "[data-driver-shell]") {
+                return {dataset: {driverAuthGeneration: "driver-auth-7"}};
+            }
             if (!shiftActive) return null;
             if (roleCode === "driver" && selector === "[data-driver-shift-close-form]") {
                 return {dataset: {nativeShiftId: "driver-17"}};
@@ -133,7 +136,12 @@ for (const roleCode of ["driver", "excavator_operator"]) {
         await runtime.flush();
         assert.deepEqual(runtime.calls[0], {
             method: "sync",
-            options: {required: false, shiftId: "", reason: "initial_render"},
+            options: {
+                required: false,
+                shiftId: "",
+                authGeneration: roleCode === "driver" ? "driver-auth-7" : "",
+                reason: "initial_render",
+            },
         });
 
         await runtime.setShiftActive(true);

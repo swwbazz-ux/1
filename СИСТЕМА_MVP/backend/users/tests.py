@@ -13,6 +13,7 @@ from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from openpyxl import load_workbook
 from PIL import Image
 
@@ -537,6 +538,8 @@ class AccessLoginTests(TestCase):
         self.assertIn('migratePreviousAuthenticatedShell()', script)
         self.assertIn('if (!prepared) return [];', script)
         self.assertIn('Authenticated driver shell is unavailable', script)
+        self.assertIn('const requests = await source.keys();', script)
+        self.assertIn('await target.put(request, response.clone());', script)
         self.assertIn('/static/css/mobile-shift-unified-v1.css', script)
         self.assertIn('/static/js/mobile-shift-unified-v1.js', script)
         self.assertIn('/static/js/mobile-operational-sounds-v1.js', script)
@@ -2386,6 +2389,7 @@ class AccessLoginTests(TestCase):
             'end_mileage': '2600',
             'end_engine_hours': '712',
             'client_action_id': 'native-close-json',
+            'occurred_at': timezone.now().isoformat(),
         }
 
         response = self.client.post(
@@ -2402,17 +2406,45 @@ class AccessLoginTests(TestCase):
             HTTP_X_REQUESTED_WITH='XMLHttpRequest',
             HTTP_HOST='localhost',
         )
+        mismatched = self.client.post(
+            '/driver/shift/close/',
+            dict(payload, end_mileage='2601'),
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
+        mismatched_time = self.client.post(
+            '/driver/shift/close/',
+            dict(
+                payload,
+                occurred_at=(parse_datetime(payload['occurred_at']) + timedelta(seconds=1)).isoformat(),
+            ),
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['status'], 'applied')
         self.assertEqual(repeated.status_code, 200)
         self.assertEqual(repeated.json()['status'], 'already_applied')
+        self.assertEqual(mismatched.status_code, 409)
+        self.assertEqual(mismatched.json()['code'], 'client_action_conflict')
+        self.assertEqual(mismatched_time.status_code, 409)
+        self.assertEqual(mismatched_time.json()['code'], 'client_action_conflict')
         self.assertEqual(
             ShiftClientAction.objects.filter(
                 action_type='driver_shift_closed',
                 client_action_id='native-close-json',
             ).count(),
             1,
+        )
+        action = ShiftClientAction.objects.get(client_action_id='native-close-json')
+        self.assertRegex(action.request_signature, r'^[0-9a-f]{64}$')
+        action.shift.refresh_from_db()
+        self.assertEqual(
+            action.shift.closed_at.isoformat(),
+            parse_datetime(payload['occurred_at']).isoformat(),
         )
 
     def test_native_driver_shift_close_returns_validation_errors_as_json(self):

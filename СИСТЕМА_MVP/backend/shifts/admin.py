@@ -47,7 +47,7 @@ class ShiftClientActionAdmin(admin.ModelAdmin):
     list_display = ('created_at', 'action_type', 'client_action_id', 'employee', 'shift')
     search_fields = ('client_action_id', 'employee__full_name', 'shift__equipment__garage_number')
     list_filter = ('action_type', 'created_at')
-    readonly_fields = ('created_at', 'response_payload')
+    readonly_fields = ('created_at', 'request_signature', 'response_payload')
 
 
 @admin.register(ShiftReadingCorrection)
