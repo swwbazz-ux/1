@@ -51,6 +51,7 @@ test("driver shell exposes confirmed identity and shift context without granting
     assert.doesNotMatch(template, /event_type: "driver\.shift\.opened"/);
     assert.match(template, /createDriverPointChangeEvent/);
     assert.match(template, /createDriverDowntimeEndEvent/);
+    assert.match(offlineRuntime, /local_downtime_id:[\s\S]*driver\.downtime\.started/);
     assert.match(template, /getServerMapping\(localStartId\)/);
     assert.match(template, /Нет подтверждённого загруженного рейса/);
 });

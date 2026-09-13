@@ -423,6 +423,52 @@ test("downtime start acknowledgement keeps the exact server mapping for close", 
     assert.deepEqual(localClose.payload, {downtime_id: null, local_downtime_id: "down-local"});
 });
 
+test("offline downtime start and close share the exact local id before sync", async () => {
+    let wire;
+    const box = runtime({send: async batch => {
+        wire = batch.events;
+        return {results: batch.events.map(event => ({event_id: event.event_id, status: "accepted"}))};
+    }});
+    const start = await box.enqueue({
+        event_id: "local-start-1",
+        event_type: "driver.downtime.started",
+        payload: {reason_id: 4},
+    });
+    const closeSpec = createDriverDowntimeEndEvent({
+        eventId: "local-close-1",
+        pendingStartId: start.event_id,
+        occurredAt: "2026-09-13T11:31:00Z",
+    });
+    await box.enqueue(closeSpec);
+    await box.flush();
+    assert.equal(wire[0].local_downtime_id, "local-start-1");
+    assert.equal(wire[1].local_downtime_id, "local-start-1");
+    assert.deepEqual(wire[1].depends_on, ["local-start-1"]);
+    assert.equal(wire[1].payload.local_downtime_id, "local-start-1");
+});
+
+test("accepted downtime start maps a quick close to the exact server id", async () => {
+    const batches = [];
+    const box = runtime({send: async batch => {
+        batches.push(batch.events);
+        return {results: batch.events.map(event => ({
+            event_id: event.event_id,
+            status: "accepted",
+            server_ids: event.event_type === "driver.downtime.started" ? {downtime_event_id: 702} : {},
+        }))};
+    }});
+    await box.enqueue({event_id: "quick-start", event_type: "driver.downtime.started", payload: {reason_id: 4}});
+    await box.flush();
+    const mapping = await box.getServerMapping("quick-start");
+    await box.enqueue(createDriverDowntimeEndEvent({eventId: "quick-close", serverId: mapping.downtime_event_id}));
+    await box.flush();
+    const close = batches[1][0];
+    assert.equal(close.payload.downtime_id, 702);
+    assert.equal(close.payload.local_downtime_id, null);
+    assert.equal(close.local_downtime_id, null);
+    assert.deepEqual(close.depends_on, []);
+});
+
 test("A to B to A point changes always get new ids CAS state and dependencies", () => {
     const first = createDriverPointChangeEvent({tripId: 91, pointId: 2, currentPointId: 1, events: []});
     const second = createDriverPointChangeEvent({tripId: 91, pointId: 1, currentPointId: 1, events: [{...first, state: "pending"}]});

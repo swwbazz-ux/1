@@ -16,7 +16,7 @@
     var IMMUTABLE_FIELDS = [
         "event_id", "event_type", "format_version", "actor_id", "access_id",
         "role_code", "device_id", "shift_id", "equipment_id", "trip_id",
-        "local_trip_id", "occurred_at", "depends_on", "payload"
+        "local_trip_id", "local_downtime_id", "occurred_at", "depends_on", "payload"
     ];
 
     function nowIso() { return new Date().toISOString(); }
@@ -65,6 +65,9 @@
         }
         if (event.event_type === "driver.downtime.started" && !number(event.payload.reason_id)) {
             throw new Error("offline_downtime_reason_required");
+        }
+        if (event.event_type === "driver.downtime.started" && event.local_downtime_id !== event.event_id) {
+            throw new Error("offline_downtime_local_id_mismatch");
         }
         if (event.event_type === "driver.downtime.ended") {
             var serverId = number(event.payload.downtime_id || event.payload.downtime_event_id);
@@ -122,6 +125,7 @@
             event_type: "driver.downtime.ended",
             occurred_at: String(options.occurredAt || nowIso()),
             depends_on: pendingStartId ? [pendingStartId] : [],
+            local_downtime_id: pendingStartId || null,
             payload: {
                 downtime_id: serverId,
                 local_downtime_id: pendingStartId || null
@@ -289,6 +293,11 @@
                 equipment_id: number(spec.equipment_id || ctx.equipmentId),
                 trip_id: number(spec.trip_id),
                 local_trip_id: spec.local_trip_id ? String(spec.local_trip_id) : null,
+                local_downtime_id: spec.local_downtime_id
+                    ? String(spec.local_downtime_id)
+                    : (String(spec.event_type || "") === "driver.downtime.started"
+                        ? requestedId
+                        : (spec.payload && spec.payload.local_downtime_id ? String(spec.payload.local_downtime_id) : null)),
                 occurred_at: occurredAt,
                 sequence: null,
                 depends_on: Array.isArray(spec.depends_on) ? spec.depends_on.map(String) : [],
