@@ -275,7 +275,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v214'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v215'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -593,6 +593,19 @@ self.addEventListener("message", (event) => {{
     }}
     if (event.data.type === "SKIP_WAITING") {{
         self.skipWaiting();
+    }}
+    if (event.data.type === "CLEAR_AUTHENTICATED_SHELL") {{
+        const work = caches.keys().then((keys) => Promise.all(
+            keys.filter((key) => key.startsWith(CACHE_PREFIX)).map(async (key) => {{
+                const cache = await caches.open(key);
+                await Promise.all(SHELL_URLS.map((url) => cache.delete(url)));
+            }})
+        ));
+        event.waitUntil(work);
+        if (event.ports && event.ports[0]) {{
+            work.finally(() => event.ports[0].postMessage({{ok: true}}));
+        }}
+        return;
     }}
     if (event.data.type === "GET_VERSION" && event.ports && event.ports[0]) {{
         event.ports[0].postMessage({{

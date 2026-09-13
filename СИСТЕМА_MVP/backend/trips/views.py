@@ -961,7 +961,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v234";
+const CACHE_NAME = "excavator-mobile-shell-v235";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -975,15 +975,15 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v234",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v234",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v234",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v234",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v234",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v234",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v235",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v235",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v235",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v235",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v235",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v235",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v234",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v234",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v235",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v235",
   "/static/js/excavator-field-outbox-v1.js?v=1",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
@@ -1254,6 +1254,18 @@ self.addEventListener("message", event => {
   if (!event.data) return;
   if (event.data.type === "SKIP_WAITING") {
     self.skipWaiting();
+    return;
+  }
+  if (event.data.type === "CLEAR_AUTHENTICATED_SHELL") {
+    const work = caches.keys().then(keys => Promise.all(
+      keys.filter(key => key.startsWith(CACHE_PREFIX)).map(async key => {
+        const cache = await caches.open(key);
+        await cache.delete(APP_SHELL_URL);
+      })
+    ));
+    event.waitUntil(work);
+    const target = event.ports && event.ports[0];
+    if (target) work.finally(() => target.postMessage({ok: true}));
     return;
   }
   if (event.data.type === "GET_VERSION") {

@@ -13,7 +13,7 @@ function renderedWorkerSource() {
     assert.ok(match);
     return match[1]
         .replaceAll("{json.dumps(APP_CONTRACT_VERSION)}", JSON.stringify("test-contract"))
-        .replaceAll("{DRIVER_SHELL_VERSION}", "driver-mobile-shell-v214")
+        .replaceAll("{DRIVER_SHELL_VERSION}", "driver-mobile-shell-v215")
         .replaceAll("{{", "{")
         .replaceAll("}}", "}")
         .replaceAll("\\\\b", "\\b")
@@ -53,6 +53,7 @@ class MemoryCache {
     async keys() { return [...this.entries.keys()].map((url) => new FakeRequest(url)); }
     async match(input) { const value = this.entries.get(this.key(input)); return value ? value.clone() : undefined; }
     async put(input, response) { this.entries.set(this.key(input), response.clone()); }
+    async delete(input) { return this.entries.delete(this.key(input)); }
     async addAll(urls) {
         for (const url of urls) await this.put(url, await this.fetcher(new FakeRequest(url)));
     }
@@ -66,7 +67,7 @@ async function createExpiredSessionRuntime({missingDependency = "", freshShell =
     const exactDependencies = [
         "/static/css/app.css?v=release-231",
         "/static/js/native-background-connection-v1.js?v=release-231",
-        "/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v214",
+        "/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v215",
     ];
     const renderedDriverShell = [
         '<link rel="stylesheet" href="' + exactDependencies[0] + '">',
@@ -149,7 +150,7 @@ test("fresh authenticated install caches the exact rendered Driver dependency cl
     runtime.listeners.get("install")({waitUntil(value) { installPromise = value; }});
     await installPromise;
 
-    const current = runtime.stores.get("driver-mobile-shell-v214");
+    const current = runtime.stores.get("driver-mobile-shell-v215");
     assert.match((await current.match("/driver/")).body, /data-driver-shell/);
     for (const dependency of runtime.exactDependencies) {
         assert.equal((await current.match(dependency)).body, "new:" + dependency);
@@ -171,7 +172,7 @@ test("expired-session update migrates real exact Driver shell dependencies and s
 
     assert.equal(runtime.stores.has(runtime.oldName), true);
     assert.deepEqual(runtime.deleted, []);
-    const current = runtime.stores.get("driver-mobile-shell-v214");
+    const current = runtime.stores.get("driver-mobile-shell-v215");
     assert.match((await current.match("/driver/")).body, /old authenticated shell/);
     for (const dependency of runtime.exactDependencies) {
         assert.equal((await current.match(dependency)).body, "old:" + dependency);
@@ -210,4 +211,27 @@ test("missing exact shell dependency fails closure and preserves the previous ca
     await activatePromise;
     assert.equal(runtime.stores.has(runtime.oldName), true);
     assert.deepEqual(runtime.deleted, []);
+});
+
+test("confirmed logout clears authenticated Driver shells but keeps exact assets", async () => {
+    const runtime = await createExpiredSessionRuntime({freshShell: true});
+    let installPromise;
+    runtime.listeners.get("install")({waitUntil(value) { installPromise = value; }});
+    await installPromise;
+
+    let messagePromise;
+    let acknowledged = false;
+    runtime.listeners.get("message")({
+        data: {type: "CLEAR_AUTHENTICATED_SHELL"},
+        ports: [{postMessage(payload) { acknowledged = Boolean(payload && payload.ok); }}],
+        waitUntil(value) { messagePromise = value; },
+    });
+    await messagePromise;
+    await Promise.resolve();
+
+    const current = runtime.stores.get("driver-mobile-shell-v215");
+    assert.equal(await current.match("/driver/"), undefined);
+    assert.equal(await runtime.stores.get(runtime.oldName).match("/driver/"), undefined);
+    assert.ok(await current.match(runtime.exactDependencies[0]));
+    assert.equal(acknowledged, true);
 });

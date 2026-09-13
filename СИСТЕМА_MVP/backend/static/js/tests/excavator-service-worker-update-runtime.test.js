@@ -86,7 +86,7 @@ test('expired-session update migrates v233 shell with exact safe assets and pres
     const currentCache = fakeCache();
     const cacheMap = new Map([
         ['excavator-mobile-shell-v233', oldCache],
-        ['excavator-mobile-shell-v234', currentCache],
+        ['excavator-mobile-shell-v235', currentCache],
     ]);
     const listeners = {};
     let skippedWaiting = false;
@@ -118,7 +118,7 @@ test('expired-session update migrates v233 shell with exact safe assets and pres
     listeners.activate({waitUntil: promise => { activateWork = promise; }});
     await activateWork;
     assert.equal(claimedClients, true);
-    assert.deepEqual([...cacheMap.keys()], ['excavator-mobile-shell-v234']);
+    assert.deepEqual([...cacheMap.keys()], ['excavator-mobile-shell-v235']);
 
     context.fetch = async () => { throw new Error('offline'); };
     let navigationResponse;
@@ -148,6 +148,19 @@ test('expired-session update migrates v233 shell with exact safe assets and pres
     assert.equal(await currentCache.match('/static/js/stale.js?v=v233'), undefined);
     assert.equal(await currentCache.match('/static/js/poison.js'), undefined);
     assert.equal((await after.ready()).length, 1);
+
+    let clearWork;
+    let clearAcknowledged = false;
+    listeners.message({
+        data: {type: 'CLEAR_AUTHENTICATED_SHELL'},
+        ports: [{postMessage: payload => { clearAcknowledged = Boolean(payload && payload.ok); }}],
+        waitUntil: promise => { clearWork = promise; },
+    });
+    await clearWork;
+    await Promise.resolve();
+    assert.equal(await currentCache.match('/excavator/work/'), undefined);
+    assert.equal((await after.ready()).length, 1, 'logout must retain the durable outbox');
+    assert.equal(clearAcknowledged, true);
 });
 
 test('fresh authenticated rendered shell precaches every exact dependency for offline reopen', {
@@ -157,13 +170,13 @@ test('fresh authenticated rendered shell precaches every exact dependency for of
     assert.ok(dependencies.length > 10, 'the rendered Excavator shell must expose its real static closure');
     assert.ok(dependencies.some(path => path.includes('/static/css/app.css?v=')));
     assert.ok(dependencies.some(path => path.includes('/static/js/realtime-client.js?v=')));
-    assert.ok(dependencies.some(path => path.includes('excavator-mobile-shell-v234')));
+    assert.ok(dependencies.some(path => path.includes('excavator-mobile-shell-v235')));
 
     const oldCache = fakeCache([['/sentinel', new FakeResponse('old', {url: 'https://excavator.test/sentinel'})]]);
     const currentCache = fakeCache();
     const cacheMap = new Map([
         ['excavator-mobile-shell-v233', oldCache],
-        ['excavator-mobile-shell-v234', currentCache],
+        ['excavator-mobile-shell-v235', currentCache],
     ]);
     const listeners = {};
     let offline = false;
@@ -216,7 +229,7 @@ test('missing fresh dependency rejects install before old cache deletion or acti
     const currentCache = fakeCache();
     const cacheMap = new Map([
         ['excavator-mobile-shell-v233', oldCache],
-        ['excavator-mobile-shell-v234', currentCache],
+        ['excavator-mobile-shell-v235', currentCache],
     ]);
     const listeners = {};
     let skippedWaiting = false;

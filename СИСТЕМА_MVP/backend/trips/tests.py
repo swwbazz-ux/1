@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import re
 import shutil
@@ -1361,14 +1361,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v234')
+        self.assertContains(response, 'excavator-mobile-shell-v235')
         self.assertContains(response, '/static/js/excavator-field-outbox-v1.js?v=1')
         self.assertContains(response, '/static/css/excavator-offline-v1.css?v=1')
         self.assertContains(response, 'data-eo-offline-sync-url="/offline-events/sync/"')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 234')
+        self.assertContains(response, 'Версия 235')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
@@ -1455,6 +1455,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'data-eo-pwa-update-check-label')
         self.assertNotContains(response, 'data-eo-pwa-update-check-version')
         self.assertNotContains(response, 'data-eo-refresh-work')
+        self.assertNotContains(response, 'js/push-notifications.js')
         self.assertNotContains(response, 'Сверьте с фактом')
         self.assertNotContains(response, 'eo-shift-attention-label')
         self.assertContains(response, 'Обновить')
@@ -1466,7 +1467,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         response = self.client.get(reverse('excavator_work'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'excavator-mobile-shell-v234')
+        self.assertContains(response, 'excavator-mobile-shell-v235')
         self.assertContains(response, '/static/js/excavator-field-outbox-v1.js?v=1')
         self.assertContains(response, '/static/css/excavator-offline-v1.css?v=1')
         self.assertContains(response, 'data-eo-offline-sync-url="/offline-events/sync/"')
@@ -3684,7 +3685,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v234', script)
+        self.assertIn('excavator-mobile-shell-v235', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
