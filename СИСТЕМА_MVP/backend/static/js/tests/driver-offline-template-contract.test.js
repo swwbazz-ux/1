@@ -32,9 +32,23 @@ test("driver v213 shell precaches the durable runtime but validates authenticate
     assert.match(views, /async function isValidatedDriverShell/);
     assert.match(views, /html\.includes\("data-driver-shell"\)/);
     assert.match(views, /networkFirstDriverShell/);
+    assert.match(views, /migratePreviousAuthenticatedShell/);
+    assert.match(views, /Authenticated driver shell is unavailable/);
+    assert.match(views, /hasValidatedCurrentShell/);
     const coreAssets = views.match(/const CORE_ASSETS = \[([\s\S]*?)\];/)[1];
     assert.doesNotMatch(coreAssets, /APP_SHELL_URL|LEGACY_SHELL_URL/);
     assert.match(roleApps, /shell_version='driver-mobile-shell-v213'/);
+});
+
+test("expired session update migrates a valid shell without touching a nonempty event queue", () => {
+    const install = views.split('self.addEventListener("install"', 2)[1].split('self.addEventListener("activate"', 1)[0];
+    const activate = views.split('self.addEventListener("activate"', 2)[1].split('async function networkFirst', 1)[0];
+    assert.match(install, /if \(prepared \|\| await migratePreviousAuthenticatedShell\(\)\) return/);
+    assert.match(install, /throw new Error\("Authenticated driver shell/);
+    assert.doesNotMatch(install, /caches\.delete/);
+    assert.match(activate, /if \(!prepared\) return \[\]/);
+    assert.match(offlineRuntime, /field-offline-events-v1/);
+    assert.doesNotMatch(views, /deleteDatabase|indexedDB\.delete/);
 });
 
 test("driver shell exposes confirmed identity and shift context without granting offline shift open", () => {

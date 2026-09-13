@@ -52,7 +52,8 @@ public class BackgroundConnectionPlugin extends Plugin {
             call.getString("endFuel", ""),
             call.getString("endMileage", ""),
             call.getString("endEngineHours", ""),
-            call.getString("confirmationToken", "")
+            call.getString("confirmationToken", ""),
+            numericLong(call.getData().opt("createdAt"))
         );
         if (!stored) {
             call.reject("Driver shift close was not saved");
@@ -65,6 +66,15 @@ public class BackgroundConnectionPlugin extends Plugin {
         }
         ConnectivityForegroundService.startForActiveShift(getContext());
         call.resolve(snapshot());
+    }
+
+    static long numericLong(Object value) {
+        if (value instanceof Number) return ((Number) value).longValue();
+        if (value instanceof String) {
+            try { return Long.parseLong(((String) value).trim()); }
+            catch (NumberFormatException ignored) {}
+        }
+        return 0L;
     }
 
     @PluginMethod

@@ -444,6 +444,7 @@ public class ConnectivityForegroundService extends Service {
 
             String encodedBody = formField("client_action_id", pending.clientActionId)
                 + "&" + formField("shift_id", pending.shiftId)
+                + "&" + formField("occurred_at", PendingDriverShiftClose.occurredAtIso(pending.createdAt))
                 + "&" + formField("end_fuel", pending.endFuel)
                 + "&" + formField("end_mileage", pending.endMileage)
                 + "&" + formField("end_engine_hours", pending.endEngineHours)

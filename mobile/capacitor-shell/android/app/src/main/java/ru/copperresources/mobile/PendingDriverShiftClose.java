@@ -7,6 +7,10 @@ import com.getcapacitor.JSObject;
 
 import org.json.JSONObject;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+import java.util.TimeZone;
 import java.util.regex.Pattern;
 
 /** Durable one-item outbox for the only driver action allowed after the UI goes away. */
@@ -67,7 +71,8 @@ final class PendingDriverShiftClose {
             String endFuel,
             String endMileage,
             String endEngineHours,
-            String confirmationToken) {
+            String confirmationToken,
+            long createdAt) {
         PendingDriverShiftClose pending = validated(
             shiftId,
             clientActionId,
@@ -75,7 +80,7 @@ final class PendingDriverShiftClose {
             endMileage,
             endEngineHours,
             confirmationToken,
-            System.currentTimeMillis(),
+            createdAt > 0L ? createdAt : System.currentTimeMillis(),
             false,
             false,
             true,
@@ -123,6 +128,12 @@ final class PendingDriverShiftClose {
 
     static boolean hasPending(Context context) {
         return load(context) != null;
+    }
+
+    static String occurredAtIso(long createdAt) {
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US);
+        format.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return format.format(new Date(createdAt > 0L ? createdAt : System.currentTimeMillis()));
     }
 
     static boolean clear(Context context, String expectedClientActionId) {

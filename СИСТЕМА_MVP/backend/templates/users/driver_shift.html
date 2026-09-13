@@ -5996,6 +5996,8 @@ window.DriverShiftCloseOutbox = (function () {
     function requestServer(form, payload) {
         fillForm(form, payload);
         var body = new window.FormData(form);
+        var occurredAt = new Date(Number(payload.createdAt) || Date.now()).toISOString();
+        body.set("occurred_at", occurredAt);
         return window.fetch(form.getAttribute("action") || window.location.href, {
             method: "POST",
             credentials: "same-origin",

@@ -366,12 +366,18 @@ self.addEventListener("install", (event) => {{
             .then((cache) => cache.addAll(CORE_ASSETS))
             .then(async () => {{
                 const cache = await caches.open(CACHE_NAME);
+                let prepared = false;
                 await Promise.all(SHELL_URLS.map(async (url) => {{
                     try {{
                         const response = await fetch(new Request(url, {{ cache: "no-store", credentials: "same-origin" }}));
-                        if (await isValidatedDriverShell(response)) await cache.put(url, response.clone());
+                        if (await isValidatedDriverShell(response)) {{
+                            await cache.put(url, response.clone());
+                            prepared = true;
+                        }}
                     }} catch (error) {{}}
                 }}));
+                if (prepared || await migratePreviousAuthenticatedShell()) return;
+                throw new Error("Authenticated driver shell is unavailable for offline installation.");
             }})
             .then(() => self.skipWaiting())
     );
@@ -379,11 +385,14 @@ self.addEventListener("install", (event) => {{
 
 self.addEventListener("activate", (event) => {{
     event.waitUntil(
-        caches.keys().then((keys) => Promise.all(
-            keys
-                .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
-                .map((key) => caches.delete(key))
-        )).then(() => self.clients.claim())
+        hasValidatedCurrentShell().then((prepared) => caches.keys().then((keys) => {{
+            if (!prepared) return [];
+            return Promise.all(
+                keys
+                    .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+                    .map((key) => caches.delete(key))
+            );
+        }})).then(() => self.clients.claim())
     );
 }});
 
@@ -403,10 +412,64 @@ async function networkFirst(request, fallbackUrl) {{
 
 async function isValidatedDriverShell(response) {{
     if (!response || !response.ok) return false;
+    let finalUrl;
+    try {{ finalUrl = new URL(response.url, self.location.origin); }} catch (error) {{ return false; }}
+    if (finalUrl.origin !== self.location.origin || !SHELL_URLS.includes(finalUrl.pathname)) return false;
     const contentType = String(response.headers.get("Content-Type") || "");
     if (!contentType.includes("text/html")) return false;
     const html = await response.clone().text();
     return html.includes("data-driver-shell") && html.includes('data-driver-access-id="');
+}}
+
+async function validatedShellEntries(cache) {{
+    const requests = await cache.keys();
+    const entries = [];
+    for (const request of requests) {{
+        const url = new URL(request.url);
+        if (!SHELL_URLS.includes(url.pathname)) continue;
+        const response = await cache.match(request);
+        if (await isValidatedDriverShell(response)) entries.push([request, response]);
+    }}
+    return entries;
+}}
+
+async function migratePreviousAuthenticatedShell() {{
+    const target = await caches.open(CACHE_NAME);
+    const names = (await caches.keys())
+        .filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME)
+        .reverse();
+    for (const name of names) {{
+        const source = await caches.open(name);
+        const entries = await validatedShellEntries(source);
+        if (!entries.length) continue;
+        for (const [request, response] of entries) await target.put(request, response.clone());
+        return true;
+    }}
+    return false;
+}}
+
+async function hasValidatedCurrentShell() {{
+    const cache = await caches.open(CACHE_NAME);
+    return (await validatedShellEntries(cache)).length > 0;
+}}
+
+async function matchDriverShellAcrossCaches(request) {{
+    const names = (await caches.keys())
+        .filter((name) => name === CACHE_NAME || name.startsWith(CACHE_PREFIX))
+        .reverse();
+    if (names.includes(CACHE_NAME)) {{
+        names.splice(names.indexOf(CACHE_NAME), 1);
+        names.unshift(CACHE_NAME);
+    }}
+    for (const name of names) {{
+        const cache = await caches.open(name);
+        const candidates = [request, APP_SHELL_URL, LEGACY_SHELL_URL];
+        for (const candidate of candidates) {{
+            const response = await cache.match(candidate);
+            if (await isValidatedDriverShell(response)) return response;
+        }}
+    }}
+    return null;
 }}
 
 async function networkFirstDriverShell(request) {{
@@ -417,10 +480,7 @@ async function networkFirstDriverShell(request) {{
         if (await isValidatedDriverShell(response)) await cache.put(request, response.clone());
         return response;
     }} catch (error) {{
-        return (await cache.match(request))
-            || (await cache.match(APP_SHELL_URL))
-            || (await cache.match(LEGACY_SHELL_URL))
-            || Response.error();
+        return (await matchDriverShellAcrossCaches(request)) || Response.error();
     }}
 }}
 
