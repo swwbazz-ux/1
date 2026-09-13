@@ -1313,6 +1313,21 @@ test(
     }
 );
 
+test("field-app logout buttons clear the authenticated shell through the shared native-safe path", () => {
+    assert.match(
+        baseTemplate,
+        /window\.navigateAfterNativeConnectionStop = navigateAfterNativeConnectionStop/
+    );
+    assert.match(
+        driverTemplate,
+        /window\.navigateAfterNativeConnectionStop\(logoutButton\.dataset\.driverLogoutUrl\)/
+    );
+    assert.match(
+        excavatorTemplate,
+        /window\.navigateAfterNativeConnectionStop\(logoutUrl\)/
+    );
+});
+
 test(
     "native APK uses the role worker for offline shell without entering the browser lock lifecycle",
     {skip: guardUnavailable},

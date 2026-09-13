@@ -1799,6 +1799,7 @@ document.addEventListener("DOMContentLoaded", function () {
             window.location.href = url;
         });
     }
+    window.navigateAfterNativeConnectionStop = navigateAfterNativeConnectionStop;
     var roleHomePath = "{% url 'role_home' %}";
     var linkedReportsHomePath = "{% if access.role.code == 'dispatcher' %}{% url 'dispatcher_reports' %}{% elif access.role.code == 'mechanic' %}{% url 'mechanic_dashboard' %}{% else %}{% url 'management_dashboard' %}{% endif %}";
     var confirmModal = document.getElementById("app-confirm-modal");

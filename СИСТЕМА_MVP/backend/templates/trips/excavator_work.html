@@ -4543,12 +4543,17 @@ window.initExcavatorWorkShell = function () {
                 logoutButton.classList.add("is-pending");
                 logoutButton.disabled = true;
                 if (logoutLabel) logoutLabel.textContent = "Выходим";
+                var logoutUrl = logoutButton.dataset.eoLogoutUrl || "/logout/";
+                if (typeof window.navigateAfterNativeConnectionStop === "function") {
+                    window.navigateAfterNativeConnectionStop(logoutUrl);
+                    return;
+                }
                 var stopPromise = window.NativeBackgroundConnection
                     && typeof window.NativeBackgroundConnection.stop === "function"
                     ? window.NativeBackgroundConnection.stop()
                     : null;
                 Promise.resolve(stopPromise).finally(function () {
-                    window.location.href = logoutButton.dataset.eoLogoutUrl || "/logout/";
+                    window.location.href = logoutUrl;
                 });
             }
         });

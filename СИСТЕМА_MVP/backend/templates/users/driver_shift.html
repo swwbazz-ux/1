@@ -6897,6 +6897,10 @@ window.bindDriverMobileShell = function () {
                 onComplete: function () {
                     var logoutLabel = logoutButton.querySelector("[data-driver-logout-label]");
                     if (logoutLabel) logoutLabel.textContent = "Выходим";
+                    if (typeof window.navigateAfterNativeConnectionStop === "function") {
+                        window.navigateAfterNativeConnectionStop(logoutButton.dataset.driverLogoutUrl);
+                        return;
+                    }
                     var stopPromise = window.NativeBackgroundConnection
                         && typeof window.NativeBackgroundConnection.stop === "function"
                         ? window.NativeBackgroundConnection.stop()
