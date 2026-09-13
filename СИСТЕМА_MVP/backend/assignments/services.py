@@ -1329,9 +1329,10 @@ def excavator_load_assignment_queryset(shift):
 
 
 def resolve_excavator_load_authority(
-    *, truck_id, excavator_id, source_shift, requested_assignment_id=None,
+    *, truck_id, excavator_id, source_shift, requested_assignment_id=None, now=None,
 ):
     """Под блокировкой подтверждает право текущего или целевого экскаватора."""
+    now = now or timezone.now()
     assignments = (
         HaulAssignment.objects
         .select_for_update(of=('self',))
@@ -1348,14 +1349,48 @@ def resolve_excavator_load_authority(
             and current.id != requested_assignment_id
         ):
             return None, None
-        outgoing_exists = active_haul_handoffs(for_update=True).filter(
-            source_assignment=current,
-            source_shift=source_shift,
-        ).exists()
-        if outgoing_exists:
-            return None, None
+        latest_open = (
+            HaulAssignment.objects
+            .select_for_update(of=('self',))
+            .filter(truck_id=truck_id, ended_at__isnull=True)
+            .exclude(status=AssignmentStatus.CANCELLED)
+            .order_by('-assigned_at', '-id')
+            .first()
+        )
+        outgoing_transition = None
+        if latest_open and latest_open.id != current.id:
+            if (
+                latest_open.status != AssignmentStatus.PENDING
+                or latest_open.effective_at is None
+                or latest_open.effective_at <= now
+            ):
+                return None, None
+            if (
+                latest_open.action == HaulAssignmentAction.RELEASE
+                and latest_open.excavator_id == current.excavator_id
+            ):
+                current.outgoing_transition_assignment = latest_open
+            elif (
+                latest_open.action == HaulAssignmentAction.ASSIGN
+                and latest_open.excavator_id != current.excavator_id
+            ):
+                outgoing_transition = (
+                    active_haul_handoffs(for_update=True)
+                    .filter(
+                        source_assignment=current,
+                        source_shift=source_shift,
+                        target_assignment=latest_open,
+                    )
+                    .first()
+                )
+                if not outgoing_transition:
+                    return None, None
+                current.outgoing_transition_assignment = latest_open
+            else:
+                return None, None
+            current.is_outgoing_transition = True
         current.is_handoff_completion = False
-        return current, None
+        return current, outgoing_transition
 
     pending = assignments.filter(
         status=AssignmentStatus.PENDING,

@@ -961,7 +961,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v232";
+const CACHE_NAME = "excavator-mobile-shell-v233";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -5127,6 +5127,14 @@ def excavator_truck_loaded_view(request):
                 'trip_id': trip.id,
                 'truck_id': trip.truck_id,
                 'excavator_id': trip.excavator_id,
+                'excavator_ids': sorted({
+                    trip.excavator_id,
+                    *(
+                        [handoff.target_assignment.excavator_id]
+                        if handoff and handoff.target_assignment.excavator_id
+                        else []
+                    ),
+                }),
                 'dump_point_id': trip.dump_point_id,
                 'assigned_dump_point_id': trip.assigned_dump_point_id,
                 'actual_dump_point_id': trip.actual_dump_point_id,
@@ -5796,6 +5804,14 @@ def excavator_work_view(request):
                                 'trip_id': trip.id,
                                 'truck_id': trip.truck_id,
                                 'excavator_id': trip.excavator_id,
+                                'excavator_ids': sorted({
+                                    trip.excavator_id,
+                                    *(
+                                        [handoff.target_assignment.excavator_id]
+                                        if handoff and handoff.target_assignment.excavator_id
+                                        else []
+                                    ),
+                                }),
                                 'dump_point_id': trip.dump_point_id,
                                 'assigned_dump_point_id': trip.assigned_dump_point_id or trip.dump_point_id,
                                 'actual_dump_point_id': trip.actual_dump_point_id or trip.dump_point_id,
@@ -5950,7 +5966,41 @@ def excavator_work_view(request):
         existing = available_assignments[existing_index]
         if existing.transfer_state and not assignment.transfer_state:
             available_assignments[existing_index] = assignment
+    assignment_snapshot_cards = [
+        {
+            'assignment_id': assignment.id,
+            'truck_id': assignment.truck_id,
+            'number': str(assignment.truck.garage_number or assignment.truck or '-'),
+        }
+        for assignment in available_assignments
+    ]
+    outgoing_transfer_by_truck_id = {
+        assignment.truck_id: assignment.transfer_state
+        for assignment in available_assignments
+        if (
+            assignment.truck_id
+            and assignment.transfer_state
+            and assignment.transfer_state.get('direction') == 'outgoing'
+        )
+    }
+    outgoing_sent_truck_ids = set()
+    if outgoing_transfer_by_truck_id and open_shift and current_excavator:
+        source_transition_trips = (
+            Trip.objects
+            .filter(
+                truck_id__in=outgoing_transfer_by_truck_id,
+                excavator=current_excavator,
+                loading_shift=open_shift,
+            )
+            .exclude(status=TripStatus.CANCELLED)
+            .only('truck_id', 'created_at')
+        )
+        for source_trip in source_transition_trips:
+            transition_started_at = outgoing_transfer_by_truck_id[source_trip.truck_id].get('created_at')
+            if transition_started_at and source_trip.created_at >= transition_started_at:
+                outgoing_sent_truck_ids.add(source_trip.truck_id)
     assignment_truck_ids = [assignment.truck_id for assignment in available_assignments if assignment.truck_id]
+    visible_assignment_truck_ids = set(assignment_truck_ids)
     dump_card_now = timezone.now()
     active_trips_queryset = (
         Trip.objects
@@ -5963,10 +6013,69 @@ def excavator_work_view(request):
     else:
         active_trips_queryset = active_trips_queryset.filter(excavator_operator=access.employee)
     active_trips = list(active_trips_queryset[:20])
+    outgoing_sent_truck_ids.update(
+        trip.truck_id
+        for trip in active_trips
+        if trip.truck_id in outgoing_transfer_by_truck_id
+    )
     dump_badge_trips = list(
         active_trips_queryset
         .filter(manual_dump_card_visibility_filter(now=dump_card_now))[:20]
     )
+    historical_outgoing_transition_by_truck_id = {}
+    historical_transition_truck_ids = {
+        trip.truck_id
+        for trip in dump_badge_trips
+        if (
+            trip.truck_id not in outgoing_transfer_by_truck_id
+            and trip.truck_id not in visible_assignment_truck_ids
+        )
+    }
+    if historical_transition_truck_ids and current_excavator:
+        for transfer in (
+            HaulAssignmentHandoff.objects
+            .filter(
+                truck_id__in=historical_transition_truck_ids,
+                source_excavator=current_excavator,
+                target_assignment__action=HaulAssignmentAction.ASSIGN,
+                target_assignment__effective_at__isnull=False,
+            )
+            .exclude(target_assignment__excavator=current_excavator)
+            .select_related('target_assignment')
+        ):
+            target = transfer.target_assignment
+            started_at = target.assigned_at or transfer.created_at
+            deadline = target.effective_at
+            if not started_at or not deadline:
+                continue
+            candidate = {
+                'id': transfer.id,
+                'created_at': started_at,
+                'deadline': deadline,
+                'order_id': target.id,
+            }
+            existing = historical_outgoing_transition_by_truck_id.get(transfer.truck_id)
+            if not existing or (started_at, target.id) > (existing['created_at'], existing['order_id']):
+                historical_outgoing_transition_by_truck_id[transfer.truck_id] = candidate
+        for release in (
+            HaulAssignment.objects
+            .filter(
+                truck_id__in=historical_transition_truck_ids,
+                excavator=current_excavator,
+                action=HaulAssignmentAction.RELEASE,
+                effective_at__isnull=False,
+            )
+        ):
+            started_at = release.assigned_at or release.created_at
+            candidate = {
+                'id': f'assignment-{release.id}',
+                'created_at': started_at,
+                'deadline': release.effective_at,
+                'order_id': release.id,
+            }
+            existing = historical_outgoing_transition_by_truck_id.get(release.truck_id)
+            if not existing or (started_at, release.id) > (existing['created_at'], existing['order_id']):
+                historical_outgoing_transition_by_truck_id[release.truck_id] = candidate
     last_sent_trip = None
     if open_shift:
         last_sent_trip = (
@@ -6074,17 +6183,6 @@ def excavator_work_view(request):
     driver_participation = truck_driver_participation(assignment_truck_ids)
 
     def assignment_load_block(assignment, active_trip=None, *, manual_control=False):
-        transfer_state = getattr(assignment, 'transfer_state', None)
-        if (
-            transfer_state
-            and transfer_state['direction'] == 'outgoing'
-            and transfer_state.get('kind') != 'release'
-        ):
-            transfer_label = transfer_state.get('route_label') or 'Назначение изменяется'
-            return {
-                'code': 'transfer_outgoing',
-                'label': transfer_label,
-            }
         known_active_trip = active_trip
         if known_active_trip is None:
             known_active_trip = active_trip_by_truck_id.get(assignment.truck_id) or False
@@ -6167,6 +6265,8 @@ def excavator_work_view(request):
 
     truck_cards = []
     for assignment in available_assignments:
+        if assignment.truck_id in outgoing_sent_truck_ids:
+            continue
         active_trip = active_trip_by_truck_id.get(assignment.truck_id)
         equipment_state_code = excavator_truck_equipment_state_code(assignment, active_trip)
         target_label = str(active_trip.dump_point) if active_trip else ''
@@ -6426,9 +6526,24 @@ def excavator_work_view(request):
         truck_detail_cards[str(truck.id)] = detail_card
 
     active_trips_by_dump_id = defaultdict(list)
+    dump_transition_by_trip_id = {}
     for trip in dump_badge_trips:
         if not manual_dump_card_is_visible(trip, now=dump_card_now):
             continue
+        transition = outgoing_transfer_by_truck_id.get(trip.truck_id)
+        historical_transition = False
+        if transition is None:
+            historical = historical_outgoing_transition_by_truck_id.get(trip.truck_id)
+            if (
+                historical
+                and historical['created_at'] <= trip.created_at <= historical['deadline']
+            ):
+                transition = historical
+                historical_transition = True
+        if transition:
+            dump_transition_by_trip_id[trip.id] = transition
+            if historical_transition or transition['deadline'] <= dump_card_now:
+                continue
         point_id = trip.assigned_dump_point_id or trip.actual_dump_point_id or trip.dump_point_id
         if point_id:
             active_trips_by_dump_id[point_id].append(trip)
@@ -6475,6 +6590,8 @@ def excavator_work_view(request):
                 'status_key': 'green',
                 'is_last_sent': index == 0,
                 'auto_hide_at': manual_dump_card_expires_at(trip),
+                'transition_id': dump_transition_by_trip_id.get(trip.id, {}).get('id', ''),
+                'transition_hide_at': dump_transition_by_trip_id.get(trip.id, {}).get('deadline'),
             }
             for index, trip in enumerate(pending_trips)
         ]
@@ -6500,6 +6617,7 @@ def excavator_work_view(request):
             'active_trips_count': len(active_trips),
             'completed_today_count': completed_shift_count,
             'truck_cards': truck_cards,
+            'assignment_snapshot_cards': assignment_snapshot_cards,
             'first_ready_assignment_id': first_ready_assignment_id,
             'legacy_trip_client_action_id': legacy_trip_client_action_id,
             'truck_detail_cards': truck_detail_cards,

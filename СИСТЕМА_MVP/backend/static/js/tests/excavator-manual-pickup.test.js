@@ -259,6 +259,66 @@ test('fragment refresh rejects older versions and late earlier requests', () => 
     assert.match(source, /window\.eoExcavatorWorkRefreshPromise/);
     assert.match(source, /return window\.eoExcavatorWorkRefreshPromise/);
     assert.match(source, /window\.eoExcavatorWorkRefreshPromise = null/);
+    assert.match(source, /eoExcavatorWorkRefreshMinimumVersion/);
+    assert.match(source, /eoExcavatorWorkQueuedMinimumVersion/);
+    assert.match(source, /eoExcavatorWorkQueuedRefreshPromise/);
+    assert.match(source, /eoExcavatorWorkRefreshMinimumVersion = -1/);
+});
+
+test('mutation queues a higher-version fragment behind an invalidated in-flight request', async () => {
+    const start = template.indexOf('var excavatorWorkMutationGeneration = 0;');
+    const end = template.indexOf('function bindExcavatorTransferCountdowns', start);
+    const requests = [];
+    let currentShell = {
+        dataset: {eoActiveTab: 'trucks'},
+        replaceWith(next) { currentShell = next; },
+    };
+    const context = {
+        window: {},
+        document: {
+            body: {dataset: {operationalStateVersion: '10'}},
+            querySelector: selector => selector === '[data-eo-shell]' ? currentShell : null,
+            getElementById: () => null,
+        },
+        isExcavatorRefreshUnsafe: () => false,
+        readExcavatorAssignmentSnapshot: () => [],
+        storeExcavatorRealtimeVersion(version) {
+            context.document.body.dataset.operationalStateVersion = String(version);
+        },
+        syncExcavatorAssignmentSnapshot() {},
+        storeExcavatorAssignments() {},
+        scheduleExcavatorViewportHeightSync() {},
+        Promise,
+        Number,
+        Math,
+        Object,
+    };
+    context.window = context;
+    context.AppOperationalFragment = {
+        request(name, minimumVersion) {
+            let resolve;
+            const promise = new Promise(done => { resolve = done; });
+            requests.push({name, minimumVersion, resolve});
+            return promise;
+        },
+        parseRoot: () => ({dataset: {eoActiveTab: 'trucks'}}),
+    };
+    vm.createContext(context);
+    vm.runInContext(template.slice(start, end), context);
+
+    const first = context.refreshExcavatorWorkFromServer({version: 10});
+    assert.equal(requests.length, 1);
+    context.invalidateExcavatorWorkRefresh();
+    const second = context.refreshExcavatorWorkFromServer({version: 11});
+    assert.equal(requests.length, 1);
+    requests[0].resolve({version: 10, html: '<section></section>'});
+    assert.equal(await first, false);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1].minimumVersion, 11);
+    requests[1].resolve({version: 11, html: '<section></section>'});
+    assert.equal(await second, true);
+    assert.equal(context.document.body.dataset.operationalStateVersion, '11');
 });
 
 test('truck loaded request carries exact assignment state id', () => {
@@ -266,6 +326,24 @@ test('truck loaded request carries exact assignment state id', () => {
     const end = template.indexOf('    function clearDropReady()', start);
     const source = template.slice(start, end);
     assert.match(source, /assignment_id:\s*card\.dataset\.assignmentId/);
+    assert.match(source, /invalidateExcavatorWorkRefresh\(\)/);
+    assert.match(source, /storeExcavatorRealtimeVersion\(Number\(data\.version/);
+    assert.match(source, /version:\s*Number\(data\.version/);
+});
+
+test('successful outgoing load removes only the source card and keeps exact trip badge', () => {
+    const confirmStart = template.indexOf('    function confirmTruckLoaded(card, payload)');
+    const confirmEnd = template.indexOf('    function restoreTruckCard', confirmStart);
+    const confirmSource = template.slice(confirmStart, confirmEnd);
+    assert.match(confirmSource, /eoTransferDirection === "outgoing"/);
+    assert.match(confirmSource, /card\.remove\(\)/);
+
+    const badgeStart = template.indexOf('    function removePendingTruckBadge');
+    const badgeEnd = template.indexOf('    function updatePendingTruckBadgeTrip', badgeStart);
+    const badgeSource = template.slice(badgeStart, badgeEnd);
+    assert.match(badgeSource, /tripId \? sameTrip : sameTruck/);
+    assert.doesNotMatch(badgeSource, /sameTruck \|\| sameTrip/);
+    assert.match(template, /data-eo-transfer-preview-deadline/);
 });
 
 test('manual dump preview expiry is trip-specific and independent from transfer countdown', () => {

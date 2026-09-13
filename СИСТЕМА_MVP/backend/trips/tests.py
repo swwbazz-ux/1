@@ -1355,7 +1355,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v232')
+        self.assertContains(response, 'excavator-mobile-shell-v233')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
@@ -3660,7 +3660,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v232', script)
+        self.assertIn('excavator-mobile-shell-v233', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -4183,18 +4183,26 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'function isDumpReturnSwipe')
         self.assertContains(response, 'returnLastTruckFromDump(target)')
 
-    def post_truck_loaded(self, *, client_action_id='load-1', truck=None, dump_point=None, rock=None):
+    def post_truck_loaded(
+        self, *, client_action_id='load-1', truck=None, dump_point=None,
+        rock=None, assignment=None, manual_control=None,
+    ):
+        payload = {
+            'client_action_id': client_action_id,
+            'truck_id': (truck or self.truck).id,
+            'excavator_id': self.excavator.id,
+            'dump_point_id': (dump_point or self.dump_point).id,
+            'rock_type': (rock or self.rock).id,
+            'loading_horizon': '125',
+            'loading_block': '4',
+        }
+        if assignment is not None:
+            payload['assignment_id'] = assignment.id
+        if manual_control is not None:
+            payload['manual_control'] = manual_control
         return self.client.post(
             reverse('excavator_truck_loaded'),
-            data=json.dumps({
-                'client_action_id': client_action_id,
-                'truck_id': (truck or self.truck).id,
-                'excavator_id': self.excavator.id,
-                'dump_point_id': (dump_point or self.dump_point).id,
-                'rock_type': (rock or self.rock).id,
-                'loading_horizon': '125',
-                'loading_block': '4',
-            }),
+            data=json.dumps(payload),
             content_type='application/json',
         )
 
@@ -4376,7 +4384,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             ).exists()
         )
 
-    def test_both_excavators_see_transfer_but_only_target_can_load(self):
+    def test_source_can_finish_loading_during_transfer_and_card_moves_to_dump(self):
         previous = HaulAssignment.objects.get(
             truck=self.truck,
             excavator=self.excavator,
@@ -4403,21 +4411,143 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
         self.assertEqual(handoff_card['transfer']['direction'], 'outgoing')
         self.assertEqual(handoff_card['transfer']['target_label'], '13')
-        self.assertFalse(handoff_card['can_load'])
+        self.assertTrue(handoff_card['can_load'])
         self.assertContains(old_screen, 'is-transfer-outgoing')
 
-        loaded = self.post_truck_loaded(client_action_id='old-completes-handoff')
-        self.assertEqual(loaded.status_code, 409)
+        loaded = self.post_truck_loaded(
+            client_action_id='old-completes-handoff',
+            assignment=previous,
+        )
+        self.assertEqual(loaded.status_code, 200, loaded.content)
+        trip = Trip.objects.get(pk=loaded.json()['trip_id'])
+        self.assertEqual(trip.excavator, self.excavator)
+        self.assertEqual(trip.excavator_operator, self.operator)
         handoff.refresh_from_db()
         self.assertEqual(handoff.status, HaulAssignmentHandoffStatus.OPEN)
+        current.refresh_from_db()
+        previous.refresh_from_db()
+        self.assertEqual(current.status, AssignmentStatus.PENDING)
+        self.assertEqual(previous.status, AssignmentStatus.ACCEPTED)
+        event = OperationalStateEvent.objects.filter(
+            event_type='trip_changed',
+            payload__trip_id=trip.id,
+        ).latest('id')
+        self.assertEqual(
+            set(event.payload['excavator_ids']),
+            {self.excavator.id, self.other_excavator.id},
+        )
+
+        source_after_send = self.client.get(reverse('excavator_work'))
+        self.assertFalse(any(
+            card['assignment'].truck_id == self.truck.id
+            for card in source_after_send.context['truck_cards']
+        ))
+        self.assertTrue(any(
+            item['truck_id'] == self.truck.id
+            for item in source_after_send.context['assignment_snapshot_cards']
+        ))
+        dump_card = next(
+            card for card in source_after_send.context['dump_cards']
+            if card['point'].id == self.dump_point.id
+        )
+        dump_truck = next(item for item in dump_card['pending_trucks'] if item['trip_id'] == trip.id)
+        self.assertEqual(dump_truck['transition_id'], handoff.id)
+        self.assertEqual(dump_truck['transition_hide_at'], current.effective_at)
 
         new_client, _, _ = self.create_other_excavator_client()
         new_screen = new_client.get(reverse('excavator_work'))
         incoming = next(card for card in new_screen.context['truck_cards'] if card['assignment'].truck_id == self.truck.id)
         self.assertEqual(incoming['transfer']['direction'], 'incoming')
         self.assertEqual(incoming['transfer']['source_label'], '12')
-        self.assertTrue(incoming['can_load'])
         self.assertContains(new_screen, 'is-transfer-incoming')
+
+        stale_target = new_client.post(
+            reverse('excavator_truck_loaded'),
+            data=json.dumps({
+                'client_action_id': 'target-after-source-trip',
+                'assignment_id': current.id,
+                'truck_id': self.truck.id,
+                'excavator_id': self.other_excavator.id,
+                'dump_point_id': self.dump_point.id,
+                'rock_type': self.rock.id,
+                'loading_horizon': '125',
+                'loading_block': '4',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(stale_target.status_code, 409)
+        self.assertEqual(
+            Trip.objects.filter(truck=self.truck, status=TripStatus.LOADED_WAITING_UNLOAD).count(),
+            1,
+        )
+        handoff.refresh_from_db()
+        self.assertEqual(handoff.status, HaulAssignmentHandoffStatus.OPEN)
+
+    def test_source_cannot_finish_transfer_at_or_after_deadline_without_reconcile(self):
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        pending, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
+        pending.effective_at = timezone.now() - timedelta(seconds=1)
+        pending.save(update_fields=['effective_at'])
+
+        loaded = self.post_truck_loaded(
+            client_action_id='old-after-transfer-deadline',
+            assignment=previous,
+        )
+
+        self.assertEqual(loaded.status_code, 409)
+        self.assertFalse(Trip.objects.filter(truck=self.truck).exists())
+
+    def test_newer_reassignment_replaces_old_dump_transition_identity(self):
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        first_target, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=self.other_excavator,
+            assigned_by=self.operator,
+        )
+        loaded = self.post_truck_loaded(
+            client_action_id='source-trip-before-reassignment',
+            assignment=previous,
+        )
+        self.assertEqual(loaded.status_code, 200, loaded.content)
+        first_target.refresh_from_db()
+
+        third_excavator = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            model=self.excavator_model,
+            garage_number='14',
+        )
+        second_target, _ = schedule_haul_assignment(
+            truck=self.truck,
+            excavator=third_excavator,
+            assigned_by=self.operator,
+            now=timezone.now() + timedelta(seconds=1),
+        )
+
+        source_screen = self.client.get(reverse('excavator_work'))
+        second_handoff = HaulAssignmentHandoff.objects.get(target_assignment=second_target)
+        self.assertFalse(any(
+            card['assignment'].truck_id == self.truck.id
+            for card in source_screen.context['truck_cards']
+        ))
+        dump_card = next(
+            card for card in source_screen.context['dump_cards']
+            if card['point'].id == self.dump_point.id
+        )
+        dump_truck = next(item for item in dump_card['pending_trucks'] if item['truck_id'] == self.truck.id)
+        self.assertEqual(dump_truck['transition_id'], second_handoff.id)
+        self.assertEqual(dump_truck['transition_hide_at'], second_target.effective_at)
 
     def test_new_excavator_first_trip_atomically_consumes_old_handoff(self):
         previous = HaulAssignment.objects.get(
@@ -4612,7 +4742,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             status=HaulAssignmentHandoffStatus.OPEN,
         ).exists())
 
-    def test_release_to_garage_does_not_create_transfer_loading_right(self):
+    def test_source_can_finish_loading_before_release_deadline(self):
         previous = HaulAssignment.objects.get(
             truck=self.truck,
             excavator=self.excavator,
@@ -4634,6 +4764,45 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertTrue(pending_card['can_drag'])
         self.assertTrue(pending_card['can_load'])
         self.assertNotEqual(pending_card['load_block_reason_code'], 'transfer_outgoing')
+
+        loaded = self.post_truck_loaded(
+            client_action_id='old-finishes-before-release',
+            assignment=previous,
+        )
+        self.assertEqual(loaded.status_code, 200, loaded.content)
+        trip = Trip.objects.get(pk=loaded.json()['trip_id'])
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.PENDING)
+        source_after_send = self.client.get(reverse('excavator_work'))
+        self.assertFalse(any(
+            card['assignment'].truck_id == self.truck.id
+            for card in source_after_send.context['truck_cards']
+        ))
+        dump_card = next(
+            card for card in source_after_send.context['dump_cards']
+            if card['point'].id == self.dump_point.id
+        )
+        dump_truck = next(item for item in dump_card['pending_trucks'] if item['trip_id'] == trip.id)
+        self.assertEqual(dump_truck['transition_id'], f'assignment-{pending.id}')
+        self.assertEqual(dump_truck['transition_hide_at'], pending.effective_at)
+
+        cancelled = self.client.post(
+            reverse('excavator_truck_loaded_cancel'),
+            data=json.dumps({
+                'client_action_id': 'pull-release-trip-back',
+                'trip_id': trip.id,
+                'truck_id': self.truck.id,
+                'dump_point_id': self.dump_point.id,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(cancelled.status_code, 200, cancelled.content)
+        source_after_cancel = self.client.get(reverse('excavator_work'))
+        self.assertTrue(any(
+            card['assignment'].truck_id == self.truck.id
+            for card in source_after_cancel.context['truck_cards']
+        ))
+
         apply_pending_haul_assignment(pending.id)
 
         self.assertNotIn(self.truck.id, projected_haul_assignments())
@@ -4643,6 +4812,85 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         ).exists())
         loaded = self.post_truck_loaded(client_action_id='old-completes-after-release')
         self.assertEqual(loaded.status_code, 409)
+
+    def test_outgoing_trip_badge_disappears_after_release_deadline_without_closing_trip(self):
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        pending, _ = schedule_haul_release(
+            truck=self.truck,
+            assigned_by=self.operator,
+        )
+        loaded = self.post_truck_loaded(
+            client_action_id='release-trip-survives-visual-expiry',
+            assignment=previous,
+        )
+        self.assertEqual(loaded.status_code, 200, loaded.content)
+        trip = Trip.objects.get(pk=loaded.json()['trip_id'])
+
+        apply_pending_haul_assignment(pending.id)
+        after_deadline = self.client.get(reverse('excavator_work'))
+
+        self.assertFalse(any(
+            card['assignment'].truck_id == self.truck.id
+            for card in after_deadline.context['truck_cards']
+        ))
+        self.assertFalse(any(
+            item['trip_id'] == trip.id
+            for card in after_deadline.context['dump_cards']
+            for item in card['pending_trucks']
+        ))
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertIsNone(trip.completed_at)
+        self.assertIsNone(trip.unload_received_at)
+
+    def test_trip_created_before_release_is_not_hidden_by_later_transition(self):
+        loaded = self.post_truck_loaded(client_action_id='trip-before-release-transition')
+        self.assertEqual(loaded.status_code, 200, loaded.content)
+        trip = Trip.objects.get(pk=loaded.json()['trip_id'])
+        pending, _ = schedule_haul_release(
+            truck=self.truck,
+            assigned_by=self.operator,
+            now=trip.created_at + timedelta(seconds=1),
+        )
+
+        apply_pending_haul_assignment(pending.id)
+        after_release = self.client.get(reverse('excavator_work'))
+
+        dump_card = next(
+            card for card in after_release.context['dump_cards']
+            if card['point'].id == self.dump_point.id
+        )
+        dump_truck = next(
+            item for item in dump_card['pending_trucks']
+            if item['trip_id'] == trip.id
+        )
+        self.assertEqual(dump_truck['transition_id'], '')
+        self.assertIsNone(dump_truck['transition_hide_at'])
+
+    def test_source_cannot_finish_release_at_or_after_deadline_without_reconcile(self):
+        previous = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        pending, _ = schedule_haul_release(
+            truck=self.truck,
+            assigned_by=self.operator,
+        )
+        pending.effective_at = timezone.now() - timedelta(seconds=1)
+        pending.save(update_fields=['effective_at'])
+
+        loaded = self.post_truck_loaded(
+            client_action_id='old-after-release-deadline',
+            assignment=previous,
+        )
+
+        self.assertEqual(loaded.status_code, 409)
+        self.assertFalse(Trip.objects.filter(truck=self.truck).exists())
 
     def test_orphaned_release_handoff_is_expired_and_never_returns_old_card(self):
         source = HaulAssignment.objects.get(
