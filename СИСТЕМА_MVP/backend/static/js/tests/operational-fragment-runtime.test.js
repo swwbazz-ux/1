@@ -217,12 +217,12 @@ function createExcavatorRefreshRuntime({deferred = false} = {}) {
 
 
 function extractExcavatorShiftSuccessHandler() {
-    const marker = '}).then(function () {\n            hideShiftConfirmation();';
+    const marker = 'return shiftRequest.then(function (result) {\n            hideShiftConfirmation();';
     const start = EXCAVATOR_TEMPLATE_SOURCE.indexOf(marker);
     assert.notEqual(start, -1, "Excavator Shift success handler was not found.");
     return extractBraceBlock(
         EXCAVATOR_TEMPLATE_SOURCE,
-        "function ()",
+        "function (result)",
         "Excavator Shift success handler",
         start
     );

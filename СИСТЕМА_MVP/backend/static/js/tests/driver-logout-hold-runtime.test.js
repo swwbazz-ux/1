@@ -186,13 +186,19 @@ function createLogoutRuntime({readonly = false} = {}) {
     };
 }
 
-test("production Driver logout hold navigates exactly once and can be repeated", () => {
+async function settleLogoutNavigation() {
+    await Promise.resolve();
+    await Promise.resolve();
+}
+
+test("production Driver logout hold navigates exactly once and can be repeated", async () => {
     const runtime = createLogoutRuntime();
 
     const firstPointerDown = runtime.button.dispatch("pointerdown");
     assert.equal(firstPointerDown.defaultPrevented, true);
     runtime.advance(2000);
     runtime.runFrames();
+    await settleLogoutNavigation();
     assert.deepEqual(runtime.navigations, ["/logout/"]);
     assert.equal(runtime.button.progress, "100%");
     assert.equal(runtime.pendingFrames(), 0);
@@ -204,12 +210,13 @@ test("production Driver logout hold navigates exactly once and can be repeated",
     assert.equal(runtime.button.progress, "0%");
     runtime.advance(2000);
     runtime.runFrames();
+    await settleLogoutNavigation();
     assert.deepEqual(runtime.navigations, ["/logout/", "/logout/"]);
     assert.equal(runtime.pendingFrames(), 0);
     assert.equal(runtime.pendingTimers(), 0);
 });
 
-test("production Driver logout hold resets after an early release", () => {
+test("production Driver logout hold resets after an early release", async () => {
     const runtime = createLogoutRuntime();
 
     runtime.button.dispatch("pointerdown");
@@ -219,6 +226,7 @@ test("production Driver logout hold resets after an early release", () => {
     runtime.button.dispatch("pointerup");
     runtime.advance(2000);
     runtime.runFrames();
+    await settleLogoutNavigation();
 
     assert.deepEqual(runtime.navigations, []);
     assert.equal(runtime.button.progress, "0%");
@@ -226,12 +234,13 @@ test("production Driver logout hold resets after an early release", () => {
     assert.equal(runtime.pendingTimers(), 0);
 });
 
-test("production Driver logout hold remains available in read-only mode", () => {
+test("production Driver logout hold remains available in read-only mode", async () => {
     const runtime = createLogoutRuntime({readonly: true});
 
     runtime.button.dispatch("pointerdown");
     runtime.advance(2000);
     runtime.runFrames();
+    await settleLogoutNavigation();
 
     assert.deepEqual(runtime.navigations, ["/logout/"]);
     assert.equal(runtime.pendingFrames(), 0);

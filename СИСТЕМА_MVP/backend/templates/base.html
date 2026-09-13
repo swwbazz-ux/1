@@ -494,12 +494,15 @@
         var updateFlightPromise = null;
         var workerVersionGeneration = 0;
         var registrationNeedsRecovery = false;
+        var nativeRegistrationRecoveryAttempts = 0;
+        var nativeRegistrationRecoveryMaxAttempts = 5;
         var controllerReloadPending = false;
         var controllerVersionPending = false;
         var unsafeWorkChecks = [];
 
-        /* APK has its own startup gate and signed-update path. An old browser
-           worker must not outlive an APK update and lock a usable work screen. */
+        /* APK keeps its own startup gate and signed-update path. The role worker
+           may cache the authenticated shell for offline restart, but it never
+           participates in the browser contract lock or APK update lifecycle. */
         function isNativeApp() {
             return !!document.body
                 && document.body.dataset.nativeApp === "true";
@@ -793,9 +796,9 @@
         }
 
         function configuredRegistration() {
-            if (isNativeApp()) return Promise.resolve(null);
             if (registration) return Promise.resolve(registration);
             if (registrationPromise) return registrationPromise;
+            var recoveringRegistration = registrationNeedsRecovery;
             var serviceWorker = window.navigator && window.navigator.serviceWorker;
             if (!serviceWorker) return Promise.resolve(null);
             var scope = document.body
@@ -813,7 +816,10 @@
                 if (!workerUrl || !serviceWorker.register) {
                     return currentRegistration || null;
                 }
-                if (registrationMatchesConfiguration(currentRegistration, scope, workerUrl)) {
+                if (
+                    !recoveringRegistration
+                    && registrationMatchesConfiguration(currentRegistration, scope, workerUrl)
+                ) {
                     return currentRegistration;
                 }
                 return serviceWorker.register(workerUrl, {
@@ -837,24 +843,6 @@
                 return null;
             });
             return registrationPromise;
-        }
-
-        function unregisterNativeAppServiceWorkers() {
-            if (!isNativeApp()) return;
-            var serviceWorker = window.navigator && window.navigator.serviceWorker;
-            if (!serviceWorker || !serviceWorker.getRegistrations) return;
-            Promise.resolve(serviceWorker.getRegistrations()).then(function (registrations) {
-                return Promise.all((registrations || []).map(function (currentRegistration) {
-                    if (!currentRegistration || !currentRegistration.unregister) {
-                        return null;
-                    }
-                    return Promise.resolve(currentRegistration.unregister()).catch(function () {
-                        return false;
-                    });
-                }));
-            }).catch(function () {
-                /* Native traffic stays usable even if WebView storage refuses cleanup. */
-            });
         }
 
         function updateError(code) {
@@ -1266,6 +1254,12 @@
                 installing.addEventListener("statechange", function () {
                     if (installing.state === "installed") {
                         requestWorkerVersion(currentRegistration.waiting || installing);
+                        return;
+                    }
+                    if (installing.state === "redundant" && isNativeApp()) {
+                        registration = null;
+                        registrationPromise = null;
+                        registrationNeedsRecovery = true;
                     }
                 });
             });
@@ -1273,6 +1267,20 @@
 
         function registerConfiguredWorker() {
             return configuredRegistration();
+        }
+
+        function retryNativeWorkerRegistration() {
+            if (!isNativeApp()) return Promise.resolve(null);
+            state.serverUnavailable = false;
+            if (registrationPromise) return registrationPromise;
+            if (!registrationNeedsRecovery && registration) return Promise.resolve(registration);
+            if (nativeRegistrationRecoveryAttempts >= nativeRegistrationRecoveryMaxAttempts) {
+                return Promise.resolve(null);
+            }
+            nativeRegistrationRecoveryAttempts += 1;
+            registration = null;
+            registrationPromise = null;
+            return registerConfiguredWorker();
         }
 
         function registerUnsafeCheck(check) {
@@ -1515,7 +1523,11 @@
         function initialize() {
             evaluate();
             if (isNativeApp()) {
-                unregisterNativeAppServiceWorkers();
+                if (!(window.navigator && window.navigator.serviceWorker)) {
+                    markServiceWorkerUnavailable();
+                    return;
+                }
+                registerConfiguredWorker();
                 return;
             }
             observeRoleUpdateDialogs();
@@ -1549,9 +1561,12 @@
             });
         }
         window.addEventListener("online", function () {
-            if (isNativeApp()) return;
             state.serverUnavailable = false;
             if (!registration && registrationPromise) {
+                return;
+            }
+            if (isNativeApp()) {
+                retryNativeWorkerRegistration();
                 return;
             }
             if (
@@ -1569,6 +1584,9 @@
             }
             evaluate();
         });
+        window.addEventListener("native-connectivity-resume", function () {
+            retryNativeWorkerRegistration();
+        });
     })(window, document);
     /* APP_PWA_CONTRACT_GUARD_END */
     </script>
@@ -1577,7 +1595,7 @@
     {% if role_session_authenticated and not observer_mode %}<script src="{% static 'js/application-session-heartbeat.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% if is_native_app and role_session_authenticated and not observer_mode %}<script src="{% static 'js/native-background-connection-v1.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     <script src="{% static 'js/client-error-report.js' %}?v={{ static_asset_release }}" defer></script>
-    {% if role_session_authenticated and not observer_mode and role_app %}<script src="{% static 'js/push-notifications.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
+    {% if role_session_authenticated and not observer_mode and role_app and not is_native_app %}<script src="{% static 'js/push-notifications.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% block extra_head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-native-app="{{ is_native_app|yesno:'true,false' }}" data-native-client-version="{{ native_app_version }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
@@ -1738,6 +1756,53 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
     var logoutPath = "{% url 'logout' %}";
+    function clearCachedAuthenticatedRoleShell() {
+        var serviceWorker = window.navigator && window.navigator.serviceWorker;
+        if (!serviceWorker) {
+            return Promise.resolve();
+        }
+        function postClearMessage(worker) {
+            if (!worker || typeof worker.postMessage !== "function") {
+                return Promise.resolve();
+            }
+            return new Promise(function (resolve) {
+                var settled = false;
+                var channel = new MessageChannel();
+                var timeout = window.setTimeout(function () {
+                    if (settled) return;
+                    settled = true;
+                    resolve();
+                }, 1200);
+                channel.port1.onmessage = function () {
+                    if (settled) return;
+                    settled = true;
+                    window.clearTimeout(timeout);
+                    resolve();
+                };
+                try {
+                    worker.postMessage({type: "CLEAR_AUTHENTICATED_SHELL"}, [channel.port2]);
+                } catch (error) {
+                    window.clearTimeout(timeout);
+                    resolve();
+                }
+            });
+        }
+        if (serviceWorker.controller) {
+            return postClearMessage(serviceWorker.controller);
+        }
+        var getRegistration = window.AppPwaContractGuard
+            && typeof window.AppPwaContractGuard.getRegistration === "function"
+            ? window.AppPwaContractGuard.getRegistration
+            : null;
+        if (!getRegistration) {
+            return Promise.resolve();
+        }
+        return Promise.resolve(getRegistration()).then(function (registration) {
+            var worker = serviceWorker.controller
+                || (registration && (registration.active || registration.waiting || registration.installing));
+            return postClearMessage(worker);
+        }).catch(function () {});
+    }
     function navigateAfterNativeConnectionStop(url) {
         var stopPromise = null;
         try {
@@ -1746,10 +1811,14 @@ document.addEventListener("DOMContentLoaded", function () {
                 ? window.NativeBackgroundConnection.stop()
                 : null;
         } catch (error) {}
-        Promise.resolve(stopPromise).finally(function () {
+        return Promise.all([
+            Promise.resolve(stopPromise).catch(function () {}),
+            clearCachedAuthenticatedRoleShell().catch(function () {})
+        ]).finally(function () {
             window.location.href = url;
         });
     }
+    window.navigateAfterNativeConnectionStop = navigateAfterNativeConnectionStop;
     var roleHomePath = "{% url 'role_home' %}";
     var linkedReportsHomePath = "{% if access.role.code == 'dispatcher' %}{% url 'dispatcher_reports' %}{% elif access.role.code == 'mechanic' %}{% url 'mechanic_dashboard' %}{% else %}{% url 'management_dashboard' %}{% endif %}";
     var confirmModal = document.getElementById("app-confirm-modal");

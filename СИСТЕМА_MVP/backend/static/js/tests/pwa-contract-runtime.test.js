@@ -60,6 +60,19 @@ function extractGuardSource() {
     );
 }
 
+function extractNamedFunction(source, name) {
+    const start = source.indexOf(`function ${name}(`);
+    assert.notEqual(start, -1, `${name} is missing`);
+    const bodyStart = source.indexOf("{", start);
+    let depth = 0;
+    for (let index = bodyStart; index < source.length; index += 1) {
+        if (source[index] === "{") depth += 1;
+        if (source[index] === "}") depth -= 1;
+        if (depth === 0) return source.slice(start, index + 1);
+    }
+    throw new Error(`${name} is not closed`);
+}
+
 const guardSource = extractGuardSource();
 const guardUnavailable = !guardSource;
 
@@ -593,6 +606,9 @@ function createRuntime(options = {}) {
             online = Boolean(value);
         },
     };
+    if (options.serviceWorkerUnavailable) {
+        delete navigator.serviceWorker;
+    }
     class MutationObserverStub {
         constructor(callback) {
             this.callback = callback;
@@ -1310,12 +1326,72 @@ test(
     }
 );
 
+test("field-app logout buttons clear the authenticated shell through the shared native-safe path", () => {
+    assert.match(
+        baseTemplate,
+        /window\.navigateAfterNativeConnectionStop = navigateAfterNativeConnectionStop/
+    );
+    assert.match(
+        driverTemplate,
+        /window\.navigateAfterNativeConnectionStop\(logoutButton\.dataset\.driverLogoutUrl\)/
+    );
+    assert.match(
+        excavatorTemplate,
+        /window\.navigateAfterNativeConnectionStop\(logoutUrl\)/
+    );
+});
+
+test("logout clears through an active registration before the first page has a controller", async () => {
+    const messages = [];
+    const activeWorker = {
+        postMessage(message, ports) {
+            messages.push(message);
+            ports[0].postMessage({ok: true});
+        },
+    };
+    const window = {
+        navigator: {serviceWorker: {controller: null}},
+        NativeBackgroundConnection: {stop: async () => {}},
+        AppPwaContractGuard: {
+            getRegistration: async () => ({active: activeWorker}),
+        },
+        location: {href: "https://driver.test/driver/"},
+        setTimeout,
+        clearTimeout,
+    };
+    const context = {
+        window,
+        Promise,
+        MessageChannel: function MessageChannelStub() {
+            const channel = createMessageChannel();
+            this.port1 = channel.port1;
+            this.port2 = channel.port2;
+        },
+    };
+    vm.createContext(context);
+    vm.runInContext(
+        [
+            extractNamedFunction(baseTemplate, "clearCachedAuthenticatedRoleShell"),
+            extractNamedFunction(baseTemplate, "navigateAfterNativeConnectionStop"),
+            "window.navigateAfterNativeConnectionStop = navigateAfterNativeConnectionStop;",
+        ].join("\n"),
+        context
+    );
+
+    await window.navigateAfterNativeConnectionStop("/logout/");
+
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].type, "CLEAR_AUTHENTICATED_SHELL");
+    assert.equal(window.location.href, "/logout/");
+});
+
 test(
-    "native APK bypasses the browser PWA lock, update and reload lifecycle",
+    "native APK uses the role worker for offline shell without entering the browser lock lifecycle",
     {skip: guardUnavailable},
     async () => {
         const runtime = createRuntime({
             nativeApp: true,
+            registrationAvailable: false,
             workerContractVersion: "contract-v1",
             workerShellVersion: "driver-shell-v1",
             hasWaitingWorker: false,
@@ -1344,8 +1420,8 @@ test(
             "an APK must never wait for the browser PWA contract"
         );
         assert.equal(runtime.document.querySelector("[data-app-contract-banner]"), null);
-        assert.equal(runtime.registerCalls, 0, "native must not register a browser worker");
-        assert.equal(runtime.unregisterCalls, 1, "a prior WebView worker is released once");
+        assert.equal(runtime.registerCalls, 1, "native registers the role worker for offline restart");
+        assert.equal(runtime.unregisterCalls, 0, "native keeps the role worker once registered");
 
         const mutation = new ElementStub("button", {type: "button"});
         runtime.document.body.appendChild(mutation);
@@ -1367,6 +1443,70 @@ test(
             /data-native-app="\{\{ is_native_app\|yesno:'true,false' \}\}"/,
             "the body must expose the context processor's native verdict"
         );
+    }
+);
+
+test(
+    "native APK retries a failed role worker registration after connectivity returns",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            nativeApp: true,
+            registrationAvailable: false,
+            registerFailures: 1,
+        });
+        await flushRuntime(runtime);
+        assert.equal(runtime.registerCalls, 1);
+        assert.equal(runtime.guard.getState().locked, false);
+
+        runtime.window.dispatchEvent(new CustomEventStub("online"));
+        await flushRuntime(runtime);
+
+        assert.equal(runtime.registerCalls, 2, "the native shell retries registration once online");
+        assert.equal(runtime.guard.getState().locked, false);
+    }
+);
+
+test(
+    "native APK retries a redundant worker install once and coalesces resume bursts",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            nativeApp: true,
+            registrationAvailable: false,
+        });
+        await flushRuntime(runtime);
+        assert.equal(runtime.registerCalls, 1);
+
+        runtime.registration.installing = runtime.waitingWorker;
+        runtime.registration.dispatchEvent(new CustomEventStub("updatefound"));
+        runtime.waitingWorker.state = "redundant";
+        runtime.waitingWorker.dispatchEvent(new CustomEventStub("statechange"));
+        runtime.window.dispatchEvent(new CustomEventStub("native-connectivity-resume"));
+        runtime.window.dispatchEvent(new CustomEventStub("native-connectivity-resume"));
+        runtime.window.dispatchEvent(new CustomEventStub("online"));
+        await flushRuntime(runtime);
+
+        assert.equal(runtime.registerCalls, 2, "resume signals share the same recovery registration");
+        assert.equal(runtime.reloadCalls, 0);
+        assert.equal(runtime.guard.getState().locked, false);
+    }
+);
+
+test(
+    "native APK remains usable when the WebView service worker API is unavailable",
+    {skip: guardUnavailable},
+    async () => {
+        const runtime = createRuntime({
+            nativeApp: true,
+            serviceWorkerUnavailable: true,
+        });
+        await flushRuntime(runtime);
+
+        assert.equal(runtime.registerCalls, 0);
+        assert.equal(runtime.reloadCalls, 0);
+        assert.equal(runtime.guard.getState().locked, false);
+        assert.equal(runtime.document.querySelector("[data-app-contract-banner]"), null);
     }
 );
 

@@ -12,7 +12,9 @@ public class BackgroundConnectionPlugin extends Plugin {
     public void sync(PluginCall call) {
         boolean required = Boolean.TRUE.equals(call.getBoolean("required", false));
         String shiftId = call.getString("shiftId", "");
+        String authGeneration = call.getString("authGeneration", "");
         if (required) {
+            PendingDriverShiftClose.resumeAfterAuthentication(getContext(), authGeneration);
             if (!ConnectionState.enableFromUi(getContext(), shiftId)) {
                 call.reject("Connection state was not saved");
                 return;
@@ -52,7 +54,13 @@ public class BackgroundConnectionPlugin extends Plugin {
             call.getString("endFuel", ""),
             call.getString("endMileage", ""),
             call.getString("endEngineHours", ""),
-            call.getString("confirmationToken", "")
+            call.getString("confirmationToken", ""),
+            numericLong(call.getData().opt("createdAt")),
+            call.getString("state", PendingDriverShiftClose.STATE_QUEUED),
+            (int) numericLong(call.getData().opt("retryAttempts")),
+            numericLong(call.getData().opt("nextAttemptAt")),
+            call.getString("authGeneration", ""),
+            call.getString("blockedAuthGeneration", "")
         );
         if (!stored) {
             call.reject("Driver shift close was not saved");
@@ -65,6 +73,15 @@ public class BackgroundConnectionPlugin extends Plugin {
         }
         ConnectivityForegroundService.startForActiveShift(getContext());
         call.resolve(snapshot());
+    }
+
+    static long numericLong(Object value) {
+        if (value instanceof Number) return ((Number) value).longValue();
+        if (value instanceof String) {
+            try { return Long.parseLong(((String) value).trim()); }
+            catch (NumberFormatException ignored) {}
+        }
+        return 0L;
     }
 
     @PluginMethod

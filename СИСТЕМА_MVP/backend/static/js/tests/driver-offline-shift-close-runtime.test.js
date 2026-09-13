@@ -10,6 +10,18 @@ const template = fs.readFileSync(
     path.resolve(__dirname, "../../../templates/users/driver_shift.html"),
     "utf8"
 );
+const nativePlugin = fs.readFileSync(
+    path.resolve(__dirname, "../../../../../mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/BackgroundConnectionPlugin.java"),
+    "utf8"
+);
+const nativeService = fs.readFileSync(
+    path.resolve(__dirname, "../../../../../mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/ConnectivityForegroundService.java"),
+    "utf8"
+);
+const nativePending = fs.readFileSync(
+    path.resolve(__dirname, "../../../../../mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/PendingDriverShiftClose.java"),
+    "utf8"
+);
 
 function markedSource(startMarker, endMarker) {
     const start = template.indexOf(startMarker);
@@ -121,21 +133,24 @@ function createForm() {
     };
 }
 
-function jsonResponse(status, data) {
+function jsonResponse(status, data, extra = {}) {
     return {
         status,
         ok: status >= 200 && status < 300,
         text() { return Promise.resolve(JSON.stringify(data)); },
+        ...extra,
     };
 }
 
-function createRuntime({responses = [], initialStorage = null, nativeState = null, online = true} = {}) {
+function createRuntime({responses = [], initialStorage = null, nativeState = null, online = true, nativeAvailable = true, authGeneration = "auth-1"} = {}) {
     const localStorage = new MemoryStorage(initialStorage);
     const nativeCalls = [];
     const fetchCalls = [];
     const toasts = [];
     const listeners = new Map();
+    const timers = [];
     const form = createForm();
+    const shell = {dataset: {driverAuthGeneration: authGeneration}};
     const body = {dataset: {}, classList: classList()};
     const native = {
         queueDriverShiftClose(payload) {
@@ -157,8 +172,10 @@ function createRuntime({responses = [], initialStorage = null, nativeState = nul
                 [...submittedForm.fields].map(([name, input]) => [name, String(input.value || "")])
             );
         }
+        set(name, value) { this.values[name] = String(value); }
     }
     const location = {
+        origin: "https://driverform.ru",
         href: "/driver/?tab=shift",
         assigned: [],
         assign(target) { this.assigned.push(target); },
@@ -166,7 +183,7 @@ function createRuntime({responses = [], initialStorage = null, nativeState = nul
     };
     const window = {
         localStorage,
-        NativeBackgroundConnection: native,
+        NativeBackgroundConnection: nativeAvailable ? native : null,
         FormData: FakeFormData,
         location,
         fetch(url, options) {
@@ -177,19 +194,22 @@ function createRuntime({responses = [], initialStorage = null, nativeState = nul
         },
         showDriverToast(text, tone) { toasts.push({text, tone}); },
         addEventListener(name, callback) { listeners.set(name, callback); },
+        setTimeout(callback, delay) { timers.push({callback, delay}); return timers.length; },
+        clearTimeout() {},
     };
     const document = {
         body,
         createElement(tagName) { return node(tagName); },
         querySelector(selector) {
+            if (selector === "[data-driver-shell]") return shell;
             return selector === "[data-driver-shift-close-form]" ? form : null;
         },
     };
     vm.runInNewContext(
         markedSource("/* DRIVER_SHIFT_CLOSE_OUTBOX_START */", "/* DRIVER_SHIFT_CLOSE_OUTBOX_END */"),
-        {window, document, navigator: {onLine: online}, Date, JSON, Promise, Error, Object, Array}
+        {window, document, navigator: {onLine: online}, Date, JSON, Promise, Error, Object, Array, Number, Math, URL}
     );
-    return {window, body, form, localStorage, nativeCalls, fetchCalls, toasts, listeners};
+    return {window, body, form, localStorage, nativeCalls, fetchCalls, toasts, listeners, timers};
 }
 
 const warningResponse = () => jsonResponse(422, {
@@ -236,6 +256,93 @@ test("a genuine fetch failure queues the exact readings for native background de
     assert.equal(runtime.form.panel.hidden, false);
     assert.equal(runtime.body.dataset.driverShiftClosePending, "true");
     assert.match(runtime.localStorage.getItem("driver-shift-close-pending:v1"), /driver-close-17/);
+    const stored = JSON.parse(runtime.localStorage.getItem("driver-shift-close-pending:v1"));
+    assert.equal(runtime.fetchCalls[0].values.occurred_at, new Date(stored.createdAt).toISOString());
+    const queued = runtime.nativeCalls.find((call) => call.method === "queue").payload;
+    assert.equal(queued.createdAt, stored.createdAt);
+    assert.equal(queued.state, "retry");
+    assert.equal(queued.retryAttempts, 1);
+});
+
+test("HTTP 5xx remains retryable across restart and drains after bounded backoff", async () => {
+    const first = createRuntime({responses: [jsonResponse(503, {ok: false, error: "temporary"})], nativeAvailable: false});
+
+    await first.window.DriverShiftCloseOutbox.submit(first.form);
+
+    const queued = JSON.parse(first.localStorage.getItem("driver-shift-close-pending:v1"));
+    assert.equal(queued.state, "retry");
+    assert.equal(queued.requiresAttention, false);
+    assert.equal(queued.retryAttempts, 1);
+    assert.ok(queued.nextAttemptAt > queued.createdAt);
+    assert.ok(queued.nextAttemptAt - queued.createdAt <= 60000);
+    queued.nextAttemptAt = 0;
+
+    const restarted = createRuntime({
+        initialStorage: JSON.stringify(queued),
+        responses: [jsonResponse(200, {ok: true, status: "applied"})],
+        nativeAvailable: false,
+    });
+    await restarted.window.DriverShiftCloseOutbox.restore(restarted.form);
+
+    assert.equal(restarted.fetchCalls.length, 1);
+    assert.equal(restarted.localStorage.getItem("driver-shift-close-pending:v1"), null);
+});
+
+test("401 waits for a new authenticated generation and resumes after login", async () => {
+    const first = createRuntime({responses: [jsonResponse(401, {ok: false})], nativeAvailable: false, authGeneration: "auth-old"});
+    await first.window.DriverShiftCloseOutbox.submit(first.form);
+    const stored = first.localStorage.getItem("driver-shift-close-pending:v1");
+    const blocked = JSON.parse(stored);
+    assert.equal(blocked.state, "auth_required");
+    assert.equal(blocked.requiresAttention, false);
+    assert.equal(blocked.blockedAuthGeneration, "auth-old");
+
+    const sameSession = createRuntime({initialStorage: stored, nativeAvailable: false, authGeneration: "auth-old"});
+    await sameSession.window.DriverShiftCloseOutbox.restore(sameSession.form);
+    assert.equal(sameSession.fetchCalls.length, 0);
+
+    const freshSession = createRuntime({
+        initialStorage: stored,
+        responses: [jsonResponse(200, {ok: true, status: "already_applied"})],
+        nativeAvailable: false,
+        authGeneration: "auth-new",
+    });
+    await freshSession.window.DriverShiftCloseOutbox.restore(freshSession.form);
+    assert.equal(freshSession.fetchCalls.length, 1);
+    assert.equal(freshSession.localStorage.getItem("driver-shift-close-pending:v1"), null);
+});
+
+test("403 and login redirects are classified as authentication, not validation", async () => {
+    for (const response of [
+        jsonResponse(403, {ok: false}),
+        jsonResponse(200, {}, {redirected: true, url: "https://driverform.ru/"}),
+    ]) {
+        const runtime = createRuntime({responses: [response], nativeAvailable: false});
+        await runtime.window.DriverShiftCloseOutbox.submit(runtime.form);
+        const stored = JSON.parse(runtime.localStorage.getItem("driver-shift-close-pending:v1"));
+        assert.equal(stored.state, "auth_required");
+        assert.equal(runtime.form.modal.hidden, true);
+    }
+});
+
+test("web retry preserves the original offline shift-close occurred_at", async () => {
+    const createdAt = Date.parse("2026-09-13T04:05:06.789Z");
+    const pending = JSON.stringify({
+        shiftId: "17",
+        clientActionId: "driver-close-old",
+        endFuel: "90",
+        endMileage: "2600",
+        endEngineHours: "712",
+        confirmationToken: "",
+        state: "queued",
+        createdAt,
+    });
+    const runtime = createRuntime({initialStorage: pending, nativeState: null, online: true, nativeAvailable: false});
+
+    await runtime.window.DriverShiftCloseOutbox.restore(runtime.form);
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(runtime.fetchCalls[0].values.occurred_at, "2026-09-13T04:05:06.789Z");
 });
 
 test("confirmation sends the signed token and clears both outboxes", async () => {
@@ -314,4 +421,15 @@ test("Driver never navigates the WebView to a raw HTTP error page", () => {
     assert.match(template, /reading_confirmation_token/);
     assert.match(template, /Вернуться и проверить/);
     assert.match(template, /Всё верно — закрыть смену/);
+});
+
+test("native foreground close posts the persisted createdAt as occurred_at", () => {
+    assert.match(nativePlugin, /numericLong\(call\.getData\(\)\.opt\("createdAt"\)\)/);
+    assert.match(nativeService, /formField\("occurred_at", PendingDriverShiftClose\.occurredAtIso\(pending\.createdAt\)\)/);
+    assert.match(nativeService, /statusCode == 401 \|\| result\.statusCode == 403/);
+    assert.match(nativeService, /PendingDriverShiftClose\.markAuthRequired/);
+    assert.match(nativeService, /PendingDriverShiftClose\.markRetry/);
+    assert.match(nativePending, /STATE_AUTH_REQUIRED/);
+    assert.match(nativePending, /next_attempt_at/);
+    assert.match(nativePlugin, /resumeAfterAuthentication\(getContext\(\), authGeneration\)/);
 });

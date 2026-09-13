@@ -7,6 +7,10 @@ import com.getcapacitor.JSObject;
 
 import org.json.JSONObject;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+import java.util.TimeZone;
 import java.util.regex.Pattern;
 
 /** Durable one-item outbox for the only driver action allowed after the UI goes away. */
@@ -16,6 +20,11 @@ final class PendingDriverShiftClose {
     private static final Pattern SHIFT_ID = Pattern.compile("[1-9][0-9]{0,18}");
     private static final Pattern READING = Pattern.compile("[0-9]{1,10}");
     private static final Pattern CONFIRMATION_TOKEN = Pattern.compile("[A-Za-z0-9._:-]{0,4096}");
+    static final String STATE_QUEUED = "queued";
+    static final String STATE_RETRY = "retry";
+    static final String STATE_AUTH_REQUIRED = "auth_required";
+    static final String STATE_ATTENTION = "attention";
+    static final long MAX_RETRY_DELAY_MS = 60_000L;
 
     final String shiftId;
     final String clientActionId;
@@ -24,7 +33,13 @@ final class PendingDriverShiftClose {
     final String endEngineHours;
     final String confirmationToken;
     final long createdAt;
+    final String syncState;
+    final int retryAttempts;
+    final long nextAttemptAt;
+    final String authGeneration;
+    final String blockedAuthGeneration;
     final boolean requiresAttention;
+    final boolean requiresAuthentication;
     final boolean confirmationRequired;
     final boolean hasActiveShift;
     final String attentionMessage;
@@ -39,7 +54,13 @@ final class PendingDriverShiftClose {
             String endEngineHours,
             String confirmationToken,
             long createdAt,
+            String syncState,
+            int retryAttempts,
+            long nextAttemptAt,
+            String authGeneration,
+            String blockedAuthGeneration,
             boolean requiresAttention,
+            boolean requiresAuthentication,
             boolean confirmationRequired,
             boolean hasActiveShift,
             String attentionMessage,
@@ -52,7 +73,13 @@ final class PendingDriverShiftClose {
         this.endEngineHours = endEngineHours;
         this.confirmationToken = confirmationToken;
         this.createdAt = createdAt;
+        this.syncState = syncState;
+        this.retryAttempts = retryAttempts;
+        this.nextAttemptAt = nextAttemptAt;
+        this.authGeneration = authGeneration;
+        this.blockedAuthGeneration = blockedAuthGeneration;
         this.requiresAttention = requiresAttention;
+        this.requiresAuthentication = requiresAuthentication;
         this.confirmationRequired = confirmationRequired;
         this.hasActiveShift = hasActiveShift;
         this.attentionMessage = attentionMessage == null ? "" : attentionMessage;
@@ -67,7 +94,13 @@ final class PendingDriverShiftClose {
             String endFuel,
             String endMileage,
             String endEngineHours,
-            String confirmationToken) {
+            String confirmationToken,
+            long createdAt,
+            String syncState,
+            int retryAttempts,
+            long nextAttemptAt,
+            String authGeneration,
+            String blockedAuthGeneration) {
         PendingDriverShiftClose pending = validated(
             shiftId,
             clientActionId,
@@ -75,8 +108,14 @@ final class PendingDriverShiftClose {
             endMileage,
             endEngineHours,
             confirmationToken,
-            System.currentTimeMillis(),
+            createdAt > 0L ? createdAt : System.currentTimeMillis(),
+            syncState,
+            retryAttempts,
+            nextAttemptAt,
+            authGeneration,
+            blockedAuthGeneration,
             false,
+            STATE_AUTH_REQUIRED.equals(syncState),
             false,
             true,
             "",
@@ -96,9 +135,16 @@ final class PendingDriverShiftClose {
         if (encoded == null || encoded.isBlank()) {
             return null;
         }
+        PendingDriverShiftClose pending = decode(encoded);
+        if (pending != null) return pending;
+        preferences(context).edit().remove(PREFERENCE_KEY).commit();
+        return null;
+    }
+
+    static PendingDriverShiftClose decode(String encoded) {
         try {
             JSONObject value = new JSONObject(encoded);
-            PendingDriverShiftClose pending = validated(
+            return validated(
                 value.optString("shift_id", ""),
                 value.optString("client_action_id", ""),
                 value.optString("end_fuel", ""),
@@ -106,23 +152,93 @@ final class PendingDriverShiftClose {
                 value.optString("end_engine_hours", ""),
                 value.optString("confirmation_token", ""),
                 value.optLong("created_at", 0L),
+                value.optString("sync_state", value.optBoolean("requires_attention", false) ? STATE_ATTENTION : STATE_QUEUED),
+                value.optInt("retry_attempts", 0),
+                value.optLong("next_attempt_at", 0L),
+                value.optString("auth_generation", ""),
+                value.optString("blocked_auth_generation", ""),
                 value.optBoolean("requires_attention", false),
+                value.optBoolean("requires_authentication", false),
                 value.optBoolean("confirmation_required", false),
                 value.optBoolean("has_active_shift", true),
                 value.optString("attention_message", ""),
                 value.optString("warnings", "[]"),
                 value.optString("field_errors", "{}")
             );
-            if (pending != null) {
-                return pending;
-            }
         } catch (Exception ignored) {}
-        preferences(context).edit().remove(PREFERENCE_KEY).commit();
         return null;
     }
 
     static boolean hasPending(Context context) {
         return load(context) != null;
+    }
+
+    static String occurredAtIso(long createdAt) {
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US);
+        format.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return format.format(new Date(createdAt > 0L ? createdAt : System.currentTimeMillis()));
+    }
+
+    static boolean isRetryableHttpStatus(int statusCode) {
+        return statusCode == 408 || statusCode == 429 || statusCode >= 500;
+    }
+
+    static long retryDelayMs(int attempts) {
+        int exponent = Math.min(Math.max(1, attempts) - 1, 5);
+        return Math.min(MAX_RETRY_DELAY_MS, 2_000L * (1L << exponent));
+    }
+
+    static boolean markRetry(Context context, String expectedClientActionId, long now) {
+        PendingDriverShiftClose pending = load(context);
+        if (pending == null || !pending.clientActionId.equals(expectedClientActionId)) return false;
+        int attempts = Math.max(0, pending.retryAttempts) + 1;
+        return persist(context, pending.withSyncState(
+            STATE_RETRY,
+            attempts,
+            now + retryDelayMs(attempts),
+            false,
+            false,
+            pending.authGeneration,
+            ""
+        ));
+    }
+
+    static boolean markAuthRequired(Context context, String expectedClientActionId) {
+        PendingDriverShiftClose pending = load(context);
+        if (pending == null || !pending.clientActionId.equals(expectedClientActionId)) return false;
+        return persist(context, pending.withSyncState(
+            STATE_AUTH_REQUIRED,
+            pending.retryAttempts,
+            0L,
+            false,
+            true,
+            pending.authGeneration,
+            pending.authGeneration
+        ));
+    }
+
+    static boolean resumeAfterAuthentication(Context context, String authGeneration) {
+        PendingDriverShiftClose pending = load(context);
+        String freshGeneration = clean(authGeneration);
+        if (pending == null || !pending.requiresAuthentication
+                || !hasFreshAuthentication(pending.blockedAuthGeneration, freshGeneration)) {
+            return false;
+        }
+        return persist(context, pending.withSyncState(
+            STATE_QUEUED,
+            0,
+            0L,
+            false,
+            false,
+            freshGeneration,
+            ""
+        ));
+    }
+
+    static boolean hasFreshAuthentication(String blockedGeneration, String currentGeneration) {
+        String blocked = clean(blockedGeneration);
+        String current = clean(currentGeneration);
+        return !current.isEmpty() && !current.equals(blocked);
     }
 
     static boolean clear(Context context, String expectedClientActionId) {
@@ -170,15 +286,56 @@ final class PendingDriverShiftClose {
             pending.endEngineHours,
             confirmationToken,
             pending.createdAt,
+            STATE_ATTENTION,
+            pending.retryAttempts,
+            0L,
+            pending.authGeneration,
+            "",
             true,
+            false,
             confirmationRequired,
             hasActiveShift,
             message,
             warningsJson,
             fieldErrorsJson
         );
-        return updated != null && preferences(context).edit()
-            .putString(PREFERENCE_KEY, updated.toJson().toString())
+        return persist(context, updated);
+    }
+
+    private PendingDriverShiftClose withSyncState(
+            String state,
+            int attempts,
+            long retryAt,
+            boolean attention,
+            boolean authentication,
+            String generation,
+            String blockedGeneration) {
+        return validated(
+            shiftId,
+            clientActionId,
+            endFuel,
+            endMileage,
+            endEngineHours,
+            confirmationToken,
+            createdAt,
+            state,
+            attempts,
+            retryAt,
+            generation,
+            blockedGeneration,
+            attention,
+            authentication,
+            confirmationRequired,
+            hasActiveShift,
+            attentionMessage,
+            warningsJson,
+            fieldErrorsJson
+        );
+    }
+
+    private static boolean persist(Context context, PendingDriverShiftClose pending) {
+        return pending != null && preferences(context).edit()
+            .putString(PREFERENCE_KEY, pending.toJson().toString())
             .commit();
     }
 
@@ -191,7 +348,13 @@ final class PendingDriverShiftClose {
         value.put("endEngineHours", endEngineHours);
         value.put("confirmationToken", confirmationToken);
         value.put("createdAt", createdAt);
+        value.put("state", syncState);
+        value.put("retryAttempts", retryAttempts);
+        value.put("nextAttemptAt", nextAttemptAt);
+        value.put("authGeneration", authGeneration);
+        value.put("blockedAuthGeneration", blockedAuthGeneration);
         value.put("requiresAttention", requiresAttention);
+        value.put("requiresAuthentication", requiresAuthentication);
         value.put("confirmationRequired", confirmationRequired);
         value.put("hasActiveShift", hasActiveShift);
         value.put("attentionMessage", attentionMessage);
@@ -215,7 +378,13 @@ final class PendingDriverShiftClose {
             value.put("end_engine_hours", endEngineHours);
             value.put("confirmation_token", confirmationToken);
             value.put("created_at", createdAt);
+            value.put("sync_state", syncState);
+            value.put("retry_attempts", retryAttempts);
+            value.put("next_attempt_at", nextAttemptAt);
+            value.put("auth_generation", authGeneration);
+            value.put("blocked_auth_generation", blockedAuthGeneration);
             value.put("requires_attention", requiresAttention);
+            value.put("requires_authentication", requiresAuthentication);
             value.put("confirmation_required", confirmationRequired);
             value.put("has_active_shift", hasActiveShift);
             value.put("attention_message", attentionMessage);
@@ -233,7 +402,13 @@ final class PendingDriverShiftClose {
             String endEngineHours,
             String confirmationToken,
             long createdAt,
+            String syncState,
+            int retryAttempts,
+            long nextAttemptAt,
+            String authGeneration,
+            String blockedAuthGeneration,
             boolean requiresAttention,
+            boolean requiresAuthentication,
             boolean confirmationRequired,
             boolean hasActiveShift,
             String attentionMessage,
@@ -245,6 +420,12 @@ final class PendingDriverShiftClose {
         String safeMileage = clean(endMileage);
         String safeHours = clean(endEngineHours);
         String safeConfirmationToken = clean(confirmationToken);
+        String safeState = clean(syncState);
+        if (!STATE_RETRY.equals(safeState)
+                && !STATE_AUTH_REQUIRED.equals(safeState)
+                && !STATE_ATTENTION.equals(safeState)) {
+            safeState = STATE_QUEUED;
+        }
         if (!SHIFT_ID.matcher(safeShiftId).matches()
                 || !ACTION_ID.matcher(safeActionId).matches()
                 || !READING.matcher(safeFuel).matches()
@@ -261,7 +442,13 @@ final class PendingDriverShiftClose {
             safeHours,
             safeConfirmationToken,
             Math.max(1L, createdAt),
+            safeState,
+            Math.max(0, retryAttempts),
+            Math.max(0L, nextAttemptAt),
+            cleanLimited(authGeneration, 256, ""),
+            cleanLimited(blockedAuthGeneration, 256, ""),
             requiresAttention,
+            requiresAuthentication,
             confirmationRequired,
             hasActiveShift,
             cleanLimited(attentionMessage, 4096, "Проверьте показания на конец смены."),

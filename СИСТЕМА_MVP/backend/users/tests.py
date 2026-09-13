@@ -1,4 +1,5 @@
-﻿import json
+import json
+import re
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
@@ -10,9 +11,11 @@ from zoneinfo import ZoneInfo
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
+from django.contrib.staticfiles import finders
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from openpyxl import load_workbook
 from PIL import Image
 
@@ -282,8 +285,20 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v212')
+        self.assertContains(response, 'driver-mobile-shell-v215')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
+        self.assertContains(
+            response,
+            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v215',
+        )
+        self.assertContains(
+            response,
+            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v215',
+        )
+        self.assertContains(
+            response,
+            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v215',
+        )
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertContains(response, 'playDriverSound("truck_assigned")')
         self.assertContains(response, 'driverAppliedActionVoice(actionKind, freshShell)')
@@ -301,6 +316,7 @@ class AccessLoginTests(TestCase):
         )
         self.assertContains(response, 'window.applyOperationalStateRefresh')
         self.assertContains(response, 'window.bindDriverMobileShell')
+        self.assertContains(response, 'body.set("occurred_at", occurredAt)')
         self.assertNotContains(response, '?version_check')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/driver-sw.js"')
         self.assertNotContains(response, 'window.' + 'alert')
@@ -453,6 +469,7 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, '<div class="driver-mobile-update-modal" data-driver-pwa-update-modal')
         self.assertNotContains(response, '<span class="driver-mobile-update-badge" data-driver-pwa-update-badge')
         self.assertNotContains(response, 'data-driver-tab-open="manifest" data-driver-pwa-update-nav-target')
+        self.assertNotContains(response, 'js/push-notifications.js')
 
     def test_native_driver_shows_real_app_version_when_reported(self):
         """Приложение сообщает свою версию — показываем именно её.
@@ -502,7 +519,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v212', script)
+        self.assertIn('driver-mobile-shell-v215', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -511,6 +528,13 @@ class AccessLoginTests(TestCase):
             script,
             r'const CORE_ASSETS = \[[\s\S]*?PRIVACY_POLICY_URL,',
         )
+        core_assets = script.split('const CORE_ASSETS = [', 1)[1].split('];', 1)[0]
+        for asset_url in re.findall(r'"(/static/[^"?]+)(?:\?[^"\s]*)?"', core_assets):
+            with self.subTest(core_asset=asset_url):
+                self.assertIsNotNone(
+                    finders.find(asset_url.removeprefix('/static/')),
+                    f'Driver service worker requires missing static asset {asset_url}',
+                )
         privacy_branch = script.index('if (url.pathname === PRIVACY_POLICY_PATH)')
         generic_navigation_branch = script.index('if (request.mode === "navigate"')
         self.assertLess(privacy_branch, generic_navigation_branch)
@@ -528,6 +552,19 @@ class AccessLoginTests(TestCase):
         self.assertIn('/static/css/app.css', script)
         self.assertIn('/static/css/native-app-update-v1.css', script)
         self.assertIn('/static/js/role-readonly.js', script)
+        self.assertIn('/static/js/driver-offline-outbox-v2.js', script)
+        self.assertNotIn('/static/js/driver-unload-outbox-v1.js', script)
+        self.assertIn('async function isValidatedDriverShell', script)
+        self.assertIn('html.includes("data-driver-shell")', script)
+        self.assertIn('function driverShellStaticDependencies', script)
+        self.assertIn('async function driverShellClosureComplete', script)
+        self.assertIn('cacheAuthenticatedDriverShell(cache, url, response)', script)
+        self.assertIn('networkFirstDriverShell(request)', script)
+        self.assertIn('migratePreviousAuthenticatedShell()', script)
+        self.assertIn('if (!prepared) return [];', script)
+        self.assertIn('Authenticated driver shell is unavailable', script)
+        self.assertIn('const requests = await source.keys();', script)
+        self.assertIn('await target.put(request, response.clone());', script)
         self.assertIn('/static/css/mobile-shift-unified-v1.css', script)
         self.assertIn('/static/js/mobile-shift-unified-v1.js', script)
         self.assertIn('/static/js/mobile-operational-sounds-v1.js', script)
@@ -2377,6 +2414,7 @@ class AccessLoginTests(TestCase):
             'end_mileage': '2600',
             'end_engine_hours': '712',
             'client_action_id': 'native-close-json',
+            'occurred_at': timezone.now().isoformat(),
         }
 
         response = self.client.post(
@@ -2393,17 +2431,45 @@ class AccessLoginTests(TestCase):
             HTTP_X_REQUESTED_WITH='XMLHttpRequest',
             HTTP_HOST='localhost',
         )
+        mismatched = self.client.post(
+            '/driver/shift/close/',
+            dict(payload, end_mileage='2601'),
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
+        mismatched_time = self.client.post(
+            '/driver/shift/close/',
+            dict(
+                payload,
+                occurred_at=(parse_datetime(payload['occurred_at']) + timedelta(seconds=1)).isoformat(),
+            ),
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+            HTTP_HOST='localhost',
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['status'], 'applied')
         self.assertEqual(repeated.status_code, 200)
         self.assertEqual(repeated.json()['status'], 'already_applied')
+        self.assertEqual(mismatched.status_code, 409)
+        self.assertEqual(mismatched.json()['code'], 'client_action_conflict')
+        self.assertEqual(mismatched_time.status_code, 409)
+        self.assertEqual(mismatched_time.json()['code'], 'client_action_conflict')
         self.assertEqual(
             ShiftClientAction.objects.filter(
                 action_type='driver_shift_closed',
                 client_action_id='native-close-json',
             ).count(),
             1,
+        )
+        action = ShiftClientAction.objects.get(client_action_id='native-close-json')
+        self.assertRegex(action.request_signature, r'^[0-9a-f]{64}$')
+        action.shift.refresh_from_db()
+        self.assertEqual(
+            action.shift.closed_at.isoformat(),
+            parse_datetime(payload['occurred_at']).isoformat(),
         )
 
     def test_native_driver_shift_close_returns_validation_errors_as_json(self):
@@ -3259,7 +3325,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v212')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v215')
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()

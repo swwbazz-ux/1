@@ -172,9 +172,10 @@ test("gesture, fallback queue and realtime safety contracts stay wired", () => {
     assert.match(templateSource, /target\.addEventListener\("pointerup"[\s\S]*playDumpReturnRebound\(target, releasedSwipe\)[\s\S]*returnLastTruckFromDump\(target\)/);
     assert.match(templateSource, /window\.setTimeout\(function \(\) \{[\s\S]*openDumpQueueModal\(target\)[\s\S]*\}, 560\)/);
     assert.match(templateSource, /\.eo-dashboard-unload-card\.is-return-swiping/);
-    assert.match(shiftCss, /\.eo-dashboard-unload-card\.is-return-swiping[\s\S]*--eo-return-swipe-progress[\s\S]*-14px/);
-    assert.match(shiftCss, /\.eo-dashboard-unload-card\.is-return-rebounding[\s\S]*animation: eo-dump-return-rebound \.58s/);
-    assert.match(shiftCss, /@keyframes eo-dump-return-rebound[\s\S]*translate3d\(0, 3px[\s\S]*translate3d\(0, -5px[\s\S]*translate3d\(0, 1\.5px[\s\S]*translate3d\(0, -2px/);
+    assert.match(shiftCss, /\.eo-dashboard-unload-card\.is-return-swiping[\s\S]*translate3d\(var\(--eo-return-drag-x\), var\(--eo-return-drag-y\), 0\)/);
+    assert.match(templateSource, /setProperty\("--eo-return-swipe-progress", String\(progress\)\)/);
+    assert.match(shiftCss, /\.eo-dashboard-unload-card\.is-return-rebounding[\s\S]*animation: eo-dump-return-rebound \.82s/);
+    assert.match(shiftCss, /@keyframes eo-dump-return-rebound[\s\S]*--eo-return-bounce-1-y[\s\S]*--eo-return-bounce-2-y[\s\S]*--eo-return-bounce-3-y[\s\S]*--eo-return-bounce-4-y/);
     assert.match(templateSource, /\.eo-dashboard-unload-card\.is-return-pending/);
     assert.match(shiftCss, /touch-action: pan-x !important;/);
     assert.match(shiftCss, /\[data-eo-last-sent-truck="true"\]/);

@@ -1,12 +1,18 @@
-﻿import json
+import json
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.contrib.staticfiles import finders
 from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -31,7 +37,7 @@ from assignments.services import (
     schedule_haul_release,
 )
 from core.models import OperationalStateEvent
-from users.role_apps import ROLE_APPS_BY_CODE
+from users.role_apps import ROLE_APPS_BY_CODE, STATIC_ASSET_RELEASE
 from core.production_time import production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import upsert_default_equipment_states
@@ -1355,11 +1361,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v233')
+        self.assertContains(response, 'excavator-mobile-shell-v235')
+        self.assertContains(response, '/static/js/excavator-field-outbox-v1.js?v=1')
+        self.assertContains(response, '/static/css/excavator-offline-v1.css?v=1')
+        self.assertContains(response, 'data-eo-offline-sync-url="/offline-events/sync/"')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 222')
+        self.assertContains(response, 'Версия 235')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
@@ -1373,6 +1382,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'shiftPendingActionId')
         self.assertContains(response, 'data-eo-shift-scroll')
         self.assertContains(response, 'data-eo-shift-inputs')
+
         self.assertContains(response, 'data-mobile-shift-role="excavator"')
         self.assertContains(response, 'data-mobile-shift-field="fuel"')
         self.assertContains(response, 'data-mobile-shift-field="fuel_limit"')
@@ -1445,12 +1455,27 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'data-eo-pwa-update-check-label')
         self.assertNotContains(response, 'data-eo-pwa-update-check-version')
         self.assertNotContains(response, 'data-eo-refresh-work')
+        self.assertNotContains(response, 'js/push-notifications.js')
         self.assertNotContains(response, 'Сверьте с фактом')
         self.assertNotContains(response, 'eo-shift-attention-label')
         self.assertContains(response, 'Обновить')
         self.assertContains(response, 'data-eo-pwa-update-apply')
         self.assertNotContains(response, 'runManualUpdateCheck')
         self.assertNotContains(response, 'Проверка...')
+
+    def test_excavator_work_exposes_durable_offline_outbox_contract(self):
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'excavator-mobile-shell-v235')
+        self.assertContains(response, '/static/js/excavator-field-outbox-v1.js?v=1')
+        self.assertContains(response, '/static/css/excavator-offline-v1.css?v=1')
+        self.assertContains(response, 'data-eo-offline-sync-url="/offline-events/sync/"')
+        self.assertContains(response, 'event_type: "excavator.trip.loaded"')
+        self.assertContains(response, 'event_type: "excavator.trip.loaded.cancelled"')
+        self.assertContains(response, '"excavator.downtime.started"')
+        self.assertContains(response, '"excavator.downtime.ended"')
+        self.assertContains(response, '"excavator.shift.closed"')
 
     def test_browser_excavator_keeps_automatic_pwa_update_ui_without_manual_controls(self):
         response = self.client.get(reverse('excavator_work'))
@@ -3660,7 +3685,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v233', script)
+        self.assertIn('excavator-mobile-shell-v235', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3668,6 +3693,48 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertRegex(
             script,
             r'const CORE_ASSETS = \[[\s\S]*?PRIVACY_POLICY_URL,',
+        )
+        core_assets = script.split('const CORE_ASSETS = [', 1)[1].split('];', 1)[0]
+        self.assertNotIn('APP_SHELL_URL', core_assets)
+        for asset_url in re.findall(r'"(/static/[^"?]+)(?:\?[^"\s]*)?"', core_assets):
+            with self.subTest(core_asset=asset_url):
+                self.assertIsNotNone(
+                    finders.find(asset_url.removeprefix('/static/')),
+                    f'Excavator service worker requires missing static asset {asset_url}',
+                )
+        self.assertIn(
+            f'/static/css/app.css?v={STATIC_ASSET_RELEASE}',
+            core_assets,
+        )
+        self.assertIn(
+            f'/static/js/realtime-client.js?v={STATIC_ASSET_RELEASE}',
+            core_assets,
+        )
+        self.assertIn('precacheAuthenticatedShell(cache)', script)
+        self.assertIn('migratePreviousExcavatorCache(previous)', script)
+        excavator_worker = script.split('const APP_CONTRACT_VERSION = "pwa-contract-v1";', 1)[1]
+        install_block = excavator_worker.split('self.addEventListener("install"', 1)[1].split(
+            'self.addEventListener("activate"', 1,
+        )[0]
+        self.assertIn('await cache.addAll(CORE_ASSETS.map', install_block)
+        self.assertNotIn('.catch(() => undefined)', install_block)
+        self.assertIn('if (await precacheAuthenticatedShell(cache)) return;', install_block)
+        self.assertIn('if (await migratePreviousExcavatorCache(previous)) return;', install_block)
+        self.assertIn('throw new Error("Authenticated excavator shell', install_block)
+        self.assertIn('async function isExcavatorShellResponse(response)', script)
+        self.assertIn('async function isSafeExcavatorCacheEntry(request, response)', script)
+        self.assertIn('excavatorShellStaticDependencies(html)', script)
+        self.assertIn('async function hasCompleteExcavatorShell(cache, response)', script)
+        self.assertIn('async function cacheExcavatorShellDependencies(cache, html)', script)
+        self.assertIn('if (missing.length) await cache.addAll(missing);', script)
+        self.assertIn('if (!await cacheExcavatorShellDependencies(cache, shellHtml)) return false;', script)
+        self.assertIn('requestUrl.search !== finalUrl.search', script)
+        self.assertIn('finalUrl.pathname !== APP_SHELL_URL', script)
+        self.assertIn('html.includes("data-eo-shell")', script)
+        self.assertIn("data-eo-role-code=", script)
+        self.assertIn(
+            'networkFirst(request, APP_SHELL_URL, isExcavatorShellResponse)',
+            script,
         )
         privacy_branch = script.index('if (url.pathname === PRIVACY_POLICY_PATH)')
         generic_navigation_branch = script.index('if (request.mode === "navigate"')
@@ -3693,6 +3760,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('/static/img/start/start-hero-v1.jpg', script)
         self.assertIn('/static/js/mobile-shift-unified-v1.js', script)
         self.assertIn('/static/js/mobile-operational-sounds-v1.js', script)
+        self.assertIn('/static/js/excavator-field-outbox-v1.js?v=1', script)
+        self.assertIn('/static/css/excavator-offline-v1.css?v=1', script)
         self.assertIn('/static/audio/excavator/excavator_truck_assigned.wav', script)
         self.assertIn('/static/audio/excavator/excavator_action_ok.wav', script)
         self.assertIn('/static/audio/excavator/excavator_action_error.wav', script)
@@ -3715,6 +3784,41 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('SKIP_WAITING', script)
         self.assertIn('GET_VERSION', script)
         self.assertIn('event.ports && event.ports[0]', script)
+
+    def test_rendered_excavator_shell_dependencies_reopen_offline_after_fresh_install(self):
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('Node.js is required for the executable service-worker runtime contract.')
+        response = self.client.get(reverse('excavator_work'))
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode('utf-8')
+        self.assertIn('data-eo-role-code="excavator_operator"', html)
+        runtime_test = Path(settings.BASE_DIR) / 'static/js/tests/excavator-service-worker-update-runtime.test.js'
+        with tempfile.TemporaryDirectory(prefix='excavator-sw-test-') as temp_dir:
+            rendered_shell = Path(temp_dir) / 'rendered-excavator-work.html'
+            rendered_shell.write_text(html, encoding='utf-8')
+            environment = os.environ.copy()
+            environment['EXCAVATOR_RENDERED_SHELL_PATH'] = str(rendered_shell)
+            completed = subprocess.run(
+                [
+                    node,
+                    '--test',
+                    '--test-name-pattern=fresh authenticated rendered shell',
+                    str(runtime_test),
+                ],
+                text=True,
+                encoding='utf-8',
+                cwd=settings.BASE_DIR,
+                env=environment,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + '\n' + completed.stderr,
+        )
 
     def test_excavator_shift_keyboard_overlays_stable_layout(self):
         response = self.client.get(reverse('excavator_work'))

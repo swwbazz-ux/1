@@ -29,6 +29,7 @@ from .services import (
     close_driver_shift,
     driver_close_reading_warnings,
     DriverShiftCloseConfirmationRequired,
+    DriverShiftCloseIdempotencyConflict,
     open_excavator_shift,
     open_driver_shift,
     shift_plan_totals,
@@ -546,6 +547,14 @@ class DriverShiftLifecycleTests(TestCase):
         self.assertEqual(first.pk, second.pk)
         self.assertTrue(created)
         self.assertFalse(created_again)
+        changed = dict(self.close_readings(), end_mileage=Decimal('10201'))
+        with self.assertRaises(DriverShiftCloseIdempotencyConflict):
+            close_driver_shift(
+                shift=shift,
+                employee=self.driver,
+                readings=changed,
+                client_action_id='same-close',
+            )
 
     def test_open_and_close_emit_realtime_events(self):
         shift = self.open_shift()

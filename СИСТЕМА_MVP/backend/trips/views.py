@@ -961,31 +961,31 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v233";
+const CACHE_NAME = "excavator-mobile-shell-v235";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
 const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";
 const CORE_ASSETS = [
-  APP_SHELL_URL,
   MANIFEST_URL,
   PRIVACY_POLICY_URL,
   "/static/portal/css/portal-shell-v5.css?v=7",
   "/static/portal/js/portal-shell-v5.js",
-  "/static/js/realtime-client.js",
+  "/static/js/realtime-client.js?v=__STATIC_ASSET_RELEASE__",
   "/static/js/role-readonly.js",
-  "/static/css/app.css",
-  "/static/css/excavator-manual-loading-v1.css?v=1",
-  "/static/css/excavator-work-v55.css",
-  "/static/css/excavator-work-v55-final.css",
-  "/static/css/excavator-work-v55-shift.css",
-  "/static/css/mobile-shift-unified-v1.css",
-  "/static/css/mobile-face-unified-v1.css",
-  "/static/css/mobile-downtime-unified-v1.css",
-  "/static/css/excavator-destination-distances-v1.css",
+  "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
+  "/static/css/excavator-manual-loading-v1.css?v=4",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v235",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v235",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v235",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v235",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v235",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v235",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js",
-  "/static/js/mobile-operational-sounds-v1.js",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v235",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v235",
+  "/static/js/excavator-field-outbox-v1.js?v=1",
+  "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
   "/static/img/pwa/excavator-180.png",
@@ -1021,7 +1021,14 @@ const CORE_ASSETS = [
 self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" }))).catch(() => undefined))
+      .then(async cache => {
+        await cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" })));
+        if (await precacheAuthenticatedShell(cache)) return;
+        const keys = await caches.keys();
+        const previous = keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME);
+        if (await migratePreviousExcavatorCache(previous)) return;
+        throw new Error("Authenticated excavator shell is unavailable for offline installation.");
+      })
       .then(() => self.skipWaiting())
   );
 });
@@ -1037,11 +1044,142 @@ self.addEventListener("activate", event => {
   );
 });
 
-async function networkFirst(request, fallbackUrl) {
+async function isExcavatorShellResponse(response) {
+  if (!response || !response.ok || !response.url) return false;
+  let finalUrl;
+  try {
+    finalUrl = new URL(response.url, self.location.origin);
+  } catch (error) {
+    return false;
+  }
+  if (finalUrl.origin !== self.location.origin || finalUrl.pathname !== APP_SHELL_URL) {
+    return false;
+  }
+  const contentType = String(response.headers.get("Content-Type") || "").toLowerCase();
+  if (!contentType.includes("text/html")) return false;
+  try {
+    const html = await response.clone().text();
+    return html.includes("data-eo-shell") &&
+      html.includes('data-eo-role-code="' + ROLE_CODE + '"');
+  } catch (error) {
+    return false;
+  }
+}
+
+async function precacheAuthenticatedShell(cache) {
+  try {
+    const request = new Request(APP_SHELL_URL, {
+      cache: "reload",
+      credentials: "same-origin"
+    });
+    const response = await fetch(request);
+    if (await isExcavatorShellResponse(response)) {
+      const shellHtml = await response.clone().text();
+      if (!await cacheExcavatorShellDependencies(cache, shellHtml)) return false;
+      await cache.put(APP_SHELL_URL, response.clone());
+      return await hasCompleteExcavatorShell(cache, response);
+    }
+  } catch (error) {
+    return false;
+  }
+  return false;
+}
+
+function excavatorShellStaticDependencies(html) {
+  const dependencies = [];
+  const pattern = /\b(?:src|href)\s*=\s*["']([^"'#]+)["']/gi;
+  let match;
+  while ((match = pattern.exec(String(html || ""))) !== null) {
+    try {
+      const url = new URL(match[1].replace(/&amp;/g, "&"), self.location.origin);
+      if (url.origin === self.location.origin && url.pathname.startsWith("/static/")) {
+        dependencies.push(url.pathname + url.search);
+      }
+    } catch (error) {}
+  }
+  return Array.from(new Set(dependencies));
+}
+
+async function cacheExcavatorShellDependencies(cache, html) {
+  const dependencies = excavatorShellStaticDependencies(html);
+  const missing = [];
+  for (const path of dependencies) {
+    const request = new Request(path, {cache: "reload", credentials: "same-origin"});
+    const response = await cache.match(request);
+    if (!await isSafeExcavatorCacheEntry(request, response)) missing.push(request);
+  }
+  if (missing.length) await cache.addAll(missing);
+  const available = await Promise.all(dependencies.map(async path => {
+    const request = new Request(path, {credentials: "same-origin"});
+    return await isSafeExcavatorCacheEntry(request, await cache.match(request));
+  }));
+  return available.every(Boolean);
+}
+
+async function hasCompleteExcavatorShell(cache, response) {
+  if (!response || !await isExcavatorShellResponse(response)) return false;
+  const shellHtml = await response.clone().text();
+  return await cacheExcavatorShellDependencies(cache, shellHtml);
+}
+
+async function isSafeExcavatorCacheEntry(request, response) {
+  if (!request || !response || !response.ok || !response.url) return false;
+  const requestUrl = new URL(request.url, self.location.origin);
+  const finalUrl = new URL(response.url, self.location.origin);
+  if (requestUrl.origin !== self.location.origin || finalUrl.origin !== self.location.origin) return false;
+  const allowed = requestUrl.pathname.startsWith("/static/") ||
+    requestUrl.pathname === MANIFEST_URL ||
+    requestUrl.pathname === PRIVACY_POLICY_PATH;
+  if (!allowed || requestUrl.pathname !== finalUrl.pathname) return false;
+  if (
+    requestUrl.pathname.startsWith("/static/")
+    && requestUrl.search !== finalUrl.search
+  ) return false;
+  if (
+    requestUrl.pathname.startsWith("/static/")
+    && String(response.headers.get("Content-Type") || "").toLowerCase().includes("text/html")
+  ) return false;
+  return true;
+}
+
+async function migratePreviousExcavatorCache(cacheNames) {
+  const current = await caches.open(CACHE_NAME);
+  const existing = await current.match(APP_SHELL_URL);
+  try {
+    if (await hasCompleteExcavatorShell(current, existing)) return true;
+  } catch (error) {}
+  if (existing) await current.delete(APP_SHELL_URL);
+  for (const cacheName of cacheNames.slice().reverse()) {
+    const previous = await caches.open(cacheName);
+    const candidate = await previous.match(APP_SHELL_URL);
+    if (candidate && await isExcavatorShellResponse(candidate)) {
+      const previousRequests = await previous.keys();
+      for (const request of previousRequests) {
+        const response = await previous.match(request);
+        if (await isSafeExcavatorCacheEntry(request, response)) {
+          await current.put(request, response.clone());
+        }
+      }
+      try {
+        if (!await cacheExcavatorShellDependencies(current, await candidate.clone().text())) continue;
+      } catch (error) {
+        continue;
+      }
+      await current.put(APP_SHELL_URL, candidate.clone());
+      if (await hasCompleteExcavatorShell(current, candidate)) return true;
+      await current.delete(APP_SHELL_URL);
+    }
+  }
+  return false;
+}
+
+async function networkFirst(request, fallbackUrl, responseValidator) {
   const cache = await caches.open(CACHE_NAME);
   try {
     const response = await fetch(request);
-    if (response && response.ok) {
+    const canCache = response && response.ok &&
+      (!responseValidator || await responseValidator(response));
+    if (canCache) {
       cache.put(request, response.clone()).catch(() => undefined);
       if (fallbackUrl && new URL(request.url).pathname === fallbackUrl) {
         cache.put(fallbackUrl, response.clone()).catch(() => undefined);
@@ -1100,7 +1238,7 @@ self.addEventListener("fetch", event => {
     return;
   }
   if (request.mode === "navigate" || url.pathname === APP_SHELL_URL) {
-    event.respondWith(networkFirst(request, APP_SHELL_URL));
+    event.respondWith(networkFirst(request, APP_SHELL_URL, isExcavatorShellResponse));
     return;
   }
   if (url.pathname === MANIFEST_URL) {
@@ -1116,6 +1254,18 @@ self.addEventListener("message", event => {
   if (!event.data) return;
   if (event.data.type === "SKIP_WAITING") {
     self.skipWaiting();
+    return;
+  }
+  if (event.data.type === "CLEAR_AUTHENTICATED_SHELL") {
+    const work = caches.keys().then(keys => Promise.all(
+      keys.filter(key => key.startsWith(CACHE_PREFIX)).map(async key => {
+        const cache = await caches.open(key);
+        await cache.delete(APP_SHELL_URL);
+      })
+    ));
+    event.waitUntil(work);
+    const target = event.ports && event.ports[0];
+    if (target) work.finally(() => target.postMessage({ok: true}));
     return;
   }
   if (event.data.type === "GET_VERSION") {
@@ -5555,6 +5705,17 @@ def excavator_shift_action_view(request):
                     },
                     status=409,
                 )
+            raw_occurred_at = str(payload.get('occurred_at') or '').strip()
+            occurred_at = parse_datetime(raw_occurred_at) if raw_occurred_at else None
+            if raw_occurred_at and (occurred_at is None or timezone.is_naive(occurred_at)):
+                return JsonResponse(
+                    {
+                        'ok': False,
+                        'error': 'Время действия должно содержать часовой пояс.',
+                        'code': 'invalid_occurred_at',
+                    },
+                    status=400,
+                )
             response_payload = close_excavator_shift(
                 employee=access.employee,
                 fuel_value=payload.get('fuel'),
@@ -5563,6 +5724,7 @@ def excavator_shift_action_view(request):
                 submitted_fuel_percent=payload.get('fuel_percent'),
                 confirmation_token=str(payload.get('confirmation_token') or '').strip(),
                 expected_shift_id=posted_shift_id,
+                occurred_at=occurred_at,
             )
             return JsonResponse(response_payload)
 

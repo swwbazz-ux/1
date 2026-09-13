@@ -303,7 +303,7 @@ public class ConnectivityForegroundService extends Service {
                     );
                 }
             }
-            if (shiftCloseFlush == FlushResult.ATTENTION) {
+            if (shiftCloseFlush == FlushResult.ATTENTION || shiftCloseFlush == FlushResult.AUTH_REQUIRED) {
                 publishStatus("Откройте приложение — проверьте закрытие смены");
             } else {
                 publishStatus("Связь работает во время смены");
@@ -388,7 +388,19 @@ public class ConnectivityForegroundService extends Service {
         if (pending.requiresAttention) {
             return FlushResult.ATTENTION;
         }
-        HeartbeatResult result = requestDriverShiftClose(pending);
+        if (pending.requiresAuthentication) {
+            return FlushResult.AUTH_REQUIRED;
+        }
+        if (pending.nextAttemptAt > System.currentTimeMillis()) {
+            return FlushResult.RETRY;
+        }
+        HeartbeatResult result;
+        try {
+            result = requestDriverShiftClose(pending);
+        } catch (Exception error) {
+            PendingDriverShiftClose.markRetry(this, pending.clientActionId, System.currentTimeMillis());
+            throw error;
+        }
         if (result.statusCode >= 200 && result.statusCode < 300) {
             JSONObject response = new JSONObject(result.body);
             if (!response.optBoolean("ok", false)) {
@@ -401,8 +413,15 @@ public class ConnectivityForegroundService extends Service {
             publishStatus("Закрытие смены отправлено");
             return FlushResult.APPLIED;
         }
-        // Any HTTP response proves that transport worked. Never present a server
-        // rejection (including 5xx/redirects) as an offline close or retry it forever.
+        if (result.statusCode == 401 || result.statusCode == 403) {
+            PendingDriverShiftClose.markAuthRequired(this, pending.clientActionId);
+            return FlushResult.AUTH_REQUIRED;
+        }
+        if (PendingDriverShiftClose.isRetryableHttpStatus(result.statusCode)) {
+            PendingDriverShiftClose.markRetry(this, pending.clientActionId, System.currentTimeMillis());
+            return FlushResult.RETRY;
+        }
+        // Validation and conflict responses require the driver to review the data.
         PendingDriverShiftClose.markAttention(this, pending.clientActionId, result.body);
         return FlushResult.ATTENTION;
     }
@@ -444,6 +463,7 @@ public class ConnectivityForegroundService extends Service {
 
             String encodedBody = formField("client_action_id", pending.clientActionId)
                 + "&" + formField("shift_id", pending.shiftId)
+                + "&" + formField("occurred_at", PendingDriverShiftClose.occurredAtIso(pending.createdAt))
                 + "&" + formField("end_fuel", pending.endFuel)
                 + "&" + formField("end_mileage", pending.endMileage)
                 + "&" + formField("end_engine_hours", pending.endEngineHours)
@@ -871,7 +891,7 @@ public class ConnectivityForegroundService extends Service {
     private String currentStatusText() {
         PendingDriverShiftClose pending = PendingDriverShiftClose.load(this);
         if (pending != null) {
-            return pending.requiresAttention
+            return (pending.requiresAttention || pending.requiresAuthentication)
                 ? "Откройте приложение — проверьте закрытие смены"
                 : "Закрытие смены сохранено — ждём связь";
         }
@@ -915,6 +935,8 @@ public class ConnectivityForegroundService extends Service {
     private enum FlushResult {
         NONE,
         APPLIED,
-        ATTENTION
+        ATTENTION,
+        RETRY,
+        AUTH_REQUIRED
     }
 }

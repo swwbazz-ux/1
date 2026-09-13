@@ -19,6 +19,7 @@ from django.shortcuts import redirect, render
 from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_POST
 from openpyxl import Workbook
@@ -82,6 +83,9 @@ from shifts.services import (
     calculate_truck_shift_progress,
     close_driver_shift,
     DriverShiftCloseConfirmationRequired,
+    DriverShiftCloseIdempotencyConflict,
+    driver_close_request_signature,
+    ensure_driver_close_action_matches,
     find_other_role_open_shift,
     open_driver_shift,
     open_shift_conflict_message,
@@ -271,7 +275,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v212'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v215'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -319,15 +323,14 @@ const CACHE_PREFIX = "driver-mobile-shell-";
 const APP_SHELL_URL = "/driver/";
 const LEGACY_SHELL_URL = "/driver/shift/";
 const MANIFEST_URL = "/driver.webmanifest";
+const SHELL_URLS = [APP_SHELL_URL, LEGACY_SHELL_URL];
 const PRIVACY_POLICY_PATH = "/company/privacy/";
 const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";
 const CORE_ASSETS = [
-    APP_SHELL_URL,
-    LEGACY_SHELL_URL,
     MANIFEST_URL,
     PRIVACY_POLICY_URL,
     "/static/portal/css/portal-shell-v5.css?v=7",
-    "/static/js/driver-unload-outbox-v1.js?v=1",
+    "/static/js/driver-offline-outbox-v2.js?v={DRIVER_SHELL_VERSION}",
     "/static/portal/js/portal-shell-v5.js",
     "/static/css/app.css",
     "/static/css/mobile-role-login-v1.css",
@@ -364,17 +367,34 @@ self.addEventListener("install", (event) => {{
     event.waitUntil(
         caches.open(CACHE_NAME)
             .then((cache) => cache.addAll(CORE_ASSETS))
+            .then(async () => {{
+                const cache = await caches.open(CACHE_NAME);
+                let prepared = false;
+                await Promise.all(SHELL_URLS.map(async (url) => {{
+                    try {{
+                        const response = await fetch(new Request(url, {{ cache: "no-store", credentials: "same-origin" }}));
+                        if (await cacheAuthenticatedDriverShell(cache, url, response)) {{
+                            prepared = true;
+                        }}
+                    }} catch (error) {{}}
+                }}));
+                if (prepared || await migratePreviousAuthenticatedShell()) return;
+                throw new Error("Authenticated driver shell is unavailable for offline installation.");
+            }})
             .then(() => self.skipWaiting())
     );
 }});
 
 self.addEventListener("activate", (event) => {{
     event.waitUntil(
-        caches.keys().then((keys) => Promise.all(
-            keys
-                .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
-                .map((key) => caches.delete(key))
-        )).then(() => self.clients.claim())
+        hasValidatedCurrentShell().then((prepared) => caches.keys().then((keys) => {{
+            if (!prepared) return [];
+            return Promise.all(
+                keys
+                    .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+                    .map((key) => caches.delete(key))
+            );
+        }})).then(() => self.clients.claim())
     );
 }});
 
@@ -389,6 +409,135 @@ async function networkFirst(request, fallbackUrl) {{
         return response;
     }} catch (error) {{
         return (await cache.match(request)) || (fallbackUrl ? cache.match(fallbackUrl) : undefined) || Response.error();
+    }}
+}}
+
+async function isValidatedDriverShell(response) {{
+    if (!response || !response.ok) return false;
+    let finalUrl;
+    try {{ finalUrl = new URL(response.url, self.location.origin); }} catch (error) {{ return false; }}
+    if (finalUrl.origin !== self.location.origin || !SHELL_URLS.includes(finalUrl.pathname)) return false;
+    const contentType = String(response.headers.get("Content-Type") || "");
+    if (!contentType.includes("text/html")) return false;
+    const html = await response.clone().text();
+    return html.includes("data-driver-shell") && html.includes('data-driver-access-id="');
+}}
+
+function driverShellStaticDependencies(html) {{
+    const dependencies = [];
+    const seen = new Set();
+    const tagPattern = /<(?:script|link)\\b[^>]*(?:src|href)\\s*=\\s*["']([^"']+)["'][^>]*>/gi;
+    let match;
+    while ((match = tagPattern.exec(String(html || ""))) !== null) {{
+        let url;
+        try {{ url = new URL(match[1].replaceAll("&amp;", "&"), self.location.origin); }} catch (error) {{ continue; }}
+        if (url.origin !== self.location.origin || !url.pathname.startsWith("/static/")) continue;
+        const exactUrl = url.pathname + url.search;
+        if (!seen.has(exactUrl)) {{
+            seen.add(exactUrl);
+            dependencies.push(exactUrl);
+        }}
+    }}
+    return dependencies;
+}}
+
+async function driverShellClosureComplete(cache, response) {{
+    if (!await isValidatedDriverShell(response)) return false;
+    const html = await response.clone().text();
+    const dependencies = driverShellStaticDependencies(html);
+    if (!dependencies.length) return false;
+    for (const dependency of dependencies) {{
+        const cached = await cache.match(dependency);
+        if (!cached || !cached.ok) return false;
+    }}
+    return true;
+}}
+
+async function cacheAuthenticatedDriverShell(cache, shellUrl, response) {{
+    if (!await isValidatedDriverShell(response)) return false;
+    const html = await response.clone().text();
+    const dependencies = driverShellStaticDependencies(html);
+    if (!dependencies.length) return false;
+    try {{
+        for (const dependency of dependencies) {{
+            const request = new Request(dependency, {{ cache: "no-store", credentials: "same-origin" }});
+            const asset = await fetch(request);
+            if (!asset || !asset.ok) return false;
+            await cache.put(dependency, asset.clone());
+        }}
+    }} catch (error) {{
+        return false;
+    }}
+    await cache.put(shellUrl, response.clone());
+    return driverShellClosureComplete(cache, response);
+}}
+
+async function validatedShellEntries(cache) {{
+    const requests = await cache.keys();
+    const entries = [];
+    for (const request of requests) {{
+        const url = new URL(request.url);
+        if (!SHELL_URLS.includes(url.pathname)) continue;
+        const response = await cache.match(request);
+        if (await driverShellClosureComplete(cache, response)) entries.push([request, response]);
+    }}
+    return entries;
+}}
+
+async function migratePreviousAuthenticatedShell() {{
+    const target = await caches.open(CACHE_NAME);
+    const names = (await caches.keys())
+        .filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME)
+        .reverse();
+    for (const name of names) {{
+        const source = await caches.open(name);
+        const entries = await validatedShellEntries(source);
+        if (!entries.length) continue;
+        const requests = await source.keys();
+        for (const request of requests) {{
+            const url = new URL(request.url);
+            if (url.origin !== self.location.origin) continue;
+            const response = await source.match(request);
+            if (response && response.ok) await target.put(request, response.clone());
+        }}
+        return hasValidatedCurrentShell();
+    }}
+    return false;
+}}
+
+async function hasValidatedCurrentShell() {{
+    const cache = await caches.open(CACHE_NAME);
+    return (await validatedShellEntries(cache)).length > 0;
+}}
+
+async function matchDriverShellAcrossCaches(request) {{
+    const names = (await caches.keys())
+        .filter((name) => name === CACHE_NAME || name.startsWith(CACHE_PREFIX))
+        .reverse();
+    if (names.includes(CACHE_NAME)) {{
+        names.splice(names.indexOf(CACHE_NAME), 1);
+        names.unshift(CACHE_NAME);
+    }}
+    for (const name of names) {{
+        const cache = await caches.open(name);
+        const candidates = [request, APP_SHELL_URL, LEGACY_SHELL_URL];
+        for (const candidate of candidates) {{
+            const response = await cache.match(candidate);
+            if (await driverShellClosureComplete(cache, response)) return response;
+        }}
+    }}
+    return null;
+}}
+
+async function networkFirstDriverShell(request) {{
+    const cache = await caches.open(CACHE_NAME);
+    try {{
+        const freshRequest = new Request(request, {{ cache: "no-store" }});
+        const response = await fetch(freshRequest);
+        await cacheAuthenticatedDriverShell(cache, request, response);
+        return response;
+    }} catch (error) {{
+        return (await matchDriverShellAcrossCaches(request)) || Response.error();
     }}
 }}
 
@@ -426,7 +575,7 @@ self.addEventListener("fetch", (event) => {{
         return;
     }}
     if (request.mode === "navigate" || url.pathname === APP_SHELL_URL || url.pathname === LEGACY_SHELL_URL) {{
-        event.respondWith(networkFirst(request, APP_SHELL_URL));
+        event.respondWith(networkFirstDriverShell(request));
         return;
     }}
     if (url.pathname === MANIFEST_URL) {{
@@ -444,6 +593,19 @@ self.addEventListener("message", (event) => {{
     }}
     if (event.data.type === "SKIP_WAITING") {{
         self.skipWaiting();
+    }}
+    if (event.data.type === "CLEAR_AUTHENTICATED_SHELL") {{
+        const work = caches.keys().then((keys) => Promise.all(
+            keys.filter((key) => key.startsWith(CACHE_PREFIX)).map(async (key) => {{
+                const cache = await caches.open(key);
+                await Promise.all(SHELL_URLS.map((url) => cache.delete(url)));
+            }})
+        ));
+        event.waitUntil(work);
+        if (event.ports && event.ports[0]) {{
+            work.finally(() => event.ports[0].postMessage({{ok: true}}));
+        }}
+        return;
     }}
     if (event.data.type === "GET_VERSION" && event.ports && event.ports[0]) {{
         event.ports[0].postMessage({{
@@ -4387,6 +4549,7 @@ def driver_shift_view(request):
             'active_trip_actual_dump_point_id': active_trip_actual_dump_point_id,
             'trip_status_loaded': TripStatus.LOADED_WAITING_UNLOAD,
             'driver_shell_version': DRIVER_SHELL_VERSION,
+            'driver_auth_generation': request.session.get(ACTIVE_ROLE_GENERATION_SESSION_KEY, ''),
             'operational_state_version': operational_state_version,
         },
     )
@@ -4489,12 +4652,52 @@ def driver_close_shift_view(request):
         return redirect('role_home')
 
     client_action_id = request.POST.get('client_action_id', '').strip()
-    completed_action = lambda: ShiftClientAction.objects.filter(
+    existing_action = ShiftClientAction.objects.select_related('shift').filter(
         action_type='driver_shift_closed',
         client_action_id=client_action_id,
         employee=access.employee,
-    ).exists()
-    if client_action_id and completed_action():
+    ).first() if client_action_id else None
+    posted_shift_id = (request.POST.get('shift_id') or '').strip()
+    raw_occurred_at = (request.POST.get('occurred_at') or '').strip()
+    occurred_at = parse_datetime(raw_occurred_at) if raw_occurred_at else None
+    occurred_at_is_valid = not raw_occurred_at or (
+        occurred_at is not None and not timezone.is_naive(occurred_at)
+    )
+
+    def posted_request_signature(shift_id):
+        return driver_close_request_signature(
+            shift_id=shift_id,
+            employee_id=access.employee_id,
+            actor_access_id=access.pk,
+            readings={
+                'end_fuel': request.POST.get('end_fuel', ''),
+                'end_mileage': request.POST.get('end_mileage', ''),
+                'end_engine_hours': request.POST.get('end_engine_hours', ''),
+            },
+            occurred_at=occurred_at if occurred_at_is_valid else raw_occurred_at,
+        )
+
+    def idempotency_conflict_response(error):
+        error_messages = getattr(error, 'messages', None) or [str(error)]
+        if wants_json:
+            return JsonResponse({
+                'ok': False,
+                'code': 'client_action_conflict',
+                'error': str(error_messages[0]),
+                'has_active_shift': False,
+            }, status=409)
+        messages.error(request, 'Повтор действия содержит другие данные. Обновите экран.')
+        return redirect(f"{reverse('driver_work')}?tab=manifest")
+
+    if existing_action:
+        try:
+            ensure_driver_close_action_matches(
+                existing_action,
+                posted_request_signature(posted_shift_id or existing_action.shift_id),
+                access.employee_id,
+            )
+        except DriverShiftCloseIdempotencyConflict as error:
+            return idempotency_conflict_response(error)
         if wants_json:
             return JsonResponse({
                 'ok': True,
@@ -4507,16 +4710,6 @@ def driver_close_shift_view(request):
 
     open_shift = driver_open_shift_queryset(access.employee).order_by('-opened_at').first()
     if not open_shift:
-        if client_action_id and completed_action():
-            if wants_json:
-                return JsonResponse({
-                    'ok': True,
-                    'status': 'already_applied',
-                    'client_action_id': client_action_id,
-                    'redirect_url': f"{reverse('driver_work')}?tab=manifest",
-                })
-            messages.success(request, 'Смена закрыта.')
-            return redirect(f"{reverse('driver_work')}?tab=manifest")
         if wants_json:
             return JsonResponse({
                 'ok': False,
@@ -4526,7 +4719,6 @@ def driver_close_shift_view(request):
         messages.error(request, 'Открытая смена не найдена.')
         return redirect('driver_work')
 
-    posted_shift_id = (request.POST.get('shift_id') or '').strip()
     if posted_shift_id and posted_shift_id != str(open_shift.pk):
         if wants_json:
             return JsonResponse({
@@ -4542,13 +4734,24 @@ def driver_close_shift_view(request):
         form_data['client_action_id'] = secrets.token_urlsafe(24)
     form = DriverCloseShiftForm(form_data, instance=open_shift)
     request._driver_close_form = form
-    if form.is_valid():
+    form_is_valid = form.is_valid()
+    if form_is_valid and not occurred_at_is_valid:
+        form.add_error(None, 'Время действия должно содержать часовой пояс.')
+        form_is_valid = False
+    if form_is_valid:
         readings = {
             'end_fuel': form.cleaned_data['end_fuel'],
             'end_mileage': form.cleaned_data['end_mileage'],
             'end_engine_hours': form.cleaned_data['end_engine_hours'],
         }
         resolved_client_action_id = form.cleaned_data['client_action_id']
+        request_signature = driver_close_request_signature(
+            shift_id=open_shift.pk,
+            employee_id=access.employee_id,
+            actor_access_id=access.pk,
+            readings=readings,
+            occurred_at=occurred_at,
+        )
         try:
             with transaction.atomic():
                 Employee.objects.select_for_update().get(pk=access.employee_id)
@@ -4560,6 +4763,9 @@ def driver_close_shift_view(request):
                     readings=readings,
                     client_action_id=resolved_client_action_id,
                     confirmation_token=form.cleaned_data.get('reading_confirmation_token') or '',
+                    occurred_at=occurred_at,
+                    actor_access_id=access.pk,
+                    request_signature=request_signature,
                 )
         except DriverShiftCloseConfirmationRequired as confirmation:
             warning_payload = {
@@ -4575,6 +4781,8 @@ def driver_close_shift_view(request):
             if wants_json:
                 return JsonResponse(warning_payload, status=422)
             request._driver_close_confirmation = warning_payload
+        except DriverShiftCloseIdempotencyConflict as error:
+            return idempotency_conflict_response(error)
         except ValidationError as error:
             form.add_error(None, error)
         else:

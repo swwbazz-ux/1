@@ -1,0 +1,88 @@
+.eo-offline-sync {
+    position: absolute !important;
+    top: calc(var(--eo-page-top, 6px) + var(--eo-topbar-h, 44px) + 4px);
+    left: 50%;
+    z-index: 90 !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .45rem;
+    width: auto !important;
+    max-width: calc(100% - 1.4rem) !important;
+    min-height: 1.65rem;
+    margin: 0;
+    padding: .28rem .7rem;
+    border: 1px solid rgba(118, 198, 255, .42);
+    border-radius: 999px;
+    background: rgba(4, 18, 27, .94);
+    color: #bfe8ff;
+    font: 700 .76rem/1.15 "Roboto Condensed", sans-serif;
+    letter-spacing: .025em;
+    white-space: nowrap;
+    pointer-events: none;
+    transform: translateX(-50%);
+    box-sizing: border-box;
+}
+
+.eo-offline-sync[hidden] { display: none; }
+
+.eo-offline-sync::before {
+    content: "";
+    width: .48rem;
+    height: .48rem;
+    flex: 0 0 .48rem;
+    border-radius: 50%;
+    background: #58df52;
+    box-shadow: 0 0 .55rem rgba(88, 223, 82, .72);
+}
+
+.eo-offline-sync.is-offline::before {
+    background: #ffd45b;
+    box-shadow: 0 0 .55rem rgba(255, 212, 91, .7);
+}
+
+.eo-offline-sync.is-syncing::before {
+    background: #69c9ff;
+    box-shadow: 0 0 .55rem rgba(105, 201, 255, .75);
+    animation: eo-offline-sync-pulse 1.1s ease-in-out infinite;
+}
+
+.eo-offline-sync.is-attention,
+.eo-offline-sync.is-storage-error {
+    border-color: rgba(255, 99, 87, .68);
+    color: #ffd2ce;
+}
+
+.eo-offline-sync.is-attention::before,
+.eo-offline-sync.is-storage-error::before {
+    background: #ff6357;
+    box-shadow: 0 0 .55rem rgba(255, 99, 87, .72);
+}
+
+.eo-offline-sync__count {
+    min-width: 1.35rem;
+    padding: .08rem .36rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .12);
+    color: #fff;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.eo-dashboard-truck-card.is-saved-on-device {
+    outline: 2px solid rgba(255, 212, 91, .82);
+    outline-offset: 2px;
+}
+
+.eo-dashboard-truck-card.is-saved-on-device span::after {
+    content: " · на телефоне";
+    color: #ffd45b;
+}
+
+@keyframes eo-offline-sync-pulse {
+    50% { opacity: .34; transform: scale(.78); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .eo-offline-sync.is-syncing::before { animation: none; }
+}

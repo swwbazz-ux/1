@@ -1,5 +1,8 @@
+import json
+
 from django.http import JsonResponse
-from django.views.decorators.http import require_GET
+from django.utils import timezone
+from django.views.decorators.http import require_GET, require_POST
 
 from shifts.models import EmployeeShift
 from users.models import EmployeeAccess
@@ -13,6 +16,11 @@ from users.role_apps import (
 )
 
 from .models import OperationalStateEvent, OperationalStateVersion
+from .offline_sync import (
+    OfflineEventProblem,
+    SYNC_FORMAT_VERSION,
+    process_offline_batch,
+)
 from .realtime import relevant_event_delta, worker_equipment_ids_for_access
 
 
@@ -32,6 +40,96 @@ def parse_bool_param(value, default=True):
     if value is None:
         return default
     return str(value).strip().lower() not in {'0', 'false', 'no', 'off'}
+
+
+@require_POST
+def offline_events_sync_view(request):
+    """Accept a durable, partially acknowledged batch from one field device."""
+    access_id = request.session.get('employee_access_id')
+    access = (
+        EmployeeAccess.objects
+        .select_related('employee', 'role', 'employee__contractor_organization')
+        .filter(pk=access_id)
+        .first()
+        if access_id else None
+    )
+    role_state = role_session_state(request, access)
+    if not access or not role_state.get('authenticated') or not role_state.get('is_active'):
+        return JsonResponse({
+            'ok': False,
+            'status': 'auth_required',
+            'code': 'session_expired_or_inactive',
+            'message': 'Сессия или активная роль изменилась. Требуется вход.',
+            'server_received_at': timezone.now().isoformat(),
+        }, status=401)
+    try:
+        body = json.loads(request.body.decode('utf-8') or '{}')
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return JsonResponse({
+            'ok': False,
+            'status': 'invalid',
+            'code': 'invalid_json',
+            'message': 'Тело запроса должно быть корректным JSON.',
+            'server_received_at': timezone.now().isoformat(),
+        }, status=400)
+    if not isinstance(body, dict):
+        return JsonResponse({
+            'ok': False,
+            'status': 'invalid',
+            'code': 'invalid_envelope',
+            'message': 'Пакет offline-событий должен быть JSON-объектом.',
+            'server_received_at': timezone.now().isoformat(),
+        }, status=400)
+    try:
+        format_version = int(body.get('format_version', body.get('protocol_version', 0)))
+    except (TypeError, ValueError):
+        format_version = 0
+    if format_version != SYNC_FORMAT_VERSION:
+        return JsonResponse({
+            'ok': False,
+            'status': 'invalid',
+            'code': 'unsupported_format_version',
+            'message': 'Версия пакета offline-событий не поддерживается.',
+            'server_received_at': timezone.now().isoformat(),
+        }, status=400)
+    role_code = str(body.get('role_code') or '').strip()
+    claimed_actor_id = body.get('actor_id')
+    claimed_access_id = body.get('access_id')
+    if (
+        claimed_actor_id not in (None, '', access.employee_id, str(access.employee_id))
+        or claimed_access_id not in (None, '', access.id, str(access.id))
+        or role_code != access.role.code
+    ):
+        return JsonResponse({
+            'ok': False,
+            'status': 'auth_required',
+            'code': 'actor_or_role_changed',
+            'message': 'Сотрудник, доступ или роль пакета не совпадают с активной сессией.',
+            'server_received_at': timezone.now().isoformat(),
+        }, status=401)
+    try:
+        results = process_offline_batch(
+            access,
+            role_code=role_code,
+            device_id=body.get('device_id'),
+            events=body.get('events'),
+        )
+    except OfflineEventProblem as problem:
+        return JsonResponse({
+            'ok': False,
+            'status': problem.status,
+            'code': problem.code,
+            'message': problem.message,
+            'retryable': problem.retryable,
+            'server_received_at': timezone.now().isoformat(),
+        }, status=400)
+    return JsonResponse({
+        'ok': True,
+        'protocol_version': SYNC_FORMAT_VERSION,
+        'format_version': SYNC_FORMAT_VERSION,
+        'server_received_at': timezone.now().isoformat(),
+        'results': results,
+    })
 
 
 @require_GET

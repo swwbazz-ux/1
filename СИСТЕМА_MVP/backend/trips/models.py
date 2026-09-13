@@ -53,6 +53,13 @@ class Trip(models.Model):
     note = models.TextField('Примечание', blank=True)
     status = models.CharField('Статус', max_length=32, choices=TripStatus.choices, default=TripStatus.ACTIVE)
     created_at = models.DateTimeField('Создан', auto_now_add=True)
+    loaded_at = models.DateTimeField('Погрузка совершена', null=True, blank=True)
+    load_received_at = models.DateTimeField('Погрузка получена сервером', null=True, blank=True)
+    load_time_source = models.CharField(
+        'Источник времени погрузки', max_length=24, default='unknown',
+        choices=[('unknown', 'Неизвестно'), ('excavator_device', 'Часы устройства машиниста'),
+                 ('server_receipt', 'Время получения сервером')],
+    )
     completed_at = models.DateTimeField('Выполнен', null=True, blank=True)
     cancelled_at = models.DateTimeField('Отменён', null=True, blank=True)
     is_carryover = models.BooleanField('Переходящий рейс', default=False)
