@@ -332,8 +332,10 @@ test('truck loaded outbox event carries exact assignment state and immutable con
     assert.match(source, /local_trip_id:\s*localTripId/);
     assert.match(source, /depends_on:\s*previous \? \[previous\.event_id\] : \[\]/);
     assert.match(source, /fieldOutbox\.queue\(event\)\.then/);
+    assert.match(source, /fieldOutbox\.allocateSequence\(legacyExcavatorFieldSequence/);
     assert.match(source, /rock_type_id:/);
     assert.match(source, /invalidateExcavatorWorkRefresh\(\)/);
+    assert.doesNotMatch(template, /nextExcavatorFieldSequence/);
 });
 
 test('successful outgoing load removes only the source card and keeps exact trip badge', () => {

@@ -11,6 +11,51 @@ function storage() {
     };
 }
 
+function fakeIndexedDB() {
+    const records = new Map();
+    let created = false;
+    const copy = value => value == null ? value : JSON.parse(JSON.stringify(value));
+    function requestResult(value) {
+        const request = {};
+        queueMicrotask(() => {
+            request.result = copy(value);
+            if (request.onsuccess) request.onsuccess();
+        });
+        return request;
+    }
+    function objectStore() {
+        return {
+            createIndex() {},
+            index: () => ({
+                getAll: queueKey => requestResult([...records.values()].filter(record => record.queue_key === queueKey)),
+            }),
+            get: key => requestResult(records.get(key)),
+            put: record => { records.set(record.storage_id, copy(record)); },
+            delete: key => { records.delete(key); },
+        };
+    }
+    const db = {
+        objectStoreNames: {contains: () => created},
+        createObjectStore: () => { created = true; return objectStore(); },
+        transaction: () => {
+            const tx = {objectStore};
+            queueMicrotask(() => queueMicrotask(() => { if (tx.oncomplete) tx.oncomplete(); }));
+            return tx;
+        },
+    };
+    return {
+        open: () => {
+            const request = {};
+            queueMicrotask(() => {
+                request.result = db;
+                if (!created && request.onupgradeneeded) request.onupgradeneeded();
+                if (request.onsuccess) request.onsuccess();
+            });
+            return request;
+        },
+    };
+}
+
 function loadEvent(id, sequence = 1) {
     return {
         event_id: id,
@@ -98,6 +143,38 @@ test('a client shell update and offline reopen preserve a nonempty queue', async
     assert.equal(restored.length, 1);
     assert.equal(restored[0].event_id, 'kept-through-update');
     assert.equal(restored[0].sync_state, 'pending');
+});
+
+test('missing legacy sequence cannot move a restarted IndexedDB queue backwards', async () => {
+    const indexedDB = fakeIndexedDB();
+    const beforeRestart = createOutbox({
+        indexedDB,
+        localStorage: storage(),
+        queueKey: 'access-7',
+        send: async events => ({ok: true, results: events.map(accepted)}),
+    });
+    await beforeRestart.ready();
+    await beforeRestart.queue(loadEvent('first', 41));
+
+    const afterRestart = createOutbox({
+        indexedDB,
+        localStorage: storage(),
+        queueKey: 'access-7',
+        send: async events => ({ok: true, results: events.map(accepted)}),
+    });
+    const restored = await afterRestart.ready();
+    assert.equal(restored[0].sequence, 41);
+    const nextSequence = await afterRestart.allocateSequence();
+    assert.equal(nextSequence, 42);
+    const second = loadEvent('second', nextSequence);
+    second.depends_on = ['first'];
+    await afterRestart.queue(second);
+    assert.deepEqual((await afterRestart.pending()).map(event => [event.event_id, event.sequence]), [
+        ['first', 41],
+        ['second', 42],
+    ]);
+    await afterRestart.flush();
+    assert.equal(await afterRestart.allocateSequence(), 43);
 });
 
 test('same event id is idempotent only for an identical immutable wire event', async () => {

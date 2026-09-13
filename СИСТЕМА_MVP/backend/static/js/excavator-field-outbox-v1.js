@@ -46,6 +46,7 @@
 
     function createLocalStorageAdapter(storage, queueKey) {
         var key = LEGACY_PREFIX + queueKey;
+        var sequenceKey = key + ":sequence";
         function read() {
             var parsed = JSON.parse(storage.getItem(key) || "[]");
             if (!Array.isArray(parsed)) throw new Error("Повреждена локальная очередь погрузок.");
@@ -70,6 +71,12 @@
             replace: function (events) {
                 storage.setItem(key, JSON.stringify(events.slice().sort(compareEvents)));
                 return Promise.resolve();
+            },
+            nextSequence: function (minimum) {
+                var current = Number(storage.getItem(sequenceKey) || 0);
+                var next = Math.max(current, Number(minimum || 0)) + 1;
+                storage.setItem(sequenceKey, String(next));
+                return Promise.resolve(next);
             }
         };
     }
@@ -99,6 +106,7 @@
 
     function createIndexedDbAdapter(indexedDB, queueKey) {
         var dbPromise = openIndexedDb(indexedDB);
+        var sequenceStorageId = queueKey + ":__sequence__";
         function transaction(mode, operation) {
             return dbPromise.then(function (db) {
                 return new Promise(function (resolve, reject) {
@@ -157,6 +165,29 @@
                         tx.onabort = function () { reject(tx.error); };
                     });
                 });
+            },
+            nextSequence: function (minimum) {
+                return dbPromise.then(function (db) {
+                    return new Promise(function (resolve, reject) {
+                        var tx = db.transaction(STORE_NAME, "readwrite");
+                        var store = tx.objectStore(STORE_NAME);
+                        var next = null;
+                        var request = store.get(sequenceStorageId);
+                        request.onsuccess = function () {
+                            var current = request.result ? Number(request.result.sequence || 0) : 0;
+                            next = Math.max(current, Number(minimum || 0)) + 1;
+                            store.put({
+                                storage_id: sequenceStorageId,
+                                queue_key: queueKey + ":metadata",
+                                sequence: next
+                            });
+                        };
+                        request.onerror = function () { reject(request.error || new Error("Не удалось прочитать порядок действий.")); };
+                        tx.oncomplete = function () { resolve(next); };
+                        tx.onerror = function () { reject(tx.error || new Error("Не удалось сохранить порядок действий.")); };
+                        tx.onabort = function () { reject(tx.error || new Error("Сохранение порядка действий отменено.")); };
+                    });
+                });
             }
         };
     }
@@ -198,6 +229,17 @@
 
         function list() {
             return adapterPromise.then(function (adapter) { return adapter.list(); });
+        }
+
+        function allocateSequence(minimum) {
+            return list().then(function (events) {
+                var durableMaximum = events.reduce(function (maximum, event) {
+                    return Math.max(maximum, Number(event.sequence || 0));
+                }, Number(minimum || 0));
+                return adapterPromise.then(function (adapter) {
+                    return adapter.nextSequence(durableMaximum);
+                });
+            });
         }
 
         function persist(event) {
@@ -469,6 +511,7 @@
             queue: queue,
             flush: flush,
             pending: list,
+            allocateSequence: allocateSequence,
             discardUnsent: discardUnsent,
             retryNow: retryNow,
             storageKind: function () { return adapterPromise.then(function (adapter) { return adapter.kind; }); }

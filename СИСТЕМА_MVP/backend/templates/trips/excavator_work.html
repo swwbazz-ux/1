@@ -1344,16 +1344,13 @@ function newExcavatorFieldId(prefix) {
     return String(prefix || "event") + "-" + value;
 }
 
-function nextExcavatorFieldSequence(accessId, deviceId) {
+function legacyExcavatorFieldSequence(accessId, deviceId) {
     var key = "excavator-field-sequence-v1:" + accessId + ":" + deviceId;
-    var next;
     try {
-        next = Math.max(1, Number(window.localStorage.getItem(key) || 0) + 1);
-        window.localStorage.setItem(key, String(next));
+        return Math.max(0, Number(window.localStorage.getItem(key) || 0));
     } catch (error) {
-        throw new Error("Не удалось сохранить порядок действий на телефоне.");
+        return 0;
     }
-    return next;
 }
 
 function renderExcavatorOfflineStatus(summary) {
@@ -1571,7 +1568,8 @@ window.initExcavatorWorkShell = function () {
                     : (predecessors[0] ? [predecessors[0].event_id] : []));
             var deviceId = excavatorInstallDeviceId();
             var eventId = newExcavatorFieldId(options.idPrefix || "excavator-event");
-            var event = {
+            return fieldOutbox.allocateSequence(legacyExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId)).then(function (sequence) {
+                var event = {
                 event_id: eventId,
                 event_type: eventType,
                 format_version: 1,
@@ -1587,13 +1585,14 @@ window.initExcavatorWorkShell = function () {
                     ? eventId
                     : (options.localDowntimeId || null),
                 occurred_at: new Date().toISOString(),
-                sequence: nextExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId),
+                sequence: sequence,
                 depends_on: dependencies,
                 payload: payload || {}
-            };
-            return fieldOutbox.queue(event).then(function () {
-                if (navigator.onLine !== false) fieldOutbox.flush();
-                return event;
+                };
+                return fieldOutbox.queue(event).then(function () {
+                    if (navigator.onLine !== false) fieldOutbox.flush();
+                    return event;
+                });
             });
         });
     }
@@ -2484,7 +2483,8 @@ window.initExcavatorWorkShell = function () {
                         var source = events.find(function (event) { return event.event_id === loadEventId; });
                         if (!source) throw new Error("Сохранённая погрузка уже подтверждена. Обновите экран.");
                         var deviceId = excavatorInstallDeviceId();
-                        var cancelEvent = {
+                        return fieldOutbox.allocateSequence(legacyExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId)).then(function (sequence) {
+                            var cancelEvent = {
                             event_id: newExcavatorFieldId("excavator-load-cancel"),
                             event_type: "excavator.trip.loaded.cancelled",
                             format_version: 1,
@@ -2497,15 +2497,16 @@ window.initExcavatorWorkShell = function () {
                             trip_id: null,
                             local_trip_id: source.local_trip_id,
                             occurred_at: new Date().toISOString(),
-                            sequence: nextExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId),
+                            sequence: sequence,
                             depends_on: [source.event_id],
                             payload: {
                                 truck_id: source.payload && source.payload.truck_id,
                                 dump_point_id: source.payload && source.payload.dump_point_id,
                                 local_trip_id: source.local_trip_id
                             }
-                        };
-                        return fieldOutbox.queue(cancelEvent).then(function () { return {discarded: false}; });
+                            };
+                            return fieldOutbox.queue(cancelEvent).then(function () { return {discarded: false}; });
+                        });
                     });
                 });
             } else {
@@ -2951,7 +2952,8 @@ window.initExcavatorWorkShell = function () {
             var eventId = newExcavatorFieldId("excavator-load");
             var localTripId = newExcavatorFieldId("local-trip");
             var deviceId = excavatorInstallDeviceId();
-            var event = {
+            return fieldOutbox.allocateSequence(legacyExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId)).then(function (sequence) {
+                var event = {
                 event_id: eventId,
                 event_type: "excavator.trip.loaded",
                 format_version: 1,
@@ -2964,11 +2966,12 @@ window.initExcavatorWorkShell = function () {
                 trip_id: null,
                 local_trip_id: localTripId,
                 occurred_at: new Date().toISOString(),
-                sequence: nextExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId),
+                sequence: sequence,
                 depends_on: previous ? [previous.event_id] : [],
                 payload: payload
-            };
-            return fieldOutbox.queue(event).then(function () { return event; });
+                };
+                return fieldOutbox.queue(event).then(function () { return event; });
+            });
         }).then(function (event) {
             invalidateExcavatorWorkRefresh();
             applyTruckPending(card, dumpTarget);
