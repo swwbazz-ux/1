@@ -271,7 +271,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v212'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v213'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -327,7 +327,7 @@ const CORE_ASSETS = [
     MANIFEST_URL,
     PRIVACY_POLICY_URL,
     "/static/portal/css/portal-shell-v5.css?v=7",
-    "/static/js/driver-unload-outbox-v1.js?v=1",
+    "/static/js/driver-offline-outbox-v2.js?v={DRIVER_SHELL_VERSION}",
     "/static/portal/js/portal-shell-v5.js",
     "/static/css/app.css",
     "/static/css/mobile-role-login-v1.css",

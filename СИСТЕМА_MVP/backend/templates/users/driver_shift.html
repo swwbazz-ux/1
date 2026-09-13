@@ -8,7 +8,7 @@
 {% block realtime_role %}driver{% endblock %}
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
-<script src="{% static 'js/driver-unload-outbox-v1.js' %}?v=1"></script>
+<script src="{% static 'js/driver-offline-outbox-v2.js' %}?v={{ driver_shell_version }}"></script>
 <meta name="theme-color" content="#031015">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Самосвал">
@@ -316,6 +316,25 @@ body.driver-mobile-screen .driver-online span {
     font-weight: 700;
     line-height: 1;
 }
+
+body.driver-mobile-screen .driver-online [data-driver-sync-count] {
+    min-width: 20px;
+    height: 20px;
+    display: inline-grid;
+    place-items: center;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: #ffd45b;
+    color: #261e05;
+    font-size: 11px;
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-online [data-driver-sync-count][hidden] { display: none; }
+body.driver-mobile-screen [data-driver-sync-state="pending"] .driver-online span { color: #ffe79a; }
+body.driver-mobile-screen [data-driver-sync-state="sending"] .driver-online span { color: #a7dcff; }
+body.driver-mobile-screen [data-driver-sync-state="review"] .driver-online span,
+body.driver-mobile-screen [data-driver-sync-state="storage-error"] .driver-online span { color: #ffaaa3; }
 
 body.driver-mobile-screen .driver-header h1 {
     min-width: 0;
@@ -4429,7 +4448,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-driver-access-id="{{ access.id }}" data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-has-open-trip="{% if driver_has_open_trip %}true{% else %}false{% endif %}" data-driver-has-loaded-trip="{% if driver_has_loaded_trip %}true{% else %}false{% endif %}" data-driver-active-trip-id="{% if active_trip %}{{ active_trip.id }}{% endif %}" data-driver-assigned-dump-point-id="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point.id }}{% endif %}" data-driver-assigned-dump-point-name="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version }}">
+<main class="driver-shell" data-driver-shell data-driver-access-id="{{ access.id }}" data-driver-actor-id="{{ access.employee_id }}" data-driver-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}" data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-has-open-trip="{% if driver_has_open_trip %}true{% else %}false{% endif %}" data-driver-has-loaded-trip="{% if driver_has_loaded_trip %}true{% else %}false{% endif %}" data-driver-active-trip-id="{% if active_trip %}{{ active_trip.id }}{% endif %}" data-driver-assigned-dump-point-id="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point.id }}{% endif %}" data-driver-assigned-dump-point-name="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version }}" data-driver-sync-state="confirmed">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -4450,7 +4469,8 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                метка без версии) — не показываем ничего: версия оболочки там
                вводит в заблуждение, человек решит, что это версия приложения. {% endcomment %}
             {% if not is_native_app %}<small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|cut:'driver-mobile-shell-' }}</small>{% endif %}
-            <span>Онлайн</span>
+            <span data-driver-sync-label>Онлайн</span>
+            <b data-driver-sync-count hidden>0</b>
             <i class="driver-online-dot" data-connection-indicator aria-hidden="true"></i>
             <strong></strong>
         </div>
@@ -5117,6 +5137,10 @@ if (typeof window.bindAchievementPrizeUnlock === "function") {
 function isDriverOperationalRefreshUnsafe(shell) {
     shell = shell || document.querySelector("[data-driver-shell]");
     if (!shell) return false;
+    if (
+        typeof window !== "undefined" &&
+        Number(window.driverOfflinePendingCount || 0) > 0
+    ) return true;
     var active = document.activeElement;
     var activeTag = active && active.tagName ? active.tagName.toLowerCase() : "";
     if (
@@ -7217,6 +7241,204 @@ window.bindDriverMobileShell = function () {
     var holdButton = shell.querySelector("[data-driver-hold-button]");
     var workDial = shell.querySelector(".driver-work-dial");
     var workDialControl = shell.querySelector("[data-driver-work-dial-control]");
+    var driverOfflineEvents = window.driverOfflineEvents || [];
+
+    function driverInstallId() {
+        var key = "field-device-install-id-v1";
+        var value = "";
+        try { value = String(window.localStorage.getItem(key) || ""); } catch (error) {}
+        if (!value) {
+            value = window.crypto && typeof window.crypto.randomUUID === "function"
+                ? window.crypto.randomUUID()
+                : "driver-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+            try { window.localStorage.setItem(key, value); } catch (error) { return ""; }
+        }
+        return value;
+    }
+
+    function driverOfflineContext() {
+        var current = document.querySelector("[data-driver-shell]");
+        return {
+            actorId: current && current.dataset.driverActorId,
+            accessId: current && current.dataset.driverAccessId,
+            shiftId: current && current.dataset.driverShiftId,
+            equipmentId: current && current.dataset.driverCurrentTruckId,
+            deviceId: driverInstallId()
+        };
+    }
+
+    function renderDriverOfflineState(state) {
+        var current = document.querySelector("[data-driver-shell]");
+        if (!current) return;
+        driverOfflineEvents = Array.isArray(state.events) ? state.events : [];
+        window.driverOfflineEvents = driverOfflineEvents;
+        var label = current.querySelector("[data-driver-sync-label]");
+        var count = current.querySelector("[data-driver-sync-count]");
+        var total = Number(state.pending || 0) + Number(state.review || 0);
+        var previousTotal = Number(window.driverOfflinePendingCount || 0);
+        window.driverOfflinePendingCount = total;
+        var mode = state.review ? "review" : state.sending ? "sending" : state.pending ? "pending" : "confirmed";
+        current.dataset.driverSyncState = mode;
+        if (label) {
+            label.textContent = mode === "review"
+                ? "Нужна сверка"
+                : mode === "sending"
+                    ? "Синхронизация"
+                    : mode === "pending"
+                        ? "Сохранено на телефоне"
+                        : (navigator.onLine === false ? "Нет связи" : "Онлайн");
+        }
+        if (count) {
+            count.textContent = String(total);
+            count.hidden = total < 1;
+        }
+        applyDriverOfflineProjection(current, driverOfflineEvents);
+        if (previousTotal > 0 && total === 0 && window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+            window.AppRealtime.wake("driver_offline_queue_drained");
+        }
+    }
+
+    function applyDriverOfflineProjection(current, events) {
+        if (!current) return;
+        var ordered = (events || []).slice().sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
+        var activeTripId = String(current.dataset.driverActiveTripId || "");
+        var unload = ordered.find(function (event) {
+            return event.event_type === "driver.trip.unloaded" && String(event.trip_id || "") === activeTripId;
+        });
+        if (unload) {
+            current.dataset.driverHasOpenTrip = "false";
+            current.dataset.driverHasLoadedTrip = "false";
+            var dial = current.querySelector(".driver-work-dial");
+            var button = current.querySelector("[data-driver-hold-button]");
+            var dialLabel = current.querySelector("[data-driver-dial-label]");
+            var note = current.querySelector(".driver-work-note");
+            if (dial) { dial.classList.remove("is-loaded"); dial.classList.add("is-empty"); }
+            if (button) {
+                button.disabled = true;
+                button.classList.remove("is-loaded", "is-pending", "is-holding");
+                button.classList.add("is-empty");
+            }
+            if (dialLabel) dialLabel.textContent = unload.state === "conflict" ? "НУЖНА СВЕРКА" : "РАЗГРУЗКА СОХРАНЕНА";
+            if (note) note.textContent = unload.state === "conflict" ? "ПРОВЕРЬТЕ СОБЫТИЕ" : "ОЖИДАНИЕ СИНХРОНИЗАЦИИ";
+            var pointCard = current.querySelector("[data-driver-point-open]");
+            if (pointCard) { pointCard.removeAttribute("role"); pointCard.removeAttribute("tabindex"); pointCard.removeAttribute("data-driver-point-open"); }
+            var sheet = current.querySelector("[data-driver-point-sheet]");
+            if (sheet) sheet.hidden = true;
+        }
+        var pointEvents = ordered.filter(function (event) {
+            return event.event_type === "driver.trip.dump_point_changed" && String(event.trip_id || "") === activeTripId;
+        });
+        if (!unload && pointEvents.length) {
+            var latestPoint = pointEvents[pointEvents.length - 1];
+            var pointId = String(latestPoint.payload && latestPoint.payload.dump_point_id || "");
+            current.querySelectorAll(".driver-unload-tile").forEach(function (tile) { tile.classList.remove("is-current"); });
+            var pointForm = current.querySelector('.driver-unload-tile-form [name="dump_point"][value="' + pointId + '"]');
+            var pointButton = pointForm && pointForm.closest("form") && pointForm.closest("form").querySelector(".driver-unload-tile");
+            if (pointButton) pointButton.classList.add("is-current");
+        }
+        var downtimeEvents = ordered.filter(function (event) {
+            return event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended";
+        });
+        if (downtimeEvents.length) {
+            var latestDowntime = downtimeEvents[downtimeEvents.length - 1];
+            if (latestDowntime.event_type === "driver.downtime.ended") {
+                clearDriverActiveDowntime({
+                    shift_total_seconds: downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds || 0
+                });
+            } else {
+                var reasonId = String(latestDowntime.payload && latestDowntime.payload.reason_id || "");
+                var reasonButton = current.querySelector('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + reasonId + '"]');
+                applyDriverActiveDowntime({
+                    active: true,
+                    event_id: "local:" + latestDowntime.event_id,
+                    reason_id: reasonId,
+                    reason: reasonButton && reasonButton.dataset.driverReasonLabel || "Простой",
+                    reason_label: reasonButton && reasonButton.dataset.driverReasonLabel || "Простой",
+                    workflow: reasonButton && reasonButton.dataset.driverDowntimeFlow || "",
+                    status_key: reasonButton && reasonButton.dataset.driverStatusKey || "yellow",
+                    started_at: latestDowntime.occurred_at,
+                    elapsed_seconds: 0,
+                    shift_total_seconds: downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds || 0,
+                    calculated_at: latestDowntime.occurred_at
+                });
+            }
+        }
+    }
+
+    function createDriverOfflineRuntime() {
+        if (typeof window.createDriverOfflineOutbox !== "function") {
+            return {
+                enqueue: function () { return Promise.reject(new Error("offline_runtime_unavailable")); },
+                flush: function () { return Promise.resolve([]); },
+                pending: function () { return Promise.resolve([]); },
+                publish: function () { return Promise.resolve([]); }
+            };
+        }
+        if (window.driverOfflineOutbox && window.driverOfflineOutboxAccessId === shell.dataset.driverAccessId) {
+            window.driverOfflineOutbox.publish().catch(function () {});
+            return window.driverOfflineOutbox;
+        }
+        window.driverOfflineOutboxAccessId = shell.dataset.driverAccessId;
+        var csrf = document.querySelector('meta[name="csrf-token"]');
+        window.driverOfflineOutbox = window.createDriverOfflineOutbox({
+            accessId: shell.dataset.driverAccessId,
+            indexedDB: window.indexedDB,
+            localStorage: window.localStorage,
+            context: driverOfflineContext,
+            send: function (batch) {
+                return fetch("/offline-events/sync/", {
+                    method: "POST",
+                    credentials: "same-origin",
+                    cache: "no-store",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "X-CSRFToken": csrf ? csrf.content : "",
+                        "X-Requested-With": "XMLHttpRequest"
+                    },
+                    body: JSON.stringify(batch)
+                }).then(function (response) {
+                    return response.json().catch(function () { return {}; }).then(function (payload) {
+                        if (response.status >= 500) throw new Error("server_unavailable");
+                        var redirectedToLogin = response.redirected === true
+                            && /\/login\/?(?:\?|$)/.test(String(response.url || ""));
+                        if (response.status === 401 || response.status === 403 || redirectedToLogin) {
+                            return {results: batch.events.map(function (event) {
+                                return {event_id: event.event_id, status: "auth_required", code: "auth_required", message: "Требуется повторный вход."};
+                            })};
+                        }
+                        if (!response.ok && !Array.isArray(payload.results)) throw new Error("sync_rejected");
+                        return payload;
+                    });
+                });
+            },
+            onState: renderDriverOfflineState,
+            onConfirmed: function () {
+                var args = arguments;
+                var event = args[0] || {};
+                if (event.event_type === "driver.trip.unloaded") {
+                    playDriverVoice("action_ok", "voice_trip_finished");
+                }
+                if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                    window.AppRealtime.wake("driver_offline_event_confirmed");
+                }
+                if (typeof window.applyOperationalStateRefresh === "function") {
+                    return window.applyOperationalStateRefresh({version: 0});
+                }
+            },
+            onReview: function (event, result) {
+                showDriverToast(result.message || "Событие сохранено и требует сверки.");
+            }
+        });
+        window.driverOfflineOutbox.initialize().catch(function () {
+            var current = document.querySelector("[data-driver-shell]");
+            if (current) current.dataset.driverSyncState = "storage-error";
+            showDriverToast("Не удалось открыть защищённое хранилище. Действия без связи недоступны.");
+        });
+        return window.driverOfflineOutbox;
+    }
+
+    var driverOfflineOutbox = createDriverOfflineRuntime();
 
     function formatDriverDowntimeDuration(seconds) {
         seconds = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -7400,25 +7622,54 @@ window.bindDriverMobileShell = function () {
     }
 
     function postDriverDowntimeAction(payload) {
-        if (!downtimeUrl) {
-            return Promise.reject(new Error("Адрес действия простоя не найден"));
-        }
-        return fetch(downtimeUrl, {
-            method: "POST",
-            credentials: "same-origin",
-            headers: {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "X-CSRFToken": downtimeCsrfToken,
-                "X-Requested-With": "XMLHttpRequest"
-            },
-            body: JSON.stringify(payload || {})
-        }).then(function (response) {
-            return response.json().catch(function () { return {}; }).then(function (data) {
-                if (!response.ok || !data.ok) {
-                    throw new Error(data.error || "Действие простоя не сохранено");
+        payload = payload || {};
+        var isClose = payload.action === "close";
+        var occurredAt = new Date().toISOString();
+        return driverOfflineOutbox.pending().then(function (events) {
+            var unresolvedStart = events.slice().reverse().find(function (event) {
+                return event.event_type === "driver.downtime.started"
+                    && !["conflict", "auth_required", "invalid"].includes(event.state);
+            });
+            var reasonButton = !isClose
+                ? shell.querySelector('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + String(payload.reason_id || "") + '"]')
+                : null;
+            var eventPayload = isClose
+                ? {
+                    downtime_id: downtimeCard && downtimeCard.dataset.driverActiveDowntimeId || null,
+                    local_downtime_id: unresolvedStart ? unresolvedStart.event_id : null
                 }
-                return data;
+                : {reason_id: Number(payload.reason_id)};
+            return driverOfflineOutbox.enqueue({
+                event_id: payload.client_action_id,
+                event_type: isClose ? "driver.downtime.ended" : "driver.downtime.started",
+                occurred_at: occurredAt,
+                depends_on: isClose && unresolvedStart ? [unresolvedStart.event_id] : [],
+                payload: eventPayload
+            }).then(function (event) {
+                driverOfflineOutbox.flush().catch(function () {});
+                if (isClose) {
+                    return {
+                        ok: true,
+                        active: false,
+                        closed: true,
+                        elapsed_seconds: downtimeCard && downtimeCard.dataset.driverActiveElapsedSeconds || 0,
+                        shift_total_seconds: downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds || 0
+                    };
+                }
+                return {
+                    ok: true,
+                    active: true,
+                    event_id: "local:" + event.event_id,
+                    reason_id: payload.reason_id,
+                    reason: reasonButton && reasonButton.dataset.driverReasonLabel || "Простой",
+                    reason_label: reasonButton && reasonButton.dataset.driverReasonLabel || "Простой",
+                    workflow: reasonButton && reasonButton.dataset.driverDowntimeFlow || "",
+                    status_key: reasonButton && reasonButton.dataset.driverStatusKey || "yellow",
+                    started_at: occurredAt,
+                    elapsed_seconds: 0,
+                    shift_total_seconds: downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds || 0,
+                    calculated_at: occurredAt
+                };
             });
         });
     }
@@ -7564,52 +7815,6 @@ window.bindDriverMobileShell = function () {
         }
     });
     window.driverUnloadRecovery = unloadRecovery;
-    if (!window.driverUnloadOutbox || window.driverUnloadOutboxAccessId !== shell.dataset.driverAccessId) {
-        window.driverUnloadOutboxAccessId = shell.dataset.driverAccessId;
-        try {
-            var outboxAccessId = shell.dataset.driverAccessId;
-            window.driverUnloadOutbox = window.createDriverUnloadOutbox({
-                storage: window.localStorage,
-                accessId: outboxAccessId,
-                send: function (event) {
-                    var current = document.querySelector("[data-driver-shell]");
-                    if (!current || current.dataset.driverAccessId !== outboxAccessId) return Promise.resolve({ok: false});
-                    var token = current.querySelector("[name=csrfmiddlewaretoken]");
-                    var body = new URLSearchParams();
-                    body.set("client_action_id", event.client_action_id);
-                    body.set("occurred_at", event.occurred_at);
-                    return fetch("/driver/trip/" + Number(event.trip_id) + "/complete/", {
-                        method: "POST", credentials: "same-origin", body: body,
-                        headers: {"Accept": "application/json", "X-CSRFToken": token ? token.value : ""}
-                    }).then(function (response) { return response.json(); });
-                },
-                onConfirmed: function (event) {
-                    var current = document.querySelector("[data-driver-shell]");
-                    if (!current || current.dataset.driverAccessId !== outboxAccessId) return;
-                    var form = current.querySelector('[data-driver-hold-form][data-driver-trip-id="' + event.trip_id + '"]');
-                    if (form) {
-                        delete form.dataset.driverUnloadSubmitting;
-                        form.querySelectorAll(".is-pending").forEach(function (item) { item.classList.remove("is-pending"); });
-                        if (window.driverUnloadRecovery) window.driverUnloadRecovery.recover({type: "confirmed"});
-                        playDriverVoice("action_ok", "voice_trip_finished");
-                    }
-                    return window.applyOperationalStateRefresh({version: 0});
-                },
-                onConflict: function (event, error) { showDriverToast(error || "Подтверждение требует сверки."); }
-            });
-        } catch (error) { window.driverUnloadOutbox = null; }
-    }
-    if (!window.driverUnloadOutboxRetryBound) {
-        window.driverUnloadOutboxRetryBound = true;
-        function flushUnloadOutbox() {
-            if (document.hidden || !window.driverUnloadOutbox) return;
-            window.driverUnloadOutbox.flush().catch(function () {});
-        }
-        window.addEventListener("online", flushUnloadOutbox);
-        document.addEventListener("visibilitychange", flushUnloadOutbox);
-        window.setInterval(flushUnloadOutbox, 15000);
-    }
-    if (window.driverUnloadOutbox) window.driverUnloadOutbox.flush().catch(function () {});
 
     if (holdForm && holdButton) {
         var dialLabel = holdButton.querySelector("[data-driver-dial-label]");
@@ -7642,32 +7847,30 @@ window.bindDriverMobileShell = function () {
                 scheduleDriverDialLabelFit();
             }
             holdButton.disabled = true;
-            if (!window.driverUnloadOutbox) {
-                window.submitDriverFormInPlace(holdForm, {fallbackToNavigation: false}).then(function (applied) {
-                    if (!applied && holdForm.isConnected) unloadRecovery.recover({type: "submit_failed"});
+            var actionId = holdForm.querySelector("[data-driver-client-action]").value;
+            var unloadTripId = String(holdForm.dataset.driverTripId || "");
+            driverOfflineOutbox.pending().then(function (events) {
+                var pendingPoint = events.slice().reverse().find(function (event) {
+                    return event.event_type === "driver.trip.dump_point_changed"
+                        && String(event.trip_id || "") === unloadTripId;
                 });
-                return true;
-            }
-            try {
-                window.driverUnloadOutbox.queue({
-                    trip_id: String(holdForm.dataset.driverTripId),
-                    client_action_id: holdForm.querySelector("[data-driver-client-action]").value,
-                    occurred_at: new Date().toISOString()
+                return driverOfflineOutbox.enqueue({
+                    event_id: actionId,
+                    event_type: "driver.trip.unloaded",
+                    trip_id: unloadTripId,
+                    depends_on: pendingPoint ? [pendingPoint.event_id] : [],
+                    payload: {trip_id: Number(unloadTripId)}
                 });
-                window.driverUnloadOutbox.flush().then(function (pending) {
-                    var waiting = pending.find(function (item) { return item.trip_id === String(holdForm.dataset.driverTripId); });
-                    if (waiting && holdForm.isConnected) {
-                        unloadRecovery.recover({type: "queued"});
-                        holdButton.classList.remove("is-pending");
-                        renderDriverDialLabel(dialLabel, waiting.needs_review ? "НУЖНА СВЕРКА" : "СОХРАНЕНО БЕЗ СВЯЗИ");
-                        showDriverToast(waiting.needs_review ? waiting.error : "Разгрузка сохранена. Отправится при восстановлении связи.");
-                    }
-                });
-            } catch (error) {
+            }).then(function () {
+                unloadRecovery.recover({type: "queued"});
+                applyDriverOfflineProjection(shell, driverOfflineEvents);
+                showDriverToast("Разгрузка сохранена на телефоне.");
+                return driverOfflineOutbox.flush();
+            }).catch(function () {
                 unloadRecovery.recover({type: "storage_failed"});
                 holdButton.classList.remove("is-pending");
-                showDriverToast("Не удалось сохранить разгрузку. Повторите после восстановления связи.");
-            }
+                showDriverToast("Не удалось сохранить разгрузку на телефоне. Повторите действие.");
+            });
             return true;
         }
         unloadHoldGuard = window.createDriverRoleHoldGuard({
@@ -7740,8 +7943,29 @@ window.bindDriverMobileShell = function () {
             });
         });
         pointSheet.querySelectorAll("form").forEach(function (form) {
-            form.addEventListener("submit", function () {
+            form.dataset.driverOfflineManaged = "true";
+            form.addEventListener("submit", function (event) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
                 fillClientAction(form, "change-unload-point");
+                var action = form.querySelector("[data-driver-client-action]");
+                var point = form.querySelector('[name="dump_point"]');
+                var tripId = shell.dataset.driverActiveTripId;
+                driverOfflineOutbox.enqueue({
+                    event_id: action && action.value,
+                    event_type: "driver.trip.dump_point_changed",
+                    trip_id: tripId,
+                    payload: {dump_point_id: Number(point && point.value)}
+                }).then(function () {
+                    pointSheet.querySelectorAll(".driver-unload-tile").forEach(function (tile) { tile.classList.remove("is-current"); });
+                    var button = form.querySelector(".driver-unload-tile");
+                    if (button) button.classList.add("is-current");
+                    setPointSheet(false);
+                    showDriverToast("Фактическая точка сохранена на телефоне.");
+                    return driverOfflineOutbox.flush();
+                }).catch(function () {
+                    showDriverToast("Не удалось сохранить точку на телефоне. Повторите действие.");
+                });
             });
         });
     }
@@ -7751,6 +7975,7 @@ window.bindDriverMobileShell = function () {
        POST-обработчики не меняем: забираем их готовый HTML и заменяем
        только рабочий shell. Обычная отправка остаётся аварийным fallback. */
     shell.querySelectorAll("form[data-driver-in-place]").forEach(function (form) {
+        if (form.dataset.driverOfflineManaged === "true") return;
         if (form.dataset.driverInPlaceBound === "true") return;
         form.dataset.driverInPlaceBound = "true";
         form.addEventListener("submit", function (event) {
