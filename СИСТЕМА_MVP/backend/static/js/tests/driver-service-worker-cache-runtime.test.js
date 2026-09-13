@@ -13,9 +13,11 @@ function renderedWorkerSource() {
     assert.ok(match);
     return match[1]
         .replaceAll("{json.dumps(APP_CONTRACT_VERSION)}", JSON.stringify("test-contract"))
-        .replaceAll("{DRIVER_SHELL_VERSION}", "driver-mobile-shell-v213")
+        .replaceAll("{DRIVER_SHELL_VERSION}", "driver-mobile-shell-v214")
         .replaceAll("{{", "{")
-        .replaceAll("}}", "}");
+        .replaceAll("}}", "}")
+        .replaceAll("\\\\b", "\\b")
+        .replaceAll("\\\\s", "\\s");
 }
 
 class Headers {
@@ -56,31 +58,53 @@ class MemoryCache {
     }
 }
 
-test("expired-session update migrates the complete validated driver cache before deleting the old one", async () => {
+async function createExpiredSessionRuntime({missingDependency = "", freshShell = false} = {}) {
     const listeners = new Map();
     const stores = new Map();
     const deleted = [];
+    let offline = false;
+    const exactDependencies = [
+        "/static/css/app.css?v=release-231",
+        "/static/js/native-background-connection-v1.js?v=release-231",
+        "/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v214",
+    ];
+    const renderedDriverShell = [
+        '<link rel="stylesheet" href="' + exactDependencies[0] + '">',
+        '<script src="' + exactDependencies[1] + '" defer></script>',
+        '<script src="' + exactDependencies[2] + '"></script>',
+        '<main data-driver-shell data-driver-access-id="77">old authenticated shell</main>',
+    ].join("");
     const fetcher = async (request) => {
-        const pathname = new URL(request.url).pathname;
+        if (offline) throw new TypeError("offline");
+        const url = new URL(request.url);
+        const pathname = url.pathname;
         if (pathname === "/driver/" || pathname === "/driver/shift/") {
+            if (freshShell) {
+                return new FakeResponse(renderedDriverShell, {
+                    url: request.url,
+                    contentType: "text/html; charset=utf-8",
+                });
+            }
             return new FakeResponse("<html>login</html>", {
                 url: "https://driverform.ru/",
                 contentType: "text/html; charset=utf-8",
             });
         }
-        return new FakeResponse("new:" + pathname, {url: request.url});
+        return new FakeResponse("new:" + pathname + url.search, {url: request.url});
     };
-    const oldName = "driver-mobile-shell-v212";
+    const oldName = "driver-mobile-shell-v213";
     const oldCache = new MemoryCache(fetcher);
     stores.set(oldName, oldCache);
     await oldCache.put("/driver/", new FakeResponse(
-        '<main data-driver-shell data-driver-access-id="77">old authenticated shell</main>',
+        renderedDriverShell,
         {url: "https://driverform.ru/driver/", contentType: "text/html; charset=utf-8"}
     ));
-    await oldCache.put("/static/js/exact-old-driver.js?v=212", new FakeResponse(
-        "exact old asset",
-        {url: "https://driverform.ru/static/js/exact-old-driver.js?v=212"}
-    ));
+    for (const dependency of exactDependencies) {
+        if (dependency === missingDependency) continue;
+        await oldCache.put(dependency, new FakeResponse("old:" + dependency, {
+            url: "https://driverform.ru" + dependency,
+        }));
+    }
 
     const caches = {
         async open(name) {
@@ -106,22 +130,84 @@ test("expired-session update migrates the complete validated driver cache before
         Promise,
         Error,
         String,
+        Set,
     });
 
+    return {
+        listeners,
+        stores,
+        deleted,
+        oldName,
+        exactDependencies,
+        setOffline(value) { offline = value; },
+    };
+}
+
+test("fresh authenticated install caches the exact rendered Driver dependency closure", async () => {
+    const runtime = await createExpiredSessionRuntime({freshShell: true});
     let installPromise;
-    listeners.get("install")({waitUntil(value) { installPromise = value; }});
+    runtime.listeners.get("install")({waitUntil(value) { installPromise = value; }});
     await installPromise;
 
-    assert.equal(stores.has(oldName), true);
-    assert.deepEqual(deleted, []);
-    const current = stores.get("driver-mobile-shell-v213");
-    assert.match((await current.match("/driver/")).body, /old authenticated shell/);
-    assert.equal((await current.match("/static/js/exact-old-driver.js?v=212")).body, "exact old asset");
+    const current = runtime.stores.get("driver-mobile-shell-v214");
+    assert.match((await current.match("/driver/")).body, /data-driver-shell/);
+    for (const dependency of runtime.exactDependencies) {
+        assert.equal((await current.match(dependency)).body, "new:" + dependency);
+    }
+    assert.deepEqual(runtime.deleted, []);
 
     let activatePromise;
-    listeners.get("activate")({waitUntil(value) { activatePromise = value; }});
+    runtime.listeners.get("activate")({waitUntil(value) { activatePromise = value; }});
     await activatePromise;
-    assert.deepEqual(deleted, [oldName]);
-    assert.equal(stores.has(oldName), false);
-    assert.equal((await current.match("/static/js/exact-old-driver.js?v=212")).body, "exact old asset");
+    assert.deepEqual(runtime.deleted, [runtime.oldName]);
+});
+
+test("expired-session update migrates real exact Driver shell dependencies and serves each offline", async () => {
+    const runtime = await createExpiredSessionRuntime();
+
+    let installPromise;
+    runtime.listeners.get("install")({waitUntil(value) { installPromise = value; }});
+    await installPromise;
+
+    assert.equal(runtime.stores.has(runtime.oldName), true);
+    assert.deepEqual(runtime.deleted, []);
+    const current = runtime.stores.get("driver-mobile-shell-v214");
+    assert.match((await current.match("/driver/")).body, /old authenticated shell/);
+    for (const dependency of runtime.exactDependencies) {
+        assert.equal((await current.match(dependency)).body, "old:" + dependency);
+    }
+
+    let activatePromise;
+    runtime.listeners.get("activate")({waitUntil(value) { activatePromise = value; }});
+    await activatePromise;
+    assert.deepEqual(runtime.deleted, [runtime.oldName]);
+    assert.equal(runtime.stores.has(runtime.oldName), false);
+
+    runtime.setOffline(true);
+    for (const dependency of runtime.exactDependencies) {
+        let responsePromise;
+        runtime.listeners.get("fetch")({
+            request: new FakeRequest(dependency),
+            respondWith(value) { responsePromise = value; },
+        });
+        const response = await responsePromise;
+        assert.equal(response.body, "old:" + dependency);
+    }
+});
+
+test("missing exact shell dependency fails closure and preserves the previous cache", async () => {
+    const missing = "/static/js/native-background-connection-v1.js?v=release-231";
+    const runtime = await createExpiredSessionRuntime({missingDependency: missing});
+    let installPromise;
+    runtime.listeners.get("install")({waitUntil(value) { installPromise = value; }});
+
+    await assert.rejects(installPromise, /Authenticated driver shell is unavailable/);
+    assert.equal(runtime.stores.has(runtime.oldName), true);
+    assert.deepEqual(runtime.deleted, []);
+
+    let activatePromise;
+    runtime.listeners.get("activate")({waitUntil(value) { activatePromise = value; }});
+    await activatePromise;
+    assert.equal(runtime.stores.has(runtime.oldName), true);
+    assert.deepEqual(runtime.deleted, []);
 });

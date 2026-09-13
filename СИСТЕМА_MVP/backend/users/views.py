@@ -275,7 +275,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v213'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v214'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -373,8 +373,7 @@ self.addEventListener("install", (event) => {{
                 await Promise.all(SHELL_URLS.map(async (url) => {{
                     try {{
                         const response = await fetch(new Request(url, {{ cache: "no-store", credentials: "same-origin" }}));
-                        if (await isValidatedDriverShell(response)) {{
-                            await cache.put(url, response.clone());
+                        if (await cacheAuthenticatedDriverShell(cache, url, response)) {{
                             prepared = true;
                         }}
                     }} catch (error) {{}}
@@ -424,6 +423,55 @@ async function isValidatedDriverShell(response) {{
     return html.includes("data-driver-shell") && html.includes('data-driver-access-id="');
 }}
 
+function driverShellStaticDependencies(html) {{
+    const dependencies = [];
+    const seen = new Set();
+    const tagPattern = /<(?:script|link)\\b[^>]*(?:src|href)\\s*=\\s*["']([^"']+)["'][^>]*>/gi;
+    let match;
+    while ((match = tagPattern.exec(String(html || ""))) !== null) {{
+        let url;
+        try {{ url = new URL(match[1].replaceAll("&amp;", "&"), self.location.origin); }} catch (error) {{ continue; }}
+        if (url.origin !== self.location.origin || !url.pathname.startsWith("/static/")) continue;
+        const exactUrl = url.pathname + url.search;
+        if (!seen.has(exactUrl)) {{
+            seen.add(exactUrl);
+            dependencies.push(exactUrl);
+        }}
+    }}
+    return dependencies;
+}}
+
+async function driverShellClosureComplete(cache, response) {{
+    if (!await isValidatedDriverShell(response)) return false;
+    const html = await response.clone().text();
+    const dependencies = driverShellStaticDependencies(html);
+    if (!dependencies.length) return false;
+    for (const dependency of dependencies) {{
+        const cached = await cache.match(dependency);
+        if (!cached || !cached.ok) return false;
+    }}
+    return true;
+}}
+
+async function cacheAuthenticatedDriverShell(cache, shellUrl, response) {{
+    if (!await isValidatedDriverShell(response)) return false;
+    const html = await response.clone().text();
+    const dependencies = driverShellStaticDependencies(html);
+    if (!dependencies.length) return false;
+    try {{
+        for (const dependency of dependencies) {{
+            const request = new Request(dependency, {{ cache: "no-store", credentials: "same-origin" }});
+            const asset = await fetch(request);
+            if (!asset || !asset.ok) return false;
+            await cache.put(dependency, asset.clone());
+        }}
+    }} catch (error) {{
+        return false;
+    }}
+    await cache.put(shellUrl, response.clone());
+    return driverShellClosureComplete(cache, response);
+}}
+
 async function validatedShellEntries(cache) {{
     const requests = await cache.keys();
     const entries = [];
@@ -431,7 +479,7 @@ async function validatedShellEntries(cache) {{
         const url = new URL(request.url);
         if (!SHELL_URLS.includes(url.pathname)) continue;
         const response = await cache.match(request);
-        if (await isValidatedDriverShell(response)) entries.push([request, response]);
+        if (await driverShellClosureComplete(cache, response)) entries.push([request, response]);
     }}
     return entries;
 }}
@@ -452,7 +500,7 @@ async function migratePreviousAuthenticatedShell() {{
             const response = await source.match(request);
             if (response && response.ok) await target.put(request, response.clone());
         }}
-        return true;
+        return hasValidatedCurrentShell();
     }}
     return false;
 }}
@@ -475,7 +523,7 @@ async function matchDriverShellAcrossCaches(request) {{
         const candidates = [request, APP_SHELL_URL, LEGACY_SHELL_URL];
         for (const candidate of candidates) {{
             const response = await cache.match(candidate);
-            if (await isValidatedDriverShell(response)) return response;
+            if (await driverShellClosureComplete(cache, response)) return response;
         }}
     }}
     return null;
@@ -486,7 +534,7 @@ async function networkFirstDriverShell(request) {{
     try {{
         const freshRequest = new Request(request, {{ cache: "no-store" }});
         const response = await fetch(freshRequest);
-        if (await isValidatedDriverShell(response)) await cache.put(request, response.clone());
+        await cacheAuthenticatedDriverShell(cache, request, response);
         return response;
     }} catch (error) {{
         return (await matchDriverShellAcrossCaches(request)) || Response.error();

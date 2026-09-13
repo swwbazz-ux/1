@@ -24,20 +24,23 @@ function functionSource(source, name) {
     throw new Error("function_not_closed");
 }
 
-test("driver v213 shell precaches the durable runtime but validates authenticated HTML", () => {
+test("driver v214 shell precaches the durable runtime and exact authenticated dependencies", () => {
     assert.match(template, /driver-offline-outbox-v2\.js/);
     assert.doesNotMatch(template, /createDriverUnloadOutbox/);
-    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v213'/);
+    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v214'/);
     assert.match(views, /driver-offline-outbox-v2\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /async function isValidatedDriverShell/);
     assert.match(views, /html\.includes\("data-driver-shell"\)/);
+    assert.match(views, /function driverShellStaticDependencies/);
+    assert.match(views, /async function driverShellClosureComplete/);
+    assert.match(views, /cacheAuthenticatedDriverShell/);
     assert.match(views, /networkFirstDriverShell/);
     assert.match(views, /migratePreviousAuthenticatedShell/);
     assert.match(views, /Authenticated driver shell is unavailable/);
     assert.match(views, /hasValidatedCurrentShell/);
     const coreAssets = views.match(/const CORE_ASSETS = \[([\s\S]*?)\];/)[1];
     assert.doesNotMatch(coreAssets, /APP_SHELL_URL|LEGACY_SHELL_URL/);
-    assert.match(roleApps, /shell_version='driver-mobile-shell-v213'/);
+    assert.match(roleApps, /shell_version='driver-mobile-shell-v214'/);
 });
 
 test("expired session update migrates a valid shell without touching a nonempty event queue", () => {
