@@ -981,7 +981,6 @@ const CORE_ASSETS = [
   "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v234",
   "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v234",
   "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v234",
-  "/static/css/excavator-destination-distances-v1.css",
   "/static/css/mobile-role-login-v1.css",
   "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v234",
   "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v234",

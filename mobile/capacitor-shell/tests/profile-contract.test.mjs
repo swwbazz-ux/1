@@ -36,8 +36,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "43",
-    versionName: "0.1.26",
+    versionCode: "46",
+    versionName: "0.1.28",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -47,8 +47,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver.qa",
     appName: "Водитель QA",
-    versionCode: "6",
-    versionName: "1.0.5-qa",
+    versionCode: "7",
+    versionName: "1.0.6-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -58,8 +58,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "45",
-    versionName: "0.1.26",
+    versionCode: "47",
+    versionName: "0.1.28",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -69,8 +69,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "44",
-    versionName: "0.1.26-rc",
+    versionCode: "46",
+    versionName: "0.1.28-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -80,8 +80,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator.qa",
     appName: "Экскаваторщик QA",
-    versionCode: "9",
-    versionName: "1.0.8-qa",
+    versionCode: "10",
+    versionName: "1.0.9-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -512,7 +512,7 @@ test("recorded equipment numbers are packaged and routed through native sequence
   const excavatorShellVersion = excavatorTemplate.match(
     /var excavatorShellVersion = "(excavator-mobile-shell-v\d+)";/
   )?.[1];
-  assert.equal(excavatorShellVersion, "excavator-mobile-shell-v229");
+  assert.equal(excavatorShellVersion, "excavator-mobile-shell-v234");
   const excavatorAssetVersions = [
     ...excavatorTemplate.matchAll(/\?v=(excavator-mobile-shell-v\d+)/g),
   ].map((match) => match[1]);
@@ -644,7 +644,9 @@ test("native heartbeat follows the active-shift lifecycle and reports the exact 
   assert.match(service, /runHeartbeat\(\)[\s\S]*?flushPendingDriverShiftClose\(\)[\s\S]*?requestHeartbeat\(\)/);
   assert.match(service, /onTaskRemoved\(Intent rootIntent\)[\s\S]*?PendingDriverShiftClose\.hasPending\(this\)[\s\S]*?scheduleHeartbeat\(0L\)/);
   assert.match(service, /requestDriverShiftClose[\s\S]*?X-CSRFToken[\s\S]*?client_action_id[\s\S]*?shift_id[\s\S]*?reading_confirmation_token/);
-  assert.match(service, /Any HTTP response proves that transport worked[\s\S]*?PendingDriverShiftClose\.markAttention[\s\S]*?FlushResult\.ATTENTION/);
+  assert.match(service, /statusCode == 401 \|\| result\.statusCode == 403[\s\S]*?PendingDriverShiftClose\.markAuthRequired[\s\S]*?FlushResult\.AUTH_REQUIRED/);
+  assert.match(service, /PendingDriverShiftClose\.isRetryableHttpStatus[\s\S]*?PendingDriverShiftClose\.markRetry[\s\S]*?FlushResult\.RETRY/);
+  assert.match(service, /Validation and conflict responses require the driver to review the data[\s\S]*?PendingDriverShiftClose\.markAttention[\s\S]*?FlushResult\.ATTENTION/);
   assert.doesNotMatch(service, /Shift close HTTP/);
   assert.match(notifications, /PendingDriverShiftClose\.hasPending\(context\)[\s\S]*?Открыть приложение/);
   assert.match(notifications, /Остановить связь/);

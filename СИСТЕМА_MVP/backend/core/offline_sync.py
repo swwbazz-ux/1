@@ -134,6 +134,26 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
     context_snapshot = raw_event.get('context_snapshot') or raw_event.get('context') or {}
     if not isinstance(payload, dict) or not isinstance(context_snapshot, dict):
         _invalid('invalid_event_payload', 'Параметры и контекст должны быть JSON-объектами.')
+    local_downtime_id = str(
+        raw_event.get('local_downtime_id') or payload.get('local_downtime_id') or ''
+    ).strip()[:128]
+    # Older field shells did not include a separate local downtime identifier.
+    # The immutable event id is a safe, deterministic fallback and lets a later
+    # offline "ended" event reference the accepted start after an app update.
+    if not local_downtime_id and event_type.endswith('.downtime.started'):
+        local_downtime_id = event_id
+    # v234 excavator shells briefly emitted the active downtime reference only
+    # inside payload.active_downtime_id. Keep those already-durable events
+    # replayable after an application update without weakening normal identity
+    # checks: the same legacy wire form is normalized deterministically.
+    if not local_downtime_id and event_type.endswith('.downtime.ended'):
+        legacy_downtime_ref = str(payload.get('active_downtime_id') or '').strip()
+        if legacy_downtime_ref:
+            if legacy_downtime_ref.isdecimal():
+                payload = dict(payload)
+                payload['downtime_id'] = int(legacy_downtime_ref)
+            else:
+                local_downtime_id = legacy_downtime_ref[:128]
     normalized = {
         'event_id': event_id,
         'event_type': event_type,
@@ -151,7 +171,7 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
         'equipment_id': raw_event.get('equipment_id') or context_snapshot.get('equipment_id'),
         'trip_id': raw_event.get('trip_id') or payload.get('trip_id'),
         'local_trip_id': str(raw_event.get('local_trip_id') or payload.get('local_trip_id') or '').strip()[:128],
-        'local_downtime_id': str(raw_event.get('local_downtime_id') or payload.get('local_downtime_id') or '').strip()[:128],
+        'local_downtime_id': local_downtime_id,
         'payload': payload,
         'context_snapshot': context_snapshot,
         'received_at': received_at,
@@ -774,6 +794,7 @@ def _process_shift_closed(access, normalized, *, role_code):
                 client_action_id=normalized['event_id'],
                 confirmation_token=str(payload.get('confirmation_token') or ''),
                 occurred_at=normalized['occurred_at'],
+                actor_access_id=access.pk,
             )
             result = {'ok': True, 'shift_id': shift.id}
         else:

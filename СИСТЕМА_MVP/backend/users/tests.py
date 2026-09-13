@@ -1,4 +1,5 @@
 ﻿import json
+import re
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
@@ -10,6 +11,7 @@ from zoneinfo import ZoneInfo
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
+from django.contrib.staticfiles import finders
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -513,6 +515,13 @@ class AccessLoginTests(TestCase):
             script,
             r'const CORE_ASSETS = \[[\s\S]*?PRIVACY_POLICY_URL,',
         )
+        core_assets = script.split('const CORE_ASSETS = [', 1)[1].split('];', 1)[0]
+        for asset_url in re.findall(r'"(/static/[^"?]+)(?:\?[^"\s]*)?"', core_assets):
+            with self.subTest(core_asset=asset_url):
+                self.assertIsNotNone(
+                    finders.find(asset_url.removeprefix('/static/')),
+                    f'Driver service worker requires missing static asset {asset_url}',
+                )
         privacy_branch = script.index('if (url.pathname === PRIVACY_POLICY_PATH)')
         generic_navigation_branch = script.index('if (request.mode === "navigate"')
         self.assertLess(privacy_branch, generic_navigation_branch)

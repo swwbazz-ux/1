@@ -444,6 +444,128 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(results[0]['server_ids']['downtime_event_id'], event.id)
         self.assertEqual(results[1]['server_ids']['downtime_event_id'], event.id)
 
+    def test_downtime_start_event_id_is_backward_compatible_local_reference(self):
+        self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.truck_shift.save(update_fields=['opened_at'])
+        reason = DowntimeReason.objects.create(
+            name='Проверка совместимости offline простоя',
+            equipment_type=self.truck_type,
+            show_for_truck_driver=True,
+        )
+        started_at = timezone.now() - timedelta(minutes=2)
+        ended_at = timezone.now() - timedelta(minutes=1)
+        started = {
+            'event_id': 'driver-downtime-start-fallback',
+            'event_type': 'driver.downtime.started',
+            'format_version': 1,
+            'occurred_at': started_at.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'payload': {'reason_id': reason.id},
+        }
+        ended = {
+            'event_id': 'driver-downtime-end-fallback',
+            'event_type': 'driver.downtime.ended',
+            'format_version': 1,
+            'occurred_at': ended_at.isoformat(),
+            'sequence': 2,
+            'depends_on': [started['event_id']],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'local_downtime_id': started['event_id'],
+            'payload': {},
+        }
+
+        results = self.sync(
+            [ended, started],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-device-down-fallback',
+        ).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'])
+        source = OfflineFieldEvent.objects.get(event_id=started['event_id'])
+        event = DowntimeEvent.objects.get(reason=reason)
+        self.assertEqual(source.local_downtime_id, started['event_id'])
+        self.assertEqual(event.started_at, started_at)
+        self.assertEqual(event.ended_at, ended_at)
+
+    def test_legacy_excavator_downtime_end_accepts_numeric_active_reference(self):
+        self.shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.shift.save(update_fields=['opened_at'])
+        reason = DowntimeReason.objects.create(
+            name='Legacy numeric offline downtime',
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+        )
+        started_at = timezone.now() - timedelta(minutes=2)
+        ended_at = timezone.now() - timedelta(minutes=1)
+        downtime = DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=reason,
+            started_at=started_at,
+        )
+        ended = {
+            'event_id': 'excavator-downtime-end-legacy-server-id',
+            'event_type': 'excavator.downtime.ended',
+            'format_version': 1,
+            'occurred_at': ended_at.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'payload': {'active_downtime_id': str(downtime.id)},
+        }
+
+        result = self.sync([ended]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted')
+        downtime.refresh_from_db()
+        self.assertEqual(downtime.ended_at, ended_at)
+
+    def test_legacy_excavator_downtime_end_accepts_local_active_reference(self):
+        self.shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.shift.save(update_fields=['opened_at'])
+        reason = DowntimeReason.objects.create(
+            name='Legacy local offline downtime',
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+        )
+        started_at = timezone.now() - timedelta(minutes=2)
+        ended_at = timezone.now() - timedelta(minutes=1)
+        started = {
+            'event_id': 'excavator-downtime-start-legacy-local',
+            'event_type': 'excavator.downtime.started',
+            'format_version': 1,
+            'occurred_at': started_at.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'payload': {'reason_id': reason.id},
+        }
+        ended = {
+            'event_id': 'excavator-downtime-end-legacy-local',
+            'event_type': 'excavator.downtime.ended',
+            'format_version': 1,
+            'occurred_at': ended_at.isoformat(),
+            'sequence': 2,
+            'depends_on': [started['event_id']],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'payload': {'active_downtime_id': started['event_id']},
+        }
+
+        results = self.sync([ended, started]).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'])
+        downtime = DowntimeEvent.objects.get(reason=reason)
+        self.assertEqual(downtime.started_at, started_at)
+        self.assertEqual(downtime.ended_at, ended_at)
+
     def test_auth_and_envelope_errors_are_classified(self):
         anonymous = Client().post(
             self.url,

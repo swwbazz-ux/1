@@ -7,6 +7,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
+from django.contrib.staticfiles import finders
 from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -3689,6 +3690,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
         core_assets = script.split('const CORE_ASSETS = [', 1)[1].split('];', 1)[0]
         self.assertNotIn('APP_SHELL_URL', core_assets)
+        for asset_url in re.findall(r'"(/static/[^"?]+)(?:\?[^"\s]*)?"', core_assets):
+            with self.subTest(core_asset=asset_url):
+                self.assertIsNotNone(
+                    finders.find(asset_url.removeprefix('/static/')),
+                    f'Excavator service worker requires missing static asset {asset_url}',
+                )
         self.assertIn(
             f'/static/css/app.css?v={STATIC_ASSET_RELEASE}',
             core_assets,

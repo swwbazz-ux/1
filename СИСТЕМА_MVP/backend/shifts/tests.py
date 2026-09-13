@@ -291,14 +291,6 @@ class DriverShiftLifecycleTests(TestCase):
         self.assertEqual(first.pk, second.pk)
         self.assertTrue(created)
         self.assertFalse(created_again)
-        changed = dict(self.close_readings(), end_mileage=Decimal('10201'))
-        with self.assertRaises(DriverShiftCloseIdempotencyConflict):
-            close_driver_shift(
-                shift=shift,
-                employee=self.driver,
-                readings=changed,
-                client_action_id='same-close',
-            )
         self.assertEqual(ShiftClientAction.objects.filter(action_type='driver_shift_opened').count(), 1)
 
     def test_end_fuel_may_exceed_start_fuel(self):
@@ -555,6 +547,14 @@ class DriverShiftLifecycleTests(TestCase):
         self.assertEqual(first.pk, second.pk)
         self.assertTrue(created)
         self.assertFalse(created_again)
+        changed = dict(self.close_readings(), end_mileage=Decimal('10201'))
+        with self.assertRaises(DriverShiftCloseIdempotencyConflict):
+            close_driver_shift(
+                shift=shift,
+                employee=self.driver,
+                readings=changed,
+                client_action_id='same-close',
+            )
 
     def test_open_and_close_emit_realtime_events(self):
         shift = self.open_shift()
