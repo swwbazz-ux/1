@@ -4631,6 +4631,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(pending_card['transfer']['kind'], 'release')
         self.assertEqual(pending_card['transfer']['route_label'], 'В свободные')
         self.assertEqual(pending_card['transfer']['deadline'], pending.effective_at)
+        self.assertTrue(pending_card['can_drag'])
+        self.assertTrue(pending_card['can_load'])
+        self.assertNotEqual(pending_card['load_block_reason_code'], 'transfer_outgoing')
         apply_pending_haul_assignment(pending.id)
 
         self.assertNotIn(self.truck.id, projected_haul_assignments())

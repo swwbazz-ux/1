@@ -10,7 +10,8 @@ from django.utils import timezone
 from . import tests as fixtures
 from .manual_loading import truck_driver_participation
 from .models import OPEN_TRIP_STATUSES, Trip, TripStatus
-from assignments.models import HaulAssignment
+from assignments.models import AssignmentStatus, HaulAssignment
+from assignments.services import schedule_haul_release
 from downtimes.models import DowntimeEvent, DowntimeReason
 from shifts.models import EmployeeShift
 from shifts.services import calculate_open_shift_progress
@@ -185,6 +186,35 @@ class ManualLoadingTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-eo-manual-available="1"')
         self.assertContains(response, 'eo-driver-presence')
+
+    def test_passive_truck_remains_manually_loadable_while_release_is_pending(self):
+        self.truck_shift.closed_at = timezone.now()
+        self.truck_shift.save(update_fields=['closed_at'])
+        pending, created = schedule_haul_release(
+            truck=self.truck,
+            assigned_by=self.operator,
+        )
+        self.assertTrue(created)
+
+        screen = self.client.get(reverse('excavator_work'))
+        card = next(
+            item for item in screen.context['truck_cards']
+            if item['assignment'].truck_id == self.truck.id
+        )
+        self.assertEqual(card['transfer']['kind'], 'release')
+        self.assertEqual(card['transfer']['route_label'], 'В свободные')
+        self.assertTrue(card['manual_available'])
+        self.assertNotEqual(card['load_block_reason_code'], 'transfer_outgoing')
+        self.assertContains(screen, 'data-eo-manual-available="1"')
+
+        loaded = self.send(action='manual-load-before-release-deadline')
+        self.assertEqual(loaded.status_code, 200, loaded.content)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.PENDING)
+        self.assertIsNone(pending.ended_at)
+        trip = Trip.objects.get(pk=loaded.json()['trip_id'])
+        self.assertIsNone(trip.driver_control_shift_id)
+        self.assertEqual(trip.excavator_id, self.excavator.id)
 
     def test_manual_dump_badge_expires_from_persisted_trip_without_changing_trip(self):
         response = self.send(action='manual-preview-expiry')

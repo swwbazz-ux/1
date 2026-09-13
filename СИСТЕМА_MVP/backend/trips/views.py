@@ -6074,11 +6074,13 @@ def excavator_work_view(request):
     driver_participation = truck_driver_participation(assignment_truck_ids)
 
     def assignment_load_block(assignment, active_trip=None, *, manual_control=False):
+        transfer_state = getattr(assignment, 'transfer_state', None)
         if (
-            getattr(assignment, 'transfer_state', None)
-            and assignment.transfer_state['direction'] == 'outgoing'
+            transfer_state
+            and transfer_state['direction'] == 'outgoing'
+            and transfer_state.get('kind') != 'release'
         ):
-            transfer_label = assignment.transfer_state.get('route_label') or 'Назначение изменяется'
+            transfer_label = transfer_state.get('route_label') or 'Назначение изменяется'
             return {
                 'code': 'transfer_outgoing',
                 'label': transfer_label,
