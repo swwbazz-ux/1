@@ -3698,7 +3698,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             core_assets,
         )
         self.assertIn('precacheAuthenticatedShell(cache)', script)
-        self.assertIn('migratePreviousAuthenticatedShell(previous)', script)
+        self.assertIn('migratePreviousExcavatorCache(previous)', script)
         excavator_worker = script.split('const APP_CONTRACT_VERSION = "pwa-contract-v1";', 1)[1]
         install_block = excavator_worker.split('self.addEventListener("install"', 1)[1].split(
             'self.addEventListener("activate"', 1,
@@ -3706,9 +3706,13 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('await cache.addAll(CORE_ASSETS.map', install_block)
         self.assertNotIn('.catch(() => undefined)', install_block)
         self.assertIn('if (await precacheAuthenticatedShell(cache)) return;', install_block)
-        self.assertIn('if (await migratePreviousAuthenticatedShell(previous)) return;', install_block)
+        self.assertIn('if (await migratePreviousExcavatorCache(previous)) return;', install_block)
         self.assertIn('throw new Error("Authenticated excavator shell', install_block)
         self.assertIn('async function isExcavatorShellResponse(response)', script)
+        self.assertIn('async function isSafeExcavatorCacheEntry(request, response)', script)
+        self.assertIn('excavatorShellStaticDependencies(shellHtml)', script)
+        self.assertIn('async function hasCompleteExcavatorShell(cache, response)', script)
+        self.assertIn('requestUrl.search !== finalUrl.search', script)
         self.assertIn('finalUrl.pathname !== APP_SHELL_URL', script)
         self.assertIn('html.includes("data-eo-shell")', script)
         self.assertIn("data-eo-role-code=", script)

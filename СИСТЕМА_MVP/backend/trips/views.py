@@ -1027,7 +1027,7 @@ self.addEventListener("install", event => {
         if (await precacheAuthenticatedShell(cache)) return;
         const keys = await caches.keys();
         const previous = keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME);
-        if (await migratePreviousAuthenticatedShell(previous)) return;
+        if (await migratePreviousExcavatorCache(previous)) return;
         throw new Error("Authenticated excavator shell is unavailable for offline installation.");
       })
       .then(() => self.skipWaiting())
@@ -1037,11 +1037,10 @@ self.addEventListener("install", event => {
 self.addEventListener("activate", event => {
   event.waitUntil(
     caches.keys()
-      .then(async keys => {
-        const previous = keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME);
-        await migratePreviousAuthenticatedShell(previous);
-        await Promise.all(previous.map(key => caches.delete(key)));
-      })
+      .then(keys => Promise.all(
+        keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+          .map(key => caches.delete(key))
+      ))
       .then(() => self.clients.claim())
   );
 });
@@ -1085,15 +1084,68 @@ async function precacheAuthenticatedShell(cache) {
   return false;
 }
 
-async function migratePreviousAuthenticatedShell(cacheNames) {
+function excavatorShellStaticDependencies(html) {
+  const dependencies = [];
+  const pattern = /\b(?:src|href)\s*=\s*["']([^"'#]+)["']/gi;
+  let match;
+  while ((match = pattern.exec(String(html || ""))) !== null) {
+    try {
+      const url = new URL(match[1].replace(/&amp;/g, "&"), self.location.origin);
+      if (url.origin === self.location.origin && url.pathname.startsWith("/static/")) {
+        dependencies.push(url.pathname + url.search);
+      }
+    } catch (error) {}
+  }
+  return Array.from(new Set(dependencies));
+}
+
+async function hasCompleteExcavatorShell(cache, response) {
+  if (!response || !await isExcavatorShellResponse(response)) return false;
+  const shellHtml = await response.clone().text();
+  const dependencies = excavatorShellStaticDependencies(shellHtml);
+  const available = await Promise.all(dependencies.map(path => cache.match(path)));
+  return available.every(Boolean);
+}
+
+async function isSafeExcavatorCacheEntry(request, response) {
+  if (!request || !response || !response.ok || !response.url) return false;
+  const requestUrl = new URL(request.url, self.location.origin);
+  const finalUrl = new URL(response.url, self.location.origin);
+  if (requestUrl.origin !== self.location.origin || finalUrl.origin !== self.location.origin) return false;
+  const allowed = requestUrl.pathname.startsWith("/static/") ||
+    requestUrl.pathname === MANIFEST_URL ||
+    requestUrl.pathname === PRIVACY_POLICY_PATH;
+  if (!allowed || requestUrl.pathname !== finalUrl.pathname) return false;
+  if (
+    requestUrl.pathname.startsWith("/static/")
+    && requestUrl.search !== finalUrl.search
+  ) return false;
+  if (
+    requestUrl.pathname.startsWith("/static/")
+    && String(response.headers.get("Content-Type") || "").toLowerCase().includes("text/html")
+  ) return false;
+  return true;
+}
+
+async function migratePreviousExcavatorCache(cacheNames) {
   const current = await caches.open(CACHE_NAME);
   const existing = await current.match(APP_SHELL_URL);
-  if (existing && await isExcavatorShellResponse(existing)) return true;
+  if (await hasCompleteExcavatorShell(current, existing)) return true;
+  if (existing) await current.delete(APP_SHELL_URL);
   for (const cacheName of cacheNames.slice().reverse()) {
-    const candidate = await (await caches.open(cacheName)).match(APP_SHELL_URL);
+    const previous = await caches.open(cacheName);
+    const candidate = await previous.match(APP_SHELL_URL);
     if (candidate && await isExcavatorShellResponse(candidate)) {
+      const previousRequests = await previous.keys();
+      for (const request of previousRequests) {
+        const response = await previous.match(request);
+        if (await isSafeExcavatorCacheEntry(request, response)) {
+          await current.put(request, response.clone());
+        }
+      }
       await current.put(APP_SHELL_URL, candidate.clone());
-      return true;
+      if (await hasCompleteExcavatorShell(current, candidate)) return true;
+      await current.delete(APP_SHELL_URL);
     }
   }
   return false;
