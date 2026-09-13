@@ -32,6 +32,27 @@ function accepted(event) {
     };
 }
 
+function downtimeEvent(id, type, sequence) {
+    return {
+        event_id: id,
+        event_type: type,
+        format_version: 1,
+        occurred_at: '2026-09-13T10:00:00.000Z',
+        sequence,
+        depends_on: [],
+        actor_id: 17,
+        access_id: 7,
+        role_code: 'excavator_operator',
+        device_id: 'device-1',
+        shift_id: 31,
+        equipment_id: 5,
+        trip_id: null,
+        local_trip_id: null,
+        local_downtime_id: null,
+        payload: {},
+    };
+}
+
 test('durable event survives a failed send and a new outbox instance', async () => {
     const local = storage();
     const first = createOutbox({
@@ -57,6 +78,26 @@ test('durable event survives a failed send and a new outbox instance', async () 
     await restarted.retryNow();
     assert.equal(received[0].occurred_at, '2026-09-13T10:00:00.000Z');
     assert.deepEqual(await restarted.pending(), []);
+});
+
+test('a client shell update and offline reopen preserve a nonempty queue', async () => {
+    const local = storage();
+    const beforeUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-7',
+        send: async () => { throw new Error('offline'); },
+    });
+    await beforeUpdate.queue(loadEvent('kept-through-update'));
+
+    const afterUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-7',
+        send: async () => { throw new Error('still offline'); },
+    });
+    const restored = await afterUpdate.ready();
+    assert.equal(restored.length, 1);
+    assert.equal(restored[0].event_id, 'kept-through-update');
+    assert.equal(restored[0].sync_state, 'pending');
 });
 
 test('same event id is idempotent only for an identical immutable wire event', async () => {
@@ -111,6 +152,63 @@ test('sequential loads retain order and dependency in one batch', async () => {
     assert.equal('sync_state' in sent[0][0], false);
     assert.equal('attempt_count' in sent[0][0], false);
     assert.equal('next_retry_at' in sent[0][0], false);
+});
+
+test('offline downtime start and close share the exact local reference before sync', async () => {
+    const sent = [];
+    const box = createOutbox({
+        localStorage: storage(),
+        queueKey: 'access-7',
+        send: async events => {
+            sent.push(events);
+            return {ok: true, results: events.map(event => ({
+                event_id: event.event_id,
+                status: 'accepted',
+                server_ids: {downtime_event_id: 501},
+            }))};
+        },
+    });
+    const started = downtimeEvent('downtime-start', 'excavator.downtime.started', 1);
+    started.local_downtime_id = started.event_id;
+    started.payload.reason_id = 9;
+    const ended = downtimeEvent('downtime-end', 'excavator.downtime.ended', 2);
+    ended.local_downtime_id = started.event_id;
+    ended.payload.local_downtime_id = started.event_id;
+    ended.depends_on = [started.event_id];
+    await box.queue(started);
+    await box.queue(ended);
+    await box.flush();
+    assert.deepEqual(sent[0].map(event => event.event_id), ['downtime-start', 'downtime-end']);
+    assert.equal(sent[0][0].local_downtime_id, 'downtime-start');
+    assert.equal(sent[0][1].local_downtime_id, 'downtime-start');
+    assert.deepEqual(sent[0][1].depends_on, ['downtime-start']);
+});
+
+test('a quick close after accepted start uses the confirmed server downtime id', async () => {
+    const sent = [];
+    const box = createOutbox({
+        localStorage: storage(),
+        queueKey: 'access-7',
+        send: async events => {
+            sent.push(events);
+            return {ok: true, results: events.map(event => ({
+                event_id: event.event_id,
+                status: 'accepted',
+                server_ids: {downtime_event_id: 501},
+            }))};
+        },
+    });
+    const started = downtimeEvent('downtime-start', 'excavator.downtime.started', 1);
+    started.local_downtime_id = started.event_id;
+    await box.queue(started);
+    await box.flush();
+    const ended = downtimeEvent('downtime-end', 'excavator.downtime.ended', 2);
+    ended.payload.downtime_id = 501;
+    await box.queue(ended);
+    await box.flush();
+    assert.equal(sent[1][0].payload.downtime_id, 501);
+    assert.equal(sent[1][0].local_downtime_id, null);
+    assert.deepEqual(sent[1][0].depends_on, []);
 });
 
 test('partial acknowledgement removes only exactly confirmed events', async () => {

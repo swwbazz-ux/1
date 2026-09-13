@@ -971,9 +971,9 @@ const CORE_ASSETS = [
   PRIVACY_POLICY_URL,
   "/static/portal/css/portal-shell-v5.css?v=7",
   "/static/portal/js/portal-shell-v5.js",
-  "/static/js/realtime-client.js",
+  "/static/js/realtime-client.js?v=__STATIC_ASSET_RELEASE__",
   "/static/js/role-readonly.js",
-  "/static/css/app.css",
+  "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
   "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v234",
   "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v234",
@@ -1022,9 +1022,14 @@ const CORE_ASSETS = [
 self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" })))
-        .catch(() => undefined)
-        .then(() => precacheAuthenticatedShell(cache)))
+      .then(async cache => {
+        await cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" })));
+        if (await precacheAuthenticatedShell(cache)) return;
+        const keys = await caches.keys();
+        const previous = keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME);
+        if (await migratePreviousAuthenticatedShell(previous)) return;
+        throw new Error("Authenticated excavator shell is unavailable for offline installation.");
+      })
       .then(() => self.skipWaiting())
   );
 });
@@ -1072,23 +1077,26 @@ async function precacheAuthenticatedShell(cache) {
     const response = await fetch(request);
     if (await isExcavatorShellResponse(response)) {
       await cache.put(APP_SHELL_URL, response.clone());
+      return true;
     }
   } catch (error) {
-    /* A successful authenticated navigation will prime the shell later. */
+    return false;
   }
+  return false;
 }
 
 async function migratePreviousAuthenticatedShell(cacheNames) {
   const current = await caches.open(CACHE_NAME);
   const existing = await current.match(APP_SHELL_URL);
-  if (existing && await isExcavatorShellResponse(existing)) return;
+  if (existing && await isExcavatorShellResponse(existing)) return true;
   for (const cacheName of cacheNames.slice().reverse()) {
     const candidate = await (await caches.open(cacheName)).match(APP_SHELL_URL);
     if (candidate && await isExcavatorShellResponse(candidate)) {
       await current.put(APP_SHELL_URL, candidate.clone());
-      return;
+      return true;
     }
   }
+  return false;
 }
 
 async function networkFirst(request, fallbackUrl, responseValidator) {

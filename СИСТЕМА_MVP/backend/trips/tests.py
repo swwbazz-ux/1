@@ -31,7 +31,7 @@ from assignments.services import (
     schedule_haul_release,
 )
 from core.models import OperationalStateEvent
-from users.role_apps import ROLE_APPS_BY_CODE
+from users.role_apps import ROLE_APPS_BY_CODE, STATIC_ASSET_RELEASE
 from core.production_time import production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import upsert_default_equipment_states
@@ -3689,8 +3689,25 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
         core_assets = script.split('const CORE_ASSETS = [', 1)[1].split('];', 1)[0]
         self.assertNotIn('APP_SHELL_URL', core_assets)
+        self.assertIn(
+            f'/static/css/app.css?v={STATIC_ASSET_RELEASE}',
+            core_assets,
+        )
+        self.assertIn(
+            f'/static/js/realtime-client.js?v={STATIC_ASSET_RELEASE}',
+            core_assets,
+        )
         self.assertIn('precacheAuthenticatedShell(cache)', script)
         self.assertIn('migratePreviousAuthenticatedShell(previous)', script)
+        excavator_worker = script.split('const APP_CONTRACT_VERSION = "pwa-contract-v1";', 1)[1]
+        install_block = excavator_worker.split('self.addEventListener("install"', 1)[1].split(
+            'self.addEventListener("activate"', 1,
+        )[0]
+        self.assertIn('await cache.addAll(CORE_ASSETS.map', install_block)
+        self.assertNotIn('.catch(() => undefined)', install_block)
+        self.assertIn('if (await precacheAuthenticatedShell(cache)) return;', install_block)
+        self.assertIn('if (await migratePreviousAuthenticatedShell(previous)) return;', install_block)
+        self.assertIn('throw new Error("Authenticated excavator shell', install_block)
         self.assertIn('async function isExcavatorShellResponse(response)', script)
         self.assertIn('finalUrl.pathname !== APP_SHELL_URL', script)
         self.assertIn('html.includes("data-eo-shell")', script)

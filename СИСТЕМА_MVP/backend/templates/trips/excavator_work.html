@@ -1570,8 +1570,9 @@ window.initExcavatorWorkShell = function () {
                     ? predecessors.map(function (event) { return event.event_id; })
                     : (predecessors[0] ? [predecessors[0].event_id] : []));
             var deviceId = excavatorInstallDeviceId();
+            var eventId = newExcavatorFieldId(options.idPrefix || "excavator-event");
             var event = {
-                event_id: newExcavatorFieldId(options.idPrefix || "excavator-event"),
+                event_id: eventId,
                 event_type: eventType,
                 format_version: 1,
                 actor_id: Number(shell.dataset.eoEmployeeId || 0),
@@ -1582,6 +1583,9 @@ window.initExcavatorWorkShell = function () {
                 equipment_id: Number(shell.dataset.eoCurrentExcavatorId || shell.dataset.eoShiftExcavatorId || 0),
                 trip_id: options.tripId || null,
                 local_trip_id: options.localTripId || null,
+                local_downtime_id: options.localDowntimeIdFromEvent
+                    ? eventId
+                    : (options.localDowntimeId || null),
                 occurred_at: new Date().toISOString(),
                 sequence: nextExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId),
                 depends_on: dependencies,
@@ -3086,6 +3090,18 @@ window.initExcavatorWorkShell = function () {
                 delete confirmedCard.dataset.eoLocalOpenTripId;
             }
         }
+        if (event.event_type === "excavator.downtime.started") {
+            var downtimeId = result && result.server_ids
+                ? (result.server_ids.downtime_event_id || result.server_ids.downtime_id || "")
+                : "";
+            if (
+                downtimeCard
+                && downtimeId
+                && String(downtimeCard.dataset.eoActiveDowntimeId || "") === String(event.local_downtime_id || event.event_id)
+            ) {
+                downtimeCard.dataset.eoActiveDowntimeId = String(downtimeId);
+            }
+        }
         var version = Number(result.server_version || result.version || 0);
         if (version) storeExcavatorRealtimeVersion(version);
         if (window.eoExcavatorConfirmedRefreshTimer) window.clearTimeout(window.eoExcavatorConfirmedRefreshTimer);
@@ -3814,13 +3830,19 @@ window.initExcavatorWorkShell = function () {
         }
         var action = String(payload && payload.action || "");
         var eventType = action === "close" ? "excavator.downtime.ended" : "excavator.downtime.started";
+        var activeDowntimeReference = downtimeCard ? String(downtimeCard.dataset.eoActiveDowntimeId || "") : "";
+        var serverDowntimeId = /^\d+$/.test(activeDowntimeReference) ? Number(activeDowntimeReference) : null;
+        var localDowntimeId = action === "close" && !serverDowntimeId ? activeDowntimeReference : "";
         return queueExcavatorFieldEvent(eventType, {
             reason_id: payload && payload.reason_id ? Number(payload.reason_id) : null,
             comment: String(payload && payload.comment || ""),
-            active_downtime_id: downtimeCard ? downtimeCard.dataset.eoActiveDowntimeId || null : null
+            downtime_id: serverDowntimeId,
+            local_downtime_id: localDowntimeId || null
         }, {
             idPrefix: action === "close" ? "excavator-downtime-end" : "excavator-downtime-start",
-            dependencyTypes: ["excavator.downtime.started", "excavator.downtime.ended"]
+            dependencyTypes: ["excavator.downtime.started", "excavator.downtime.ended"],
+            localDowntimeIdFromEvent: action !== "close",
+            localDowntimeId: localDowntimeId || null
         }).then(function (event) {
             if (action === "close") {
                 return {

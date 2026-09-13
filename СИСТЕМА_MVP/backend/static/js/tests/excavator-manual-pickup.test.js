@@ -385,8 +385,17 @@ test('downtime end keeps the active server id and depends on a local start', () 
     const start = template.indexOf('    function postDowntimeAction(payload)');
     const end = template.indexOf('    var downtimeStatusSyncGeneration', start);
     const source = template.slice(start, end);
-    assert.match(source, /active_downtime_id:\s*downtimeCard \? downtimeCard\.dataset\.eoActiveDowntimeId/);
+    assert.match(source, /serverDowntimeId = \/\^\\d\+\$\//);
+    assert.match(source, /downtime_id:\s*serverDowntimeId/);
+    assert.match(source, /local_downtime_id:\s*localDowntimeId \|\| null/);
+    assert.match(source, /localDowntimeIdFromEvent:\s*action !== "close"/);
     assert.match(source, /dependencyTypes:\s*\["excavator\.downtime\.started", "excavator\.downtime\.ended"\]/);
+    assert.match(template, /local_downtime_id:\s*options\.localDowntimeIdFromEvent[\s\S]*?\? eventId/);
+    const confirmStart = template.indexOf('    window.confirmExcavatorFieldEvent');
+    const confirmEnd = template.indexOf('    window.attendExcavatorFieldEvent', confirmStart);
+    const confirmSource = template.slice(confirmStart, confirmEnd);
+    assert.match(confirmSource, /result\.server_ids\.downtime_event_id/);
+    assert.match(confirmSource, /downtimeCard\.dataset\.eoActiveDowntimeId = String\(downtimeId\)/);
 });
 
 test('confirmed server trip cancellation also uses the durable outbox', () => {
