@@ -59,6 +59,35 @@ test('durable event survives a failed send and a new outbox instance', async () 
     assert.deepEqual(await restarted.pending(), []);
 });
 
+test('same event id is idempotent only for an identical immutable wire event', async () => {
+    const box = createOutbox({localStorage: storage(), queueKey: 'access-7', send: async () => ({})});
+    const original = {
+        ...loadEvent('same'),
+        actor_id: 17,
+        access_id: 7,
+        role_code: 'excavator_operator',
+        device_id: 'device-1',
+        shift_id: 31,
+        equipment_id: 5,
+        trip_id: null,
+    };
+    await box.queue(original);
+    const reorderedPayload = {
+        ...original,
+        payload: {dump_point_id: 2, excavator_id: 5, truck_id: 63},
+    };
+    assert.equal((await box.queue(reorderedPayload)).event_id, 'same');
+    await assert.rejects(
+        box.queue({...original, actor_id: 18}),
+        /идентификатор события уже занят/i
+    );
+    await assert.rejects(
+        box.queue({...original, payload: {...original.payload, dump_point_id: 9}}),
+        /идентификатор события уже занят/i
+    );
+    assert.equal((await box.pending()).length, 1);
+});
+
 test('sequential loads retain order and dependency in one batch', async () => {
     const sent = [];
     const box = createOutbox({
@@ -127,6 +156,48 @@ test('conflict and authorization outcomes remain for review and are not retried'
     assert.equal(calls, 1);
     assert.equal(pending[0].sync_state, 'conflict');
     assert.equal(pending[0].last_error, 'assignment changed');
+});
+
+test('a pending event depending on a terminal conflict becomes attention instead of hanging', async () => {
+    let calls = 0;
+    const attention = [];
+    const box = createOutbox({
+        localStorage: storage(),
+        queueKey: 'access-7',
+        onAttention: (event, result) => attention.push([event.event_id, result.code]),
+        send: async events => {
+            calls += 1;
+            return {
+                ok: true,
+                results: events.map(event => event.event_id === 'first'
+                    ? {event_id: event.event_id, status: 'conflict', message: 'assignment changed'}
+                    : {event_id: event.event_id, status: 'retry', message: 'dependency pending'}),
+            };
+        },
+    });
+    const first = loadEvent('first', 1);
+    const second = loadEvent('second', 2);
+    const third = loadEvent('third', 3);
+    second.depends_on = ['first'];
+    third.depends_on = ['second'];
+    await box.queue(first);
+    await box.queue(second);
+    await box.queue(third);
+    await box.flush();
+    await box.flush();
+    const pending = await box.pending();
+    assert.equal(calls, 1);
+    assert.deepEqual(pending.map(event => [event.event_id, event.sync_state]), [
+        ['first', 'conflict'],
+        ['second', 'conflict'],
+        ['third', 'conflict'],
+    ]);
+    assert.equal(pending[1].last_error_code, 'dependency_rejected');
+    assert.equal(pending[2].last_error_code, 'dependency_rejected');
+    assert.deepEqual(attention.slice(-2), [
+        ['second', 'dependency_rejected'],
+        ['third', 'dependency_rejected'],
+    ]);
 });
 
 test('concurrent flush calls share one network request', async () => {

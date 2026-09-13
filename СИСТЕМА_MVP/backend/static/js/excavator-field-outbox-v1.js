@@ -24,7 +24,24 @@
         delete value.attempt_count;
         delete value.next_retry_at;
         delete value.last_error;
+        delete value.last_error_code;
         return value;
+    }
+
+    function canonicalValue(value) {
+        if (Array.isArray(value)) return value.map(canonicalValue);
+        if (value && typeof value === "object") {
+            return Object.keys(value).sort().reduce(function (result, key) {
+                if (typeof value[key] !== "undefined") result[key] = canonicalValue(value[key]);
+                return result;
+            }, {});
+        }
+        return value;
+    }
+
+    function sameWireEvent(left, right) {
+        return JSON.stringify(canonicalValue(wireEvent(left))) ===
+            JSON.stringify(canonicalValue(wireEvent(right)));
     }
 
     function createLocalStorageAdapter(storage, queueKey) {
@@ -200,7 +217,12 @@
         function queue(event) {
             return list().then(function (events) {
                 var existing = events.find(function (item) { return item.event_id === event.event_id; });
-                if (existing) return existing;
+                if (existing) {
+                    if (!sameWireEvent(existing, event)) {
+                        throw new Error("Идентификатор события уже занят другим действием.");
+                    }
+                    return clone(existing);
+                }
                 var stored = Object.assign({}, clone(event), {
                     sync_state: "pending",
                     attempt_count: Number(event.attempt_count || 0),
@@ -273,6 +295,54 @@
             return batch;
         }
 
+        function markTerminalDependencyConflicts(events) {
+            var rejected = Object.create(null);
+            events.forEach(function (event) {
+                if (event.sync_state === "conflict" || event.sync_state === "invalid") {
+                    rejected[event.event_id] = true;
+                }
+            });
+            var affected = [];
+            var ordered = events.slice().sort(compareEvents);
+            var changed = true;
+            while (changed) {
+                changed = false;
+                ordered.forEach(function (event) {
+                    if (
+                        event.sync_state === "pending"
+                        && !rejected[event.event_id]
+                        && (event.depends_on || []).some(function (dependency) { return rejected[dependency]; })
+                    ) {
+                        rejected[event.event_id] = true;
+                        affected.push(event);
+                        changed = true;
+                    }
+                });
+            }
+            var chain = Promise.resolve();
+            affected.forEach(function (event) {
+                chain = chain.then(function () {
+                    var message = "Предыдущее связанное действие требует сверки.";
+                    return updateEvent(event.event_id, {
+                        sync_state: "conflict",
+                        next_retry_at: 0,
+                        last_error_code: "dependency_rejected",
+                        last_error: message
+                    }).then(function () {
+                        if (typeof options.onAttention === "function") {
+                            options.onAttention(clone(event), {
+                                event_id: event.event_id,
+                                status: "conflict",
+                                code: "dependency_rejected",
+                                message: message
+                            });
+                        }
+                    });
+                });
+            });
+            return chain.then(list);
+        }
+
         function applyResults(sent, payload) {
             var byId = Object.create(null);
             ((payload && payload.results) || []).forEach(function (result) { byId[String(result.event_id || "")] = result; });
@@ -314,7 +384,7 @@
             running = list().then(function (events) {
                 notify(events, {reason: "flush_start"});
                 function drain() {
-                    return list().then(function (current) {
+                    return list().then(markTerminalDependencyConflicts).then(function (current) {
                         var batch = eligible(current);
                         if (!batch.length || documentHidden()) return current;
                         return Promise.all(batch.map(function (event) {
