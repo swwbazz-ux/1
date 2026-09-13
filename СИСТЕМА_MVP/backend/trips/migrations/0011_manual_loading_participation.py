@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('shifts', '0018_excavatorshiftreadingconfirmation'),
-        ('trips', '0009_unique_open_trip_per_truck'),
+        ('trips', '0010_dispatcher_manual_trip_action'),
         ('users', '0024_employee_contractor_access_from_and_more'),
     ]
 

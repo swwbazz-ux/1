@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('shifts', '0019_merge_20260912_2035'),
+        ('shifts', '0019_employeeshift_service_close_kind'),
     ]
 
     operations = [

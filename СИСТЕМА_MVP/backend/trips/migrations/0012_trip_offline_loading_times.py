@@ -13,7 +13,7 @@ def backfill_loading_times(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('trips', '0011_merge_20260912_2035'),
+        ('trips', '0011_manual_loading_participation'),
     ]
 
     operations = [

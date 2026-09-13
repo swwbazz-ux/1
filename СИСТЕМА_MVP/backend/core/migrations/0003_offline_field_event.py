@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
         ('core', '0002_operationalstateevent'),
         ('downtimes', '0005_downtime_actor_subject'),
         ('references', '0010_remove_obsolete_cargo_aliases'),
-        ('shifts', '0019_merge_20260912_2035'),
+        ('shifts', '0019_employeeshift_service_close_kind'),
         ('trips', '0012_trip_offline_loading_times'),
         ('users', '0024_employee_contractor_access_from_and_more'),
     ]
