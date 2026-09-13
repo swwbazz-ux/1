@@ -86,6 +86,8 @@ def create_loaded_waiting_unload_trip(
     note='',
     supersede_trip=None,
     participation=None,
+    occurred_at=None,
+    resolve_assignment_transition=True,
 ):
     """Create the single server-side state used after an excavator loads a truck."""
     locked_truck = (
@@ -109,9 +111,11 @@ def create_loaded_waiting_unload_trip(
         assignment.truck,
         rock_type,
     )
+    received_at = timezone.now()
+    load_occurred_at = occurred_at or received_at
     if supersede_trip:
         supersede_trip.status = TripStatus.UNCONTROLLED
-        supersede_trip.operationally_closed_at = timezone.now()
+        supersede_trip.operationally_closed_at = load_occurred_at
         supersede_trip.closure_recorded_by = excavator_operator
         supersede_trip.save(update_fields=['status', 'operationally_closed_at', 'closure_recorded_by'])
     if participation is None:
@@ -139,11 +143,15 @@ def create_loaded_waiting_unload_trip(
         downtime_text=str(downtime_text or '')[:255],
         note=str(note or '')[:1000],
         status=TripStatus.LOADED_WAITING_UNLOAD,
+        loaded_at=load_occurred_at,
+        load_received_at=received_at,
+        load_time_source='excavator_device' if occurred_at else 'server_receipt',
     )
     if supersede_trip:
         supersede_trip.superseded_by = trip
         supersede_trip.save(update_fields=['superseded_by'])
     # Импорт внутри функции не образует циклическую зависимость models/services.
     from assignments.services import resolve_haul_handoffs_for_trip
-    resolve_haul_handoffs_for_trip(trip)
+    if resolve_assignment_transition:
+        resolve_haul_handoffs_for_trip(trip)
     return trip

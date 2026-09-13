@@ -19,6 +19,7 @@ from django.shortcuts import redirect, render
 from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_POST
 from openpyxl import Workbook
@@ -4542,7 +4543,15 @@ def driver_close_shift_view(request):
         form_data['client_action_id'] = secrets.token_urlsafe(24)
     form = DriverCloseShiftForm(form_data, instance=open_shift)
     request._driver_close_form = form
-    if form.is_valid():
+    form_is_valid = form.is_valid()
+    occurred_at = None
+    raw_occurred_at = (request.POST.get('occurred_at') or '').strip()
+    if form_is_valid and raw_occurred_at:
+        occurred_at = parse_datetime(raw_occurred_at)
+        if occurred_at is None or timezone.is_naive(occurred_at):
+            form.add_error(None, 'Время действия должно содержать часовой пояс.')
+            form_is_valid = False
+    if form_is_valid:
         readings = {
             'end_fuel': form.cleaned_data['end_fuel'],
             'end_mileage': form.cleaned_data['end_mileage'],
@@ -4560,6 +4569,7 @@ def driver_close_shift_view(request):
                     readings=readings,
                     client_action_id=resolved_client_action_id,
                     confirmation_token=form.cleaned_data.get('reading_confirmation_token') or '',
+                    occurred_at=occurred_at,
                 )
         except DriverShiftCloseConfirmationRequired as confirmation:
             warning_payload = {

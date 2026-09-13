@@ -1,0 +1,1083 @@
+import hashlib
+import json
+import logging
+import re
+from datetime import timedelta
+from decimal import Decimal, InvalidOperation
+
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
+from django.db.models import Q
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+
+from core.db_locks import lock_idempotency_key
+from core.models import (
+    OfflineFieldEvent,
+    OfflineFieldEventConflict,
+    OfflineFieldEventStatus,
+    bump_operational_state,
+    lock_production_state,
+)
+
+
+SYNC_FORMAT_VERSION = 1
+MAX_BATCH_SIZE = 100
+MAX_DEPENDENCIES = 32
+MAX_FUTURE_CLOCK_SKEW = timedelta(minutes=5)
+EVENT_ID_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
+DEVICE_ID_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{5,127}$')
+logger = logging.getLogger(__name__)
+
+SUPPORTED_EVENT_ROLES = {
+    'excavator.trip.loaded': 'excavator_operator',
+    'excavator.trip.loaded.cancelled': 'excavator_operator',
+    'excavator.downtime.started': 'excavator_operator',
+    'excavator.downtime.ended': 'excavator_operator',
+    'excavator.shift.closed': 'excavator_operator',
+    'driver.trip.unloaded': 'driver',
+    'driver.trip.dump_point_changed': 'driver',
+    'driver.downtime.started': 'driver',
+    'driver.downtime.ended': 'driver',
+    'driver.shift.closed': 'driver',
+}
+
+
+class OfflineEventProblem(Exception):
+    def __init__(self, status, code, message, *, retryable=False, details=None):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.details = details or {}
+
+
+def _invalid(code, message):
+    raise OfflineEventProblem(OfflineFieldEventStatus.INVALID, code, message)
+
+
+def _conflict(code, message, *, details=None):
+    raise OfflineEventProblem(
+        OfflineFieldEventStatus.CONFLICT,
+        code,
+        message,
+        details=details,
+    )
+
+
+def _retry(code, message):
+    raise OfflineEventProblem(OfflineFieldEventStatus.RETRY, code, message, retryable=True)
+
+
+def _clean_identifier(value, *, field, pattern=EVENT_ID_RE):
+    value = str(value or '').strip()
+    if not pattern.fullmatch(value):
+        _invalid(f'invalid_{field}', f'Некорректное поле {field}.')
+    return value
+
+
+def _positive_int(value, *, field, allow_zero=False, required=True):
+    if value in (None, ''):
+        if required:
+            _invalid(f'{field}_required', f'Не передано поле {field}.')
+        return None
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        _invalid(f'invalid_{field}', f'Некорректное поле {field}.')
+    if value < (0 if allow_zero else 1):
+        _invalid(f'invalid_{field}', f'Некорректное поле {field}.')
+    return value
+
+
+def _optional_decimal(value, *, field):
+    if value in (None, ''):
+        return None
+    try:
+        parsed = Decimal(str(value).strip().replace(',', '.'))
+    except (InvalidOperation, TypeError, ValueError):
+        _invalid(f'invalid_{field}', f'Некорректное поле {field}.')
+    if not parsed.is_finite():
+        _invalid(f'invalid_{field}', f'Некорректное поле {field}.')
+    return parsed
+
+
+def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None):
+    if not isinstance(raw_event, dict):
+        _invalid('invalid_event', 'Событие должно быть JSON-объектом.')
+    received_at = received_at or timezone.now()
+    event_id = _clean_identifier(raw_event.get('event_id'), field='event_id')
+    event_type = str(raw_event.get('event_type') or '').strip()
+    if event_type not in SUPPORTED_EVENT_ROLES:
+        _invalid('unsupported_event_type', 'Это действие не поддерживает offline-синхронизацию.')
+    if SUPPORTED_EVENT_ROLES[event_type] != role_code:
+        _invalid('event_role_mismatch', 'Тип события не соответствует роли.')
+    try:
+        format_version = int(raw_event.get('format_version', 0))
+    except (TypeError, ValueError):
+        format_version = 0
+    if format_version != SYNC_FORMAT_VERSION:
+        _invalid('unsupported_format_version', 'Версия offline-события не поддерживается.')
+    sequence = _positive_int(raw_event.get('sequence'), field='sequence', allow_zero=True)
+    depends_on = raw_event.get('depends_on') or []
+    if not isinstance(depends_on, list) or len(depends_on) > MAX_DEPENDENCIES:
+        _invalid('invalid_dependencies', 'Некорректный список зависимостей.')
+    depends_on = [_clean_identifier(item, field='dependency') for item in depends_on]
+    if event_id in depends_on or len(depends_on) != len(set(depends_on)):
+        _invalid('invalid_dependencies', 'Событие не может зависеть от себя или повторять зависимость.')
+    raw_occurred_at = str(raw_event.get('occurred_at') or '').strip()
+    occurred_at = parse_datetime(raw_occurred_at) if raw_occurred_at else None
+    if occurred_at is None or timezone.is_naive(occurred_at):
+        _invalid('invalid_occurred_at', 'Время события должно содержать часовой пояс.')
+    payload = raw_event.get('payload') or {}
+    context_snapshot = raw_event.get('context_snapshot') or raw_event.get('context') or {}
+    if not isinstance(payload, dict) or not isinstance(context_snapshot, dict):
+        _invalid('invalid_event_payload', 'Параметры и контекст должны быть JSON-объектами.')
+    normalized = {
+        'event_id': event_id,
+        'event_type': event_type,
+        'format_version': format_version,
+        'role_code': role_code,
+        'device_id': device_id,
+        'claimed_actor_id': raw_event.get('actor_id'),
+        'claimed_access_id': raw_event.get('access_id'),
+        'claimed_role_code': raw_event.get('role_code'),
+        'claimed_device_id': raw_event.get('device_id'),
+        'sequence': sequence,
+        'depends_on': depends_on,
+        'occurred_at': occurred_at,
+        'shift_id': raw_event.get('shift_id') or context_snapshot.get('shift_id'),
+        'equipment_id': raw_event.get('equipment_id') or context_snapshot.get('equipment_id'),
+        'trip_id': raw_event.get('trip_id') or payload.get('trip_id'),
+        'local_trip_id': str(raw_event.get('local_trip_id') or payload.get('local_trip_id') or '').strip()[:128],
+        'local_downtime_id': str(raw_event.get('local_downtime_id') or payload.get('local_downtime_id') or '').strip()[:128],
+        'payload': payload,
+        'context_snapshot': context_snapshot,
+        'received_at': received_at,
+    }
+    canonical = {
+        **normalized,
+        'occurred_at': occurred_at.isoformat(),
+        'received_at': None,
+    }
+    normalized['fingerprint'] = hashlib.sha256(
+        json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str).encode('utf-8')
+    ).hexdigest()
+    return normalized
+
+
+def _result(event_id, status, *, retryable=False, code='', message='', payload=None):
+    payload = dict(payload or {})
+    return {
+        'event_id': event_id,
+        'status': status,
+        'retryable': bool(retryable),
+        'code': code,
+        'message': message,
+        'server_ids': payload.pop('server_ids', {}),
+        'server_received_at': payload.pop('server_received_at', timezone.now().isoformat()),
+        'version': payload.pop('version', None),
+        **payload,
+    }
+
+
+def _stored_result(event, *, deduplicated=False):
+    status = 'deduplicated' if deduplicated and event.status == OfflineFieldEventStatus.ACCEPTED else event.status
+    payload = dict(event.result_payload or {})
+    payload.setdefault('server_received_at', event.received_at.isoformat())
+    return _result(
+        event.event_id, status, retryable=event.retryable,
+        code=event.error_code, message=event.error_message, payload=payload,
+    )
+
+
+def _record_conflict_attempt(*, existing, access, normalized, code):
+    OfflineFieldEventConflict.objects.create(
+        existing_event=existing,
+        attempted_event_id=normalized['event_id'],
+        actor=access.employee,
+        access=access,
+        role_code=normalized['role_code'],
+        device_id=normalized['device_id'],
+        fingerprint=normalized['fingerprint'],
+        code=code,
+        submitted_event={
+            key: (value.isoformat() if hasattr(value, 'isoformat') else value)
+            for key, value in normalized.items()
+            if key not in {'received_at', 'fingerprint'}
+        },
+    )
+
+
+def _record_invalid_attempt(*, access, role_code, device_id, raw_event, code):
+    submitted = raw_event if isinstance(raw_event, dict) else {'raw_event': raw_event}
+    serialized = json.dumps(submitted, ensure_ascii=False, sort_keys=True, default=str)
+    OfflineFieldEventConflict.objects.create(
+        existing_event=None,
+        attempted_event_id=str(submitted.get('event_id') or '')[:128],
+        actor=access.employee,
+        access=access,
+        role_code=role_code,
+        device_id=device_id,
+        fingerprint=hashlib.sha256(serialized.encode('utf-8')).hexdigest(),
+        code=code,
+        submitted_event=submitted,
+    )
+
+
+def _validate_claimed_context(access, normalized):
+    actor_claims = (
+        normalized.get('claimed_actor_id'),
+        normalized['context_snapshot'].get('actor_id'),
+    )
+    access_claims = (
+        normalized.get('claimed_access_id'),
+        normalized['context_snapshot'].get('access_id'),
+    )
+    role_claims = (
+        normalized.get('claimed_role_code'),
+        normalized['context_snapshot'].get('role_code'),
+    )
+    device_claim = normalized.get('claimed_device_id')
+    if any(item not in (None, '', access.employee_id, str(access.employee_id)) for item in actor_claims):
+        _conflict('actor_context_changed', 'Событие сохранено для другого сотрудника.')
+    if any(item not in (None, '', access.id, str(access.id)) for item in access_claims):
+        _conflict('access_context_changed', 'Доступ события не совпадает с текущим.')
+    if any(item not in (None, '', access.role.code) for item in role_claims):
+        _conflict('role_context_changed', 'Роль события не совпадает с текущей.')
+    if device_claim not in (None, '', normalized['device_id']):
+        _conflict('device_context_changed', 'Устройство события не совпадает с пакетом.')
+
+
+def _locked_shift(access, normalized, *, role_code):
+    from shifts.models import EmployeeShift
+
+    shift_id = _positive_int(normalized['shift_id'], field='shift_id')
+    shift = (
+        EmployeeShift.objects.select_for_update(of=('self',))
+        .select_related('equipment', 'equipment__equipment_type')
+        .filter(pk=shift_id, employee=access.employee)
+        .first()
+    )
+    if not shift:
+        _conflict('shift_context_changed', 'Смена из события не найдена или не принадлежит сотруднику.')
+    allowed_workplaces = {
+        'driver': {'driver', ''},
+        'excavator_operator': {'excavator_operator', ''},
+    }
+    expected_equipment_type = 'Самосвал' if role_code == 'driver' else 'Экскаватор'
+    if shift.workplace_code not in allowed_workplaces[role_code] or (
+        shift.workplace_code == '' and shift.equipment.equipment_type.name != expected_equipment_type
+    ):
+        _conflict('shift_role_mismatch', 'Смена не соответствует роли события.')
+    if not shift.equipment_id:
+        _conflict('shift_equipment_missing', 'В смене не зафиксирована техника.')
+    equipment_id = _positive_int(normalized['equipment_id'], field='equipment_id')
+    if equipment_id != shift.equipment_id:
+        _conflict('equipment_context_changed', 'Техника в событии не совпадает со сменой.')
+    occurred_at = normalized['occurred_at']
+    if occurred_at < shift.opened_at:
+        _conflict('event_before_shift', 'Время события раньше начала смены.')
+    if shift.closed_at and occurred_at > shift.closed_at:
+        _conflict('event_after_shift', 'Время события позже закрытия смены.')
+    return shift
+
+
+def _resolve_trip_reference(access, normalized):
+    from trips.models import Trip
+
+    trip_id = normalized['trip_id']
+    local_trip_id = normalized['local_trip_id']
+    if trip_id:
+        trip = Trip.objects.select_for_update().filter(pk=_positive_int(trip_id, field='trip_id')).first()
+    elif local_trip_id:
+        source = (
+            OfflineFieldEvent.objects.select_for_update(of=('self',))
+            .filter(
+                actor=access.employee,
+                device_id=normalized['device_id'],
+                local_trip_id=local_trip_id,
+                event_type='excavator.trip.loaded',
+                status=OfflineFieldEventStatus.ACCEPTED,
+                trip__isnull=False,
+            )
+            .exclude(event_id=normalized['event_id'])
+            .order_by('sequence', 'id')
+            .first()
+        )
+        trip = Trip.objects.select_for_update().filter(pk=source.trip_id).first() if source else None
+    else:
+        _invalid('trip_reference_required', 'Не передан рейс или его локальный ID.')
+    if not trip:
+        _retry('trip_reference_pending', 'Связанный рейс ещё не подтверждён сервером.')
+    return trip
+
+
+def _historical_excavator_assignment(*, shift, truck_id, requested_assignment_id, occurred_at):
+    from assignments.models import HaulAssignment, HaulAssignmentAction
+
+    assignment = (
+        HaulAssignment.objects.select_for_update(of=('self',))
+        .select_related('truck', 'excavator')
+        .filter(pk=requested_assignment_id, truck_id=truck_id, excavator_id=shift.equipment_id)
+        .first()
+    )
+    if not assignment or assignment.action != HaulAssignmentAction.ASSIGN:
+        _conflict('assignment_context_changed', 'Назначение из события не найдено.')
+    if occurred_at < assignment.assigned_at or (assignment.ended_at and occurred_at > assignment.ended_at):
+        _conflict('assignment_time_mismatch', 'В указанное время это назначение не действовало.')
+    return assignment
+
+
+def _process_excavator_loaded(access, normalized):
+    from assignments.models import AssignmentStatus
+    from downtimes.driver_workflow import close_truck_waiting_loading_downtimes
+    from downtimes.models import DowntimeEvent
+    from references.models import DumpPoint, RockType
+    from trips.manual_loading import may_replace_open_trip
+    from trips.models import OPEN_TRIP_STATUSES, Trip, TripClientAction
+    from trips.trip_creation import create_loaded_waiting_unload_trip, lock_trip_participant_equipment
+    from trips.views import (
+        excavator_truck_load_block,
+        notify_driver_truck_loaded,
+        reconcile_excavator_waiting_for_trucks,
+    )
+
+    shift = _locked_shift(access, normalized, role_code='excavator_operator')
+    payload = normalized['payload']
+    truck_id = _positive_int(payload.get('truck_id'), field='truck_id')
+    assignment_id = _positive_int(payload.get('assignment_id'), field='assignment_id')
+    lock_production_state()
+    excavator, truck = lock_trip_participant_equipment(excavator_id=shift.equipment_id, truck_id=truck_id)
+    shift.equipment = excavator
+    assignment = _historical_excavator_assignment(
+        shift=shift, truck_id=truck_id, requested_assignment_id=assignment_id,
+        occurred_at=normalized['occurred_at'],
+    )
+    assignment.truck = truck
+    assignment.excavator = excavator
+    from shifts.models import EmployeeShift
+
+    historical_driver_shift = (
+        EmployeeShift.objects.select_for_update(of=('self',))
+        .filter(
+            equipment_id=truck_id,
+            opened_at__lte=normalized['occurred_at'],
+        )
+        .filter(Q(closed_at__isnull=True) | Q(closed_at__gte=normalized['occurred_at']))
+        .filter(
+            Q(workplace_code='driver')
+            | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
+        )
+        .order_by('-opened_at', '-id')
+        .first()
+    )
+    manual_control = payload.get('manual_control') is True
+    participation = {
+        'shift': historical_driver_shift,
+        'control_shift': None if manual_control else historical_driver_shift,
+        'passive': manual_control,
+        'code': 'offline_manual' if manual_control else 'historical_driver_shift',
+        'label': '',
+    }
+    open_trip = (
+        Trip.objects.select_for_update().filter(truck_id=truck_id, status__in=OPEN_TRIP_STATUSES).first()
+    )
+    expected_local = str(payload.get('expected_open_trip_local_id') or '').strip()
+    expected_id = payload.get('expected_open_trip_id')
+    linked_previous = None
+    if expected_local:
+        previous_event = (
+            OfflineFieldEvent.objects.select_for_update(of=('self',))
+            .filter(
+                actor=access.employee, device_id=normalized['device_id'],
+                local_trip_id=expected_local, event_type='excavator.trip.loaded',
+                status=OfflineFieldEventStatus.ACCEPTED, trip__isnull=False,
+            )
+            .order_by('sequence', 'id').first()
+        )
+        if not previous_event:
+            _retry('previous_trip_pending', 'Предыдущая offline-погрузка ещё не принята.')
+        linked_previous = previous_event.trip
+        expected_id = linked_previous.id
+    if open_trip:
+        if str(expected_id or '') != str(open_trip.id):
+            _conflict('open_trip_changed', 'Незакрытый рейс самосвала уже изменился.')
+        prior_is_own_offline_event = bool(linked_previous and linked_previous.id == open_trip.id)
+        if not prior_is_own_offline_event and not may_replace_open_trip(open_trip, participation):
+            _conflict('open_trip_cannot_be_replaced', 'Действующий рейс нельзя заменить этой погрузкой.')
+    truck_downtime = (
+        DowntimeEvent.objects.select_for_update(of=('self',))
+        .select_related('reason')
+        .filter(equipment=truck, ended_at__isnull=True)
+        .order_by('-started_at', '-id')
+        .first()
+    )
+    excavator_downtimes = list(
+        DowntimeEvent.objects.select_for_update(of=('self',))
+        .select_related('reason')
+        .filter(equipment=excavator, ended_at__isnull=True)
+        .order_by('id')
+    )
+    if (
+        (truck_downtime and truck_downtime.started_at > normalized['occurred_at'])
+        or any(item.started_at > normalized['occurred_at'] for item in excavator_downtimes)
+    ):
+        _conflict(
+            'newer_downtime_exists',
+            'После сохранённой погрузки состояние простоя техники уже изменилось.',
+        )
+    load_block = excavator_truck_load_block(
+        assignment,
+        current_excavator=excavator,
+        active_trip=open_trip or False,
+        active_downtime=truck_downtime or False,
+        manual_control=manual_control,
+        participation=participation,
+        has_open_truck_shift=bool(historical_driver_shift),
+    )
+    if load_block:
+        _conflict(load_block['code'], load_block['label'])
+    if manual_control and (
+        not excavator.is_active
+        or any(item.reason.is_critical for item in excavator_downtimes)
+    ):
+        _conflict('excavator_unavailable', 'Экскаватор недоступен для работы.')
+    dump_point_id = _positive_int(payload.get('dump_point_id'), field='dump_point_id')
+    rock_type_id = _positive_int(payload.get('rock_type_id') or payload.get('rock_type'), field='rock_type_id')
+    dump_point = DumpPoint.objects.select_for_update().filter(pk=dump_point_id).first()
+    rock_type = RockType.objects.filter(pk=rock_type_id).first()
+    if not dump_point or not rock_type:
+        _conflict('reference_data_changed', 'Справочные данные погрузки больше недоступны.')
+    try:
+        trip = create_loaded_waiting_unload_trip(
+            assignment=assignment,
+            excavator_operator=access.employee,
+            loading_shift=shift,
+            rock_type=rock_type,
+            dump_point=dump_point,
+            planned_volume_m3=payload.get('planned_volume_m3') or None,
+            loading_horizon=str(payload.get('loading_horizon') or '')[:64],
+            loading_block=str(payload.get('loading_block') or '')[:64],
+            transport_distance_km=payload.get('transport_distance_km') or None,
+            downtime_text=payload.get('downtime_text'),
+            note=payload.get('note'),
+            participation=participation,
+            supersede_trip=open_trip,
+            occurred_at=normalized['occurred_at'],
+            resolve_assignment_transition=(
+                assignment.ended_at is None
+                and assignment.status in {AssignmentStatus.ACCEPTED, AssignmentStatus.PENDING}
+            ),
+        )
+    except ValidationError as error:
+        _conflict('trip_validation_failed', '; '.join(error.messages))
+    TripClientAction.objects.create(
+        action_type='truck_loaded', client_action_id=normalized['event_id'],
+        trip=trip, actor=access.employee,
+    )
+    if open_trip:
+        TripClientAction.objects.create(
+            action_type='truck_load_supersede', client_action_id=normalized['event_id'],
+            trip=open_trip, actor=access.employee,
+        )
+    close_truck_waiting_loading_downtimes(truck, ended_at=normalized['occurred_at'])
+    for downtime in excavator_downtimes:
+        downtime.ended_at = normalized['occurred_at']
+        downtime.save(update_fields=['ended_at'])
+    reconcile_excavator_waiting_for_trucks(excavator, access.employee, start_when_empty=True)
+    state = bump_operational_state(
+        'OfflineFieldEvent:excavator_trip_loaded', event_type='trip_changed',
+        object_type='Trip', object_id=trip.id,
+        payload={'action': 'truck_loaded', 'trip_id': trip.id, 'truck_id': trip.truck_id,
+                 'excavator_id': trip.excavator_id, 'status': trip.status},
+    )
+    transaction.on_commit(lambda: notify_driver_truck_loaded(trip))
+    return {
+        'server_ids': {'trip_id': trip.id, 'shift_id': shift.id},
+        'version': state.version,
+    }, {'trip': trip, 'shift': shift, 'equipment': truck}
+
+
+def _process_excavator_loaded_cancelled(access, normalized):
+    from trips.models import Trip, TripClientAction, TripStatus
+    from trips.views import reconcile_excavator_waiting_for_trucks
+
+    shift = _locked_shift(access, normalized, role_code='excavator_operator')
+    lock_production_state()
+    trip = _resolve_trip_reference(access, normalized)
+    if trip.loading_shift_id != shift.id or trip.excavator_operator_id != access.employee_id:
+        _conflict('trip_owner_changed', 'Рейс не принадлежит этой смене машиниста.')
+    if normalized['occurred_at'] < (trip.loaded_at or trip.created_at):
+        _conflict('cancel_before_load', 'Время отмены раньше времени погрузки.')
+    if trip.status != TripStatus.LOADED_WAITING_UNLOAD:
+        _conflict('trip_not_cancellable', 'Рейс уже завершён, отменён или заменён.')
+    trip.status = TripStatus.CANCELLED
+    trip.cancelled_at = normalized['occurred_at']
+    trip.save(update_fields=['status', 'cancelled_at'])
+    previous = Trip.objects.select_for_update().filter(
+        superseded_by=trip, status=TripStatus.UNCONTROLLED,
+    ).first()
+    if previous:
+        previous.status = TripStatus.LOADED_WAITING_UNLOAD
+        previous.operationally_closed_at = None
+        previous.closure_recorded_by = None
+        previous.superseded_by = None
+        previous.save(update_fields=['status', 'operationally_closed_at', 'closure_recorded_by', 'superseded_by'])
+    TripClientAction.objects.create(
+        action_type='truck_loaded_cancel', client_action_id=normalized['event_id'],
+        trip=trip, actor=access.employee,
+    )
+    reconcile_excavator_waiting_for_trucks(trip.excavator)
+    state = bump_operational_state(
+        'OfflineFieldEvent:excavator_trip_loaded_cancelled', event_type='trip_changed',
+        object_type='Trip', object_id=trip.id,
+        payload={'action': 'truck_loaded_cancel', 'trip_id': trip.id, 'truck_id': trip.truck_id,
+                 'excavator_id': trip.excavator_id, 'status': trip.status},
+    )
+    return {'server_ids': {'trip_id': trip.id, 'shift_id': shift.id}, 'version': state.version}, {
+        'trip': trip, 'shift': shift, 'equipment': trip.truck,
+    }
+
+
+def _process_driver_unloaded(access, normalized):
+    from trips.models import OPEN_TRIP_STATUSES, TripClientAction, TripStatus
+    from trips.views import finalize_trip_unloaded
+
+    shift = _locked_shift(access, normalized, role_code='driver')
+    lock_production_state()
+    trip = _resolve_trip_reference(access, normalized)
+    if trip.truck_id != shift.equipment_id:
+        _conflict('trip_truck_changed', 'Рейс не принадлежит самосвалу этой смены.')
+    if trip.driver_participation_recorded and trip.driver_control_shift_id != shift.id:
+        _conflict('trip_driver_shift_changed', 'Рейс закреплён за другой сменой водителя.')
+    if trip.status not in (*OPEN_TRIP_STATUSES, TripStatus.UNCONTROLLED):
+        _conflict('trip_already_terminal', 'Рейс уже завершён или отменён другим действием.')
+    loaded_at = trip.loaded_at or trip.created_at
+    if normalized['occurred_at'] < loaded_at:
+        _conflict('unload_before_load', 'Время разгрузки раньше погрузки.')
+    late_confirmation = trip.status == TripStatus.UNCONTROLLED
+    if late_confirmation and trip.operationally_closed_at and normalized['occurred_at'] > trip.operationally_closed_at:
+        _conflict('late_unload_after_supersede', 'Разгрузка относится к более позднему рейсу.')
+    finalize_trip_unloaded(
+        trip, driver=access.employee, unloading_shift=shift,
+        occurred_at=normalized['occurred_at'], late_confirmation=late_confirmation,
+    )
+    TripClientAction.objects.create(
+        action_type='trip_unloaded', client_action_id=normalized['event_id'],
+        trip=trip, actor=access.employee,
+    )
+    state = bump_operational_state(
+        'OfflineFieldEvent:driver_trip_unloaded', event_type='trip_changed',
+        object_type='Trip', object_id=trip.id,
+        payload={'action': 'trip_unloaded', 'trip_id': trip.id, 'truck_id': trip.truck_id,
+                 'excavator_id': trip.excavator_id, 'status': trip.status},
+    )
+    return {'server_ids': {'trip_id': trip.id, 'shift_id': shift.id}, 'version': state.version}, {
+        'trip': trip, 'shift': shift, 'equipment': trip.truck,
+    }
+
+
+def _process_driver_dump_point_changed(access, normalized):
+    from references.models import DumpPoint
+    from trips.models import OPEN_TRIP_STATUSES, TripClientAction
+
+    shift = _locked_shift(access, normalized, role_code='driver')
+    lock_production_state()
+    trip = _resolve_trip_reference(access, normalized)
+    if trip.truck_id != shift.equipment_id or trip.status not in OPEN_TRIP_STATUSES:
+        _conflict('trip_not_editable', 'Рейс изменился или уже завершён.')
+    if trip.driver_participation_recorded and trip.driver_control_shift_id != shift.id:
+        _conflict('trip_driver_shift_changed', 'Рейс закреплён за другой сменой водителя.')
+    if normalized['occurred_at'] < (trip.loaded_at or trip.created_at):
+        _conflict('dump_point_change_before_load', 'Время изменения точки раньше погрузки.')
+    newer_offline_change = OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
+        trip=trip,
+        event_type='driver.trip.dump_point_changed',
+        status=OfflineFieldEventStatus.ACCEPTED,
+        occurred_at__gt=normalized['occurred_at'],
+    ).exclude(event_id=normalized['event_id']).exists()
+    if newer_offline_change:
+        _conflict('stale_dump_point_change', 'После этого действия точка разгрузки уже менялась.')
+    offline_change_ids = OfflineFieldEvent.objects.filter(
+        trip=trip,
+        event_type='driver.trip.dump_point_changed',
+    ).values_list('event_id', flat=True)
+    newer_legacy_change = (
+        TripClientAction.objects.select_for_update(of=('self',))
+        .filter(
+            trip=trip,
+            action_type='change_actual_unload_point',
+            created_at__gt=normalized['occurred_at'],
+        )
+        .exclude(client_action_id=normalized['event_id'])
+        .exclude(client_action_id__in=offline_change_ids)
+        .exists()
+    )
+    if newer_legacy_change:
+        _conflict('stale_dump_point_change', 'После этого действия точка разгрузки уже менялась.')
+    expected_dump_point_id = (
+        normalized['payload'].get('expected_actual_dump_point_id')
+        or normalized['payload'].get('expected_dump_point_id')
+    )
+    current_dump_point_id = trip.actual_dump_point_id or trip.dump_point_id
+    if expected_dump_point_id not in (None, '') and (
+        _positive_int(expected_dump_point_id, field='expected_dump_point_id') != current_dump_point_id
+    ):
+        _conflict('dump_point_state_changed', 'Текущая точка разгрузки уже отличается от сохранённого состояния.')
+    dump_point_id = _positive_int(normalized['payload'].get('dump_point_id'), field='dump_point_id')
+    dump_point = DumpPoint.objects.select_for_update().filter(pk=dump_point_id).first()
+    if not dump_point:
+        _conflict('dump_point_changed', 'Точка разгрузки больше недоступна.')
+    if trip.assigned_dump_point_id is None:
+        trip.assigned_dump_point = trip.dump_point
+    trip.actual_dump_point = dump_point
+    trip.dump_point = dump_point
+    trip.save(update_fields=['assigned_dump_point', 'actual_dump_point', 'dump_point'])
+    TripClientAction.objects.create(
+        action_type='change_actual_unload_point', client_action_id=normalized['event_id'],
+        trip=trip, actor=access.employee,
+    )
+    state = bump_operational_state(
+        'OfflineFieldEvent:driver_dump_point_changed', event_type='trip_changed',
+        object_type='Trip', object_id=trip.id,
+        payload={'action': 'change_actual_unload_point', 'trip_id': trip.id,
+                 'truck_id': trip.truck_id, 'actual_dump_point_id': dump_point.id, 'status': trip.status},
+    )
+    return {
+        'server_ids': {'trip_id': trip.id, 'shift_id': shift.id, 'dump_point_id': dump_point.id},
+        'version': state.version,
+    }, {'trip': trip, 'shift': shift, 'equipment': trip.truck}
+
+
+def _process_downtime(access, normalized, *, role_code, close):
+    from downtimes.driver_workflow import (
+        driver_downtime_requires_empty_truck,
+        driver_downtime_requires_loaded_trip,
+    )
+    from downtimes.models import DowntimeEvent, DowntimeReason
+    from trips.models import OPEN_TRIP_STATUSES, Trip, TripStatus
+
+    shift = _locked_shift(access, normalized, role_code=role_code)
+    lock_production_state()
+    equipment = shift.equipment.__class__.objects.select_for_update().get(pk=shift.equipment_id)
+    if close:
+        downtime_id = (
+            normalized['payload'].get('downtime_event_id')
+            or normalized['payload'].get('downtime_id')
+        )
+        event = None
+        if downtime_id:
+            event = DowntimeEvent.objects.select_for_update(of=('self',)).filter(pk=downtime_id).first()
+        elif normalized['local_downtime_id']:
+            source = (
+                OfflineFieldEvent.objects.select_for_update(of=('self',))
+                .filter(
+                    actor=access.employee, device_id=normalized['device_id'],
+                    local_downtime_id=normalized['local_downtime_id'],
+                    event_type=f'{"driver" if role_code == "driver" else "excavator"}.downtime.started',
+                    status=OfflineFieldEventStatus.ACCEPTED,
+                    downtime_event__isnull=False,
+                ).order_by('sequence', 'id').first()
+            )
+            event = source.downtime_event if source else None
+        if not event:
+            _retry('downtime_reference_pending', 'Связанный простой ещё не подтверждён.')
+        if event.equipment_id != equipment.id:
+            _conflict('downtime_equipment_changed', 'Простой относится к другой технике.')
+        if normalized['occurred_at'] < event.started_at:
+            _conflict('downtime_end_before_start', 'Время окончания простоя раньше его начала.')
+        if event.employee_id not in (None, access.employee_id):
+            _conflict('downtime_owner_changed', 'Простой относится к другому сотруднику.')
+        if event.ended_at:
+            if normalized['occurred_at'] > event.ended_at:
+                _conflict('downtime_already_closed', 'Простой уже завершён более ранним серверным действием.')
+            if normalized['occurred_at'] < event.ended_at:
+                event.ended_at = normalized['occurred_at']
+                event.save(update_fields=['ended_at'])
+        else:
+            event.ended_at = normalized['occurred_at']
+            event.save(update_fields=['ended_at'])
+        action = 'downtime_closed'
+    else:
+        reason_id = _positive_int(normalized['payload'].get('reason_id'), field='reason_id')
+        workplace = 'truck_driver' if role_code == 'driver' else 'excavator_operator'
+        reason = DowntimeReason.for_workplace(workplace, equipment.equipment_type).filter(pk=reason_id).first()
+        if not reason:
+            _conflict('downtime_reason_changed', 'Причина простоя больше недоступна.')
+        open_event = DowntimeEvent.objects.select_for_update(of=('self',)).filter(
+            equipment=equipment, ended_at__isnull=True,
+        ).order_by('-started_at', '-id').first()
+        if open_event:
+            _conflict('downtime_state_changed', 'На технике уже есть другой активный простой.')
+        if role_code == 'driver' and driver_downtime_requires_empty_truck(reason):
+            if Trip.objects.select_for_update().filter(truck=equipment, status__in=OPEN_TRIP_STATUSES).exists():
+                _conflict('empty_truck_required', 'Ожидание погрузки нельзя начать: самосвал уже загружен.')
+        if role_code == 'driver' and driver_downtime_requires_loaded_trip(reason):
+            if not Trip.objects.select_for_update().filter(
+                truck=equipment, status=TripStatus.LOADED_WAITING_UNLOAD,
+            ).exists():
+                _conflict('loaded_trip_required', 'Этот простой доступен только после погрузки.')
+        event = DowntimeEvent.objects.create(
+            equipment=equipment,
+            employee=access.employee,
+            subject_employee=access.employee,
+            recorded_by=access.employee,
+            reason=reason,
+            started_at=normalized['occurred_at'],
+            comment=str(normalized['payload'].get('comment') or '')[:255],
+            recorded_at=normalized['received_at'],
+            ended_at=(
+                shift.closed_at
+                if shift.closed_at and shift.closed_at >= normalized['occurred_at']
+                else None
+            ),
+        )
+        action = 'downtime_started'
+    state = bump_operational_state(
+        f'OfflineFieldEvent:{action}', event_type='downtime_changed',
+        object_type='DowntimeEvent', object_id=event.id,
+        payload={'action': action, 'event_id': event.id, 'equipment_id': equipment.id,
+                 'employee_id': access.employee_id},
+    )
+    return {
+        'server_ids': {'downtime_event_id': event.id, 'shift_id': shift.id},
+        'version': state.version,
+    }, {'downtime_event': event, 'shift': shift, 'equipment': equipment}
+
+
+def _process_shift_closed(access, normalized, *, role_code):
+    from shifts.services import (
+        DriverShiftCloseConfirmationRequired,
+        ExcavatorShiftError,
+        ExcavatorShiftCloseConfirmationRequired,
+        close_driver_shift,
+        close_excavator_shift,
+    )
+
+    shift = _locked_shift(access, normalized, role_code=role_code)
+    if shift.closed_at:
+        _conflict('shift_already_closed', 'Смена уже закрыта другим действием.')
+    payload = normalized['payload']
+    try:
+        if role_code == 'driver':
+            shift, _ = close_driver_shift(
+                shift=shift, employee=access.employee,
+                readings={
+                    'end_fuel': _optional_decimal(payload.get('end_fuel'), field='end_fuel'),
+                    'end_mileage': _optional_decimal(payload.get('end_mileage'), field='end_mileage'),
+                    'end_engine_hours': _optional_decimal(
+                        payload.get('end_engine_hours'), field='end_engine_hours',
+                    ),
+                },
+                client_action_id=normalized['event_id'],
+                confirmation_token=str(payload.get('confirmation_token') or ''),
+                occurred_at=normalized['occurred_at'],
+            )
+            result = {'ok': True, 'shift_id': shift.id}
+        else:
+            result = close_excavator_shift(
+                employee=access.employee,
+                fuel_value=payload.get('fuel') if payload.get('fuel') is not None else payload.get('end_fuel'),
+                engine_hours_value=(payload.get('engine_hours') if payload.get('engine_hours') is not None
+                                    else payload.get('end_engine_hours')),
+                client_action_id=normalized['event_id'],
+                submitted_fuel_percent=payload.get('fuel_percent'),
+                confirmation_token=str(payload.get('confirmation_token') or ''),
+                expected_shift_id=shift.id,
+                occurred_at=normalized['occurred_at'],
+            )
+    except (DriverShiftCloseConfirmationRequired, ExcavatorShiftCloseConfirmationRequired) as error:
+        _conflict(
+            'confirmation_required',
+            str(error),
+            details={
+                'confirmation_token': error.confirmation_token,
+                'warnings': error.warnings,
+            },
+        )
+    except ExcavatorShiftError as error:
+        _conflict(
+            getattr(error, 'code', 'shift_close_failed'),
+            str(error),
+            details={
+                'field_errors': getattr(error, 'field_errors', {}),
+                **getattr(error, 'extra', {}),
+            },
+        )
+    except ValidationError as error:
+        _conflict('shift_close_failed', '; '.join(error.messages))
+    shift.refresh_from_db()
+    return {
+        'server_ids': {'shift_id': shift.id},
+        'version': result.get('version') if isinstance(result, dict) else None,
+    }, {'shift': shift, 'equipment': shift.equipment}
+
+
+PROCESSORS = {
+    'excavator.trip.loaded': _process_excavator_loaded,
+    'excavator.trip.loaded.cancelled': _process_excavator_loaded_cancelled,
+    'driver.trip.unloaded': _process_driver_unloaded,
+    'driver.trip.dump_point_changed': _process_driver_dump_point_changed,
+    'excavator.downtime.started': lambda access, event: _process_downtime(access, event, role_code='excavator_operator', close=False),
+    'excavator.downtime.ended': lambda access, event: _process_downtime(access, event, role_code='excavator_operator', close=True),
+    'driver.downtime.started': lambda access, event: _process_downtime(access, event, role_code='driver', close=False),
+    'driver.downtime.ended': lambda access, event: _process_downtime(access, event, role_code='driver', close=True),
+    'excavator.shift.closed': lambda access, event: _process_shift_closed(access, event, role_code='excavator_operator'),
+    'driver.shift.closed': lambda access, event: _process_shift_closed(access, event, role_code='driver'),
+}
+
+
+def _legacy_action_result(access, normalized):
+    """Import an already acknowledged legacy unload into the receipt table."""
+    if normalized['event_type'] != 'driver.trip.unloaded':
+        return None
+    from trips.models import TripClientAction
+
+    action = (
+        TripClientAction.objects.select_for_update(of=('self',))
+        .select_related('trip')
+        .filter(action_type='trip_unloaded', client_action_id=normalized['event_id'])
+        .first()
+    )
+    if not action:
+        return None
+    trip = action.trip
+    requested_trip_id = _positive_int(normalized['trip_id'], field='trip_id')
+    requested_shift_id = _positive_int(normalized['shift_id'], field='shift_id')
+    if action.actor_id != access.employee_id or trip.id != requested_trip_id:
+        _conflict(
+            'legacy_action_mismatch',
+            'Ранее принятое действие с этим ID относится к другому сотруднику или рейсу.',
+        )
+    if trip.unloading_shift_id and trip.unloading_shift_id != requested_shift_id:
+        _conflict(
+            'legacy_action_mismatch',
+            'Ранее принятое действие с этим ID относится к другой смене.',
+        )
+    if trip.completed_at and abs((trip.completed_at - normalized['occurred_at']).total_seconds()) > 1:
+        _conflict(
+            'legacy_action_time_mismatch',
+            'Время ранее принятой разгрузки не совпадает с сохранённым событием.',
+        )
+    return {
+        'server_ids': {'trip_id': trip.id, 'shift_id': trip.unloading_shift_id},
+        'legacy_action_imported': True,
+    }, {'trip': trip, 'shift': trip.unloading_shift, 'equipment': trip.truck}
+
+
+def _dependency_state(access, normalized):
+    if not normalized['depends_on']:
+        return
+    dependencies = {
+        item.event_id: item
+        for item in OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
+            event_id__in=normalized['depends_on']
+        )
+    }
+    for dependency_id in normalized['depends_on']:
+        dependency = dependencies.get(dependency_id)
+        if not dependency:
+            _retry('dependency_pending', 'Предыдущее событие ещё не получено сервером.')
+        if (
+            dependency.actor_id != access.employee_id
+            or dependency.access_id != access.id
+            or dependency.role_code != normalized['role_code']
+            or dependency.device_id != normalized['device_id']
+        ):
+            _conflict('dependency_owner_mismatch', 'Зависимость принадлежит другому сотруднику или устройству.')
+        if dependency.sequence >= normalized['sequence']:
+            _conflict('dependency_order_invalid', 'Зависимость должна иметь меньший номер порядка.')
+        if dependency.status != OfflineFieldEventStatus.ACCEPTED:
+            if dependency.status == OfflineFieldEventStatus.RETRY:
+                _retry('dependency_pending', 'Предыдущее событие ещё не принято.')
+            _conflict('dependency_rejected', 'Предыдущее событие требует сверки или отклонено.')
+
+
+def process_one_offline_event(access, normalized):
+    try:
+        with transaction.atomic():
+            lock_idempotency_key('offline_field_event', normalized['event_id'])
+            existing = OfflineFieldEvent.objects.select_for_update().filter(
+                event_id=normalized['event_id']
+            ).first()
+            if existing:
+                same_identity = (
+                    existing.actor_id == access.employee_id
+                    and existing.access_id == access.id
+                    and existing.role_code == normalized['role_code']
+                    and existing.device_id == normalized['device_id']
+                    and existing.fingerprint == normalized['fingerprint']
+                )
+                if not same_identity:
+                    _record_conflict_attempt(
+                        existing=existing, access=access, normalized=normalized,
+                        code='event_id_reused',
+                    )
+                    return _result(
+                        normalized['event_id'], 'conflict', code='event_id_reused',
+                        message='Идентификатор уже использован для другого события.',
+                    )
+                if existing.status != OfflineFieldEventStatus.RETRY:
+                    return _stored_result(existing, deduplicated=True)
+                receipt = existing
+                receipt.status = OfflineFieldEventStatus.PROCESSING
+                receipt.retryable = False
+                receipt.error_code = ''
+                receipt.error_message = ''
+                receipt.save(update_fields=['status', 'retryable', 'error_code', 'error_message', 'updated_at'])
+            else:
+                sequence_collision = OfflineFieldEvent.objects.select_for_update().filter(
+                    actor=access.employee,
+                    role_code=normalized['role_code'],
+                    device_id=normalized['device_id'],
+                    sequence=normalized['sequence'],
+                ).first()
+                if sequence_collision:
+                    _record_conflict_attempt(
+                        existing=sequence_collision, access=access, normalized=normalized,
+                        code='sequence_reused',
+                    )
+                    return _result(
+                        normalized['event_id'], 'conflict', code='sequence_reused',
+                        message='Номер порядка уже занят другим событием.',
+                    )
+                receipt = OfflineFieldEvent.objects.create(
+                    event_id=normalized['event_id'],
+                    event_type=normalized['event_type'],
+                    format_version=normalized['format_version'],
+                    actor=access.employee,
+                    access=access,
+                    role_code=normalized['role_code'],
+                    device_id=normalized['device_id'],
+                    sequence=normalized['sequence'],
+                    depends_on=normalized['depends_on'],
+                    occurred_at=normalized['occurred_at'],
+                    received_at=normalized['received_at'],
+                    shift_id=_positive_int(normalized['shift_id'], field='shift_id', required=False),
+                    equipment_id=_positive_int(normalized['equipment_id'], field='equipment_id', required=False),
+                    local_trip_id=normalized['local_trip_id'],
+                    local_downtime_id=normalized['local_downtime_id'],
+                    context_snapshot=normalized['context_snapshot'],
+                    payload=normalized['payload'],
+                    fingerprint=normalized['fingerprint'],
+                )
+            try:
+                with transaction.atomic():
+                    _validate_claimed_context(access, normalized)
+                    if normalized['occurred_at'] > normalized['received_at'] + MAX_FUTURE_CLOCK_SKEW:
+                        _conflict('device_clock_ahead', 'Часы устройства заметно опережают сервер. Требуется сверка.')
+                    _dependency_state(access, normalized)
+                    legacy_result = _legacy_action_result(access, normalized)
+                    if legacy_result is not None:
+                        result_payload, links = legacy_result
+                    else:
+                        result_payload, links = PROCESSORS[normalized['event_type']](access, normalized)
+            except OfflineEventProblem as problem:
+                receipt.status = problem.status
+                receipt.retryable = problem.retryable
+                receipt.error_code = problem.code
+                receipt.error_message = problem.message
+                receipt.result_payload = {
+                    'server_received_at': receipt.received_at.isoformat(),
+                    **problem.details,
+                }
+                receipt.save(update_fields=[
+                    'status', 'retryable', 'error_code', 'error_message',
+                    'result_payload', 'updated_at',
+                ])
+                return _stored_result(receipt)
+            except (IntegrityError, TimeoutError):
+                receipt.status = OfflineFieldEventStatus.RETRY
+                receipt.retryable = True
+                receipt.error_code = 'concurrent_state_retry'
+                receipt.error_message = 'Состояние изменилось одновременно. Событие будет повторено.'
+                receipt.result_payload = {'server_received_at': receipt.received_at.isoformat()}
+                receipt.save(update_fields=[
+                    'status', 'retryable', 'error_code', 'error_message',
+                    'result_payload', 'updated_at',
+                ])
+                return _stored_result(receipt)
+            except Exception:
+                logger.exception(
+                    'Unexpected offline event processing failure: %s',
+                    normalized['event_id'],
+                )
+                receipt.status = OfflineFieldEventStatus.RETRY
+                receipt.retryable = True
+                receipt.error_code = 'temporary_server_error'
+                receipt.error_message = 'Временная ошибка сервера. Событие сохранено и будет повторено.'
+                receipt.result_payload = {'server_received_at': receipt.received_at.isoformat()}
+                receipt.save(update_fields=[
+                    'status', 'retryable', 'error_code', 'error_message',
+                    'result_payload', 'updated_at',
+                ])
+                return _stored_result(receipt)
+            receipt.status = OfflineFieldEventStatus.ACCEPTED
+            receipt.retryable = False
+            receipt.error_code = ''
+            receipt.error_message = ''
+            result_payload = dict(result_payload or {})
+            result_payload.setdefault('server_received_at', receipt.received_at.isoformat())
+            result_payload.setdefault('server_ids', {})['event_receipt_id'] = receipt.id
+            receipt.result_payload = result_payload
+            for field in ('trip', 'shift', 'equipment', 'downtime_event'):
+                if links.get(field) is not None:
+                    setattr(receipt, field, links[field])
+            receipt.save(update_fields=[
+                'status', 'retryable', 'error_code', 'error_message', 'result_payload',
+                'trip', 'shift', 'equipment', 'downtime_event', 'updated_at',
+            ])
+            return _stored_result(receipt)
+    except IntegrityError:
+        existing = OfflineFieldEvent.objects.filter(event_id=normalized['event_id']).first()
+        if existing:
+            return _stored_result(existing, deduplicated=(existing.status == OfflineFieldEventStatus.ACCEPTED))
+        return _result(
+            normalized['event_id'], 'retry', retryable=True,
+            code='concurrent_receipt_retry',
+            message='Параллельная синхронизация. Повторите позже.',
+        )
+
+
+def process_offline_batch(access, *, role_code, device_id, events):
+    if role_code != access.role.code or role_code not in {'driver', 'excavator_operator'}:
+        return [_result('', 'auth_required', code='role_session_changed', message='Активная роль изменилась.')]
+    device_id = _clean_identifier(device_id, field='device_id', pattern=DEVICE_ID_RE)
+    if not isinstance(events, list) or not events or len(events) > MAX_BATCH_SIZE:
+        _invalid('invalid_batch_size', f'В пакете должно быть от 1 до {MAX_BATCH_SIZE} событий.')
+    received_at = timezone.now()
+    normalized_events = []
+    immediate_results = []
+    for index, raw_event in enumerate(events):
+        try:
+            normalized_events.append((index, normalize_offline_event(
+                raw_event, role_code=role_code, device_id=device_id, received_at=received_at,
+            )))
+        except OfflineEventProblem as problem:
+            event_id = str(raw_event.get('event_id') or '') if isinstance(raw_event, dict) else ''
+            _record_invalid_attempt(
+                access=access,
+                role_code=role_code,
+                device_id=device_id,
+                raw_event=raw_event,
+                code=problem.code,
+            )
+            immediate_results.append((index, _result(
+                event_id, 'invalid', code=problem.code, message=problem.message,
+            )))
+    processed_by_index = {}
+    for index, normalized in sorted(
+        normalized_events,
+        key=lambda item: (item[1]['sequence'], item[1]['event_id'], item[0]),
+    ):
+        processed_by_index[index] = process_one_offline_event(access, normalized)
+    results = []
+    immediate_by_index = dict(immediate_results)
+    for index, raw_event in enumerate(events):
+        if index in immediate_by_index:
+            results.append(immediate_by_index[index])
+        else:
+            results.append(processed_by_index[index])
+    return results

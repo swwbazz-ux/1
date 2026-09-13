@@ -708,7 +708,10 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id, 
         ) from error
 
 
-def close_driver_shift(*, shift, employee, readings, client_action_id, confirmation_token=''):
+def close_driver_shift(
+    *, shift, employee, readings, client_action_id, confirmation_token='',
+    occurred_at=None,
+):
     existing_action = ShiftClientAction.objects.select_related('shift').filter(
         action_type='driver_shift_closed',
         client_action_id=client_action_id,
@@ -761,7 +764,15 @@ def close_driver_shift(*, shift, employee, readings, client_action_id, confirmat
             )
         for field, value in readings.items():
             setattr(locked_shift, field, value)
-        locked_shift.closed_at = timezone.now()
+        received_at = timezone.now()
+        closed_at = occurred_at or received_at
+        if timezone.is_naive(closed_at):
+            raise ValidationError('Время закрытия смены должно содержать часовой пояс.')
+        if closed_at < locked_shift.opened_at:
+            raise ValidationError('Время закрытия смены раньше времени открытия смены.')
+        if closed_at > received_at + timedelta(minutes=5):
+            raise ValidationError('Часы устройства заметно опережают сервер. Требуется сверка.')
+        locked_shift.closed_at = closed_at
         locked_shift.closed_by = employee
         locked_shift.save(update_fields=[*readings, 'closed_at', 'closed_by'])
         from downtimes.driver_workflow import close_workflow_downtimes
@@ -1911,6 +1922,7 @@ def close_excavator_shift(
     submitted_fuel_percent=None,
     confirmation_token='',
     expected_shift_id=None,
+    occurred_at=None,
 ):
     from references.models import Equipment
     from trips.models import OPEN_TRIP_STATUSES, Trip
@@ -2040,7 +2052,27 @@ def close_excavator_shift(
     shift.end_fuel = fuel
     shift.end_mileage = None
     shift.end_engine_hours = engine_hours
-    shift.closed_at = timezone.now()
+    received_at = timezone.now()
+    closed_at = occurred_at or received_at
+    if timezone.is_naive(closed_at):
+        raise ExcavatorShiftError(
+            'Время закрытия смены должно содержать часовой пояс.',
+            status=422,
+            code='invalid_occurred_at',
+        )
+    if closed_at < shift.opened_at:
+        raise ExcavatorShiftError(
+            'Время закрытия смены раньше времени открытия смены.',
+            status=409,
+            code='event_before_shift',
+        )
+    if closed_at > received_at + timedelta(minutes=5):
+        raise ExcavatorShiftError(
+            'Часы устройства заметно опережают сервер. Требуется сверка.',
+            status=409,
+            code='device_clock_ahead',
+        )
+    shift.closed_at = closed_at
     shift.closed_by = employee
     shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
     from downtimes.driver_workflow import close_workflow_downtimes

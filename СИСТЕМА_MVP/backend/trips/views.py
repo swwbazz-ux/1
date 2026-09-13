@@ -5611,6 +5611,17 @@ def excavator_shift_action_view(request):
                     },
                     status=409,
                 )
+            raw_occurred_at = str(payload.get('occurred_at') or '').strip()
+            occurred_at = parse_datetime(raw_occurred_at) if raw_occurred_at else None
+            if raw_occurred_at and (occurred_at is None or timezone.is_naive(occurred_at)):
+                return JsonResponse(
+                    {
+                        'ok': False,
+                        'error': 'Время действия должно содержать часовой пояс.',
+                        'code': 'invalid_occurred_at',
+                    },
+                    status=400,
+                )
             response_payload = close_excavator_shift(
                 employee=access.employee,
                 fuel_value=payload.get('fuel'),
@@ -5619,6 +5630,7 @@ def excavator_shift_action_view(request):
                 submitted_fuel_percent=payload.get('fuel_percent'),
                 confirmation_token=str(payload.get('confirmation_token') or '').strip(),
                 expected_shift_id=posted_shift_id,
+                occurred_at=occurred_at,
             )
             return JsonResponse(response_payload)
 

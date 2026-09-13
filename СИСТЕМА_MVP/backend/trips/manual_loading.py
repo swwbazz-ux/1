@@ -30,7 +30,12 @@ def passive_manual_trip(trip):
 def manual_dump_card_expires_at(trip):
     if not passive_manual_trip(trip) or not trip.created_at:
         return None
-    return trip.created_at + MANUAL_DUMP_CARD_VISIBILITY
+    anchor = (
+        trip.loaded_at
+        if trip.load_time_source == 'excavator_device' and trip.loaded_at
+        else trip.created_at
+    )
+    return anchor + MANUAL_DUMP_CARD_VISIBILITY
 
 
 def manual_dump_card_is_visible(trip, *, now=None):
