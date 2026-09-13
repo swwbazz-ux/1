@@ -1,11 +1,16 @@
 ﻿import json
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.contrib.staticfiles import finders
 from django.db import IntegrityError, transaction
@@ -3717,8 +3722,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('throw new Error("Authenticated excavator shell', install_block)
         self.assertIn('async function isExcavatorShellResponse(response)', script)
         self.assertIn('async function isSafeExcavatorCacheEntry(request, response)', script)
-        self.assertIn('excavatorShellStaticDependencies(shellHtml)', script)
+        self.assertIn('excavatorShellStaticDependencies(html)', script)
         self.assertIn('async function hasCompleteExcavatorShell(cache, response)', script)
+        self.assertIn('async function cacheExcavatorShellDependencies(cache, html)', script)
+        self.assertIn('if (missing.length) await cache.addAll(missing);', script)
+        self.assertIn('if (!await cacheExcavatorShellDependencies(cache, shellHtml)) return false;', script)
         self.assertIn('requestUrl.search !== finalUrl.search', script)
         self.assertIn('finalUrl.pathname !== APP_SHELL_URL', script)
         self.assertIn('html.includes("data-eo-shell")', script)
@@ -3775,6 +3783,41 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('SKIP_WAITING', script)
         self.assertIn('GET_VERSION', script)
         self.assertIn('event.ports && event.ports[0]', script)
+
+    def test_rendered_excavator_shell_dependencies_reopen_offline_after_fresh_install(self):
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('Node.js is required for the executable service-worker runtime contract.')
+        response = self.client.get(reverse('excavator_work'))
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode('utf-8')
+        self.assertIn('data-eo-role-code="excavator_operator"', html)
+        runtime_test = Path(settings.BASE_DIR) / 'static/js/tests/excavator-service-worker-update-runtime.test.js'
+        with tempfile.TemporaryDirectory(prefix='excavator-sw-test-') as temp_dir:
+            rendered_shell = Path(temp_dir) / 'rendered-excavator-work.html'
+            rendered_shell.write_text(html, encoding='utf-8')
+            environment = os.environ.copy()
+            environment['EXCAVATOR_RENDERED_SHELL_PATH'] = str(rendered_shell)
+            completed = subprocess.run(
+                [
+                    node,
+                    '--test',
+                    '--test-name-pattern=fresh authenticated rendered shell',
+                    str(runtime_test),
+                ],
+                text=True,
+                encoding='utf-8',
+                cwd=settings.BASE_DIR,
+                env=environment,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + '\n' + completed.stderr,
+        )
 
     def test_excavator_shift_keyboard_overlays_stable_layout(self):
         response = self.client.get(reverse('excavator_work'))

@@ -1074,8 +1074,10 @@ async function precacheAuthenticatedShell(cache) {
     });
     const response = await fetch(request);
     if (await isExcavatorShellResponse(response)) {
+      const shellHtml = await response.clone().text();
+      if (!await cacheExcavatorShellDependencies(cache, shellHtml)) return false;
       await cache.put(APP_SHELL_URL, response.clone());
-      return true;
+      return await hasCompleteExcavatorShell(cache, response);
     }
   } catch (error) {
     return false;
@@ -1098,12 +1100,26 @@ function excavatorShellStaticDependencies(html) {
   return Array.from(new Set(dependencies));
 }
 
+async function cacheExcavatorShellDependencies(cache, html) {
+  const dependencies = excavatorShellStaticDependencies(html);
+  const missing = [];
+  for (const path of dependencies) {
+    const request = new Request(path, {cache: "reload", credentials: "same-origin"});
+    const response = await cache.match(request);
+    if (!await isSafeExcavatorCacheEntry(request, response)) missing.push(request);
+  }
+  if (missing.length) await cache.addAll(missing);
+  const available = await Promise.all(dependencies.map(async path => {
+    const request = new Request(path, {credentials: "same-origin"});
+    return await isSafeExcavatorCacheEntry(request, await cache.match(request));
+  }));
+  return available.every(Boolean);
+}
+
 async function hasCompleteExcavatorShell(cache, response) {
   if (!response || !await isExcavatorShellResponse(response)) return false;
   const shellHtml = await response.clone().text();
-  const dependencies = excavatorShellStaticDependencies(shellHtml);
-  const available = await Promise.all(dependencies.map(path => cache.match(path)));
-  return available.every(Boolean);
+  return await cacheExcavatorShellDependencies(cache, shellHtml);
 }
 
 async function isSafeExcavatorCacheEntry(request, response) {
@@ -1129,7 +1145,9 @@ async function isSafeExcavatorCacheEntry(request, response) {
 async function migratePreviousExcavatorCache(cacheNames) {
   const current = await caches.open(CACHE_NAME);
   const existing = await current.match(APP_SHELL_URL);
-  if (await hasCompleteExcavatorShell(current, existing)) return true;
+  try {
+    if (await hasCompleteExcavatorShell(current, existing)) return true;
+  } catch (error) {}
   if (existing) await current.delete(APP_SHELL_URL);
   for (const cacheName of cacheNames.slice().reverse()) {
     const previous = await caches.open(cacheName);
@@ -1141,6 +1159,11 @@ async function migratePreviousExcavatorCache(cacheNames) {
         if (await isSafeExcavatorCacheEntry(request, response)) {
           await current.put(request, response.clone());
         }
+      }
+      try {
+        if (!await cacheExcavatorShellDependencies(current, await candidate.clone().text())) continue;
+      } catch (error) {
+        continue;
       }
       await current.put(APP_SHELL_URL, candidate.clone());
       if (await hasCompleteExcavatorShell(current, candidate)) return true;

@@ -9,6 +9,9 @@ const viewsSource = fs.readFileSync(path.join(__dirname, '../../../trips/views.p
 const marker = 'EXCAVATOR_SERVICE_WORKER_JS = r"""';
 const start = viewsSource.indexOf(marker) + marker.length;
 const workerSource = viewsSource.slice(start, viewsSource.indexOf('"""', start));
+const renderedShellInput = process.env.EXCAVATOR_RENDERED_SHELL_PATH
+    ? fs.readFileSync(process.env.EXCAVATOR_RENDERED_SHELL_PATH, 'utf8')
+    : '';
 
 class FakeHeaders {
     constructor(type) { this.type = type; }
@@ -37,6 +40,31 @@ function fakeCache(initial = []) {
         delete: request => Promise.resolve(entries.delete(keyOf(request))),
         keys: () => Promise.resolve([...entries.keys()].map(url => new FakeRequest(url))),
     };
+}
+
+function wireAddAll(cache, fetcher) {
+    cache.addAll = async requests => {
+        const staged = [];
+        for (const request of requests) {
+            const response = await fetcher(request);
+            if (!response || !response.ok) throw new Error(`failed to cache ${request.url}`);
+            staged.push([request, response]);
+        }
+        for (const [request, response] of staged) await cache.put(request, response.clone());
+    };
+}
+
+function staticDependencies(html) {
+    const dependencies = [];
+    const pattern = /\b(?:src|href)\s*=\s*["']([^"'#]+)["']/gi;
+    let match;
+    while ((match = pattern.exec(html)) !== null) {
+        const url = new URL(match[1].replace(/&amp;/g, '&'), 'https://excavator.test');
+        if (url.origin === 'https://excavator.test' && url.pathname.startsWith('/static/')) {
+            dependencies.push(url.pathname + url.search);
+        }
+    }
+    return [...new Set(dependencies)];
 }
 
 function storage() {
@@ -122,7 +150,64 @@ test('expired-session update migrates v233 shell with exact safe assets and pres
     assert.equal((await after.ready()).length, 1);
 });
 
-test('incomplete previous shell rejects install before old cache deletion or activation', async () => {
+test('fresh authenticated rendered shell precaches every exact dependency for offline reopen', {
+    skip: !renderedShellInput,
+}, async () => {
+    const dependencies = staticDependencies(renderedShellInput);
+    assert.ok(dependencies.length > 10, 'the rendered Excavator shell must expose its real static closure');
+    assert.ok(dependencies.some(path => path.includes('/static/css/app.css?v=')));
+    assert.ok(dependencies.some(path => path.includes('/static/js/realtime-client.js?v=')));
+    assert.ok(dependencies.some(path => path.includes('excavator-mobile-shell-v234')));
+
+    const oldCache = fakeCache([['/sentinel', new FakeResponse('old', {url: 'https://excavator.test/sentinel'})]]);
+    const currentCache = fakeCache();
+    const cacheMap = new Map([
+        ['excavator-mobile-shell-v233', oldCache],
+        ['excavator-mobile-shell-v234', currentCache],
+    ]);
+    const listeners = {};
+    let offline = false;
+    const fetcher = async request => {
+        if (offline) throw new Error('offline');
+        const url = new URL(request.url, 'https://excavator.test');
+        if (url.pathname === '/excavator/work/') {
+            return new FakeResponse(renderedShellInput, {url: url.href, type: 'text/html'});
+        }
+        const type = url.pathname.endsWith('.css') ? 'text/css' : 'text/javascript';
+        return new FakeResponse(`asset:${url.pathname}${url.search}`, {url: url.href, type});
+    };
+    wireAddAll(currentCache, fetcher);
+    const context = {
+        URL, Set, Promise, Request: FakeRequest, Response: FakeResponse,
+        fetch: request => fetcher(request),
+        caches: {open: async name => cacheMap.get(name), keys: async () => [...cacheMap.keys()], delete: async name => cacheMap.delete(name)},
+        self: {location: {origin: 'https://excavator.test'}, addEventListener: (name, fn) => { listeners[name] = fn; }, clients: {claim: async () => {}}, skipWaiting: async () => {}},
+        setTimeout, clearTimeout,
+    };
+    vm.createContext(context);
+    vm.runInContext(workerSource, context);
+
+    let installWork;
+    listeners.install({waitUntil: promise => { installWork = promise; }});
+    await installWork;
+    let activateWork;
+    listeners.activate({waitUntil: promise => { activateWork = promise; }});
+    await activateWork;
+    assert.equal(cacheMap.has('excavator-mobile-shell-v233'), false);
+
+    offline = true;
+    for (const path of dependencies) {
+        let responseWork;
+        listeners.fetch({
+            request: new FakeRequest(path),
+            respondWith: promise => { responseWork = promise; },
+        });
+        const response = await responseWork;
+        assert.equal(await response.text(), `asset:${path}`, path);
+    }
+});
+
+test('missing fresh dependency rejects install before old cache deletion or activation', async () => {
     const missing = '/static/js/missing.js?v=excavator-mobile-shell-v233';
     const shellHtml = `<main data-eo-shell data-eo-role-code="excavator_operator"><script src="${missing}"></script></main>`;
     const oldCache = fakeCache([
@@ -136,9 +221,20 @@ test('incomplete previous shell rejects install before old cache deletion or act
     const listeners = {};
     let skippedWaiting = false;
     let claimedClients = false;
+    const fetcher = async request => {
+        const url = new URL(request.url, 'https://excavator.test');
+        if (url.pathname === '/excavator/work/') {
+            return new FakeResponse(shellHtml, {url: url.href, type: 'text/html'});
+        }
+        if (url.pathname + url.search === missing) {
+            return new FakeResponse('missing', {url: url.href, ok: false});
+        }
+        return new FakeResponse('asset', {url: url.href, type: url.pathname.endsWith('.css') ? 'text/css' : 'text/javascript'});
+    };
+    wireAddAll(currentCache, fetcher);
     const context = {
         URL, Set, Promise, Request: FakeRequest, Response: FakeResponse,
-        fetch: async () => new FakeResponse('<form>expired</form>', {url: 'https://excavator.test/login/', type: 'text/html'}),
+        fetch: request => fetcher(request),
         caches: {open: async name => cacheMap.get(name), keys: async () => [...cacheMap.keys()], delete: async name => cacheMap.delete(name)},
         self: {
             location: {origin: 'https://excavator.test'},
