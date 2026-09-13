@@ -4448,7 +4448,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
 {% endblock %}
 
 {% block body %}
-<main class="driver-shell" data-driver-shell data-driver-access-id="{{ access.id }}" data-driver-actor-id="{{ access.employee_id }}" data-driver-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}" data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-has-open-trip="{% if driver_has_open_trip %}true{% else %}false{% endif %}" data-driver-has-loaded-trip="{% if driver_has_loaded_trip %}true{% else %}false{% endif %}" data-driver-active-trip-id="{% if active_trip %}{{ active_trip.id }}{% endif %}" data-driver-assigned-dump-point-id="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point.id }}{% endif %}" data-driver-assigned-dump-point-name="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version }}" data-driver-sync-state="confirmed">
+<main class="driver-shell" data-driver-shell data-driver-access-id="{{ access.id }}" data-driver-actor-id="{{ access.employee_id }}" data-driver-auth-generation="{{ driver_auth_generation }}" data-driver-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}" data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-has-open-trip="{% if driver_has_open_trip %}true{% else %}false{% endif %}" data-driver-has-loaded-trip="{% if driver_has_loaded_trip %}true{% else %}false{% endif %}" data-driver-active-trip-id="{% if active_trip %}{{ active_trip.id }}{% endif %}" data-driver-assigned-dump-point-id="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point.id }}{% endif %}" data-driver-actual-dump-point-id="{{ active_trip_actual_dump_point_id|default:'' }}" data-driver-assigned-dump-point-name="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point }}{% endif %}" data-driver-pwa-version="{{ driver_shell_version }}" data-driver-sync-state="confirmed">
     {% if messages %}
         <div class="driver-messages">
             {% for message in messages %}
@@ -4463,7 +4463,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
             <b class="driver-header-truck">{{ driver_header_truck_label }}</b>
             <span class="driver-header-person">{{ driver_header_person_label }}</span>
         </div>
-        <div class="driver-online" role="status" aria-label="Онлайн">
+        <div class="driver-online" role="status" aria-live="polite" aria-atomic="true" aria-label="Связь с сервером: онлайн, неподтверждённых событий нет">
             {% comment %} В приложении показываем версию самого приложения, в браузере — версию
                веб-оболочки. Если приложение версию не сообщило (старая сборка,
                метка без версии) — не показываем ничего: версия оболочки там
@@ -7028,6 +7028,8 @@ window.bindDriverMobileShell = function () {
         }, 3600);
     }
     function openDriverTab(tab) {
+        var allowedTabs = ["work", "shift", "downtimes", "manifest"];
+        if (allowedTabs.indexOf(tab) < 0) tab = "work";
         /* Новая панель должна получить базовую плотность до первого paint:
            иначе она на кадр наследует tight/compact от предыдущей вкладки. */
         shell.dataset.driverDensity = shell.dataset.driverViewportDensity
@@ -7039,10 +7041,22 @@ window.bindDriverMobileShell = function () {
             url.searchParams.set("tab", tab);
             window.history.replaceState({}, "", url.toString());
         }
+        try {
+            window.localStorage.setItem("driver-active-tab-v1:" + shell.dataset.driverAccessId, tab);
+        } catch (error) {}
         clearDriverMessages();
         if (tab === "work") scheduleDriverDialLabelFit();
         scheduleDriverTabSettle(tab);
     }
+    (function restoreDriverTab() {
+        var allowedTabs = ["work", "shift", "downtimes", "manifest"];
+        var requested = "";
+        var stored = "";
+        try { requested = new URL(window.location.href).searchParams.get("tab") || ""; } catch (error) {}
+        try { stored = window.localStorage.getItem("driver-active-tab-v1:" + shell.dataset.driverAccessId) || ""; } catch (error) {}
+        var restored = allowedTabs.indexOf(requested) >= 0 ? requested : stored;
+        if (allowedTabs.indexOf(restored) >= 0) openDriverTab(restored);
+    })();
     document.querySelectorAll("[data-driver-tab-open]").forEach(function (button) {
         button.addEventListener("click", function () {
             openDriverTab(button.dataset.driverTabOpen);
@@ -7263,6 +7277,7 @@ window.bindDriverMobileShell = function () {
             accessId: current && current.dataset.driverAccessId,
             shiftId: current && current.dataset.driverShiftId,
             equipmentId: current && current.dataset.driverCurrentTruckId,
+            authGeneration: current && current.dataset.driverAuthGeneration,
             deviceId: driverInstallId()
         };
     }
@@ -7274,9 +7289,11 @@ window.bindDriverMobileShell = function () {
         window.driverOfflineEvents = driverOfflineEvents;
         var label = current.querySelector("[data-driver-sync-label]");
         var count = current.querySelector("[data-driver-sync-count]");
-        var total = Number(state.pending || 0) + Number(state.review || 0);
-        var previousTotal = Number(window.driverOfflinePendingCount || 0);
-        window.driverOfflinePendingCount = total;
+        var pending = Number(state.pending || 0);
+        var review = Number(state.review || 0);
+        var total = pending + review;
+        var previousPending = Number(window.driverOfflinePendingCount || 0);
+        window.driverOfflinePendingCount = pending;
         var mode = state.review ? "review" : state.sending ? "sending" : state.pending ? "pending" : "confirmed";
         current.dataset.driverSyncState = mode;
         if (label) {
@@ -7291,9 +7308,21 @@ window.bindDriverMobileShell = function () {
         if (count) {
             count.textContent = String(total);
             count.hidden = total < 1;
+            count.setAttribute("aria-label", total + " неподтверждённых событий");
+        }
+        var connection = current.querySelector(".driver-online");
+        if (connection) {
+            var detail = mode === "review"
+                ? "требуется сверка, событий: " + total
+                : mode === "sending"
+                    ? "отправка сохранённых событий, осталось: " + total
+                    : mode === "pending"
+                        ? "события сохранены на телефоне, ожидают отправки: " + total
+                        : (navigator.onLine === false ? "нет сети" : "онлайн, неподтверждённых событий нет");
+            connection.setAttribute("aria-label", "Связь с сервером: " + detail);
         }
         applyDriverOfflineProjection(current, driverOfflineEvents);
-        if (previousTotal > 0 && total === 0 && window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+        if (previousPending > 0 && pending === 0 && window.AppRealtime && typeof window.AppRealtime.wake === "function") {
             window.AppRealtime.wake("driver_offline_queue_drained");
         }
     }
@@ -7306,6 +7335,7 @@ window.bindDriverMobileShell = function () {
             return event.event_type === "driver.trip.unloaded" && String(event.trip_id || "") === activeTripId;
         });
         if (unload) {
+            var unloadNeedsReview = ["conflict", "auth_required", "invalid"].includes(unload.state);
             current.dataset.driverHasOpenTrip = "false";
             current.dataset.driverHasLoadedTrip = "false";
             var dial = current.querySelector(".driver-work-dial");
@@ -7318,8 +7348,8 @@ window.bindDriverMobileShell = function () {
                 button.classList.remove("is-loaded", "is-pending", "is-holding");
                 button.classList.add("is-empty");
             }
-            if (dialLabel) dialLabel.textContent = unload.state === "conflict" ? "НУЖНА СВЕРКА" : "РАЗГРУЗКА СОХРАНЕНА";
-            if (note) note.textContent = unload.state === "conflict" ? "ПРОВЕРЬТЕ СОБЫТИЕ" : "ОЖИДАНИЕ СИНХРОНИЗАЦИИ";
+            if (dialLabel) dialLabel.textContent = unloadNeedsReview ? "НУЖНА СВЕРКА" : "РАЗГРУЗКА СОХРАНЕНА";
+            if (note) note.textContent = unloadNeedsReview ? "ПРОВЕРЬТЕ СОБЫТИЕ" : "ОЖИДАНИЕ СИНХРОНИЗАЦИИ";
             var pointCard = current.querySelector("[data-driver-point-open]");
             if (pointCard) { pointCard.removeAttribute("role"); pointCard.removeAttribute("tabindex"); pointCard.removeAttribute("data-driver-point-open"); }
             var sheet = current.querySelector("[data-driver-point-sheet]");
@@ -7331,6 +7361,7 @@ window.bindDriverMobileShell = function () {
         if (!unload && pointEvents.length) {
             var latestPoint = pointEvents[pointEvents.length - 1];
             var pointId = String(latestPoint.payload && latestPoint.payload.dump_point_id || "");
+            current.dataset.driverActualDumpPointId = pointId;
             current.querySelectorAll(".driver-unload-tile").forEach(function (tile) { tile.classList.remove("is-current"); });
             var pointForm = current.querySelector('.driver-unload-tile-form [name="dump_point"][value="' + pointId + '"]');
             var pointButton = pointForm && pointForm.closest("form") && pointForm.closest("form").querySelector(".driver-unload-tile");
@@ -7365,17 +7396,55 @@ window.bindDriverMobileShell = function () {
         }
     }
 
+    function driverOfflineBindings() {
+        return {
+            context: driverOfflineContext,
+            onState: renderDriverOfflineState,
+            onConfirmed: function () {
+                var args = arguments;
+                var event = args[0] || {};
+                if (event.event_type === "driver.trip.unloaded" && !window.driverOfflineConfirmationCueScheduled) {
+                    window.driverOfflineConfirmationCueScheduled = true;
+                    playDriverVoice("action_ok", "voice_trip_finished");
+                    window.setTimeout(function () { window.driverOfflineConfirmationCueScheduled = false; }, 750);
+                }
+                if (!window.driverOfflineRefreshScheduled) {
+                    window.driverOfflineRefreshScheduled = true;
+                    Promise.resolve().then(function () {
+                        if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                            window.AppRealtime.wake("driver_offline_event_confirmed");
+                        }
+                        if (typeof window.applyOperationalStateRefresh === "function") {
+                            return window.applyOperationalStateRefresh({version: 0});
+                        }
+                    }).catch(function () {}).finally(function () {
+                        window.driverOfflineRefreshScheduled = false;
+                    });
+                }
+            },
+            onReview: function (event, result) {
+                showDriverToast(result.message || "Событие сохранено и требует сверки.");
+            }
+        };
+    }
+
     function createDriverOfflineRuntime() {
         if (typeof window.createDriverOfflineOutbox !== "function") {
             return {
                 enqueue: function () { return Promise.reject(new Error("offline_runtime_unavailable")); },
                 flush: function () { return Promise.resolve([]); },
                 pending: function () { return Promise.resolve([]); },
-                publish: function () { return Promise.resolve([]); }
+                publish: function () { return Promise.resolve([]); },
+                getServerMapping: function () { return Promise.resolve(null); }
             };
         }
         if (window.driverOfflineOutbox && window.driverOfflineOutboxAccessId === shell.dataset.driverAccessId) {
-            window.driverOfflineOutbox.publish().catch(function () {});
+            var existingBindings = driverOfflineBindings();
+            window.driverOfflineOutbox.setBindings(existingBindings).then(function () {
+                return window.driverOfflineOutbox.resumeAuthRequired(driverOfflineContext().authGeneration);
+            }).then(function () {
+                return window.driverOfflineOutbox.flush();
+            }).catch(function () {});
             return window.driverOfflineOutbox;
         }
         window.driverOfflineOutboxAccessId = shell.dataset.driverAccessId;
@@ -7398,11 +7467,13 @@ window.bindDriverMobileShell = function () {
                     },
                     body: JSON.stringify(batch)
                 }).then(function (response) {
-                    return response.json().catch(function () { return {}; }).then(function (payload) {
+                    return response.text().then(function (body) {
+                        var payload = {};
+                        try { payload = JSON.parse(body || "{}"); } catch (error) {}
                         if (response.status >= 500) throw new Error("server_unavailable");
-                        var redirectedToLogin = response.redirected === true
-                            && /\/login\/?(?:\?|$)/.test(String(response.url || ""));
-                        if (response.status === 401 || response.status === 403 || redirectedToLogin) {
+                        var needsAuthentication = typeof window.isDriverSyncAuthResponse === "function"
+                            && window.isDriverSyncAuthResponse(response, body, window.location.href);
+                        if (needsAuthentication) {
                             return {results: batch.events.map(function (event) {
                                 return {event_id: event.event_id, status: "auth_required", code: "auth_required", message: "Требуется повторный вход."};
                             })};
@@ -7412,27 +7483,17 @@ window.bindDriverMobileShell = function () {
                     });
                 });
             },
-            onState: renderDriverOfflineState,
-            onConfirmed: function () {
-                var args = arguments;
-                var event = args[0] || {};
-                if (event.event_type === "driver.trip.unloaded") {
-                    playDriverVoice("action_ok", "voice_trip_finished");
-                }
-                if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
-                    window.AppRealtime.wake("driver_offline_event_confirmed");
-                }
-                if (typeof window.applyOperationalStateRefresh === "function") {
-                    return window.applyOperationalStateRefresh({version: 0});
-                }
-            },
-            onReview: function (event, result) {
-                showDriverToast(result.message || "Событие сохранено и требует сверки.");
-            }
+            onState: driverOfflineBindings().onState,
+            onConfirmed: driverOfflineBindings().onConfirmed,
+            onReview: driverOfflineBindings().onReview
         });
         window.driverOfflineOutbox.initialize().catch(function () {
             var current = document.querySelector("[data-driver-shell]");
-            if (current) current.dataset.driverSyncState = "storage-error";
+            if (current) {
+                current.dataset.driverSyncState = "storage-error";
+                var connection = current.querySelector(".driver-online");
+                if (connection) connection.setAttribute("aria-label", "Локальное сохранение недоступно; действие не выполнено");
+            }
             showDriverToast("Не удалось открыть защищённое хранилище. Действия без связи недоступны.");
         });
         return window.driverOfflineOutbox;
@@ -7625,26 +7686,51 @@ window.bindDriverMobileShell = function () {
         payload = payload || {};
         var isClose = payload.action === "close";
         var occurredAt = new Date().toISOString();
+        var context = driverOfflineContext();
+        if (!context.shiftId || !context.equipmentId) {
+            return Promise.reject(new Error("Нет подтверждённой смены или самосвала для сохранения простоя."));
+        }
+        if (!isClose && Number(payload.reason_id) <= 0) {
+            return Promise.reject(new Error("Не выбрана причина простоя."));
+        }
         return driverOfflineOutbox.pending().then(function (events) {
             var unresolvedStart = events.slice().reverse().find(function (event) {
                 return event.event_type === "driver.downtime.started"
-                    && !["conflict", "auth_required", "invalid"].includes(event.state);
+                    && event.state === "pending";
             });
             var reasonButton = !isClose
                 ? shell.querySelector('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + String(payload.reason_id || "") + '"]')
                 : null;
-            var eventPayload = isClose
-                ? {
-                    downtime_id: downtimeCard && downtimeCard.dataset.driverActiveDowntimeId || null,
-                    local_downtime_id: unresolvedStart ? unresolvedStart.event_id : null
+            var activeDowntimeId = String(downtimeCard && downtimeCard.dataset.driverActiveDowntimeId || "");
+            var localStartId = unresolvedStart ? unresolvedStart.event_id
+                : (activeDowntimeId.indexOf("local:") === 0 ? activeDowntimeId.slice(6) : "");
+            var mappingPromise = isClose && localStartId && !unresolvedStart
+                ? driverOfflineOutbox.getServerMapping(localStartId)
+                : Promise.resolve(null);
+            return mappingPromise.then(function (mapping) {
+                var mappedServerId = Number(mapping && (mapping.downtime_event_id || mapping.downtime_id)) || null;
+                var directServerId = activeDowntimeId.indexOf("local:") === 0 ? null : Number(activeDowntimeId) || null;
+                if (isClose && !unresolvedStart && !mappedServerId && !directServerId) {
+                    throw new Error("Начало простоя ещё не подтверждено. Дождитесь синхронизации или сверки.");
                 }
-                : {reason_id: Number(payload.reason_id)};
-            return driverOfflineOutbox.enqueue({
-                event_id: payload.client_action_id,
-                event_type: isClose ? "driver.downtime.ended" : "driver.downtime.started",
-                occurred_at: occurredAt,
-                depends_on: isClose && unresolvedStart ? [unresolvedStart.event_id] : [],
-                payload: eventPayload
+                if (isClose) {
+                    if (typeof window.createDriverDowntimeEndEvent !== "function") {
+                        throw new Error("offline_runtime_unavailable");
+                    }
+                    return driverOfflineOutbox.enqueue(window.createDriverDowntimeEndEvent({
+                        eventId: payload.client_action_id,
+                        occurredAt: occurredAt,
+                        pendingStartId: unresolvedStart ? unresolvedStart.event_id : null,
+                        serverId: mappedServerId || directServerId
+                    }));
+                }
+                return driverOfflineOutbox.enqueue({
+                    event_id: payload.client_action_id,
+                    event_type: "driver.downtime.started",
+                    occurred_at: occurredAt,
+                    depends_on: [],
+                    payload: {reason_id: Number(payload.reason_id)}
+                });
             }).then(function (event) {
                 driverOfflineOutbox.flush().catch(function () {});
                 if (isClose) {
@@ -7849,10 +7935,18 @@ window.bindDriverMobileShell = function () {
             holdButton.disabled = true;
             var actionId = holdForm.querySelector("[data-driver-client-action]").value;
             var unloadTripId = String(holdForm.dataset.driverTripId || "");
+            var unloadContext = driverOfflineContext();
+            if (!unloadTripId || shell.dataset.driverHasLoadedTrip !== "true" || !unloadContext.shiftId || !unloadContext.equipmentId) {
+                unloadRecovery.recover({type: "local_guard_failed"});
+                holdButton.classList.remove("is-pending");
+                showDriverToast("Нет подтверждённого загруженного рейса для разгрузки.");
+                return false;
+            }
             driverOfflineOutbox.pending().then(function (events) {
                 var pendingPoint = events.slice().reverse().find(function (event) {
                     return event.event_type === "driver.trip.dump_point_changed"
-                        && String(event.trip_id || "") === unloadTripId;
+                        && String(event.trip_id || "") === unloadTripId
+                        && event.state === "pending";
                 });
                 return driverOfflineOutbox.enqueue({
                     event_id: actionId,
@@ -7947,16 +8041,30 @@ window.bindDriverMobileShell = function () {
             form.addEventListener("submit", function (event) {
                 event.preventDefault();
                 event.stopImmediatePropagation();
-                fillClientAction(form, "change-unload-point");
+                if (form.dataset.driverOfflinePending === "true") return;
                 var action = form.querySelector("[data-driver-client-action]");
                 var point = form.querySelector('[name="dump_point"]');
-                var tripId = shell.dataset.driverActiveTripId;
-                driverOfflineOutbox.enqueue({
-                    event_id: action && action.value,
-                    event_type: "driver.trip.dump_point_changed",
-                    trip_id: tripId,
-                    payload: {dump_point_id: Number(point && point.value)}
+                var tripId = String(shell.dataset.driverActiveTripId || "");
+                var pointId = Number(point && point.value);
+                if (!tripId || !pointId || shell.dataset.driverHasOpenTrip !== "true") {
+                    showDriverToast("Нет подтверждённого рейса или точки разгрузки.");
+                    return;
+                }
+                form.dataset.driverOfflinePending = "true";
+                driverOfflineOutbox.pending().then(function (events) {
+                    if (typeof window.createDriverPointChangeEvent !== "function") {
+                        throw new Error("offline_runtime_unavailable");
+                    }
+                    var change = window.createDriverPointChangeEvent({
+                        tripId: tripId,
+                        pointId: pointId,
+                        currentPointId: shell.dataset.driverActualDumpPointId,
+                        events: events
+                    });
+                    if (action) action.value = change.event_id;
+                    return driverOfflineOutbox.enqueue(change);
                 }).then(function () {
+                    shell.dataset.driverActualDumpPointId = String(pointId);
                     pointSheet.querySelectorAll(".driver-unload-tile").forEach(function (tile) { tile.classList.remove("is-current"); });
                     var button = form.querySelector(".driver-unload-tile");
                     if (button) button.classList.add("is-current");
@@ -7965,6 +8073,8 @@ window.bindDriverMobileShell = function () {
                     return driverOfflineOutbox.flush();
                 }).catch(function () {
                     showDriverToast("Не удалось сохранить точку на телефоне. Повторите действие.");
+                }).finally(function () {
+                    form.dataset.driverOfflinePending = "false";
                 });
             });
         });

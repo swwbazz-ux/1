@@ -320,11 +320,10 @@ const CACHE_PREFIX = "driver-mobile-shell-";
 const APP_SHELL_URL = "/driver/";
 const LEGACY_SHELL_URL = "/driver/shift/";
 const MANIFEST_URL = "/driver.webmanifest";
+const SHELL_URLS = [APP_SHELL_URL, LEGACY_SHELL_URL];
 const PRIVACY_POLICY_PATH = "/company/privacy/";
 const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";
 const CORE_ASSETS = [
-    APP_SHELL_URL,
-    LEGACY_SHELL_URL,
     MANIFEST_URL,
     PRIVACY_POLICY_URL,
     "/static/portal/css/portal-shell-v5.css?v=7",
@@ -365,6 +364,15 @@ self.addEventListener("install", (event) => {{
     event.waitUntil(
         caches.open(CACHE_NAME)
             .then((cache) => cache.addAll(CORE_ASSETS))
+            .then(async () => {{
+                const cache = await caches.open(CACHE_NAME);
+                await Promise.all(SHELL_URLS.map(async (url) => {{
+                    try {{
+                        const response = await fetch(new Request(url, {{ cache: "no-store", credentials: "same-origin" }}));
+                        if (await isValidatedDriverShell(response)) await cache.put(url, response.clone());
+                    }} catch (error) {{}}
+                }}));
+            }})
             .then(() => self.skipWaiting())
     );
 }});
@@ -390,6 +398,29 @@ async function networkFirst(request, fallbackUrl) {{
         return response;
     }} catch (error) {{
         return (await cache.match(request)) || (fallbackUrl ? cache.match(fallbackUrl) : undefined) || Response.error();
+    }}
+}}
+
+async function isValidatedDriverShell(response) {{
+    if (!response || !response.ok) return false;
+    const contentType = String(response.headers.get("Content-Type") || "");
+    if (!contentType.includes("text/html")) return false;
+    const html = await response.clone().text();
+    return html.includes("data-driver-shell") && html.includes('data-driver-access-id="');
+}}
+
+async function networkFirstDriverShell(request) {{
+    const cache = await caches.open(CACHE_NAME);
+    try {{
+        const freshRequest = new Request(request, {{ cache: "no-store" }});
+        const response = await fetch(freshRequest);
+        if (await isValidatedDriverShell(response)) await cache.put(request, response.clone());
+        return response;
+    }} catch (error) {{
+        return (await cache.match(request))
+            || (await cache.match(APP_SHELL_URL))
+            || (await cache.match(LEGACY_SHELL_URL))
+            || Response.error();
     }}
 }}
 
@@ -427,7 +458,7 @@ self.addEventListener("fetch", (event) => {{
         return;
     }}
     if (request.mode === "navigate" || url.pathname === APP_SHELL_URL || url.pathname === LEGACY_SHELL_URL) {{
-        event.respondWith(networkFirst(request, APP_SHELL_URL));
+        event.respondWith(networkFirstDriverShell(request));
         return;
     }}
     if (url.pathname === MANIFEST_URL) {{
@@ -4388,6 +4419,7 @@ def driver_shift_view(request):
             'active_trip_actual_dump_point_id': active_trip_actual_dump_point_id,
             'trip_status_loaded': TripStatus.LOADED_WAITING_UNLOAD,
             'driver_shell_version': DRIVER_SHELL_VERSION,
+            'driver_auth_generation': request.session.get(ACTIVE_ROLE_GENERATION_SESSION_KEY, ''),
             'operational_state_version': operational_state_version,
         },
     )
