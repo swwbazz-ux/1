@@ -1758,31 +1758,50 @@ document.addEventListener("DOMContentLoaded", function () {
     var logoutPath = "{% url 'logout' %}";
     function clearCachedAuthenticatedRoleShell() {
         var serviceWorker = window.navigator && window.navigator.serviceWorker;
-        var controller = serviceWorker && serviceWorker.controller;
-        if (!controller || typeof controller.postMessage !== "function") {
+        if (!serviceWorker) {
             return Promise.resolve();
         }
-        return new Promise(function (resolve) {
-            var settled = false;
-            var channel = new MessageChannel();
-            var timeout = window.setTimeout(function () {
-                if (settled) return;
-                settled = true;
-                resolve();
-            }, 1200);
-            channel.port1.onmessage = function () {
-                if (settled) return;
-                settled = true;
-                window.clearTimeout(timeout);
-                resolve();
-            };
-            try {
-                controller.postMessage({type: "CLEAR_AUTHENTICATED_SHELL"}, [channel.port2]);
-            } catch (error) {
-                window.clearTimeout(timeout);
-                resolve();
+        function postClearMessage(worker) {
+            if (!worker || typeof worker.postMessage !== "function") {
+                return Promise.resolve();
             }
-        });
+            return new Promise(function (resolve) {
+                var settled = false;
+                var channel = new MessageChannel();
+                var timeout = window.setTimeout(function () {
+                    if (settled) return;
+                    settled = true;
+                    resolve();
+                }, 1200);
+                channel.port1.onmessage = function () {
+                    if (settled) return;
+                    settled = true;
+                    window.clearTimeout(timeout);
+                    resolve();
+                };
+                try {
+                    worker.postMessage({type: "CLEAR_AUTHENTICATED_SHELL"}, [channel.port2]);
+                } catch (error) {
+                    window.clearTimeout(timeout);
+                    resolve();
+                }
+            });
+        }
+        if (serviceWorker.controller) {
+            return postClearMessage(serviceWorker.controller);
+        }
+        var getRegistration = window.AppPwaContractGuard
+            && typeof window.AppPwaContractGuard.getRegistration === "function"
+            ? window.AppPwaContractGuard.getRegistration
+            : null;
+        if (!getRegistration) {
+            return Promise.resolve();
+        }
+        return Promise.resolve(getRegistration()).then(function (registration) {
+            var worker = serviceWorker.controller
+                || (registration && (registration.active || registration.waiting || registration.installing));
+            return postClearMessage(worker);
+        }).catch(function () {});
     }
     function navigateAfterNativeConnectionStop(url) {
         var stopPromise = null;
@@ -1792,7 +1811,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 ? window.NativeBackgroundConnection.stop()
                 : null;
         } catch (error) {}
-        Promise.all([
+        return Promise.all([
             Promise.resolve(stopPromise).catch(function () {}),
             clearCachedAuthenticatedRoleShell().catch(function () {})
         ]).finally(function () {

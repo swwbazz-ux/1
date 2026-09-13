@@ -60,6 +60,19 @@ function extractGuardSource() {
     );
 }
 
+function extractNamedFunction(source, name) {
+    const start = source.indexOf(`function ${name}(`);
+    assert.notEqual(start, -1, `${name} is missing`);
+    const bodyStart = source.indexOf("{", start);
+    let depth = 0;
+    for (let index = bodyStart; index < source.length; index += 1) {
+        if (source[index] === "{") depth += 1;
+        if (source[index] === "}") depth -= 1;
+        if (depth === 0) return source.slice(start, index + 1);
+    }
+    throw new Error(`${name} is not closed`);
+}
+
 const guardSource = extractGuardSource();
 const guardUnavailable = !guardSource;
 
@@ -1326,6 +1339,50 @@ test("field-app logout buttons clear the authenticated shell through the shared 
         excavatorTemplate,
         /window\.navigateAfterNativeConnectionStop\(logoutUrl\)/
     );
+});
+
+test("logout clears through an active registration before the first page has a controller", async () => {
+    const messages = [];
+    const activeWorker = {
+        postMessage(message, ports) {
+            messages.push(message);
+            ports[0].postMessage({ok: true});
+        },
+    };
+    const window = {
+        navigator: {serviceWorker: {controller: null}},
+        NativeBackgroundConnection: {stop: async () => {}},
+        AppPwaContractGuard: {
+            getRegistration: async () => ({active: activeWorker}),
+        },
+        location: {href: "https://driver.test/driver/"},
+        setTimeout,
+        clearTimeout,
+    };
+    const context = {
+        window,
+        Promise,
+        MessageChannel: function MessageChannelStub() {
+            const channel = createMessageChannel();
+            this.port1 = channel.port1;
+            this.port2 = channel.port2;
+        },
+    };
+    vm.createContext(context);
+    vm.runInContext(
+        [
+            extractNamedFunction(baseTemplate, "clearCachedAuthenticatedRoleShell"),
+            extractNamedFunction(baseTemplate, "navigateAfterNativeConnectionStop"),
+            "window.navigateAfterNativeConnectionStop = navigateAfterNativeConnectionStop;",
+        ].join("\n"),
+        context
+    );
+
+    await window.navigateAfterNativeConnectionStop("/logout/");
+
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].type, "CLEAR_AUTHENTICATED_SHELL");
+    assert.equal(window.location.href, "/logout/");
 });
 
 test(
