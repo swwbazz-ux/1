@@ -321,14 +321,19 @@ test('mutation queues a higher-version fragment behind an invalidated in-flight 
     assert.equal(context.document.body.dataset.operationalStateVersion, '11');
 });
 
-test('truck loaded request carries exact assignment state id', () => {
+test('truck loaded outbox event carries exact assignment state and immutable context', () => {
     const start = template.indexOf('    function postTruckLoaded(card, dumpTarget)');
     const end = template.indexOf('    function clearDropReady()', start);
     const source = template.slice(start, end);
     assert.match(source, /assignment_id:\s*card\.dataset\.assignmentId/);
+    assert.match(source, /event_type:\s*"excavator\.trip\.loaded"/);
+    assert.match(source, /format_version:\s*1/);
+    assert.match(source, /occurred_at:\s*new Date\(\)\.toISOString\(\)/);
+    assert.match(source, /local_trip_id:\s*localTripId/);
+    assert.match(source, /depends_on:\s*previous \? \[previous\.event_id\] : \[\]/);
+    assert.match(source, /fieldOutbox\.queue\(event\)\.then/);
+    assert.match(source, /rock_type_id:/);
     assert.match(source, /invalidateExcavatorWorkRefresh\(\)/);
-    assert.match(source, /storeExcavatorRealtimeVersion\(Number\(data\.version/);
-    assert.match(source, /version:\s*Number\(data\.version/);
 });
 
 test('successful outgoing load removes only the source card and keeps exact trip badge', () => {
@@ -357,4 +362,134 @@ test('manual dump preview expiry is trip-specific and independent from transfer 
     assert.doesNotMatch(source, /removePendingTruckBadge\(/);
     assert.match(template, /bindExcavatorTransferCountdowns\(shell\);/);
     assert.match(template, /bindManualDumpCardExpiry\(shell\);/);
+});
+
+test('offline review records do not block authoritative refresh forever', () => {
+    assert.match(template, /eoHasPendingFieldEvents = summary\.pending > 0/);
+    const guardStart = template.indexOf('function isExcavatorRefreshUnsafe(options)');
+    const guardEnd = template.indexOf('function invalidateExcavatorWorkRefresh()', guardStart);
+    const guardSource = template.slice(guardStart, guardEnd);
+    assert.doesNotMatch(guardSource, /is-saved-on-device/);
+    assert.doesNotMatch(guardSource, /data-eo-offline-event-id/);
+    const start = template.indexOf('    window.applyExcavatorPendingFieldEvents = function (events)');
+    const end = template.indexOf('    window.confirmExcavatorFieldEvent', start);
+    const source = template.slice(start, end);
+    assert.match(source, /\["pending", "syncing"\]\.indexOf\(event\.sync_state\)/);
+    assert.doesNotMatch(source, /\["pending", "syncing", "conflict"/);
+    const attentionStart = template.indexOf('    window.attendExcavatorFieldEvent');
+    const attentionEnd = template.indexOf('    if (fieldOutbox)', attentionStart);
+    assert.match(template.slice(attentionStart, attentionEnd), /refreshExcavatorWorkFromServer\(\{preserveTab: true\}\)/);
+});
+
+test('downtime end keeps the active server id and depends on a local start', () => {
+    const start = template.indexOf('    function postDowntimeAction(payload)');
+    const end = template.indexOf('    var downtimeStatusSyncGeneration', start);
+    const source = template.slice(start, end);
+    assert.match(source, /active_downtime_id:\s*downtimeCard \? downtimeCard\.dataset\.eoActiveDowntimeId/);
+    assert.match(source, /dependencyTypes:\s*\["excavator\.downtime\.started", "excavator\.downtime\.ended"\]/);
+});
+
+test('confirmed server trip cancellation also uses the durable outbox', () => {
+    const start = template.indexOf('    function cancelLoadedTripFromQueue(item, options)');
+    const end = template.indexOf('    function returnLastTruckFromDump', start);
+    const source = template.slice(start, end);
+    assert.match(source, /item\.dataset\.eoOfflineEventId \|\| item\.dataset\.tripId/);
+    assert.match(source, /queueExcavatorFieldEvent\("excavator\.trip\.loaded\.cancelled"/);
+    assert.match(source, /tripId:\s*Number\(item\.dataset\.tripId/);
+});
+
+test('confirmed load keeps the server trip id for the next offline load', () => {
+    const start = template.indexOf('    window.confirmExcavatorFieldEvent = function (event, result)');
+    const end = template.indexOf('    window.attendExcavatorFieldEvent', start);
+    const source = template.slice(start, end);
+    assert.match(source, /cardByTruckId\(event\.payload && event\.payload\.truck_id\)/);
+    assert.match(source, /confirmedCard\.dataset\.eoOpenTripId = String\(tripId\)/);
+    assert.match(source, /delete confirmedCard\.dataset\.eoLocalOpenTripId/);
+});
+
+test('offline restart restores a valid tab from URL or access-scoped storage', () => {
+    const start = template.indexOf('    var excavatorTabPreferenceKey');
+    const end = template.indexOf('    /* EXCAVATOR_TAB_SETTLE_START */', start);
+    const source = template.slice(start, end);
+    assert.match(source, /"excavator-active-tab-v1:"/);
+    assert.match(source, /shell\.dataset\.eoAccessId/);
+    assert.match(source, /searchParams\.get\("tab"\)/);
+    assert.match(source, /localStorage\.getItem\(excavatorTabPreferenceKey\)/);
+    assert.match(source, /localStorage\.setItem\(excavatorTabPreferenceKey, name\)/);
+    assert.match(template, /activateTab\(restoredExcavatorTab\(shell\.dataset\.eoActiveTab \|\| "trucks"\)\)/);
+});
+
+test('fragment replacement rebinds outbox dispatch to the new shell without duplicate lifecycle listeners', async () => {
+    const start = template.indexOf('function ensureExcavatorFieldOutbox(shell)');
+    const end = template.indexOf('window.initExcavatorWorkShell = function ()', start);
+    const source = template.slice(start, end);
+    const oldShell = {
+        name: 'old',
+        dataset: {eoAccessId: '7', eoEmployeeId: '17'},
+        querySelector: () => ({value: 'old-token'}),
+    };
+    const newShell = {
+        name: 'new',
+        dataset: {eoAccessId: '7', eoEmployeeId: '17'},
+        querySelector: () => ({value: 'new-token'}),
+    };
+    let currentShell = oldShell;
+    let factoryCalls = 0;
+    let windowListenerCount = 0;
+    let documentListenerCount = 0;
+    let callbacks;
+    const outbox = {
+        ready: () => Promise.resolve([]),
+        flush: () => Promise.resolve([]),
+        retryNow: () => Promise.resolve([]),
+        pending: () => Promise.resolve([]),
+    };
+    const context = {
+        navigator: {onLine: false},
+        excavatorInstallDeviceId: () => 'device-1',
+        renderExcavatorOfflineStatus() {},
+        document: {
+            hidden: false,
+            querySelector: selector => selector === '[data-eo-shell]' ? currentShell : null,
+            addEventListener: () => { documentListenerCount += 1; },
+        },
+        window: {
+            indexedDB: {},
+            localStorage: {},
+            createExcavatorFieldOutbox: options => {
+                factoryCalls += 1;
+                callbacks = options;
+                return outbox;
+            },
+            addEventListener: () => { windowListenerCount += 1; },
+        },
+    };
+    vm.createContext(context);
+    vm.runInContext(source, context);
+    assert.equal(context.ensureExcavatorFieldOutbox(oldShell), outbox);
+    const oldApplications = [];
+    context.window.applyExcavatorPendingFieldEvents = events => oldApplications.push(events);
+
+    currentShell = newShell;
+    const newApplications = [];
+    const confirmations = [];
+    context.window.applyExcavatorPendingFieldEvents = events => newApplications.push(events);
+    context.window.confirmExcavatorFieldEvent = event => confirmations.push(event.event_type);
+    assert.equal(context.ensureExcavatorFieldOutbox(newShell), outbox);
+    callbacks.onChange(
+        {total: 2, pending: 2, syncing: 0, attention: 0},
+        [{event_type: 'excavator.trip.loaded'}, {event_type: 'excavator.downtime.started'}],
+        {}
+    );
+    await callbacks.onConfirmed({event_type: 'excavator.trip.loaded'}, {status: 'accepted'});
+
+    assert.equal(factoryCalls, 1);
+    assert.equal(windowListenerCount, 3);
+    assert.equal(documentListenerCount, 1);
+    assert.deepEqual(oldApplications, []);
+    assert.deepEqual(newApplications[0].map(event => event.event_type), [
+        'excavator.trip.loaded',
+        'excavator.downtime.started',
+    ]);
+    assert.deepEqual(confirmations, ['excavator.trip.loaded']);
 });

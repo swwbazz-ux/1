@@ -6,16 +6,18 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v233">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v233">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v233">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v233">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v233">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v233">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v233" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v233" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v234">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v234">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v234">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v234">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v234">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v234">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v234" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v234" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
+<link rel="stylesheet" href="{% static 'css/excavator-offline-v1.css' %}?v=1">
+<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=1" defer></script>
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -35,6 +37,10 @@
     data-eo-shift-url="{% url 'excavator_shift_action' %}"
     data-eo-truck-loaded-url="{% url 'excavator_truck_loaded' %}"
     data-eo-truck-loaded-cancel-url="{% url 'excavator_truck_loaded_cancel' %}"
+    data-eo-offline-sync-url="/offline-events/sync/"
+    data-eo-access-id="{{ access.id }}"
+    data-eo-employee-id="{{ access.employee_id }}"
+    data-eo-role-code="excavator_operator"
     data-eo-truck-green-icon="{% static 'img/equipment/truck-green.png' %}"
 >
     {% if messages %}
@@ -72,6 +78,11 @@
                 </strong>
             </div>
         </header>
+
+        <div class="eo-offline-sync" data-eo-offline-sync hidden role="status" aria-live="polite">
+            <span data-eo-offline-sync-label>Связь есть · всё подтверждено</span>
+            <b class="eo-offline-sync__count" data-eo-offline-sync-count hidden>0</b>
+        </div>
 
         {% include "includes/mobile_shift_screen.html" with mobile_shift_role="excavator" mobile_shift_state=open_shift|yesno:"open,closed" mobile_shift_previous=shift_previous_readings %}
 
@@ -425,7 +436,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v233";
+var excavatorShellVersion = "excavator-mobile-shell-v234";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -444,7 +455,10 @@ function compactExcavatorNotice(message) {
         "Техника неактивна. Обратитесь к руководителю.": "Техника неактивна.",
         "Назначенная техника неактивна. Обратитесь к руководителю.": "Назначенная техника неактивна.",
         "Назначенная техника уже занята в открытой смене. Обратитесь к руководителю.": "Техника занята в другой смене.",
-        "Выберите породу и хотя бы одну точку разгрузки": "Выберите породу и точку разгрузки."
+        "Выберите породу и хотя бы одну точку разгрузки": "Выберите породу и точку разгрузки.",
+        "Failed to fetch": "Сервер недоступен. Действие не сохранено.",
+        "Load failed": "Сервер недоступен. Действие не сохранено.",
+        "NetworkError when attempting to fetch resource.": "Сервер недоступен. Действие не сохранено."
     };
     return replacements[text] || text;
 }
@@ -1010,6 +1024,7 @@ function isExcavatorRefreshUnsafe(options) {
         : "";
     var shell = document.querySelector("[data-eo-shell]");
     if (!shell) return false;
+    if (shell.dataset.eoHasPendingFieldEvents === "true") return true;
     var active = document.activeElement;
     var activeTag = active && active.tagName ? active.tagName.toLowerCase() : "";
     if (active && shell.contains(active) && (active.isContentEditable || activeTag === "input" || activeTag === "textarea" || activeTag === "select")) {
@@ -1307,6 +1322,179 @@ window.applyOperationalStateRefresh = function (context) {
     });
 };
 
+function excavatorInstallDeviceId() {
+    var key = "copper-field-device-id-v1";
+    try {
+        var existing = window.localStorage.getItem(key);
+        if (existing) return existing;
+        var generated = window.crypto && typeof window.crypto.randomUUID === "function"
+            ? window.crypto.randomUUID()
+            : "device-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+        window.localStorage.setItem(key, generated);
+        return generated;
+    } catch (error) {
+        return "";
+    }
+}
+
+function newExcavatorFieldId(prefix) {
+    var value = window.crypto && typeof window.crypto.randomUUID === "function"
+        ? window.crypto.randomUUID()
+        : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+    return String(prefix || "event") + "-" + value;
+}
+
+function nextExcavatorFieldSequence(accessId, deviceId) {
+    var key = "excavator-field-sequence-v1:" + accessId + ":" + deviceId;
+    var next;
+    try {
+        next = Math.max(1, Number(window.localStorage.getItem(key) || 0) + 1);
+        window.localStorage.setItem(key, String(next));
+    } catch (error) {
+        throw new Error("Не удалось сохранить порядок действий на телефоне.");
+    }
+    return next;
+}
+
+function renderExcavatorOfflineStatus(summary) {
+    var indicator = document.querySelector("[data-eo-offline-sync]");
+    if (!indicator) return;
+    var shell = document.querySelector("[data-eo-shell]");
+    summary = summary || {};
+    var label = indicator.querySelector("[data-eo-offline-sync-label]");
+    var count = indicator.querySelector("[data-eo-offline-sync-count]");
+    var offline = navigator.onLine === false;
+    var text = "Связь есть · всё подтверждено";
+    var stateClass = "";
+    if (summary.storage_failed) {
+        text = "Не удалось сохранить действие";
+        stateClass = "is-storage-error";
+    } else if (summary.attention > 0) {
+        text = "Нужна сверка";
+        stateClass = "is-attention";
+    } else if (summary.syncing > 0) {
+        text = "Отправляем накопленное";
+        stateClass = "is-syncing";
+    } else if (summary.total > 0 && offline) {
+        text = "Нет связи · сохранено на телефоне";
+        stateClass = "is-offline";
+    } else if (summary.total > 0) {
+        text = "Ожидает отправки";
+        stateClass = "is-offline";
+    } else if (offline) {
+        text = "Нет связи · новых действий нет";
+        stateClass = "is-offline";
+    }
+    indicator.className = "eo-offline-sync" + (stateClass ? " " + stateClass : "");
+    if (shell) shell.dataset.eoHasPendingFieldEvents = summary.pending > 0 ? "true" : "false";
+    indicator.hidden = false;
+    if (label) label.textContent = text;
+    if (count) {
+        count.textContent = String(Number(summary.total || 0));
+        count.hidden = !(summary.total > 0);
+    }
+}
+
+function ensureExcavatorFieldOutbox(shell) {
+    if (!shell || !window.createExcavatorFieldOutbox) return null;
+    var accessId = String(shell.dataset.eoAccessId || "");
+    var employeeId = String(shell.dataset.eoEmployeeId || "");
+    var deviceId = excavatorInstallDeviceId();
+    if (!accessId || !employeeId || !deviceId) {
+        renderExcavatorOfflineStatus({storage_failed: true, total: 0});
+        return null;
+    }
+    var queueKey = ["excavator", accessId, deviceId].join(":");
+    if (window.eoExcavatorFieldOutbox && window.eoExcavatorFieldOutboxKey === queueKey) {
+        return window.eoExcavatorFieldOutbox;
+    }
+    window.eoExcavatorFieldOutboxKey = queueKey;
+    window.eoExcavatorFieldOutbox = window.createExcavatorFieldOutbox({
+        indexedDB: window.indexedDB,
+        localStorage: window.localStorage,
+        queueKey: queueKey,
+        onChange: function (summary, events, extra) {
+            renderExcavatorOfflineStatus(summary);
+            if (typeof window.applyExcavatorPendingFieldEvents === "function") {
+                window.applyExcavatorPendingFieldEvents(events, extra || {});
+            }
+        },
+        onConfirmed: function (event, result) {
+            if (typeof window.confirmExcavatorFieldEvent === "function") {
+                return window.confirmExcavatorFieldEvent(event, result);
+            }
+        },
+        onAttention: function (event, result) {
+            if (typeof window.attendExcavatorFieldEvent === "function") {
+                window.attendExcavatorFieldEvent(event, result);
+            }
+        },
+        send: function (events) {
+            var current = document.querySelector("[data-eo-shell]");
+            var url = current ? current.dataset.eoOfflineSyncUrl || "" : "";
+            var tokenNode = current ? current.querySelector("input[name='csrfmiddlewaretoken']") : null;
+            if (!url || !tokenNode) return Promise.reject(new Error("Синхронизация сейчас недоступна."));
+            var controller = window.AbortController ? new AbortController() : null;
+            var timeout = controller ? window.setTimeout(function () { controller.abort(); }, 12000) : null;
+            return fetch(url, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-CSRFToken": tokenNode.value,
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                body: JSON.stringify({
+                    protocol_version: 1,
+                    role_code: "excavator_operator",
+                    device_id: deviceId,
+                    events: events
+                }),
+                signal: controller ? controller.signal : undefined
+            }).then(function (response) {
+                return response.json().catch(function () { return {}; }).then(function (payload) {
+                    if (response.status === 401 || response.status === 403) {
+                        return {ok: false, results: events.map(function (event) {
+                            return {event_id: event.event_id, status: "auth_required", message: payload.error || "Требуется повторный вход."};
+                        })};
+                    }
+                    if (response.status >= 500 || response.status === 429) throw new Error("Сервер временно недоступен.");
+                    if (!response.ok && !Array.isArray(payload.results)) throw new Error(payload.error || "События не приняты.");
+                    return payload;
+                });
+            }).finally(function () {
+                if (timeout) window.clearTimeout(timeout);
+            });
+        }
+    });
+    window.eoExcavatorFieldOutbox.ready({resumeAuthRequired: navigator.onLine !== false}).then(function () {
+        if (navigator.onLine !== false) window.eoExcavatorFieldOutbox.flush();
+    }).catch(function () {
+        renderExcavatorOfflineStatus({storage_failed: true, total: 0});
+    });
+    if (!window.eoExcavatorOutboxRetryBound) {
+        window.eoExcavatorOutboxRetryBound = true;
+        window.addEventListener("online", function () {
+            if (window.eoExcavatorFieldOutbox) window.eoExcavatorFieldOutbox.retryNow();
+        });
+        window.addEventListener("offline", function () {
+            if (window.eoExcavatorFieldOutbox) {
+                window.eoExcavatorFieldOutbox.pending().then(function (events) {
+                    renderExcavatorOfflineStatus({total: events.length, pending: events.length, syncing: 0, attention: events.filter(function (event) { return ["conflict", "invalid", "auth_required"].indexOf(event.sync_state) >= 0; }).length});
+                });
+            }
+        });
+        document.addEventListener("visibilitychange", function () {
+            if (!document.hidden && window.eoExcavatorFieldOutbox) window.eoExcavatorFieldOutbox.flush();
+        });
+        window.addEventListener("native-connectivity-resume", function () {
+            if (window.eoExcavatorFieldOutbox) window.eoExcavatorFieldOutbox.flush();
+        });
+    }
+    return window.eoExcavatorFieldOutbox;
+}
+
 window.initExcavatorWorkShell = function () {
     var shell = document.querySelector("[data-eo-shell]");
     if (!shell) return;
@@ -1335,6 +1523,7 @@ window.initExcavatorWorkShell = function () {
     var truckLoadedUrl = shell.dataset.eoTruckLoadedUrl || "";
     var truckLoadedCancelUrl = shell.dataset.eoTruckLoadedCancelUrl || "";
     var truckGreenIcon = shell.dataset.eoTruckGreenIcon || "";
+    var fieldOutbox = ensureExcavatorFieldOutbox(shell);
     var activeTruckDrag = null;
     var activeQueueDrag = null;
     var shiftButton = shell.querySelector("[data-eo-shift-button]");
@@ -1364,6 +1553,65 @@ window.initExcavatorWorkShell = function () {
     var logoutButton = shell.querySelector("[data-eo-logout-button]");
     var logoutLabel = shell.querySelector("[data-eo-logout-label]");
     var logoutHoldMs = 2000;
+
+    function queueExcavatorFieldEvent(eventType, payload, options) {
+        options = options || {};
+        if (!fieldOutbox) return Promise.reject(new Error("Локальное сохранение недоступно."));
+        return fieldOutbox.pending().then(function (events) {
+            var dependencyTypes = options.dependencyTypes || [];
+            var predecessors = events.filter(function (event) {
+                return (!dependencyTypes.length || dependencyTypes.indexOf(event.event_type) >= 0)
+                    && String(event.shift_id || "") === String(shell.dataset.nativeShiftId || "")
+                    && ["conflict", "invalid", "auth_required"].indexOf(event.sync_state) < 0;
+            }).sort(function (left, right) { return Number(right.sequence || 0) - Number(left.sequence || 0); });
+            var dependencies = options.noDependency
+                ? []
+                : (options.dependsOnAll
+                    ? predecessors.map(function (event) { return event.event_id; })
+                    : (predecessors[0] ? [predecessors[0].event_id] : []));
+            var deviceId = excavatorInstallDeviceId();
+            var event = {
+                event_id: newExcavatorFieldId(options.idPrefix || "excavator-event"),
+                event_type: eventType,
+                format_version: 1,
+                actor_id: Number(shell.dataset.eoEmployeeId || 0),
+                access_id: Number(shell.dataset.eoAccessId || 0),
+                role_code: shell.dataset.eoRoleCode || "excavator_operator",
+                device_id: deviceId,
+                shift_id: Number(shell.dataset.nativeShiftId || 0),
+                equipment_id: Number(shell.dataset.eoCurrentExcavatorId || shell.dataset.eoShiftExcavatorId || 0),
+                trip_id: options.tripId || null,
+                local_trip_id: options.localTripId || null,
+                occurred_at: new Date().toISOString(),
+                sequence: nextExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId),
+                depends_on: dependencies,
+                payload: payload || {}
+            };
+            return fieldOutbox.queue(event).then(function () {
+                if (navigator.onLine !== false) fieldOutbox.flush();
+                return event;
+            });
+        });
+    }
+
+    function applyLocalShiftClose() {
+        shell.dataset.eoOfflineShiftClosed = "true";
+        if (workScreen) workScreen.dataset.eoWorkAvailable = "false";
+        if (eventsScreen) eventsScreen.dataset.eoDowntimeAvailable = "false";
+        if (faceContent) faceContent.dataset.eoFaceSettingsAvailable = "false";
+        shell.querySelectorAll("[data-eo-truck-card], [data-eo-dump-target], [data-eo-downtime-reason-id], [data-eo-apply-settings]").forEach(function (control) {
+            control.disabled = true;
+            control.setAttribute("aria-disabled", "true");
+        });
+        if (shiftButton) {
+            shiftButton.disabled = true;
+            shiftButton.classList.remove("is-pending");
+            shiftButton.classList.add("is-disabled");
+            shiftButton.setAttribute("aria-disabled", "true");
+        }
+        if (shiftLabel) shiftLabel.textContent = "Закрытие сохранено";
+        activateTab("shift");
+    }
     var truckDetailLayer = document.querySelector("[data-eo-truck-detail]");
     var truckDetailIconSlot = document.querySelector("[data-eo-truck-detail-icon-slot]");
     var truckDetailType = document.querySelector("[data-eo-truck-detail-type]");
@@ -1730,15 +1978,46 @@ window.initExcavatorWorkShell = function () {
         }
     }
 
-    function activateTab(name) {
-        /* Экран с таким именем должен существовать, иначе спрячутся все и
-           человек увидит пустоту. Так уже случалось: после настроек забоя код
-           переключал на «downtime», а вкладка простоя называется «events». */
+    var excavatorTabPreferenceKey = "excavator-active-tab-v1:" +
+        String(shell.dataset.eoAccessId || "anonymous");
+
+    function isKnownExcavatorTab(name) {
         var known = false;
         screens.forEach(function (screen) {
             if (screen.dataset.eoScreen === name) known = true;
         });
-        if (!known) {
+        return known;
+    }
+
+    function restoredExcavatorTab(fallback) {
+        var requested = "";
+        try {
+            requested = new URL(window.location.href).searchParams.get("tab") || "";
+        } catch (error) {
+            requested = "";
+        }
+        if (isKnownExcavatorTab(requested)) return requested;
+        try {
+            requested = window.localStorage.getItem(excavatorTabPreferenceKey) || "";
+        } catch (error) {
+            requested = "";
+        }
+        return isKnownExcavatorTab(requested) ? requested : fallback;
+    }
+
+    function rememberExcavatorTab(name) {
+        try {
+            window.localStorage.setItem(excavatorTabPreferenceKey, name);
+        } catch (error) {
+            /* The tab still works when storage is blocked. */
+        }
+    }
+
+    function activateTab(name) {
+        /* Экран с таким именем должен существовать, иначе спрячутся все и
+           человек увидит пустоту. Так уже случалось: после настроек забоя код
+           переключал на «downtime», а вкладка простоя называется «events». */
+        if (!isKnownExcavatorTab(name)) {
             name = "trucks";
         }
         screens.forEach(function (screen) {
@@ -1754,6 +2033,7 @@ window.initExcavatorWorkShell = function () {
             }
         });
         shell.dataset.eoActiveTab = name;
+        rememberExcavatorTab(name);
     }
 
     /* EXCAVATOR_TAB_SETTLE_START */
@@ -1970,12 +2250,15 @@ window.initExcavatorWorkShell = function () {
 
     function restoreTruckAfterLoadedCancel(card, data) {
         if (!card) return;
-        card.classList.remove("status-green", "status-yellow", "status-gray", "status-red", "status-orange", "is-inactive", "is-pending", "is-load-blocked", "is-shift-pending", "is-no-driver");
+        card.hidden = false;
+        card.classList.remove("status-green", "status-yellow", "status-gray", "status-red", "status-orange", "is-inactive", "is-pending", "is-saved-on-device", "is-load-blocked", "is-shift-pending", "is-no-driver");
         card.classList.add("status-" + (data.status_key || "blue"));
         delete card.dataset.eoTruckInactive;
         card.dataset.eoCanLoad = "1";
         delete card.dataset.eoLoadBlockReasonCode;
         delete card.dataset.eoLoadBlockReasonLabel;
+        delete card.dataset.eoOfflineEventId;
+        delete card.dataset.eoLocalOpenTripId;
         card.dataset.eoEquipmentState = data.equipment_state || "assigned";
         card.setAttribute("draggable", "true");
         card.removeAttribute("aria-disabled");
@@ -2033,6 +2316,8 @@ window.initExcavatorWorkShell = function () {
         item.dataset.tripId = badge.dataset.tripId || "";
         item.dataset.dumpPointId = dumpTarget.dataset.eoDumpTarget || "";
         item.dataset.truckNumber = badge.dataset.eoTruckNumber || badge.textContent.trim();
+        item.dataset.eoOfflineEventId = badge.dataset.eoOfflineEventId || "";
+        item.dataset.eoLocalTripId = badge.dataset.eoLocalTripId || "";
         item.innerHTML = '<img src="' + truckGreenIcon + '" alt=""><strong>' + item.dataset.truckNumber + '</strong>';
         item.addEventListener("pointerdown", beginQueueDrag);
         return item;
@@ -2184,6 +2469,69 @@ window.initExcavatorWorkShell = function () {
         if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
             showLoadedCancelStatus(options, "Роль неактивна — доступен только просмотр.", true);
             return Promise.resolve(false);
+        }
+        if (item && fieldOutbox && (item.dataset.eoOfflineEventId || item.dataset.tripId)) {
+            var loadEventId = item.dataset.eoOfflineEventId;
+            var saveCancellation;
+            if (loadEventId) {
+                saveCancellation = fieldOutbox.discardUnsent(loadEventId).then(function (discarded) {
+                    if (discarded) return {discarded: true};
+                    return fieldOutbox.pending().then(function (events) {
+                        var source = events.find(function (event) { return event.event_id === loadEventId; });
+                        if (!source) throw new Error("Сохранённая погрузка уже подтверждена. Обновите экран.");
+                        var deviceId = excavatorInstallDeviceId();
+                        var cancelEvent = {
+                            event_id: newExcavatorFieldId("excavator-load-cancel"),
+                            event_type: "excavator.trip.loaded.cancelled",
+                            format_version: 1,
+                            actor_id: Number(shell.dataset.eoEmployeeId || 0),
+                            access_id: Number(shell.dataset.eoAccessId || 0),
+                            role_code: shell.dataset.eoRoleCode || "excavator_operator",
+                            device_id: deviceId,
+                            shift_id: Number(source.shift_id || shell.dataset.nativeShiftId || 0),
+                            equipment_id: Number(source.equipment_id || shell.dataset.eoCurrentExcavatorId || 0),
+                            trip_id: null,
+                            local_trip_id: source.local_trip_id,
+                            occurred_at: new Date().toISOString(),
+                            sequence: nextExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId),
+                            depends_on: [source.event_id],
+                            payload: {
+                                truck_id: source.payload && source.payload.truck_id,
+                                dump_point_id: source.payload && source.payload.dump_point_id,
+                                local_trip_id: source.local_trip_id
+                            }
+                        };
+                        return fieldOutbox.queue(cancelEvent).then(function () { return {discarded: false}; });
+                    });
+                });
+            } else {
+                saveCancellation = queueExcavatorFieldEvent("excavator.trip.loaded.cancelled", {
+                    truck_id: Number(item.dataset.truckId || 0),
+                    dump_point_id: Number(item.dataset.dumpPointId || 0),
+                    trip_id: Number(item.dataset.tripId || 0)
+                }, {
+                    idPrefix: "excavator-load-cancel",
+                    tripId: Number(item.dataset.tripId || 0),
+                    noDependency: true
+                });
+            }
+            return saveCancellation.then(function () {
+                var truckId = item.dataset.truckId || "";
+                var dumpTarget = shell.querySelector('[data-eo-dump-target="' + item.dataset.dumpPointId + '"]');
+                removePendingTruckBadge(dumpTarget, truckId, "");
+                restoreTruckAfterLoadedCancel(cardByTruckId(truckId), {
+                    equipment_state: "assigned",
+                    status_label: "Назначен",
+                    status_key: "yellow"
+                });
+                item.remove();
+                showLoadedCancelStatus(options, "Отмена сохранена на телефоне.", false);
+                if (navigator.onLine !== false) fieldOutbox.flush();
+                return true;
+            }).catch(function (error) {
+                showLoadedCancelStatus(options, error.message || "Отмена не сохранена", true);
+                return false;
+            });
         }
         if (!truckLoadedCancelUrl || !item || !item.dataset.tripId) {
             playExcavatorSound("action_error");
@@ -2558,7 +2906,7 @@ window.initExcavatorWorkShell = function () {
         if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
             return;
         }
-        if (!card || !dumpTarget || !truckLoadedUrl) return;
+        if (!card || !dumpTarget || !fieldOutbox) return;
         if (!canTruckLoad(card)) {
             playExcavatorSound("action_error");
             showExcavatorNotice(truckLoadBlockReason(card));
@@ -2566,33 +2914,18 @@ window.initExcavatorWorkShell = function () {
         }
         var snapshot = snapshotTruckCard(card);
         snapshot.className = snapshot.className.replace(/\bis-picked-up\b/g, "");
-        var optimisticBadge = null;
         var truckId = card.dataset.truckId || "";
         var truckNumber = card.dataset.eoTruckNumber || (card.querySelector("strong") ? card.querySelector("strong").textContent.trim() : "");
         var dumpPointId = Number(dumpTarget.dataset.eoDumpTarget || 0);
         var dumpPointName = dumpTarget.dataset.eoDumpName || (dumpTarget.querySelector("strong") ? dumpTarget.querySelector("strong").textContent.trim() : "");
-        var loadActionKey = [
-            truckId,
-            dumpTarget.dataset.eoDumpTarget || "",
-            shell.querySelector("select[name='rock_type']") ? shell.querySelector("select[name='rock_type']").value : "",
-            shell.querySelector("input[name='loading_horizon']") ? shell.querySelector("input[name='loading_horizon']").value : "",
-            shell.querySelector("input[name='loading_block']") ? shell.querySelector("input[name='loading_block']").value : ""
-        ].join(":");
-        var loadActionId = (
-            card.dataset.eoLoadActionKey === loadActionKey
-            && card.dataset.eoLoadActionId
-        ) ? card.dataset.eoLoadActionId : generateClientActionId("truck-loaded");
-        card.dataset.eoLoadActionKey = loadActionKey;
-        card.dataset.eoLoadActionId = loadActionId;
         var payload = {
-            client_action_id: loadActionId,
             assignment_id: card.dataset.assignmentId || "",
             manual_control: card.dataset.eoManualAvailable === "1",
             expected_open_trip_id: card.dataset.eoOpenTripId || "",
             truck_id: card.dataset.truckId || "",
             excavator_id: shell.dataset.eoCurrentExcavatorId || "",
             dump_point_id: dumpTarget.dataset.eoDumpTarget || "",
-            rock_type: shell.querySelector("select[name='rock_type']") ? shell.querySelector("select[name='rock_type']").value : "",
+            rock_type_id: shell.querySelector("select[name='rock_type']") ? shell.querySelector("select[name='rock_type']").value : "",
             loading_horizon: shell.querySelector("input[name='loading_horizon']") ? shell.querySelector("input[name='loading_horizon']").value : "",
             loading_block: shell.querySelector("input[name='loading_block']") ? shell.querySelector("input[name='loading_block']").value : "",
             planned_volume_m3: shell.querySelector("input[name='planned_volume_m3']") ? shell.querySelector("input[name='planned_volume_m3']").value : "",
@@ -2600,78 +2933,186 @@ window.initExcavatorWorkShell = function () {
             downtime_text: downtimeInput ? downtimeInput.value : "",
             note: shell.querySelector("input[name='note']") ? shell.querySelector("input[name='note']").value : ""
         };
-        invalidateExcavatorWorkRefresh();
-        applyTruckPending(card, dumpTarget);
-        optimisticBadge = addPendingTruckBadge(dumpTarget, card, "");
-        fetch(truckLoadedUrl, {
-            method: "POST",
-            credentials: "same-origin",
-            headers: {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "X-CSRFToken": csrfToken,
-                "X-Requested-With": "XMLHttpRequest"
-            },
-            body: JSON.stringify(payload)
-        }).then(function (response) {
-            return response.json().catch(function () { return {}; }).then(function (data) {
-                if (!response.ok || !data.ok) {
-                    throw new Error(data.error || "Действие не сохранено");
-                }
-                return data;
-            });
-        }).then(function (data) {
+        card.classList.add("is-pending");
+        fieldOutbox.pending().then(function (events) {
+            var previous = events.filter(function (event) {
+                return event.event_type === "excavator.trip.loaded"
+                    && String(event.payload && event.payload.truck_id || "") === String(truckId)
+                    && ["conflict", "invalid", "auth_required"].indexOf(event.sync_state) < 0;
+            }).sort(function (left, right) { return Number(right.sequence || 0) - Number(left.sequence || 0); })[0];
+            if (previous && previous.local_trip_id) {
+                payload.expected_open_trip_id = "";
+                payload.expected_open_trip_local_id = previous.local_trip_id;
+            }
+            var eventId = newExcavatorFieldId("excavator-load");
+            var localTripId = newExcavatorFieldId("local-trip");
+            var deviceId = excavatorInstallDeviceId();
+            var event = {
+                event_id: eventId,
+                event_type: "excavator.trip.loaded",
+                format_version: 1,
+                actor_id: Number(shell.dataset.eoEmployeeId || 0),
+                access_id: Number(shell.dataset.eoAccessId || 0),
+                role_code: shell.dataset.eoRoleCode || "excavator_operator",
+                device_id: deviceId,
+                shift_id: Number(shell.dataset.nativeShiftId || 0),
+                equipment_id: Number(shell.dataset.eoCurrentExcavatorId || 0),
+                trip_id: null,
+                local_trip_id: localTripId,
+                occurred_at: new Date().toISOString(),
+                sequence: nextExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId),
+                depends_on: previous ? [previous.event_id] : [],
+                payload: payload
+            };
+            return fieldOutbox.queue(event).then(function () { return event; });
+        }).then(function (event) {
+            invalidateExcavatorWorkRefresh();
+            applyTruckPending(card, dumpTarget);
+            var optimisticBadge = addPendingTruckBadge(dumpTarget, card, "");
+            if (optimisticBadge) {
+                optimisticBadge.dataset.eoOfflineEventId = event.event_id;
+                optimisticBadge.dataset.eoLocalTripId = event.local_trip_id;
+            }
+            card.dataset.eoOfflineEventId = event.event_id;
+            card.dataset.eoLocalOpenTripId = event.local_trip_id;
+            card.classList.add("is-saved-on-device");
+            if (card.dataset.eoTransferDirection === "outgoing") {
+                card.classList.remove("is-pending");
+                card.hidden = true;
+            } else {
+                confirmTruckLoaded(card, {trip_id: "", status_label: "Сохранено на телефоне"});
+            }
             playExcavatorEquipmentVoice("excavator_truck_sent", truckNumber, {
                 cue: "action_ok",
                 fallbackVoice: "voice_truck_sent",
                 dumpPointId: dumpPointId,
                 dumpPointName: dumpPointName,
-                eventVersion: Number(data.version || 0),
+                eventVersion: 0,
                 eventKey: "excavator_operator_truck_sent"
             });
-            delete card.dataset.eoLoadActionKey;
-            delete card.dataset.eoLoadActionId;
-            invalidateExcavatorWorkRefresh();
-            storeExcavatorRealtimeVersion(Number(data.version || 0));
-            if (data.refresh_required) {
-                restoreTruckCard(card, snapshot);
-                if (optimisticBadge) optimisticBadge.remove();
-                ensureMutedPendingBadge(pendingBadgeList(dumpTarget));
-                return refreshExcavatorWorkFromServer({ preserveTab: true, version: Number(data.version || 0) }).then(function (applied) {
-                    if (!applied && window.AppRealtime && typeof window.AppRealtime.wake === "function") {
-                        window.AppRealtime.wake("truck_loaded_refresh_required");
-                    }
-                    return applied;
-                });
-            }
             markLastDumpTarget(dumpTarget);
-            updatePendingTruckBadgeTrip(dumpTarget, truckId, data.trip_id || "");
-            if (optimisticBadge && data.dump_badge_auto_hide_at) {
-                optimisticBadge.dataset.eoManualPreviewExpiresAt = data.dump_badge_auto_hide_at;
-                bindManualDumpCardExpiry(shell);
-            }
-            bindExcavatorTransferCountdowns(shell);
-            confirmTruckLoaded(card, data);
-            refreshExcavatorWorkFromServer({ preserveTab: true, version: Number(data.version || 0) });
-            if (data.downtime_status) {
-                if (data.downtime_status.active) {
-                    applyActiveDowntime(data.downtime_status);
-                } else {
-                    clearActiveDowntime(data.downtime_status);
-                }
-            }
-            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
-                window.AppRealtime.wake("truck_loaded");
-            }
+            showExcavatorNotice(navigator.onLine === false ? "Погрузка сохранена на телефоне" : "Погрузка сохранена. Отправляем на сервер...");
+            if (navigator.onLine !== false) fieldOutbox.flush();
         }).catch(function (error) {
             playExcavatorVoice("action_error", "voice_truck_send_failed");
             restoreTruckCard(card, snapshot);
-            if (optimisticBadge) optimisticBadge.remove();
-            ensureMutedPendingBadge(pendingBadgeList(dumpTarget));
-            showExcavatorNotice(error.message || "Самосвал не отправлен");
-            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
-                window.AppRealtime.wake("truck_loaded_error");
+            card.classList.remove("is-pending", "is-saved-on-device");
+            showExcavatorNotice(error.message || "Не удалось сохранить погрузку на телефоне");
+        });
+    }
+
+    window.applyExcavatorPendingFieldEvents = function (events) {
+        var currentEvents = (events || []).filter(function (event) {
+            return ["pending", "syncing"].indexOf(event.sync_state) >= 0
+                && String(event.shift_id || "") === String(shell.dataset.nativeShiftId || "")
+                && String(event.equipment_id || "") === String(shell.dataset.eoCurrentExcavatorId || "");
+        }).sort(function (left, right) {
+            return Number(left.sequence || 0) - Number(right.sequence || 0);
+        });
+        currentEvents.filter(function (event) {
+            return event.event_type === "excavator.trip.loaded"
+                && ["pending", "syncing"].indexOf(event.sync_state) >= 0
+        }).forEach(function (event) {
+            var payload = event.payload || {};
+            var card = cardByTruckId(payload.truck_id);
+            var dumpTarget = shell.querySelector('[data-eo-dump-target="' + String(payload.dump_point_id || "") + '"]');
+            if (!card || !dumpTarget) return;
+            var badge = addPendingTruckBadge(dumpTarget, card, "");
+            if (badge) {
+                badge.dataset.eoOfflineEventId = event.event_id;
+                badge.dataset.eoLocalTripId = event.local_trip_id || "";
             }
+            card.dataset.eoOfflineEventId = event.event_id;
+            card.dataset.eoLocalOpenTripId = event.local_trip_id || "";
+            card.classList.add("is-saved-on-device");
+            if (card.dataset.eoTransferDirection === "outgoing") {
+                card.classList.remove("is-pending");
+                card.hidden = true;
+            } else {
+                confirmTruckLoaded(card, {trip_id: "", status_label: "Сохранено на телефоне"});
+            }
+        });
+        currentEvents.filter(function (event) {
+            return event.event_type === "excavator.downtime.started" || event.event_type === "excavator.downtime.ended";
+        }).forEach(function (event) {
+            if (event.event_type === "excavator.downtime.ended") {
+                clearActiveDowntime({active: false, shift_total_seconds: downtimeCard ? downtimeCard.dataset.eoShiftDowntimeSeconds || 0 : 0});
+                return;
+            }
+            var payload = event.payload || {};
+            var reasonButton = shell.querySelector('[data-eo-downtime-reason-id="' + String(payload.reason_id || "") + '"]');
+            var statusMatch = reasonButton ? reasonButton.className.match(/status-([a-z]+)/) : null;
+            applyActiveDowntime({
+                active: true,
+                event_id: event.event_id,
+                reason_id: payload.reason_id,
+                started_at: event.occurred_at,
+                elapsed_seconds: Math.max(0, Math.floor((Date.now() - Date.parse(event.occurred_at || "")) / 1000)),
+                shift_total_seconds: downtimeCard ? downtimeCard.dataset.eoShiftDowntimeSeconds || 0 : 0,
+                active_counts_towards_shift: true,
+                status_key: statusMatch ? statusMatch[1] : "yellow",
+                equipment_state_code: reasonButton ? reasonButton.dataset.eoEquipmentState || "waiting" : "waiting"
+            });
+        });
+        currentEvents.filter(function (event) {
+            return event.event_type === "excavator.trip.loaded.cancelled";
+        }).forEach(function (event) {
+            var payload = event.payload || {};
+            var dumpTarget = shell.querySelector('[data-eo-dump-target="' + String(payload.dump_point_id || "") + '"]');
+            if (dumpTarget) removePendingTruckBadge(dumpTarget, payload.truck_id, "");
+            restoreTruckAfterLoadedCancel(cardByTruckId(payload.truck_id), {
+                equipment_state: "assigned", status_label: "Назначен", status_key: "yellow"
+            });
+        });
+        if (currentEvents.some(function (event) { return event.event_type === "excavator.shift.closed"; })) {
+            applyLocalShiftClose();
+        }
+    };
+
+    window.confirmExcavatorFieldEvent = function (event, result) {
+        if (!event) return Promise.resolve();
+        if (event.event_type === "excavator.trip.loaded") {
+            var tripId = result && result.server_ids ? result.server_ids.trip_id : "";
+            var badge = document.querySelector('[data-eo-offline-event-id="' + event.event_id + '"]');
+            if (badge && tripId) {
+                badge.dataset.tripId = String(tripId);
+                delete badge.dataset.eoOfflineEventId;
+                delete badge.dataset.eoLocalTripId;
+            }
+            var confirmedCard = cardByTruckId(event.payload && event.payload.truck_id);
+            if (confirmedCard && tripId) {
+                confirmedCard.dataset.eoOpenTripId = String(tripId);
+                delete confirmedCard.dataset.eoOfflineEventId;
+                delete confirmedCard.dataset.eoLocalOpenTripId;
+            }
+        }
+        var version = Number(result.server_version || result.version || 0);
+        if (version) storeExcavatorRealtimeVersion(version);
+        if (window.eoExcavatorConfirmedRefreshTimer) window.clearTimeout(window.eoExcavatorConfirmedRefreshTimer);
+        window.eoExcavatorConfirmedRefreshTimer = window.setTimeout(function () {
+            window.eoExcavatorConfirmedRefreshTimer = null;
+            refreshExcavatorWorkFromServer({preserveTab: true, version: version});
+            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+                window.AppRealtime.wake("offline_excavator_events_confirmed");
+            }
+        }, 120);
+        return Promise.resolve();
+    };
+
+    window.attendExcavatorFieldEvent = function (event, result) {
+        var message = result && (result.message || result.error);
+        showExcavatorNotice(message || "Одно из сохранённых действий требует сверки.");
+        invalidateExcavatorWorkRefresh();
+        window.setTimeout(function () {
+            refreshExcavatorWorkFromServer({preserveTab: true});
+        }, 120);
+    };
+
+    if (fieldOutbox) {
+        fieldOutbox.pending().then(function (events) {
+            window.applyExcavatorPendingFieldEvents(events);
+        }).catch(function () {
+            renderExcavatorOfflineStatus({storage_failed: true, total: 0});
         });
     }
 
@@ -3371,23 +3812,40 @@ window.initExcavatorWorkShell = function () {
         if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
             return Promise.reject(new Error("Роль неактивна — доступен только просмотр"));
         }
-        return fetch("{% url 'excavator_downtime_action' %}", {
-            method: "POST",
-            credentials: "same-origin",
-            headers: {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "X-CSRFToken": csrfToken,
-                "X-Requested-With": "XMLHttpRequest"
-            },
-            body: JSON.stringify(payload || {})
-        }).then(function (response) {
-            if (!response.ok) {
-                return response.json().catch(function () { return {}; }).then(function (payload) {
-                    throw new Error(payload.error || "Действие не сохранено");
-                });
+        var action = String(payload && payload.action || "");
+        var eventType = action === "close" ? "excavator.downtime.ended" : "excavator.downtime.started";
+        return queueExcavatorFieldEvent(eventType, {
+            reason_id: payload && payload.reason_id ? Number(payload.reason_id) : null,
+            comment: String(payload && payload.comment || ""),
+            active_downtime_id: downtimeCard ? downtimeCard.dataset.eoActiveDowntimeId || null : null
+        }, {
+            idPrefix: action === "close" ? "excavator-downtime-end" : "excavator-downtime-start",
+            dependencyTypes: ["excavator.downtime.started", "excavator.downtime.ended"]
+        }).then(function (event) {
+            if (action === "close") {
+                return {
+                    ok: true,
+                    active: false,
+                    event_id: event.event_id,
+                    shift_total_seconds: downtimeCard ? downtimeCard.dataset.eoShiftDowntimeSeconds || 0 : 0,
+                    local_saved: true
+                };
             }
-            return response.json();
+            var reasonButton = shell.querySelector('[data-eo-downtime-reason-id="' + String(payload.reason_id || "") + '"]');
+            var reasonStatusMatch = reasonButton ? reasonButton.className.match(/status-([a-z]+)/) : null;
+            return {
+                ok: true,
+                active: true,
+                event_id: event.event_id,
+                reason_id: payload.reason_id,
+                started_at: event.occurred_at,
+                elapsed_seconds: 0,
+                shift_total_seconds: downtimeCard ? downtimeCard.dataset.eoShiftDowntimeSeconds || 0 : 0,
+                active_counts_towards_shift: true,
+                status_key: reasonStatusMatch ? reasonStatusMatch[1] : "yellow",
+                equipment_state_code: reasonButton ? reasonButton.dataset.eoEquipmentState || "waiting" : "waiting",
+                local_saved: true
+            };
         });
     }
 
@@ -3396,7 +3854,7 @@ window.initExcavatorWorkShell = function () {
         if (!eventsScreen || eventsScreen.dataset.eoDowntimeAvailable !== "true") {
             return Promise.resolve(null);
         }
-        if (downtimeActionPending) return Promise.resolve(null);
+        if (downtimeActionPending || (shell && shell.dataset && shell.dataset.eoHasPendingFieldEvents === "true")) return Promise.resolve(null);
         downtimeStatusSyncGeneration += 1;
         var generation = downtimeStatusSyncGeneration;
         return fetch("{% url 'excavator_downtime_action' %}?_eo_status=" + Date.now(), {
@@ -3621,7 +4079,7 @@ window.initExcavatorWorkShell = function () {
         playExcavatorVoice("action_error", "voice_action_failed");
         clearShiftErrors();
         if (shiftFormError) {
-            shiftFormError.textContent = message || "Проверьте показания.";
+            shiftFormError.textContent = compactExcavatorNotice(message || "Проверьте показания.");
             shiftFormError.hidden = false;
         }
         Object.keys(fieldErrors || {}).forEach(function (name) {
@@ -3840,7 +4298,26 @@ window.initExcavatorWorkShell = function () {
         if (shiftLabel) {
             shiftLabel.textContent = action === "close" ? "Закрываем смену" : "Открываем смену";
         }
-        return fetch(shiftUrl, {
+        var shiftRequest = action === "close"
+            ? queueExcavatorFieldEvent("excavator.shift.closed", {
+                shift_id: Number(payload.shift_id || 0),
+                excavator_id: Number(payload.excavator_id || 0),
+                fuel_percent: payload.fuel_percent,
+                fuel: payload.fuel,
+                engine_hours: payload.engine_hours,
+                confirmation_token: payload.confirmation_token || ""
+            }, {
+                idPrefix: "excavator-shift-close",
+                dependsOnAll: true,
+                dependencyTypes: [
+                    "excavator.trip.loaded",
+                    "excavator.trip.loaded.cancelled",
+                    "excavator.downtime.started",
+                    "excavator.downtime.ended",
+                    "excavator.shift.closed"
+                ]
+            }).then(function (event) { return {ok: true, local_saved: true, event_id: event.event_id}; })
+            : fetch(shiftUrl, {
             method: "POST",
             credentials: "same-origin",
             headers: {
@@ -3857,7 +4334,8 @@ window.initExcavatorWorkShell = function () {
                 }
                 return data;
             });
-        }).then(function () {
+        });
+        return shiftRequest.then(function (result) {
             hideShiftConfirmation();
             playExcavatorVoice(
                 action === "close" ? "shift_end" : "shift_start",
@@ -3867,6 +4345,13 @@ window.initExcavatorWorkShell = function () {
             shiftPendingActionId = "";
             if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "false";
             clearShiftErrors();
+            if (result && result.local_saved) {
+                applyLocalShiftClose();
+                showExcavatorNotice(navigator.onLine === false
+                    ? "Закрытие смены сохранено на телефоне"
+                    : "Закрытие смены сохранено. Отправляем на сервер...");
+                return true;
+            }
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                 try {
                     window.AppRealtime.wake("excavator_shift_saved");
@@ -4051,7 +4536,7 @@ window.initExcavatorWorkShell = function () {
         }
     }
     pickFirstActiveTruck();
-    activateTab(shell.dataset.eoActiveTab || "trucks");
+    activateTab(restoredExcavatorTab(shell.dataset.eoActiveTab || "trucks"));
 };
 
 function formatExcavatorVersion(version) {

@@ -333,6 +333,6 @@ test("legacy string snapshots remain readable after the schema upgrade", () => {
 test("the rendered snapshot exposes the exact HaulAssignment id", () => {
     assert.match(
         templateSource,
-        /data-eo-assignment-snapshot[\s\S]*?data-assignment-id="\{\{ card\.assignment\.id \}\}"/
+        /data-eo-assignment-snapshot[\s\S]*?data-assignment-id="\{\{ card\.assignment_id \}\}"/
     );
 });

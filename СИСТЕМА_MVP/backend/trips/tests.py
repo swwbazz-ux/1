@@ -1355,11 +1355,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v233')
+        self.assertContains(response, 'excavator-mobile-shell-v234')
+        self.assertContains(response, '/static/js/excavator-field-outbox-v1.js?v=1')
+        self.assertContains(response, '/static/css/excavator-offline-v1.css?v=1')
+        self.assertContains(response, 'data-eo-offline-sync-url="/offline-events/sync/"')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 222')
+        self.assertContains(response, 'Версия 234')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
@@ -1373,6 +1376,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'shiftPendingActionId')
         self.assertContains(response, 'data-eo-shift-scroll')
         self.assertContains(response, 'data-eo-shift-inputs')
+
         self.assertContains(response, 'data-mobile-shift-role="excavator"')
         self.assertContains(response, 'data-mobile-shift-field="fuel"')
         self.assertContains(response, 'data-mobile-shift-field="fuel_limit"')
@@ -1451,6 +1455,20 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-pwa-update-apply')
         self.assertNotContains(response, 'runManualUpdateCheck')
         self.assertNotContains(response, 'Проверка...')
+
+    def test_excavator_work_exposes_durable_offline_outbox_contract(self):
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'excavator-mobile-shell-v234')
+        self.assertContains(response, '/static/js/excavator-field-outbox-v1.js?v=1')
+        self.assertContains(response, '/static/css/excavator-offline-v1.css?v=1')
+        self.assertContains(response, 'data-eo-offline-sync-url="/offline-events/sync/"')
+        self.assertContains(response, 'event_type: "excavator.trip.loaded"')
+        self.assertContains(response, 'event_type: "excavator.trip.loaded.cancelled"')
+        self.assertContains(response, '"excavator.downtime.started"')
+        self.assertContains(response, '"excavator.downtime.ended"')
+        self.assertContains(response, '"excavator.shift.closed"')
 
     def test_browser_excavator_keeps_automatic_pwa_update_ui_without_manual_controls(self):
         response = self.client.get(reverse('excavator_work'))
@@ -3660,7 +3678,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v233', script)
+        self.assertIn('excavator-mobile-shell-v234', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3668,6 +3686,18 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertRegex(
             script,
             r'const CORE_ASSETS = \[[\s\S]*?PRIVACY_POLICY_URL,',
+        )
+        core_assets = script.split('const CORE_ASSETS = [', 1)[1].split('];', 1)[0]
+        self.assertNotIn('APP_SHELL_URL', core_assets)
+        self.assertIn('precacheAuthenticatedShell(cache)', script)
+        self.assertIn('migratePreviousAuthenticatedShell(previous)', script)
+        self.assertIn('async function isExcavatorShellResponse(response)', script)
+        self.assertIn('finalUrl.pathname !== APP_SHELL_URL', script)
+        self.assertIn('html.includes("data-eo-shell")', script)
+        self.assertIn("data-eo-role-code=", script)
+        self.assertIn(
+            'networkFirst(request, APP_SHELL_URL, isExcavatorShellResponse)',
+            script,
         )
         privacy_branch = script.index('if (url.pathname === PRIVACY_POLICY_PATH)')
         generic_navigation_branch = script.index('if (request.mode === "navigate"')
@@ -3693,6 +3723,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('/static/img/start/start-hero-v1.jpg', script)
         self.assertIn('/static/js/mobile-shift-unified-v1.js', script)
         self.assertIn('/static/js/mobile-operational-sounds-v1.js', script)
+        self.assertIn('/static/js/excavator-field-outbox-v1.js?v=1', script)
+        self.assertIn('/static/css/excavator-offline-v1.css?v=1', script)
         self.assertIn('/static/audio/excavator/excavator_truck_assigned.wav', script)
         self.assertIn('/static/audio/excavator/excavator_action_ok.wav', script)
         self.assertIn('/static/audio/excavator/excavator_action_error.wav', script)

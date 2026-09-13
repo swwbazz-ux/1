@@ -961,13 +961,12 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v233";
+const CACHE_NAME = "excavator-mobile-shell-v234";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
 const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";
 const CORE_ASSETS = [
-  APP_SHELL_URL,
   MANIFEST_URL,
   PRIVACY_POLICY_URL,
   "/static/portal/css/portal-shell-v5.css?v=7",
@@ -975,17 +974,19 @@ const CORE_ASSETS = [
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
   "/static/css/app.css",
-  "/static/css/excavator-manual-loading-v1.css?v=1",
-  "/static/css/excavator-work-v55.css",
-  "/static/css/excavator-work-v55-final.css",
-  "/static/css/excavator-work-v55-shift.css",
-  "/static/css/mobile-shift-unified-v1.css",
-  "/static/css/mobile-face-unified-v1.css",
-  "/static/css/mobile-downtime-unified-v1.css",
+  "/static/css/excavator-manual-loading-v1.css?v=4",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v234",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v234",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v234",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v234",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v234",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v234",
   "/static/css/excavator-destination-distances-v1.css",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js",
-  "/static/js/mobile-operational-sounds-v1.js",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v234",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v234",
+  "/static/js/excavator-field-outbox-v1.js?v=1",
+  "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
   "/static/img/pwa/excavator-180.png",
@@ -1021,7 +1022,9 @@ const CORE_ASSETS = [
 self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" }))).catch(() => undefined))
+      .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" })))
+        .catch(() => undefined)
+        .then(() => precacheAuthenticatedShell(cache)))
       .then(() => self.skipWaiting())
   );
 });
@@ -1029,19 +1032,72 @@ self.addEventListener("install", event => {
 self.addEventListener("activate", event => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(
-        keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
-          .map(key => caches.delete(key))
-      ))
+      .then(async keys => {
+        const previous = keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME);
+        await migratePreviousAuthenticatedShell(previous);
+        await Promise.all(previous.map(key => caches.delete(key)));
+      })
       .then(() => self.clients.claim())
   );
 });
 
-async function networkFirst(request, fallbackUrl) {
+async function isExcavatorShellResponse(response) {
+  if (!response || !response.ok || !response.url) return false;
+  let finalUrl;
+  try {
+    finalUrl = new URL(response.url, self.location.origin);
+  } catch (error) {
+    return false;
+  }
+  if (finalUrl.origin !== self.location.origin || finalUrl.pathname !== APP_SHELL_URL) {
+    return false;
+  }
+  const contentType = String(response.headers.get("Content-Type") || "").toLowerCase();
+  if (!contentType.includes("text/html")) return false;
+  try {
+    const html = await response.clone().text();
+    return html.includes("data-eo-shell") &&
+      html.includes('data-eo-role-code="' + ROLE_CODE + '"');
+  } catch (error) {
+    return false;
+  }
+}
+
+async function precacheAuthenticatedShell(cache) {
+  try {
+    const request = new Request(APP_SHELL_URL, {
+      cache: "reload",
+      credentials: "same-origin"
+    });
+    const response = await fetch(request);
+    if (await isExcavatorShellResponse(response)) {
+      await cache.put(APP_SHELL_URL, response.clone());
+    }
+  } catch (error) {
+    /* A successful authenticated navigation will prime the shell later. */
+  }
+}
+
+async function migratePreviousAuthenticatedShell(cacheNames) {
+  const current = await caches.open(CACHE_NAME);
+  const existing = await current.match(APP_SHELL_URL);
+  if (existing && await isExcavatorShellResponse(existing)) return;
+  for (const cacheName of cacheNames.slice().reverse()) {
+    const candidate = await (await caches.open(cacheName)).match(APP_SHELL_URL);
+    if (candidate && await isExcavatorShellResponse(candidate)) {
+      await current.put(APP_SHELL_URL, candidate.clone());
+      return;
+    }
+  }
+}
+
+async function networkFirst(request, fallbackUrl, responseValidator) {
   const cache = await caches.open(CACHE_NAME);
   try {
     const response = await fetch(request);
-    if (response && response.ok) {
+    const canCache = response && response.ok &&
+      (!responseValidator || await responseValidator(response));
+    if (canCache) {
       cache.put(request, response.clone()).catch(() => undefined);
       if (fallbackUrl && new URL(request.url).pathname === fallbackUrl) {
         cache.put(fallbackUrl, response.clone()).catch(() => undefined);
@@ -1100,7 +1156,7 @@ self.addEventListener("fetch", event => {
     return;
   }
   if (request.mode === "navigate" || url.pathname === APP_SHELL_URL) {
-    event.respondWith(networkFirst(request, APP_SHELL_URL));
+    event.respondWith(networkFirst(request, APP_SHELL_URL, isExcavatorShellResponse));
     return;
   }
   if (url.pathname === MANIFEST_URL) {
