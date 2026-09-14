@@ -104,11 +104,20 @@ def _process_free_bucket_accepted(access, normalized):
         _conflict('open_trip_exists', 'Самосвал уже находится в незавершённом рейсе.')
     existing = (
         FreeBucketAcceptance.objects.select_for_update()
-        .filter(truck=truck, status=FreeBucketAcceptanceStatus.ACCEPTED)
+        .filter(
+            truck=truck,
+            status__in=(
+                FreeBucketAcceptanceStatus.ACCEPTED,
+                FreeBucketAcceptanceStatus.USED,
+            ),
+        )
         .first()
     )
     if existing:
-        _conflict('free_bucket_already_accepted', 'Самосвал уже принят под свободный ковш другим экскаватором.')
+        _conflict(
+            'free_bucket_already_accepted',
+            'Самосвал уже принят под свободный ковш или ожидает разгрузки после такой погрузки.',
+        )
     primary_assignment = (
         HaulAssignment.objects.select_for_update()
         .filter(truck=truck, ended_at__isnull=True, status=AssignmentStatus.ACCEPTED)

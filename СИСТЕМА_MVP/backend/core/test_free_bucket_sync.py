@@ -184,6 +184,19 @@ class FreeBucketServerIntegrationTests(TestCase):
             results[loaded['event_id']]['server_ids']['free_bucket_acceptance_id'],
             acceptance.id,
         )
+        from trips.excavator_hourly_report import build_excavator_hourly_report
+
+        report_at = trip.loaded_at + timedelta(minutes=1)
+        temporary_report = build_excavator_hourly_report(
+            self.other_excavator,
+            captured_at=report_at,
+        )
+        primary_report = build_excavator_hourly_report(
+            self.excavator,
+            captured_at=report_at,
+        )
+        self.assertEqual(sum(hour['source_trip_count'] for hour in temporary_report['hours']), 1)
+        self.assertEqual(sum(hour['source_trip_count'] for hour in primary_report['hours']), 0)
 
         repeated = self.sync(
             [accepted, loaded],
@@ -221,6 +234,41 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(second_result['status'], 'conflict', second_result)
         self.assertEqual(second_result['code'], 'free_bucket_already_accepted')
         self.assertEqual(FreeBucketAcceptance.objects.count(), 1)
+
+    def test_second_acceptance_after_free_bucket_load_is_a_stable_conflict(self):
+        other_client, other_operator, other_shift = (
+            trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
+        )
+        other_access = EmployeeAccess.objects.get(employee=other_operator, role=self.role)
+        identity = {
+            'actor': other_operator,
+            'access': other_access,
+            'shift': other_shift,
+            'excavator': self.other_excavator,
+        }
+        accepted = self.accept_event('free-accept-used', 1, **identity)
+        loaded = self.load_event(accepted, event_id='free-load-used', sequence=2, **identity)
+        first = self.sync(
+            [loaded, accepted],
+            client=other_client,
+            actor=other_operator,
+            access=other_access,
+            device_id='free-bucket-used-device',
+        ).json()['results']
+        self.assertEqual({item['status'] for item in first}, {'accepted'}, first)
+
+        second = self.accept_event('free-accept-after-used', 1)
+        result = self.sync(
+            [second],
+            device_id='free-bucket-after-used-device',
+        ).json()['results'][0]
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(result['code'], 'open_trip_exists')
+        self.assertEqual(Trip.objects.count(), 1)
+        self.assertEqual(
+            FreeBucketAcceptance.objects.get().status,
+            FreeBucketAcceptanceStatus.USED,
+        )
 
     def test_free_bucket_load_preserves_passive_manual_control(self):
         accepted = self.accept_event()
