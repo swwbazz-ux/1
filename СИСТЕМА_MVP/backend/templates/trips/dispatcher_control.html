@@ -2755,6 +2755,15 @@ document.addEventListener("DOMContentLoaded", function () {
         }, 260);
     }
 
+    // Атрибуты фазы плана — это настройка заливки с доски: на них держатся
+    // правила с мягким цветом. Снимешь — копия вернётся к непрозрачной
+    // заливке, и подпись состояния на плитке перестанет читаться.
+    var DETAIL_TILE_KEEP_DATA = {
+        "data-plan-progress-phase": true,
+        "data-plan-loop-percent": true,
+        "data-plan-completed-loops": true
+    };
+
     function cleanDetailTile(tile) {
         tile.classList.remove("is-assigned", "is-placeholder", "dispatcher-dragging");
         tile.classList.add("gd-detail-slot-clone");
@@ -2763,7 +2772,7 @@ document.addEventListener("DOMContentLoaded", function () {
         tile.removeAttribute("tabindex");
         tile.removeAttribute("draggable");
         Array.from(tile.attributes).forEach(function (attr) {
-            if (attr.name.indexOf("data-") === 0) {
+            if (attr.name.indexOf("data-") === 0 && !DETAIL_TILE_KEEP_DATA[attr.name]) {
                 tile.removeAttribute(attr.name);
             }
         });
@@ -2814,6 +2823,12 @@ document.addEventListener("DOMContentLoaded", function () {
         title.className = "gd-detail-report-title";
         title.textContent = chart.title || "";
         card.appendChild(title);
+        if (chart.summary) {
+            var summary = document.createElement("div");
+            summary.className = "gd-detail-report-summary";
+            summary.textContent = chart.summary;
+            card.appendChild(summary);
+        }
         if (chart.type === "donut-list") {
             return card;
         }
@@ -7459,6 +7474,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v98" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v125" defer></script>
 {% endif %}
 {% endblock %}

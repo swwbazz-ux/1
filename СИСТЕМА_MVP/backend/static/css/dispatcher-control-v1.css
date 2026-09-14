@@ -14266,6 +14266,55 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-tru
     opacity: .88;
 }
 
+/* --- Миниатюра в шапке карточки: подпись состояния --- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-garage-slot .dispatcher-truck-tile img,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-garage-slot .dispatcher-excavator-garage-tile img {
+    top: 46%;
+    opacity: .6;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-garage-slot .dispatcher-truck-tile span,
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-garage-slot .dispatcher-excavator-garage-tile span {
+    right: 4px;
+    bottom: 4px;
+    left: 4px;
+    font-size: 9px;
+    line-height: 1.1;
+    white-space: normal;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .85), 0 0 6px rgba(4, 13, 18, .9);
+}
+
+/* --- Полоса долей: сегменты врозь, итог под заголовком --- */
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-stack {
+    gap: 3px;
+    padding: 2px;
+    background: rgba(142, 158, 166, .1);
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-stack i {
+    min-width: 10px;
+    border-radius: 999px;
+    background: var(--chart-accent);
+    box-shadow: none;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .gd-detail-report-summary {
+    justify-self: start;
+    width: fit-content;
+    margin-top: 6px;
+    padding: 5px 12px;
+    border: 1px solid var(--gd-detail-line);
+    border-radius: 999px;
+    background: rgba(142, 158, 166, .12);
+    color: var(--gd-detail-ink);
+    font-size: 14px;
+    font-weight: 900;
+    letter-spacing: .01em;
+    line-height: 1.15;
+}
+
 /* Временная работа не переносит самосвал между комплексами: это только
    компактная объясняющая метка на его исходной плитке. */
 .dispatcher-truck-tile .dispatcher-free-bucket-marker {

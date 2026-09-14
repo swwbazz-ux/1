@@ -788,7 +788,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v105";
+const CACHE_NAME = "dispatcher-desktop-shell-v125";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -4596,11 +4596,7 @@ def excavator_assigned_truck_counts(excavator):
     loadable = sum(
         1
         for assignment in assignments
-        if not excavator_truck_load_block(
-            assignment,
-            current_excavator=excavator,
-            manual_control=True,
-        )
+        if not excavator_truck_load_block(assignment, current_excavator=excavator, manual_control=True)
     )
     return len(assignments), loadable, has_inactive_assigned_truck
 
