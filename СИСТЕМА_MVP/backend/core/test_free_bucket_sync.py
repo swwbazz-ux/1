@@ -216,6 +216,78 @@ class FreeBucketServerIntegrationTests(TestCase):
         )
         self.assertEqual(Trip.objects.count(), 1)
 
+    def test_server_confirmed_acceptance_can_be_loaded_from_another_device(self):
+        """A rendered server card must not depend on the device that accepted it."""
+        other_client, other_operator, other_shift = (
+            trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
+        )
+        other_access = EmployeeAccess.objects.get(employee=other_operator, role=self.role)
+        identity = {
+            'actor': other_operator,
+            'access': other_access,
+            'shift': other_shift,
+            'excavator': self.other_excavator,
+        }
+        accepted = self.accept_event('free-cross-device-accept', 1, **identity)
+        accepted_result = self.sync(
+            [accepted], client=other_client, actor=other_operator, access=other_access,
+            device_id='free-bucket-origin-device',
+        ).json()['results'][0]
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+
+        acceptance_id = accepted_result['server_ids']['free_bucket_acceptance_id']
+        loaded = self.load_event(
+            accepted,
+            event_id='free-cross-device-load',
+            sequence=1,
+            **identity,
+        )
+        loaded['depends_on'] = []
+        loaded['payload'].pop('free_bucket_acceptance_local_id')
+        loaded['payload']['free_bucket_acceptance_id'] = acceptance_id
+
+        loaded_result = self.sync(
+            [loaded], client=other_client, actor=other_operator, access=other_access,
+            device_id='free-bucket-loading-device',
+        ).json()['results'][0]
+
+        self.assertEqual(loaded_result['status'], 'accepted', loaded_result)
+        self.assertEqual(Trip.objects.count(), 1)
+        acceptance = FreeBucketAcceptance.objects.get(pk=acceptance_id)
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.USED)
+        self.assertEqual(acceptance.used_trip_id, Trip.objects.get().id)
+
+        work = other_client.get(reverse('excavator_work'))
+        self.assertEqual(work.status_code, 200)
+        self.assertEqual(work.context['free_bucket_cards'], [])
+        dump_card = next(
+            card for card in work.context['dump_cards']
+            if card['point'].id == self.dump_point.id
+        )
+        dump_badge = next(
+            item for item in dump_card['pending_trucks']
+            if item['trip_id'] == acceptance.used_trip_id
+        )
+        self.assertEqual(dump_badge['auto_hide_kind'], 'free_bucket')
+        self.assertEqual(
+            dump_badge['auto_hide_at'],
+            acceptance.used_trip.loaded_at + timedelta(minutes=5),
+        )
+
+        trip = acceptance.used_trip
+        trip.loaded_at = timezone.now() - timedelta(minutes=5, seconds=1)
+        trip.save(update_fields=['loaded_at'])
+        expired_work = other_client.get(reverse('excavator_work'))
+        self.assertFalse(any(
+            item['trip_id'] == trip.id
+            for card in expired_work.context['dump_cards']
+            for item in card['pending_trucks']
+        ))
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertIsNone(trip.completed_at)
+        self.assertIsNone(trip.unload_received_at)
+
     def test_out_of_order_free_bucket_load_retries_then_creates_exactly_one_trip(self):
         """A saved load must wait for its acceptance, not be discarded or duplicated."""
         accepted = self.accept_event('free-accept-later', 1)
@@ -600,6 +672,38 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(len(primary_tiles), 1)
         self.assertIn('Свободный ковш', primary_tiles[0]['free_bucket_label'])
         self.assertIn(str(self.other_excavator.garage_number), primary_tiles[0]['free_bucket_label'])
+
+    def test_excavator_fragment_carries_free_bucket_snapshots(self):
+        other_client, other_operator, other_shift = (
+            trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
+        )
+        other_access = EmployeeAccess.objects.get(employee=other_operator, role=self.role)
+        accepted = self.accept_event(
+            actor=other_operator,
+            access=other_access,
+            shift=other_shift,
+            excavator=self.other_excavator,
+        )
+        result = self.sync(
+            [accepted], client=other_client, actor=other_operator, access=other_access,
+            device_id='free-bucket-fragment-001',
+        ).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+
+        payload = other_client.get(
+            reverse('excavator_work'),
+            {'_operational_fragment': 'excavator', '_operational_version': 0},
+        ).json()
+        self.assertEqual(payload['screen'], 'excavator')
+        self.assertIn('free_bucket_truck_directory', payload)
+        self.assertEqual(
+            [card['truck_id'] for card in payload['free_bucket_cards']],
+            [self.truck.id],
+        )
+        self.assertEqual(
+            payload['free_bucket_cards'][0]['client_acceptance_id'],
+            accepted['event_id'],
+        )
 
 
 @override_settings(EXCAVATOR_MANUAL_LOADING_ENABLED=True)

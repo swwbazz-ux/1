@@ -6,22 +6,22 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v238">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v238">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v238">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v238">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v238">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v238">
-<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v238">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v238" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v238" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
-<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v238" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v244">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v244">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v244">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v244">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v244">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v244">
+<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v244">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v244" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v244" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v244" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <link rel="stylesheet" href="{% static 'css/excavator-offline-v1.css' %}?v=1">
-<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v238">
-<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v238" defer></script>
-<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v238" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v244">
+<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v244" defer></script>
+<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v244" defer></script>
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -271,7 +271,7 @@
                             <span class="eo-dashboard-unload-label">Разгружено</span>
                             <span class="eo-dashboard-unload-badges" aria-label="Назначены, не разгружены">
                                 {% for truck in card.pending_trucks %}
-                                    <b class="status-{{ truck.status_key }}{% if truck.is_last_sent %} is-last-sent-truck{% endif %}" data-eo-queue-truck data-truck-id="{{ truck.truck_id }}" data-trip-id="{{ truck.trip_id }}" data-eo-truck-number="{{ truck.number }}" data-eo-last-sent-truck="{% if truck.is_last_sent %}true{% else %}false{% endif %}"{% if truck.auto_hide_at %} data-eo-manual-preview-expires-at="{{ truck.auto_hide_at|date:'c' }}"{% endif %}{% if truck.transition_hide_at %} data-eo-transfer-preview-id="{{ truck.transition_id }}" data-eo-transfer-preview-deadline="{{ truck.transition_hide_at|date:'c' }}"{% endif %}>{{ truck.number }}</b>
+                                    <b class="status-{{ truck.status_key }}{% if truck.is_last_sent %} is-last-sent-truck{% endif %}" data-eo-queue-truck data-truck-id="{{ truck.truck_id }}" data-trip-id="{{ truck.trip_id }}" data-eo-truck-number="{{ truck.number }}" data-eo-last-sent-truck="{% if truck.is_last_sent %}true{% else %}false{% endif %}"{% if truck.auto_hide_at and truck.auto_hide_kind == 'manual' %} data-eo-manual-preview-expires-at="{{ truck.auto_hide_at|date:'c' }}"{% endif %}{% if truck.auto_hide_at and truck.auto_hide_kind == 'free_bucket' %} data-eo-free-bucket-preview-expires-at="{{ truck.auto_hide_at|date:'c' }}"{% endif %}{% if truck.transition_hide_at %} data-eo-transfer-preview-id="{{ truck.transition_id }}" data-eo-transfer-preview-deadline="{{ truck.transition_hide_at|date:'c' }}"{% endif %}>{{ truck.number }}</b>
                                 {% empty %}
                                     <b class="is-muted">нет</b>
                                 {% endfor %}
@@ -506,7 +506,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v238";
+var excavatorShellVersion = "excavator-mobile-shell-v244";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1214,6 +1214,20 @@ function refreshExcavatorWorkFromServer(options) {
         if (payload.equipment_cards && currentTruckDetailCards) {
             currentTruckDetailCards.textContent = JSON.stringify(payload.equipment_cards);
         }
+        [
+            ['eo-free-bucket-directory-data', payload.free_bucket_truck_directory],
+            ['eo-free-bucket-cards-data', payload.free_bucket_cards]
+        ].forEach(function (entry) {
+            if (entry[1] === undefined) return;
+            var node = newShell.querySelector('#' + entry[0]);
+            if (!node) {
+                node = document.createElement('script');
+                node.type = 'application/json';
+                node.id = entry[0];
+                newShell.appendChild(node);
+            }
+            node.textContent = JSON.stringify(entry[1]);
+        });
         var latestActiveTab = currentShell.dataset.eoActiveTab || activeTab;
         newShell.dataset.eoActiveTab = options.preserveTab === false
             ? (newShell.dataset.eoActiveTab || "trucks")
@@ -2335,6 +2349,67 @@ window.initExcavatorWorkShell = function () {
 
     bindManualDumpCardExpiry(shell);
 
+    function bindFreeBucketDumpCardExpiry(shellRoot) {
+        if (window.eoFreeBucketQueuePreviewTimer) {
+            window.clearInterval(window.eoFreeBucketQueuePreviewTimer);
+            window.eoFreeBucketQueuePreviewTimer = null;
+        }
+        if (!shellRoot) return;
+        var badges = Array.prototype.slice.call(
+            shellRoot.querySelectorAll("[data-eo-queue-truck][data-eo-free-bucket-preview-expires-at]")
+        ).map(function (badge) {
+            var tripId = String(badge.dataset.tripId || "");
+            var localTripId = String(badge.dataset.eoLocalTripId || "");
+            var eventId = String(badge.dataset.eoOfflineEventId || "");
+            return {
+                badge: badge,
+                identity: tripId || localTripId || eventId,
+                identityKind: tripId ? "trip" : (localTripId ? "localTrip" : "event"),
+                deadline: Date.parse(badge.dataset.eoFreeBucketPreviewExpiresAt || "")
+            };
+        }).filter(function (entry) {
+            return entry.identity && Number.isFinite(entry.deadline);
+        });
+        if (!badges.length) return;
+        var serverEpoch = Date.parse(shellRoot.dataset.eoServerNow || "");
+        var clientEpoch = Date.now();
+        if (!Number.isFinite(serverEpoch)) serverEpoch = clientEpoch;
+
+        function tick() {
+            var authoritativeNow = serverEpoch + (Date.now() - clientEpoch);
+            badges.forEach(function (entry) {
+                var badge = entry.badge;
+                if (!badge.isConnected || entry.deadline > authoritativeNow) return;
+                var currentIdentity = entry.identityKind === "trip"
+                    ? String(badge.dataset.tripId || "")
+                    : entry.identityKind === "localTrip"
+                        ? String(badge.dataset.eoLocalTripId || "")
+                        : String(badge.dataset.eoOfflineEventId || "");
+                if (currentIdentity !== entry.identity) return;
+                var list = badge.closest ? badge.closest(".eo-dashboard-unload-badges") : null;
+                badge.remove();
+                shellRoot.querySelectorAll('[data-eo-dump-queue-list] [data-eo-queue-truck]').forEach(function (item) {
+                    var sameTrip = entry.identityKind === "trip" && String(item.dataset.tripId || "") === entry.identity;
+                    var sameLocalTrip = entry.identityKind === "localTrip" && String(item.dataset.eoLocalTripId || "") === entry.identity;
+                    var sameEvent = entry.identityKind === "event" && String(item.dataset.eoOfflineEventId || "") === entry.identity;
+                    if (sameTrip || sameLocalTrip || sameEvent) item.remove();
+                });
+                markLatestPendingTruckBadge(list);
+                ensureMutedPendingBadge(list);
+            });
+            if (!badges.some(function (entry) { return entry.badge.isConnected; }) && window.eoFreeBucketQueuePreviewTimer) {
+                window.clearInterval(window.eoFreeBucketQueuePreviewTimer);
+                window.eoFreeBucketQueuePreviewTimer = null;
+            }
+        }
+        tick();
+        if (badges.some(function (entry) { return entry.badge.isConnected; })) {
+            window.eoFreeBucketQueuePreviewTimer = window.setInterval(tick, 1000);
+        }
+    }
+
+    bindFreeBucketDumpCardExpiry(shell);
+
     function restoreTruckAfterLoadedCancel(card, data) {
         if (!card) return;
         card.hidden = false;
@@ -3007,15 +3082,20 @@ window.initExcavatorWorkShell = function () {
         var truckNumber = card.dataset.eoTruckNumber || (card.querySelector("strong") ? card.querySelector("strong").textContent.trim() : "");
         var dumpPointId = Number(dumpTarget.dataset.eoDumpTarget || 0);
         var dumpPointName = dumpTarget.dataset.eoDumpName || (dumpTarget.querySelector("strong") ? dumpTarget.querySelector("strong").textContent.trim() : "");
+        var freeBucketAcceptanceId = card.dataset.eoFreeBucketAcceptanceId || "";
         var freeBucketAcceptanceLocalId = card.dataset.eoFreeBucketAcceptanceLocalId || "";
-        var isFreeBucketLoad = card.dataset.eoFreeBucket === "1" && Boolean(freeBucketAcceptanceLocalId);
+        var freeBucketAcceptanceReference = freeBucketAcceptanceId || freeBucketAcceptanceLocalId;
+        var isFreeBucketLoad = card.dataset.eoFreeBucket === "1" && Boolean(freeBucketAcceptanceReference);
         var payload = {
             assignment_id: isFreeBucketLoad ? "" : (card.dataset.assignmentId || ""),
             // Свободный ковш определяет фактический экскаватор, но не отключает
             // уже подключенного водителя: при его активной смене сервер создаст
             // обычный рейс и передаст его водителю.
             manual_control: card.dataset.eoManualAvailable === "1",
-            free_bucket_acceptance_local_id: freeBucketAcceptanceLocalId,
+            // Подтверждённый сервером приём может быть открыт на другом устройстве.
+            // Тогда передаём его серверный id без device-scoped зависимости.
+            free_bucket_acceptance_id: freeBucketAcceptanceId,
+            free_bucket_acceptance_local_id: freeBucketAcceptanceId ? "" : freeBucketAcceptanceLocalId,
             expected_open_trip_id: card.dataset.eoOpenTripId || "",
             truck_id: card.dataset.truckId || "",
             excavator_id: shell.dataset.eoCurrentExcavatorId || "",
@@ -3028,6 +3108,7 @@ window.initExcavatorWorkShell = function () {
             downtime_text: downtimeInput ? downtimeInput.value : "",
             note: shell.querySelector("input[name='note']") ? shell.querySelector("input[name='note']").value : ""
         };
+        if (isFreeBucketLoad) payload.truck_number = truckNumber;
         card.classList.add("is-pending");
         fieldOutbox.pending().then(function (events) {
             var previous = events.filter(function (event) {
@@ -3061,7 +3142,9 @@ window.initExcavatorWorkShell = function () {
                 occurred_at: new Date().toISOString(),
                 sequence: sequence,
                 depends_on: [
-                    isFreeBucketLoad ? freeBucketAcceptanceLocalId : (acceptanceEvent ? acceptanceEvent.event_id : ""),
+                    isFreeBucketLoad
+                        ? (freeBucketAcceptanceId ? "" : freeBucketAcceptanceLocalId)
+                        : (acceptanceEvent ? acceptanceEvent.event_id : ""),
                     previous ? previous.event_id : ""
                 ].filter(function (value, index, values) {
                     return value && values.indexOf(value) === index;
@@ -3077,12 +3160,19 @@ window.initExcavatorWorkShell = function () {
             if (optimisticBadge) {
                 optimisticBadge.dataset.eoOfflineEventId = event.event_id;
                 optimisticBadge.dataset.eoLocalTripId = event.local_trip_id;
+                if (isFreeBucketLoad) {
+                    optimisticBadge.dataset.eoFreeBucketPreviewExpiresAt = new Date(
+                        Date.parse(event.occurred_at) + 5 * 60 * 1000
+                    ).toISOString();
+                }
             }
             card.dataset.eoOfflineEventId = event.event_id;
             card.dataset.eoLocalOpenTripId = event.local_trip_id;
             card.classList.add("is-saved-on-device");
-            if (isFreeBucketLoad && freeBucketController) freeBucketController.markLoaded(card);
-            if (card.dataset.eoTransferDirection === "outgoing") {
+            if (isFreeBucketLoad && freeBucketController) {
+                freeBucketController.markLoaded(card);
+                bindFreeBucketDumpCardExpiry(shell);
+            } else if (card.dataset.eoTransferDirection === "outgoing") {
                 card.classList.remove("is-pending");
                 card.hidden = true;
             } else {
@@ -3125,18 +3215,35 @@ window.initExcavatorWorkShell = function () {
             var payload = event.payload || {};
             var card = cardByTruckId(payload.truck_id);
             var dumpTarget = shell.querySelector('[data-eo-dump-target="' + String(payload.dump_point_id || "") + '"]');
-            if (!card || !dumpTarget) return;
-            var badge = addPendingTruckBadge(dumpTarget, card, "");
+            if (!dumpTarget) return;
+            var badgeSource = card;
+            if (!badgeSource && event.event_type === "excavator.free_bucket.loaded") {
+                badgeSource = document.createElement("span");
+                badgeSource.dataset.truckId = String(payload.truck_id || "");
+                var badgeNumber = document.createElement("strong");
+                badgeNumber.textContent = payload.truck_number || payload.truck_id || "";
+                badgeSource.appendChild(badgeNumber);
+            }
+            if (!badgeSource) return;
+            var badge = addPendingTruckBadge(dumpTarget, badgeSource, "");
             if (badge) {
                 badge.dataset.eoOfflineEventId = event.event_id;
                 badge.dataset.eoLocalTripId = event.local_trip_id || "";
+                if (event.event_type === "excavator.free_bucket.loaded") {
+                    badge.dataset.eoFreeBucketPreviewExpiresAt = new Date(
+                        Date.parse(event.occurred_at) + 5 * 60 * 1000
+                    ).toISOString();
+                }
             }
+            if (event.event_type === "excavator.free_bucket.loaded") {
+                if (card && freeBucketController) freeBucketController.markLoaded(card);
+                bindFreeBucketDumpCardExpiry(shell);
+                return;
+            }
+            if (!card) return;
             card.dataset.eoOfflineEventId = event.event_id;
             card.dataset.eoLocalOpenTripId = event.local_trip_id || "";
             card.classList.add("is-saved-on-device");
-            if (event.event_type === "excavator.free_bucket.loaded" && freeBucketController) {
-                freeBucketController.markLoaded(card);
-            }
             if (card.dataset.eoTransferDirection === "outgoing") {
                 card.classList.remove("is-pending");
                 card.hidden = true;
@@ -3191,6 +3298,9 @@ window.initExcavatorWorkShell = function () {
                 badge.dataset.tripId = String(tripId);
                 delete badge.dataset.eoOfflineEventId;
                 delete badge.dataset.eoLocalTripId;
+                if (event.event_type === "excavator.free_bucket.loaded") {
+                    bindFreeBucketDumpCardExpiry(shell);
+                }
             }
             var confirmedCard = cardByTruckId(event.payload && event.payload.truck_id);
             if (confirmedCard && tripId) {
@@ -3668,7 +3778,8 @@ window.initExcavatorWorkShell = function () {
             queueEvent: queueExcavatorFieldEvent,
             fieldOutbox: fieldOutbox,
             bindTruckCard: bindExcavatorTruckCard,
-            showNotice: showExcavatorNotice
+            showNotice: showExcavatorNotice,
+            invalidateRefresh: invalidateExcavatorWorkRefresh
         })
         : null;
     shell.querySelectorAll("[data-eo-truck-card]").forEach(bindExcavatorTruckCard);

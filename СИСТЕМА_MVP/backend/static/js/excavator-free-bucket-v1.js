@@ -5,6 +5,7 @@
     var DB_VERSION = 1;
     var STORE_NAME = "catalogs";
     var LS_PREFIX = "excavator-free-bucket-catalog-v1:";
+    var CONSUMED_PREFIX = "excavator-free-bucket-consumed-v1:";
     var OPEN_STATE_KEY = "eoFreeBucket";
     var modal = null;
     var input = null;
@@ -15,6 +16,7 @@
     var fieldOutbox = null;
     var bindTruckCard = null;
     var showNotice = null;
+    var invalidateRefresh = null;
     var catalog = [];
     var catalogMeta = {};
     var selectedTruck = null;
@@ -41,6 +43,47 @@
     function catalogScope() {
         var current = shell || document.querySelector("[data-eo-shell]");
         return current ? text(current.dataset.eoAccessId || "anonymous") : "anonymous";
+    }
+
+    function consumedScope() {
+        var current = shell || document.querySelector("[data-eo-shell]");
+        return catalogScope() + ":" + (current ? text(current.dataset.eoCurrentExcavatorId) : "");
+    }
+
+    function consumedReferences() {
+        try {
+            return JSON.parse(root.localStorage.getItem(CONSUMED_PREFIX + consumedScope()) || "{}") || {};
+        } catch (error) {
+            return {};
+        }
+    }
+
+    function storeConsumedReferences(references, consumed) {
+        var stored = consumedReferences();
+        (references || []).filter(Boolean).forEach(function (reference) {
+            if (consumed) stored[text(reference)] = Date.now();
+            else delete stored[text(reference)];
+        });
+        var compact = Object.keys(stored).sort(function (left, right) {
+            return Number(stored[right] || 0) - Number(stored[left] || 0);
+        }).slice(0, 100).reduce(function (result, reference) {
+            result[reference] = stored[reference];
+            return result;
+        }, {});
+        try {
+            root.localStorage.setItem(CONSUMED_PREFIX + consumedScope(), JSON.stringify(compact));
+        } catch (error) {}
+    }
+
+    function eventAcceptanceReferences(payload) {
+        payload = payload || {};
+        return [payload.free_bucket_acceptance_id, payload.free_bucket_acceptance_local_id].map(text).filter(Boolean);
+    }
+
+    function itemWasConsumed(item) {
+        var stored = consumedReferences();
+        return [item && item.id, item && item.free_bucket_acceptance_id, item && item.client_acceptance_id]
+            .map(text).filter(Boolean).some(function (reference) { return Boolean(stored[reference]); });
     }
 
     function localStorageRead(scope) {
@@ -128,9 +171,13 @@
 
     function useSnapshot(snapshot) {
         snapshot = normalizeSnapshot(snapshot);
+        var selectedTruckId = truckIdOf(selectedTruck);
         catalog = snapshot.trucks.filter(function (item) {
             return truckIdOf(item) && numberOf(item);
         });
+        selectedTruck = selectedTruckId
+            ? catalog.find(function (item) { return truckIdOf(item) === selectedTruckId; }) || null
+            : null;
         catalogMeta = snapshot;
         renderSearch();
     }
@@ -459,9 +506,13 @@
     function cardForAcceptance(reference) {
         reference = text(reference);
         if (!reference) return null;
-        return document.querySelector(
-            "[data-eo-truck-card][data-eo-free-bucket='1'][data-eo-free-bucket-acceptance-local-id='" + reference.replace(/'/g, "\\'") + "']"
-        );
+        return Array.prototype.find.call(
+            document.querySelectorAll("[data-eo-truck-card][data-eo-free-bucket='1']"),
+            function (card) {
+                return text(card.dataset.eoFreeBucketAcceptanceLocalId) === reference
+                    || text(card.dataset.eoFreeBucketAcceptanceId) === reference;
+            }
+        ) || null;
     }
 
     function terminalAttention(event) {
@@ -473,8 +524,8 @@
         (events || []).forEach(function (event) {
             if (event.event_type !== "excavator.free_bucket.cancelled") return;
             var payload = event.payload || {};
-            var card = cardForAcceptance(payload.free_bucket_acceptance_local_id || payload.free_bucket_acceptance_id)
-                || cardForTruck(payload.truck_id);
+            var reference = text(payload.free_bucket_acceptance_local_id || payload.free_bucket_acceptance_id);
+            var card = reference ? cardForAcceptance(reference) : cardForTruck(payload.truck_id);
             if (!card || card.dataset.eoFreeBucket !== "1") return;
             if (["pending", "syncing"].indexOf(event.sync_state) >= 0) card.remove();
             else if (terminalAttention(event)) markAttention(event, {});
@@ -488,10 +539,17 @@
         });
         (events || []).forEach(function (event) {
             if (event.event_type !== "excavator.free_bucket.loaded") return;
-            var card = cardForTruck(event.payload && event.payload.truck_id);
-            if (!card) return;
-            markLoaded(card);
-            if (terminalAttention(event)) markAttention(event, {});
+            var payload = event.payload || {};
+            var reference = text(payload.free_bucket_acceptance_id || payload.free_bucket_acceptance_local_id);
+            var card = reference ? cardForAcceptance(reference) : cardForTruck(payload.truck_id);
+            if (["pending", "syncing"].indexOf(event.sync_state) >= 0) {
+                storeConsumedReferences(eventAcceptanceReferences(payload), true);
+                if (card) removeLoadedCard(card);
+            } else if (terminalAttention(event)) {
+                storeConsumedReferences(eventAcceptanceReferences(payload), false);
+                renderEmbeddedCards(shell);
+                markAttention(event, {});
+            }
         });
         normalizeGrid();
     }
@@ -507,6 +565,7 @@
         acceptButton.disabled = true;
         acceptButton.textContent = "Сохраняем…";
         var item = selectedTruck;
+        if (typeof invalidateRefresh === "function") invalidateRefresh();
         queueEvent("excavator.free_bucket.accepted", {
             truck_id: Number(truckIdOf(item)),
             truck_number: numberOf(item),
@@ -538,11 +597,12 @@
             return;
         }
         button.disabled = true;
+        if (typeof invalidateRefresh === "function") invalidateRefresh();
         queueEvent("excavator.free_bucket.cancelled", {
             free_bucket_acceptance_local_id: localId,
             truck_id: Number(truckId)
         }, {idPrefix: "free-bucket-cancel", dependsOn: [localId]}).then(function () {
-            var card = cardForTruck(truckId);
+            var card = cardForAcceptance(localId);
             if (card && card.dataset.eoFreeBucket === "1") card.remove();
             normalizeGrid();
             renderSearch();
@@ -553,31 +613,19 @@
         });
     }
 
-    function markLoaded(card, details) {
+    function removeLoadedCard(card) {
         if (!card || card.dataset.eoFreeBucket !== "1") return;
-        details = details || {};
-        card.dataset.eoFreeBucketUsed = "1";
-        card.dataset.eoCanLoad = "0";
-        card.dataset.eoTruckInactive = "1";
-        card.dataset.eoEquipmentState = "loaded_waiting_unload";
-        card.setAttribute("draggable", "false");
-        card.classList.remove("is-selected", "status-yellow", "status-gray", "status-red", "status-blue", "status-orange");
-        card.classList.add("status-green", "is-inactive");
-        var status = card.querySelector("span");
-        if (status) status.textContent = details.status_label || "на разгрузку";
-        var target = card.querySelector("em");
-        if (!target && details.dump_point) {
-            target = make("em", "", details.dump_point);
-            card.appendChild(target);
-        } else if (target && details.dump_point) {
-            target.textContent = details.dump_point;
-        }
-        var marker = card.querySelector(".eo-free-bucket-card-marker");
-        if (marker) marker.textContent = "Свободный ковш · отправлен";
+        storeConsumedReferences([
+            card.dataset.eoFreeBucketAcceptanceId,
+            card.dataset.eoFreeBucketAcceptanceLocalId
+        ], true);
+        card.remove();
+        normalizeGrid();
     }
 
     function renderEmbeddedCards(currentShell) {
         readEmbeddedCards(currentShell).forEach(function (item) {
+            if (item.is_used || itemWasConsumed(item)) return;
             var cardItem = Object.assign({}, item, {id: item.truck_id});
             var event = {
                 event_id: text(item.client_acceptance_id || item.free_bucket_acceptance_local_id),
@@ -589,9 +637,6 @@
                 card.classList.remove("is-saved-on-device");
                 card.dataset.eoFreeBucketAcceptanceId = text(item.id || item.free_bucket_acceptance_id);
                 card.dataset.eoFreeBucketAcceptanceLocalId = event.event_id;
-                if (item.is_used) {
-                    markLoaded(card, {dump_point: text(item.dump_point)});
-                }
             }
         });
     }
@@ -607,12 +652,12 @@
                 card.dataset.eoFreeBucketAcceptanceId = text(result && result.server_ids && result.server_ids.free_bucket_acceptance_id);
             }
         } else if (event.event_type === "excavator.free_bucket.loaded") {
-            markLoaded(cardForTruck(payload.truck_id), {
-                dump_point: text(result && result.dump_point),
-                status_label: text(result && result.status_label),
-            });
+            var loadedReference = text(payload.free_bucket_acceptance_id || payload.free_bucket_acceptance_local_id);
+            storeConsumedReferences(eventAcceptanceReferences(payload), true);
+            removeLoadedCard(loadedReference ? cardForAcceptance(loadedReference) : cardForTruck(payload.truck_id));
         } else if (event.event_type === "excavator.free_bucket.cancelled") {
-            var cancelled = cardForTruck(payload.truck_id);
+            var cancelledReference = text(payload.free_bucket_acceptance_local_id || payload.free_bucket_acceptance_id);
+            var cancelled = cancelledReference ? cardForAcceptance(cancelledReference) : cardForTruck(payload.truck_id);
             if (cancelled && cancelled.dataset.eoFreeBucket === "1") cancelled.remove();
             normalizeGrid();
         }
@@ -638,8 +683,9 @@
         fieldOutbox = options.fieldOutbox || fieldOutbox;
         bindTruckCard = options.bindTruckCard || bindTruckCard;
         showNotice = options.showNotice || showNotice;
-        hydrateCatalog(shell);
+        invalidateRefresh = options.invalidateRefresh || invalidateRefresh;
         renderEmbeddedCards(shell);
+        hydrateCatalog(shell);
         normalizeGrid();
         if (fieldOutbox && typeof fieldOutbox.pending === "function") {
             fieldOutbox.pending().then(reconcileEvents).catch(function () {});
@@ -649,7 +695,7 @@
             reconcileEvents: reconcileEvents,
             handleConfirmed: handleConfirmed,
             markAttention: markAttention,
-            markLoaded: markLoaded,
+            markLoaded: removeLoadedCard,
             normalizeGrid: normalizeGrid
         };
     }
@@ -734,7 +780,7 @@
         reconcileEvents: reconcileEvents,
         handleConfirmed: handleConfirmed,
         markAttention: markAttention,
-        markLoaded: markLoaded,
+        markLoaded: removeLoadedCard,
         normalizeGrid: normalizeGrid,
         isOpen: function () { return Boolean(modal && !modal.hidden); }
     };

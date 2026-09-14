@@ -7,7 +7,10 @@ from pathlib import Path
 
 
 HOST = "127.0.0.1"
-PORT = "8000"
+PORT = os.environ.get("MVP_SERVER_PORT", "8000").strip() or "8000"
+
+if not PORT.isdecimal() or not 1 <= int(PORT) <= 65535:
+    raise RuntimeError("MVP_SERVER_PORT must be a TCP port between 1 and 65535.")
 
 
 def write_log(path: Path, message: str) -> None:

@@ -40,37 +40,58 @@ test('catalog and accepted cards survive offline shell lifecycle', () => {
     assert.match(source, /operational-state-refresh-applied/);
     assert.match(source, /fieldOutbox\.pending\(\)\.then\(reconcileEvents\)/);
     assert.match(source, /renderEmbeddedCards\(shell\)/);
+    assert.ok(source.indexOf('renderEmbeddedCards(shell);') < source.indexOf('hydrateCatalog(shell);'));
     assert.match(source, /value\.replace\(\/\\D\+\/g, ""\)\.indexOf\(digits\)/);
     assert.match(source, /catalogMeta\.updated_at/);
     assert.match(source, /availability_label/);
+    assert.match(template, /payload\.free_bucket_truck_directory/);
+    assert.match(template, /payload\.free_bucket_cards/);
+    assert.match(template, /node\.type = 'application\/json'/);
+    assert.match(source, /var selectedTruckId = truckIdOf\(selectedTruck\)/);
+    assert.match(source, /catalog\.find\(function \(item\) \{ return truckIdOf\(item\) === selectedTruckId; \}\)/);
 });
 
 test('accept cancel and load use the durable field outbox', () => {
     assert.match(source, /queueEvent\("excavator\.free_bucket\.accepted"/);
     assert.match(source, /queueEvent\("excavator\.free_bucket\.cancelled"/);
     assert.match(template, /event_type: isFreeBucketLoad \? "excavator\.free_bucket\.loaded"/);
-    assert.match(template, /free_bucket_acceptance_local_id: freeBucketAcceptanceLocalId/);
-    assert.match(template, /isFreeBucketLoad \? freeBucketAcceptanceLocalId/);
+    assert.match(template, /freeBucketAcceptanceReference = freeBucketAcceptanceId \|\| freeBucketAcceptanceLocalId/);
+    assert.match(template, /free_bucket_acceptance_id: freeBucketAcceptanceId/);
+    assert.match(template, /free_bucket_acceptance_local_id: freeBucketAcceptanceId \? "" : freeBucketAcceptanceLocalId/);
+    assert.match(template, /freeBucketAcceptanceId \? "" : freeBucketAcceptanceLocalId/);
     assert.match(template, /manual_control: card\.dataset\.eoManualAvailable === "1"/);
     assert.doesNotMatch(template, /manual_control: isFreeBucketLoad \|\|/);
     assert.match(template, /function bindExcavatorTruckCard\(card\)/);
     assert.match(template, /bindTruckCard: bindExcavatorTruckCard/);
-    assert.match(source, /eoFreeBucketUsed/);
+    assert.match(template, /freeBucketController\.markLoaded\(card\)/);
 });
 
 test('cancel and failed load do not restore an actionable stale card', () => {
+    assert.match(source, /var card = reference \? cardForAcceptance\(reference\) : cardForTruck\(payload\.truck_id\)/);
+    assert.match(source, /var card = cardForAcceptance\(localId\)/);
+    assert.match(source, /var cancelled = cancelledReference \? cardForAcceptance\(cancelledReference\) : cardForTruck\(payload\.truck_id\)/);
+    assert.doesNotMatch(source, /cardForAcceptance\([^\n]+\)\s*\|\|\s*cardForTruck/);
     assert.match(source, /if \(\["pending", "syncing"\]\.indexOf\(event\.sync_state\) >= 0\) card\.remove\(\)/);
     assert.match(source, /event\.event_type !== "excavator\.free_bucket\.loaded"/);
     assert.match(source, /if \(terminalAttention\(event\)\) markAttention\(event, \{\}\)/);
-    assert.match(source, /card\.dataset\.eoCanLoad = "0"/);
-    assert.match(source, /card\.setAttribute\("draggable", "false"\)/);
-    assert.match(source, /if \(item\.is_used\) \{/);
-    assert.match(source, /markLoaded\(card, \{dump_point: text\(item\.dump_point\)\}\)/);
+    assert.match(source, /function removeLoadedCard\(card\)[\s\S]*card\.remove\(\)/);
+    assert.match(source, /if \(item\.is_used \|\| itemWasConsumed\(item\)\) return/);
+    assert.match(source, /loadedReference \? cardForAcceptance\(loadedReference\) : cardForTruck/);
+    assert.match(source, /eoFreeBucketAcceptanceId\) === reference/);
 });
 
-test('all free bucket assets share the v238 shell marker', () => {
-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v238/);
-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v238/);
+test('one successful free-bucket swipe removes the upper card and keeps a separate five-minute badge', () => {
+    assert.match(template, /data-eo-free-bucket-preview-expires-at/);
+    assert.match(template, /function bindFreeBucketDumpCardExpiry\(shellRoot\)/);
+    assert.match(template, /window\.eoFreeBucketQueuePreviewTimer/);
+    assert.match(template, /Date\.parse\(event\.occurred_at\) \+ 5 \* 60 \* 1000/);
+    assert.match(template, /freeBucketController\.markLoaded\(card\);\s*bindFreeBucketDumpCardExpiry\(shell\)/);
+    assert.doesNotMatch(source, /Свободный ковш · отправлен/);
+});
+
+test('all free bucket assets share the current shell marker', () => {
+    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v244/);
+    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v244/);
 });
 
 test('temporary card adds semantics without replacing production status', () => {
@@ -85,4 +106,11 @@ test('temporary card adds semantics without replacing production status', () => 
     assert.match(css, /\.eo-free-bucket-remote-marker/);
     assert.match(css, /is-free-bucket-remote \{[\s\S]*grid-template-areas:\s*"icon" "number" "freebucket" "target"/);
     assert.match(css, /grid-area:\s*freebucket/);
+});
+
+test('accept and cancel invalidate an older operational fragment first', () => {
+    assert.match(source, /var invalidateRefresh = null;/);
+    assert.match(source, /invalidateRefresh\(\);\s*queueEvent\("excavator\.free_bucket\.accepted"/);
+    assert.match(source, /invalidateRefresh\(\);\s*queueEvent\("excavator\.free_bucket\.cancelled"/);
+    assert.match(template, /invalidateRefresh:\s*invalidateExcavatorWorkRefresh/);
 });

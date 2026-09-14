@@ -108,6 +108,11 @@ from .manual_loading import (
     trip_driver_control_filter,
     truck_driver_participation,
 )
+from .free_bucket import (
+    free_bucket_dump_card_expires_at,
+    free_bucket_dump_card_is_visible,
+    free_bucket_dump_card_visibility_filter,
+)
 from users.active_role import role_session_state
 from users.role_apps import role_app_manifest_response, role_app_service_worker_response
 from users.session_device import get_session_device_kind, set_session_device_kind
@@ -962,7 +967,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v238";
+const CACHE_NAME = "excavator-mobile-shell-v244";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -976,20 +981,20 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v238",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v238",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v238",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v238",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v238",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v238",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v238",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v244",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v244",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v244",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v244",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v244",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v244",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v244",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v238",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v238",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v238",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v238",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v238",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v238",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v244",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v244",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v244",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v244",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v244",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v244",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -5060,7 +5065,10 @@ def trip_loaded_payload(trip, *, client_action_id=''):
         )['label']
     else:
         status_label = trip.get_status_display()
-    dump_badge_auto_hide_at = manual_dump_card_expires_at(trip)
+    dump_badge_auto_hide_at = (
+        free_bucket_dump_card_expires_at(trip)
+        or manual_dump_card_expires_at(trip)
+    )
     return {
         'ok': True,
         'action': 'truck_loaded',
@@ -6256,7 +6264,7 @@ def excavator_work_view(request):
     active_trips_queryset = (
         Trip.objects
         .filter(status__in=OPEN_TRIP_STATUSES)
-        .select_related('truck', 'excavator', 'rock_type', 'dump_point')
+        .select_related('truck', 'excavator', 'rock_type', 'dump_point', 'free_bucket_acceptance')
         .order_by('-created_at', '-id')
     )
     if current_excavator:
@@ -6270,8 +6278,13 @@ def excavator_work_view(request):
         if trip.truck_id in outgoing_transfer_by_truck_id
     )
     dump_badge_trips = list(
-        active_trips_queryset
-        .filter(manual_dump_card_visibility_filter(now=dump_card_now))[:20]
+        active_trips_queryset.filter(
+            free_bucket_dump_card_visibility_filter(now=dump_card_now)
+            | (
+                Q(free_bucket_acceptance__isnull=True)
+                & manual_dump_card_visibility_filter(now=dump_card_now)
+            )
+        )[:20]
     )
     historical_outgoing_transition_by_truck_id = {}
     historical_transition_truck_ids = {
@@ -6717,12 +6730,9 @@ def excavator_work_view(request):
             FreeBucketAcceptance.objects
             .filter(
                 excavator=current_excavator,
-                status__in=(
-                    FreeBucketAcceptanceStatus.ACCEPTED,
-                    FreeBucketAcceptanceStatus.USED,
-                ),
+                status=FreeBucketAcceptanceStatus.ACCEPTED,
             )
-            .select_related('truck', 'primary_assignment__excavator', 'used_trip__dump_point')
+            .select_related('truck', 'primary_assignment__excavator')
             .order_by('occurred_at', 'id')
         ):
             free_bucket_cards.append({
@@ -6735,8 +6745,6 @@ def excavator_work_view(request):
                     if acceptance.primary_assignment_id else ''
                 ),
                 'occurred_at': acceptance.occurred_at,
-                'is_used': acceptance.status == FreeBucketAcceptanceStatus.USED,
-                'dump_point': str(acceptance.used_trip.dump_point) if acceptance.used_trip_id else '',
             })
 
     work_settings = excavator_work_settings_from_session(request, current_excavator, form)
@@ -6933,7 +6941,11 @@ def excavator_work_view(request):
     active_trips_by_dump_id = defaultdict(list)
     dump_transition_by_trip_id = {}
     for trip in dump_badge_trips:
-        if not manual_dump_card_is_visible(trip, now=dump_card_now):
+        free_bucket_expires_at = free_bucket_dump_card_expires_at(trip)
+        if free_bucket_expires_at is not None:
+            if not free_bucket_dump_card_is_visible(trip, now=dump_card_now):
+                continue
+        elif not manual_dump_card_is_visible(trip, now=dump_card_now):
             continue
         transition = outgoing_transfer_by_truck_id.get(trip.truck_id)
         historical_transition = False
@@ -6994,7 +7006,16 @@ def excavator_work_view(request):
                 'number': equipment_number(trip.truck),
                 'status_key': 'green',
                 'is_last_sent': index == 0,
-                'auto_hide_at': manual_dump_card_expires_at(trip),
+                'auto_hide_at': (
+                    free_bucket_dump_card_expires_at(trip)
+                    or manual_dump_card_expires_at(trip)
+                ),
+                'auto_hide_kind': (
+                    'free_bucket'
+                    if free_bucket_dump_card_expires_at(trip) is not None
+                    else 'manual' if manual_dump_card_expires_at(trip) is not None
+                    else ''
+                ),
                 'transition_id': dump_transition_by_trip_id.get(trip.id, {}).get('id', ''),
                 'transition_hide_at': dump_transition_by_trip_id.get(trip.id, {}).get('deadline'),
             }
@@ -7105,7 +7126,14 @@ def excavator_work_view(request):
             screen='excavator',
             selector='[data-eo-shell]',
             version=operational_state_version,
-            extra={'equipment_cards': truck_detail_cards},
+            extra={
+                'equipment_cards': truck_detail_cards,
+                # The fragment extractor intentionally strips script elements.
+                # Send the JSON snapshots explicitly so a shell replacement can
+                # restore the temporary cards and the offline truck directory.
+                'free_bucket_truck_directory': free_bucket_truck_directory,
+                'free_bucket_cards': free_bucket_cards,
+            },
         )
     return response
 
