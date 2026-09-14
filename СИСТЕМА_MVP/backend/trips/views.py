@@ -18,7 +18,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
-from django.views.decorators.http import require_http_methods, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from assignments.models import (
     AssignmentStatus,
@@ -112,8 +112,9 @@ from users.active_role import role_session_state
 from users.role_apps import role_app_manifest_response, role_app_service_worker_response
 from users.session_device import get_session_device_kind, set_session_device_kind
 
-from .forms import TripCreateForm
+from .excavator_hourly_report import build_excavator_hourly_report
 from .dispatcher_header import build_dispatcher_header_context, close_dispatcher_shift, get_active_dispatcher_shift, open_dispatcher_shift
+from .forms import TripCreateForm
 from .models import DispatcherActionLog, DispatcherActionType, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 from .trip_creation import (
     calculate_trip_volume_and_tonnage,
@@ -961,7 +962,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v235";
+const CACHE_NAME = "excavator-mobile-shell-v236";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -975,15 +976,17 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v235",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v235",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v235",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v235",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v235",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v235",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v236",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v236",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v236",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v236",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v236",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v236",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v236",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v235",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v235",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v236",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v236",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v236",
   "/static/js/excavator-field-outbox-v1.js?v=1",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
@@ -5776,6 +5779,34 @@ def excavator_shift_action_view(request):
             'has_active_shift': bool(open_shift),
             **error.extra,
         }, status=error.status)
+
+
+@require_GET
+def excavator_hourly_report_view(request):
+    access = excavator_access_from_request(request, require_active_role=False)
+    if not access:
+        return JsonResponse({
+            'ok': False,
+            'code': 'authentication_required',
+            'error': 'Требуется вход Экскаваторщика.',
+        }, status=403)
+
+    open_shift = get_excavator_open_shift(access.employee)
+    if not open_shift:
+        return JsonResponse({
+            'ok': False,
+            'code': 'open_shift_required',
+            'error': 'Нет открытой смены Экскаваторщика.',
+        }, status=409)
+
+    payload = build_excavator_hourly_report(open_shift.equipment)
+    payload.update({
+        'ok': True,
+        'version': get_operational_state_version(),
+    })
+    response = JsonResponse(payload)
+    response['Cache-Control'] = 'no-store'
+    return response
 
 
 def excavator_work_view(request):
