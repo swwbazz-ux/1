@@ -25,6 +25,11 @@ test('selector modal is external, keypad driven and Android Back aware', () => {
     assert.match(source, /history\.pushState/);
     assert.match(source, /window\.addEventListener\("popstate"/);
     assert.match(source, /setAttribute\("inert", ""\)/);
+    const unsafeStart = template.indexOf('function isExcavatorRefreshUnsafe(options) {');
+    const unsafeEnd = template.indexOf('function storeExcavatorRealtimeVersion', unsafeStart);
+    assert.ok(unsafeStart >= 0 && unsafeEnd > unsafeStart);
+    assert.doesNotMatch(template.slice(unsafeStart, unsafeEnd), /data-eo-free-bucket-modal/);
+    assert.match(source, /operational-state-refresh-applied[\s\S]*setUnderlyingBlocked\(true\)/);
 });
 
 test('catalog and accepted cards survive offline shell lifecycle', () => {
@@ -36,6 +41,8 @@ test('catalog and accepted cards survive offline shell lifecycle', () => {
     assert.match(source, /fieldOutbox\.pending\(\)\.then\(reconcileEvents\)/);
     assert.match(source, /renderEmbeddedCards\(shell\)/);
     assert.match(source, /value\.replace\(\/\\D\+\/g, ""\)\.indexOf\(digits\)/);
+    assert.match(source, /catalogMeta\.updated_at/);
+    assert.match(source, /availability_label/);
 });
 
 test('accept cancel and load use the durable field outbox', () => {
@@ -56,6 +63,9 @@ test('cancel and failed load do not restore an actionable stale card', () => {
     assert.match(source, /event\.event_type !== "excavator\.free_bucket\.loaded"/);
     assert.match(source, /if \(terminalAttention\(event\)\) markAttention\(event, \{\}\)/);
     assert.match(source, /card\.dataset\.eoCanLoad = "0"/);
+    assert.match(source, /card\.setAttribute\("draggable", "false"\)/);
+    assert.match(source, /if \(item\.is_used\) \{/);
+    assert.match(source, /markLoaded\(card, \{dump_point: text\(item\.dump_point\)\}\)/);
 });
 
 test('all free bucket assets share the v238 shell marker', () => {
@@ -70,4 +80,9 @@ test('temporary card adds semantics without replacing production status', () => 
     assert.match(css, /\.eo-dashboard-truck-card\.is-free-bucket \.eo-free-bucket-card-accent/);
     assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
     assert.match(source, /is-free-bucket-overflow/);
+    assert.match(template, /eo-free-bucket-remote-marker/);
+    assert.match(template, /foreign_free_bucket %\} is-free-bucket-remote/);
+    assert.match(css, /\.eo-free-bucket-remote-marker/);
+    assert.match(css, /is-free-bucket-remote \{[\s\S]*grid-template-areas:\s*"icon" "number" "freebucket" "target"/);
+    assert.match(css, /grid-area:\s*freebucket/);
 });

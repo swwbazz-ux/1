@@ -14265,3 +14265,32 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-exc
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]) img {
     opacity: .88;
 }
+
+/* Временная работа не переносит самосвал между комплексами: это только
+   компактная объясняющая метка на его исходной плитке. */
+.dispatcher-truck-tile .dispatcher-free-bucket-marker {
+    display: block;
+    max-width: 100%;
+    margin-top: 2px;
+    overflow: hidden;
+    color: #f7d667;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .01em;
+    line-height: 1.1;
+    text-align: center;
+    text-overflow: ellipsis;
+    text-shadow: 0 1px 2px rgba(4, 13, 18, .9);
+    white-space: nowrap;
+}
+
+.complex-truck-tile .dispatcher-free-bucket-marker {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    left: 2px;
+    padding: 1px 2px;
+    border: 1px solid rgba(244, 208, 78, .45);
+    border-radius: 4px;
+    background: rgba(31, 25, 5, .78);
+}

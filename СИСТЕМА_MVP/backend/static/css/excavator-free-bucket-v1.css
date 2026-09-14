@@ -377,6 +377,51 @@ body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket.is-free-b
     color: #ffc0ba;
 }
 
+/* Основная карточка остаётся в своём комплексе, но явно показывает временную
+   работу у другого экскаватора. Метка не подменяет производственный цвет. */
+body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-remote {
+    grid-template-areas: "icon" "number" "freebucket" "target" !important;
+    grid-template-rows: minmax(0, 1fr) auto auto auto !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-outgoing,
+body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-incoming {
+    grid-template-areas: "icon" "number" "transfer" "freebucket" "target" !important;
+    grid-template-rows: minmax(0, 1fr) auto auto auto auto !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card .eo-free-bucket-remote-marker {
+    grid-area: freebucket !important;
+    position: relative !important;
+    z-index: 8 !important;
+    display: block !important;
+    max-width: calc(100% - 4px) !important;
+    box-sizing: border-box;
+    padding: 2px 5px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 211, 72, .52);
+    border-radius: 999px;
+    background: rgba(37, 31, 9, .86);
+    color: #ffe071;
+    font-size: clamp(7px, 1.9vw, 10px);
+    font-weight: 900;
+    line-height: 1.05;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4 .eo-dashboard-truck-card.is-free-bucket-remote {
+    grid-template-areas: "icon" "number" "freebucket" "target" !important;
+    grid-template-rows: minmax(12px, 1fr) auto auto auto !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4 .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-outgoing,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4 .eo-dashboard-truck-card.is-free-bucket-remote.is-transfer-incoming {
+    grid-template-areas: "icon" "number" "transfer" "freebucket" "target" !important;
+    grid-template-rows: minmax(8px, 1fr) auto auto auto auto !important;
+}
+
 body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-highlight {
     animation: eo-free-bucket-card-highlight .82s ease-out both;
 }

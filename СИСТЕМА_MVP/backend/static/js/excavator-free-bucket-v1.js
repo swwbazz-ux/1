@@ -553,9 +553,25 @@
         });
     }
 
-    function markLoaded(card) {
+    function markLoaded(card, details) {
         if (!card || card.dataset.eoFreeBucket !== "1") return;
+        details = details || {};
         card.dataset.eoFreeBucketUsed = "1";
+        card.dataset.eoCanLoad = "0";
+        card.dataset.eoTruckInactive = "1";
+        card.dataset.eoEquipmentState = "loaded_waiting_unload";
+        card.setAttribute("draggable", "false");
+        card.classList.remove("is-selected", "status-yellow", "status-gray", "status-red", "status-blue", "status-orange");
+        card.classList.add("status-green", "is-inactive");
+        var status = card.querySelector("span");
+        if (status) status.textContent = details.status_label || "на разгрузку";
+        var target = card.querySelector("em");
+        if (!target && details.dump_point) {
+            target = make("em", "", details.dump_point);
+            card.appendChild(target);
+        } else if (target && details.dump_point) {
+            target.textContent = details.dump_point;
+        }
         var marker = card.querySelector(".eo-free-bucket-card-marker");
         if (marker) marker.textContent = "Свободный ковш · отправлен";
     }
@@ -573,6 +589,9 @@
                 card.classList.remove("is-saved-on-device");
                 card.dataset.eoFreeBucketAcceptanceId = text(item.id || item.free_bucket_acceptance_id);
                 card.dataset.eoFreeBucketAcceptanceLocalId = event.event_id;
+                if (item.is_used) {
+                    markLoaded(card, {dump_point: text(item.dump_point)});
+                }
             }
         });
     }
@@ -588,7 +607,10 @@
                 card.dataset.eoFreeBucketAcceptanceId = text(result && result.server_ids && result.server_ids.free_bucket_acceptance_id);
             }
         } else if (event.event_type === "excavator.free_bucket.loaded") {
-            markLoaded(cardForTruck(payload.truck_id));
+            markLoaded(cardForTruck(payload.truck_id), {
+                dump_point: text(result && result.dump_point),
+                status_label: text(result && result.status_label),
+            });
         } else if (event.event_type === "excavator.free_bucket.cancelled") {
             var cancelled = cardForTruck(payload.truck_id);
             if (cancelled && cancelled.dataset.eoFreeBucket === "1") cancelled.remove();

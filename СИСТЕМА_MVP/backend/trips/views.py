@@ -2308,6 +2308,27 @@ def build_dispatcher_dashboard_context(
     open_downtime_list = list(open_mechanic_downtimes)
     trucks_list = list(trucks)
     excavators_list = list(excavators)
+    # The dispatcher keeps a truck in its primary complex.  This separate
+    # annotation explains a temporary free-bucket operation without turning it
+    # into a dispatcher reassignment.
+    from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+    free_bucket_label_by_truck_id = {}
+    for acceptance in (
+        FreeBucketAcceptance.objects
+        .filter(
+            truck_id__in=[truck.id for truck in trucks_list],
+            status__in=(
+                FreeBucketAcceptanceStatus.ACCEPTED,
+                FreeBucketAcceptanceStatus.USED,
+            ),
+        )
+        .select_related('excavator')
+        .order_by('-occurred_at', '-id')
+    ):
+        free_bucket_label_by_truck_id.setdefault(
+            acceptance.truck_id,
+            'Свободный ковш · ' + equipment_short_name(acceptance.excavator),
+        )
     shift_trip_queryset = Trip.objects.none()
     shift_trip_attribution = None
     production_shift_start = None
@@ -2972,6 +2993,7 @@ def build_dispatcher_dashboard_context(
                     if transfer_source_excavator
                     else ''
                 ),
+                'free_bucket_label': free_bucket_label_by_truck_id.get(truck_id, ''),
                 **equipment_presence_fields(truck.id),
             })
         forecast = fact
@@ -3146,6 +3168,7 @@ def build_dispatcher_dashboard_context(
                 'assignment_state_id': row.get('assignment_state_id') or 0,
                 'transfer_pending': bool(row.get('transfer_pending')),
                 'transfer_source_label': row.get('transfer_source_label') or '',
+                'free_bucket_label': row.get('free_bucket_label') or '',
                 'has_current_shift': bool(row.get('has_current_shift')),
                 'presence_status': row.get('presence_status') or '',
                 'presence_label': row.get('presence_label') or '',
@@ -3363,6 +3386,7 @@ def build_dispatcher_dashboard_context(
                 if truck.id in assignment_by_truck
                 else 0
             ),
+            'free_bucket_label': free_bucket_label_by_truck_id.get(truck.id, ''),
             **equipment_presence_fields(truck.id),
         })
     mobile_truck_garage_tiles = []
@@ -3403,6 +3427,7 @@ def build_dispatcher_dashboard_context(
                 if truck.id in assignment_by_truck
                 else 0
             ),
+            'free_bucket_label': free_bucket_label_by_truck_id.get(truck.id, ''),
             **equipment_presence_fields(truck.id),
         })
 
@@ -3590,6 +3615,8 @@ def build_dispatcher_dashboard_context(
                 {'label': 'Порода', 'value': complex_card.get('current_rock')},
                 {'label': 'Разгрузки', 'value': ', '.join(point.get('name') for point in complex_card.get('unload_points', []) if point.get('name'))},
             ]
+            if tile.get('free_bucket_label'):
+                details.append({'label': 'Временная работа', 'value': tile['free_bucket_label']})
             details.extend(dispatcher_plan_details(tile.get('plan')))
             equipment_cards[card_id] = build_dispatcher_equipment_card(
                 card_id=card_id,
@@ -3643,6 +3670,8 @@ def build_dispatcher_dashboard_context(
                     {'label': 'Экскаватор', 'value': equipment_short_name(assignment.excavator)},
                     {'label': 'Назначен', 'value': format_dispatcher_datetime(assignment.assigned_at)},
                 ])
+            if tile.get('free_bucket_label'):
+                details.append({'label': 'Временная работа', 'value': tile['free_bucket_label']})
             if active_trip:
                 details.extend([
                     {'label': 'Рейс', 'value': 'активный'},
@@ -6485,15 +6514,48 @@ def excavator_work_view(request):
             return 'assigned'
         return 'free'
 
+    # A confirmed free-bucket acceptance does not change the dispatcher
+    # assignment, so the primary excavator keeps its normal card.  It must
+    # nevertheless see why that card is temporarily unavailable.
+    from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+    foreign_free_bucket_by_truck_id = {}
+    if current_excavator:
+        for acceptance in (
+            FreeBucketAcceptance.objects
+            .filter(
+                truck_id__in=[assignment.truck_id for assignment in available_assignments],
+                status__in=(
+                    FreeBucketAcceptanceStatus.ACCEPTED,
+                    FreeBucketAcceptanceStatus.USED,
+                ),
+            )
+            .exclude(excavator=current_excavator)
+            .select_related('excavator')
+            .order_by('-occurred_at', '-id')
+        ):
+            foreign_free_bucket_by_truck_id.setdefault(
+                acceptance.truck_id,
+                {
+                    'label': str(acceptance.excavator.garage_number or acceptance.excavator),
+                    'is_loaded': acceptance.status == FreeBucketAcceptanceStatus.USED,
+                },
+            )
+
     truck_cards = []
     for assignment in available_assignments:
         if assignment.truck_id in outgoing_sent_truck_ids:
             continue
         active_trip = active_trip_by_truck_id.get(assignment.truck_id)
+        foreign_free_bucket = foreign_free_bucket_by_truck_id.get(assignment.truck_id)
         equipment_state_code = excavator_truck_equipment_state_code(assignment, active_trip)
         target_label = str(active_trip.dump_point) if active_trip else ''
         state_ui = equipment_state_ui(equipment_state_map, equipment_state_code)
         load_block = assignment_load_block(assignment, active_trip)
+        if foreign_free_bucket:
+            load_block = {
+                'code': 'free_bucket_reserved_elsewhere',
+                'label': 'Самосвал временно обслуживается другим экскаватором.',
+            }
         block_reason = load_block['label'] if load_block else ''
         load_block_reason_code = load_block['code'] if load_block else ''
         participation = driver_participation[assignment.truck_id]
@@ -6527,7 +6589,13 @@ def excavator_work_view(request):
             'equipment_state_code': equipment_state_code,
             'status_key': status_key,
             'status_label': (
-                active_truck_downtime.reason.button_label
+                (
+                    'На разгрузку под свободным ковшом'
+                    if foreign_free_bucket and foreign_free_bucket['is_loaded']
+                    else 'Под свободным ковшом'
+                )
+                if foreign_free_bucket
+                else active_truck_downtime.reason.button_label
                 if active_truck_downtime
                 else (
                     block_reason
@@ -6549,6 +6617,7 @@ def excavator_work_view(request):
             'is_waiting_for_loading': is_waiting_for_loading,
             'is_handoff_completion': False,
             'transfer': getattr(assignment, 'transfer_state', None),
+            'foreign_free_bucket': foreign_free_bucket,
             'driver_shift_started': assignment.truck_id in open_truck_shift_equipment_ids,
             'block_reason': block_reason,
             'load_block_reason_code': load_block_reason_code,
@@ -6564,6 +6633,7 @@ def excavator_work_view(request):
         .select_related('equipment_type', 'model')
         .order_by('garage_number', 'id')
     )
+    free_bucket_truck_ids = [item.id for item in free_bucket_trucks]
     free_bucket_primary_by_truck_id = {}
     for assignment in (
         HaulAssignment.objects.filter(
@@ -6579,31 +6649,80 @@ def excavator_work_view(request):
             assignment.truck_id,
             excavator_operator_label(assignment.excavator),
         )
-    free_bucket_truck_directory = []
+    free_bucket_active_trip_by_truck_id = {}
+    free_bucket_downtime_by_truck_id = {}
+    free_bucket_acceptance_by_truck_id = {}
+    if free_bucket_truck_ids:
+        for trip in (
+            Trip.objects
+            .filter(truck_id__in=free_bucket_truck_ids, status__in=OPEN_TRIP_STATUSES)
+            .only('id', 'truck_id', 'status')
+            .order_by('-created_at', '-id')
+        ):
+            free_bucket_active_trip_by_truck_id.setdefault(trip.truck_id, trip)
+        for downtime in (
+            DowntimeEvent.objects
+            .filter(equipment_id__in=free_bucket_truck_ids, ended_at__isnull=True)
+            .select_related('reason')
+            .order_by('-started_at', '-id')
+        ):
+            free_bucket_downtime_by_truck_id.setdefault(downtime.equipment_id, downtime)
+        for acceptance in (
+            FreeBucketAcceptance.objects
+            .filter(
+                truck_id__in=free_bucket_truck_ids,
+                status__in=(
+                    FreeBucketAcceptanceStatus.ACCEPTED,
+                    FreeBucketAcceptanceStatus.USED,
+                ),
+            )
+            .select_related('excavator')
+            .order_by('-occurred_at', '-id')
+        ):
+            free_bucket_acceptance_by_truck_id.setdefault(acceptance.truck_id, acceptance)
+
+    free_bucket_truck_directory = {
+        'updated_at': timezone.now().isoformat(),
+        'version': get_operational_state_version(),
+        'trucks': [],
+    }
     for truck in free_bucket_trucks:
         model_name = str(getattr(truck.model, 'name', '') or '')
         model_key = model_name.casefold()
         truck_type = 'БелАЗ' if 'белаз' in model_key or 'belaz' in model_key else (
             'NHL' if 'nhl' in model_key or 'nte' in model_key else 'Тип не определён'
         )
-        free_bucket_truck_directory.append({
+        active_trip = free_bucket_active_trip_by_truck_id.get(truck.id)
+        downtime = free_bucket_downtime_by_truck_id.get(truck.id)
+        acceptance = free_bucket_acceptance_by_truck_id.get(truck.id)
+        availability_label = (
+            'Неактивен' if not truck.is_active
+            else 'На разгрузку' if active_trip
+            else str(downtime.reason.button_label or downtime.reason) if downtime
+            else 'Под свободным ковшом' if acceptance
+            else 'Доступен'
+        )
+        free_bucket_truck_directory['trucks'].append({
             'id': truck.id,
             'number': equipment_number(truck),
             'truck_type': truck_type,
             'model': model_name,
             'is_active': bool(truck.is_active),
             'primary_assignment_label': free_bucket_primary_by_truck_id.get(truck.id, ''),
+            'availability_label': availability_label,
         })
-    from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
     free_bucket_cards = []
     if current_excavator:
         for acceptance in (
             FreeBucketAcceptance.objects
             .filter(
                 excavator=current_excavator,
-                status=FreeBucketAcceptanceStatus.ACCEPTED,
+                status__in=(
+                    FreeBucketAcceptanceStatus.ACCEPTED,
+                    FreeBucketAcceptanceStatus.USED,
+                ),
             )
-            .select_related('truck', 'primary_assignment__excavator')
+            .select_related('truck', 'primary_assignment__excavator', 'used_trip__dump_point')
             .order_by('occurred_at', 'id')
         ):
             free_bucket_cards.append({
@@ -6616,6 +6735,8 @@ def excavator_work_view(request):
                     if acceptance.primary_assignment_id else ''
                 ),
                 'occurred_at': acceptance.occurred_at,
+                'is_used': acceptance.status == FreeBucketAcceptanceStatus.USED,
+                'dump_point': str(acceptance.used_trip.dump_point) if acceptance.used_trip_id else '',
             })
 
     work_settings = excavator_work_settings_from_session(request, current_excavator, form)

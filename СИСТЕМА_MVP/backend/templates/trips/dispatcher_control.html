@@ -165,6 +165,7 @@
                                     <strong>{{ truck.name }}</strong>
                                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                                     <span>{{ truck.label }}</span>
+                                    {% if truck.free_bucket_label %}<small class="dispatcher-free-bucket-marker">{{ truck.free_bucket_label }}</small>{% endif %}
                                     {% if truck.has_current_shift %}<i class="dispatcher-presence-dot is-{{ truck.presence_status }}" title="{{ truck.presence_label }}" aria-label="{{ truck.presence_label }}"></i>{% endif %}
                                     {% if truck.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ truck.plan_visual.completed_loops }}">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
                                 </article>
@@ -190,6 +191,7 @@
                         <strong>{{ tile.name }}</strong>
                         <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                         <span>{{ tile.label }}</span>
+                        {% if tile.free_bucket_label %}<small class="dispatcher-free-bucket-marker">{{ tile.free_bucket_label }}</small>{% endif %}
                         {% if tile.has_current_shift %}<i class="dispatcher-presence-dot is-{{ tile.presence_status }}" title="{{ tile.presence_label }}" aria-label="{{ tile.presence_label }}"></i>{% endif %}
                         {% if tile.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ tile.plan_visual.completed_loops }}">×{{ tile.plan_visual.completed_loops }}</b>{% endif %}
                     </article>
