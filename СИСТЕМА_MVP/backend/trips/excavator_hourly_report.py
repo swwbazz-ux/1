@@ -1,18 +1,11 @@
 from collections import defaultdict
 from datetime import timedelta
 
-from django.db.models import Exists, OuterRef
 from django.utils import formats, timezone
 
-from shifts.models import EquipmentPlanGroup
+from shifts.equipment_plan_groups import equipment_is_belaz_truck, equipment_is_nhl_truck
 
 from .models import Trip, TripStatus
-
-
-FLEET_PLAN_GROUP_CODES = {
-    'belaz': 'belaz_trucks',
-    'nhl': 'nhl_trucks',
-}
 
 
 def _period_label(start, end):
@@ -22,8 +15,8 @@ def _period_label(start, end):
 
 
 def _fleet_code(trip):
-    belongs_to_belaz = bool(trip.is_belaz)
-    belongs_to_nhl = bool(trip.is_nhl)
+    belongs_to_belaz = equipment_is_belaz_truck(trip.truck)
+    belongs_to_nhl = equipment_is_nhl_truck(trip.truck)
     if belongs_to_belaz == belongs_to_nhl:
         return 'unknown'
     return 'belaz' if belongs_to_belaz else 'nhl'
@@ -35,14 +28,6 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
     current_start = local_now.replace(minute=0, second=0, microsecond=0)
     previous_start = current_start - timedelta(hours=1)
 
-    group_membership = {
-        fleet_code: EquipmentPlanGroup.objects.filter(
-            code=group_code,
-            is_active=True,
-            equipment=OuterRef('truck_id'),
-        )
-        for fleet_code, group_code in FLEET_PLAN_GROUP_CODES.items()
-    }
     trips = (
         Trip.objects
         .filter(
@@ -51,11 +36,7 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
             loaded_at__lt=captured_at,
         )
         .exclude(status=TripStatus.CANCELLED)
-        .annotate(
-            is_belaz=Exists(group_membership['belaz']),
-            is_nhl=Exists(group_membership['nhl']),
-        )
-        .select_related('assigned_dump_point')
+        .select_related('assigned_dump_point', 'truck__equipment_type', 'truck__model')
         .order_by('loaded_at', 'id')
     )
 

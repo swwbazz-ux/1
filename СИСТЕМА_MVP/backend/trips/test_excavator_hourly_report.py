@@ -5,7 +5,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType
-from shifts.models import EmployeeShift, EquipmentPlanGroup
+from shifts.models import EmployeeShift
 from users.models import Employee, EmployeeAccess, Role
 
 from .excavator_hourly_report import build_excavator_hourly_report
@@ -41,7 +41,7 @@ class ExcavatorHourlyReportTests(TestCase):
         self.belaz = Equipment.objects.create(
             equipment_type=self.truck_type,
             model=self.belaz_model,
-            garage_number='58',
+            garage_number='ТЕСТ-1',
         )
         self.nhl = Equipment.objects.create(
             equipment_type=self.truck_type,
@@ -52,14 +52,6 @@ class ExcavatorHourlyReportTests(TestCase):
             equipment_type=self.truck_type,
             garage_number='U-1',
         )
-        self.belaz_group = EquipmentPlanGroup.objects.get(code='belaz_trucks')
-        self.belaz_group.is_active = True
-        self.belaz_group.save(update_fields=['is_active'])
-        self.belaz_group.equipment.add(self.belaz)
-        self.nhl_group = EquipmentPlanGroup.objects.get(code='nhl_trucks')
-        self.nhl_group.is_active = True
-        self.nhl_group.save(update_fields=['is_active'])
-        self.nhl_group.equipment.add(self.nhl)
         self.point_a = DumpPoint.objects.create(name='Склад 2.1')
         self.point_b = DumpPoint.objects.create(name='ККД')
         self.actual_point = DumpPoint.objects.create(name='СКДР')
@@ -96,7 +88,7 @@ class ExcavatorHourlyReportTests(TestCase):
             driver_control_shift=None if passive else loading_shift,
         )
 
-    def test_builds_two_hour_blocks_from_assigned_point_and_plan_groups(self):
+    def test_builds_two_hour_blocks_from_equipment_models_without_plan_group_membership(self):
         captured_at = timezone.make_aware(datetime(2026, 9, 14, 11, 24))
         old_shift = EmployeeShift.objects.create(
             employee=self.operator,
@@ -207,4 +199,4 @@ class ExcavatorHourlyReportTests(TestCase):
         work_response = self.client.get(reverse('excavator_work'))
         self.assertContains(work_response, 'data-eo-hourly-report-open')
         self.assertContains(work_response, reverse('excavator_hourly_report'))
-        self.assertContains(work_response, 'excavator-mobile-shell-v236')
+        self.assertContains(work_response, 'excavator-mobile-shell-v237')

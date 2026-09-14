@@ -9,9 +9,10 @@ const template = fs.readFileSync(path.join(backend, 'templates', 'trips', 'excav
 const css = fs.readFileSync(path.join(backend, 'static', 'css', 'excavator-hourly-report-v1.css'), 'utf8');
 
 test('existing plan ring is the only accessible hourly-report entry', () => {
-    assert.match(template, /<button type="button" class="eo-dashboard-plan-ring[^>]+data-eo-hourly-report-open/);
+    assert.match(template, /<div class="eo-dashboard-plan-ring[^>]+role="button" tabindex="0"[^>]+data-eo-hourly-report-open/);
     assert.match(template, /aria-label="Открыть почасовой отчёт./);
     assert.equal((template.match(/data-eo-hourly-report-open/g) || []).length, 1);
+    assert.match(source, /event\.key === "Enter" \|\| event\.key === " "/);
 });
 
 test('report remains outside replaceable shell without blocking operational refresh', () => {
@@ -62,4 +63,6 @@ test('layout matches mobile block structure without horizontal overflow', () => 
     assert.match(css, /overflow-x:\s*hidden/);
     assert.match(css, /overflow-y:\s*auto/);
     assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+    assert.match(css, /\.eo-hourly-report__close::before,[\s\S]*\.eo-hourly-report__close::after/);
+    assert.match(css, /transform:\s*translate\(-50%, -50%\) rotate\(45deg\)/);
 });

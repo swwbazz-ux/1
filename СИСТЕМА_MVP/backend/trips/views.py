@@ -962,7 +962,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v236";
+const CACHE_NAME = "excavator-mobile-shell-v237";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -976,17 +976,17 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v236",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v236",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v236",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v236",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v236",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v236",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v236",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v237",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v237",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v237",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v237",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v237",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v237",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v237",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v236",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v236",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v236",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v237",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v237",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v237",
   "/static/js/excavator-field-outbox-v1.js?v=1",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",

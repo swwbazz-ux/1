@@ -375,6 +375,12 @@
             }
         });
         document.addEventListener("keydown", function (event) {
+            var openButton = event.target.closest && event.target.closest("[data-eo-hourly-report-open]");
+            if (modal.hidden && openButton && (event.key === "Enter" || event.key === " ")) {
+                event.preventDefault();
+                openReport(openButton);
+                return;
+            }
             if (!modal.hidden && event.key === "Escape") {
                 event.preventDefault();
                 requestClose();

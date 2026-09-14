@@ -6,16 +6,16 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v236">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v236">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v236">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v236">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v236">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v236">
-<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v236">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v236" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v236" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
-<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v236" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v237">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v237">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v237">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v237">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v237">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v237">
+<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v237">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v237" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v237" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v237" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <link rel="stylesheet" href="{% static 'css/excavator-offline-v1.css' %}?v=1">
@@ -176,10 +176,10 @@
                         <strong>{{ access.employee.full_name|default:"-" }}</strong>
                     </div>
                     <div class="eo-dashboard-plan-widget">
-                        <button type="button" class="eo-dashboard-plan-ring {{ shift_plan_visual.text_class }}{% if shift_plan_visual.is_overrun %} is-progress-overrun{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--eo-dashboard-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%; --eo-dashboard-loop-progress: {{ shift_plan_visual.loop_progress }}%;" aria-label="Открыть почасовой отчёт. {% if shift_plan_has_plan %}Выполнение нормы: текущий цикл {{ shift_plan_visual.loop_progress }}%, завершено циклов {{ shift_plan_visual.completed_loops }}{% else %}{{ shift_plan_status_label }}{% endif %}" data-eo-hourly-report-open data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}" data-progress-percent="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-progress-loops="{{ shift_plan_visual.completed_loops }}" data-progress-phase="{{ shift_plan_visual.phase }}">
+                        <div class="eo-dashboard-plan-ring {{ shift_plan_visual.text_class }}{% if shift_plan_visual.is_overrun %} is-progress-overrun{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--eo-dashboard-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%; --eo-dashboard-loop-progress: {{ shift_plan_visual.loop_progress }}%;" role="button" tabindex="0" aria-label="Открыть почасовой отчёт. {% if shift_plan_has_plan %}Выполнение нормы: текущий цикл {{ shift_plan_visual.loop_progress }}%, завершено циклов {{ shift_plan_visual.completed_loops }}{% else %}{{ shift_plan_status_label }}{% endif %}" data-eo-hourly-report-open data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}" data-progress-percent="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-progress-loops="{{ shift_plan_visual.completed_loops }}" data-progress-phase="{{ shift_plan_visual.phase }}">
                             <span>{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}%</span>
                             {% if shift_plan_visual.has_completed_loops %}<b class="eo-dashboard-progress-loop">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
-                        </button>
+                        </div>
                     </div>
                 </div>
 
@@ -455,7 +455,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v236";
+var excavatorShellVersion = "excavator-mobile-shell-v237";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
