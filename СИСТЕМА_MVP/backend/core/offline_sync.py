@@ -60,7 +60,7 @@ def _resolve_free_bucket_acceptance(access, normalized):
     if reference.isdigit():
         acceptance_filter |= Q(pk=int(reference))
     acceptance = (
-        FreeBucketAcceptance.objects.select_for_update()
+        FreeBucketAcceptance.objects.select_for_update(of=('self',))
         .select_related('truck', 'excavator', 'loading_shift', 'primary_assignment')
         .filter(acceptance_filter)
         .first()
@@ -80,7 +80,7 @@ def _resolve_free_bucket_acceptance(access, normalized):
         )
         acceptance_id = (source.result_payload or {}).get('server_ids', {}).get('free_bucket_acceptance_id') if source else None
         acceptance = (
-            FreeBucketAcceptance.objects.select_for_update()
+            FreeBucketAcceptance.objects.select_for_update(of=('self',))
             .select_related('truck', 'excavator', 'loading_shift', 'primary_assignment')
             .filter(pk=acceptance_id)
             .first()
