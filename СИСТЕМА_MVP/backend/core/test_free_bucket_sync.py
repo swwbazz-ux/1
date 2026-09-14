@@ -1,13 +1,18 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from threading import Barrier
 
-from django.test import Client, TestCase, override_settings
+from django.apps import apps
+from django.core.management.color import no_style
+from django.db import close_old_connections, connection
+from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, HaulAssignment
 from core.models import OfflineFieldEvent
-from downtimes.models import DowntimeEvent
+from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import Equipment
 from shifts.models import EmployeeShift
 from trips import tests as trip_fixtures
@@ -571,3 +576,126 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(len(primary_tiles), 1)
         self.assertIn('Свободный ковш', primary_tiles[0]['free_bucket_label'])
         self.assertIn(str(self.other_excavator.garage_number), primary_tiles[0]['free_bucket_label'])
+
+
+@override_settings(EXCAVATOR_MANUAL_LOADING_ENABLED=True)
+class FreeBucketPostgreSQLConcurrencyTests(TransactionTestCase):
+    """The two-device acceptance race needs real PostgreSQL row locks."""
+
+    reset_sequences = True
+    serialized_rollback = True
+    create_registered_driver_shift = (
+        trip_fixtures.ExcavatorWorkServerIntegrationTests.create_registered_driver_shift
+    )
+
+    def setUp(self):
+        if connection.vendor != 'postgresql':
+            self.skipTest('Конкурентный приём под свободный ковш проверяется только на PostgreSQL.')
+        with connection.cursor() as cursor:
+            for sql in connection.ops.sequence_reset_sql(no_style(), apps.get_models()):
+                cursor.execute(sql)
+        DowntimeReason.objects.get_or_create(
+            name='Ожидание самосвалов',
+            defaults={
+                'short_label': 'Ожидание самосвалов',
+                'show_for_excavator_operator': True,
+            },
+        )
+        trip_fixtures.ExcavatorWorkServerIntegrationTests.setUp(self)
+        self.url = reverse('offline_events_sync')
+        self.shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        self.assignment = HaulAssignment.objects.get(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        self.first_session_key = self.client.cookies['sessionid'].value
+        self.other_client, self.other_operator, self.other_shift = (
+            trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
+        )
+        self.other_access = EmployeeAccess.objects.get(employee=self.other_operator, role=self.role)
+        self.other_session_key = self.other_client.cookies['sessionid'].value
+
+    def acceptance_event(self, *, event_id, sequence, access, shift):
+        return {
+            'event_id': event_id,
+            'event_type': 'excavator.free_bucket.accepted',
+            'format_version': 1,
+            'actor_id': access.employee_id,
+            'access_id': access.id,
+            'role_code': 'excavator_operator',
+            'occurred_at': timezone.now().isoformat(),
+            'sequence': sequence,
+            'depends_on': [],
+            'shift_id': shift.id,
+            'equipment_id': shift.equipment_id,
+            'context_snapshot': {
+                'actor_id': access.employee_id,
+                'access_id': access.id,
+                'role_code': 'excavator_operator',
+            },
+            'payload': {'truck_id': self.truck.id},
+        }
+
+    def post_from_thread(self, *, session_key, access, device_id, event, start):
+        close_old_connections()
+        try:
+            start.wait(timeout=10)
+            client = Client()
+            client.cookies['sessionid'] = session_key
+            response = client.post(
+                self.url,
+                data=json.dumps({
+                    'protocol_version': 1,
+                    'actor_id': access.employee_id,
+                    'access_id': access.id,
+                    'role_code': 'excavator_operator',
+                    'device_id': device_id,
+                    'events': [event],
+                }),
+                content_type='application/json',
+            )
+            return response.status_code, response.json()['results'][0]
+        finally:
+            close_old_connections()
+
+    def test_two_offline_excavators_accept_same_truck_once(self):
+        start = Barrier(2)
+        first = self.acceptance_event(
+            event_id='free-pg-accept-a',
+            sequence=1,
+            access=self.access,
+            shift=self.shift,
+        )
+        second = self.acceptance_event(
+            event_id='free-pg-accept-b',
+            sequence=1,
+            access=self.other_access,
+            shift=self.other_shift,
+        )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(
+                lambda payload: self.post_from_thread(start=start, **payload),
+                [
+                    {
+                        'session_key': self.first_session_key,
+                        'access': self.access,
+                        'device_id': 'free-pg-device-a',
+                        'event': first,
+                    },
+                    {
+                        'session_key': self.other_session_key,
+                        'access': self.other_access,
+                        'device_id': 'free-pg-device-b',
+                        'event': second,
+                    },
+                ],
+            ))
+
+        self.assertEqual([status for status, _ in results], [200, 200])
+        self.assertEqual(sorted(result['status'] for _, result in results), ['accepted', 'conflict'])
+        self.assertEqual(FreeBucketAcceptance.objects.count(), 1)
+        self.assertEqual(Trip.objects.count(), 0)
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNone(self.assignment.ended_at)
