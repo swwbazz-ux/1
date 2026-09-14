@@ -50,8 +50,8 @@ body.eo-hourly-report-open {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
     width: min(100%, 430px);
-    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 52px);
-    min-height: min(620px, calc(100dvh - env(safe-area-inset-top, 0px) - 52px));
+    height: calc(100dvh - env(safe-area-inset-top, 0px) - 88px);
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 88px);
     overflow: hidden;
     border: 1px solid rgba(99, 131, 139, .34);
     border-bottom: 0;
@@ -122,8 +122,86 @@ body.eo-hourly-report-open {
     overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 8px 20px 16px;
+    padding: 8px clamp(10px, 3vw, 14px) 16px;
     scrollbar-width: thin;
+}
+
+.eo-hourly-report__hour {
+    --eo-hour-accent: #ffd858;
+    --eo-hour-soft: rgba(255, 216, 88, .12);
+    overflow: hidden;
+    border: 1px solid rgba(104, 143, 157, .58);
+    border-radius: 12px;
+    background: rgba(13, 33, 40, .76);
+}
+
+.eo-hourly-report__hour + .eo-hourly-report__hour {
+    margin-top: 14px;
+}
+
+.eo-hourly-report__hour.is-current-hour {
+    --eo-hour-accent: #63ee91;
+    --eo-hour-soft: rgba(39, 176, 92, .18);
+    border-color: #63ee91;
+    box-shadow: inset 0 0 24px rgba(31, 177, 87, .08);
+}
+
+.eo-hourly-report__hour-header {
+    display: flex;
+    min-height: 66px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--eo-hour-soft);
+}
+
+.eo-hourly-report__hour-heading {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+}
+
+.eo-hourly-report__hour-heading strong {
+    position: relative;
+    padding-left: 22px;
+    color: var(--eo-hour-accent);
+    font-size: clamp(18px, 5.4vw, 23px);
+    line-height: 1.08;
+}
+
+.eo-hourly-report__hour-heading strong::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--eo-hour-accent);
+    transform: translateY(-50%);
+}
+
+.eo-hourly-report__hour-heading time {
+    padding-left: 22px;
+    color: #d7e3e5;
+    font-size: clamp(16px, 4.6vw, 20px);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    white-space: normal;
+}
+
+.eo-hourly-report__hour-total {
+    flex: 0 0 auto;
+    padding: 8px 12px;
+    border: 1px solid color-mix(in srgb, var(--eo-hour-accent) 30%, transparent);
+    border-radius: 14px;
+    background: var(--eo-hour-soft);
+    color: var(--eo-hour-accent);
+    font-size: clamp(15px, 4.4vw, 19px);
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
 }
 
 .eo-hourly-report__state {
@@ -157,14 +235,14 @@ body.eo-hourly-report-open {
     font-variant-numeric: tabular-nums;
 }
 
-.eo-hourly-report__table col:first-child { width: 41%; }
+.eo-hourly-report__table col:first-child { width: 52%; }
 .eo-hourly-report__table col:nth-child(2),
-.eo-hourly-report__table col:nth-child(3) { width: 29.5%; }
+.eo-hourly-report__table col:nth-child(3) { width: 24%; }
 
 .eo-hourly-report__table th,
 .eo-hourly-report__table td {
     min-width: 0;
-    padding: 8px 7px;
+    padding: 11px 8px;
     border: 1px solid rgba(109, 139, 146, .55);
     font-size: clamp(14px, 4.2vw, 20px);
     font-weight: 400;
@@ -173,10 +251,11 @@ body.eo-hourly-report-open {
 }
 
 .eo-hourly-report__table thead th {
-    padding-block: 10px;
-    background: #21383d;
+    padding-block: 11px;
+    background: rgba(35, 62, 72, .72);
     text-align: center;
     vertical-align: middle;
+    font-weight: 700;
 }
 
 .eo-hourly-report__table thead th:first-child,
@@ -185,44 +264,41 @@ body.eo-hourly-report-open {
     text-align: left;
 }
 
-.eo-hourly-report__table .is-current {
-    background: rgba(45, 93, 61, .58);
-    color: #a8f4a8;
+.eo-hourly-report__table td {
     text-align: center;
+    font-size: clamp(18px, 5vw, 22px);
+    font-variant-numeric: tabular-nums;
 }
 
-.eo-hourly-report__table td:not(.is-current) {
+.eo-hourly-report__total-row th,
+.eo-hourly-report__total-row td {
+    border-top: 2px solid color-mix(in srgb, var(--eo-hour-accent) 55%, transparent);
+    background: var(--eo-hour-soft);
+    color: var(--eo-hour-accent);
+    font-weight: 700;
+}
+
+.eo-hourly-report__hour-empty {
+    margin: 0;
+    padding: 22px 14px;
+    border-top: 1px solid rgba(109, 139, 146, .55);
+    color: #b9cacc;
     text-align: center;
+    font-size: 16px;
 }
 
-.eo-hourly-report__group th {
-    padding: 7px 10px;
-    border-top-width: 10px;
-    border-top-color: #102226;
-    background: #294247;
-    color: #f6e6aa;
-    font-size: clamp(16px, 4.6vw, 21px);
-}
-
-.eo-hourly-report__fleet th {
-    padding-left: 22px;
-    color: #c8d7da;
-}
-
-.eo-hourly-report__totals {
-    border-top: 14px solid #102226;
-}
-
-.eo-hourly-report__grand th,
-.eo-hourly-report__grand td {
-    border-top: 2px solid rgba(143, 236, 150, .56);
-    background: rgba(46, 87, 59, .66);
+.eo-hourly-report__unknown {
+    margin: 0;
+    padding: 8px 12px;
+    border-top: 1px solid rgba(255, 216, 88, .3);
+    color: #f0d881;
+    font-size: 12px;
+    line-height: 1.25;
 }
 
 .eo-hourly-report__meta {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
+    display: grid;
+    gap: 4px;
     margin-top: 14px;
     color: #afc1c5;
     font-size: 14px;
@@ -230,7 +306,6 @@ body.eo-hourly-report-open {
 
 .eo-hourly-report__meta time {
     color: #9ceca3;
-    white-space: nowrap;
 }
 
 .eo-hourly-report__note {
@@ -263,6 +338,7 @@ body.eo-hourly-report-open {
 
 @media (max-width: 350px), (max-height: 650px) {
     .eo-hourly-report__sheet {
+        height: auto;
         max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 18px);
         min-height: 0;
         border-radius: 22px 22px 0 0;
@@ -272,7 +348,11 @@ body.eo-hourly-report-open {
     .eo-hourly-report__footer { padding-inline: 14px; }
     .eo-hourly-report__table th,
     .eo-hourly-report__table td { padding: 6px 4px; }
-    .eo-hourly-report__fleet th { padding-left: 12px; }
+    .eo-hourly-report__hour-header { padding-inline: 10px; }
+    .eo-hourly-report__hour-heading strong,
+    .eo-hourly-report__hour-heading time { padding-left: 18px; }
+    .eo-hourly-report__hour-heading strong::before { width: 10px; height: 10px; }
+    .eo-hourly-report__hour-total { padding: 7px 9px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

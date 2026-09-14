@@ -5,7 +5,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType
-from shifts.models import EmployeeShift
+from shifts.models import EmployeeShift, EquipmentPlanGroup
 from users.models import Employee, EmployeeAccess, Role
 
 from .excavator_hourly_report import build_excavator_hourly_report
@@ -52,6 +52,14 @@ class ExcavatorHourlyReportTests(TestCase):
             equipment_type=self.truck_type,
             garage_number='U-1',
         )
+        self.belaz_group = EquipmentPlanGroup.objects.get(code='belaz_trucks')
+        self.belaz_group.is_active = True
+        self.belaz_group.save(update_fields=['is_active'])
+        self.belaz_group.equipment.add(self.belaz)
+        self.nhl_group = EquipmentPlanGroup.objects.get(code='nhl_trucks')
+        self.nhl_group.is_active = True
+        self.nhl_group.save(update_fields=['is_active'])
+        self.nhl_group.equipment.add(self.nhl)
         self.point_a = DumpPoint.objects.create(name='Склад 2.1')
         self.point_b = DumpPoint.objects.create(name='ККД')
         self.actual_point = DumpPoint.objects.create(name='СКДР')
@@ -88,7 +96,7 @@ class ExcavatorHourlyReportTests(TestCase):
             driver_control_shift=None if passive else loading_shift,
         )
 
-    def test_counts_canonical_load_time_point_and_fleet_without_shift_cutoff(self):
+    def test_builds_two_hour_blocks_from_assigned_point_and_plan_groups(self):
         captured_at = timezone.make_aware(datetime(2026, 9, 14, 11, 24))
         old_shift = EmployeeShift.objects.create(
             employee=self.operator,
@@ -118,32 +126,53 @@ class ExcavatorHourlyReportTests(TestCase):
         with self.assertNumQueries(1):
             report = build_excavator_hourly_report(self.excavator, captured_at=captured_at)
 
-        by_point = {group['dump_point']: group for group in report['groups']}
-        self.assertEqual(by_point['Склад 2.1']['rows'][0], {
-            'code': 'belaz', 'label': 'БелАЗ', 'previous': 1, 'current': 1,
+        self.assertEqual(report['schema_version'], 2)
+        self.assertEqual([hour['code'] for hour in report['hours']], ['current', 'previous'])
+        current, previous = report['hours']
+        current_by_point = {row['dump_point']: row for row in current['rows']}
+        self.assertEqual(current_by_point['Склад 2.1'], {
+            'dump_point_id': self.point_a.pk,
+            'dump_point': 'Склад 2.1',
+            'belaz': 1,
+            'nhl': 0,
         })
-        self.assertNotIn('СКДР', by_point)
-        self.assertEqual(by_point['ККД']['rows'][0]['code'], 'nhl')
-        self.assertEqual(by_point['Точка не определена']['rows'][0]['code'], 'belaz')
-        self.assertEqual(by_point['ККД']['rows'][1]['code'], 'unknown')
-        self.assertEqual(report['totals']['grand'], {'previous': 1, 'current': 4})
-        self.assertFalse(report['is_empty'])
+        self.assertEqual(current_by_point['ККД']['nhl'], 1)
+        self.assertEqual(current_by_point['Точка не определена']['belaz'], 1)
+        self.assertNotIn('СКДР', current_by_point)
+        self.assertEqual(current['totals'], {'belaz': 2, 'nhl': 1, 'trip_count': 3})
+        self.assertEqual(current['source_trip_count'], 4)
+        self.assertEqual(current['unclassified_trip_count'], 1)
+        self.assertEqual(previous['totals'], {'belaz': 1, 'nhl': 0, 'trip_count': 1})
+        self.assertEqual(report['data_quality']['unknown_dump_point_trip_count'], 1)
+        self.assertFalse(report['data_quality']['complete'])
 
     def test_empty_report_keeps_grand_total_and_omits_empty_groups(self):
         captured_at = timezone.make_aware(datetime(2026, 9, 14, 11, 24))
         report = build_excavator_hourly_report(self.excavator, captured_at=captured_at)
 
-        self.assertEqual(report['groups'], [])
-        self.assertEqual(report['totals']['rows'], [])
-        self.assertEqual(report['totals']['grand'], {'previous': 0, 'current': 0})
-        self.assertTrue(report['is_empty'])
+        self.assertEqual([hour['rows'] for hour in report['hours']], [[], []])
+        self.assertEqual([hour['totals']['trip_count'] for hour in report['hours']], [0, 0])
+        self.assertTrue(all(hour['is_empty'] for hour in report['hours']))
 
     def test_midnight_period_labels_include_both_dates(self):
         captured_at = timezone.make_aware(datetime(2026, 9, 14, 0, 17))
         report = build_excavator_hourly_report(self.excavator, captured_at=captured_at)
 
-        self.assertEqual(report['periods']['previous']['label'], '13.09 23:00–14.09 00:00')
-        self.assertEqual(report['periods']['current']['label'], '00:00–00:17')
+        current, previous = report['hours']
+        self.assertEqual(previous['period']['label'], '13.09 23:00–14.09 00:00')
+        self.assertEqual(current['period']['label'], '00:00–00:17')
+
+    def test_hour_boundaries_are_half_open_and_never_double_counted(self):
+        captured_at = timezone.make_aware(datetime(2026, 9, 14, 11, 24))
+        self.trip(self.belaz, timezone.make_aware(datetime(2026, 9, 14, 10, 59, 59, 999999)))
+        self.trip(self.belaz, timezone.make_aware(datetime(2026, 9, 14, 11, 0)))
+        self.trip(self.belaz, captured_at)
+
+        report = build_excavator_hourly_report(self.excavator, captured_at=captured_at)
+
+        current, previous = report['hours']
+        self.assertEqual(current['totals']['trip_count'], 1)
+        self.assertEqual(previous['totals']['trip_count'], 1)
 
     def test_endpoint_uses_only_excavator_from_open_shift(self):
         now = timezone.now()
@@ -165,7 +194,7 @@ class ExcavatorHourlyReportTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Cache-Control'], 'no-store')
         self.assertEqual(response.json()['excavator']['id'], self.excavator.pk)
-        self.assertEqual(response.json()['totals']['grand']['current'], 1)
+        self.assertEqual(response.json()['hours'][0]['totals']['trip_count'], 1)
 
     def test_endpoint_requires_open_shift_and_work_screen_exposes_entry(self):
         session = self.client.session

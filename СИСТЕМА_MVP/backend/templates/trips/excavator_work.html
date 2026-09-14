@@ -407,7 +407,7 @@
 </main>
 
 <div class="eo-hourly-report" data-eo-hourly-report-modal data-eo-hourly-report-url="{% url 'excavator_hourly_report' %}" hidden aria-hidden="true">
-    <button class="eo-hourly-report__backdrop" type="button" data-eo-hourly-report-dismiss aria-label="Закрыть почасовой отчёт"></button>
+    <button class="eo-hourly-report__backdrop" type="button" tabindex="-1" data-eo-hourly-report-dismiss aria-label="Закрыть почасовой отчёт"></button>
     <section class="eo-hourly-report__sheet" role="dialog" aria-modal="true" aria-labelledby="eo-hourly-report-title" aria-describedby="eo-hourly-report-subtitle">
         <header class="eo-hourly-report__header">
             <div>
@@ -1064,7 +1064,7 @@ function isExcavatorRefreshUnsafe(options) {
     )) {
         return true;
     }
-    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-picked-up, .eo-truck-card.is-pickup-waiting, .eo-truck-card.is-dragging, .eo-dashboard-unload-card.is-return-swiping, .eo-dashboard-unload-card.is-return-rebounding, .eo-dashboard-unload-card.is-return-pending, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .eo-reading-confirmation:not([hidden]), [data-eo-hourly-report-modal]:not([hidden])")) {
+    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-picked-up, .eo-truck-card.is-pickup-waiting, .eo-truck-card.is-dragging, .eo-dashboard-unload-card.is-return-swiping, .eo-dashboard-unload-card.is-return-rebounding, .eo-dashboard-unload-card.is-return-pending, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .eo-reading-confirmation:not([hidden])")) {
         return true;
     }
     return Array.prototype.some.call(

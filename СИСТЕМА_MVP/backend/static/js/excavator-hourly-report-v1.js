@@ -10,6 +10,7 @@
     var refreshQueued = false;
     var hourTimer = 0;
     var historyOwned = false;
+    var closing = false;
     var OPEN_STATE_KEY = "eoHourlyReport";
 
     function shell() {
@@ -22,7 +23,7 @@
     }
 
     function cacheKey() {
-        return "eo-hourly-report-v1:" + currentExcavatorId();
+        return "eo-hourly-report-v2:" + currentExcavatorId();
     }
 
     function safeCacheRead() {
@@ -63,72 +64,113 @@
         return cell;
     }
 
+    function tripWord(count) {
+        var value = Math.abs(Number(count) || 0) % 100;
+        var tail = value % 10;
+        if (value > 10 && value < 20) return "рейсов";
+        if (tail === 1) return "рейс";
+        if (tail > 1 && tail < 5) return "рейса";
+        return "рейсов";
+    }
+
+    function renderHourBlock(hour) {
+        var period = hour.period;
+        var rows = hour.rows || [];
+        var belazTotal = Number(hour.totals && hour.totals.belaz) || 0;
+        var nhlTotal = Number(hour.totals && hour.totals.nhl) || 0;
+        var classifiedTotal = Number(hour.totals && hour.totals.trip_count) || 0;
+        var unknownTotal = Number(hour.unclassified_trip_count) || 0;
+        var accentClass = hour.code === "current" ? "is-current-hour" : "is-previous-hour";
+        var block = element("section", "eo-hourly-report__hour " + accentClass);
+        block.setAttribute("aria-label", hour.title + " " + period.label);
+
+        var heading = element("header", "eo-hourly-report__hour-header");
+        var headingText = element("div", "eo-hourly-report__hour-heading");
+        headingText.appendChild(element("strong", "", hour.title));
+        var interval = element("time", "", period.label);
+        interval.dateTime = period.start || "";
+        headingText.appendChild(interval);
+        heading.appendChild(headingText);
+        heading.appendChild(element(
+            "span",
+            "eo-hourly-report__hour-total",
+            classifiedTotal + " " + tripWord(classifiedTotal)
+        ));
+        block.appendChild(heading);
+
+        if (hour.is_empty) {
+            block.appendChild(element(
+                "p",
+                "eo-hourly-report__hour-empty",
+                "За этот час рейсов нет"
+            ));
+        } else if (!rows.length) {
+            block.appendChild(element(
+                "p",
+                "eo-hourly-report__hour-empty is-incomplete",
+                "Есть отправки, но тип техники требует уточнения"
+            ));
+        } else {
+            var table = element("table", "eo-hourly-report__table");
+            table.setAttribute("aria-label", hour.title + ": отправки по назначенным точкам и типам самосвалов");
+            var colgroup = document.createElement("colgroup");
+            colgroup.appendChild(document.createElement("col"));
+            colgroup.appendChild(document.createElement("col"));
+            colgroup.appendChild(document.createElement("col"));
+            table.appendChild(colgroup);
+
+            var thead = document.createElement("thead");
+            var header = document.createElement("tr");
+            appendCell(header, "th", "Куда отправлены", "", "col");
+            appendCell(header, "th", "БелАЗ", "", "col");
+            appendCell(header, "th", "NHL", "", "col");
+            thead.appendChild(header);
+            table.appendChild(thead);
+
+            var tbody = document.createElement("tbody");
+            rows.forEach(function (hourRow) {
+                var row = document.createElement("tr");
+                appendCell(row, "th", hourRow.dump_point, "", "row");
+                appendCell(row, "td", hourRow.belaz || "—");
+                appendCell(row, "td", hourRow.nhl || "—");
+                tbody.appendChild(row);
+            });
+            table.appendChild(tbody);
+
+            var tfoot = document.createElement("tfoot");
+            var totalRow = element("tr", "eo-hourly-report__total-row");
+            appendCell(totalRow, "th", "Итого", "", "row");
+            appendCell(totalRow, "td", belazTotal);
+            appendCell(totalRow, "td", nhlTotal);
+            tfoot.appendChild(totalRow);
+            table.appendChild(tfoot);
+            block.appendChild(table);
+        }
+
+        if (unknownTotal) {
+            block.appendChild(element(
+                "p",
+                "eo-hourly-report__unknown",
+                unknownTotal + " " + tripWord(unknownTotal) + " требуют уточнения типа самосвала"
+            ));
+        }
+        return block;
+    }
+
     function renderPayload(payload, offline) {
-        if (!modal || modal.hidden || !payload || !payload.periods || !payload.totals) return;
+        if (!modal || modal.hidden || !payload || payload.schema_version !== 2 || !Array.isArray(payload.hours)) return;
         clearNode(content);
         subtitle.textContent = (payload.excavator ? payload.excavator.name : "Экскаватор")
             + " · " + (payload.work_date || "");
 
         if (offline) {
             var cachedAt = payload.freshness_label || "последнее обновление";
-            content.appendChild(element("p", "eo-hourly-report__offline", "Нет связи · данные " + cachedAt.toLowerCase()));
+            content.appendChild(element("p", "eo-hourly-report__offline", "Нет связи · " + cachedAt.toLowerCase()));
         }
 
-        if (payload.is_empty) {
-            content.appendChild(element(
-                "div",
-                "eo-hourly-report__state",
-                "За прошлый и текущий час погрузок нет"
-            ));
-        }
-
-        var table = element("table", "eo-hourly-report__table");
-        table.setAttribute("aria-label", "Рейсы по точкам разгрузки и типам самосвалов");
-        var colgroup = document.createElement("colgroup");
-        colgroup.appendChild(document.createElement("col"));
-        colgroup.appendChild(document.createElement("col"));
-        colgroup.appendChild(document.createElement("col"));
-        table.appendChild(colgroup);
-
-        var thead = document.createElement("thead");
-        var header = document.createElement("tr");
-        appendCell(header, "th", "Точка разгрузки", "", "col");
-        appendCell(header, "th", "Прошлый\n" + payload.periods.previous.label, "", "col");
-        appendCell(header, "th", "Текущий\n" + payload.periods.current.label, "is-current", "col");
-        thead.appendChild(header);
-        table.appendChild(thead);
-
-        (payload.groups || []).forEach(function (group) {
-            var tbody = document.createElement("tbody");
-            var groupRow = element("tr", "eo-hourly-report__group");
-            var groupCell = appendCell(groupRow, "th", group.dump_point, "", "rowgroup");
-            groupCell.colSpan = 3;
-            tbody.appendChild(groupRow);
-            (group.rows || []).forEach(function (fleet) {
-                var row = element("tr", "eo-hourly-report__fleet");
-                appendCell(row, "th", fleet.label, "", "row");
-                appendCell(row, "td", fleet.previous);
-                appendCell(row, "td", fleet.current, "is-current");
-                tbody.appendChild(row);
-            });
-            table.appendChild(tbody);
+        payload.hours.forEach(function (hour) {
+            content.appendChild(renderHourBlock(hour));
         });
-
-        var tfoot = element("tfoot", "eo-hourly-report__totals");
-        (payload.totals.rows || []).forEach(function (fleet) {
-            var row = document.createElement("tr");
-            appendCell(row, "th", fleet.label, "", "row");
-            appendCell(row, "td", fleet.previous);
-            appendCell(row, "td", fleet.current, "is-current");
-            tfoot.appendChild(row);
-        });
-        var grand = element("tr", "eo-hourly-report__grand");
-        appendCell(grand, "th", "Всего рейсов", "", "row");
-        appendCell(grand, "td", payload.totals.grand.previous);
-        appendCell(grand, "td", payload.totals.grand.current, "is-current");
-        tfoot.appendChild(grand);
-        table.appendChild(tfoot);
-        content.appendChild(table);
 
         var meta = element("div", "eo-hourly-report__meta");
         meta.appendChild(element("span", "", "По времени погрузки"));
@@ -149,8 +191,10 @@
     function scheduleHourRefresh(payload) {
         window.clearTimeout(hourTimer);
         hourTimer = 0;
-        if (!payload || !payload.periods || !payload.periods.current) return;
-        var start = Date.parse(payload.periods.current.start || "");
+        if (!payload || !Array.isArray(payload.hours)) return;
+        var currentHour = payload.hours.find(function (hour) { return hour.code === "current"; });
+        if (!currentHour || !currentHour.period) return;
+        var start = Date.parse(currentHour.period.start || "");
         if (!Number.isFinite(start)) return;
         var delay = Math.max(1000, Math.min((start + 3600000) - Date.now() + 750, 3600750));
         hourTimer = window.setTimeout(function () {
@@ -191,6 +235,9 @@
             });
         }).then(function (payload) {
             if (generation !== requestGeneration || modal.hidden) return false;
+            if (payload.schema_version !== 2 || !Array.isArray(payload.hours)) {
+                throw new Error("Получена несовместимая версия почасового отчёта");
+            }
             safeCacheWrite(payload);
             renderPayload(payload, false);
             modal.dataset.eoHourlyState = "ready";
@@ -236,20 +283,21 @@
     }
 
     function onLiveUpdate() {
-        if (modal && !modal.hidden) requestReport("live-update");
+        if (modal && !modal.hidden) {
+            setUnderlyingBlocked(true);
+            requestReport("live-update");
+        }
     }
 
     function bindOpenLifecycle() {
         window.addEventListener("online", onLiveUpdate);
         window.addEventListener("native-connectivity-resume", onLiveUpdate);
-        window.addEventListener("operational-state-update-available", onLiveUpdate);
         window.addEventListener("operational-state-refresh-applied", onLiveUpdate);
     }
 
     function unbindOpenLifecycle() {
         window.removeEventListener("online", onLiveUpdate);
         window.removeEventListener("native-connectivity-resume", onLiveUpdate);
-        window.removeEventListener("operational-state-update-available", onLiveUpdate);
         window.removeEventListener("operational-state-refresh-applied", onLiveUpdate);
     }
 
@@ -266,14 +314,16 @@
         setUnderlyingBlocked(false);
         unbindOpenLifecycle();
         historyOwned = false;
+        closing = false;
         var focusTarget = document.querySelector("[data-eo-hourly-report-open]") || opener;
         if (focusTarget && typeof focusTarget.focus === "function") focusTarget.focus();
         opener = null;
     }
 
     function requestClose() {
-        if (!modal || modal.hidden) return;
+        if (!modal || modal.hidden || closing) return;
         if (historyOwned && history.state && history.state[OPEN_STATE_KEY]) {
+            closing = true;
             history.back();
         } else {
             finishClose();
@@ -286,6 +336,7 @@
             return;
         }
         opener = button;
+        closing = false;
         modal.hidden = false;
         modal.setAttribute("aria-hidden", "false");
         document.body.classList.add("eo-hourly-report-open");
@@ -327,6 +378,23 @@
             if (!modal.hidden && event.key === "Escape") {
                 event.preventDefault();
                 requestClose();
+                return;
+            }
+            if (!modal.hidden && event.key === "Tab") {
+                var focusable = [
+                    modal.querySelector("[data-eo-hourly-report-close]"),
+                    modal.querySelector(".eo-hourly-report__return")
+                ].filter(Boolean);
+                if (!focusable.length) return;
+                var first = focusable[0];
+                var last = focusable[focusable.length - 1];
+                if (event.shiftKey && document.activeElement === first) {
+                    event.preventDefault();
+                    last.focus();
+                } else if (!event.shiftKey && document.activeElement === last) {
+                    event.preventDefault();
+                    first.focus();
+                }
             }
         });
         window.addEventListener("popstate", function () {
