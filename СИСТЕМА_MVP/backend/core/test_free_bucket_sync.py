@@ -216,6 +216,30 @@ class FreeBucketServerIntegrationTests(TestCase):
         )
         self.assertEqual(Trip.objects.count(), 1)
 
+    def test_out_of_order_free_bucket_load_retries_then_creates_exactly_one_trip(self):
+        """A saved load must wait for its acceptance, not be discarded or duplicated."""
+        accepted = self.accept_event('free-accept-later', 1)
+        loaded = self.load_event(accepted, event_id='free-load-earlier', sequence=2)
+
+        waiting = self.sync([loaded]).json()['results'][0]
+        self.assertEqual(waiting['status'], 'retry', waiting)
+        self.assertTrue(waiting['retryable'])
+        self.assertEqual(Trip.objects.count(), 0)
+
+        accepted_result = self.sync([accepted]).json()['results'][0]
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+
+        replayed = self.sync([loaded]).json()['results'][0]
+        self.assertEqual(replayed['status'], 'accepted', replayed)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.loaded_at, timezone.datetime.fromisoformat(loaded['occurred_at']))
+        self.assertEqual(trip.excavator_id, self.excavator.id)
+        self.assertEqual(FreeBucketAcceptance.objects.get().used_trip_id, trip.id)
+
+        deduplicated = self.sync([loaded]).json()['results'][0]
+        self.assertEqual(deduplicated['status'], 'deduplicated', deduplicated)
+        self.assertEqual(Trip.objects.count(), 1)
+
     def test_second_confirmed_acceptance_of_the_same_truck_is_a_stable_conflict(self):
         first = self.accept_event('free-accept-first', 1)
         first_result = self.sync([first], device_id='free-bucket-first-device').json()['results'][0]
