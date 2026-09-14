@@ -70,7 +70,7 @@ test('accept cancel and load use the durable field outbox', () => {
 
 test('cancel and failed load do not restore an actionable stale card', () => {
     assert.match(source, /var card = reference \? cardForAcceptance\(reference\) : cardForTruck\(payload\.truck_id\)/);
-    assert.match(source, /var card = cardForAcceptance\(localId\)/);
+    assert.match(source, /var current = cardForAcceptance\(reference\)/);
     assert.match(source, /var cancelled = cancelledReference \? cardForAcceptance\(cancelledReference\) : cardForTruck\(payload\.truck_id\)/);
     assert.doesNotMatch(source, /cardForAcceptance\([^\n]+\)\s*\|\|\s*cardForTruck/);
     assert.match(source, /if \(\["pending", "syncing"\]\.indexOf\(event\.sync_state\) >= 0\) card\.remove\(\)/);
@@ -110,8 +110,8 @@ test('one successful free-bucket swipe removes the upper card and keeps a separa
 });
 
 test('all free bucket assets share the current shell marker', () => {
-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v245/);
-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v245/);
+    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v246/);
+    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v246/);
 });
 
 test('temporary card adds semantics without replacing production status', () => {
@@ -131,6 +131,22 @@ test('temporary card adds semantics without replacing production status', () => 
 test('accept and cancel invalidate an older operational fragment first', () => {
     assert.match(source, /var invalidateRefresh = null;/);
     assert.match(source, /invalidateRefresh\(\);\s*queueEvent\("excavator\.free_bucket\.accepted"/);
-    assert.match(source, /invalidateRefresh\(\);\s*queueEvent\("excavator\.free_bucket\.cancelled"/);
+    assert.match(source, /invalidateRefresh\(\);\s*return queueEvent\("excavator\.free_bucket\.cancelled"/);
     assert.match(template, /invalidateRefresh:\s*invalidateExcavatorWorkRefresh/);
+});
+
+test('an upward swipe cancels only an unused free bucket card through the durable outbox', () => {
+    assert.match(template, /function isFreeBucketCancelSwipe\(state, deltaX, deltaY\)/);
+    assert.match(template, /state\.card\.dataset\.eoFreeBucket === "1"/);
+    assert.match(template, /state\.card\.dataset\.eoFreeBucketUsed !== "1"/);
+    assert.match(template, /deltaY <= -56/);
+    assert.match(template, /Math\.abs\(deltaY\) >= Math\.max\(56, Math\.abs\(deltaX\) \* 1\.25\)/);
+    assert.match(template, /freeBucketController\.cancelAccepted\(state\.card\)/);
+    assert.match(source, /function cancelAcceptedCard\(card\)/);
+    assert.match(source, /queueEvent\("excavator\.free_bucket\.cancelled"/);
+    assert.match(source, /eoFreeBucketCancelPending/);
+    assert.match(source, /dependsOn: serverId \? \[\] : \[localId\]/);
+    assert.match(source, /cancelAccepted: cancelAcceptedCard/);
+    assert.match(css, /is-free-bucket-cancel-armed/);
+    assert.match(css, /is-free-bucket-cancel-pending/);
 });

@@ -606,28 +606,51 @@
         });
     }
 
-    function removeAcceptance(button) {
-        if (!queueEvent) return;
-        var localId = text(button.dataset.acceptanceLocalId);
-        var truckId = text(button.dataset.truckId);
-        if (!localId) {
-            if (typeof showNotice === "function") showNotice("Не найден идентификатор временного приёма.");
-            return;
+    function cancelAcceptedCard(card) {
+        if (!queueEvent || !card || card.dataset.eoFreeBucket !== "1") return Promise.resolve(false);
+        if (card.dataset.eoFreeBucketCancelPending === "1" || card.dataset.eoFreeBucketUsed === "1") {
+            return Promise.resolve(false);
         }
-        button.disabled = true;
+        var localId = text(card.dataset.eoFreeBucketAcceptanceLocalId);
+        var serverId = text(card.dataset.eoFreeBucketAcceptanceId);
+        var reference = localId || serverId;
+        var truckId = text(card.dataset.truckId);
+        if (!reference) {
+            if (typeof showNotice === "function") showNotice("Не найден идентификатор временного приёма.");
+            return Promise.resolve(false);
+        }
+        var previousCanLoad = text(card.dataset.eoCanLoad);
+        card.dataset.eoFreeBucketCancelPending = "1";
+        card.dataset.eoCanLoad = "0";
+        card.classList.add("is-free-bucket-cancel-pending");
         if (typeof invalidateRefresh === "function") invalidateRefresh();
-        queueEvent("excavator.free_bucket.cancelled", {
-            free_bucket_acceptance_local_id: localId,
+        return queueEvent("excavator.free_bucket.cancelled", {
+            free_bucket_acceptance_id: serverId,
+            free_bucket_acceptance_local_id: serverId ? "" : localId,
             truck_id: Number(truckId)
-        }, {idPrefix: "free-bucket-cancel", dependsOn: [localId]}).then(function () {
-            var card = cardForAcceptance(localId);
-            if (card && card.dataset.eoFreeBucket === "1") card.remove();
+        }, {idPrefix: "free-bucket-cancel", dependsOn: serverId ? [] : [localId]}).then(function () {
+            var current = cardForAcceptance(reference);
+            if (current && current.dataset.eoFreeBucket === "1") current.remove();
             normalizeGrid();
             renderSearch();
             if (typeof showNotice === "function") showNotice("Самосвал убран из свободного ковша");
+            return true;
         }).catch(function (error) {
-            button.disabled = false;
+            delete card.dataset.eoFreeBucketCancelPending;
+            card.dataset.eoCanLoad = previousCanLoad;
+            card.classList.remove("is-free-bucket-cancel-pending");
             if (typeof showNotice === "function") showNotice(error.message || "Не удалось сохранить отмену.");
+            return false;
+        });
+    }
+
+    function removeAcceptance(button) {
+        var reference = text(button && button.dataset.acceptanceLocalId);
+        var card = reference ? cardForAcceptance(reference) : cardForTruck(button && button.dataset.truckId);
+        if (!card) return;
+        button.disabled = true;
+        cancelAcceptedCard(card).then(function (cancelled) {
+            if (!cancelled && button.isConnected) button.disabled = false;
         });
     }
 
@@ -722,6 +745,7 @@
             handleConfirmed: handleConfirmed,
             markAttention: markAttention,
             markLoaded: removeLoadedCard,
+            cancelAccepted: cancelAcceptedCard,
             normalizeGrid: normalizeGrid
         };
     }
@@ -807,6 +831,7 @@
         handleConfirmed: handleConfirmed,
         markAttention: markAttention,
         markLoaded: removeLoadedCard,
+        cancelAccepted: cancelAcceptedCard,
         normalizeGrid: normalizeGrid,
         isOpen: function () { return Boolean(modal && !modal.hidden); }
     };

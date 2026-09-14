@@ -6,22 +6,22 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v245">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v245">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v245">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v245">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v245">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v245">
-<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v245">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v245" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v245" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
-<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v245" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v246">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v246">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v246">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v246">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v246">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v246">
+<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v246">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v246" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v246" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v246" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <link rel="stylesheet" href="{% static 'css/excavator-offline-v1.css' %}?v=1">
-<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v245">
-<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v245" defer></script>
-<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v245" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v246">
+<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v246" defer></script>
+<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v246" defer></script>
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -506,7 +506,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v245";
+var excavatorShellVersion = "excavator-mobile-shell-v246";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -3575,6 +3575,16 @@ window.initExcavatorWorkShell = function () {
             createTruckComet(activeTruckDrag);
         }
         moveTruckDragPreview(activeTruckDrag, dx, dy);
+        var cancelFreeBucket = isFreeBucketCancelSwipe(activeTruckDrag, dx, dy);
+        activeTruckDrag.card.classList.toggle("is-free-bucket-cancel-armed", cancelFreeBucket);
+        if (activeTruckDrag.preview) {
+            activeTruckDrag.preview.classList.toggle("is-free-bucket-cancel-armed", cancelFreeBucket);
+        }
+        if (cancelFreeBucket) {
+            clearDropReady();
+            activeTruckDrag.target = null;
+            return;
+        }
         var target = findDumpTargetIntersectingPreview(activeTruckDrag);
         setTruckDragTarget(target);
         activeTruckDrag.target = target;
@@ -3589,7 +3599,10 @@ window.initExcavatorWorkShell = function () {
                 state.card.releasePointerCapture(state.pointerId);
             } catch (error) {}
         }
-        state.card.classList.remove("is-dragging");
+        var deltaX = Number.isFinite(event.clientX) ? event.clientX - state.startX : 0;
+        var deltaY = Number.isFinite(event.clientY) ? event.clientY - state.startY : 0;
+        var cancelFreeBucket = isFreeBucketCancelSwipe(state, deltaX, deltaY);
+        state.card.classList.remove("is-dragging", "is-free-bucket-cancel-armed");
         state.card.style.transform = "";
         removeTruckDragPreview(state);
         clearDropReady();
@@ -3606,7 +3619,9 @@ window.initExcavatorWorkShell = function () {
         window.setTimeout(function () {
             delete state.card.dataset.eoSuppressClick;
         }, 0);
-        if (state.target && canTruckLoad(state.card)) {
+        if (cancelFreeBucket && freeBucketController && typeof freeBucketController.cancelAccepted === "function") {
+            freeBucketController.cancelAccepted(state.card);
+        } else if (state.target && canTruckLoad(state.card)) {
             selectTruck(state.card);
             selectDump(state.target.dataset.eoDumpTarget);
             postTruckLoaded(state.card, state.target);
@@ -3618,7 +3633,7 @@ window.initExcavatorWorkShell = function () {
         if (!activeTruckDrag || event.pointerId !== activeTruckDrag.pointerId) return;
         var state = activeTruckDrag;
         activeTruckDrag = null;
-        state.card.classList.remove("is-dragging", "is-picked-up", "is-pickup-waiting");
+        state.card.classList.remove("is-dragging", "is-picked-up", "is-pickup-waiting", "is-free-bucket-cancel-armed");
         state.card.style.transform = "";
         removeTruckDragPreview(state);
         clearDropReady();
@@ -3629,6 +3644,19 @@ window.initExcavatorWorkShell = function () {
             event.preventDefault();
         }
     }, true);
+
+    function isFreeBucketCancelSwipe(state, deltaX, deltaY) {
+        return Boolean(
+            state
+            && state.started
+            && state.card
+            && state.card.dataset.eoFreeBucket === "1"
+            && state.card.dataset.eoFreeBucketUsed !== "1"
+            && state.card.dataset.eoFreeBucketCancelPending !== "1"
+            && deltaY <= -56
+            && Math.abs(deltaY) >= Math.max(56, Math.abs(deltaX) * 1.25)
+        );
+    }
 
     tabs.forEach(function (tab) {
         tab.addEventListener("click", function () {
