@@ -4536,12 +4536,14 @@ def close_excavator_open_downtimes(excavator):
 def excavator_assigned_truck_counts(excavator):
     """Сколько самосвалов назначено экскаватору и сколько из них можно грузить.
 
-    Возвращает (всего назначено, доступно для погрузки). Самосвал перестаёт
-    быть доступным, когда он уже отгружен и получил точку разгрузки — в
-    интерфейсе экскаваторщика его значок в этот момент гаснет.
+    Возвращает (всего назначено, доступно для погрузки, есть выключенный).
+    Выключенной считается только неактивная единица техники. Рейс на
+    разгрузке сюда не относится: это штатное состояние, при котором
+    ожидание самосвалов как раз должно включаться после отправки всех
+    рабочих машин.
     """
     if not excavator:
-        return 0, 0
+        return 0, 0, False
     assignments = list(
         HaulAssignment.objects
         .filter(
@@ -4551,12 +4553,20 @@ def excavator_assigned_truck_counts(excavator):
         )
         .select_related('truck', 'truck__equipment_type')
     )
+    has_inactive_assigned_truck = any(
+        not getattr(assignment.truck, 'is_active', True)
+        for assignment in assignments
+    )
     loadable = sum(
         1
         for assignment in assignments
-        if not excavator_truck_load_block(assignment, current_excavator=excavator, manual_control=True)
+        if not excavator_truck_load_block(
+            assignment,
+            current_excavator=excavator,
+            manual_control=True,
+        )
     )
-    return len(assignments), loadable
+    return len(assignments), loadable, has_inactive_assigned_truck
 
 
 def excavator_has_loadable_assigned_truck(excavator):
@@ -4568,7 +4578,7 @@ def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_wh
         return None
     with transaction.atomic():
         excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
-        assigned_total, loadable = excavator_assigned_truck_counts(excavator)
+        assigned_total, loadable, has_inactive_assigned_truck = excavator_assigned_truck_counts(excavator)
         if loadable:
             close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
             return None
@@ -4576,6 +4586,12 @@ def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_wh
         # отгружены. Если экскаватору не назначено ни одного самосвала, ждать
         # ему нечего — это не простой по ожиданию, и открывать его нельзя.
         if assigned_total == 0:
+            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+            return None
+        # Автоматическое «Ожидание самосвалов» отражает только ситуацию,
+        # когда весь назначенный парк включён, но уже находится в рейсах.
+        # Выключенный самосвал не должен сам запускать этот простой.
+        if has_inactive_assigned_truck:
             close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
             return None
         if start_when_empty:

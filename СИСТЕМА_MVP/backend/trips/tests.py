@@ -68,6 +68,7 @@ from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripCl
 from trips.views import (
     build_dispatcher_dashboard_context,
     dispatcher_empty_snapshot_progress,
+    reconcile_excavator_waiting_for_trucks,
     finalize_trip_unloaded,
     get_operational_state_version,
 )
@@ -5397,6 +5398,54 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
         self.assertEqual(waiting.employee, self.operator)
         self.assertEqual(waiting.comment, 'Автоматически по производственному событию')
+
+    def test_waiting_does_not_start_with_inactive_assigned_truck(self):
+        self.truck.is_active = False
+        self.truck.save(update_fields=['is_active'])
+
+        result = reconcile_excavator_waiting_for_trucks(
+            self.excavator,
+            self.operator,
+            start_when_empty=True,
+        )
+
+        self.assertIsNone(result)
+        self.assertFalse(
+            DowntimeEvent.objects.filter(
+                equipment=self.excavator,
+                reason__name='Ожидание самосвалов',
+                ended_at__isnull=True,
+            ).exists()
+        )
+
+    def test_waiting_closes_when_inactive_truck_is_assigned(self):
+        waiting = DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=self.reason,
+            started_at=timezone.now(),
+            comment='Автоматически по производственному событию',
+        )
+        inactive_truck = Equipment.objects.create(
+            equipment_type=self.truck_type,
+            garage_number='88',
+            is_active=False,
+        )
+        HaulAssignment.objects.create(
+            truck=inactive_truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+
+        result = reconcile_excavator_waiting_for_trucks(
+            self.excavator,
+            self.operator,
+            start_when_empty=True,
+        )
+
+        self.assertIsNone(result)
+        waiting.refresh_from_db()
+        self.assertIsNotNone(waiting.ended_at)
 
     def test_excavator_work_restores_waiting_when_no_truck_is_loadable(self):
         self.post_truck_loaded(client_action_id='waiting-before-refresh')
