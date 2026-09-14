@@ -57,7 +57,7 @@
         </div>
     {% endif %}
 
-    <section class="dispatcher-board{% if not dispatcher_header.active_shift %} is-readonly{% endif %}" data-dispatcher-shift-open="{% if dispatcher_header.active_shift %}true{% else %}false{% endif %}" data-dispatcher-own-shift-open="{% if dispatcher_header.shift_is_open %}true{% else %}false{% endif %}" data-operational-state-version="{{ operational_state_version|default:0 }}" aria-label="{% if dispatcher_board_label %}{{ dispatcher_board_label }}{% else %}Горный диспетчер{% endif %}">
+    <section class="dispatcher-board{% if not dispatcher_header.active_shift %} is-readonly{% endif %}" data-dispatcher-shift-open="{% if dispatcher_header.active_shift %}true{% else %}false{% endif %}" data-dispatcher-own-shift-open="{% if dispatcher_header.shift_is_open %}true{% else %}false{% endif %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-server-now="{{ server_now|date:'c' }}" aria-label="{% if dispatcher_board_label %}{{ dispatcher_board_label }}{% else %}Горный диспетчер{% endif %}">
         <header class="dispatcher-topbar dispatcher-unified-topbar">
             {% include "includes/dispatcher_header.html" with dispatcher_nav_active="control" %}
         </header>
@@ -165,7 +165,7 @@
                                     <strong>{{ truck.name }}</strong>
                                     <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                                     <span>{{ truck.label }}</span>
-                                    {% if truck.free_bucket_label %}<small class="dispatcher-free-bucket-marker">{{ truck.free_bucket_label }}</small>{% endif %}
+                                    {% if truck.free_bucket_label %}<small class="dispatcher-free-bucket-marker"{% if truck.free_bucket_expires_at %} data-dispatcher-free-bucket-expires-at="{{ truck.free_bucket_expires_at|date:'c' }}"{% endif %}>{{ truck.free_bucket_label }}</small>{% endif %}
                                     {% if truck.has_current_shift %}<i class="dispatcher-presence-dot is-{{ truck.presence_status }}" title="{{ truck.presence_label }}" aria-label="{{ truck.presence_label }}"></i>{% endif %}
                                     {% if truck.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ truck.plan_visual.completed_loops }}">×{{ truck.plan_visual.completed_loops }}</b>{% endif %}
                                 </article>
@@ -191,7 +191,7 @@
                         <strong>{{ tile.name }}</strong>
                         <img src="{% static 'img/equipment/truck-gray.png' %}" alt="">
                         <span>{{ tile.label }}</span>
-                        {% if tile.free_bucket_label %}<small class="dispatcher-free-bucket-marker">{{ tile.free_bucket_label }}</small>{% endif %}
+                        {% if tile.free_bucket_label %}<small class="dispatcher-free-bucket-marker"{% if tile.free_bucket_expires_at %} data-dispatcher-free-bucket-expires-at="{{ tile.free_bucket_expires_at|date:'c' }}"{% endif %}>{{ tile.free_bucket_label }}</small>{% endif %}
                         {% if tile.has_current_shift %}<i class="dispatcher-presence-dot is-{{ tile.presence_status }}" title="{{ tile.presence_label }}" aria-label="{{ tile.presence_label }}"></i>{% endif %}
                         {% if tile.plan_visual.has_completed_loops %}<b class="dispatcher-plan-loop-badge" aria-label="Завершено циклов: {{ tile.plan_visual.completed_loops }}">×{{ tile.plan_visual.completed_loops }}</b>{% endif %}
                     </article>
@@ -7474,6 +7474,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v125" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v126" defer></script>
 {% endif %}
 {% endblock %}

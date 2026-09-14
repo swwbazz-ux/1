@@ -1362,7 +1362,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v244')
+        self.assertContains(response, 'excavator-mobile-shell-v245')
         self.assertContains(response, '/static/js/excavator-field-outbox-v1.js?v=1')
         self.assertContains(response, '/static/css/excavator-offline-v1.css?v=1')
         self.assertContains(response, 'data-eo-offline-sync-url="/offline-events/sync/"')
@@ -1468,7 +1468,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         response = self.client.get(reverse('excavator_work'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'excavator-mobile-shell-v244')
+        self.assertContains(response, 'excavator-mobile-shell-v245')
         self.assertContains(response, '/static/js/excavator-field-outbox-v1.js?v=1')
         self.assertContains(response, '/static/css/excavator-offline-v1.css?v=1')
         self.assertContains(response, 'data-eo-offline-sync-url="/offline-events/sync/"')
@@ -3686,7 +3686,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v244', script)
+        self.assertIn('excavator-mobile-shell-v245', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,

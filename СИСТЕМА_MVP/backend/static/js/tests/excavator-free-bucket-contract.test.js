@@ -6,6 +6,8 @@ const path = require('node:path');
 const backend = path.resolve(__dirname, '..', '..', '..');
 const template = fs.readFileSync(path.join(backend, 'templates', 'trips', 'excavator_work.html'), 'utf8');
 const source = fs.readFileSync(path.join(backend, 'static', 'js', 'excavator-free-bucket-v1.js'), 'utf8');
+const dispatcherSource = fs.readFileSync(path.join(backend, 'static', 'js', 'dispatcher-control-v1.js'), 'utf8');
+const dispatcherTemplate = fs.readFileSync(path.join(backend, 'templates', 'trips', 'dispatcher_control.html'), 'utf8');
 const css = fs.readFileSync(path.join(backend, 'static', 'css', 'excavator-free-bucket-v1.css'), 'utf8');
 
 test('bucket entry stays beside the existing hourly report ring', () => {
@@ -80,6 +82,24 @@ test('cancel and failed load do not restore an actionable stale card', () => {
     assert.match(source, /eoFreeBucketAcceptanceId\) === reference/);
 });
 
+test('a rejected repeat acceptance is removed instead of becoming a dead card', () => {
+    assert.match(source, /function rejectedAcceptance\(event, result\)/);
+    assert.match(source, /\["conflict", "invalid"\]\.indexOf\(status\)/);
+    assert.match(source, /if \(rejectedAcceptance\(event\)\) \{[\s\S]*cardForAcceptance\(event\.event_id\)[\s\S]*rejectedCard\.remove\(\)/);
+    assert.match(source, /if \(rejectedAcceptance\(event, result\)\) \{[\s\S]*cardForAcceptance\(event\.event_id\)[\s\S]*renderSearch\(\)/);
+    assert.match(source, /function itemCanBeAccepted\(item\)/);
+    assert.match(source, /item\.can_accept_free_bucket !== false/);
+});
+
+test('dispatcher removes the used marker at its server deadline without polling', () => {
+    assert.match(dispatcherTemplate, /data-dispatcher-free-bucket-expires-at/);
+    assert.match(dispatcherTemplate, /data-server-now=/);
+    assert.match(dispatcherSource, /function expireDispatcherFreeBucketMarkers\(\)/);
+    assert.match(dispatcherSource, /serverNowClientCapturedAt/);
+    assert.match(dispatcherSource, /marker\.remove\(\)/);
+    assert.match(dispatcherSource, /setInterval\(expireDispatcherFreeBucketMarkers, 1000\)/);
+});
+
 test('one successful free-bucket swipe removes the upper card and keeps a separate five-minute badge', () => {
     assert.match(template, /data-eo-free-bucket-preview-expires-at/);
     assert.match(template, /function bindFreeBucketDumpCardExpiry\(shellRoot\)/);
@@ -90,8 +110,8 @@ test('one successful free-bucket swipe removes the upper card and keeps a separa
 });
 
 test('all free bucket assets share the current shell marker', () => {
-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v244/);
-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v244/);
+    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v245/);
+    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v245/);
 });
 
 test('temporary card adds semantics without replacing production status', () => {

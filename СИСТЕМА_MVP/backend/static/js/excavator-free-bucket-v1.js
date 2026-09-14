@@ -247,6 +247,10 @@
         return pieces.join(" · ");
     }
 
+    function itemCanBeAccepted(item) {
+        return Boolean(item && item.is_active !== false && item.can_accept_free_bucket !== false);
+    }
+
     function appendActiveItems() {
         if (!results) return 0;
         var cards = Array.prototype.slice.call(document.querySelectorAll(
@@ -299,14 +303,14 @@
             if (acceptButton) acceptButton.disabled = true;
             return;
         }
-        if (matches.length === 1 && matches[0].is_active !== false) selectedTruck = matches[0];
+        if (matches.length === 1 && itemCanBeAccepted(matches[0])) selectedTruck = matches[0];
         else if (!selectedTruck || matches.indexOf(selectedTruck) < 0) selectedTruck = null;
-        if (selectedTruck && selectedTruck.is_active === false) selectedTruck = null;
+        if (selectedTruck && !itemCanBeAccepted(selectedTruck)) selectedTruck = null;
         matches.forEach(function (item) {
             var button = make("button", "eo-free-bucket__result" + (selectedTruck === item ? " is-selected" : ""));
             button.type = "button";
             button.dataset.eoFreeBucketResultId = truckIdOf(item);
-            button.disabled = item.is_active === false;
+            button.disabled = !itemCanBeAccepted(item);
             var copy = make("div");
             copy.appendChild(make("strong", "", "№ " + numberOf(item)));
             copy.appendChild(make("span", "", resultDescription(item) || "Самосвал"));
@@ -519,6 +523,15 @@
         return ["conflict", "invalid", "auth_required"].indexOf(event && event.sync_state) >= 0;
     }
 
+    function rejectedAcceptance(event, result) {
+        var status = text(result && result.status) || text(event && event.sync_state);
+        return Boolean(
+            event
+            && event.event_type === "excavator.free_bucket.accepted"
+            && ["conflict", "invalid"].indexOf(status) >= 0
+        );
+    }
+
     function reconcileEvents(events) {
         var cancelled = cancellationReferences(events);
         (events || []).forEach(function (event) {
@@ -532,6 +545,11 @@
         });
         acceptanceEvents(events).forEach(function (event) {
             if (cancelled[event.event_id]) return;
+            if (rejectedAcceptance(event)) {
+                var rejectedCard = cardForAcceptance(event.event_id);
+                if (rejectedCard) rejectedCard.remove();
+                return;
+            }
             var payload = event.payload || {};
             var card = renderLocalCard(findCatalogItem(payload.truck_id, payload), event,
                 terminalAttention(event));
@@ -666,6 +684,14 @@
     function markAttention(event, result) {
         if (!event || event.event_type.indexOf("excavator.free_bucket.") !== 0) return;
         var payload = event.payload || {};
+        if (rejectedAcceptance(event, result)) {
+            var rejectedCard = cardForAcceptance(event.event_id);
+            if (rejectedCard) rejectedCard.remove();
+            normalizeGrid();
+            renderSearch();
+            if (typeof showNotice === "function") showNotice((result && (result.message || result.error)) || "Самосвал нельзя принять под свободный ковш.");
+            return;
+        }
         var card = cardForTruck(payload.truck_id);
         if (card) {
             card.classList.add("is-free-bucket-conflict");
@@ -728,7 +754,7 @@
             var result = event.target.closest && event.target.closest("[data-eo-free-bucket-result-id]");
             if (result) {
                 selectedTruck = catalog.find(function (item) { return truckIdOf(item) === result.dataset.eoFreeBucketResultId; }) || null;
-                if (selectedTruck && selectedTruck.is_active === false) selectedTruck = null;
+                if (selectedTruck && !itemCanBeAccepted(selectedTruck)) selectedTruck = null;
                 renderSearch();
                 return;
             }

@@ -93,6 +93,7 @@ def _resolve_free_bucket_acceptance(access, normalized):
 def _process_free_bucket_accepted(access, normalized):
     from assignments.models import AssignmentStatus, HaulAssignment
     from references.models import Equipment
+    from trips.free_bucket import active_free_bucket_acceptance_filter
     from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus, OPEN_TRIP_STATUSES, Trip
     from trips.trip_creation import lock_trip_participant_equipment
 
@@ -103,14 +104,9 @@ def _process_free_bucket_accepted(access, normalized):
     if Trip.objects.select_for_update().filter(truck=truck, status__in=OPEN_TRIP_STATUSES).exists():
         _conflict('open_trip_exists', 'Самосвал уже находится в незавершённом рейсе.')
     existing = (
-        FreeBucketAcceptance.objects.select_for_update()
-        .filter(
-            truck=truck,
-            status__in=(
-                FreeBucketAcceptanceStatus.ACCEPTED,
-                FreeBucketAcceptanceStatus.USED,
-            ),
-        )
+        FreeBucketAcceptance.objects.select_for_update(of=('self',))
+        .filter(truck=truck)
+        .filter(active_free_bucket_acceptance_filter(now=normalized['received_at']))
         .first()
     )
     if existing:
@@ -192,7 +188,7 @@ def _process_free_bucket_loaded(access, normalized):
         or acceptance.loading_shift_id != shift.id
     ):
         _conflict('free_bucket_context_changed', 'Временный приём не соответствует этой погрузке.')
-    if acceptance.status == FreeBucketAcceptanceStatus.USED and acceptance.used_trip_id:
+    if acceptance.used_trip_id:
         trip = Trip.objects.select_for_update().get(pk=acceptance.used_trip_id)
         return {
             'server_ids': {'trip_id': trip.id, 'free_bucket_acceptance_id': acceptance.id, 'shift_id': shift.id},

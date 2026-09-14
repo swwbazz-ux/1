@@ -109,9 +109,12 @@ from .manual_loading import (
     truck_driver_participation,
 )
 from .free_bucket import (
+    active_free_bucket_acceptance_filter,
+    free_bucket_acceptance_expires_at,
     free_bucket_dump_card_expires_at,
     free_bucket_dump_card_is_visible,
     free_bucket_dump_card_visibility_filter,
+    reconcile_expired_free_bucket_acceptances,
 )
 from users.active_role import role_session_state
 from users.role_apps import role_app_manifest_response, role_app_service_worker_response
@@ -788,7 +791,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v125";
+const CACHE_NAME = "dispatcher-desktop-shell-v126";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -967,7 +970,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v244";
+const CACHE_NAME = "excavator-mobile-shell-v245";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -981,20 +984,20 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v244",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v244",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v244",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v244",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v244",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v244",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v244",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v245",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v245",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v245",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v245",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v245",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v245",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v245",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v244",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v244",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v244",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v244",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v244",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v244",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v245",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v245",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v245",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v245",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v245",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v245",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -2317,22 +2320,23 @@ def build_dispatcher_dashboard_context(
     # annotation explains a temporary free-bucket operation without turning it
     # into a dispatcher reassignment.
     from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
-    free_bucket_label_by_truck_id = {}
+    free_bucket_marker_by_truck_id = {}
+    free_bucket_marker_now = timezone.now()
     for acceptance in (
         FreeBucketAcceptance.objects
         .filter(
             truck_id__in=[truck.id for truck in trucks_list],
-            status__in=(
-                FreeBucketAcceptanceStatus.ACCEPTED,
-                FreeBucketAcceptanceStatus.USED,
-            ),
         )
-        .select_related('excavator')
+        .filter(active_free_bucket_acceptance_filter(now=free_bucket_marker_now))
+        .select_related('excavator', 'used_trip')
         .order_by('-occurred_at', '-id')
     ):
-        free_bucket_label_by_truck_id.setdefault(
+        free_bucket_marker_by_truck_id.setdefault(
             acceptance.truck_id,
-            'Свободный ковш · ' + equipment_short_name(acceptance.excavator),
+            {
+                'label': 'Свободный ковш · ' + equipment_short_name(acceptance.excavator),
+                'expires_at': free_bucket_acceptance_expires_at(acceptance),
+            },
         )
     shift_trip_queryset = Trip.objects.none()
     shift_trip_attribution = None
@@ -2998,7 +3002,12 @@ def build_dispatcher_dashboard_context(
                     if transfer_source_excavator
                     else ''
                 ),
-                'free_bucket_label': free_bucket_label_by_truck_id.get(truck_id, ''),
+                'free_bucket_label': (
+                    free_bucket_marker_by_truck_id.get(truck_id, {}).get('label', '')
+                ),
+                'free_bucket_expires_at': (
+                    free_bucket_marker_by_truck_id.get(truck_id, {}).get('expires_at')
+                ),
                 **equipment_presence_fields(truck.id),
             })
         forecast = fact
@@ -3174,6 +3183,7 @@ def build_dispatcher_dashboard_context(
                 'transfer_pending': bool(row.get('transfer_pending')),
                 'transfer_source_label': row.get('transfer_source_label') or '',
                 'free_bucket_label': row.get('free_bucket_label') or '',
+                'free_bucket_expires_at': row.get('free_bucket_expires_at'),
                 'has_current_shift': bool(row.get('has_current_shift')),
                 'presence_status': row.get('presence_status') or '',
                 'presence_label': row.get('presence_label') or '',
@@ -3391,7 +3401,8 @@ def build_dispatcher_dashboard_context(
                 if truck.id in assignment_by_truck
                 else 0
             ),
-            'free_bucket_label': free_bucket_label_by_truck_id.get(truck.id, ''),
+            'free_bucket_label': free_bucket_marker_by_truck_id.get(truck.id, {}).get('label', ''),
+            'free_bucket_expires_at': free_bucket_marker_by_truck_id.get(truck.id, {}).get('expires_at'),
             **equipment_presence_fields(truck.id),
         })
     mobile_truck_garage_tiles = []
@@ -3432,7 +3443,8 @@ def build_dispatcher_dashboard_context(
                 if truck.id in assignment_by_truck
                 else 0
             ),
-            'free_bucket_label': free_bucket_label_by_truck_id.get(truck.id, ''),
+            'free_bucket_label': free_bucket_marker_by_truck_id.get(truck.id, {}).get('label', ''),
+            'free_bucket_expires_at': free_bucket_marker_by_truck_id.get(truck.id, {}).get('expires_at'),
             **equipment_presence_fields(truck.id),
         })
 
@@ -5887,6 +5899,7 @@ def excavator_work_view(request):
         return redirect('role_home')
 
     reconcile_due_haul_assignments()
+    reconcile_expired_free_bucket_acceptances()
 
     open_shift = get_excavator_open_shift(access.employee)
     work_assignment = get_active_equipment_assignment(access.employee, 'excavator_operator')
@@ -6533,13 +6546,10 @@ def excavator_work_view(request):
             FreeBucketAcceptance.objects
             .filter(
                 truck_id__in=[assignment.truck_id for assignment in available_assignments],
-                status__in=(
-                    FreeBucketAcceptanceStatus.ACCEPTED,
-                    FreeBucketAcceptanceStatus.USED,
-                ),
             )
+            .filter(active_free_bucket_acceptance_filter(now=timezone.now()))
             .exclude(excavator=current_excavator)
-            .select_related('excavator')
+            .select_related('excavator', 'used_trip')
             .order_by('-occurred_at', '-id')
         ):
             foreign_free_bucket_by_truck_id.setdefault(
@@ -6680,12 +6690,9 @@ def excavator_work_view(request):
             FreeBucketAcceptance.objects
             .filter(
                 truck_id__in=free_bucket_truck_ids,
-                status__in=(
-                    FreeBucketAcceptanceStatus.ACCEPTED,
-                    FreeBucketAcceptanceStatus.USED,
-                ),
             )
-            .select_related('excavator')
+            .filter(active_free_bucket_acceptance_filter(now=timezone.now()))
+            .select_related('excavator', 'used_trip')
             .order_by('-occurred_at', '-id')
         ):
             free_bucket_acceptance_by_truck_id.setdefault(acceptance.truck_id, acceptance)
@@ -6717,6 +6724,7 @@ def excavator_work_view(request):
             'truck_type': truck_type,
             'model': model_name,
             'is_active': bool(truck.is_active),
+            'can_accept_free_bucket': bool(truck.is_active and not active_trip and not acceptance),
             'primary_assignment_label': free_bucket_primary_by_truck_id.get(truck.id, ''),
             'availability_label': availability_label,
         })
@@ -7551,6 +7559,7 @@ def dispatcher_control_view(
 ):
     requested_fragment = request.GET.get('_operational_fragment', '').strip()
     reconcile_due_haul_assignments()
+    reconcile_expired_free_bucket_acceptances()
     # Просроченные смены закрывает сервер по таймеру (close_expired_shifts),
     # а не загрузка пульта: момент закрытия не должен зависеть от того, открыл
     # ли кто-то браузер.
@@ -7813,6 +7822,7 @@ def dispatcher_control_view(
             'dispatcher_compat_title': 'Диспетчерский пульт',
             'dispatcher_board_label': 'Горный диспетчер',
             'operational_state_version': operational_state_version,
+            'server_now': timezone.now(),
             'dispatcher_move_excavator_url': reverse('dispatcher_move_excavator'),
             'dispatcher_assign_truck_url': reverse('dispatcher_assign_truck'),
             'active_trips': active_trips,

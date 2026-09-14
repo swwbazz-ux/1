@@ -71,10 +71,7 @@ class FreeBucketAcceptance(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=['truck'],
-                condition=models.Q(status__in=[
-                    FreeBucketAcceptanceStatus.ACCEPTED,
-                    FreeBucketAcceptanceStatus.USED,
-                ]),
+                condition=models.Q(status=FreeBucketAcceptanceStatus.ACCEPTED),
                 name='unique_open_free_bucket_acceptance_per_truck',
             ),
         ]

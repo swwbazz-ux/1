@@ -5,7 +5,7 @@ from threading import Barrier
 
 from django.apps import apps
 from django.core.management.color import no_style
-from django.db import close_old_connections, connection
+from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -38,6 +38,32 @@ class FreeBucketServerIntegrationTests(TestCase):
             truck=self.truck,
             excavator=self.excavator,
             status=AssignmentStatus.ACCEPTED,
+        )
+
+    def dispatcher_dashboard(self):
+        from trips.views import build_dispatcher_dashboard_context
+
+        return build_dispatcher_dashboard_context(
+            dispatcher_shift=self.shift,
+            active_trips=Trip.objects.filter(
+                status__in=(TripStatus.ACTIVE, TripStatus.LOADED_WAITING_UNLOAD),
+            ),
+            pending_assignments=HaulAssignment.objects.filter(status=AssignmentStatus.PENDING),
+            accepted_assignments=HaulAssignment.objects.filter(status=AssignmentStatus.ACCEPTED),
+            recent_completed_trips=Trip.objects.none(),
+            open_shifts=EmployeeShift.objects.filter(closed_at__isnull=True).exclude(pk=self.shift.pk),
+            open_mechanic_downtimes=DowntimeEvent.objects.filter(ended_at__isnull=True),
+            trucks=Equipment.objects.filter(equipment_type=self.truck_type).order_by('garage_number'),
+            excavators=Equipment.objects.filter(equipment_type=self.excavator_type).order_by('garage_number'),
+            recent_dispatcher_actions=[],
+        )
+
+    def dispatcher_primary_tile(self):
+        return next(
+            tile
+            for complex_card in self.dispatcher_dashboard()['complex_cards']
+            for tile in complex_card.get('active_truck_tiles', [])
+            if tile.get('card_id') == str(self.truck.id)
         )
 
     def event(
@@ -371,6 +397,80 @@ class FreeBucketServerIntegrationTests(TestCase):
             FreeBucketAcceptanceStatus.USED,
         )
 
+    def test_used_state_expires_at_five_minutes_without_closing_trip_or_assignment(self):
+        accepted = self.accept_event()
+        loaded = self.load_event(accepted)
+        response = self.sync([loaded, accepted])
+        self.assertEqual(response.status_code, 200, response.content)
+        trip = Trip.objects.get()
+        acceptance = FreeBucketAcceptance.objects.get()
+        anchor = timezone.now() - timedelta(minutes=5)
+        Trip.objects.filter(pk=trip.pk).update(loaded_at=anchor)
+        FreeBucketAcceptance.objects.filter(pk=acceptance.pk).update(used_at=anchor)
+
+        from trips.free_bucket import (
+            active_free_bucket_acceptance_for_truck,
+            reconcile_expired_free_bucket_acceptances,
+        )
+
+        self.assertIsNotNone(active_free_bucket_acceptance_for_truck(
+            self.truck,
+            now=anchor + timedelta(minutes=5) - timedelta(microseconds=1),
+        ))
+        self.assertEqual(
+            reconcile_expired_free_bucket_acceptances(now=anchor + timedelta(minutes=5)),
+            1,
+        )
+        acceptance.refresh_from_db()
+        trip.refresh_from_db()
+        self.assignment.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CLOSED)
+        self.assertEqual(acceptance.closed_at, anchor + timedelta(minutes=5))
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNone(self.assignment.ended_at)
+        self.assertEqual(
+            reconcile_expired_free_bucket_acceptances(now=anchor + timedelta(minutes=6)),
+            0,
+        )
+
+        duplicate = self.load_event(accepted, event_id='free-load-after-timeout', sequence=3)
+        duplicate['depends_on'] = []
+        duplicate['payload'].pop('free_bucket_acceptance_local_id')
+        duplicate['payload']['free_bucket_acceptance_id'] = acceptance.id
+        duplicate_result = self.sync([duplicate]).json()['results'][0]
+        self.assertEqual(duplicate_result['status'], 'accepted', duplicate_result)
+        self.assertEqual(duplicate_result['server_ids']['trip_id'], trip.id)
+        self.assertEqual(Trip.objects.count(), 1)
+
+    def test_database_allows_used_history_but_only_one_accepted_right(self):
+        accepted = self.accept_event()
+        loaded = self.load_event(accepted)
+        response = self.sync([loaded, accepted])
+        self.assertEqual(response.status_code, 200, response.content)
+        used = FreeBucketAcceptance.objects.get()
+        second = FreeBucketAcceptance.objects.create(
+            client_acceptance_id='constraint-second-accepted',
+            truck=self.truck,
+            excavator=self.excavator,
+            operator=self.operator,
+            loading_shift=self.shift,
+            primary_assignment=self.assignment,
+            occurred_at=timezone.now(),
+        )
+        self.assertEqual(used.status, FreeBucketAcceptanceStatus.USED)
+        self.assertEqual(second.status, FreeBucketAcceptanceStatus.ACCEPTED)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            FreeBucketAcceptance.objects.create(
+                client_acceptance_id='constraint-third-accepted',
+                truck=self.truck,
+                excavator=self.excavator,
+                operator=self.operator,
+                loading_shift=self.shift,
+                primary_assignment=self.assignment,
+                occurred_at=timezone.now(),
+            )
+
     def test_free_bucket_load_preserves_passive_manual_control(self):
         accepted = self.accept_event()
         loaded = self.load_event(accepted)
@@ -647,31 +747,45 @@ class FreeBucketServerIntegrationTests(TestCase):
         )
         self.assertEqual(response.json()['results'][0]['status'], 'accepted')
 
-        from trips.views import build_dispatcher_dashboard_context
+        primary_tile = self.dispatcher_primary_tile()
+        self.assertIn('Свободный ковш', primary_tile['free_bucket_label'])
+        self.assertIn(str(self.other_excavator.garage_number), primary_tile['free_bucket_label'])
+        self.assertIsNone(primary_tile['free_bucket_expires_at'])
 
-        dashboard = build_dispatcher_dashboard_context(
-            dispatcher_shift=self.shift,
-            active_trips=Trip.objects.filter(
-                status__in=(TripStatus.ACTIVE, TripStatus.LOADED_WAITING_UNLOAD),
-            ),
-            pending_assignments=HaulAssignment.objects.filter(status=AssignmentStatus.PENDING),
-            accepted_assignments=HaulAssignment.objects.filter(status=AssignmentStatus.ACCEPTED),
-            recent_completed_trips=Trip.objects.none(),
-            open_shifts=EmployeeShift.objects.filter(closed_at__isnull=True).exclude(pk=self.shift.pk),
-            open_mechanic_downtimes=DowntimeEvent.objects.filter(ended_at__isnull=True),
-            trucks=Equipment.objects.filter(equipment_type=self.truck_type).order_by('garage_number'),
-            excavators=Equipment.objects.filter(equipment_type=self.excavator_type).order_by('garage_number'),
-            recent_dispatcher_actions=[],
+    def test_dispatcher_used_marker_is_visible_only_for_five_minutes(self):
+        other_client, other_operator, other_shift = (
+            trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
         )
-        primary_tiles = [
-            tile
-            for complex_card in dashboard['complex_cards']
-            for tile in complex_card.get('active_truck_tiles', [])
-            if tile.get('card_id') == str(self.truck.id)
-        ]
-        self.assertEqual(len(primary_tiles), 1)
-        self.assertIn('Свободный ковш', primary_tiles[0]['free_bucket_label'])
-        self.assertIn(str(self.other_excavator.garage_number), primary_tiles[0]['free_bucket_label'])
+        other_access = EmployeeAccess.objects.get(employee=other_operator, role=self.role)
+        identity = {
+            'actor': other_operator,
+            'access': other_access,
+            'shift': other_shift,
+            'excavator': self.other_excavator,
+        }
+        accepted = self.accept_event('free-marker-used', 1, **identity)
+        loaded = self.load_event(accepted, event_id='free-marker-load', sequence=2, **identity)
+        result = self.sync(
+            [loaded, accepted], client=other_client, actor=other_operator, access=other_access,
+            device_id='free-bucket-marker-used-device',
+        ).json()['results']
+        self.assertEqual({item['status'] for item in result}, {'accepted'}, result)
+        trip = Trip.objects.get()
+        acceptance = FreeBucketAcceptance.objects.get()
+        recent = timezone.now() - timedelta(minutes=4, seconds=59)
+        Trip.objects.filter(pk=trip.pk).update(loaded_at=recent)
+        FreeBucketAcceptance.objects.filter(pk=acceptance.pk).update(used_at=recent)
+
+        recent_tile = self.dispatcher_primary_tile()
+        self.assertIn('Свободный ковш', recent_tile['free_bucket_label'])
+        self.assertEqual(recent_tile['free_bucket_expires_at'], recent + timedelta(minutes=5))
+
+        expired = timezone.now() - timedelta(minutes=5, seconds=1)
+        Trip.objects.filter(pk=trip.pk).update(loaded_at=expired)
+        FreeBucketAcceptance.objects.filter(pk=acceptance.pk).update(used_at=expired)
+        expired_tile = self.dispatcher_primary_tile()
+        self.assertEqual(expired_tile['free_bucket_label'], '')
+        self.assertIsNone(expired_tile['free_bucket_expires_at'])
 
     def test_excavator_fragment_carries_free_bucket_snapshots(self):
         other_client, other_operator, other_shift = (
