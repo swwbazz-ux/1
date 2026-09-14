@@ -1089,3 +1089,19 @@ test("Excavator fragment refresh preserves the latest current-shell tab", () => 
     assert.ok(latestIndex >= 0 && latestIndex < assignmentIndex);
     assert.ok(assignmentIndex < replaceIndex);
 });
+
+test("Excavator fragment refresh restores native APK update indicator", () => {
+    const source = extractBraceBlock(
+        EXCAVATOR_SOURCE,
+        "function refreshExcavatorWorkFromServer(options)",
+        "Excavator operational fragment refresh"
+    );
+    const replaceIndex = source.indexOf("currentShell.replaceWith(newShell)");
+    const refreshIndex = source.indexOf("window.CopperResourcesUpdate.refreshIndicator()");
+    assert.ok(replaceIndex >= 0, "shell replacement must remain present");
+    assert.ok(refreshIndex > replaceIndex, "native indicator must be restored after shell replacement");
+    assert.match(
+        source,
+        /typeof\s+window\.CopperResourcesUpdate\.refreshIndicator\s*===\s*["']function["']/
+    );
+});

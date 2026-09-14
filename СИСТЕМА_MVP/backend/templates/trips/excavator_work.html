@@ -1176,6 +1176,17 @@ function refreshExcavatorWorkFromServer(options) {
         if (typeof window.initExcavatorWorkShell === "function") {
             window.initExcavatorWorkShell();
         }
+        /* Operational fragments can be fetched by the service worker without
+           the native User-Agent suffix. In that case Django correctly keeps
+           the APK version node hidden in the replacement HTML. Ask the
+           Android bridge to restore both the installed version and the
+           update-button state on the new shell immediately after replacement. */
+        if (
+            window.CopperResourcesUpdate
+            && typeof window.CopperResourcesUpdate.refreshIndicator === "function"
+        ) {
+            window.CopperResourcesUpdate.refreshIndicator();
+        }
         if (typeof window.checkAchievementPrize === "function") {
             window.checkAchievementPrize(options.achievementContext);
         }
