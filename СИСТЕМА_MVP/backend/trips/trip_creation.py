@@ -73,7 +73,10 @@ def resolve_required_trip_measurements(truck, rock_type):
 @transaction.atomic
 def create_loaded_waiting_unload_trip(
     *,
-    assignment,
+    assignment=None,
+    truck=None,
+    excavator=None,
+    free_bucket_acceptance=None,
     excavator_operator,
     loading_shift,
     rock_type,
@@ -89,12 +92,28 @@ def create_loaded_waiting_unload_trip(
     occurred_at=None,
     resolve_assignment_transition=True,
 ):
-    """Create the single server-side state used after an excavator loads a truck."""
+    """Create the single server-side state used after an excavator loads a truck.
+
+    ``assignment`` is the ordinary primary-assignment path.  ``truck`` and
+    ``excavator`` are used only by a confirmed one-load free-bucket acceptance;
+    they never rewrite that primary assignment.
+    """
+    if assignment is not None and free_bucket_acceptance is not None:
+        raise ValidationError('Погрузка может иметь только один источник полномочия.')
+    if assignment is None and (truck is None or excavator is None or free_bucket_acceptance is None):
+        raise ValidationError('Не задан самосвал или экскаватор для погрузки.')
+    truck_id = assignment.truck_id if assignment is not None else getattr(truck, 'pk', truck)
+    excavator_id = assignment.excavator_id if assignment is not None else getattr(excavator, 'pk', excavator)
+    if free_bucket_acceptance is not None and (
+        free_bucket_acceptance.truck_id != truck_id
+        or free_bucket_acceptance.excavator_id != excavator_id
+    ):
+        raise ValidationError('Временный приём не соответствует самосвалу или экскаватору.')
     locked_truck = (
         Equipment.objects
         .select_for_update(of=('self',))
         .select_related('model')
-        .get(pk=assignment.truck_id)
+        .get(pk=truck_id)
     )
     open_trips = Trip.objects.select_for_update().filter(
         truck=locked_truck,
@@ -106,9 +125,10 @@ def create_loaded_waiting_unload_trip(
         open_trips = open_trips.exclude(pk=supersede_trip.pk)
     if open_trips.exists():
         raise ValidationError('Самосвал уже находится в незакрытом рейсе.')
-    assignment.truck = locked_truck
+    if assignment is not None:
+        assignment.truck = locked_truck
     volume_m3, tonnage = resolve_required_trip_measurements(
-        assignment.truck,
+        locked_truck,
         rock_type,
     )
     received_at = timezone.now()
@@ -118,14 +138,16 @@ def create_loaded_waiting_unload_trip(
         supersede_trip.operationally_closed_at = load_occurred_at
         supersede_trip.closure_recorded_by = excavator_operator
         supersede_trip.save(update_fields=['status', 'operationally_closed_at', 'closure_recorded_by'])
+        from .free_bucket import close_free_bucket_acceptance_for_trip
+        close_free_bucket_acceptance_for_trip(supersede_trip, closed_at=load_occurred_at)
     if participation is None:
         from .manual_loading import truck_driver_participation
         participation = truck_driver_participation([locked_truck.pk])[locked_truck.pk]
     from .manual_loading import manual_loading_enabled
     control_shift = participation['control_shift'] if manual_loading_enabled() else participation['shift']
     trip = Trip.objects.create(
-        excavator=assignment.excavator,
-        truck=assignment.truck,
+        excavator_id=excavator_id,
+        truck=locked_truck,
         excavator_operator=excavator_operator,
         loading_shift=loading_shift,
         rock_type=rock_type,
@@ -152,6 +174,6 @@ def create_loaded_waiting_unload_trip(
         supersede_trip.save(update_fields=['superseded_by'])
     # Импорт внутри функции не образует циклическую зависимость models/services.
     from assignments.services import resolve_haul_handoffs_for_trip
-    if resolve_assignment_transition:
+    if assignment is not None and resolve_assignment_transition:
         resolve_haul_handoffs_for_trip(trip)
     return trip

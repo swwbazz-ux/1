@@ -962,7 +962,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v237";
+const CACHE_NAME = "excavator-mobile-shell-v238";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -976,18 +976,20 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v237",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v237",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v237",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v237",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v237",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v237",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v237",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v238",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v238",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v238",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v238",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v238",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v238",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v238",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v237",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v237",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v237",
-  "/static/js/excavator-field-outbox-v1.js?v=1",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v238",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v238",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v238",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v238",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v238",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v238",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -5004,6 +5006,8 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift, occurred_at=None, l
         'actual_dump_point',
         'is_carryover',
     ])
+    from trips.free_bucket import close_free_bucket_acceptance_for_trip
+    close_free_bucket_acceptance_for_trip(trip, closed_at=trip.completed_at or trip.unload_received_at)
     if not late_confirmation:
         close_truck_unloading_wait_downtimes(
             trip.truck,
@@ -5170,6 +5174,13 @@ def excavator_truck_loaded_view(request):
                 },
                 status=409,
             )
+        from trips.free_bucket import active_free_bucket_acceptance_for_truck
+        if active_free_bucket_acceptance_for_truck(locked_truck, for_update=True):
+            return JsonResponse({
+                'ok': False,
+                'error': 'Самосвал принят под свободный ковш; погрузка возможна только через этот временный приём.',
+                'code': 'free_bucket_acceptance_required',
+            }, status=409)
         open_shift.equipment = current_excavator
         assignment, handoff = resolve_excavator_load_authority(
             truck_id=locked_truck.id,
@@ -5403,6 +5414,8 @@ def excavator_truck_loaded_cancel_view(request):
         trip.status = TripStatus.CANCELLED
         trip.cancelled_at = timezone.now()
         trip.save(update_fields=['status', 'cancelled_at'])
+        from trips.free_bucket import close_free_bucket_acceptance_for_trip
+        close_free_bucket_acceptance_for_trip(trip, closed_at=trip.cancelled_at)
         previous = Trip.objects.select_for_update().filter(superseded_by=trip, status=TripStatus.UNCONTROLLED).first()
         if previous:
             previous.status = TripStatus.LOADED_WAITING_UNLOAD
@@ -6543,6 +6556,68 @@ def excavator_work_view(request):
             'icon': f'img/equipment/truck-{status_key}.png',
         })
 
+    # This directory is deliberately broader than the excavator's own cards:
+    # an offline free-bucket lookup must find every truck the operator was
+    # allowed to see when the shell was last synchronized.
+    free_bucket_trucks = list(
+        Equipment.objects.filter(equipment_type__name='Самосвал')
+        .select_related('equipment_type', 'model')
+        .order_by('garage_number', 'id')
+    )
+    free_bucket_primary_by_truck_id = {}
+    for assignment in (
+        HaulAssignment.objects.filter(
+            truck_id__in=[item.id for item in free_bucket_trucks],
+            action=HaulAssignmentAction.ASSIGN,
+            status=AssignmentStatus.ACCEPTED,
+            ended_at__isnull=True,
+        )
+        .select_related('excavator')
+        .order_by('truck_id', '-assigned_at', '-id')
+    ):
+        free_bucket_primary_by_truck_id.setdefault(
+            assignment.truck_id,
+            excavator_operator_label(assignment.excavator),
+        )
+    free_bucket_truck_directory = []
+    for truck in free_bucket_trucks:
+        model_name = str(getattr(truck.model, 'name', '') or '')
+        model_key = model_name.casefold()
+        truck_type = 'БелАЗ' if 'белаз' in model_key or 'belaz' in model_key else (
+            'NHL' if 'nhl' in model_key or 'nte' in model_key else 'Тип не определён'
+        )
+        free_bucket_truck_directory.append({
+            'id': truck.id,
+            'number': equipment_number(truck),
+            'truck_type': truck_type,
+            'model': model_name,
+            'is_active': bool(truck.is_active),
+            'primary_assignment_label': free_bucket_primary_by_truck_id.get(truck.id, ''),
+        })
+    from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+    free_bucket_cards = []
+    if current_excavator:
+        for acceptance in (
+            FreeBucketAcceptance.objects
+            .filter(
+                excavator=current_excavator,
+                status=FreeBucketAcceptanceStatus.ACCEPTED,
+            )
+            .select_related('truck', 'primary_assignment__excavator')
+            .order_by('occurred_at', 'id')
+        ):
+            free_bucket_cards.append({
+                'id': acceptance.id,
+                'client_acceptance_id': acceptance.client_acceptance_id,
+                'truck_id': acceptance.truck_id,
+                'number': equipment_number(acceptance.truck),
+                'primary_assignment_label': (
+                    excavator_operator_label(acceptance.primary_assignment.excavator)
+                    if acceptance.primary_assignment_id else ''
+                ),
+                'occurred_at': acceptance.occurred_at,
+            })
+
     work_settings = excavator_work_settings_from_session(request, current_excavator, form)
     if not form.is_bound and work_settings['transport_distance_km'] not in {None, ''}:
         form.fields['transport_distance_km'].initial = work_settings['transport_distance_km']
@@ -6826,6 +6901,8 @@ def excavator_work_view(request):
             'active_trips_count': len(active_trips),
             'completed_today_count': completed_shift_count,
             'truck_cards': truck_cards,
+            'free_bucket_truck_directory': free_bucket_truck_directory,
+            'free_bucket_cards': free_bucket_cards,
             'assignment_snapshot_cards': assignment_snapshot_cards,
             'first_ready_assignment_id': first_ready_assignment_id,
             'legacy_trip_client_action_id': legacy_trip_client_action_id,
@@ -7960,6 +8037,8 @@ def dispatcher_cancel_trip_view(request, trip_id):
     trip.status = TripStatus.CANCELLED
     trip.cancelled_at = timezone.now()
     trip.save(update_fields=['status', 'cancelled_at'])
+    from trips.free_bucket import close_free_bucket_acceptance_for_trip
+    close_free_bucket_acceptance_for_trip(trip, closed_at=trip.cancelled_at)
     reconcile_excavator_waiting_for_trucks(trip.excavator)
     log_dispatcher_action(
         actor=access.employee,

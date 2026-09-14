@@ -1,6 +1,24 @@
 from django.contrib import admin
 
-from .models import DispatcherActionLog, Trip, TripClientAction
+from .models import DispatcherActionLog, FreeBucketAcceptance, Trip, TripClientAction
+
+
+@admin.register(FreeBucketAcceptance)
+class FreeBucketAcceptanceAdmin(admin.ModelAdmin):
+    list_display = ('truck', 'excavator', 'operator', 'status', 'occurred_at', 'used_trip', 'closed_at')
+    list_filter = ('status', 'excavator')
+    search_fields = ('truck__garage_number', 'excavator__garage_number', 'operator__full_name', 'client_acceptance_id')
+    readonly_fields = (
+        'client_acceptance_id', 'truck', 'excavator', 'operator', 'loading_shift',
+        'primary_assignment', 'status', 'occurred_at', 'received_at', 'cancelled_at',
+        'used_at', 'closed_at', 'used_trip',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return request.method in {'GET', 'HEAD'}
 
 
 @admin.register(Trip)

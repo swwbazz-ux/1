@@ -314,6 +314,23 @@ test('accepted load without server trip id remains queued', async () => {
     assert.equal((await box.pending()).length, 1);
 });
 
+test('accepted free-bucket load without server trip id remains queued', async () => {
+    const box = createOutbox({
+        localStorage: storage(),
+        queueKey: 'access-7',
+        send: async events => ({ok: true, results: [{event_id: events[0].event_id, status: 'accepted'}]}),
+    });
+    const event = loadEvent('free-bucket-load');
+    event.event_type = 'excavator.free_bucket.loaded';
+    event.depends_on = ['free-bucket-accept'];
+    event.payload.free_bucket_acceptance_local_id = 'free-bucket-accept';
+    await box.queue(event);
+    await box.flush();
+    const pending = await box.pending();
+    assert.equal(pending.length, 1);
+    assert.deepEqual(pending[0].depends_on, ['free-bucket-accept']);
+});
+
 test('conflict and authorization outcomes remain for review and are not retried', async () => {
     let calls = 0;
     const box = createOutbox({

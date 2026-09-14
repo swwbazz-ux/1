@@ -18,6 +18,72 @@ class DispatcherActionType(models.TextChoices):
     MANUAL_TRIP = 'manual_trip', 'Ручной рейс диспетчера'
 
 
+class FreeBucketAcceptanceStatus(models.TextChoices):
+    ACCEPTED = 'accepted', 'Принят под свободный ковш'
+    CANCELLED = 'cancelled', 'Отменён до погрузки'
+    USED = 'used', 'Погружен'
+    CLOSED = 'closed', 'Завершён'
+
+
+class FreeBucketAcceptance(models.Model):
+    """One temporary, single-load acceptance without changing primary haul assignment."""
+
+    client_acceptance_id = models.CharField('Неизменяемый ID временного приёма', max_length=128, unique=True)
+    truck = models.ForeignKey(
+        'references.Equipment', verbose_name='Самосвал', on_delete=models.PROTECT,
+        related_name='free_bucket_truck_acceptances',
+    )
+    excavator = models.ForeignKey(
+        'references.Equipment', verbose_name='Экскаватор', on_delete=models.PROTECT,
+        related_name='free_bucket_excavator_acceptances',
+    )
+    operator = models.ForeignKey(
+        'users.Employee', verbose_name='Машинист экскаватора', on_delete=models.PROTECT,
+        related_name='free_bucket_acceptances',
+    )
+    loading_shift = models.ForeignKey(
+        'shifts.EmployeeShift', verbose_name='Смена приёма', on_delete=models.PROTECT,
+        related_name='free_bucket_acceptances',
+    )
+    primary_assignment = models.ForeignKey(
+        'assignments.HaulAssignment', verbose_name='Основное закрепление при приёме',
+        on_delete=models.SET_NULL, null=True, blank=True, related_name='free_bucket_acceptances',
+    )
+    status = models.CharField(
+        'Состояние временного приёма', max_length=16,
+        choices=FreeBucketAcceptanceStatus.choices,
+        default=FreeBucketAcceptanceStatus.ACCEPTED,
+    )
+    occurred_at = models.DateTimeField('Принят на устройстве')
+    received_at = models.DateTimeField('Принят сервером', default=timezone.now)
+    cancelled_at = models.DateTimeField('Отменён', null=True, blank=True)
+    used_at = models.DateTimeField('Погружен', null=True, blank=True)
+    closed_at = models.DateTimeField('Закрыт', null=True, blank=True)
+    used_trip = models.OneToOneField(
+        'trips.Trip', verbose_name='Рейс свободного ковша', on_delete=models.PROTECT,
+        null=True, blank=True, related_name='free_bucket_acceptance',
+    )
+
+    class Meta:
+        verbose_name = 'Приём под свободный ковш'
+        verbose_name_plural = 'Приёмы под свободный ковш'
+        ordering = ['-occurred_at', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['truck'],
+                condition=models.Q(status__in=[
+                    FreeBucketAcceptanceStatus.ACCEPTED,
+                    FreeBucketAcceptanceStatus.USED,
+                ]),
+                name='unique_open_free_bucket_acceptance_per_truck',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['excavator', 'status'], name='free_bucket_exc_status'),
+            models.Index(fields=['truck', 'status'], name='free_bucket_truck_status'),
+        ]
+
+
 class Trip(models.Model):
     excavator = models.ForeignKey('references.Equipment', verbose_name='Экскаватор', on_delete=models.PROTECT, related_name='excavator_trips')
     truck = models.ForeignKey('references.Equipment', verbose_name='Самосвал', on_delete=models.PROTECT, related_name='truck_trips')

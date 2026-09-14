@@ -6,20 +6,22 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v237">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v237">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v237">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v237">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v237">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v237">
-<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v237">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v237" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v237" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
-<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v237" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v238">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v238">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v238">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v238">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v238">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v238">
+<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v238">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v238" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v238" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v238" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <link rel="stylesheet" href="{% static 'css/excavator-offline-v1.css' %}?v=1">
-<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=1" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v238">
+<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v238" defer></script>
+<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v238" defer></script>
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -176,6 +178,13 @@
                         <strong>{{ access.employee.full_name|default:"-" }}</strong>
                     </div>
                     <div class="eo-dashboard-plan-widget">
+                        <button class="eo-free-bucket-button" type="button" data-eo-free-bucket-open aria-label="Свободный ковш" title="Свободный ковш"{% if not open_shift %} disabled aria-disabled="true"{% endif %}>
+                            <svg viewBox="0 0 28 28" aria-hidden="true" focusable="false">
+                                <path d="M3.5 7.5h7.8l2.6 8.2H7.2L3.5 7.5Z"></path>
+                                <path d="M7.2 15.7c1.7 3.2 4.7 5.1 8.4 5.1 2.5 0 4.7-.8 6.6-2.3"></path>
+                                <path d="M17.9 5.5v8M13.9 9.5h8"></path>
+                            </svg>
+                        </button>
                         <div class="eo-dashboard-plan-ring {{ shift_plan_visual.text_class }}{% if shift_plan_visual.is_overrun %} is-progress-overrun{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--eo-dashboard-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%; --eo-dashboard-loop-progress: {{ shift_plan_visual.loop_progress }}%;" role="button" tabindex="0" aria-label="Открыть почасовой отчёт. {% if shift_plan_has_plan %}Выполнение нормы: текущий цикл {{ shift_plan_visual.loop_progress }}%, завершено циклов {{ shift_plan_visual.completed_loops }}{% else %}{{ shift_plan_status_label }}{% endif %}" data-eo-hourly-report-open data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}" data-progress-percent="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-progress-loops="{{ shift_plan_visual.completed_loops }}" data-progress-phase="{{ shift_plan_visual.phase }}">
                             <span>{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}%</span>
                             {% if shift_plan_visual.has_completed_loops %}<b class="eo-dashboard-progress-loop">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
@@ -242,6 +251,8 @@
                         <i data-assignment-id="{{ card.assignment_id }}" data-truck-id="{{ card.truck_id }}" data-truck-number="{{ card.number }}"></i>
                     {% endfor %}
                 </div>
+                {{ free_bucket_truck_directory|json_script:"eo-free-bucket-directory-data" }}
+                {{ free_bucket_cards|json_script:"eo-free-bucket-cards-data" }}
             </div>
 
             <div class="eo-dashboard-dump-zone">
@@ -423,6 +434,41 @@
     </section>
 </div>
 
+<div class="eo-free-bucket" data-eo-free-bucket-modal hidden aria-hidden="true">
+    <button class="eo-free-bucket__backdrop" type="button" tabindex="-1" data-eo-free-bucket-dismiss aria-label="Закрыть свободный ковш"></button>
+    <section class="eo-free-bucket__sheet" role="dialog" aria-modal="true" aria-labelledby="eo-free-bucket-title" aria-describedby="eo-free-bucket-subtitle">
+        <header class="eo-free-bucket__header">
+            <div>
+                <h2 id="eo-free-bucket-title">Свободный ковш</h2>
+                <p class="eo-free-bucket__subtitle" id="eo-free-bucket-subtitle">Принять на одну погрузку</p>
+            </div>
+            <button class="eo-free-bucket__close" type="button" data-eo-free-bucket-dismiss aria-label="Закрыть">×</button>
+        </header>
+        <div class="eo-free-bucket__search">
+            <label class="eo-free-bucket__label" for="eo-free-bucket-number">Бортовой номер</label>
+            <input class="eo-free-bucket__input" id="eo-free-bucket-number" type="text" inputmode="none" autocomplete="off" readonly maxlength="16" data-eo-free-bucket-input aria-controls="eo-free-bucket-results">
+        </div>
+        <div class="eo-free-bucket__results" id="eo-free-bucket-results" data-eo-free-bucket-results aria-live="polite"></div>
+        <div class="eo-free-bucket__keypad" aria-label="Цифровая клавиатура">
+            <button class="eo-free-bucket__key" type="button" data-eo-free-bucket-key="1">1</button>
+            <button class="eo-free-bucket__key" type="button" data-eo-free-bucket-key="2">2</button>
+            <button class="eo-free-bucket__key" type="button" data-eo-free-bucket-key="3">3</button>
+            <button class="eo-free-bucket__key" type="button" data-eo-free-bucket-key="4">4</button>
+            <button class="eo-free-bucket__key" type="button" data-eo-free-bucket-key="5">5</button>
+            <button class="eo-free-bucket__key" type="button" data-eo-free-bucket-key="6">6</button>
+            <button class="eo-free-bucket__key" type="button" data-eo-free-bucket-key="7">7</button>
+            <button class="eo-free-bucket__key" type="button" data-eo-free-bucket-key="8">8</button>
+            <button class="eo-free-bucket__key" type="button" data-eo-free-bucket-key="9">9</button>
+            <button class="eo-free-bucket__key eo-free-bucket__key--clear" type="button" data-eo-free-bucket-key="clear">Очистить</button>
+            <button class="eo-free-bucket__key" type="button" data-eo-free-bucket-key="0">0</button>
+            <button class="eo-free-bucket__key eo-free-bucket__key--erase" type="button" data-eo-free-bucket-key="erase" aria-label="Удалить последнюю цифру">⌫</button>
+        </div>
+        <footer class="eo-free-bucket__footer">
+            <button class="eo-free-bucket__accept" type="button" data-eo-free-bucket-accept disabled>Принять на погрузку</button>
+        </footer>
+    </section>
+</div>
+
 {% comment %} Окно обновления веб-оболочки. В приложении не нужно: обновления
    приходят из RuStore, а не отсюда. {% endcomment %}
 {% if not is_native_app %}
@@ -455,7 +501,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v237";
+var excavatorShellVersion = "excavator-mobile-shell-v238";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1064,7 +1110,7 @@ function isExcavatorRefreshUnsafe(options) {
     )) {
         return true;
     }
-    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-picked-up, .eo-truck-card.is-pickup-waiting, .eo-truck-card.is-dragging, .eo-dashboard-unload-card.is-return-swiping, .eo-dashboard-unload-card.is-return-rebounding, .eo-dashboard-unload-card.is-return-pending, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .eo-reading-confirmation:not([hidden])")) {
+    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-picked-up, .eo-truck-card.is-pickup-waiting, .eo-truck-card.is-dragging, .eo-dashboard-unload-card.is-return-swiping, .eo-dashboard-unload-card.is-return-rebounding, .eo-dashboard-unload-card.is-return-pending, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .eo-reading-confirmation:not([hidden]), [data-eo-free-bucket-modal]:not([hidden])")) {
         return true;
     }
     return Array.prototype.some.call(
@@ -1551,6 +1597,7 @@ window.initExcavatorWorkShell = function () {
     var truckLoadedCancelUrl = shell.dataset.eoTruckLoadedCancelUrl || "";
     var truckGreenIcon = shell.dataset.eoTruckGreenIcon || "";
     var fieldOutbox = ensureExcavatorFieldOutbox(shell);
+    var freeBucketController = null;
     var activeTruckDrag = null;
     var activeQueueDrag = null;
     var shiftButton = shell.querySelector("[data-eo-shift-button]");
@@ -1591,11 +1638,13 @@ window.initExcavatorWorkShell = function () {
                     && String(event.shift_id || "") === String(shell.dataset.nativeShiftId || "")
                     && ["conflict", "invalid", "auth_required"].indexOf(event.sync_state) < 0;
             }).sort(function (left, right) { return Number(right.sequence || 0) - Number(left.sequence || 0); });
-            var dependencies = options.noDependency
-                ? []
-                : (options.dependsOnAll
-                    ? predecessors.map(function (event) { return event.event_id; })
-                    : (predecessors[0] ? [predecessors[0].event_id] : []));
+            var dependencies = Array.isArray(options.dependsOn)
+                ? options.dependsOn.slice()
+                : (options.noDependency
+                    ? []
+                    : (options.dependsOnAll
+                        ? predecessors.map(function (event) { return event.event_id; })
+                        : (predecessors[0] ? [predecessors[0].event_id] : [])));
             var deviceId = excavatorInstallDeviceId();
             var eventId = newExcavatorFieldId(options.idPrefix || "excavator-event");
             return fieldOutbox.allocateSequence(legacyExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId)).then(function (sequence) {
@@ -2953,9 +3002,15 @@ window.initExcavatorWorkShell = function () {
         var truckNumber = card.dataset.eoTruckNumber || (card.querySelector("strong") ? card.querySelector("strong").textContent.trim() : "");
         var dumpPointId = Number(dumpTarget.dataset.eoDumpTarget || 0);
         var dumpPointName = dumpTarget.dataset.eoDumpName || (dumpTarget.querySelector("strong") ? dumpTarget.querySelector("strong").textContent.trim() : "");
+        var freeBucketAcceptanceLocalId = card.dataset.eoFreeBucketAcceptanceLocalId || "";
+        var isFreeBucketLoad = card.dataset.eoFreeBucket === "1" && Boolean(freeBucketAcceptanceLocalId);
         var payload = {
-            assignment_id: card.dataset.assignmentId || "",
+            assignment_id: isFreeBucketLoad ? "" : (card.dataset.assignmentId || ""),
+            // Свободный ковш определяет фактический экскаватор, но не отключает
+            // уже подключенного водителя: при его активной смене сервер создаст
+            // обычный рейс и передаст его водителю.
             manual_control: card.dataset.eoManualAvailable === "1",
+            free_bucket_acceptance_local_id: freeBucketAcceptanceLocalId,
             expected_open_trip_id: card.dataset.eoOpenTripId || "",
             truck_id: card.dataset.truckId || "",
             excavator_id: shell.dataset.eoCurrentExcavatorId || "",
@@ -2971,7 +3026,7 @@ window.initExcavatorWorkShell = function () {
         card.classList.add("is-pending");
         fieldOutbox.pending().then(function (events) {
             var previous = events.filter(function (event) {
-                return event.event_type === "excavator.trip.loaded"
+                return (event.event_type === "excavator.trip.loaded" || event.event_type === "excavator.free_bucket.loaded")
                     && String(event.payload && event.payload.truck_id || "") === String(truckId)
                     && ["conflict", "invalid", "auth_required"].indexOf(event.sync_state) < 0;
             }).sort(function (left, right) { return Number(right.sequence || 0) - Number(left.sequence || 0); })[0];
@@ -2979,13 +3034,16 @@ window.initExcavatorWorkShell = function () {
                 payload.expected_open_trip_id = "";
                 payload.expected_open_trip_local_id = previous.local_trip_id;
             }
-            var eventId = newExcavatorFieldId("excavator-load");
+            var acceptanceEvent = isFreeBucketLoad ? events.find(function (event) {
+                return event.event_id === freeBucketAcceptanceLocalId;
+            }) : null;
+            var eventId = newExcavatorFieldId(isFreeBucketLoad ? "free-bucket-load" : "excavator-load");
             var localTripId = newExcavatorFieldId("local-trip");
             var deviceId = excavatorInstallDeviceId();
             return fieldOutbox.allocateSequence(legacyExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId)).then(function (sequence) {
                 var event = {
                 event_id: eventId,
-                event_type: "excavator.trip.loaded",
+                event_type: isFreeBucketLoad ? "excavator.free_bucket.loaded" : "excavator.trip.loaded",
                 format_version: 1,
                 actor_id: Number(shell.dataset.eoEmployeeId || 0),
                 access_id: Number(shell.dataset.eoAccessId || 0),
@@ -2997,7 +3055,12 @@ window.initExcavatorWorkShell = function () {
                 local_trip_id: localTripId,
                 occurred_at: new Date().toISOString(),
                 sequence: sequence,
-                depends_on: previous ? [previous.event_id] : [],
+                depends_on: [
+                    isFreeBucketLoad ? freeBucketAcceptanceLocalId : (acceptanceEvent ? acceptanceEvent.event_id : ""),
+                    previous ? previous.event_id : ""
+                ].filter(function (value, index, values) {
+                    return value && values.indexOf(value) === index;
+                }),
                 payload: payload
                 };
                 return fieldOutbox.queue(event).then(function () { return event; });
@@ -3013,6 +3076,7 @@ window.initExcavatorWorkShell = function () {
             card.dataset.eoOfflineEventId = event.event_id;
             card.dataset.eoLocalOpenTripId = event.local_trip_id;
             card.classList.add("is-saved-on-device");
+            if (isFreeBucketLoad && freeBucketController) freeBucketController.markLoaded(card);
             if (card.dataset.eoTransferDirection === "outgoing") {
                 card.classList.remove("is-pending");
                 card.hidden = true;
@@ -3039,15 +3103,18 @@ window.initExcavatorWorkShell = function () {
     }
 
     window.applyExcavatorPendingFieldEvents = function (events) {
-        var currentEvents = (events || []).filter(function (event) {
-            return ["pending", "syncing"].indexOf(event.sync_state) >= 0
-                && String(event.shift_id || "") === String(shell.dataset.nativeShiftId || "")
+        var allCurrentEvents = (events || []).filter(function (event) {
+            return String(event.shift_id || "") === String(shell.dataset.nativeShiftId || "")
                 && String(event.equipment_id || "") === String(shell.dataset.eoCurrentExcavatorId || "");
+        });
+        if (freeBucketController) freeBucketController.reconcileEvents(allCurrentEvents);
+        var currentEvents = allCurrentEvents.filter(function (event) {
+            return ["pending", "syncing"].indexOf(event.sync_state) >= 0;
         }).sort(function (left, right) {
             return Number(left.sequence || 0) - Number(right.sequence || 0);
         });
         currentEvents.filter(function (event) {
-            return event.event_type === "excavator.trip.loaded"
+            return (event.event_type === "excavator.trip.loaded" || event.event_type === "excavator.free_bucket.loaded")
                 && ["pending", "syncing"].indexOf(event.sync_state) >= 0
         }).forEach(function (event) {
             var payload = event.payload || {};
@@ -3062,6 +3129,9 @@ window.initExcavatorWorkShell = function () {
             card.dataset.eoOfflineEventId = event.event_id;
             card.dataset.eoLocalOpenTripId = event.local_trip_id || "";
             card.classList.add("is-saved-on-device");
+            if (event.event_type === "excavator.free_bucket.loaded" && freeBucketController) {
+                freeBucketController.markLoaded(card);
+            }
             if (card.dataset.eoTransferDirection === "outgoing") {
                 card.classList.remove("is-pending");
                 card.hidden = true;
@@ -3108,7 +3178,8 @@ window.initExcavatorWorkShell = function () {
 
     window.confirmExcavatorFieldEvent = function (event, result) {
         if (!event) return Promise.resolve();
-        if (event.event_type === "excavator.trip.loaded") {
+        if (freeBucketController) freeBucketController.handleConfirmed(event, result || {});
+        if (event.event_type === "excavator.trip.loaded" || event.event_type === "excavator.free_bucket.loaded") {
             var tripId = result && result.server_ids ? result.server_ids.trip_id : "";
             var badge = document.querySelector('[data-eo-offline-event-id="' + event.event_id + '"]');
             if (badge && tripId) {
@@ -3149,6 +3220,7 @@ window.initExcavatorWorkShell = function () {
     };
 
     window.attendExcavatorFieldEvent = function (event, result) {
+        if (freeBucketController) freeBucketController.markAttention(event, result || {});
         var message = result && (result.message || result.error);
         showExcavatorNotice(message || "Одно из сохранённых действий требует сверки.");
         invalidateExcavatorWorkRefresh();
@@ -3451,7 +3523,9 @@ window.initExcavatorWorkShell = function () {
         });
     });
 
-    shell.querySelectorAll("[data-eo-truck-card]").forEach(function (card) {
+    function bindExcavatorTruckCard(card) {
+        if (!card || card.dataset.eoTruckInteractionBound === "1") return;
+        card.dataset.eoTruckInteractionBound = "1";
         var truckLongPressTimer = null;
         var truckLongPressPointerId = null;
         var truckLongPressStartX = 0;
@@ -3581,7 +3655,18 @@ window.initExcavatorWorkShell = function () {
             event.preventDefault();
             event.stopPropagation();
         });
-    });
+    }
+
+    freeBucketController = window.ExcavatorFreeBucket && typeof window.ExcavatorFreeBucket.attachShell === "function"
+        ? window.ExcavatorFreeBucket.attachShell({
+            shell: shell,
+            queueEvent: queueExcavatorFieldEvent,
+            fieldOutbox: fieldOutbox,
+            bindTruckCard: bindExcavatorTruckCard,
+            showNotice: showExcavatorNotice
+        })
+        : null;
+    shell.querySelectorAll("[data-eo-truck-card]").forEach(bindExcavatorTruckCard);
 
     shell.querySelectorAll("[data-eo-dump-select]").forEach(function (button) {
         button.addEventListener("click", function () {

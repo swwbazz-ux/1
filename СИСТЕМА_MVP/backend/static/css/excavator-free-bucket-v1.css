@@ -1,0 +1,430 @@
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-head {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-plan-widget {
+    display: grid !important;
+    grid-template-columns: 46px auto !important;
+    width: auto !important;
+    flex: 0 0 auto !important;
+    column-gap: clamp(8px, 2vw, 10px) !important;
+    align-items: center !important;
+    justify-items: center !important;
+}
+
+.eo-free-bucket-button {
+    position: relative;
+    display: grid;
+    width: 46px;
+    height: 46px;
+    min-width: 46px;
+    min-height: 46px;
+    box-sizing: border-box;
+    padding: 9px;
+    place-items: center;
+    border: 2px solid #e9b936;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at 34% 24%, rgba(255, 241, 156, .2), transparent 30%),
+        linear-gradient(155deg, #263138 0%, #111b21 58%, #071015 100%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 247, 188, .34),
+        inset 0 -4px 8px rgba(0, 0, 0, .42),
+        0 0 0 1px rgba(93, 65, 7, .8),
+        0 5px 12px rgba(0, 0, 0, .38);
+    color: #ffd447;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 90ms ease, filter 90ms ease, box-shadow 90ms ease;
+}
+
+.eo-free-bucket-button svg {
+    display: block;
+    width: 27px;
+    height: 27px;
+    overflow: visible;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .65));
+}
+
+.eo-free-bucket-button:active {
+    transform: translateY(2px) scale(.96);
+    filter: brightness(1.08);
+    box-shadow:
+        inset 0 4px 9px rgba(0, 0, 0, .58),
+        0 0 0 1px rgba(93, 65, 7, .8),
+        0 2px 5px rgba(0, 0, 0, .32);
+}
+
+.eo-free-bucket-button:focus-visible {
+    outline: 3px solid rgba(255, 222, 88, .92);
+    outline-offset: 3px;
+}
+
+.eo-free-bucket-button:disabled {
+    opacity: .42;
+    filter: grayscale(.45);
+    cursor: default;
+}
+
+body.eo-free-bucket-open {
+    overflow: hidden !important;
+}
+
+.eo-free-bucket[hidden] {
+    display: none !important;
+}
+
+.eo-free-bucket {
+    position: fixed;
+    inset: 0;
+    z-index: 23100;
+    display: grid;
+    place-items: end center;
+    color: #edf5f6;
+    font-family: inherit;
+}
+
+.eo-free-bucket__backdrop {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: rgba(0, 7, 10, .78);
+}
+
+.eo-free-bucket__sheet {
+    position: relative;
+    display: grid;
+    grid-template-rows: auto auto minmax(58px, 1fr) auto auto;
+    width: min(100%, 430px);
+    height: min(680px, calc(100dvh - env(safe-area-inset-top, 0px) - 18px));
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 18px);
+    box-sizing: border-box;
+    overflow: hidden;
+    border: 1px solid rgba(229, 181, 51, .34);
+    border-bottom: 0;
+    border-radius: 26px 26px 0 0;
+    background: #102226;
+    box-shadow: 0 -16px 45px rgba(0, 0, 0, .48);
+    animation: eo-free-bucket-sheet-in .18s ease-out both;
+}
+
+.eo-free-bucket__sheet::before {
+    content: "";
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    width: 38px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(220, 193, 102, .42);
+    transform: translateX(-50%);
+}
+
+.eo-free-bucket__header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 46px;
+    gap: 10px;
+    align-items: start;
+    padding: 27px 16px 8px;
+}
+
+.eo-free-bucket__header h2 {
+    margin: 0;
+    font-size: clamp(26px, 7vw, 34px);
+    font-weight: 700;
+    line-height: 1.04;
+}
+
+.eo-free-bucket__subtitle {
+    margin: 5px 0 0;
+    color: #b9c7ca;
+    font-size: clamp(14px, 4vw, 17px);
+    line-height: 1.2;
+}
+
+.eo-free-bucket__close {
+    position: relative;
+    display: grid;
+    width: 46px;
+    height: 46px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid rgba(135, 165, 172, .44);
+    border-radius: 50%;
+    background: rgba(29, 52, 58, .92);
+    color: #dbe8ea;
+    font-size: 31px;
+    font-weight: 300;
+    line-height: 1;
+}
+
+.eo-free-bucket__search {
+    padding: 0 16px 8px;
+}
+
+.eo-free-bucket__label {
+    display: block;
+    margin-bottom: 5px;
+    color: #d6e1e3;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: .04em;
+}
+
+.eo-free-bucket__input {
+    width: 100%;
+    height: 52px;
+    box-sizing: border-box;
+    padding: 4px 14px;
+    border: 1px solid rgba(231, 190, 73, .58);
+    border-radius: 12px;
+    outline: 0;
+    background: #071418;
+    color: #fff3bd;
+    font: 900 28px/1 "Roboto Condensed", sans-serif;
+    letter-spacing: .06em;
+    caret-color: transparent;
+}
+
+.eo-free-bucket__input:focus-visible {
+    border-color: #ffd65d;
+    box-shadow: 0 0 0 3px rgba(255, 214, 93, .2);
+}
+
+.eo-free-bucket__results {
+    min-height: 0;
+    margin: 0 16px 8px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    border: 1px solid rgba(103, 133, 140, .26);
+    border-radius: 12px;
+    background: rgba(4, 15, 19, .48);
+}
+
+.eo-free-bucket__message {
+    margin: 0;
+    padding: 12px;
+    color: #aebfc3;
+    font-size: 14px;
+    line-height: 1.28;
+}
+
+.eo-free-bucket__message.is-error { color: #ffc1bb; }
+
+.eo-free-bucket__result,
+.eo-free-bucket__active-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 11px;
+    border: 0;
+    border-bottom: 1px solid rgba(103, 133, 140, .22);
+    background: transparent;
+    color: #eaf3f4;
+    text-align: left;
+}
+
+.eo-free-bucket__result:last-child,
+.eo-free-bucket__active-item:last-child { border-bottom: 0; }
+
+.eo-free-bucket__result.is-selected {
+    background: rgba(255, 210, 68, .12);
+    box-shadow: inset 3px 0 #ffd447;
+}
+
+.eo-free-bucket__result strong,
+.eo-free-bucket__active-item strong {
+    display: block;
+    color: #fff0a3;
+    font-size: 19px;
+    line-height: 1.05;
+}
+
+.eo-free-bucket__result span,
+.eo-free-bucket__active-item span {
+    display: block;
+    margin-top: 3px;
+    color: #afc0c4;
+    font-size: 12px;
+    line-height: 1.18;
+    overflow-wrap: anywhere;
+}
+
+.eo-free-bucket__result-status {
+    align-self: center;
+    color: #dce8ea;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.eo-free-bucket__active-title {
+    margin: 0;
+    padding: 8px 11px 5px;
+    color: #d7c16e;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+}
+
+.eo-free-bucket__remove {
+    align-self: center;
+    min-height: 36px;
+    padding: 6px 9px;
+    border: 1px solid rgba(255, 126, 111, .46);
+    border-radius: 9px;
+    background: rgba(90, 31, 26, .34);
+    color: #ffc0b8;
+    font: 800 12px/1.05 inherit;
+}
+
+.eo-free-bucket__keypad {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+    padding: 0 16px 9px;
+}
+
+.eo-free-bucket__key {
+    min-height: 47px;
+    padding: 0;
+    border: 1px solid rgba(123, 153, 159, .34);
+    border-radius: 11px;
+    background: linear-gradient(#263a40, #17292e);
+    box-shadow: inset 0 1px rgba(255, 255, 255, .07), 0 2px 4px rgba(0, 0, 0, .28);
+    color: #f0f6f7;
+    font: 800 23px/1 inherit;
+    touch-action: manipulation;
+}
+
+.eo-free-bucket__key:active { transform: translateY(1px); filter: brightness(1.12); }
+.eo-free-bucket__key--clear { color: #ffd86b; font-size: 14px; }
+.eo-free-bucket__key--erase { font-size: 20px; }
+
+.eo-free-bucket__footer {
+    padding: 0 16px calc(12px + env(safe-area-inset-bottom, 0px));
+}
+
+.eo-free-bucket__accept {
+    width: 100%;
+    min-height: 50px;
+    border: 1px solid #79dc70;
+    border-radius: 13px;
+    background: #214f2b;
+    color: #d9f7d4;
+    font: 900 17px/1.1 inherit;
+}
+
+.eo-free-bucket__accept:disabled {
+    border-color: rgba(125, 151, 155, .32);
+    background: rgba(37, 55, 59, .72);
+    color: rgba(200, 214, 217, .42);
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket .eo-free-bucket-card-marker {
+    grid-area: target !important;
+    position: relative !important;
+    z-index: 8 !important;
+    display: block !important;
+    max-width: calc(100% - 4px) !important;
+    box-sizing: border-box;
+    padding: 2px 5px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 211, 72, .55);
+    border-radius: 999px;
+    background: rgba(37, 31, 9, .86);
+    color: #ffe071;
+    font-size: clamp(7px, 1.9vw, 10px);
+    font-weight: 900;
+    line-height: 1.05;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket[data-eo-free-bucket-used="1"] .eo-free-bucket-card-marker {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket .eo-free-bucket-card-accent {
+    position: absolute !important;
+    inset: 3px !important;
+    z-index: 4 !important;
+    display: block !important;
+    border: 1px dashed rgba(255, 213, 76, .78);
+    border-radius: inherit;
+    box-shadow: inset 0 0 15px rgba(255, 210, 62, .1);
+    pointer-events: none;
+    text-decoration: none;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket.is-free-bucket-conflict .eo-free-bucket-card-accent {
+    border-color: rgba(255, 104, 92, .9);
+    box-shadow: inset 0 0 16px rgba(255, 72, 61, .16);
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket.is-free-bucket-conflict .eo-free-bucket-card-marker {
+    border-color: rgba(255, 104, 92, .72);
+    background: rgba(69, 18, 15, .9);
+    color: #ffc0ba;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-highlight {
+    animation: eo-free-bucket-card-highlight .82s ease-out both;
+}
+
+body.excavator-operator-screen .eo-dashboard-truck-grid.is-free-bucket-overflow {
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    align-content: start !important;
+}
+
+@keyframes eo-free-bucket-card-highlight {
+    0%, 38% { filter: brightness(1.42); box-shadow: 0 0 0 3px rgba(255, 220, 82, .86), 0 0 24px rgba(255, 204, 44, .7) !important; }
+    100% { filter: none; }
+}
+
+@keyframes eo-free-bucket-sheet-in {
+    from { transform: translateY(18px); opacity: .5; }
+    to { transform: none; opacity: 1; }
+}
+
+@media (max-width: 370px) {
+    body.excavator-operator-screen .eo-dashboard-plan-widget {
+        grid-template-columns: 44px auto !important;
+        column-gap: 7px !important;
+    }
+    .eo-free-bucket-button {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+        padding: 9px;
+    }
+    .eo-free-bucket__sheet {
+        border-radius: 22px 22px 0 0;
+    }
+    .eo-free-bucket__header { padding: 24px 12px 6px; }
+    .eo-free-bucket__search { padding: 0 12px 6px; }
+    .eo-free-bucket__results { margin: 0 12px 6px; }
+    .eo-free-bucket__keypad { gap: 6px; padding: 0 12px 7px; }
+    .eo-free-bucket__footer { padding-right: 12px; padding-left: 12px; }
+    .eo-free-bucket__key { min-height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .eo-free-bucket-button,
+    .eo-free-bucket__key { transition: none; }
+    .eo-free-bucket__sheet,
+    body.excavator-operator-screen .eo-dashboard-truck-card.is-free-bucket-highlight {
+        animation: none !important;
+    }
+}

@@ -9,7 +9,7 @@ from assignments.models import AssignmentStatus, HaulAssignment
 from core.models import OfflineFieldEvent
 from trips import tests as trip_fixtures
 from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus, Trip, TripStatus
-from users.models import EmployeeAccess
+from users.models import AdminConflict, EmployeeAccess
 
 
 @override_settings(EXCAVATOR_MANUAL_LOADING_ENABLED=True)
@@ -159,6 +159,8 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
         self.assertEqual(trip.excavator_id, self.other_excavator.id)
         self.assertEqual(trip.truck_id, self.truck.id)
+        self.assertEqual(trip.driver_control_shift_id, self.truck_shift.id)
+        self.assertTrue(trip.driver_participation_recorded)
         self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.USED)
         self.assertEqual(acceptance.used_trip_id, trip.id)
         self.assertEqual(acceptance.primary_assignment_id, self.assignment.id)
@@ -286,3 +288,27 @@ class FreeBucketServerIntegrationTests(TestCase):
             OfflineFieldEvent.objects.get(event_id=ordinary_offline['event_id']).status,
             'conflict',
         )
+
+    def test_conflicting_free_bucket_load_is_retained_in_existing_review_queue(self):
+        other_client, other_operator, other_shift = (
+            trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
+        )
+        other_access = EmployeeAccess.objects.get(employee=other_operator, role=self.role)
+        accepted = self.accept_event(
+            actor=other_operator,
+            access=other_access,
+            shift=other_shift,
+            excavator=self.other_excavator,
+        )
+        self.sync(
+            [accepted], client=other_client, actor=other_operator, access=other_access,
+            device_id='free-bucket-other-review-001',
+        )
+        conflicting_load = self.load_event(accepted)
+        result = self.sync([conflicting_load]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(Trip.objects.count(), 0)
+        review = AdminConflict.objects.get(process='Свободный ковш')
+        self.assertEqual(review.employee_id, self.operator.id)
+        self.assertIn(conflicting_load['event_id'], review.description)

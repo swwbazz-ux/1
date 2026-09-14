@@ -396,7 +396,7 @@
                     var status = String(result.status || "retry");
                     if (status === "accepted" || status === "deduplicated") {
                         if (
-                            event.event_type === "excavator.trip.loaded"
+                            (event.event_type === "excavator.trip.loaded" || event.event_type === "excavator.free_bucket.loaded")
                             && !(result.server_ids && result.server_ids.trip_id)
                         ) {
                             return markRetry(event, "Сервер не вернул ID созданного рейса.");
