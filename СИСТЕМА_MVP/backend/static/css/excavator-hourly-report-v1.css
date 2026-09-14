@@ -261,6 +261,9 @@ body.eo-hourly-report-open {
 .eo-hourly-report__table col:nth-child(2),
 .eo-hourly-report__table col:nth-child(3) { width: 24%; }
 
+.eo-hourly-report__hour.is-no-nhl .eo-hourly-report__table col:first-child { width: 66%; }
+.eo-hourly-report__hour.is-no-nhl .eo-hourly-report__table col:nth-child(2) { width: 34%; }
+
 .eo-hourly-report__table th,
 .eo-hourly-report__table td {
     min-width: 0;

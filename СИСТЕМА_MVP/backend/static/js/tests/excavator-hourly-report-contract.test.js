@@ -28,6 +28,9 @@ test('report remains outside replaceable shell without blocking operational refr
 test('server schema renders current then previous as independent three-column blocks', () => {
     assert.match(source, /payload\.schema_version !== 2/);
     assert.match(source, /payload\.hours\.forEach/);
+    assert.match(source, /var showNhl = nhlTotal > 0/);
+    assert.match(source, /if \(showNhl\) appendCell\(header, "th", "NHL"/);
+    assert.match(css, /\.is-no-nhl \.eo-hourly-report__table col:first-child \{ width: 66%; \}/);
     assert.match(source, /"Куда отправлены"/);
     assert.match(source, /"БелАЗ"/);
     assert.match(source, /"NHL"/);

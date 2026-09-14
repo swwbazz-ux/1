@@ -78,10 +78,12 @@
         var rows = hour.rows || [];
         var belazTotal = Number(hour.totals && hour.totals.belaz) || 0;
         var nhlTotal = Number(hour.totals && hour.totals.nhl) || 0;
+        var showNhl = nhlTotal > 0;
         var classifiedTotal = Number(hour.totals && hour.totals.trip_count) || 0;
         var unknownTotal = Number(hour.unclassified_trip_count) || 0;
         var accentClass = hour.code === "current" ? "is-current-hour" : "is-previous-hour";
         var block = element("section", "eo-hourly-report__hour " + accentClass);
+        if (!showNhl) block.classList.add("is-no-nhl");
         block.setAttribute("aria-label", hour.title + " " + period.label);
 
         var heading = element("header", "eo-hourly-report__hour-header");
@@ -116,14 +118,14 @@
             var colgroup = document.createElement("colgroup");
             colgroup.appendChild(document.createElement("col"));
             colgroup.appendChild(document.createElement("col"));
-            colgroup.appendChild(document.createElement("col"));
+            if (showNhl) colgroup.appendChild(document.createElement("col"));
             table.appendChild(colgroup);
 
             var thead = document.createElement("thead");
             var header = document.createElement("tr");
             appendCell(header, "th", "Куда отправлены", "", "col");
             appendCell(header, "th", "БелАЗ", "", "col");
-            appendCell(header, "th", "NHL", "", "col");
+            if (showNhl) appendCell(header, "th", "NHL", "", "col");
             thead.appendChild(header);
             table.appendChild(thead);
 
@@ -132,7 +134,7 @@
                 var row = document.createElement("tr");
                 appendCell(row, "th", hourRow.dump_point, "", "row");
                 appendCell(row, "td", hourRow.belaz || "—");
-                appendCell(row, "td", hourRow.nhl || "—");
+                if (showNhl) appendCell(row, "td", hourRow.nhl || "—");
                 tbody.appendChild(row);
             });
             table.appendChild(tbody);
@@ -141,7 +143,7 @@
             var totalRow = element("tr", "eo-hourly-report__total-row");
             appendCell(totalRow, "th", "Итого", "", "row");
             appendCell(totalRow, "td", belazTotal);
-            appendCell(totalRow, "td", nhlTotal);
+            if (showNhl) appendCell(totalRow, "td", nhlTotal);
             tfoot.appendChild(totalRow);
             table.appendChild(tfoot);
             block.appendChild(table);
