@@ -14768,6 +14768,139 @@ body.employees-admin-screen {
     background: var(--admin-panel);
 }
 
+.system-admin-reference-detail-screen .rock-capacity-settings {
+    display: grid;
+    gap: 10px;
+    margin-top: 6px;
+    padding-top: 14px;
+    border-top: 1px solid var(--admin-line);
+}
+
+.system-admin-reference-detail-screen .rock-capacity-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.system-admin-reference-detail-screen .rock-capacity-heading h3 {
+    margin: 2px 0 0;
+    color: var(--admin-ink);
+    font-size: 15px;
+    line-height: 1.25;
+}
+
+.system-admin-reference-detail-screen .rock-capacity-kicker {
+    color: var(--admin-green);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.system-admin-reference-detail-screen .rock-capacity-intro {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.system-admin-reference-detail-screen .rock-capacity-list {
+    display: grid;
+    gap: 8px;
+}
+
+.system-admin-reference-detail-screen .rock-capacity-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(142px, 0.65fr);
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    border: 1px solid var(--admin-line);
+    border-radius: 10px;
+    background: var(--admin-panel-soft);
+}
+
+.system-admin-reference-detail-screen .rock-capacity-row.has-rule {
+    border-color: color-mix(in srgb, var(--admin-green) 48%, var(--admin-line));
+    background: color-mix(in srgb, var(--admin-green) 7%, var(--admin-panel-soft));
+}
+
+.system-admin-reference-detail-screen .rock-capacity-model,
+.system-admin-reference-detail-screen .rock-capacity-field {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.system-admin-reference-detail-screen .rock-capacity-model strong {
+    overflow: hidden;
+    color: var(--admin-ink);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.system-admin-reference-detail-screen .rock-capacity-model span,
+.system-admin-reference-detail-screen .rock-capacity-model small,
+.system-admin-reference-detail-screen .rock-capacity-state {
+    color: var(--admin-muted);
+    font-size: 10px;
+    line-height: 1.35;
+}
+
+.system-admin-reference-detail-screen .rock-capacity-field label {
+    font-size: 10px;
+    font-weight: 750;
+}
+
+.system-admin-reference-detail-screen .rock-capacity-field .rock-capacity-input {
+    width: 100%;
+    text-align: right;
+    font-size: 15px;
+    font-weight: 800;
+}
+
+.system-admin-reference-detail-screen .rock-capacity-row.has-rule .rock-capacity-state {
+    color: color-mix(in srgb, var(--admin-green) 78%, var(--admin-ink));
+    font-weight: 700;
+}
+
+.system-admin-reference-detail-screen .rock-capacity-note {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    padding: 9px 10px;
+    border: 1px solid color-mix(in srgb, var(--admin-yellow) 45%, var(--admin-line));
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--admin-yellow) 8%, var(--admin-panel-soft));
+    color: var(--admin-muted);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.system-admin-reference-detail-screen .rock-capacity-note strong {
+    color: color-mix(in srgb, var(--admin-yellow) 82%, var(--admin-ink));
+}
+
+.system-admin-reference-detail-screen .rock-capacity-empty {
+    min-height: 92px;
+}
+
+@media (max-width: 620px) {
+    .system-admin-reference-detail-screen .rock-capacity-row {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .system-admin-reference-detail-screen .rock-capacity-field .rock-capacity-input {
+        text-align: left;
+    }
+
+    .system-admin-reference-detail-screen .rock-capacity-note {
+        grid-template-columns: 1fr;
+    }
+}
+
 .system-admin-reference-detail-screen .reference-editor-fields .employee-detail-field {
     gap: 4px;
 }

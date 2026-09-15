@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
+from django import forms
 from django.core.exceptions import FieldDoesNotExist, ValidationError
 from django.forms import modelform_factory
 from django.forms.models import construct_instance
@@ -63,6 +64,7 @@ from references.models import (
     EquipmentState,
     EquipmentType,
     RockType,
+    TruckCapacityRule,
 )
 from reports.forms import RatingPeriodReferenceForm
 from reports.models import RatingPeriod, ReportTemplate
@@ -95,6 +97,7 @@ from shifts.services import (
     plan_unit_label,
     progress_cycle_visual_context,
     recent_shift_reading_corrections,
+    refresh_open_shift_plan_snapshots_for_group,
 )
 from trips.manual_loading import trip_driver_control_filter
 from trips.models import DispatcherActionLog, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
@@ -2139,6 +2142,7 @@ def get_system_admin_reference_configs():
             'title': 'Породы',
             'section': 'Производство',
             'model': RockType,
+            'description': 'Породы, плотности и кубатура рейса для каждой модели самосвала.',
             'search_fields': ['name'],
             'preview_fields': ['name', 'density', 'loosening_factor'],
             'admin_url': '/admin/references/rocktype/',
@@ -2349,6 +2353,101 @@ def get_reference_record_preview(record, config):
     return preview
 
 
+class CapacityDecimalField(forms.DecimalField):
+    def to_python(self, value):
+        if isinstance(value, str):
+            value = value.strip().replace(',', '.')
+        return super().to_python(value)
+
+
+def build_rock_capacity_rules_form(rock_type=None, data=None):
+    existing_rules = {}
+    if rock_type and rock_type.pk:
+        existing_rules = {
+            rule.equipment_model_id: rule
+            for rule in TruckCapacityRule.objects.filter(rock_type=rock_type).select_related('equipment_model')
+        }
+
+    truck_models = (
+        EquipmentModel.objects
+        .filter(equipment_type__name__icontains='Самосвал')
+        .filter(Q(is_active=True) | Q(id__in=existing_rules))
+        .select_related('equipment_type')
+        .order_by('name', 'id')
+        .distinct()
+    )
+
+    capacity_form = forms.Form(data=data)
+    capacity_form.capacity_models = {}
+    capacity_form.capacity_rows = []
+    for equipment_model in truck_models:
+        field_name = f'capacity_model_{equipment_model.id}'
+        current_rule = existing_rules.get(equipment_model.id)
+        capacity_form.fields[field_name] = CapacityDecimalField(
+            label=f'Кубатура для {equipment_model.name}, м³',
+            required=False,
+            min_value=Decimal('0.01'),
+            max_digits=10,
+            decimal_places=2,
+            initial=current_rule.volume_m3 if current_rule else None,
+            widget=forms.TextInput(attrs={
+                'class': 'rock-capacity-input',
+                'inputmode': 'decimal',
+                'placeholder': 'Например, 52',
+                'autocomplete': 'off',
+            }),
+        )
+        capacity_form.capacity_models[field_name] = equipment_model
+
+    for field_name, equipment_model in capacity_form.capacity_models.items():
+        current_rule = existing_rules.get(equipment_model.id)
+        capacity_form.capacity_rows.append({
+            'model': equipment_model,
+            'field': capacity_form[field_name],
+            'has_explicit_rule': current_rule is not None,
+            'fallback_volume': equipment_model.body_volume_m3,
+        })
+    return capacity_form
+
+
+def save_rock_capacity_rules(rock_type, capacity_form):
+    changes = []
+    existing_rules = {
+        rule.equipment_model_id: rule
+        for rule in TruckCapacityRule.objects.filter(rock_type=rock_type)
+    }
+    for field_name, equipment_model in capacity_form.capacity_models.items():
+        new_volume = capacity_form.cleaned_data.get(field_name)
+        current_rule = existing_rules.get(equipment_model.id)
+        old_volume = current_rule.volume_m3 if current_rule else None
+        if new_volume is None:
+            if current_rule:
+                current_rule.delete()
+            else:
+                continue
+        elif current_rule:
+            if current_rule.volume_m3 == new_volume:
+                continue
+            current_rule.volume_m3 = new_volume
+            current_rule.save(update_fields=['volume_m3'])
+        else:
+            TruckCapacityRule.objects.create(
+                equipment_model=equipment_model,
+                rock_type=rock_type,
+                volume_m3=new_volume,
+            )
+        changes.append({
+            'model': equipment_model.name,
+            'old': old_volume,
+            'new': new_volume,
+        })
+    return changes
+
+
+def format_capacity_change_value(value):
+    return f'{value} м³' if value is not None else 'общий объем модели'
+
+
 def _add_validation_error_to_form(form, error):
     if hasattr(error, 'message_dict'):
         for field_name, field_messages in error.message_dict.items():
@@ -2408,6 +2507,7 @@ def system_admin_reference_detail_view(request, reference_code):
     status_filter = request.GET.get('status', '').strip()
     edit_id = request.GET.get('edit', '').strip()
     selected_record = None
+    rock_capacity_form = None
     if edit_id.isdigit():
         selected_record = get_object_or_404(build_reference_queryset(config), id=edit_id)
 
@@ -2429,6 +2529,7 @@ def system_admin_reference_detail_view(request, reference_code):
         record = None
         if record_id.isdigit():
             record = get_object_or_404(model, id=record_id)
+            selected_record = record
 
         if action in {'disable', 'enable'} and record and hasattr(record, 'is_active'):
             try:
@@ -2489,7 +2590,11 @@ def system_admin_reference_detail_view(request, reference_code):
             return redirect(reference_detail_redirect_url(record.id))
 
         form = form_class(request.POST, request.FILES, instance=record)
-        if form.is_valid():
+        if reference_code == 'rocks':
+            rock_capacity_form = build_rock_capacity_rules_form(record, data=request.POST)
+        form_is_valid = form.is_valid()
+        capacity_form_is_valid = rock_capacity_form.is_valid() if rock_capacity_form else True
+        if form_is_valid and capacity_form_is_valid:
             saved_record = form.save(commit=False)
             saved_record = prepare_reference_record_for_save(reference_code, saved_record, access)
             try:
@@ -2517,6 +2622,47 @@ def system_admin_reference_detail_view(request, reference_code):
                             old_audit_value,
                             saved_record.audit_value(),
                         )
+                elif reference_code == 'rocks':
+                    with transaction.atomic():
+                        saved_record.save()
+                        form.save_m2m()
+                        capacity_changes = save_rock_capacity_rules(
+                            saved_record,
+                            rock_capacity_form,
+                        )
+                        log_admin_action(
+                            access.employee,
+                            f'Справочник: {config["title"]}',
+                            saved_record,
+                            '',
+                            'Сохранено',
+                        )
+                        if capacity_changes:
+                            log_admin_action(
+                                access.employee,
+                                'Справочник: кубатура самосвалов по породе',
+                                saved_record,
+                                old_value='; '.join(
+                                    f'{item["model"]}: {format_capacity_change_value(item["old"])}'
+                                    for item in capacity_changes
+                                ),
+                                new_value='; '.join(
+                                    f'{item["model"]}: {format_capacity_change_value(item["new"])}'
+                                    for item in capacity_changes
+                                ),
+                            )
+                elif reference_code == 'equipment-plan-groups':
+                    with transaction.atomic():
+                        saved_record.save()
+                        form.save_m2m()
+                        refreshed_open_shifts = refresh_open_shift_plan_snapshots_for_group(saved_record)
+                        log_admin_action(
+                            access.employee,
+                            f'Справочник: {config["title"]}',
+                            saved_record,
+                            '',
+                            f'Сохранено; открытых смен пересчитано: {refreshed_open_shifts}',
+                        )
                 else:
                     saved_record.save()
                     form.save_m2m()
@@ -2535,6 +2681,8 @@ def system_admin_reference_detail_view(request, reference_code):
     else:
         form_initial = None if selected_record else config.get('initial')
         form = form_class(instance=selected_record, initial=form_initial)
+        if reference_code == 'rocks':
+            rock_capacity_form = build_rock_capacity_rules_form(selected_record)
 
     records_queryset = build_reference_queryset(config)
     if query:
@@ -2573,6 +2721,9 @@ def system_admin_reference_detail_view(request, reference_code):
             'query': query,
             'status_filter': status_filter,
             'has_active_status': hasattr(model, 'is_active'),
+            'show_rock_capacity_settings': reference_code == 'rocks',
+            'rock_capacity_form': rock_capacity_form,
+            'rock_capacity_rows': rock_capacity_form.capacity_rows if rock_capacity_form else [],
             'rating_period_automation': (
                 _rating_period_automation_context()
                 if reference_code == 'rating-periods'

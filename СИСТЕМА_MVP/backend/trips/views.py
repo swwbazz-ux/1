@@ -105,6 +105,7 @@ from .manual_loading import (
     manual_dump_card_visibility_filter,
     manual_loading_enabled,
     may_replace_open_trip,
+    reconcile_expired_manual_trips,
     trip_driver_control_filter,
     truck_driver_participation,
 )
@@ -970,7 +971,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v246";
+const CACHE_NAME = "excavator-mobile-shell-v247";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -984,20 +985,20 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v246",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v246",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v246",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v246",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v246",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v246",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v246",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v247",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v247",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v247",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v247",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v247",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v247",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v247",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v246",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v246",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v246",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v246",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v246",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v246",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v247",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v247",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v247",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v247",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v247",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v247",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -5900,6 +5901,7 @@ def excavator_work_view(request):
 
     reconcile_due_haul_assignments()
     reconcile_expired_free_bucket_acceptances()
+    reconcile_expired_manual_trips()
 
     open_shift = get_excavator_open_shift(access.employee)
     work_assignment = get_active_equipment_assignment(access.employee, 'excavator_operator')
@@ -7560,6 +7562,7 @@ def dispatcher_control_view(
     requested_fragment = request.GET.get('_operational_fragment', '').strip()
     reconcile_due_haul_assignments()
     reconcile_expired_free_bucket_acceptances()
+    reconcile_expired_manual_trips()
     # Просроченные смены закрывает сервер по таймеру (close_expired_shifts),
     # а не загрузка пульта: момент закрытия не должен зависеть от того, открыл
     # ли кто-то браузер.

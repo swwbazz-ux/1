@@ -147,6 +147,46 @@
         .app-realtime-status[hidden] {
             display: none;
         }
+        /* Заставка на время подготовки экрана. Экраны диспетчера рисуются
+           внутри холста постоянного размера, а масштаб под окно считает
+           скрипт — до этого страница успевает показаться неразмеченной, «в
+           куче». Прячем её до готовности и показываем кружок. */
+        .app-screen-boot {
+            position: fixed;
+            inset: 0;
+            z-index: 10100;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            background: #0b1622;
+            color: #9fb3c8;
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: .04em;
+            text-transform: uppercase;
+        }
+        body.is-screen-booting .app-screen-boot {
+            display: flex;
+        }
+        body.is-screen-booting .dispatcher-canvas {
+            visibility: hidden;
+        }
+        .app-screen-boot__spinner {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            border: 3px solid rgba(159, 179, 200, .25);
+            border-top-color: #60a5fa;
+            animation: app-screen-boot-spin .8s linear infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .app-screen-boot__spinner { animation-duration: 2.4s; }
+        }
+        @keyframes app-screen-boot-spin {
+            to { transform: rotate(360deg); }
+        }
         .app-realtime-update {
             position: fixed;
             left: 50%;
@@ -171,6 +211,10 @@
             pointer-events: none;
             transition: opacity 160ms ease, transform 160ms ease;
         }
+        .app-realtime-update > span {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
         .app-realtime-update.is-visible {
             opacity: 1;
             pointer-events: auto;
@@ -181,6 +225,10 @@
         }
         .app-realtime-update__button {
             flex: 0 0 auto;
+            width: auto; /* глобальное правило `button { width: 100% }` из app.css
+                            растягивало кнопку на всю плашку и выталкивало её
+                            за край, а текст сжимало в столбик из одного слова */
+            min-width: 0;
             border: 0;
             border-radius: 6px;
             padding: 8px 10px;
@@ -1599,6 +1647,35 @@
     {% block extra_head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-native-app="{{ is_native_app|yesno:'true,false' }}" data-native-client-version="{{ native_app_version }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
+<div class="app-screen-boot" data-app-screen-boot aria-hidden="true"><span class="app-screen-boot__spinner"></span><span>Готовим экран</span></div>
+<script>
+(function () {
+    // Заставку включаем сразу, до отрисовки содержимого, и только на экранах
+    // диспетчера — они живут в холсте и до его расчёта выглядят разъехавшимися.
+    // Снимаем, когда разметка загружена и холст успел посчитать масштаб;
+    // страховка по таймеру — чтобы экран не остался под заставкой, если
+    // скрипт холста почему-то не отработает.
+    var body = document.body;
+    if (!body || body.className.indexOf("dispatcher-control-screen") < 0) return;
+    body.classList.add("is-screen-booting");
+    var done = false;
+    function ready() {
+        if (done) return;
+        done = true;
+        body.classList.remove("is-screen-booting");
+    }
+    function afterCanvas() {
+        var frame = window.requestAnimationFrame || function (fn) { return window.setTimeout(fn, 16); };
+        frame(function () { frame(ready); });
+    }
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", afterCanvas, {once: true});
+    } else {
+        afterCanvas();
+    }
+    window.setTimeout(ready, 4000);
+})();
+</script>
 {% if is_yandex_android and not observer_mode %}
 <div class="app-yandex-warning-banner" data-yandex-warning role="status" aria-live="polite">
     <span><strong>Это Яндекс Браузер.</strong> Приложение может установиться неправильно — со своей строкой снизу. Нажмите «Скопировать ссылку», откройте Google Chrome и вставьте её в адресную строку.</span>
@@ -2495,7 +2572,7 @@ window.AppRealtimeConfig = {
     mobileQueueKey: "mining-master-mobile-sync-queue-v1",
     screens: [
         {name: "dispatcher-control", role: "dispatcher", mode: "custom", path: "^/dispatcher/control/?$", customRefresh: true},
-        {name: "dispatcher-shift-report", role: "dispatcher", mode: "custom", path: "^/dispatcher/shift-reports/(?:trucks|excavation|hourly)/?$", customRefresh: true},
+        {name: "dispatcher-shift-report", role: "dispatcher", mode: "custom", path: "^/dispatcher/shift-reports/(?:trucks|excavation|hourly-grid|hourly)/?$", customRefresh: true},
         {name: "dispatcher-reports", role: "dispatcher", mode: "manual", path: "^/dispatcher/"},
         {name: "mining-master", role: "mining_master", mode: "custom", path: "^/mining-master/", customRefresh: true},
         {name: "excavator", role: "excavator_operator", mode: "custom", path: "^/excavator/work/?$", customRefresh: true, foregroundReconcile: true, pollIntervalMs: 2000},
