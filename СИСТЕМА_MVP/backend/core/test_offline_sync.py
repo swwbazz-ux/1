@@ -224,6 +224,8 @@ class OfflineEventSyncTests(TestCase):
             full_name='Новый водитель',
             access_code='200022',
         )
+        new_shift.opened_at = self.truck_shift.closed_at + timedelta(seconds=1)
+        new_shift.save(update_fields=['opened_at'])
         event = self.load_event('load-before-driver-change', 1, occurred_at=occurred_at)
         event['payload']['manual_control'] = False
 

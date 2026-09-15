@@ -1167,6 +1167,27 @@ def assign_shift_plan_snapshot(shift):
     return calculate_open_shift_progress(shift)
 
 
+def refresh_open_shift_plan_snapshots_for_group(group):
+    """Reassign the current plan to open shifts affected by a group save."""
+    if not group or not group.pk:
+        return 0
+
+    current_equipment_ids = group.equipment.values_list('id', flat=True)
+    open_shifts = (
+        EmployeeShift.objects
+        .select_related('equipment', 'equipment__equipment_type')
+        .filter(closed_at__isnull=True)
+        .filter(Q(plan_group_id=group.pk) | Q(equipment_id__in=current_equipment_ids))
+        .distinct()
+        .order_by('id')
+    )
+    updated_count = 0
+    for shift in open_shifts:
+        assign_shift_plan_snapshot(shift)
+        updated_count += 1
+    return updated_count
+
+
 def equipment_is_excavator(equipment):
     return bool(equipment and equipment.equipment_type and 'экскаватор' in equipment.equipment_type.name.lower())
 

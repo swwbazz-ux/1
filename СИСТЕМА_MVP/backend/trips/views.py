@@ -799,6 +799,7 @@ const CORE_ASSETS = [
   APP_SHELL_URL,
   MANIFEST_URL,
   "/static/js/realtime-client.js?v=__STATIC_ASSET_RELEASE__",
+  "/static/js/connection-indicators-v1.js?v=__STATIC_ASSET_RELEASE__",
   "/static/js/role-readonly.js",
   "/static/js/dispatcher-control-v1.js",
   "/static/css/dispatcher-control-v1.css",

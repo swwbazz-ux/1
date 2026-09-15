@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -83,7 +84,7 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                     script,
                 )
                 self.assertIsNotNone(core_assets)
-                self.assertNotIn('/static/css/app.css', core_assets.group(1))
+                self.assertNotIn('"/static/css/app.css"', core_assets.group(1))
                 if role_code == 'dispatcher':
                     self.assertEqual(
                         script.count('self.addEventListener("install"'),
@@ -94,10 +95,6 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                         f'/static/js/realtime-client.js?v={EXPECTED_RELEASE}',
                         core_assets.group(1),
                     )
-                    self.assertIn(
-                        'const RELEASE_STATIC_PATHS = new Set(["/static/js/realtime-client.js"]);',
-                        script,
-                    )
                     self.assertIn('/static/css/dispatcher-control-v1.css', core_assets.group(1))
                     self.assertIn('/static/js/dispatcher-control-v1.js', core_assets.group(1))
                 else:
@@ -105,14 +102,43 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                         script.count('self.addEventListener("install"'),
                         2,
                     )
-                    self.assertNotIn('/static/js/realtime-client.js', core_assets.group(1))
-                    self.assertIn(
-                        'const RELEASE_STATIC_PATHS = new Set(["/static/css/app.css", "/static/js/realtime-client.js"]);',
-                        script,
-                    )
+                    self.assertNotIn('"/static/js/realtime-client.js"', core_assets.group(1))
                     self.assertIn('cache.delete(path)', script)
+                declared_paths = re.search(
+                    r'const RELEASE_STATIC_PATHS = new Set\((\[[^;]*\])\);', script,
+                )
+                self.assertIsNotNone(declared_paths)
+                expected_paths = {
+                    '/static/js/realtime-client.js',
+                    '/static/js/connection-indicators-v1.js',
+                }
+                if role_code != 'dispatcher':
+                    expected_paths.add('/static/css/app.css')
+                if role_code in {'driver', 'excavator_operator'}:
+                    expected_paths.update({
+                        '/static/js/client-error-report.js',
+                        '/static/js/application-session-heartbeat.js',
+                        '/static/js/native-background-connection-v1.js',
+                    })
+                self.assertEqual(set(json.loads(declared_paths.group(1))), expected_paths)
+                for core_url in re.findall(r'"([^"\n]+)"', core_assets.group(1)):
+                    path = core_url.split('?', 1)[0]
+                    if path in expected_paths:
+                        self.assertEqual(core_url, f'{path}?v={EXPECTED_RELEASE}')
                 self.assertIn('request.mode === "navigate"', script)
                 self.assertIn('networkFirstStatic(request)', script)
+
+    def test_dispatcher_precaches_every_declared_release_asset(self):
+        response = Client().get('/dispatcher-sw.js', HTTP_HOST='dispatcher.localhost')
+        self.assertEqual(response.status_code, 200)
+        script = response.content.decode('utf-8')
+        paths = re.search(r'const RELEASE_STATIC_PATHS = new Set\((\[[^;]*\])\);', script)
+        core_assets = re.search(r'const CORE_ASSETS = (\[[\s\S]*?\]);', script)
+        self.assertIsNotNone(paths)
+        self.assertIsNotNone(core_assets)
+        for path in re.findall(r'"([^"\n]+)"', paths.group(1)):
+            with self.subTest(asset=path):
+                self.assertIn(f'"{path}?v={EXPECTED_RELEASE}"', core_assets.group(1))
 
     def test_unfinished_role_workers_do_not_receive_ready_core_cache_contract(self):
         for role_code in sorted(set(ROLE_APPS_BY_CODE) - set(READY_ROLE_CODES)):
