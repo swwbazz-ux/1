@@ -518,8 +518,8 @@ function installDriverFragmentHandler(runtime, nextTruckId = 17) {
     );
     runtime.window.bindDriverMobileShell = function () {};
     runtime.window.AppOperationalFragment = {
-        request() {
-            return Promise.resolve({html: "<main></main>"});
+        request(_screen, version) {
+            return Promise.resolve({html: "<main></main>", version});
         },
         parseRoot() {
             return createShell(runtime.document, "driver", nextTruckId);
@@ -550,8 +550,8 @@ function installExcavatorFragmentHandler(runtime, nextExcavatorId = 31) {
     );
     runtime.window.initExcavatorWorkShell = function () {};
     runtime.window.AppOperationalFragment = {
-        request() {
-            return Promise.resolve({html: "<main></main>"});
+        request(_screen, version) {
+            return Promise.resolve({html: "<main></main>", version});
         },
         parseRoot() {
             return createShell(runtime.document, "excavator", nextExcavatorId);
@@ -564,6 +564,8 @@ function installExcavatorFragmentHandler(runtime, nextExcavatorId = 31) {
             "function readExcavatorAssignmentSnapshot() { return {}; }",
             "function syncExcavatorAssignmentSnapshot() {}",
             "var excavatorWorkMutationGeneration = 0;",
+            "var excavatorWorkRefreshRequestGeneration = 0;",
+            "var excavatorWorkAppliedRequestGeneration = 0;",
             "function storeExcavatorRealtimeVersion(version) {",
             "  if (version) document.body.dataset.operationalStateVersion = String(version);",
             "}",

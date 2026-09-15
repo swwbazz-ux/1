@@ -8,7 +8,7 @@ from django.http import HttpResponse, JsonResponse
 
 
 APP_CONTRACT_VERSION = 'pwa-contract-v1'
-STATIC_ASSET_RELEASE = 'ready-core-traffic-v179'
+STATIC_ASSET_RELEASE = 'ready-core-traffic-v180'
 READY_TRAFFIC_ROLE_CODES = frozenset({
     'admin',
     'oup',
@@ -219,7 +219,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v215',
+        shell_version='driver-mobile-shell-v216',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -236,7 +236,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v247',
+        shell_version='excavator-mobile-shell-v248',
     ),
     RoleApp(
         role_code='mining_master',
@@ -644,7 +644,13 @@ self.addEventListener("message", event => {{
 
 
 def add_release_static_cache(worker_script, role_code):
-    release_static_paths = ['/static/js/realtime-client.js']
+    release_static_paths = ['/static/js/realtime-client.js', '/static/js/connection-indicators-v1.js']
+    if role_code in {'driver', 'excavator_operator'}:
+        release_static_paths.extend([
+            '/static/js/client-error-report.js',
+            '/static/js/application-session-heartbeat.js',
+            '/static/js/native-background-connection-v1.js',
+        ])
     if role_code != 'dispatcher':
         release_static_paths.insert(0, '/static/css/app.css')
     release_helper = RELEASE_STATIC_SERVICE_WORKER_JS.replace(

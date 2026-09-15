@@ -21,6 +21,46 @@
     var syncScheduled = false;
     var syncInFlight = false;
     var syncAgain = false;
+    var lastEvidenceKey = "";
+    var lastEvidenceAt = 0;
+
+    function publishTransport(snapshot) {
+        var evidence = snapshot && (snapshot.transport || snapshot);
+        // Older APKs have lastAliveAt only. They continue lifecycle/outbox sync, without
+        // inventing fresh transport evidence from an unversioned historical timestamp.
+        if (!evidence || (evidence.status !== "success" && evidence.status !== "failure")) return;
+        if (document.hidden || document.visibilityState === "hidden") return;
+        var occurredAt = Number(evidence.occurredAtMs);
+        var lastSuccessAt = Number(evidence.lastSuccessAtMs);
+        var now = Date.now();
+        if (!Number.isFinite(occurredAt) || occurredAt <= 0 || occurredAt < lastEvidenceAt
+            || occurredAt > now + 1000 || now - occurredAt > 15000
+            || !Number.isFinite(lastSuccessAt) || lastSuccessAt < 0 || lastSuccessAt > occurredAt) return;
+        if (evidence.status === "success" && (lastSuccessAt <= 0 || now - lastSuccessAt > 15000)) return;
+        var key = evidence.status + ":" + occurredAt + ":" + lastSuccessAt;
+        if (key === lastEvidenceKey) return;
+        var failureCount = Number(evidence.failureCount);
+        var serverVersion = Number(evidence.serverVersion);
+        var reason = String(evidence.reason || "");
+        var allowedReason = /^(heartbeat_success|timeout|network_error|invalid_payload|cookie_timeout|local_processing|authentication_ended|http_[1-5][0-9]{2})$/;
+        var detail = {
+            status: evidence.status,
+            transportState: /^(ok|weak|lost|auth_required)$/.test(String(evidence.transportState || ""))
+                ? evidence.transportState : "unknown",
+            occurredAtMs: occurredAt,
+            lastSuccessAtMs: lastSuccessAt,
+            failureCount: Number.isSafeInteger(failureCount) && failureCount >= 0 ? failureCount : 0,
+            reason: allowedReason.test(reason) ? reason : "local_processing",
+            serverVersion: Number.isSafeInteger(serverVersion) && serverVersion >= 0 ? serverVersion : 0
+        };
+        lastEvidenceKey = key;
+        lastEvidenceAt = occurredAt;
+        window.dispatchEvent(new CustomEvent("native-connection-state", {detail: detail}));
+    }
+
+    if (typeof plugin.addListener === "function") {
+        Promise.resolve(plugin.addListener("connectionState", publishTransport)).catch(function () {});
+    }
 
     function readShiftState() {
         if (roleCode === "driver") {
@@ -56,7 +96,8 @@
             shiftId: state.shiftId,
             authGeneration: String(state.authGeneration || ""),
             reason: reason || (state.required ? "shift_active" : "shift_inactive")
-        })).then(function () {
+        })).then(function (snapshot) {
+            publishTransport(snapshot);
             lastSignature = signature;
         }).catch(function () {
             lastSignature = "";
@@ -110,7 +151,10 @@
         stop: stopForLogout,
         getState: function () {
             if (typeof plugin.getState !== "function") return Promise.resolve({});
-            return Promise.resolve(plugin.getState()).catch(function () { return {}; });
+            return Promise.resolve(plugin.getState()).then(function (snapshot) {
+                publishTransport(snapshot);
+                return snapshot;
+            }).catch(function () { return {}; });
         },
         queueDriverShiftClose: function (payload) {
             if (roleCode !== "driver" || typeof plugin.queueDriverShiftClose !== "function") {

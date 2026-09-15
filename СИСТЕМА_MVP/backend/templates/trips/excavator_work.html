@@ -6,22 +6,22 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v247">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v247">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v247">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v247">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v247">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v247">
-<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v247">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v247" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v247" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
-<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v247" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v248">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v248">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v248">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v248">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v248">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v248">
+<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v248">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v248" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v248" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" defer></script>
+<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v248" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <link rel="stylesheet" href="{% static 'css/excavator-offline-v1.css' %}?v=1">
-<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v247">
-<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v247" defer></script>
-<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v247" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v248">
+<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v248" defer></script>
+<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v248" defer></script>
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -84,7 +84,7 @@
         </header>
 
         <div class="eo-offline-sync" data-eo-offline-sync hidden role="status" aria-live="polite">
-            <span data-eo-offline-sync-label>Связь есть · всё подтверждено</span>
+            <span data-eo-offline-sync-label>Все действия отправлены</span>
             <b class="eo-offline-sync__count" data-eo-offline-sync-count hidden>0</b>
         </div>
 
@@ -506,7 +506,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v247";
+var excavatorShellVersion = "excavator-mobile-shell-v248";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1089,6 +1089,7 @@ document.addEventListener("visibilitychange", function () {
 
 function isExcavatorRefreshUnsafe(options) {
     options = options || {};
+    if (document.hidden) return true;
     var pendingOwner = options.pendingOwner === "face" || options.pendingOwner === "shift"
         ? options.pendingOwner
         : "";
@@ -1115,7 +1116,7 @@ function isExcavatorRefreshUnsafe(options) {
     )) {
         return true;
     }
-    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-picked-up, .eo-truck-card.is-pickup-waiting, .eo-truck-card.is-dragging, .eo-dashboard-unload-card.is-return-swiping, .eo-dashboard-unload-card.is-return-rebounding, .eo-dashboard-unload-card.is-return-pending, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .eo-reading-confirmation:not([hidden])")) {
+    if (document.querySelector(".eo-truck-card.is-pending, .eo-truck-card.is-picked-up, .eo-truck-card.is-pickup-waiting, .eo-truck-card.is-dragging, .eo-dashboard-unload-card.is-return-swiping, .eo-dashboard-unload-card.is-return-rebounding, .eo-dashboard-unload-card.is-return-pending, .eo-reason-action.is-pending, [data-eo-close-event].is-pending, .mobile-shift__action.is-holding, .eo-truck-detail-modal:not([hidden]), .eo-mobile-update-modal:not([hidden]), .eo-reading-confirmation:not([hidden]), [data-eo-dump-queue-modal]:not([hidden])")) {
         return true;
     }
     return Array.prototype.some.call(
@@ -1131,10 +1132,19 @@ function isExcavatorRefreshUnsafe(options) {
 
 function storeExcavatorRealtimeVersion(version) {
     if (!version) return;
-    document.body.dataset.operationalStateVersion = String(version);
+    var appliedVersion = Math.max(Number(document.body.dataset.operationalStateVersion || 0), Number(version));
+    document.body.dataset.operationalStateVersion = String(appliedVersion);
     try {
-        window.sessionStorage.setItem("operational-state-version", String(version));
+        window.sessionStorage.setItem("operational-state-version", String(appliedVersion));
     } catch (error) {}
+    if (window.AppRealtime && typeof window.AppRealtime.markApplied === "function") {
+        window.AppRealtime.markApplied(appliedVersion);
+    }
+    if (window.AppRealtime && typeof window.AppRealtime.reportTransportSuccess === "function") {
+        window.AppRealtime.reportTransportSuccess({
+            channel: "fragment", occurredAtMs: Date.now(), serverVersion: appliedVersion
+        });
+    }
 }
 
 function hasExcavatorRelevantEvents(events) {
@@ -1232,9 +1242,10 @@ function refreshExcavatorWorkFromServer(options) {
         newShell.dataset.eoActiveTab = options.preserveTab === false
             ? (newShell.dataset.eoActiveTab || "trucks")
             : latestActiveTab;
+        var viewState = window.AppOperationalFragment.captureView
+            ? window.AppOperationalFragment.captureView(currentShell, "[data-eo-screen]", "data-eo-screen")
+            : null;
         currentShell.replaceWith(newShell);
-        excavatorWorkAppliedRequestGeneration = requestGeneration;
-        storeExcavatorRealtimeVersion(payloadVersion);
         if (typeof window.bindMobileShiftScreens === "function") {
             window.bindMobileShiftScreens();
         }
@@ -1263,6 +1274,12 @@ function refreshExcavatorWorkFromServer(options) {
             syncExcavatorAssignmentSnapshot(newShell, previousAssignments, Number(options.version || 0));
         }
         scheduleExcavatorViewportHeightSync();
+        if (window.AppOperationalFragment.restoreView) {
+            window.AppOperationalFragment.restoreView(newShell, viewState);
+        }
+        // Версия подтверждена только после установки и инициализации server truth.
+        excavatorWorkAppliedRequestGeneration = requestGeneration;
+        storeExcavatorRealtimeVersion(payloadVersion);
         return true;
     }).catch(function () {
         return false;
@@ -1376,14 +1393,8 @@ function bindExcavatorTransferCountdowns(shell) {
     window.eoTransferCountdownTimer = window.setInterval(tick, 1000);
 }
 
-// Присутствие истекает без изменения рейса; обновляем его и при неизменной версии.
-if (!window.eoDriverPresenceRefreshTimer) {
-    window.eoDriverPresenceRefreshTimer = window.setInterval(function () {
-        if (!document.hidden && !isExcavatorRefreshUnsafe({})) {
-            refreshExcavatorWorkFromServer({preserveTab: true});
-        }
-    }, 20000);
-}
+// Пассивной сверкой обеих ролей раз в 20 секунд владеет AppRealtime.
+// Собственный таймер здесь создавал второй независимый поток fragments.
 window.excavatorHasPendingWork = isExcavatorRefreshUnsafe;
 if (
     window.AppPwaContractGuard
@@ -1393,27 +1404,15 @@ if (
 }
 window.applyOperationalStateRefresh = function (context) {
     if (isExcavatorRefreshUnsafe()) {
-        return Promise.resolve({ deferred: true, reason: "excavator_busy" });
+        return Promise.resolve({deferred: true, reason: "excavator_busy"});
     }
     var targetVersion = Number(context && context.version || 0);
-    var events = context && context.events;
-    if (context && (context.eventsTruncated || context.foregroundReconcile === true)) {
-        return refreshExcavatorWorkFromServer({ preserveTab: true, version: targetVersion, achievementContext: context }).then(function (applied) {
-            if (!applied) return { deferred: true, reason: "excavator_refresh_failed" };
-            storeExcavatorRealtimeVersion(targetVersion);
-            return { applied: true };
-        });
-    }
-    if (!hasExcavatorRelevantEvents(events)) {
-        storeExcavatorRealtimeVersion(targetVersion);
-        return Promise.resolve({ applied: true });
-    }
-    return refreshExcavatorWorkFromServer({ preserveTab: true, version: targetVersion, achievementContext: context }).then(function (applied) {
-        if (!applied) return { deferred: true, reason: "excavator_refresh_failed" };
-        storeExcavatorRealtimeVersion(targetVersion);
-        return { applied: true };
+    // Даже пустая/усечённая дельта не доказывает, что текущий DOM отражает сервер.
+    return refreshExcavatorWorkFromServer({preserveTab: true, version: targetVersion, achievementContext: context}).then(function (applied) {
+        if (!applied) return {deferred: true, reason: "excavator_refresh_failed"};
+        return {applied: true, version: Number(document.body.dataset.operationalStateVersion || 0)};
     }).catch(function () {
-        return { deferred: true, reason: "excavator_refresh_error" };
+        return {deferred: true, reason: "excavator_refresh_error"};
     });
 };
 
@@ -1449,6 +1448,16 @@ function legacyExcavatorFieldSequence(accessId, deviceId) {
 }
 
 function renderExcavatorOfflineStatus(summary) {
+    summary = summary || {};
+    var previousPending = Number(window.operationalOutboxPendingCount || 0);
+    window.operationalOutboxPendingCount = Math.max(0, Number(summary.pending || 0));
+    window.dispatchEvent(new CustomEvent("operational-outbox-state", {detail: {
+        role: "excavator", pendingCount: window.operationalOutboxPendingCount,
+        reviewCount: Math.max(0, Number(summary.attention || 0))
+    }}));
+    if (previousPending > 0 && window.operationalOutboxPendingCount === 0 && window.AppRealtime && typeof window.AppRealtime.requestReconcile === "function") {
+        window.AppRealtime.requestReconcile("excavator_offline_queue_drained");
+    }
     var indicator = document.querySelector("[data-eo-offline-sync]");
     if (!indicator) return;
     var shell = document.querySelector("[data-eo-shell]");
@@ -1456,7 +1465,7 @@ function renderExcavatorOfflineStatus(summary) {
     var label = indicator.querySelector("[data-eo-offline-sync-label]");
     var count = indicator.querySelector("[data-eo-offline-sync-count]");
     var offline = navigator.onLine === false;
-    var text = "Связь есть · всё подтверждено";
+    var text = "Все действия отправлены";
     var stateClass = "";
     if (summary.storage_failed) {
         text = "Не удалось сохранить действие";
@@ -1468,13 +1477,13 @@ function renderExcavatorOfflineStatus(summary) {
         text = "Отправляем накопленное";
         stateClass = "is-syncing";
     } else if (summary.total > 0 && offline) {
-        text = "Нет связи · сохранено на телефоне";
+        text = "Нет сети · сохранено на телефоне";
         stateClass = "is-offline";
     } else if (summary.total > 0) {
         text = "Ожидает отправки";
         stateClass = "is-offline";
     } else if (offline) {
-        text = "Нет связи · новых действий нет";
+        text = "Новых действий на телефоне нет";
         stateClass = "is-offline";
     }
     indicator.className = "eo-offline-sync" + (stateClass ? " " + stateClass : "");
@@ -3321,16 +3330,12 @@ window.initExcavatorWorkShell = function () {
                 downtimeCard.dataset.eoActiveDowntimeId = String(downtimeId);
             }
         }
-        var version = Number(result.server_version || result.version || 0);
-        if (version) storeExcavatorRealtimeVersion(version);
-        if (window.eoExcavatorConfirmedRefreshTimer) window.clearTimeout(window.eoExcavatorConfirmedRefreshTimer);
-        window.eoExcavatorConfirmedRefreshTimer = window.setTimeout(function () {
-            window.eoExcavatorConfirmedRefreshTimer = null;
-            refreshExcavatorWorkFromServer({preserveTab: true, version: version});
-            if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
-                window.AppRealtime.wake("offline_excavator_events_confirmed");
-            }
-        }, 120);
+        var version = Number(result && (result.server_version || result.version) || 0);
+        // POST подтверждает запись, но ещё не применение серверного HTML.
+        // Единственный владелец сверки сохраняет pending при abort/фоне/жесте.
+        if (window.AppRealtime && typeof window.AppRealtime.requestReconcile === "function") {
+            window.AppRealtime.requestReconcile("offline_excavator_events_confirmed", version);
+        }
         return Promise.resolve();
     };
 

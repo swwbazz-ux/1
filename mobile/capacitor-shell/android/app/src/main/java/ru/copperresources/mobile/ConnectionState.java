@@ -3,8 +3,12 @@ package ru.copperresources.mobile;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.getcapacitor.JSObject;
+import org.json.JSONObject;
+
 final class ConnectionState {
     static final String PREFS_NAME = "native_connectivity";
+    static final String TRANSPORT_EVIDENCE = "transport_evidence_v1";
     private static final String CONNECTION_DESIRED = "connection_desired";
     private static final String SHIFT_ACTIVE = "shift_active";
     private static final String ACTIVE_SHIFT_ID = "active_shift_id";
@@ -70,6 +74,35 @@ final class ConnectionState {
 
     static void recordAlive(Context context, long aliveAt) {
         preferences(context).edit().putLong(LAST_ALIVE_AT, aliveAt).apply();
+    }
+
+    static void recordTransport(Context context, NativeTransportState state) {
+        JSObject evidence = new JSObject()
+            .put("status", state.status)
+            .put("transportState", state.transportState)
+            .put("lastSuccessAtMs", state.lastSuccessAtMs)
+            .put("occurredAtMs", state.occurredAtMs)
+            .put("failureCount", state.failureCount)
+            .put("reason", state.reason)
+            .put("serverVersion", state.serverVersion);
+        // One preference value makes a listener snapshot coherent across all fields.
+        preferences(context).edit().putString(TRANSPORT_EVIDENCE, evidence.toString()).apply();
+    }
+
+    static JSObject transportSnapshot(Context context) {
+        try {
+            JSONObject stored = new JSONObject(preferences(context).getString(TRANSPORT_EVIDENCE, "{}"));
+            return new JSObject()
+                .put("status", stored.optString("status", "unknown"))
+                .put("transportState", stored.optString("transportState", "unknown"))
+                .put("lastSuccessAtMs", stored.optLong("lastSuccessAtMs", 0L))
+                .put("occurredAtMs", stored.optLong("occurredAtMs", 0L))
+                .put("failureCount", stored.optInt("failureCount", 0))
+                .put("reason", stored.optString("reason", "initial"))
+                .put("serverVersion", stored.optLong("serverVersion", 0L));
+        } catch (Exception ignored) {
+            return new JSObject();
+        }
     }
 
     private static SharedPreferences preferences(Context context) {

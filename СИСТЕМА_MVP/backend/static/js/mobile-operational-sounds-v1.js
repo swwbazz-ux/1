@@ -33,6 +33,7 @@
     var loadingBuffers = Object.create(null);
     var activeSource = null;
     var lastConnectionState = "";
+    var connectionLossAnnounced = false;
 
     var directCueAliases = Object.freeze({
         truck_assigned: "assignment_notice",
@@ -422,19 +423,16 @@
             ? document.body.dataset.connectionState
             : "";
         if (!nextState) return;
-        if (!lastConnectionState) {
-            lastConnectionState = nextState;
-            return;
-        }
         if (nextState === lastConnectionState) return;
-        var previousState = lastConnectionState;
         lastConnectionState = nextState;
-        if (nextState === "lost") {
+        if (nextState === "lost" && !connectionLossAnnounced) {
+            connectionLossAnnounced = true;
             announceOperational({
                 cue: "connection_lost",
                 voice: "voice_connection_lost"
             });
-        } else if (previousState === "lost" && nextState === "ok") {
+        } else if (connectionLossAnnounced && nextState === "ok") {
+            connectionLossAnnounced = false;
             announceOperational({
                 cue: "connection_restored",
                 voice: "voice_connection_restored"

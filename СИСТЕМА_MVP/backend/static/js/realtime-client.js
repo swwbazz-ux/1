@@ -30,7 +30,8 @@
             observerPollIntervalMs: config.observerPollIntervalMs || 15000,
             idleDelayMs: config.idleDelayMs || 2500,
             pollTimeoutMs: config.pollTimeoutMs || 8000,
-            maxSilentMs: config.maxSilentMs || 7000,
+            maxSilentMs: config.maxSilentMs || 15000,
+            truthRefreshIntervalMs: config.truthRefreshIntervalMs || 20000,
             mobileQueueKey: config.mobileQueueKey || "mining-master-mobile-sync-queue-v1",
             loginUrl: config.loginUrl || "/"
         };
@@ -138,6 +139,7 @@
         var pollIntervalMs = screenPollInterval(config, screen);
         var idleDelayMs = config.idleDelayMs;
         var currentVersion = config.initialVersion > 0 ? config.initialVersion : null;
+        var observedVersion = currentVersion || 0;
         var pendingVersion = null;
         var pendingPreviousVersion = 0;
         var pendingVersionSince = 0;
@@ -153,7 +155,7 @@
         var realtimePollController = null;
         var realtimePollGeneration = 0;
         var realtimePollTimeoutMs = config.pollTimeoutMs;
-        var realtimeMaxSilentMs = Math.max(config.maxSilentMs, pollIntervalMs * 2 + 2000);
+        var realtimeMaxSilentMs = Math.max(15000, config.maxSilentMs, pollIntervalMs * 2 + 2000);
         var realtimeStatus = document.querySelector("[data-app-realtime-status]");
         var realtimeUpdateNotice = document.querySelector("[data-app-realtime-update]");
         var realtimeUpdateText = document.querySelector("[data-app-realtime-update-text]");
@@ -164,17 +166,38 @@
         var foregroundReconcileRequested = false;
         var foregroundReconcileReason = "";
         var foregroundReconcileRevision = 0;
+        var connectionState = "unknown";
+        var connectionStateSince = Date.now();
+        var lastNativeSuccessAt = 0;
+        var auxiliarySuccessAt = {web_heartbeat: 0, fragment: 0};
+        var transportInterrupted = false;
+        var lastSuccessfulTruthAt = Date.now();
+        var lastReconciledWakeAt = 0;
+        var activeSince = Date.now();
+        var lastWakeAt = 0;
+        var lastWakeRevision = -1;
+        var refreshFailures = 0;
+        var refreshRetryAt = 0;
+        var pollTimeoutId = null;
+        var pendingOutboxCount = Number(window.operationalOutboxPendingCount || window.driverOfflinePendingCount || 0);
         var authEnded = false;
         var pollIntervalId = null;
         var pendingUpdateTimeoutId = null;
         var watchdogIntervalId = null;
         var wakeTimeoutId = null;
         var authRedirectScheduled = false;
+        var pagePaused = false;
         var pageFocused = typeof document.hasFocus === "function" ? document.hasFocus() : true;
         var visibilityOnlyActivity = document.body.dataset.realtimeVisibilityOnly === "true";
 
         function isPageActive() {
-            return document.hidden !== true && (visibilityOnlyActivity || pageFocused);
+            return !pagePaused && document.hidden !== true && (visibilityOnlyActivity || pageFocused);
+        }
+
+        function resumePageActivity() {
+            if (document.hidden === true) return;
+            if (pagePaused || !isPageActive()) activeSince = Date.now();
+            pagePaused = false;
         }
 
         function clearPollSchedule() {
@@ -193,7 +216,7 @@
 
         function schedulePendingUpdate(delay) {
             clearPendingUpdateSchedule();
-            if (authEnded || !pendingVersion || !isPageActive()) {
+            if (authEnded || pendingVersion === null || !isPageActive()) {
                 return;
             }
             pendingUpdateTimeoutId = window.setTimeout(function () {
@@ -218,19 +241,47 @@
                 inspectRealtimeWatchdog("poll_timer");
                 pollOperationalState();
                 scheduleNextPoll();
-            }, pollIntervalMs);
+            }, Math.min(30000, pollIntervalMs * Math.pow(2, Math.min(realtimeConsecutiveFailures, 4))));
         }
 
         function requestForegroundReconcile(reason) {
-            if (!foregroundReconcileEnabled || authEnded) {
-                return false;
-            }
-            foregroundReconcileRevision += 1;
+            if (!foregroundReconcileEnabled || authEnded) return false;
+            if (!foregroundReconcileRequested) foregroundReconcileRevision += 1;
             foregroundReconcileRequested = true;
-            if (reason) {
-                foregroundReconcileReason = String(reason);
-            }
+            if (reason && !foregroundReconcileReason) foregroundReconcileReason = String(reason);
             return true;
+        }
+
+        function requestReconcile(reason, version) {
+            if (authEnded || !foregroundReconcileEnabled) return false;
+            var parsed = Number(version);
+            if (Number.isSafeInteger(parsed) && parsed >= 0) observedVersion = Math.max(observedVersion, parsed);
+            requestForegroundReconcile(reason || "explicit_reconcile");
+            queueReconcileVersion(observedVersion, null);
+            updateConnectionState(reason || "explicit_reconcile");
+            wakeRealtimeConnection(reason || "explicit_reconcile", {explicit: true});
+            return true;
+        }
+
+        function queueReconcileVersion(version, payload) {
+            var target = Math.max(Number(version || 0), Number(pendingVersion || 0));
+            if (pendingVersion === null || target > pendingVersion) {
+                pendingVersionSince = Date.now();
+                pendingPreviousVersion = currentVersion || 0;
+            }
+            pendingVersion = target;
+            if (payload && Array.isArray(payload.events)) {
+                var eventVersions = {};
+                pendingEvents.concat(payload.events).forEach(function (event) {
+                    if (event && Number(event.version) > 0) eventVersions[String(event.version)] = event;
+                });
+                var collectedEvents = Object.keys(eventVersions).map(function (key) { return eventVersions[key]; });
+                collectedEvents.sort(function (left, right) { return Number(left.version) - Number(right.version); });
+                pendingEvents = collectedEvents.slice(-100);
+                // Bound retained deltas when fragments keep failing. Server truth can recover
+                // the final state even after older events have been discarded.
+                pendingEventsTruncated = pendingEventsTruncated || payload.events_truncated === true || collectedEvents.length > 100;
+            }
         }
 
         function clearForegroundReconcile(expectedRevision) {
@@ -246,6 +297,9 @@
         }
 
         function pauseRealtimeConnection(reason) {
+            pagePaused = true;
+            // A new background cycle invalidates any older fragment's reconciliation revision.
+            if (foregroundReconcileEnabled) foregroundReconcileRevision += 1;
             requestForegroundReconcile(reason || "background");
             clearPollSchedule();
             clearPendingUpdateSchedule();
@@ -253,16 +307,26 @@
                 window.clearTimeout(wakeTimeoutId);
                 wakeTimeoutId = null;
             }
-            if (realtimePollInFlight) {
-                realtimePollGeneration += 1;
-                if (realtimePollController) {
-                    try {
-                        realtimePollController.abort();
-                    } catch (error) {}
-                }
-                realtimePollInFlight = false;
-                realtimePollController = null;
+            lastWakeAt = 0;
+            refreshRetryAt = 0;
+            cancelCurrentPoll("planned_abort", false);
+            diagnoseConnection("background_pause", connectionState, connectionState);
+        }
+
+        function cancelCurrentPoll(reason, countFailure) {
+            if (!realtimePollInFlight) return;
+            var controller = realtimePollController;
+            // Invalidate before abort: the rejected old promise cannot count twice or clear a new owner.
+            realtimePollGeneration += 1;
+            realtimePollInFlight = false;
+            realtimePollController = null;
+            window.clearTimeout(pollTimeoutId);
+            pollTimeoutId = null;
+            if (controller) {
+                try { controller.abort(); } catch (error) {}
             }
+            if (countFailure) recordPollFailure(reason || "timeout");
+            else diagnoseConnection(reason || "planned_abort", connectionState, connectionState);
         }
 
         function clearPendingMobileQueue() {
@@ -330,82 +394,130 @@
             }
         }
 
-        function publishRealtimeConnectionState(isConnected, detail) {
-            var payload = Object.assign({
-                connected: !!isConnected,
-                failures: realtimeConsecutiveFailures,
-                lastSuccessAt: realtimeLastSuccessAt,
-                screen: screen ? screen.name : null,
-                mode: screen ? screen.mode : null,
-                role: screen ? screen.role : null
-            }, detail || {});
-            document.body.classList.toggle("is-realtime-stale", !isConnected);
-            /* Три состояния для индикатора связи в шапке: связь есть, связь
-               пропадает (первые неудачные опросы) и связь потеряна. */
-            document.body.dataset.connectionState = isConnected
-                ? "ok"
-                : (realtimeConsecutiveFailures > 2 ? "lost" : "weak");
-            /* Где связь показывает лампочка в шапке, нижняя плашка не нужна:
-               она дублирует ту же мысль и закрывает навигацию. */
-            if (document.querySelector("[data-connection-indicator]")) {
-                if (realtimeStatus) {
-                    realtimeStatus.classList.remove("is-visible");
-                    realtimeStatus.hidden = true;
-                }
-                dispatchWindowEvent("operational-state-connection", payload);
-                return;
-            }
-            if (realtimeStatus) {
-                if (isConnected) {
-                    realtimeStatus.classList.remove("is-visible");
-                    window.setTimeout(function () {
-                        if (!realtimeStatus.classList.contains("is-visible")) {
-                            realtimeStatus.hidden = true;
-                        }
-                    }, 180);
-                } else {
-                    realtimeStatus.hidden = false;
-                    var reveal = window.requestAnimationFrame || function (callback) {
-                        return window.setTimeout(callback, 0);
-                    };
-                    reveal(function () {
-                        realtimeStatus.classList.add("is-visible");
-                    });
-                }
-            }
-            dispatchWindowEvent("operational-state-connection", payload);
+        function nativeHeartbeatFresh(now) {
+            return lastNativeSuccessAt > 0 && now - lastNativeSuccessAt <= 15000;
         }
 
-        function inspectRealtimeWatchdog(reason) {
-            if (authEnded) {
-                return;
-            }
+        function auxiliaryChannelFresh(now) {
+            var latest = Math.max(auxiliarySuccessAt.web_heartbeat, auxiliarySuccessAt.fragment);
+            return nativeHeartbeatFresh(now) || (latest > 0 && now - latest <= 15000);
+        }
+
+        function reportTransportSuccess(evidence) {
+            evidence = evidence || {};
+            var channel = evidence.channel;
+            var occurredAt = Number(evidence.occurredAtMs);
             var now = Date.now();
-            if (realtimePollInFlight && realtimeLastPollStartedAt && now - realtimeLastPollStartedAt > realtimePollTimeoutMs + 1500) {
-                if (realtimePollController) {
-                    try {
-                        realtimePollController.abort();
-                    } catch (error) {}
+            if (authEnded || !Object.prototype.hasOwnProperty.call(auxiliarySuccessAt, channel)
+                || !Number.isFinite(occurredAt) || occurredAt <= auxiliarySuccessAt[channel]
+                || occurredAt <= 0 || now - occurredAt > 15000 || occurredAt > now + 1000) return false;
+            var needsRecovery = realtimeConsecutiveFailures > 0 || connectionState === "lost" || hasPendingReconcile();
+            auxiliarySuccessAt[channel] = occurredAt;
+            realtimeLastSuccessAt = Math.max(realtimeLastSuccessAt, occurredAt);
+            realtimeConsecutiveFailures = 0;
+            transportInterrupted = false;
+            if (channel === "web_heartbeat") {
+                if (needsRecovery) {
+                    refreshRetryAt = 0;
+                    requestReconcile("web_heartbeat_success", evidence.serverVersion);
+                } else if (Number(evidence.serverVersion) > observedVersion) {
+                    wakeRealtimeConnection("web_heartbeat_version");
                 }
-                realtimePollInFlight = false;
-                realtimePollController = null;
-                realtimeConsecutiveFailures = Math.max(realtimeConsecutiveFailures, 1);
-                publishRealtimeConnectionState(false, {reason: reason || "poll_stuck"});
-                dispatchWindowEvent("operational-state-poll-reset", {
-                    reason: reason || "poll_stuck",
-                    lastPollStartedAt: realtimeLastPollStartedAt,
-                    screen: screen ? screen.name : null,
-                    mode: screen ? screen.mode : null,
-                    role: screen ? screen.role : null
-                });
-                return;
             }
-            if (realtimeLastSuccessAt && now - realtimeLastSuccessAt > realtimeMaxSilentMs) {
-                realtimeConsecutiveFailures = Math.max(realtimeConsecutiveFailures, 1);
-                publishRealtimeConnectionState(false, {reason: reason || "silent_timeout"});
-            } else if (!realtimeLastSuccessAt && realtimeLastPollStartedAt && now - realtimeLastPollStartedAt > realtimePollTimeoutMs) {
-                realtimeConsecutiveFailures = Math.max(realtimeConsecutiveFailures, 1);
-                publishRealtimeConnectionState(false, {reason: reason || "initial_timeout"});
+            updateConnectionState(channel + "_success");
+            return true;
+        }
+
+        function hasPendingReconcile() {
+            return pendingVersion !== null || foregroundReconcileRequested || applyingUpdate || pendingOutboxCount > 0;
+        }
+
+        function diagnoseConnection(cause, before, after) {
+            dispatchWindowEvent("app:connectiondiagnostic", {
+                cause: cause || "state_change", owner: "realtime_poll",
+                generation: realtimePollGeneration, failureCount: realtimeConsecutiveFailures,
+                lastSuccessAt: realtimeLastSuccessAt, durationMs: Date.now() - connectionStateSince,
+                nativeHeartbeatFresh: nativeHeartbeatFresh(Date.now()), pendingOutboxCount: pendingOutboxCount,
+                fromState: before, toState: after
+            });
+        }
+
+        function publishRealtimeConnectionState(state, detail) {
+            var previousState = connectionState;
+            connectionState = state;
+            document.body.classList.toggle("is-realtime-stale", state === "lost");
+            document.body.dataset.connectionState = state;
+            document.body.dataset.operationalObservedVersion = String(observedVersion);
+            document.body.dataset.operationalAppliedVersion = String(currentVersion || 0);
+            document.body.dataset.operationalPendingVersion = pendingVersion === null ? "" : String(pendingVersion);
+            var text = {
+                unknown: "Проверяем связь…", ok: "Связь есть", weak: "Переподключение…",
+                lost: "Связь с сервером потеряна", recovering: "Восстанавливаем данные…"
+            }[state];
+            if (realtimeStatus) {
+                realtimeStatus.textContent = text;
+                var visible = state !== "ok" && state !== "unknown" && !document.querySelector("[data-connection-indicator]");
+                realtimeStatus.hidden = !visible;
+                realtimeStatus.classList.toggle("is-visible", visible);
+            }
+            var payload = Object.assign({
+                state: state, previousState: previousState,
+                connected: state === "ok" || state === "recovering",
+                failures: realtimeConsecutiveFailures, lastSuccessAt: realtimeLastSuccessAt,
+                nativeHeartbeatFresh: nativeHeartbeatFresh(Date.now()),
+                pendingOutboxCount: pendingOutboxCount, observedVersion: observedVersion,
+                appliedVersion: currentVersion || 0, pendingReconcileVersion: pendingVersion,
+                screen: screen ? screen.name : null, mode: screen ? screen.mode : null, role: screen ? screen.role : null
+            }, detail || {});
+            dispatchWindowEvent("operational-state-connection", payload);
+            if (previousState !== state) {
+                diagnoseConnection(payload.reason || "state_change", previousState, state);
+                connectionStateSince = Date.now();
+            }
+        }
+
+        function updateConnectionState(reason) {
+            if (authEnded || !isPageActive()) return;
+            var now = Date.now();
+            var since = Math.max(realtimeLastSuccessAt, activeSince);
+            var silent = now - since >= realtimeMaxSilentMs;
+            var supportingChannelFresh = auxiliaryChannelFresh(now);
+            var state;
+            if (silent || (realtimeConsecutiveFailures >= 3 && !supportingChannelFresh)) state = "lost";
+            else if ((realtimeConsecutiveFailures > 0 || transportInterrupted) && !supportingChannelFresh) state = "weak";
+            else if (realtimeLastSuccessAt > 0) state = hasPendingReconcile() ? "recovering" : "ok";
+            else state = connectionState === "weak" ? "weak" : "unknown";
+            publishRealtimeConnectionState(state, {reason: reason || "state_change"});
+        }
+
+        function recordPollFailure(reason) {
+            realtimeConsecutiveFailures += 1;
+            requestForegroundReconcile(reason || "network_error");
+            if (foregroundReconcileEnabled) queueReconcileVersion(observedVersion, null);
+            if (window.AppPwaContractGuard && typeof window.AppPwaContractGuard.markServerUnavailable === "function") {
+                window.AppPwaContractGuard.markServerUnavailable();
+            }
+            updateConnectionState(reason || "network_error");
+            diagnoseConnection(reason || "network_error", connectionState, connectionState);
+        }
+
+        function inspectRealtimeWatchdog() {
+            if (authEnded || !isPageActive()) return;
+            var now = Date.now();
+            if (realtimePollInFlight && now - realtimeLastPollStartedAt >= realtimePollTimeoutMs) {
+                cancelCurrentPoll("timeout", true);
+                scheduleNextPoll();
+            }
+            var previous = connectionState;
+            updateConnectionState("silent_timeout");
+            if (connectionState === "lost" && previous !== "lost") {
+                requestForegroundReconcile("silent_timeout");
+                if (foregroundReconcileEnabled) queueReconcileVersion(observedVersion, null);
+            }
+            if (foregroundReconcileEnabled && now - lastSuccessfulTruthAt >= config.truthRefreshIntervalMs) {
+                requestForegroundReconcile("periodic_server_truth");
+                queueReconcileVersion(observedVersion, null);
+                if (!realtimeConsecutiveFailures && realtimeLastSuccessAt) applyPendingUpdate();
             }
         }
 
@@ -468,20 +580,21 @@
         }
 
         function markOperationalStateApplied(version) {
-            var parsedVersion = Number(version || 0);
-            if (!Number.isFinite(parsedVersion) || parsedVersion <= 0) {
-                return;
-            }
-            currentVersion = parsedVersion;
-            if (pendingVersion && parsedVersion >= pendingVersion) {
+            var parsedVersion = Number(version);
+            if (!Number.isSafeInteger(parsedVersion) || parsedVersion < 0) return;
+            currentVersion = Math.max(currentVersion || 0, parsedVersion);
+            observedVersion = Math.max(observedVersion, parsedVersion);
+            // Role code may call this inside the currently owned refresh. Only its resolved
+            // {applied:true} promise can release that owner and clear the reconciliation revision.
+            if (!applyingUpdate && !foregroundReconcileRequested && pendingVersion !== null && parsedVersion >= pendingVersion) {
                 pendingVersion = null;
                 pendingPreviousVersion = 0;
                 pendingVersionSince = 0;
                 pendingEvents = [];
                 pendingEventsTruncated = false;
-                applyingUpdate = false;
             }
-            storeOperationalVersion(parsedVersion);
+            storeOperationalVersion(currentVersion);
+            updateConnectionState("dom_applied");
         }
 
         function revealRealtimeUpdateNotice(context) {
@@ -522,113 +635,83 @@
             window.location.reload();
         }
 
+        function retryPendingRefresh(reason, deferred) {
+            applyingUpdate = false;
+            if (!deferred) refreshFailures += 1;
+            var delay = deferred ? 1000 : Math.min(15000, 1000 * Math.pow(2, Math.min(refreshFailures, 4)));
+            refreshRetryAt = Date.now() + delay;
+            dispatchWindowEvent("operational-state-refresh-deferred", {
+                version: pendingVersion, reason: reason || "fragment_failed", role: screen ? screen.role : null
+            });
+            updateConnectionState(reason || "fragment_failed");
+            schedulePendingUpdate(delay);
+        }
+
         function applyPendingUpdate() {
-            if (authEnded || !isPageActive() || !pendingVersion || applyingUpdate) {
+            if (authEnded || !isPageActive() || pendingVersion === null || applyingUpdate) return;
+            if (Date.now() < refreshRetryAt) {
+                schedulePendingUpdate(refreshRetryAt - Date.now());
                 return;
             }
             var versionToApply = pendingVersion;
             var refreshContext = {
-                version: versionToApply,
-                previousVersion: pendingPreviousVersion || currentVersion || config.initialVersion || 0,
-                screen: screen ? screen.name : null,
-                mode: screen ? screen.mode : null,
-                role: screen ? screen.role : null,
-                events: pendingEvents.slice(),
-                eventsTruncated: pendingEventsTruncated,
-                foregroundReconcile: foregroundReconcileRequested,
-                reconcileReason: foregroundReconcileReason,
+                version: versionToApply, previousVersion: pendingPreviousVersion || currentVersion || config.initialVersion || 0,
+                screen: screen ? screen.name : null, mode: screen ? screen.mode : null, role: screen ? screen.role : null,
+                events: pendingEvents.slice(), eventsTruncated: pendingEventsTruncated,
+                foregroundReconcile: foregroundReconcileRequested, reconcileReason: foregroundReconcileReason,
                 reconcileRevision: foregroundReconcileRequested ? foregroundReconcileRevision : 0
             };
             var busyReason = shouldDeferPendingUpdate();
-            if (busyReason) {
-                dispatchWindowEvent("operational-state-refresh-deferred", Object.assign({}, refreshContext, {
-                    reason: busyReason
-                }));
-                schedulePendingUpdate(1000);
-                return;
-            }
+            if (busyReason) { retryPendingRefresh(busyReason, true); return; }
             applyingUpdate = true;
-            if (manualRefreshMode) {
-                revealRealtimeUpdateNotice(refreshContext);
+            updateConnectionState("fragment_refresh");
+            if (manualRefreshMode) { revealRealtimeUpdateNotice(refreshContext); return; }
+            if (typeof window.applyOperationalStateRefresh !== "function") {
+                if (requiresCustomRefresh) { retryPendingRefresh("custom_handler_missing", false); return; }
+                reloadForOperationalUpdate(versionToApply);
                 return;
             }
-            var customRefresh = typeof window.applyOperationalStateRefresh === "function"
-                ? window.applyOperationalStateRefresh(refreshContext)
-                : null;
-            if (customRefresh) {
-                Promise.resolve(customRefresh).then(function (result) {
-                    if (result && result.deferred) {
-                        applyingUpdate = false;
-                        dispatchWindowEvent("operational-state-refresh-deferred", Object.assign({}, refreshContext, {
-                            reason: result.reason || "custom_deferred"
-                        }));
-                        schedulePendingUpdate(1000);
-                        return;
+            // Capture synchronous throws too. An exception never acknowledges a version.
+            Promise.resolve().then(function () {
+                return window.applyOperationalStateRefresh(refreshContext);
+            }).then(function (result) {
+                if (authEnded) return;
+                if (result && result.deferred) { retryPendingRefresh(result.reason || "custom_deferred", !/failed|error/.test(result.reason || "")); return; }
+                if (result && result.applied === true) {
+                    var applied = typeof result.version === "undefined" ? versionToApply : Number(result.version);
+                    if (!Number.isSafeInteger(applied) || applied < versionToApply) {
+                        retryPendingRefresh("stale_fragment_version", false); return;
                     }
-                    if (result && result.applied) {
-                        var refreshWasSuperseded = (
-                            pendingVersion !== versionToApply
-                            || (
-                                foregroundReconcileRequested
-                                && (
-                                    !refreshContext.foregroundReconcile
-                                    || refreshContext.reconcileRevision !== foregroundReconcileRevision
-                                )
-                            )
-                        );
-                        currentVersion = versionToApply;
-                        if (!refreshWasSuperseded) {
-                            pendingVersion = null;
-                            pendingPreviousVersion = 0;
-                            pendingVersionSince = 0;
-                            pendingEvents = [];
-                            pendingEventsTruncated = false;
-                            if (refreshContext.foregroundReconcile) {
-                                clearForegroundReconcile(refreshContext.reconcileRevision);
-                            }
-                        }
-                        storeOperationalVersion(versionToApply);
-                        dispatchWindowEvent("operational-state-refresh-applied", refreshContext);
-                        applyingUpdate = false;
-                        if (refreshWasSuperseded) {
-                            schedulePendingUpdate(0);
-                        }
-                        return;
+                    // A verified network-only fragment is also fresh authenticated transport.
+                    // It can clear lost even if the separate realtime request has failed.
+                    reportTransportSuccess({channel: "fragment", occurredAtMs: Date.now(), serverVersion: applied});
+                    var superseded = pendingVersion > applied || (
+                        foregroundReconcileRequested && (!refreshContext.foregroundReconcile || refreshContext.reconcileRevision !== foregroundReconcileRevision)
+                    );
+                    currentVersion = Math.max(currentVersion || 0, applied);
+                    observedVersion = Math.max(observedVersion, applied);
+                    if (!superseded) {
+                        pendingVersion = null; pendingPreviousVersion = 0; pendingVersionSince = 0;
+                        pendingEvents = []; pendingEventsTruncated = false;
+                        if (refreshContext.foregroundReconcile) clearForegroundReconcile(refreshContext.reconcileRevision);
                     }
-                    if (result === false && requiresCustomRefresh) {
-                        applyingUpdate = false;
-                        dispatchWindowEvent("operational-state-refresh-deferred", Object.assign({}, refreshContext, {
-                            reason: "custom_refresh_not_applied"
-                        }));
-                        schedulePendingUpdate(2000);
-                        return;
-                    }
-                    reloadForOperationalUpdate(versionToApply);
-                }).catch(function () {
+                    storeOperationalVersion(currentVersion);
+                    refreshFailures = 0; refreshRetryAt = 0; lastSuccessfulTruthAt = Date.now();
+                    lastReconciledWakeAt = lastWakeAt;
                     applyingUpdate = false;
-                    schedulePendingUpdate(2000);
-                });
-                return;
-            }
-            reloadForOperationalUpdate(versionToApply);
+                    dispatchWindowEvent("operational-state-refresh-applied", refreshContext);
+                    updateConnectionState("dom_applied");
+                    if (superseded) schedulePendingUpdate(0);
+                    return;
+                }
+                if (requiresCustomRefresh) { retryPendingRefresh("custom_refresh_not_applied", false); return; }
+                reloadForOperationalUpdate(versionToApply);
+            }).catch(function () { retryPendingRefresh("fragment_failed", false); });
         }
 
         function reloadForOperationalUpdate(version) {
             if (requiresCustomRefresh) {
-                currentVersion = version;
-                pendingVersion = null;
-                pendingPreviousVersion = 0;
-                pendingVersionSince = 0;
-                pendingEvents = [];
-                pendingEventsTruncated = false;
-                applyingUpdate = false;
-                storeOperationalVersion(version);
-                dispatchWindowEvent("operational-state-refresh-skipped", {
-                    version: version,
-                    screen: screen ? screen.name : null,
-                    mode: screen ? screen.mode : null,
-                    role: screen ? screen.role : null
-                });
+                retryPendingRefresh("custom_handler_missing", false);
                 return;
             }
             storeOperationalVersion(version);
@@ -649,7 +732,7 @@
 
         function buildOperationalStatePollUrl() {
             var url = new URL(stateUrl, window.location.origin);
-            var afterVersion = currentVersion || config.initialVersion || 0;
+            var afterVersion = observedVersion || config.initialVersion || 0;
             if (afterVersion > 0) {
                 url.searchParams.set("after", String(afterVersion));
             }
@@ -713,32 +796,19 @@
 
         function pollOperationalState(options) {
             options = options || {};
-            if (options.reconcile === true && !foregroundReconcileRequested) {
-                requestForegroundReconcile(options.reconcileReason || "foreground");
-            }
-            if (authEnded || !isPageActive()) {
-                return;
-            }
+            if (options.reconcile === true) requestForegroundReconcile(options.reconcileReason || "foreground");
+            if (authEnded || !isPageActive()) return;
+            // force means prompt catch-up, never replacing a healthy in-flight owner.
+            if (realtimePollInFlight) return;
             if (navigator && navigator.onLine === false) {
-                realtimeConsecutiveFailures += 1;
-                publishRealtimeConnectionState(false, {reason: "offline"});
-                if (
-                    window.AppPwaContractGuard
-                    && typeof window.AppPwaContractGuard.markServerUnavailable === "function"
-                ) {
-                    window.AppPwaContractGuard.markServerUnavailable();
-                }
+                transportInterrupted = true;
+                requestForegroundReconcile("offline");
+                if (connectionState === "unknown" || connectionState === "ok") publishRealtimeConnectionState("weak", {reason: "offline"});
+                inspectRealtimeWatchdog();
+                scheduleNextPoll();
                 return;
             }
-            if (realtimePollInFlight && !options.force) {
-                inspectRealtimeWatchdog("poll_in_flight");
-                return;
-            }
-            if (realtimePollInFlight && options.force && realtimePollController) {
-                try {
-                    realtimePollController.abort();
-                } catch (error) {}
-            }
+            clearPollSchedule();
             var pollGeneration = ++realtimePollGeneration;
             var pollRequest = buildOperationalStatePollUrl();
             var capturedAfterVersion = Number(pollRequest.afterVersion || 0);
@@ -747,147 +817,107 @@
             var pollController = window.AbortController ? new AbortController() : null;
             realtimePollController = pollController;
             var timeoutId = window.setTimeout(function () {
-                if (pollGeneration === realtimePollGeneration && pollController) {
-                    try {
-                        pollController.abort();
-                    } catch (error) {}
-                }
+                if (pollGeneration !== realtimePollGeneration) return;
+                cancelCurrentPoll("timeout", true);
+                scheduleNextPoll();
             }, realtimePollTimeoutMs);
+            pollTimeoutId = timeoutId;
             var fetchOptions = {
-                method: "GET",
-                credentials: "same-origin",
-                cache: "no-store",
-                headers: {"Accept": "application/json"}
+                method: "GET", credentials: "same-origin", cache: "no-store", headers: {"Accept": "application/json"}
             };
-            if (pollController) {
-                fetchOptions.signal = pollController.signal;
-            }
-            window.fetch(pollRequest.url, fetchOptions)
-                .then(function (response) {
-                    if (pollGeneration !== realtimePollGeneration) {
-                        return null;
-                    }
-                    if (response.status === 401) {
-                        terminateAuthentication();
-                        return null;
-                    }
-                    if (!response.ok) {
-                        throw new Error("state status " + response.status);
-                    }
-                    return response.json();
-                })
-                .then(function (payload) {
-                    if (authEnded || pollGeneration !== realtimePollGeneration) {
-                        return;
-                    }
+            if (pollController) fetchOptions.signal = pollController.signal;
+            var failureReason = "network_error";
+            var requestPromise;
+            try { requestPromise = window.fetch(pollRequest.url, fetchOptions); }
+            catch (error) { requestPromise = Promise.reject(error); }
+            Promise.resolve(requestPromise).then(function (response) {
+                if (pollGeneration !== realtimePollGeneration) return null;
+                if (response.status === 401) { terminateAuthentication(); return null; }
+                if (!response.ok) { failureReason = "http_" + Number(response.status || 0); throw new Error(failureReason); }
+                var contentType = response.headers && response.headers.get("Content-Type");
+                if (response.redirected || (response.headers && !/application\/json/i.test(contentType || ""))) {
+                    failureReason = "invalid_payload"; throw new Error(failureReason);
+                }
+                failureReason = "invalid_payload";
+                return response.json();
+            }).then(function (payload) {
+                if (authEnded || pollGeneration !== realtimePollGeneration) return;
+                if (!payload || !Number.isSafeInteger(payload.version) || payload.version < 0) {
+                    failureReason = "invalid_payload"; throw new Error(failureReason);
+                }
+                var hadFailure = realtimeConsecutiveFailures > 0 || connectionState === "lost" || connectionState === "weak";
+                realtimeConsecutiveFailures = 0;
+                transportInterrupted = false;
+                realtimeLastSuccessAt = Date.now();
+                if (hadFailure) requestForegroundReconcile("transport_recovered");
+                refreshRetryAt = hadFailure ? 0 : refreshRetryAt;
+                try {
                     applyActiveRoleState(payload);
-                    if (!payload || typeof payload.version === "undefined") {
-                        return;
-                    }
-                    if (
-                        window.AppPwaContractGuard
-                        && typeof window.AppPwaContractGuard.acceptServerContract === "function"
-                    ) {
+                    if (window.AppPwaContractGuard && typeof window.AppPwaContractGuard.acceptServerContract === "function") {
                         window.AppPwaContractGuard.acceptServerContract(payload);
                     }
-                    realtimeConsecutiveFailures = 0;
-                    realtimeLastSuccessAt = Date.now();
-                    publishRealtimeConnectionState(true);
-                    var version = Number(payload.version || 0);
-                    var previousVersion = currentVersion || config.initialVersion || 0;
-                    var reconcileForeground = foregroundReconcileEnabled && foregroundReconcileRequested;
-                    if (currentVersion === null) {
-                        currentVersion = version;
-                        if (!reconcileForeground) {
-                            return;
-                        }
-                    }
-                    dispatchOperationalSignals(payload, capturedAfterVersion);
-                    if (reconcileForeground) {
-                        if (pendingVersion !== version) {
-                            pendingVersionSince = Date.now();
-                            pendingPreviousVersion = previousVersion;
-                        }
-                        pendingVersion = version;
-                        pendingEvents = Array.isArray(payload.events) ? payload.events.slice() : [];
-                        pendingEventsTruncated = payload.events_truncated === true;
-                        applyPendingUpdate();
-                        return;
-                    }
-                    if (version > currentVersion) {
-                        if (payload.relevant === false) {
-                            var irrelevantPreviousVersion = currentVersion || config.initialVersion || 0;
-                            markOperationalStateApplied(version);
-                            dispatchWindowEvent("operational-state-refresh-skipped", {
-                                version: version,
-                                previousVersion: irrelevantPreviousVersion,
-                                reason: "irrelevant",
-                                screen: screen ? screen.name : null,
-                                mode: screen ? screen.mode : null,
-                                role: screen ? screen.role : null
-                            });
-                            return;
-                        }
-                        if (pendingVersion !== version) {
-                            pendingVersionSince = Date.now();
-                            pendingPreviousVersion = currentVersion || config.initialVersion || 0;
-                        }
-                        pendingVersion = version;
-                        pendingEvents = Array.isArray(payload.events) ? payload.events.slice() : [];
-                        pendingEventsTruncated = payload.events_truncated === true;
-                        applyPendingUpdate();
-                    }
-                })
-                .catch(function () {
-                    if (authEnded || pollGeneration !== realtimePollGeneration) {
-                        return;
-                    }
-                    realtimeConsecutiveFailures += 1;
-                    if (
-                        window.AppPwaContractGuard
-                        && typeof window.AppPwaContractGuard.markServerUnavailable === "function"
-                    ) {
-                        window.AppPwaContractGuard.markServerUnavailable();
-                    }
-                    if (realtimeConsecutiveFailures >= 2 || (options && options.force)) {
-                        publishRealtimeConnectionState(false, {reason: "fetch_failed"});
-                    }
-                    return;
-                })
-                .finally(function () {
-                    window.clearTimeout(timeoutId);
-                    if (authEnded || pollGeneration !== realtimePollGeneration) {
-                        return;
-                    }
-                    realtimePollInFlight = false;
-                    realtimePollController = null;
-                });
+                } catch (error) {
+                    // A UI/contract callback failure is not a failed HTTP request.
+                    requestForegroundReconcile("role_state_apply_failed");
+                }
+                var version = payload.version;
+                observedVersion = Math.max(observedVersion, version);
+                dispatchOperationalSignals(payload, capturedAfterVersion);
+                if (currentVersion === null && !foregroundReconcileRequested) {
+                    if (foregroundReconcileEnabled) requestForegroundReconcile("initial_server_truth");
+                    else currentVersion = version;
+                }
+                if (foregroundReconcileRequested || pendingVersion !== null || (version > (currentVersion || 0) && payload.relevant !== false)) {
+                    queueReconcileVersion(observedVersion, payload);
+                    updateConnectionState("transport_success");
+                    applyPendingUpdate();
+                } else if (version > (currentVersion || 0)) {
+                    var previousVersion = currentVersion || 0;
+                    // Only an irrelevant delta without older unapplied work is safe to acknowledge.
+                    markOperationalStateApplied(version);
+                    dispatchWindowEvent("operational-state-refresh-skipped", {
+                        version: version, previousVersion: previousVersion, reason: "irrelevant",
+                        screen: screen ? screen.name : null, mode: screen ? screen.mode : null, role: screen ? screen.role : null
+                    });
+                } else updateConnectionState("transport_success");
+            }).catch(function () {
+                if (authEnded || pollGeneration !== realtimePollGeneration) return;
+                recordPollFailure(failureReason);
+            }).finally(function () {
+                window.clearTimeout(timeoutId);
+                if (authEnded || pollGeneration !== realtimePollGeneration) return;
+                realtimePollInFlight = false;
+                realtimePollController = null;
+                pollTimeoutId = null;
+                scheduleNextPoll();
+            });
         }
 
         function wakeRealtimeConnection(reason, options) {
             options = options || {};
-            if (options.reconcile === true) {
+            var withinBurst = lastWakeAt && Date.now() - lastWakeAt < 750;
+            var burstAlreadyReconciled = withinBurst && !foregroundReconcileRequested && pendingVersion === null
+                && lastReconciledWakeAt === lastWakeAt;
+            if (options.reconcile === true && !burstAlreadyReconciled) {
                 requestForegroundReconcile(options.reconcileReason || reason || "foreground");
             }
-            if (authEnded || !isPageActive()) {
-                return;
-            }
-            inspectRealtimeWatchdog(reason || "wake");
-            if (wakeTimeoutId !== null) {
+            if (authEnded || !isPageActive()) return;
+            if (realtimePollInFlight || wakeTimeoutId !== null) return;
+            // Lifecycle signals can arrive after the first HTTP response. Reuse that fresh
+            // result and its pending fragment instead of starting another poll/abort cycle.
+            if (withinBurst && !options.explicit) {
+                if (foregroundReconcileRequested && realtimeLastSuccessAt >= lastWakeAt) {
+                    queueReconcileVersion(observedVersion, null);
+                    applyPendingUpdate();
+                }
                 return;
             }
             clearPollSchedule();
             wakeTimeoutId = window.setTimeout(function () {
                 wakeTimeoutId = null;
-                if (authEnded || !isPageActive()) {
-                    return;
-                }
-                pollOperationalState({
-                    force: true,
-                    reconcile: foregroundReconcileRequested,
-                    reconcileReason: foregroundReconcileReason || reason || "wake"
-                });
-                scheduleNextPoll();
+                if (authEnded || !isPageActive()) return;
+                lastWakeAt = Date.now(); lastWakeRevision = foregroundReconcileRevision;
+                pollOperationalState({reconcile: foregroundReconcileRequested, reconcileReason: foregroundReconcileReason || reason || "wake"});
             }, 0);
         }
 
@@ -897,6 +927,17 @@
                 screen: screen,
                 mode: screen ? screen.mode : null,
                 currentVersion: currentVersion,
+                observedVersion: observedVersion,
+                appliedVersion: currentVersion || 0,
+                pendingReconcileVersion: pendingVersion,
+                connectionState: connectionState,
+                pollGeneration: realtimePollGeneration,
+                nativeLastSuccessAt: lastNativeSuccessAt,
+                webHeartbeatLastSuccessAt: auxiliarySuccessAt.web_heartbeat,
+                fragmentLastSuccessAt: auxiliarySuccessAt.fragment,
+                pendingOutboxCount: pendingOutboxCount,
+                refreshFailures: refreshFailures,
+                refreshRetryAt: refreshRetryAt,
                 pendingVersion: pendingVersion,
                 pendingPreviousVersion: pendingPreviousVersion,
                 pendingVersionSince: pendingVersionSince,
@@ -929,6 +970,9 @@
             wake: wakeRealtimeConnection,
             refresh: refreshManualRealtimeScreen,
             markApplied: markOperationalStateApplied,
+            requestReconcile: requestReconcile,
+            reportTransportSuccess: reportTransportSuccess,
+            observeVersion: function (version, options) { return requestReconcile(options && options.reason, version); },
             getDebugState: getDebugState
         };
         if (realtimeUpdateButton) {
@@ -940,6 +984,10 @@
             role: screen ? screen.role : null
         });
 
+        publishRealtimeConnectionState("unknown", {reason: "initial"});
+        if (window.AppSessionHeartbeat && Number(window.AppSessionHeartbeat.lastSuccessAtMs) > 0) {
+            reportTransportSuccess({channel: "web_heartbeat", occurredAtMs: window.AppSessionHeartbeat.lastSuccessAtMs});
+        }
         if (isPageActive()) {
             pollOperationalState({force: true});
             scheduleNextPoll();
@@ -952,12 +1000,14 @@
                 pauseRealtimeConnection("visibility_hidden");
                 return;
             }
+            resumePageActivity();
             pageFocused = typeof document.hasFocus !== "function" || document.hasFocus();
             if (visibilityOnlyActivity || pageFocused) {
                 wakeRealtimeConnection("visibilitychange");
             }
         });
         window.addEventListener("focus", function () {
+            resumePageActivity();
             pageFocused = true;
             wakeRealtimeConnection("focus");
         });
@@ -974,18 +1024,21 @@
             pauseRealtimeConnection("pagehide");
         });
         window.addEventListener("pageshow", function (event) {
+            resumePageActivity();
             pageFocused = typeof document.hasFocus !== "function" || document.hasFocus();
             var persisted = !!(event && event.persisted);
             wakeRealtimeConnection(persisted ? "pageshow_persisted" : "pageshow", {
-                reconcile: persisted,
+                reconcile: true,
                 reconcileReason: persisted ? "pageshow_persisted" : ""
             });
         });
         document.addEventListener("resume", function () {
+            resumePageActivity();
             pageFocused = true;
             wakeRealtimeConnection("resume", {reconcile: true, reconcileReason: "resume"});
         });
         window.addEventListener("resume", function () {
+            resumePageActivity();
             pageFocused = true;
             wakeRealtimeConnection("window_resume", {reconcile: true, reconcileReason: "window_resume"});
         });
@@ -995,32 +1048,60 @@
            the native signal as a foreground catch-up as well. Browser pages
            never dispatch this event and keep their ordinary focus contract. */
         window.addEventListener("native-connectivity-resume", function () {
+            resumePageActivity();
             pageFocused = true;
             wakeRealtimeConnection("native_connectivity_resume", {
                 reconcile: true,
                 reconcileReason: "native_connectivity_resume"
             });
         });
-        window.addEventListener("online", function () {
-            if (authEnded) {
-                return;
-            }
+        window.addEventListener("web-heartbeat-success", function (event) {
+            var detail = event && event.detail || {};
+            if (detail.source !== "application-session-heartbeat" || detail.status !== 204) return;
+            reportTransportSuccess({channel: "web_heartbeat", occurredAtMs: detail.occurredAtMs});
+        });
+        window.addEventListener("native-connection-state", function (event) {
+            if (authEnded) return;
+            var detail = event && event.detail || {};
+            var successAt = Number(detail.lastSuccessAtMs || 0);
+            var occurredAt = Number(detail.occurredAtMs || 0);
+            var now = Date.now();
+            // Only fresh, monotonic evidence from an authenticated heartbeat is a success.
+            if (detail.status !== "success" || !Number.isFinite(successAt) || !Number.isFinite(occurredAt)
+                || successAt <= lastNativeSuccessAt || successAt <= 0 || now - successAt > 15000
+                || successAt > now + 1000 || occurredAt < successAt || occurredAt > now + 1000) return;
+            var needsRecovery = connectionState === "lost" || realtimeConsecutiveFailures > 0 || hasPendingReconcile();
+            lastNativeSuccessAt = successAt;
+            transportInterrupted = false;
+            realtimeLastSuccessAt = Math.max(realtimeLastSuccessAt, successAt);
             realtimeConsecutiveFailures = 0;
-            wakeRealtimeConnection("online");
+            if (needsRecovery) {
+                refreshRetryAt = 0;
+                requestReconcile("native_heartbeat_success", detail.serverVersion);
+            } else if (Number(detail.serverVersion) > observedVersion) {
+                // Native version is global. Let the role-addressed poll decide relevance
+                // instead of turning unrelated heartbeats into extra fragment refreshes.
+                wakeRealtimeConnection("native_version");
+            }
+            updateConnectionState("native_heartbeat_success");
+        });
+        window.addEventListener("operational-outbox-state", function (event) {
+            var count = Number(event && event.detail && event.detail.pendingCount);
+            if (!Number.isFinite(count) || count < 0) return;
+            var previous = pendingOutboxCount;
+            pendingOutboxCount = count;
+            if (previous > 0 && count === 0) requestReconcile("outbox_drained", observedVersion);
+            updateConnectionState("outbox_state");
+        });
+        window.addEventListener("online", function () {
+            if (authEnded) return;
+            wakeRealtimeConnection("online", {reconcile: true});
         });
         window.addEventListener("offline", function () {
-            if (authEnded) {
-                return;
-            }
+            if (authEnded) return;
+            transportInterrupted = true;
             requestForegroundReconcile("offline");
-            realtimeConsecutiveFailures += 1;
-            publishRealtimeConnectionState(false, {reason: "offline"});
-            if (
-                window.AppPwaContractGuard
-                && typeof window.AppPwaContractGuard.markServerUnavailable === "function"
-            ) {
-                window.AppPwaContractGuard.markServerUnavailable();
-            }
+            if (isPageActive()) publishRealtimeConnectionState("weak", {reason: "offline"});
         });
         ["pointerdown", "pointerup", "touchstart", "touchend", "mousedown", "click", "keydown"].forEach(function (eventName) {
             document.addEventListener(eventName, function () {

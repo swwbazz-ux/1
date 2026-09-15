@@ -21,8 +21,11 @@ const excavatorTemplate = fs.readFileSync(
     "utf8"
 );
 
-function createRuntime(roleCode) {
+function createRuntime(roleCode, options = {}) {
     const calls = [];
+    const events = [];
+    let nativeListener = null;
+    let snapshot = options.snapshot || {};
     const listeners = new Map();
     const timers = [];
     let shiftActive = false;
@@ -31,7 +34,7 @@ function createRuntime(roleCode) {
     const plugin = {
         sync(options) {
             calls.push({method: "sync", options: {...options}});
-            return Promise.resolve({desired: options.required});
+            return Promise.resolve({...snapshot, desired: options.required});
         },
         stop(options) {
             calls.push({method: "stop", options: {...options}});
@@ -39,7 +42,7 @@ function createRuntime(roleCode) {
         },
         getState() {
             calls.push({method: "getState"});
-            return Promise.resolve({pendingDriverShiftClose: null});
+            return Promise.resolve({...snapshot, pendingDriverShiftClose: null});
         },
         queueDriverShiftClose(options) {
             calls.push({method: "queueDriverShiftClose", options: {...options}});
@@ -50,6 +53,9 @@ function createRuntime(roleCode) {
             return Promise.resolve({pendingDriverShiftClose: null});
         },
     };
+    if (options.newBridge) {
+        plugin.addListener = (name, callback) => { nativeListener = callback; return Promise.resolve({remove() {}}); };
+    }
     const body = {
         dataset: {
             nativeApp: "true",
@@ -80,6 +86,7 @@ function createRuntime(roleCode) {
     };
     const window = {
         Capacitor: {Plugins: {BackgroundConnection: plugin}},
+        dispatchEvent(event) { events.push(event); },
         addEventListener(name, callback) {
             listeners.set(`window:${name}`, callback);
         },
@@ -99,6 +106,8 @@ function createRuntime(roleCode) {
         window,
         MutationObserver,
         Promise,
+        CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init.detail; } },
+        Date: {now() { return 1_000_000; }},
     });
     vm.runInContext(source, context);
 
@@ -113,6 +122,10 @@ function createRuntime(roleCode) {
 
     return {
         calls,
+        events,
+        setHidden(value) { document.hidden = value; document.visibilityState = value ? "hidden" : "visible"; },
+        setSnapshot(value) { snapshot = value; },
+        emitNative(value) { if (nativeListener) nativeListener(value); },
         async flush() { await flush(); },
         async setShiftActive(value) {
             shiftActive = value;
@@ -212,4 +225,78 @@ test("driver bridge exposes the durable shift-close outbox without widening othe
         excavator.connection.queueDriverShiftClose(payload),
         /Фоновая очередь недоступна/
     );
+});
+
+function nativeSuccess(overrides = {}) {
+    return {
+        status: "success", transportState: "ok", lastSuccessAtMs: 999_900,
+        occurredAtMs: 999_900, failureCount: 0, serverVersion: 17,
+        reason: "heartbeat_success", ...overrides,
+    };
+}
+
+for (const roleCode of ["driver", "excavator_operator"]) {
+    test(`${roleCode} forwards fresh native evidence once across listener and snapshot`, async () => {
+        const evidence = nativeSuccess();
+        const runtime = createRuntime(roleCode, {newBridge: true, snapshot: {transport: evidence}});
+        await runtime.flush();
+        assert.equal(runtime.events.length, 1);
+        assert.equal(runtime.events[0].type, "native-connection-state");
+        assert.equal(runtime.events[0].detail.serverVersion, 17);
+        const callsBefore = runtime.calls.length;
+        runtime.emitNative(evidence);
+        runtime.emitNative(evidence);
+        assert.equal(runtime.events.length, 1);
+        assert.equal(runtime.calls.length, callsBefore, "native evidence must not initiate another native HTTP loop");
+        await runtime.connection.getState();
+        assert.equal(runtime.events.length, 1);
+        runtime.emitNative(nativeSuccess({lastSuccessAtMs: 1_000_000, occurredAtMs: 1_000_000, serverVersion: 18}));
+        assert.equal(runtime.events.length, 2);
+    });
+}
+
+test("native bridge rejects stale future out-of-order and invalid evidence", async () => {
+    const runtime = createRuntime("driver", {newBridge: true});
+    await runtime.flush();
+    runtime.emitNative(nativeSuccess({occurredAtMs: 980_000, lastSuccessAtMs: 980_000}));
+    runtime.emitNative(nativeSuccess({occurredAtMs: 1_002_000, lastSuccessAtMs: 1_002_000}));
+    runtime.emitNative(nativeSuccess({occurredAtMs: NaN}));
+    runtime.emitNative(nativeSuccess({lastSuccessAtMs: 1_000_100}));
+    assert.equal(runtime.events.length, 0);
+    runtime.emitNative(nativeSuccess());
+    runtime.emitNative(nativeSuccess({occurredAtMs: 999_800, lastSuccessAtMs: 999_800}));
+    assert.equal(runtime.events.length, 1);
+});
+
+test("old APK lastAliveAt remains lifecycle-compatible without invented heartbeat", async () => {
+    const runtime = createRuntime("excavator_operator", {snapshot: {lastAliveAt: 999_900}});
+    await runtime.flush();
+    await runtime.connection.getState();
+    await runtime.setShiftActive(true);
+    assert.equal(runtime.events.length, 0);
+    assert.equal(runtime.calls.at(-1).options.required, true);
+});
+
+test("background evidence is applied once from a fresh resume snapshot", async () => {
+    const runtime = createRuntime("driver", {newBridge: true});
+    await runtime.flush();
+    runtime.setHidden(true);
+    runtime.emitNative(nativeSuccess());
+    assert.equal(runtime.events.length, 0);
+    runtime.setSnapshot({transport: nativeSuccess()});
+    runtime.setHidden(false);
+    await runtime.resume();
+    assert.equal(runtime.events.length, 1);
+});
+
+test("failure evidence is sanitized and never leaks native error text or queue content", async () => {
+    const runtime = createRuntime("driver", {newBridge: true});
+    await runtime.flush();
+    runtime.emitNative(nativeSuccess({status: "failure", transportState: "weak", failureCount: 1,
+        reason: "https://example.invalid/?token=secret", cookie: "secret", pendingDriverShiftClose: {endFuel: "90"}}));
+    assert.equal(runtime.events[0].detail.status, "failure");
+    assert.equal(runtime.events[0].detail.failureCount, 1);
+    assert.equal(runtime.events[0].detail.reason, "local_processing");
+    assert.equal(JSON.stringify(runtime.events[0].detail).includes("secret"), false);
+    assert.equal(JSON.stringify(runtime.events[0].detail).includes("endFuel"), false);
 });

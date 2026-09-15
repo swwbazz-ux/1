@@ -577,8 +577,8 @@ test("realtime waiting_loading to loaded-trip transition opens Work from server 
     };
     const runtimeWindow = {
         AppOperationalFragment: {
-            request() {
-                return Promise.resolve({html: "<main data-driver-shell></main>"});
+            request(_screen, version) {
+                return Promise.resolve({html: "<main data-driver-shell></main>", version});
             },
             parseRoot() {
                 return freshShell;
@@ -599,6 +599,7 @@ test("realtime waiting_loading to loaded-trip transition opens Work from server 
                 return false;
             },
             playDriverAssignmentAlert() {},
+            playDriverDumpPointAlert() {},
             window: runtimeWindow,
         },
         {filename: "templates/users/driver_shift.html#operational-refresh"}

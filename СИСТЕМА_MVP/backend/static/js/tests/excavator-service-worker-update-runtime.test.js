@@ -9,6 +9,8 @@ const viewsSource = fs.readFileSync(path.join(__dirname, '../../../trips/views.p
 const marker = 'EXCAVATOR_SERVICE_WORKER_JS = r"""';
 const start = viewsSource.indexOf(marker) + marker.length;
 const workerSource = viewsSource.slice(start, viewsSource.indexOf('"""', start));
+const currentShellVersion = workerSource.match(/const CACHE_NAME = "([^"]+)";/)[1];
+assert.match(currentShellVersion, /^excavator-mobile-shell-v\d+$/);
 const renderedShellInput = process.env.EXCAVATOR_RENDERED_SHELL_PATH
     ? fs.readFileSync(process.env.EXCAVATOR_RENDERED_SHELL_PATH, 'utf8')
     : '';
@@ -86,7 +88,7 @@ test('expired-session update migrates v233 shell with exact safe assets and pres
     const currentCache = fakeCache();
     const cacheMap = new Map([
         ['excavator-mobile-shell-v233', oldCache],
-        ['excavator-mobile-shell-v246', currentCache],
+        [currentShellVersion, currentCache],
     ]);
     const listeners = {};
     let skippedWaiting = false;
@@ -118,7 +120,7 @@ test('expired-session update migrates v233 shell with exact safe assets and pres
     listeners.activate({waitUntil: promise => { activateWork = promise; }});
     await activateWork;
     assert.equal(claimedClients, true);
-    assert.deepEqual([...cacheMap.keys()], ['excavator-mobile-shell-v246']);
+    assert.deepEqual([...cacheMap.keys()], [currentShellVersion]);
 
     context.fetch = async () => { throw new Error('offline'); };
     let navigationResponse;
@@ -170,13 +172,13 @@ test('fresh authenticated rendered shell precaches every exact dependency for of
     assert.ok(dependencies.length > 10, 'the rendered Excavator shell must expose its real static closure');
     assert.ok(dependencies.some(path => path.includes('/static/css/app.css?v=')));
     assert.ok(dependencies.some(path => path.includes('/static/js/realtime-client.js?v=')));
-    assert.ok(dependencies.some(path => path.includes('excavator-mobile-shell-v246')));
+    assert.ok(dependencies.some(path => path.includes(currentShellVersion)));
 
     const oldCache = fakeCache([['/sentinel', new FakeResponse('old', {url: 'https://excavator.test/sentinel'})]]);
     const currentCache = fakeCache();
     const cacheMap = new Map([
         ['excavator-mobile-shell-v233', oldCache],
-        ['excavator-mobile-shell-v246', currentCache],
+        [currentShellVersion, currentCache],
     ]);
     const listeners = {};
     let offline = false;
@@ -229,7 +231,7 @@ test('missing fresh dependency rejects install before old cache deletion or acti
     const currentCache = fakeCache();
     const cacheMap = new Map([
         ['excavator-mobile-shell-v233', oldCache],
-        ['excavator-mobile-shell-v246', currentCache],
+        [currentShellVersion, currentCache],
     ]);
     const listeners = {};
     let skippedWaiting = false;

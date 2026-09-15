@@ -542,7 +542,7 @@ function extractBaseLinkConfirmHandlerSource() {
     return source.slice(start, end);
 }
 
-test("read-only ordinary logout uses the production link handler and mutation confirms stay blocked", () => {
+test("read-only ordinary logout uses the production link handler and mutation confirms stay blocked", async () => {
     const runtime = createRuntime();
     runtime.window.location.href = "http://localhost/mining-master/assignments/";
     let readonly = true;
@@ -579,6 +579,14 @@ test("read-only ordinary logout uses the production link handler and mutation co
                 confirmAccept.disabled = false;
                 confirmAccept.textContent = acceptLabel || "Подтвердить";
             }
+            function clearCachedAuthenticatedRoleShell() { return Promise.resolve(); }
+            ${(() => {
+                const base = fs.readFileSync(path.resolve(__dirname, "../../../templates/base.html"), "utf8");
+                const start = base.indexOf("    function navigateAfterNativeConnectionStop(url)");
+                const end = base.indexOf("    window.navigateAfterNativeConnectionStop", start);
+                assert.ok(start >= 0 && end > start);
+                return base.slice(start, end);
+            })()}
             ${extractBaseOpenConfirmSource()}
             ${extractBaseLinkConfirmHandlerSource()}
             context.readPendingAction = function () {
@@ -599,6 +607,7 @@ test("read-only ordinary logout uses the production link handler and mutation co
     runtime.document.body.appendChild(logoutLink);
 
     const logoutEvent = runtime.dispatchDocumentEvent("click", logoutLabel);
+    await new Promise(resolve => setImmediate(resolve));
     assert.equal(logoutEvent.defaultPrevented, true);
     assert.equal(runtime.window.location.href, "http://localhost/logout/");
     assert.equal(confirmModal.hidden, true);

@@ -127,6 +127,31 @@ test("connection transitions use one native signal-and-voice sequence", () => {
     ]);
 });
 
+test("connection recovery stays silent until reconciled and survives recovering or weak states", () => {
+    const runtime = createRuntime();
+    const listener = runtime.windowListeners.get("operational-state-connection");
+    for (const state of ["unknown", "weak", "recovering", "ok"]) {
+        runtime.document.body.dataset.connectionState = state;
+        listener();
+    }
+    assert.deepEqual(runtime.played, []);
+    for (const state of ["lost", "recovering", "weak", "lost", "recovering"]) {
+        runtime.document.body.dataset.connectionState = state;
+        listener();
+    }
+    assert.deepEqual(runtime.played, ["connection_lost_notice"]);
+    runtime.document.body.dataset.connectionState = "ok";
+    listener(); listener();
+    assert.deepEqual(runtime.played, ["connection_lost_notice", "connection_restored_notice"]);
+});
+
+test("first confirmed lost state is announced even without an earlier successful response", () => {
+    const runtime = createRuntime("driver");
+    runtime.document.body.dataset.connectionState = "lost";
+    runtime.windowListeners.get("operational-state-connection")();
+    assert.deepEqual(runtime.played, ["connection_lost_notice"]);
+});
+
 test("Excavator assignment batches reach the native bridge with exact operation keys", async () => {
     const runtime = createRuntime();
     const calls = [];

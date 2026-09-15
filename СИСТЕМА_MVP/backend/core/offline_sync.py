@@ -744,8 +744,20 @@ def _process_excavator_loaded(access, normalized):
     state = bump_operational_state(
         'OfflineFieldEvent:excavator_trip_loaded', event_type='trip_changed',
         object_type='Trip', object_id=trip.id,
-        payload={'action': 'truck_loaded', 'trip_id': trip.id, 'truck_id': trip.truck_id,
-                 'excavator_id': trip.excavator_id, 'status': trip.status},
+        payload={
+            'action': 'truck_loaded',
+            'trip_id': trip.id,
+            'truck_id': trip.truck_id,
+            'excavator_id': trip.excavator_id,
+            'excavator_ids': [trip.excavator_id],
+            'driver_participation_recorded': trip.driver_participation_recorded,
+            'driver_control_shift_id': trip.driver_control_shift_id,
+            'dump_point_id': trip.dump_point_id,
+            'assigned_dump_point_id': trip.assigned_dump_point_id,
+            'actual_dump_point_id': trip.actual_dump_point_id,
+            'dump_point_name': str(trip.assigned_dump_point or trip.dump_point),
+            'status': trip.status,
+        },
     )
     transaction.on_commit(lambda: notify_driver_truck_loaded(trip))
     return {

@@ -102,8 +102,16 @@
         /* Цвет связи держим одной переменной: её же берут кольца планов в шапках
            приложений, чтобы связь везде читалась одинаково. */
         body { --app-connection-color: #58df52; }
+        body[data-connection-state="unknown"] { --app-connection-color: #8b9da3; }
         body[data-connection-state="weak"] { --app-connection-color: #ffd45b; }
         body[data-connection-state="lost"] { --app-connection-color: #ff5a50; }
+        body[data-connection-state="recovering"] { --app-connection-color: #78c9ee; }
+        body[data-connection-state="unknown"].driver-mobile-screen .driver-online-dot,
+        body[data-connection-state="recovering"].driver-mobile-screen .driver-online-dot {
+            background: var(--app-connection-color);
+            box-shadow: 0 0 12px var(--app-connection-color);
+            animation: none;
+        }
 
         .app-connection-dot {
             position: fixed;
@@ -1643,10 +1651,11 @@
     {% if role_session_authenticated and not observer_mode %}<script src="{% static 'js/application-session-heartbeat.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% if is_native_app and role_session_authenticated and not observer_mode %}<script src="{% static 'js/native-background-connection-v1.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     <script src="{% static 'js/client-error-report.js' %}?v={{ static_asset_release }}" defer></script>
+    <script src="{% static 'js/connection-indicators-v1.js' %}?v={{ static_asset_release }}" defer></script>
     {% if role_session_authenticated and not observer_mode and role_app and not is_native_app %}<script src="{% static 'js/push-notifications.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% block extra_head %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-native-app="{{ is_native_app|yesno:'true,false' }}" data-native-client-version="{{ native_app_version }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
+<body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-connection-state="unknown" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-native-app="{{ is_native_app|yesno:'true,false' }}" data-native-client-version="{{ native_app_version }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
 <div class="app-screen-boot" data-app-screen-boot aria-hidden="true"><span class="app-screen-boot__spinner"></span><span>Готовим экран</span></div>
 <script>
 (function () {
@@ -1715,13 +1724,13 @@
    запасной путь: realtime-client прячет её, если на экране есть индикатор
    связи, а индикатор ниже стоит на всех экранах. -->
 <div class="app-realtime-status" data-app-realtime-status hidden role="status" aria-live="polite">
-    Связь с сервером потеряна. Экран может отставать.
+    Проверяем связь…
 </div>
 
 <!-- Один индикатор на все приложения: зелёный — связь есть, жёлтый — связь
    пропадает, красный — потеряна. У водителя и горного мастера индикатор свой,
    встроенный в шапку, поэтому там этот скрыт. -->
-<span class="app-connection-dot" data-connection-indicator role="status" aria-live="polite" title="Связь с сервером" data-state-label="связь есть">
+<span class="app-connection-dot" data-connection-indicator role="status" aria-live="polite" title="Проверяем связь…" data-state-label="Проверяем связь…">
     <i aria-hidden="true"></i>
 </span>
 
@@ -2519,6 +2528,12 @@ window.AppOperationalFragment = (function () {
                 error.status = response.status;
                 throw error;
             }
+            var contentType = response.headers && response.headers.get("Content-Type");
+            if (response.redirected || !/^application\/(?:[a-z0-9.+-]+\+)?json(?:\s*;|$)/i.test(contentType || "")) {
+                var responseError = new Error("operational fragment unexpected response");
+                responseError.code = "OPERATIONAL_FRAGMENT_INVALID_RESPONSE";
+                throw responseError;
+            }
             return response.json();
         }).then(function (payload) {
             if (
@@ -2526,9 +2541,14 @@ window.AppOperationalFragment = (function () {
                 payload.contract !== contract ||
                 payload.screen !== screen ||
                 typeof payload.html !== "string" ||
+                typeof payload.version !== "number" ||
+                !Number.isSafeInteger(payload.version) ||
+                payload.version < 0 ||
                 Number(payload.version || 0) < Number(version || 0)
             ) {
-                throw new Error("operational fragment contract mismatch");
+                var contractError = new Error("operational fragment contract mismatch");
+                contractError.code = "OPERATIONAL_FRAGMENT_INVALID_PAYLOAD";
+                throw contractError;
             }
             return payload;
         });
@@ -2553,10 +2573,45 @@ window.AppOperationalFragment = (function () {
         return roots.length === 1 ? roots[0] : null;
     }
 
+    function captureView(root, panelSelector, keyAttribute) {
+        var snapshot = {
+            rootTop: root ? Number(root.scrollTop || 0) : 0,
+            rootLeft: root ? Number(root.scrollLeft || 0) : 0,
+            windowX: Number(window.scrollX || 0),
+            windowY: Number(window.scrollY || 0),
+            panelSelector: panelSelector,
+            keyAttribute: keyAttribute,
+            panels: []
+        };
+        if (root && panelSelector && root.querySelectorAll) {
+            Array.prototype.forEach.call(root.querySelectorAll(panelSelector), function (panel) {
+                var key = panel.getAttribute(keyAttribute);
+                if (key !== null) snapshot.panels.push({key: key, top: Number(panel.scrollTop || 0), left: Number(panel.scrollLeft || 0)});
+            });
+        }
+        return snapshot;
+    }
+
+    function restoreView(root, snapshot) {
+        if (!root || !snapshot) return;
+        root.scrollTop = snapshot.rootTop;
+        root.scrollLeft = snapshot.rootLeft;
+        if (snapshot.panelSelector && root.querySelectorAll) {
+            Array.prototype.forEach.call(root.querySelectorAll(snapshot.panelSelector), function (panel) {
+                var key = panel.getAttribute(snapshot.keyAttribute);
+                var saved = snapshot.panels.find(function (item) { return item.key === key; });
+                if (saved) { panel.scrollTop = saved.top; panel.scrollLeft = saved.left; }
+            });
+        }
+        if (typeof window.scrollTo === "function") window.scrollTo(snapshot.windowX, snapshot.windowY);
+    }
+
     return {
         contract: contract,
         request: request,
-        parseRoot: parseRoot
+        parseRoot: parseRoot,
+        captureView: captureView,
+        restoreView: restoreView
     };
 })();
 /* OPERATIONAL_FRAGMENT_CLIENT_END */

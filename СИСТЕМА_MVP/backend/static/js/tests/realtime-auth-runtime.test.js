@@ -527,7 +527,8 @@ test("server restart recovery applies a higher version through custom refresh", 
     await settlePromises();
 
     assert.equal(runtime.fetchCalls.length, 1);
-    assert.equal(runtime.document.body.classList.contains("is-realtime-stale"), true);
+    assert.equal(runtime.document.body.classList.contains("is-realtime-stale"), false);
+    assert.equal(runtime.document.body.dataset.connectionState, "weak");
     assert.equal(runtime.window.AppRealtime.getDebugState().currentVersion, 7);
 
     runtime.window.AppRealtime.poll({force: true});
@@ -622,6 +623,7 @@ test("custom refresh false keeps the version pending until a retry applies it", 
     assert.equal(runtime.refreshSkippedEvents.length, 0);
     assert.equal(runtime.reloads.length, 0);
 
+    runtime.advanceTime(2000);
     runtime.runTimeoutsUpTo(2000);
     await settlePromises();
 
@@ -724,6 +726,7 @@ test("system admin uses the generic safe reload after server recovery", async ()
     assert.equal(runtime.fetchCalls.length, 1);
     assert.equal(runtime.reloads.length, 0, "pending mobile work must defer a full reload");
     runtime.localStorage.removeItem(MOBILE_QUEUE_KEY);
+    runtime.advanceTime(2000);
     runtime.runTimeoutsUpTo(2000);
     await settlePromises();
 
@@ -743,7 +746,7 @@ test("offline state is recoverable and does not terminate authentication", async
     await settlePromises();
 
     assert.equal(runtime.fetchCalls.length, 0);
-    assert.equal(runtime.window.AppRealtime.getDebugState().consecutiveFailures, 1);
+    assert.equal(runtime.window.AppRealtime.getDebugState().consecutiveFailures, 0);
     assert.notEqual(runtime.window.AppRealtime.getDebugState().authEnded, true);
     assert.deepEqual(runtime.readonlyCalls, []);
     assert.deepEqual(runtime.activeRoleEvents, []);
@@ -1035,7 +1038,7 @@ test("Excavator BFCache recovery reconciles its first known version despite irre
     assert.equal(runtime.fetchCalls.length, 1);
     assert.equal(customRefreshCalls.length, 1, "BFCache restore must reconcile even without a prior client version");
     assert.equal(customRefreshCalls[0].foregroundReconcile, true);
-    assert.equal(customRefreshCalls[0].reconcileReason, "pageshow_persisted");
+    assert.equal(customRefreshCalls[0].reconcileReason, "pagehide", "coalesced wake retains its original background cause");
     assert.equal(customRefreshCalls[0].version, 12);
     assert.equal(runtime.window.AppRealtime.getDebugState().currentVersion, 12);
 });
@@ -1068,6 +1071,7 @@ test("foreground reconciliation stays pending while a worker edits and applies a
     assert.equal(runtime.window.AppRealtime.getDebugState().foregroundReconcileRequested, true);
 
     runtime.document.activeElement = null;
+    runtime.advanceTime(1000);
     runtime.runTimeoutsUpTo(1000);
     await settlePromises();
 
@@ -1114,7 +1118,7 @@ test("a touch after a missed Android lifecycle gap forces one server reconciliat
     }));
     await settlePromises();
 
-    runtime.advanceTime(13_000);
+    runtime.advanceTime(16_000);
     runtime.document.dispatchEvent({type: "pointerdown"});
     runtime.flushZeroTimers();
     await settlePromises();
@@ -1321,39 +1325,25 @@ test("native Driver reveal reconciles its same-version shell before the first DO
     assert.equal(runtime.window.AppRealtime.getDebugState().foregroundReconcileRequested, false);
 });
 
-test("forced catch-up ignores the aborted older response without clearing the new poll", async () => {
+test("force shares a healthy owner; a paused generation cannot clear its replacement", async () => {
     const resolvers = [];
-    const runtime = createRuntime({
-        fetch() {
-            return new Promise((resolve) => {
-                resolvers.push(resolve);
-            });
-        },
-    });
+    const runtime = createRuntime({fetch() { return new Promise(resolve => resolvers.push(resolve)); }});
     await settlePromises();
-    assert.equal(runtime.fetchCalls.length, 1);
-
     runtime.window.AppRealtime.poll({force: true});
-    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 1, "force must not cancel healthy transport");
+    runtime.document.hidden = true;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.document.hidden = false;
+    runtime.document.dispatchEvent({type: "visibilitychange"});
+    runtime.flushZeroTimers();
     assert.equal(runtime.fetchCalls.length, 2);
-
-    resolvers[0](response(200, {
-        version: 99,
-        role_active: true,
-        relevant: false,
-    }));
+    resolvers[0](response(200, {version: 99, relevant: false}));
     await settlePromises();
     assert.equal(runtime.window.AppRealtime.getDebugState().pollInFlight, true);
     assert.equal(runtime.window.AppRealtime.getDebugState().currentVersion, 7);
-
     runtime.window.AppRealtime.poll();
-    assert.equal(runtime.fetchCalls.length, 2, "the new in-flight request must stay protected");
-
-    resolvers[1](response(200, {
-        version: 8,
-        role_active: true,
-        relevant: false,
-    }));
+    assert.equal(runtime.fetchCalls.length, 2);
+    resolvers[1](response(200, {version: 8, relevant: false}));
     await settlePromises();
     assert.equal(runtime.window.AppRealtime.getDebugState().pollInFlight, false);
     assert.equal(runtime.window.AppRealtime.getDebugState().currentVersion, 8);

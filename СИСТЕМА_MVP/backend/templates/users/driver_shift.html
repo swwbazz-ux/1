@@ -5135,6 +5135,7 @@ if (typeof window.bindAchievementPrizeUnlock === "function") {
 }
 
 function isDriverOperationalRefreshUnsafe(shell) {
+    if (document.hidden) return true;
     shell = shell || document.querySelector("[data-driver-shell]");
     if (!shell) return false;
     if (
@@ -5549,15 +5550,19 @@ function syncDriverTabMarkup(shell, tab) {
 }
 
 window.applyOperationalStateRefresh = function (context) {
+    // Outbox, poll и resume разделяют один запрос; новая версия остаётся
+    // pending у AppRealtime, если она появилась во время текущего fragment.
+    if (window.driverOperationalRefreshPromise) return window.driverOperationalRefreshPromise;
     var currentShell = document.querySelector("[data-driver-shell]");
     if (!currentShell || !window.AppOperationalFragment || isDriverOperationalRefreshUnsafe(currentShell)) {
         return Promise.resolve({deferred: true, reason: "driver_busy"});
     }
     var activeTab = currentShell.dataset.activeTab || "work";
     var targetVersion = Number(context && context.version || 0);
-    return window.AppOperationalFragment.request("driver", targetVersion).then(function (payload) {
+    var requestShell = currentShell;
+    var refreshPromise = window.AppOperationalFragment.request("driver", targetVersion).then(function (payload) {
         var oldShell = document.querySelector("[data-driver-shell]");
-        if (!oldShell || isDriverOperationalRefreshUnsafe(oldShell)) {
+        if (!oldShell || oldShell !== requestShell || isDriverOperationalRefreshUnsafe(oldShell)) {
             return {deferred: true, reason: "driver_busy"};
         }
         var freshShell = window.AppOperationalFragment.parseRoot(
@@ -5588,17 +5593,17 @@ window.applyOperationalStateRefresh = function (context) {
         if (movedFromLoadingWaitToWork) {
             activeTab = "work";
         }
+        activeTab = movedFromLoadingWaitToWork ? "work" : (oldShell.dataset.activeTab || activeTab);
         syncDriverTabMarkup(freshShell, activeTab);
         if (movedFromLoadingWaitToWork && window.history && window.history.replaceState) {
             var refreshedUrl = new URL(window.location.href);
             refreshedUrl.searchParams.set("tab", activeTab);
             window.history.replaceState({}, "", refreshedUrl.toString());
         }
+        var viewState = window.AppOperationalFragment.captureView
+            ? window.AppOperationalFragment.captureView(oldShell, "[data-driver-tab-panel]", "data-driver-tab-panel")
+            : null;
         oldShell.replaceWith(freshShell);
-
-        if (targetVersion) {
-            document.body.dataset.operationalStateVersion = String(targetVersion);
-        }
         if (typeof window.bindDriverMobileShell === "function") {
             window.bindDriverMobileShell();
         }
@@ -5639,10 +5644,22 @@ window.applyOperationalStateRefresh = function (context) {
                 playDriverReleaseOfferCue(fallbackAssignmentId);
             }
         }
-        return {applied: true};
+        if (window.AppOperationalFragment.restoreView) {
+            window.AppOperationalFragment.restoreView(freshShell, viewState);
+        }
+        var appliedVersion = Number(payload.version || 0);
+        document.body.dataset.operationalStateVersion = String(appliedVersion);
+        return {applied: true, version: appliedVersion};
     }).catch(function () {
         return {deferred: true, reason: "driver_refresh_failed"};
     });
+    var ownedPromise = refreshPromise.finally(function () {
+        if (window.driverOperationalRefreshPromise === ownedPromise) {
+            window.driverOperationalRefreshPromise = null;
+        }
+    });
+    window.driverOperationalRefreshPromise = ownedPromise;
+    return ownedPromise;
 };
 
 /* Разгрузка уходила обычной отправкой формы: браузер перезагружал страницу
@@ -7416,6 +7433,10 @@ window.bindDriverMobileShell = function () {
         var total = pending + review;
         var previousPending = Number(window.driverOfflinePendingCount || 0);
         window.driverOfflinePendingCount = pending;
+        window.operationalOutboxPendingCount = pending;
+        window.dispatchEvent(new CustomEvent("operational-outbox-state", {detail: {
+            role: "driver", pendingCount: pending, reviewCount: review
+        }}));
         var mode = state.review ? "review" : state.sending ? "sending" : state.pending ? "pending" : "confirmed";
         current.dataset.driverSyncState = mode;
         if (label) {
@@ -7425,27 +7446,17 @@ window.bindDriverMobileShell = function () {
                     ? "Синхронизация"
                     : mode === "pending"
                         ? "Сохранено на телефоне"
-                        : (navigator.onLine === false ? "Нет связи" : "Онлайн");
+                        : "Все действия отправлены";
         }
         if (count) {
             count.textContent = String(total);
             count.hidden = total < 1;
             count.setAttribute("aria-label", total + " неподтверждённых событий");
         }
-        var connection = current.querySelector(".driver-online");
-        if (connection) {
-            var detail = mode === "review"
-                ? "требуется сверка, событий: " + total
-                : mode === "sending"
-                    ? "отправка сохранённых событий, осталось: " + total
-                    : mode === "pending"
-                        ? "события сохранены на телефоне, ожидают отправки: " + total
-                        : (navigator.onLine === false ? "нет сети" : "онлайн, неподтверждённых событий нет");
-            connection.setAttribute("aria-label", "Связь с сервером: " + detail);
-        }
+        // Доступность сервера и accessible-label точки принадлежат общей машине связи.
         applyDriverOfflineProjection(current, driverOfflineEvents);
-        if (previousPending > 0 && pending === 0 && window.AppRealtime && typeof window.AppRealtime.wake === "function") {
-            window.AppRealtime.wake("driver_offline_queue_drained");
+        if (previousPending > 0 && pending === 0 && window.AppRealtime && typeof window.AppRealtime.requestReconcile === "function") {
+            window.AppRealtime.requestReconcile("driver_offline_queue_drained");
         }
     }
 
@@ -7530,18 +7541,12 @@ window.bindDriverMobileShell = function () {
                     playDriverVoice("action_ok", "voice_trip_finished");
                     window.setTimeout(function () { window.driverOfflineConfirmationCueScheduled = false; }, 750);
                 }
-                if (!window.driverOfflineRefreshScheduled) {
-                    window.driverOfflineRefreshScheduled = true;
-                    Promise.resolve().then(function () {
-                        if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
-                            window.AppRealtime.wake("driver_offline_event_confirmed");
-                        }
-                        if (typeof window.applyOperationalStateRefresh === "function") {
-                            return window.applyOperationalStateRefresh({version: 0});
-                        }
-                    }).catch(function () {}).finally(function () {
-                        window.driverOfflineRefreshScheduled = false;
-                    });
+                var result = args[1] || {};
+                if (window.AppRealtime && typeof window.AppRealtime.requestReconcile === "function") {
+                    window.AppRealtime.requestReconcile(
+                        "driver_offline_event_confirmed",
+                        Number(result.server_version || result.version || 0)
+                    );
                 }
             },
             onReview: function (event, result) {

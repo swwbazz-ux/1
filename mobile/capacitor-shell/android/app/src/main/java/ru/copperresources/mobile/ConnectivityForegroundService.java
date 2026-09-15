@@ -27,6 +27,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URLEncoder;
 import java.net.URL;
+import java.net.SocketTimeoutException;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -58,7 +60,9 @@ public class ConnectivityForegroundService extends Service {
     private ScheduledFuture<?> pendingHeartbeat;
     private ConnectivityManager connectivityManager;
     private ConnectivityManager.NetworkCallback networkCallback;
-    private int consecutiveFailures;
+    private NativeTransportState transport;
+    private final HeartbeatSchedule heartbeatSchedule = new HeartbeatSchedule();
+    private volatile boolean stopping;
     private boolean foregroundStarted;
     private String publishedStatus = "";
 
@@ -101,6 +105,7 @@ public class ConnectivityForegroundService extends Service {
     public void onCreate() {
         super.onCreate();
         AppNotifications.createChannels(this);
+        transport = new NativeTransportState(ConnectionState.lastAliveAt(this));
         executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "native-server-heartbeat");
             thread.setDaemon(true);
@@ -142,6 +147,8 @@ public class ConnectivityForegroundService extends Service {
 
     @Override
     public void onDestroy() {
+        stopping = true;
+        synchronized (scheduleLock) { heartbeatSchedule.stop(); }
         if (connectivityManager != null && networkCallback != null) {
             try {
                 connectivityManager.unregisterNetworkCallback(networkCallback);
@@ -202,7 +209,9 @@ public class ConnectivityForegroundService extends Service {
 
             @Override
             public void onLost(@NonNull Network network) {
-                publishStatus("Сеть недоступна — ожидаем восстановление");
+                // Losing the previous default does not mean the new Wi-Fi/mobile route is lost.
+                // Both callbacks only request one probe; only its result classifies server reachability.
+                scheduleHeartbeat(0L);
             }
         };
         try {
@@ -212,18 +221,31 @@ public class ConnectivityForegroundService extends Service {
 
     private void scheduleHeartbeat(long delayMs) {
         synchronized (scheduleLock) {
-            if (executor == null || executor.isShutdown()) {
-                return;
-            }
-            if (pendingHeartbeat != null && !pendingHeartbeat.isDone()) {
-                pendingHeartbeat.cancel(false);
-            }
-            pendingHeartbeat = executor.schedule(this::runHeartbeat, Math.max(0L, delayMs), TimeUnit.MILLISECONDS);
+            if (stopping || executor == null || executor.isShutdown()) return;
+            long scheduledDelay = heartbeatSchedule.request(delayMs, android.os.SystemClock.elapsedRealtime());
+            if (scheduledDelay < 0L) return;
+            if (pendingHeartbeat != null && !pendingHeartbeat.isDone()) pendingHeartbeat.cancel(false);
+            long ownerGeneration = heartbeatSchedule.generation();
+            pendingHeartbeat = executor.schedule(() -> {
+                synchronized (scheduleLock) {
+                    if (!heartbeatSchedule.start(android.os.SystemClock.elapsedRealtime(), ownerGeneration)) return;
+                    pendingHeartbeat = null;
+                }
+                try {
+                    runHeartbeat();
+                } finally {
+                    synchronized (scheduleLock) {
+                        long nextDelay = heartbeatSchedule.finish();
+                        if (nextDelay >= 0L) scheduleHeartbeat(nextDelay);
+                    }
+                }
+            }, scheduledDelay, TimeUnit.MILLISECONDS);
         }
     }
 
     private void runHeartbeat() {
         PowerManager.WakeLock wakeLock = null;
+        boolean heartbeatSucceeded = false;
         try {
             PowerManager powerManager = getSystemService(PowerManager.class);
             if (powerManager != null) {
@@ -233,20 +255,45 @@ public class ConnectivityForegroundService extends Service {
                 );
                 wakeLock.acquire(20_000L);
             }
-            FlushResult shiftCloseFlush = flushPendingDriverShiftClose();
+            FlushResult shiftCloseFlush;
+            try {
+                shiftCloseFlush = flushPendingDriverShiftClose();
+            } catch (InterruptedException interrupted) {
+                throw interrupted;
+            } catch (Exception queueError) {
+                // The durable queue retains its retry. A queue error must not hide a healthy heartbeat.
+                shiftCloseFlush = FlushResult.RETRY;
+            }
             HeartbeatResult result = requestHeartbeat();
+            if (stopping || Thread.currentThread().isInterrupted()) return;
             if (result.statusCode == 401 || result.statusCode == 403) {
+                recordLocalTransportFailure("authentication_ended");
                 stopBecauseConnectionIsNotRequired("authentication_ended");
                 return;
             }
             if (result.statusCode < 200 || result.statusCode >= 300) {
-                throw new IllegalStateException("Heartbeat HTTP " + result.statusCode);
+                throw new HeartbeatFailure("http_" + result.statusCode);
             }
-            JSONObject response = new JSONObject(result.body);
+            JSONObject response;
+            try {
+                response = new JSONObject(result.body);
+                if (!(response.opt("authenticated") instanceof Boolean)
+                        || (response.optBoolean("authenticated") && !NativeTransportState.isValidServerVersion(response.opt("version")))) {
+                    throw new HeartbeatFailure("invalid_payload");
+                }
+            } catch (org.json.JSONException invalid) {
+                throw new HeartbeatFailure("invalid_payload");
+            }
             if (!response.optBoolean("authenticated", true)) {
+                recordLocalTransportFailure("authentication_ended");
                 stopBecauseConnectionIsNotRequired("authentication_ended");
                 return;
             }
+            heartbeatSucceeded = true;
+            synchronized (scheduleLock) { heartbeatSchedule.responseSucceeded(); }
+            transport.success(System.currentTimeMillis(), response.optLong("version", 0L));
+            ConnectionState.recordAlive(this, transport.lastSuccessAtMs);
+            ConnectionState.recordTransport(this, transport);
             if (response.has("background_connection_required")) {
                 boolean connectionRequired = response.optBoolean("background_connection_required", false);
                 String shiftId = response.optString("active_shift_id", "");
@@ -266,7 +313,6 @@ public class ConnectivityForegroundService extends Service {
                 stopBecauseConnectionIsNotRequired("server_contract_missing");
                 return;
             }
-            consecutiveFailures = 0;
             SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
             boolean connectionLossWasAnnounced = preferences.getBoolean(CONNECTION_LOSS_ANNOUNCED, false);
             long previousVersion = preferences.getLong("last_server_version", 0L);
@@ -275,11 +321,11 @@ public class ConnectivityForegroundService extends Service {
             preferences.edit()
                 .putLong("last_transport_success_at", System.currentTimeMillis())
                 .putInt("last_http_status", result.statusCode)
-                .putString("last_response", result.body)
+                .remove("last_response")
+                .remove("last_error")
                 .putLong("last_server_version", serverVersion > 0L ? serverVersion : previousVersion)
                 .putBoolean(CONNECTION_LOSS_ANNOUNCED, false)
                 .apply();
-            ConnectionState.recordAlive(this, System.currentTimeMillis());
             if (connectionLossWasAnnounced && !AppVisibility.isForeground()) {
                 OperationalVoicePlayer.play(
                     this,
@@ -310,15 +356,35 @@ public class ConnectivityForegroundService extends Service {
             }
             scheduleHeartbeat(BuildConfig.HEARTBEAT_INTERVAL_MS);
         } catch (Exception error) {
-            consecutiveFailures += 1;
+            // Service shutdown/cookie-thread interruption is planned cancellation, never network loss.
+            if (stopping || error instanceof InterruptedException || Thread.currentThread().isInterrupted()) {
+                if (error instanceof InterruptedException) Thread.currentThread().interrupt();
+                return;
+            }
+            if (heartbeatSucceeded) {
+                // Notifications or local post-processing cannot turn a received heartbeat into a failure.
+                Log.w("ConnectivityForegroundService", "Heartbeat received; local processing deferred");
+                scheduleHeartbeat(BuildConfig.HEARTBEAT_INTERVAL_MS);
+                return;
+            }
+            String reason = error instanceof HeartbeatFailure ? ((HeartbeatFailure) error).reason
+                : error instanceof SocketTimeoutException ? "timeout"
+                : error instanceof IOException ? "network_error" : "local_processing";
+            if ("cookie_timeout".equals(reason) || "local_processing".equals(reason)) {
+                recordLocalTransportFailure(reason);
+                publishStatus(transport.failureStatusText(AppVisibility.isForeground()));
+                scheduleHeartbeat(2_000L);
+                return;
+            }
+            transport.failure(System.currentTimeMillis(), reason);
+            ConnectionState.recordTransport(this, transport);
             SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            boolean shouldAnnounceConnectionLoss = consecutiveFailures >= 2
+            boolean shouldAnnounceConnectionLoss = "lost".equals(transport.transportState)
                 && !preferences.getBoolean(CONNECTION_LOSS_ANNOUNCED, false);
             preferences.edit()
-                .putLong("last_failure_at", System.currentTimeMillis())
-                .putString("last_error", error.getClass().getSimpleName() + ": " + String.valueOf(error.getMessage()))
-                .putBoolean(CONNECTION_LOSS_ANNOUNCED, shouldAnnounceConnectionLoss
-                    || preferences.getBoolean(CONNECTION_LOSS_ANNOUNCED, false))
+                .putLong("last_failure_at", transport.occurredAtMs)
+                .putString("last_failure_reason", reason)
+                .remove("last_error")
                 .apply();
             if (shouldAnnounceConnectionLoss && !AppVisibility.isForeground()) {
                 OperationalVoicePlayer.play(
@@ -328,15 +394,25 @@ public class ConnectivityForegroundService extends Service {
                     true,
                     0L
                 );
+                preferences.edit().putBoolean(CONNECTION_LOSS_ANNOUNCED, true).apply();
             }
-            publishStatus("Связь восстанавливается…");
-            long multiplier = 1L << Math.min(consecutiveFailures, 3);
-            scheduleHeartbeat(Math.min(MAX_BACKOFF_MS, BuildConfig.HEARTBEAT_INTERVAL_MS * multiplier));
+            publishStatus(transport.failureStatusText(AppVisibility.isForeground()));
+            scheduleHeartbeat(transport.retryDelay(BuildConfig.HEARTBEAT_INTERVAL_MS, MAX_BACKOFF_MS));
         } finally {
             if (wakeLock != null && wakeLock.isHeld()) {
                 wakeLock.release();
             }
         }
+    }
+
+    private void recordLocalTransportFailure(String reason) {
+        transport.localFailure(System.currentTimeMillis(), reason);
+        ConnectionState.recordTransport(this, transport);
+    }
+
+    private static final class HeartbeatFailure extends Exception {
+        final String reason;
+        HeartbeatFailure(String reason) { super(reason); this.reason = reason; }
     }
 
     private HeartbeatResult requestHeartbeat() throws Exception {
@@ -500,20 +576,22 @@ public class ConnectivityForegroundService extends Service {
         return "";
     }
 
-    private String readWebViewCookie() {
+    private String readWebViewCookie() throws InterruptedException, HeartbeatFailure {
         AtomicReference<String> cookie = new AtomicReference<>();
+        AtomicReference<Boolean> cookieReadFailed = new AtomicReference<>(false);
         CountDownLatch latch = new CountDownLatch(1);
         mainHandler.post(() -> {
             try {
                 cookie.set(CookieManager.getInstance().getCookie(BuildConfig.APP_SERVER_URL));
+            } catch (RuntimeException unavailable) {
+                cookieReadFailed.set(true);
             } finally {
                 latch.countDown();
             }
         });
-        try {
-            latch.await(2, TimeUnit.SECONDS);
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
+        if (!latch.await(2, TimeUnit.SECONDS) || cookieReadFailed.get()) {
+            // Do not send an unauthenticated probe just because the UI thread is temporarily busy.
+            throw new HeartbeatFailure("cookie_timeout");
         }
         return cookie.get();
     }
@@ -895,9 +973,7 @@ public class ConnectivityForegroundService extends Service {
                 ? "Откройте приложение — проверьте закрытие смены"
                 : "Закрытие смены сохранено — ждём связь";
         }
-        return ConnectionState.lastAliveAt(this) > 0L
-            ? "Связь работает во время смены"
-            : "Проверяем связь с сервером…";
+        return "Проверяем связь с сервером…";
     }
 
     private void stopBecauseConnectionIsNotRequired(String reason) {
@@ -906,7 +982,9 @@ public class ConnectivityForegroundService extends Service {
     }
 
     private void stopServiceAndRemoveNotification() {
+        stopping = true;
         synchronized (scheduleLock) {
+            heartbeatSchedule.stop();
             if (pendingHeartbeat != null) {
                 pendingHeartbeat.cancel(true);
                 pendingHeartbeat = null;

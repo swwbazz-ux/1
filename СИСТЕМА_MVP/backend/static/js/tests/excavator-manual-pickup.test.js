@@ -229,7 +229,8 @@ test('drag copy sheds blocking and transfer decoration while the real truck reta
 
 test('transfer countdown uses server time and never grants rights at local zero', () => {
     const start = template.indexOf('function bindExcavatorTransferCountdowns(shell)');
-    const end = template.indexOf('// Присутствие истекает', start);
+    const end = template.indexOf('window.excavatorHasPendingWork', start);
+    assert.ok(start >= 0 && end > start, 'The countdown source must have explicit valid bounds');
     const source = template.slice(start, end);
     assert.match(source, /shell\.dataset\.eoServerNow/);
     assert.match(source, /data-eo-transfer-deadline|eoTransferDeadline/);

@@ -346,6 +346,7 @@ test("production fragment helper sends a versioned JSON-only request", async () 
         fetchCalls.push({url, options});
         return Promise.resolve({
             ok: true,
+            headers: {get: () => "application/json; charset=utf-8"},
             status: 200,
             json() {
                 jsonCalls += 1;
@@ -393,6 +394,7 @@ test("production fragment helper rejects contract and screen mismatches", async 
     let fetchIndex = 0;
     const {runtimeWindow} = createFragmentRuntime(() => Promise.resolve({
         ok: true,
+            headers: {get: () => "application/json; charset=utf-8"},
         status: 200,
         json() {
             const payload = responses[fetchIndex];
@@ -431,6 +433,7 @@ test("production fragment helper times out a hung request and remains reusable",
         }
         return Promise.resolve({
             ok: true,
+            headers: {get: () => "application/json; charset=utf-8"},
             status: 200,
             json() {
                 return Promise.resolve(recoveredPayload);

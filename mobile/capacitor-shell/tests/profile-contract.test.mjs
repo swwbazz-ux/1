@@ -25,8 +25,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "42",
-    versionName: "0.1.26",
+    versionCode: "43",
+    versionName: "0.1.27",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -36,8 +36,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "46",
-    versionName: "0.1.28",
+    versionCode: "47",
+    versionName: "0.1.29",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -58,8 +58,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "47",
-    versionName: "0.1.28",
+    versionCode: "48",
+    versionName: "0.1.29",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -69,8 +69,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "46",
-    versionName: "0.1.28-rc",
+    versionCode: "47",
+    versionName: "0.1.29-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -512,7 +512,10 @@ test("recorded equipment numbers are packaged and routed through native sequence
   const excavatorShellVersion = excavatorTemplate.match(
     /var excavatorShellVersion = "(excavator-mobile-shell-v\d+)";/
   )?.[1];
-  assert.equal(excavatorShellVersion, "excavator-mobile-shell-v235");
+  const roleApps = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "users", "role_apps.py"), "utf8");
+  const declaredShell = roleApps.match(/shell_version=['"](excavator-mobile-shell-v\d+)['"]/)?.[1];
+  assert.ok(declaredShell, "excavator role must declare a shell version");
+  assert.equal(excavatorShellVersion, declaredShell);
   const excavatorAssetVersions = [
     ...excavatorTemplate.matchAll(/\?v=(excavator-mobile-shell-v\d+)/g),
   ].map((match) => match[1]);

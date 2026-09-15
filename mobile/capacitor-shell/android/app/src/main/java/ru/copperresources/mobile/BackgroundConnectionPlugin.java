@@ -1,5 +1,8 @@
 package ru.copperresources.mobile;
 
+import android.content.Context;
+import android.content.SharedPreferences;
+
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -8,6 +11,27 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 @CapacitorPlugin(name = "BackgroundConnection")
 public class BackgroundConnectionPlugin extends Plugin {
+    private SharedPreferences transportPreferences;
+    private final SharedPreferences.OnSharedPreferenceChangeListener transportListener = (preferences, key) -> {
+        if (ConnectionState.TRANSPORT_EVIDENCE.equals(key)) {
+            notifyListeners("connectionState", ConnectionState.transportSnapshot(getContext()));
+        }
+    };
+
+    @Override
+    public void load() {
+        transportPreferences = getContext().getSharedPreferences(ConnectionState.PREFS_NAME, Context.MODE_PRIVATE);
+        transportPreferences.registerOnSharedPreferenceChangeListener(transportListener);
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        if (transportPreferences != null) {
+            transportPreferences.unregisterOnSharedPreferenceChangeListener(transportListener);
+        }
+        super.handleOnDestroy();
+    }
+
     @PluginMethod
     public void sync(PluginCall call) {
         boolean required = Boolean.TRUE.equals(call.getBoolean("required", false));
@@ -103,6 +127,7 @@ public class BackgroundConnectionPlugin extends Plugin {
             .put("shiftId", ConnectionState.activeShiftId(getContext()))
             .put("lastAliveAt", ConnectionState.lastAliveAt(getContext()))
             .put("lastStopReason", ConnectionState.lastStopReason(getContext()));
+        result.put("transport", ConnectionState.transportSnapshot(getContext()));
         result.put("pendingDriverShiftClose", pending == null ? null : pending.toJsObject());
         return result;
     }
