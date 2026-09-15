@@ -105,6 +105,7 @@ from .manual_loading import (
     manual_dump_card_visibility_filter,
     manual_loading_enabled,
     may_replace_open_trip,
+    reconcile_expired_manual_trips,
     trip_driver_control_filter,
     truck_driver_participation,
 )
@@ -5900,6 +5901,7 @@ def excavator_work_view(request):
 
     reconcile_due_haul_assignments()
     reconcile_expired_free_bucket_acceptances()
+    reconcile_expired_manual_trips()
 
     open_shift = get_excavator_open_shift(access.employee)
     work_assignment = get_active_equipment_assignment(access.employee, 'excavator_operator')
@@ -7560,6 +7562,7 @@ def dispatcher_control_view(
     requested_fragment = request.GET.get('_operational_fragment', '').strip()
     reconcile_due_haul_assignments()
     reconcile_expired_free_bucket_acceptances()
+    reconcile_expired_manual_trips()
     # Просроченные смены закрывает сервер по таймеру (close_expired_shifts),
     # а не загрузка пульта: момент закрытия не должен зависеть от того, открыл
     # ли кто-то браузер.

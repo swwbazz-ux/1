@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from . import tests as fixtures
-from .manual_loading import truck_driver_participation
+from .manual_loading import reconcile_expired_manual_trips, truck_driver_participation
 from .models import OPEN_TRIP_STATUSES, Trip, TripStatus
 from assignments.models import AssignmentStatus, HaulAssignment
 from assignments.services import schedule_haul_release
@@ -68,6 +68,38 @@ class ManualLoadingTests(TestCase):
     def test_passive_requires_deliberate_manual_action(self):
         self.assertEqual(self.send(manual=False).status_code, 409)
         self.assertEqual(self.send().status_code, 200)
+
+    def test_expired_passive_trip_leaves_operational_control_without_fake_unload(self):
+        self.truck_shift.closed_at = timezone.now()
+        self.truck_shift.save()
+        response = self.send()
+        trip = Trip.objects.get(pk=response.json()['trip_id'])
+        loaded_at = timezone.now() - timedelta(minutes=6)
+        Trip.objects.filter(pk=trip.pk).update(created_at=loaded_at, loaded_at=loaded_at)
+
+        reconciled = reconcile_expired_manual_trips(now=loaded_at + timedelta(minutes=5, seconds=1))
+
+        trip.refresh_from_db()
+        self.assertEqual(reconciled, [trip.pk])
+        self.assertEqual(trip.status, TripStatus.UNCONTROLLED)
+        self.assertEqual(trip.operationally_closed_at, loaded_at + timedelta(minutes=5))
+        self.assertIsNone(trip.completed_at)
+        self.assertIsNone(trip.actual_dump_point_id)
+        self.assertEqual(reconcile_expired_manual_trips(now=timezone.now()), [])
+
+    def test_fresh_or_driver_controlled_trip_is_not_expired(self):
+        fresh = self.send()
+        fresh_trip = Trip.objects.get(pk=fresh.json()['trip_id'])
+        self.assertEqual(reconcile_expired_manual_trips(now=timezone.now()), [])
+
+        fresh_trip.status = TripStatus.UNCONTROLLED
+        fresh_trip.operationally_closed_at = timezone.now()
+        fresh_trip.save(update_fields=['status', 'operationally_closed_at'])
+        self.presence()
+        controlled = self.send()
+        controlled_trip = Trip.objects.get(pk=controlled.json()['trip_id'])
+        Trip.objects.filter(pk=controlled_trip.pk).update(loaded_at=timezone.now() - timedelta(minutes=10))
+        self.assertEqual(reconcile_expired_manual_trips(now=timezone.now()), [])
 
     def test_next_loading_closes_previous_without_inventing_unload(self):
         first = self.send()
@@ -232,14 +264,14 @@ class ManualLoadingTests(TestCase):
         expired = self.client.get(reverse('excavator_work'))
         dump_card = next(card for card in expired.context['dump_cards'] if card['point'].id == self.dump_point.id)
         self.assertEqual(dump_card['pending_trucks'], [])
-        self.assertEqual(expired.context['active_trips_count'], 1)
+        self.assertEqual(expired.context['active_trips_count'], 0)
         truck_card = next(
             card for card in expired.context['truck_cards']
             if card['assignment'].truck_id == self.truck.id
         )
-        self.assertEqual(truck_card['open_trip_id'], trip.id)
+        self.assertEqual(truck_card['open_trip_id'], '')
         trip.refresh_from_db()
-        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertEqual(trip.status, TripStatus.UNCONTROLLED)
         self.assertIsNone(trip.completed_at)
         self.assertIsNone(trip.unload_received_at)
 
