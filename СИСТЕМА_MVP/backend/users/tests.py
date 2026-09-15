@@ -3417,7 +3417,8 @@ class AccessLoginTests(TestCase):
     def test_driver_downtime_json_keeps_per_reason_shift_totals(self):
         truck = self.create_registered_driver_shift()
         shift = EmployeeShift.objects.get(employee=self.employee, closed_at__isnull=True)
-        shift.opened_at = timezone.now() - timedelta(hours=1)
+        now = datetime(2026, 9, 15, 1, 0, tzinfo=ZoneInfo('UTC'))
+        shift.opened_at = now - timedelta(hours=1)
         shift.save(update_fields=['opened_at'])
         first_reason = DowntimeReason.objects.create(
             name='Тест история простоя 1',
@@ -3429,7 +3430,6 @@ class AccessLoginTests(TestCase):
             short_label='История 2',
             show_for_truck_driver=True,
         )
-        now = timezone.now()
         DowntimeEvent.objects.create(
             equipment=truck,
             employee=self.employee,
@@ -3438,38 +3438,37 @@ class AccessLoginTests(TestCase):
             ended_at=now - timedelta(minutes=8),
         )
 
-        start_response = self.client.post(
-            reverse('driver_downtime_action'),
-            data=json.dumps({'action': 'start', 'reason_id': second_reason.id}),
-            content_type='application/json',
-            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
-            HTTP_ACCEPT='application/json',
-            HTTP_HOST='localhost',
-        )
+        with patch('users.views.timezone.now', return_value=now):
+            start_response = self.client.post(
+                reverse('driver_downtime_action'),
+                data=json.dumps({'action': 'start', 'reason_id': second_reason.id}),
+                content_type='application/json',
+                HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                HTTP_ACCEPT='application/json',
+                HTTP_HOST='localhost',
+            )
 
         self.assertEqual(start_response.status_code, 200)
         start_payload = start_response.json()
         self.assertEqual(start_payload['reason_totals'][str(first_reason.id)], 120)
-        # A just-started interval can still total zero whole seconds.  The
-        # payload may omit that zero-valued reason on a fast run (or while the
-        # system clock is being corrected), which is equivalent for clients.
         self.assertEqual(start_payload['reason_totals'].get(str(second_reason.id), 0), 0)
         self.assertEqual(start_payload['reason_id'], second_reason.id)
         self.assertTrue(start_payload['active'])
 
-        close_response = self.client.post(
-            reverse('driver_downtime_action'),
-            data=json.dumps({'action': 'close'}),
-            content_type='application/json',
-            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
-            HTTP_ACCEPT='application/json',
-            HTTP_HOST='localhost',
-        )
+        with patch('users.views.timezone.now', return_value=now + timedelta(seconds=7)):
+            close_response = self.client.post(
+                reverse('driver_downtime_action'),
+                data=json.dumps({'action': 'close'}),
+                content_type='application/json',
+                HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                HTTP_ACCEPT='application/json',
+                HTTP_HOST='localhost',
+            )
 
         self.assertEqual(close_response.status_code, 200)
         close_payload = close_response.json()
         self.assertFalse(close_payload['active'])
-        self.assertGreaterEqual(close_payload['reason_totals'][str(second_reason.id)], 0)
+        self.assertEqual(close_payload['reason_totals'][str(second_reason.id)], 7)
         self.assertEqual(close_payload['reason_totals'][str(first_reason.id)], 120)
 
     def test_driver_downtime_action_validates_reason_by_workplace_and_equipment_type(self):
