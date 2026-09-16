@@ -172,11 +172,15 @@ function loadUnloadGestureBinder() {
         "Driver unload gesture binder"
     );
     const context = {bind: null};
-    const runtimeWindow = {};
+    const runtimeWindow = createEventTarget();
+    const runtimeDocument = createEventTarget({
+        hidden: false,
+        visibilityState: "visible",
+    });
 
     vm.runInNewContext(
         `${source};\ncontext.bind = window.bindDriverUnloadGesture;`,
-        {context, window: runtimeWindow},
+        {context, document: runtimeDocument, window: runtimeWindow},
         {filename: "templates/users/driver_shift.html#unload-gesture"}
     );
     assert.equal(typeof context.bind, "function");
@@ -344,6 +348,10 @@ test("a confirmed downtime receipt overrides only an older cached shell", () => 
     assert.match(
         DRIVER_TEMPLATE_SOURCE,
         /closedProjection\.shift_total_seconds[\s\S]*reason_totals: closedProjection\.reason_totals/
+    );
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /restoreDriverConfirmedDowntime\(driverOfflineOutbox\)\.catch/
     );
 });
 
@@ -629,7 +637,8 @@ test("an armed one-tap gesture blocks operational fragment replacement", () => {
     let touchArmed = true;
     const unsafeSelector = (
         ".is-touch-armed, .is-holding, .is-pending, .is-dragging, "
-        + "[data-driver-point-sheet]:not([hidden])"
+        + "[data-driver-point-sheet]:not([hidden]), "
+        + "[data-driver-free-bucket-sheet]:not([hidden])"
     );
     const shell = {
         contains() { return false; },
@@ -651,7 +660,7 @@ test("an armed one-tap gesture blocks operational fragment replacement", () => {
 
     assert.match(
         unsafeSource,
-        /shell\.querySelector\(["']\.is-touch-armed,\s*\.is-holding,\s*\.is-pending,\s*\.is-dragging,\s*\[data-driver-point-sheet\]:not\(\[hidden\]\)["']\)/,
+        /shell\.querySelector\(["']\.is-touch-armed,\s*\.is-holding,\s*\.is-pending,\s*\.is-dragging,\s*\[data-driver-point-sheet\]:not\(\[hidden\]\),\s*\[data-driver-free-bucket-sheet\]:not\(\[hidden\]\)["']\)/,
         "The static refresh guard must include the armed touch state."
     );
     assert.equal(context.isUnsafe(shell), true);

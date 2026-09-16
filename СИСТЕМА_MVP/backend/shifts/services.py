@@ -262,6 +262,8 @@ def handover_other_role_shift(shift, *, closed_by):
     shift.closed_by = closed_by
     shift.is_service_closed = True
     shift.save(update_fields=['closed_at', 'closed_by', 'is_service_closed'])
+    from trips.free_bucket import cancel_free_bucket_acceptances_for_shift
+    cancel_free_bucket_acceptances_for_shift(shift, cancelled_at=now)
     from downtimes.driver_workflow import close_workflow_downtimes
     close_workflow_downtimes(shift.equipment, ended_at=now)
     from trips.models import OPEN_TRIP_STATUSES
@@ -838,6 +840,8 @@ def close_driver_shift(
         locked_shift.closed_at = closed_at
         locked_shift.closed_by = employee
         locked_shift.save(update_fields=[*readings, 'closed_at', 'closed_by'])
+        from trips.free_bucket import cancel_free_bucket_acceptances_for_shift
+        cancel_free_bucket_acceptances_for_shift(locked_shift, cancelled_at=closed_at)
         from downtimes.driver_workflow import close_workflow_downtimes
         close_workflow_downtimes(locked_shift.equipment, ended_at=locked_shift.closed_at)
         Trip.objects.filter(
@@ -2160,6 +2164,8 @@ def close_excavator_shift(
     shift.closed_at = closed_at
     shift.closed_by = employee
     shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
+    from trips.free_bucket import cancel_free_bucket_acceptances_for_shift
+    cancel_free_bucket_acceptances_for_shift(shift, cancelled_at=closed_at)
     from downtimes.driver_workflow import close_workflow_downtimes
     close_workflow_downtimes(shift.equipment, ended_at=shift.closed_at)
     # Переходное право существует только до конца конкретной смены старого
