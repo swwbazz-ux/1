@@ -1,20 +1,4 @@
 # Paths are relative to the repository root. Only these files enter a release.
-СИСТЕМА_MVP/backend/core/offline_sync.py
-СИСТЕМА_MVP/backend/shifts/services.py
-СИСТЕМА_MVP/backend/static/css/driver-free-bucket-v1.css
-СИСТЕМА_MVP/backend/static/css/mobile-dial-actions-v1.css
-СИСТЕМА_MVP/backend/static/js/driver-free-bucket-v1.js
-СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js
-СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
-СИСТЕМА_MVP/backend/static/js/excavator-free-bucket-v1.js
-СИСТЕМА_MVP/backend/static/js/mobile-dial-actions-v1.js
-СИСТЕМА_MVP/backend/templates/includes/mobile_dial_actions.html
 СИСТЕМА_MVP/backend/templates/users/driver_shift.html
-СИСТЕМА_MVP/backend/trips/free_bucket.py
-СИСТЕМА_MVP/backend/trips/migrations/0015_free_bucket_driver_request.py
-СИСТЕМА_MVP/backend/trips/models.py
-СИСТЕМА_MVP/backend/trips/views.py
-СИСТЕМА_MVP/backend/users/active_role.py
-СИСТЕМА_MVP/backend/users/live_monitor.py
 СИСТЕМА_MVP/backend/users/role_apps.py
 СИСТЕМА_MVP/backend/users/views.py

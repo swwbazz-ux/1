@@ -24,10 +24,10 @@ function functionSource(source, name) {
     throw new Error("function_not_closed");
 }
 
-test("driver v225 shell precaches the durable runtime and exact authenticated dependencies", () => {
+test("driver v226 shell precaches the durable runtime and exact authenticated dependencies", () => {
     assert.match(template, /driver-offline-outbox-v2\.js/);
     assert.doesNotMatch(template, /createDriverUnloadOutbox/);
-    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v225'/);
+    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v226'/);
     assert.match(views, /driver-offline-outbox-v2\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /async function isValidatedDriverShell/);
     assert.match(views, /html\.includes\("data-driver-shell"\)/);
@@ -40,7 +40,36 @@ test("driver v225 shell precaches the durable runtime and exact authenticated de
     assert.match(views, /hasValidatedCurrentShell/);
     const coreAssets = views.match(/const CORE_ASSETS = \[([\s\S]*?)\];/)[1];
     assert.doesNotMatch(coreAssets, /APP_SHELL_URL|LEGACY_SHELL_URL/);
-    assert.match(roleApps, /shell_version='driver-mobile-shell-v225'/);
+    assert.match(roleApps, /shell_version='driver-mobile-shell-v226'/);
+});
+
+test("a legacy loaded shell reloads before adopting a fragment that requires newer assets", () => {
+    assert.match(views, /'driver_operational_fragment': requested_fragment == 'driver'/);
+    assert.match(template, /\{% if driver_operational_fragment %\}/);
+    assert.match(template, /data-driver-fragment-shell="\{\{ driver_shell_version \}\}"/);
+    assert.match(template, /runtime\.currentShellVersion/);
+    assert.match(template, /loaded!==fresh\)\{window\.location\.reload\(\)/);
+    const handler = template.match(/data-driver-fragment-shell="\{\{ driver_shell_version \}\}"[^>]*onload="([^"]+)"/)[1]
+        .replaceAll("&amp;", "&");
+    function execute(loadedVersion) {
+        let reloads = 0;
+        let removals = 0;
+        const node = {
+            dataset: {driverFragmentShell: "driver-mobile-shell-v226"},
+            remove() { removals += 1; },
+        };
+        vm.runInNewContext(`(function(){${handler}}).call(node)`, {
+            node,
+            String,
+            window: {
+                __driverPwaUpdateRuntime: {currentShellVersion: loadedVersion},
+                location: {reload() { reloads += 1; }},
+            },
+        });
+        return {reloads, removals};
+    }
+    assert.deepEqual(execute("driver-mobile-shell-v218"), {reloads: 1, removals: 0});
+    assert.deepEqual(execute("driver-mobile-shell-v226"), {reloads: 0, removals: 1});
 });
 
 test("expired session update migrates a valid shell without touching a nonempty event queue", () => {

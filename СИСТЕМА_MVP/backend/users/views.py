@@ -278,7 +278,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v225'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v226'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -4961,6 +4961,7 @@ def driver_shift_view(request):
             'active_trip_actual_dump_point_id': active_trip_actual_dump_point_id,
             'trip_status_loaded': TripStatus.LOADED_WAITING_UNLOAD,
             'driver_shell_version': DRIVER_SHELL_VERSION,
+            'driver_operational_fragment': requested_fragment == 'driver',
             'driver_auth_generation': request.session.get(ACTIVE_ROLE_GENERATION_SESSION_KEY, ''),
             'operational_state_version': operational_state_version,
         },
