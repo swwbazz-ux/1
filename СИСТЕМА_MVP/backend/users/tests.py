@@ -1613,6 +1613,72 @@ class AccessLoginTests(TestCase):
         self.assertEqual(equipment.garage_number, 'A-102')
         self.assertIn(f'/system-admin/references/equipment/?q=A&status=active&edit={equipment.id}', response['Location'])
 
+    def test_admin_reorders_active_downtime_buttons_from_role_reference(self):
+        admin_role = Role.objects.create(code='admin', name='Администратор')
+        admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)
+        EmployeeAccess.objects.create(
+            employee=admin_employee,
+            role=admin_role,
+            access_code='1000',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        DowntimeReason.objects.all().delete()
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        first_reason = DowntimeReason.objects.create(
+            name='Ожидание погрузки',
+            equipment_type=truck_type,
+            show_for_truck_driver=True,
+            sort_order=10,
+        )
+        other_role_reason = DowntimeReason.objects.create(
+            name='Подготовка экскаватора',
+            show_for_excavator_operator=True,
+            sort_order=20,
+        )
+        second_reason = DowntimeReason.objects.create(
+            name='Очередь на разгрузке',
+            equipment_type=truck_type,
+            show_for_truck_driver=True,
+            sort_order=30,
+        )
+
+        self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
+        page = self.client.get('/system-admin/references/truck-driver-downtimes/', HTTP_HOST='localhost')
+
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, 'Стрелки сразу сохраняют единый порядок кнопок на сервере.')
+        self.assertContains(page, 'Переместить «Очередь на разгрузке» выше')
+
+        response = self.client.post(
+            '/system-admin/references/truck-driver-downtimes/',
+            {
+                'action': 'move_up',
+                'record_id': str(second_reason.id),
+            },
+            HTTP_HOST='localhost',
+        )
+        first_reason.refresh_from_db()
+        other_role_reason.refresh_from_db()
+        second_reason.refresh_from_db()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f'edit={second_reason.id}', response['Location'])
+        self.assertLess(second_reason.sort_order, other_role_reason.sort_order)
+        self.assertLess(other_role_reason.sort_order, first_reason.sort_order)
+        self.assertEqual(
+            list(
+                DowntimeReason.for_workplace('truck_driver', truck_type)
+                .values_list('id', flat=True)
+            ),
+            [second_reason.id, first_reason.id],
+        )
+        self.assertTrue(
+            AdminActionLog.objects.filter(
+                action='Справочник: Простои водителя самосвала — порядок',
+                object_repr='Очередь на разгрузке',
+            ).exists()
+        )
+
     def test_admin_opens_conflicts_registry(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
         admin_employee = Employee.objects.create(full_name='Администратор MVP', status=Employee.Status.ACTIVE)

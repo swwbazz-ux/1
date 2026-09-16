@@ -14,6 +14,52 @@
     font-weight: 600;
 }
 
+.reference-reorder-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.reference-reorder-form {
+    margin: 0;
+}
+
+.reference-reorder-button {
+    display: inline-grid;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid var(--admin-line, #c7d9e3);
+    border-radius: 7px;
+    background: var(--admin-panel-soft, #f3f8fa);
+    color: var(--admin-ink, #16262c);
+    font: inherit;
+    font-size: 18px;
+    font-weight: 900;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.reference-reorder-button:hover,
+.reference-reorder-button:focus-visible {
+    border-color: var(--admin-green, #14965d);
+    background: color-mix(in srgb, var(--admin-green, #14965d) 16%, var(--admin-panel-soft, #f3f8fa));
+    outline: none;
+}
+
+.reference-reorder-button:disabled {
+    opacity: .34;
+    cursor: not-allowed;
+}
+
+@media (max-width: 760px) {
+    .reference-record-actions {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+}
+
 @media (min-width: 1041px) {
     body.system-admin-reference-detail-screen .admin-reference-detail-shell {
         display: grid;
@@ -176,7 +222,11 @@
             <div class="section-title-row">
                 <div>
                     <h2>Записи</h2>
-                    <p>Запись открывается в форме редактирования.</p>
+                    {% if allow_reorder %}
+                        <p data-reference-reorder-note data-default-text="Стрелки сразу сохраняют единый порядок кнопок на сервере." data-filtered-text="Сбросьте поиск и фильтр, чтобы менять порядок.">{% if reorder_filters_active %}Сбросьте поиск и фильтр, чтобы менять порядок.{% else %}Стрелки сразу сохраняют единый порядок кнопок на сервере.{% endif %}</p>
+                    {% else %}
+                        <p>Запись открывается в форме редактирования.</p>
+                    {% endif %}
                 </div>
                 <span class="badge">{{ records|length }} видно</span>
             </div>
@@ -194,6 +244,22 @@
                             {% endfor %}
                         </div>
                         <div class="reference-record-actions">
+                            {% if allow_reorder %}
+                                <div class="reference-reorder-controls" data-reference-reorder aria-label="Изменить порядок причины простоя">
+                                    <form class="reference-reorder-form" method="post">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="move_up">
+                                        <input type="hidden" name="record_id" value="{{ record.object.id }}">
+                                        <button class="reference-reorder-button" type="submit" aria-label="Переместить «{{ record.title }}» выше" title="Переместить выше" data-reorder-button data-reorder-boundary-disabled="{% if record.can_move_up %}false{% else %}true{% endif %}" {% if not record.can_move_up or reorder_filters_active %}disabled{% endif %}>↑</button>
+                                    </form>
+                                    <form class="reference-reorder-form" method="post">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="move_down">
+                                        <input type="hidden" name="record_id" value="{{ record.object.id }}">
+                                        <button class="reference-reorder-button" type="submit" aria-label="Переместить «{{ record.title }}» ниже" title="Переместить ниже" data-reorder-button data-reorder-boundary-disabled="{% if record.can_move_down %}false{% else %}true{% endif %}" {% if not record.can_move_down or reorder_filters_active %}disabled{% endif %}>↓</button>
+                                    </form>
+                                </div>
+                            {% endif %}
                             <strong class="reference-state reference-state-{{ record.status_class }}">{{ record.status_label }}</strong>
                             <a class="reference-open" href="{% url 'system_admin_reference_detail' reference_code %}?edit={{ record.object.id }}">Править</a>
                         </div>
@@ -312,6 +378,8 @@ document.addEventListener('DOMContentLoaded', function () {
     var storageKey = 'system-admin-reference-scroll:' + window.location.pathname;
     var shell = document.querySelector('[data-admin-theme]');
     var themeToggle = document.querySelector('[data-admin-theme-toggle]');
+    var reorderButtons = Array.from(document.querySelectorAll('[data-reorder-button]'));
+    var reorderNote = document.querySelector('[data-reference-reorder-note]');
 
     function normalize(value) {
         return (value || '').toString().trim().toLowerCase();
@@ -338,6 +406,14 @@ document.addEventListener('DOMContentLoaded', function () {
             var matchesState = !state || row.dataset.recordStatus === state;
             row.hidden = !(matchesQuery && matchesState);
         });
+        var filtersActive = Boolean(query || state);
+        reorderButtons.forEach(function (button) {
+            var boundaryDisabled = button.dataset.reorderBoundaryDisabled === 'true';
+            button.disabled = filtersActive || boundaryDisabled;
+        });
+        if (reorderNote) {
+            reorderNote.textContent = filtersActive ? reorderNote.dataset.filteredText : reorderNote.dataset.defaultText;
+        }
     }
 
     if (search) search.addEventListener('input', applyFilters);
@@ -379,12 +455,13 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     rows.forEach(function (row) {
-        row.addEventListener('dblclick', function () {
+        row.addEventListener('dblclick', function (event) {
+            if (event.target.closest('a, button, form')) return;
             saveCurrentScroll();
             window.location.href = row.dataset.referenceRecordUrl;
         });
     });
-    document.querySelectorAll('.reference-record-row .reference-open, .reference-editor-form, .references-actions form, .references-actions a').forEach(function (node) {
+    document.querySelectorAll('.reference-record-row .reference-open, .reference-reorder-form, .reference-editor-form, .references-actions form, .references-actions a').forEach(function (node) {
         var eventName = node.tagName === 'FORM' ? 'submit' : 'click';
         node.addEventListener(eventName, saveCurrentScroll);
     });

@@ -1,4 +1,3 @@
 # Paths are relative to the repository root. Only these files enter a release.
-СИСТЕМА_MVP/backend/templates/users/driver_shift.html
-СИСТЕМА_MVP/backend/users/role_apps.py
+СИСТЕМА_MVP/backend/templates/users/system_admin_reference_detail.html
 СИСТЕМА_MVP/backend/users/views.py
