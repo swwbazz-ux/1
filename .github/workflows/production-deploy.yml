@@ -163,7 +163,6 @@ jobs:
           test -n "$RELEASE_STORE_PASSWORD"
           test -n "$RELEASE_KEY_ALIAS"
           test -n "$RELEASE_KEY_PASSWORD"
-          test -n "$RELEASE_CERT_SHA256"
           keystore="$RUNNER_TEMP/copper-release.jks"
           credentials="$RUNNER_TEMP/keystore-credentials.txt"
           printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
@@ -184,8 +183,14 @@ jobs:
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           "$apksigner" verify --verbose "$apk"
           actual_cert="$($apksigner verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':' | tr '[:lower:]' '[:upper:]')"
-          expected_cert="$(printf '%s' "$RELEASE_CERT_SHA256" | tr -d ': ' | tr '[:lower:]' '[:upper:]')"
+          current_manifest="$RUNNER_TEMP/$APK_PROFILE-current-update.json"
+          current_apk="$RUNNER_TEMP/$APK_PROFILE-current.apk"
+          curl --fail --silent --show-error "https://driverform.ru/media/apk/$APK_PROFILE-update.json" -o "$current_manifest"
+          current_url="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["apkUrl"])' "$current_manifest")"
+          curl --fail --silent --show-error --location "$current_url" -o "$current_apk"
+          expected_cert="$($apksigner verify --print-certs "$current_apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':' | tr '[:lower:]' '[:upper:]')"
           test -n "$actual_cert"
+          test -n "$expected_cert"
           test "$actual_cert" = "$expected_cert"
 
       - name: Reject non-incrementing APK version
