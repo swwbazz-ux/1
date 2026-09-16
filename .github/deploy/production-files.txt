@@ -1,3 +1,5 @@
-# Paths are relative to the repository root. Only these files enter a release.
-СИСТЕМА_MVP/backend/templates/users/system_admin_reference_detail.html
-СИСТЕМА_MVP/backend/users/views.py
+# Paths are relative to the repository root. Only these files enter this release.
+СИСТЕМА_MVP/backend/assignments/views.py
+СИСТЕМА_MVP/backend/assignments/tests.py
+СИСТЕМА_MVP/backend/templates/trips/dispatcher_control.html
+СИСТЕМА_MVP/backend/users/role_apps.py
