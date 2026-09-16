@@ -26,8 +26,11 @@ CODE_MODES = {"verify", "deploy"}
 MIGRATION_MODES = {"verify_migrations", "deploy_migrations"}
 APK_MODES = {"verify_apk", "publish_apk"}
 DATA_MODES = {"verify_data", "apply_data"}
-ALL_MODES = CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | {"rollback"}
-VERIFY_MODES = {"verify", "verify_migrations", "verify_apk", "verify_data"}
+RECEIVER_MODES = {"verify_receiver", "update_receiver"}
+ALL_MODES = CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | {"rollback"}
+VERIFY_MODES = {"verify", "verify_migrations", "verify_apk", "verify_data", "verify_receiver"}
+RECEIVER_PAYLOAD = "deploy/receiver/accounting_github_deploy_receiver.py"
+RECEIVER_PATH = Path("/usr/local/sbin/accounting-github-deploy-receiver")
 ALLOWED_TOP_LEVEL = {
     "assignments", "config", "core", "deploy", "downtimes", "portal",
     "references", "reports", "rotations", "settlement", "shifts", "static",
@@ -58,6 +61,10 @@ def validate_target(value: str, mode: str) -> PurePosixPath:
     path = PurePosixPath(value)
     if path.is_absolute() or not path.parts or ".." in path.parts:
         raise ReleaseError(f"unsafe target path: {value}")
+    if mode in RECEIVER_MODES:
+        if path.as_posix() != RECEIVER_PAYLOAD:
+            raise ReleaseError(f"receiver update target is not allowed: {value}")
+        return path
     if mode in APK_MODES:
         if path.parts[:2] != ("media", "apk") or len(path.parts) != 3:
             raise ReleaseError(f"APK release target is not allowed: {value}")
@@ -172,6 +179,13 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
         operation = metadata.get("operation")
         if not isinstance(operation, str) or operation not in payload or not operation.endswith(".py"):
             raise ReleaseError("data operation script is missing from the package")
+    elif mode in RECEIVER_MODES:
+        if set(payload) != {RECEIVER_PAYLOAD}:
+            raise ReleaseError("receiver release must contain exactly one receiver file")
+        try:
+            compile(payload[RECEIVER_PAYLOAD], RECEIVER_PAYLOAD, "exec")
+        except SyntaxError as exc:
+            raise ReleaseError("receiver source is not valid Python") from exc
     elif mode == "rollback":
         rollback_id = metadata.get("rollback_id")
         if not isinstance(rollback_id, str) or not rollback_id.startswith("github-"):
@@ -378,13 +392,13 @@ def publish_apk(manifest: dict[str, Any], payload: dict[str, bytes]) -> Path:
 
 def apply_data(manifest: dict[str, Any], payload: dict[str, bytes]) -> Path:
     backup = new_backup(manifest, payload)
-    install_payload(payload)
-    operation = APP / Path(*PurePosixPath(manifest["metadata"]["operation"]).parts)
-    dry_run = run([str(APP / ".venv/bin/python"), str(operation), "--dry-run"])
-    print(dry_run.stdout, end="")
-    run(["systemctl", "stop", "accounting-mvp"])
-    backup_database(backup)
     try:
+        install_payload(payload)
+        operation = APP / Path(*PurePosixPath(manifest["metadata"]["operation"]).parts)
+        dry_run = run([str(APP / ".venv/bin/python"), str(operation), "--dry-run"])
+        print(dry_run.stdout, end="")
+        backup_database(backup)
+        run(["systemctl", "stop", "accounting-mvp"])
         applied = run([str(APP / ".venv/bin/python"), str(operation), "--apply"])
         print(applied.stdout, end="")
         check = run([str(APP / ".venv/bin/python"), "manage.py", "check"])
@@ -392,10 +406,38 @@ def apply_data(manifest: dict[str, Any], payload: dict[str, bytes]) -> Path:
         run(["systemctl", "start", "accounting-mvp"])
         wait_for_service()
     except Exception:
-        restore_database(backup)
+        if (backup / "database.dump").is_file():
+            restore_database(backup)
         restore_files(backup)
         run(["systemctl", "restart", "accounting-mvp"], check=False)
         raise
+    return backup
+
+
+def update_receiver(manifest: dict[str, Any], payload: dict[str, bytes]) -> Path:
+    source = payload[RECEIVER_PAYLOAD]
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    backup = RECEIVER_PATH.with_name(
+        f"{RECEIVER_PATH.name}.{stamp}-{manifest['commit'][:12]}-before"
+    )
+    if not RECEIVER_PATH.is_file():
+        raise ReleaseError("installed receiver does not exist")
+    shutil.copy2(RECEIVER_PATH, backup)
+    os.chown(backup, 0, 0)
+    os.chmod(backup, 0o755)
+    write_atomic(RECEIVER_PATH, source, 0, 0, 0o755)
+    result = subprocess.run(
+        [sys.executable, "-m", "py_compile", str(RECEIVER_PATH)],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if result.returncode != 0:
+        shutil.copy2(backup, RECEIVER_PATH)
+        os.chown(RECEIVER_PATH, 0, 0)
+        os.chmod(RECEIVER_PATH, 0o755)
+        raise ReleaseError(f"receiver verification failed: {result.stdout.strip()}")
     return backup
 
 
@@ -433,6 +475,8 @@ def main() -> int:
                 backup = publish_apk(manifest, payload)
             elif mode == "apply_data":
                 backup = apply_data(manifest, payload)
+            elif mode == "update_receiver":
+                backup = update_receiver(manifest, payload)
             elif mode == "rollback":
                 backup = rollback(manifest)
             else:

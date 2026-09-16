@@ -44,6 +44,15 @@ class ReleaseProtocolTests(unittest.TestCase):
         with self.assertRaises(receiver.ReleaseError):
             receiver.validate_target("users/views.py", "apply_data")
 
+    def test_receiver_mode_accepts_only_the_receiver_payload(self):
+        accepted = receiver.validate_target(
+            "deploy/receiver/accounting_github_deploy_receiver.py",
+            "update_receiver",
+        )
+        self.assertEqual(accepted.as_posix(), receiver.RECEIVER_PAYLOAD)
+        with self.assertRaises(receiver.ReleaseError):
+            receiver.validate_target("deploy/other.py", "update_receiver")
+
     def test_apk_contract_requires_exact_role_version_url_and_sha(self):
         apk = b"PK\x03\x04signed-apk-placeholder"
         update = {

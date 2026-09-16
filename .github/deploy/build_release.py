@@ -19,6 +19,8 @@ MODES = {
     "publish_apk",
     "verify_data",
     "apply_data",
+    "verify_receiver",
+    "update_receiver",
     "rollback",
 }
 
@@ -37,6 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--apk-dist", type=Path)
     parser.add_argument("--apk-profile", choices=("driver", "excavator"))
     parser.add_argument("--operation")
+    parser.add_argument("--receiver-source", type=Path)
     parser.add_argument("--rollback-id")
     return parser.parse_args()
 
@@ -121,6 +124,18 @@ def main() -> None:
             raise SystemExit("APK mode requires --apk-dist and --apk-profile")
         paths = load_apk_paths(args.apk_dist.resolve(), args.apk_profile)
         metadata["apk_profile"] = args.apk_profile
+    elif args.mode in {"verify_receiver", "update_receiver"}:
+        if not args.receiver_source:
+            raise SystemExit("receiver mode requires --receiver-source")
+        source = args.receiver_source.resolve()
+        if not source.is_file():
+            raise SystemExit(f"receiver source is missing: {source}")
+        paths = [
+            (
+                PurePosixPath("deploy/receiver/accounting_github_deploy_receiver.py"),
+                source,
+            )
+        ]
     else:
         paths = load_paths(
             root,

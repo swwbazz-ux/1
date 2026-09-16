@@ -17,6 +17,8 @@ on:
           - publish_apk
           - verify_data
           - apply_data
+          - verify_receiver
+          - update_receiver
           - rollback
       expected_commit:
         description: "Full 40-character commit SHA selected for this run"
@@ -86,6 +88,8 @@ jobs:
             publish_apk) expected=PUBLISH_APK ;;
             verify_data) expected=VERIFY_DATA ;;
             apply_data) expected=APPLY_DATA ;;
+            verify_receiver) expected=VERIFY_RECEIVER ;;
+            update_receiver) expected=UPDATE_RECEIVER ;;
             rollback) expected=ROLLBACK ;;
             *) exit 2 ;;
           esac
@@ -109,16 +113,16 @@ jobs:
           cache-dependency-path: СИСТЕМА_MVP/backend/requirements.txt
 
       - name: Install project dependencies
-        if: ${{ !contains(inputs.mode, 'apk') && inputs.mode != 'rollback' }}
+        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && inputs.mode != 'rollback' }}
         run: python -m pip install -r "СИСТЕМА_MVP/backend/requirements.txt"
 
       - name: Prepare runtime directories for checks
-        if: ${{ !contains(inputs.mode, 'apk') && inputs.mode != 'rollback' }}
+        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && inputs.mode != 'rollback' }}
         working-directory: СИСТЕМА_MVP/backend
         run: mkdir -p media/employee_photos
 
       - name: Run Django release checks
-        if: ${{ !contains(inputs.mode, 'apk') && inputs.mode != 'rollback' }}
+        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && inputs.mode != 'rollback' }}
         working-directory: СИСТЕМА_MVP/backend
         env:
           DJANGO_SECRET_KEY: github-production-release-check
@@ -221,6 +225,8 @@ jobs:
           )
           if [[ "$MODE" == *apk ]]; then
             args+=(--apk-dist mobile/capacitor-shell/dist --apk-profile "$APK_PROFILE")
+          elif [[ "$MODE" == *receiver ]]; then
+            args+=(--receiver-source deployment/server/accounting_github_deploy_receiver.py)
           elif [[ "$MODE" == *data ]]; then
             args+=(--operation "$DATA_OPERATION")
           elif [[ "$MODE" == "rollback" ]]; then
