@@ -66,6 +66,10 @@ jobs:
       - name: Install project dependencies
         run: python -m pip install -r "СИСТЕМА_MVP/backend/requirements.txt"
 
+      - name: Prepare runtime directories for checks
+        working-directory: СИСТЕМА_MVP/backend
+        run: mkdir -p media/employee_photos
+
       - name: Run Django release checks
         working-directory: СИСТЕМА_MVP/backend
         env:
