@@ -4,20 +4,44 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "verify checks the channel without changing production"
+        description: "Safe production operation"
         required: true
         default: verify
         type: choice
         options:
           - verify
           - deploy
+          - verify_migrations
+          - deploy_migrations
+          - verify_apk
+          - publish_apk
+          - verify_data
+          - apply_data
+          - rollback
       expected_commit:
         description: "Full 40-character commit SHA selected for this run"
         required: true
         type: string
       confirmation:
-        description: "Enter DEPLOY for deploy mode or VERIFY for verify mode"
+        description: "Exact confirmation word for the selected mode"
         required: true
+        type: string
+      apk_profile:
+        description: "APK role for verify_apk/publish_apk"
+        required: false
+        default: none
+        type: choice
+        options:
+          - none
+          - driver
+          - excavator
+      data_operation:
+        description: "Target path deploy/data_updates/name.py for data modes"
+        required: false
+        type: string
+      rollback_id:
+        description: "Exact github-... rollback directory for rollback mode"
+        required: false
         type: string
 
 permissions:
@@ -47,16 +71,37 @@ jobs:
           MODE: ${{ inputs.mode }}
           CONFIRMATION: ${{ inputs.confirmation }}
           EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          APK_PROFILE: ${{ inputs.apk_profile }}
+          DATA_OPERATION: ${{ inputs.data_operation }}
+          ROLLBACK_ID: ${{ inputs.rollback_id }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
-          if [[ "$MODE" == "deploy" ]]; then
-            test "$CONFIRMATION" = "DEPLOY"
-          else
-            test "$CONFIRMATION" = "VERIFY"
+          case "$MODE" in
+            verify) expected=VERIFY ;;
+            deploy) expected=DEPLOY ;;
+            verify_migrations) expected=VERIFY_MIGRATIONS ;;
+            deploy_migrations) expected=DEPLOY_MIGRATIONS ;;
+            verify_apk) expected=VERIFY_APK ;;
+            publish_apk) expected=PUBLISH_APK ;;
+            verify_data) expected=VERIFY_DATA ;;
+            apply_data) expected=APPLY_DATA ;;
+            rollback) expected=ROLLBACK ;;
+            *) exit 2 ;;
+          esac
+          test "$CONFIRMATION" = "$expected"
+          if [[ "$MODE" == *apk ]]; then
+            [[ "$APK_PROFILE" == "driver" || "$APK_PROFILE" == "excavator" ]]
+          fi
+          if [[ "$MODE" == *data ]]; then
+            [[ "$DATA_OPERATION" =~ ^deploy/data_updates/[A-Za-z0-9._-]+\.py$ ]]
+          fi
+          if [[ "$MODE" == "rollback" ]]; then
+            [[ "$ROLLBACK_ID" =~ ^github-[A-Za-z0-9._-]+$ ]]
           fi
 
       - name: Set up Python
+        if: ${{ !contains(inputs.mode, 'apk') }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -64,13 +109,16 @@ jobs:
           cache-dependency-path: СИСТЕМА_MVP/backend/requirements.txt
 
       - name: Install project dependencies
+        if: ${{ !contains(inputs.mode, 'apk') && inputs.mode != 'rollback' }}
         run: python -m pip install -r "СИСТЕМА_MVP/backend/requirements.txt"
 
       - name: Prepare runtime directories for checks
+        if: ${{ !contains(inputs.mode, 'apk') && inputs.mode != 'rollback' }}
         working-directory: СИСТЕМА_MVP/backend
         run: mkdir -p media/employee_photos
 
       - name: Run Django release checks
+        if: ${{ !contains(inputs.mode, 'apk') && inputs.mode != 'rollback' }}
         working-directory: СИСТЕМА_MVP/backend
         env:
           DJANGO_SECRET_KEY: github-production-release-check
@@ -80,14 +128,105 @@ jobs:
           python manage.py check
           python manage.py makemigrations --check --dry-run
 
-      - name: Build deterministic release package
+      - name: Set up Java for signed APK
+        if: ${{ contains(inputs.mode, 'apk') }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: mobile/capacitor-shell/android/**/*.gradle*
+
+      - name: Set up Node for signed APK
+        if: ${{ contains(inputs.mode, 'apk') }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/capacitor-shell/package-lock.json
+
+      - name: Build and verify signed APK
+        if: ${{ contains(inputs.mode, 'apk') }}
+        working-directory: mobile/capacitor-shell
+        env:
+          APK_PROFILE: ${{ inputs.apk_profile }}
+          RELEASE_KEYSTORE_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          RELEASE_CERT_SHA256: ${{ secrets.ANDROID_RELEASE_CERT_SHA256 }}
         run: |
-          python .github/deploy/build_release.py \
-            --root . \
-            --files .github/deploy/production-files.txt \
-            --output "$RUNNER_TEMP/accounting-release.tar.gz" \
-            --commit "${{ github.sha }}" \
-            --mode "${{ inputs.mode }}"
+          set -euo pipefail
+          test -n "$RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_STORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          test -n "$RELEASE_KEY_PASSWORD"
+          test -n "$RELEASE_CERT_SHA256"
+          keystore="$RUNNER_TEMP/copper-release.jks"
+          credentials="$RUNNER_TEMP/keystore-credentials.txt"
+          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          chmod 0600 "$keystore"
+          {
+            printf 'storeFile=%s\n' "$keystore"
+            printf 'storePassword=%s\n' "$RELEASE_STORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$RELEASE_KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$RELEASE_KEY_PASSWORD"
+          } > "$credentials"
+          chmod 0600 "$credentials"
+          export COPPER_RELEASE_KEYSTORE_PROPERTIES="$credentials"
+          npm ci
+          npm test
+          npm run "android:release:$APK_PROFILE"
+          apk="dist/$APK_PROFILE-release.apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          "$apksigner" verify --verbose "$apk"
+          actual_cert="$($apksigner verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          expected_cert="$(printf '%s' "$RELEASE_CERT_SHA256" | tr -d ': ' | tr '[:lower:]' '[:upper:]')"
+          test -n "$actual_cert"
+          test "$actual_cert" = "$expected_cert"
+
+      - name: Reject non-incrementing APK version
+        if: ${{ contains(inputs.mode, 'apk') }}
+        working-directory: mobile/capacitor-shell
+        env:
+          APK_PROFILE: ${{ inputs.apk_profile }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          profile = os.environ["APK_PROFILE"]
+          new = json.load(open(f"dist/{profile}-update.json", encoding="utf-8"))
+          with urllib.request.urlopen(f"https://driverform.ru/media/apk/{profile}-update.json") as response:
+              current = json.load(response)
+          if int(new["versionCode"]) <= int(current["versionCode"]):
+              raise SystemExit(
+                  f"versionCode must increase: current={current['versionCode']} new={new['versionCode']}"
+              )
+          PY
+
+      - name: Build deterministic release package
+        env:
+          MODE: ${{ inputs.mode }}
+          APK_PROFILE: ${{ inputs.apk_profile }}
+          DATA_OPERATION: ${{ inputs.data_operation }}
+          ROLLBACK_ID: ${{ inputs.rollback_id }}
+        run: |
+          set -euo pipefail
+          python .github/deploy/test_release_protocol.py
+          args=(
+            --root .
+            --files .github/deploy/production-files.txt
+            --output "$RUNNER_TEMP/accounting-release.tar.gz"
+            --commit "${{ github.sha }}"
+            --mode "$MODE"
+          )
+          if [[ "$MODE" == *apk ]]; then
+            args+=(--apk-dist mobile/capacitor-shell/dist --apk-profile "$APK_PROFILE")
+          elif [[ "$MODE" == *data ]]; then
+            args+=(--operation "$DATA_OPERATION")
+          elif [[ "$MODE" == "rollback" ]]; then
+            args+=(--rollback-id "$ROLLBACK_ID")
+          fi
+          python .github/deploy/build_release.py "${args[@]}"
 
       - name: Configure pinned SSH transport
         env:
@@ -108,24 +247,35 @@ jobs:
         run: |
           set -euo pipefail
           cat "$RUNNER_TEMP/accounting-release.tar.gz" | \
-            ssh -T \
-              -o BatchMode=yes \
-              -o IdentitiesOnly=yes \
-              -o StrictHostKeyChecking=yes \
-              -o ConnectTimeout=20 \
-              -i "$HOME/.ssh/production_deploy" \
+            ssh -T -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=20 -i "$HOME/.ssh/production_deploy" \
               "$PROD_USER@$PROD_HOST"
 
-      - name: Verify public health after deployment
-        if: inputs.mode == 'deploy'
+      - name: Verify public web health
+        if: ${{ inputs.mode == 'deploy' || inputs.mode == 'deploy_migrations' || inputs.mode == 'apply_data' || inputs.mode == 'rollback' }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --location \
-            --retry 6 --retry-delay 5 --retry-all-errors \
-            https://driverform.ru/ >/dev/null
-          curl --fail --silent --show-error \
-            --retry 6 --retry-delay 5 --retry-all-errors \
-            https://driverform.ru/driver-sw.js >/dev/null
-          curl --fail --silent --show-error \
-            --retry 6 --retry-delay 5 --retry-all-errors \
-            https://driverform.ru/excavator-sw.js >/dev/null
+          curl --fail --silent --show-error --location --retry 6 --retry-delay 5 --retry-all-errors https://driverform.ru/ >/dev/null
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 --retry-all-errors https://driverform.ru/driver-sw.js >/dev/null
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 --retry-all-errors https://driverform.ru/excavator-sw.js >/dev/null
+
+      - name: Verify published APK and manifest
+        if: ${{ inputs.mode == 'publish_apk' }}
+        working-directory: mobile/capacitor-shell
+        env:
+          APK_PROFILE: ${{ inputs.apk_profile }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, os, urllib.request
+          profile = os.environ["APK_PROFILE"]
+          expected = json.load(open(f"dist/{profile}-update.json", encoding="utf-8"))
+          with urllib.request.urlopen(f"https://driverform.ru/media/apk/{profile}-update.json") as response:
+              published = json.load(response)
+          if published != expected:
+              raise SystemExit("published APK manifest differs from the release")
+          with urllib.request.urlopen(published["apkUrl"]) as response:
+              apk = response.read()
+          if hashlib.sha256(apk).hexdigest() != published["sha256"]:
+              raise SystemExit("published APK SHA-256 mismatch")
+          PY

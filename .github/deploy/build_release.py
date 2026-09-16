@@ -10,6 +10,17 @@ import tarfile
 
 
 BACKEND_PREFIX = PurePosixPath("СИСТЕМА_MVP/backend")
+MODES = {
+    "verify",
+    "deploy",
+    "verify_migrations",
+    "deploy_migrations",
+    "verify_apk",
+    "publish_apk",
+    "verify_data",
+    "apply_data",
+    "rollback",
+}
 
 
 def sha256(data: bytes) -> str:
@@ -22,11 +33,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--files", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--commit", required=True)
-    parser.add_argument("--mode", choices=("verify", "deploy"), required=True)
+    parser.add_argument("--mode", choices=sorted(MODES), required=True)
+    parser.add_argument("--apk-dist", type=Path)
+    parser.add_argument("--apk-profile", choices=("driver", "excavator"))
+    parser.add_argument("--operation")
+    parser.add_argument("--rollback-id")
     return parser.parse_args()
 
 
-def load_paths(root: Path, list_path: Path) -> list[tuple[PurePosixPath, Path]]:
+def load_paths(
+    root: Path,
+    list_path: Path,
+    *,
+    allow_migrations: bool,
+) -> list[tuple[PurePosixPath, Path]]:
     result: list[tuple[PurePosixPath, Path]] = []
     seen: set[str] = set()
     for line_number, raw in enumerate(list_path.read_text(encoding="utf-8").splitlines(), 1):
@@ -46,13 +66,37 @@ def load_paths(root: Path, list_path: Path) -> list[tuple[PurePosixPath, Path]]:
         source = root.joinpath(*repository_path.parts)
         if not source.is_file():
             raise SystemExit(f"release file is missing: {value}")
-        if "migrations" in target.parts:
+        if "migrations" in target.parts and not allow_migrations:
             raise SystemExit(f"database migrations require a separately approved release: {value}")
         seen.add(target_text)
         result.append((target, source))
     if not result:
         raise SystemExit("release file list is empty")
     return sorted(result, key=lambda item: item[0].as_posix())
+
+
+def load_apk_paths(dist: Path, profile: str) -> list[tuple[PurePosixPath, Path]]:
+    manifest_path = dist / f"{profile}-update.json"
+    if not manifest_path.is_file():
+        raise SystemExit(f"APK update manifest is missing: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"APK update manifest is invalid: {manifest_path}") from exc
+    if manifest.get("profile") != profile:
+        raise SystemExit("APK profile does not match the update manifest")
+    apk_name = PurePosixPath(str(manifest.get("apkUrl", ""))).name
+    if not apk_name or apk_name != f"{profile}-{manifest.get('versionName')}.apk":
+        raise SystemExit("APK public name does not match profile/versionName")
+    apk_path = dist / apk_name
+    if not apk_path.is_file():
+        raise SystemExit(f"public APK is missing: {apk_path}")
+    if sha256(apk_path.read_bytes()) != manifest.get("sha256"):
+        raise SystemExit("APK SHA-256 does not match the update manifest")
+    return [
+        (PurePosixPath(f"media/apk/{apk_name}"), apk_path),
+        (PurePosixPath(f"media/apk/{profile}-update.json"), manifest_path),
+    ]
 
 
 def add_bytes(archive: tarfile.TarFile, name: str, data: bytes, mode: int = 0o644) -> None:
@@ -66,7 +110,37 @@ def add_bytes(archive: tarfile.TarFile, name: str, data: bytes, mode: int = 0o64
 def main() -> None:
     args = parse_args()
     root = args.root.resolve()
-    paths = load_paths(root, args.files.resolve())
+    metadata: dict[str, str] = {}
+    if args.mode == "rollback":
+        if not args.rollback_id or not args.rollback_id.startswith("github-"):
+            raise SystemExit("rollback mode requires --rollback-id github-...")
+        paths: list[tuple[PurePosixPath, Path]] = []
+        metadata["rollback_id"] = args.rollback_id
+    elif args.mode in {"verify_apk", "publish_apk"}:
+        if not args.apk_dist or not args.apk_profile:
+            raise SystemExit("APK mode requires --apk-dist and --apk-profile")
+        paths = load_apk_paths(args.apk_dist.resolve(), args.apk_profile)
+        metadata["apk_profile"] = args.apk_profile
+    else:
+        paths = load_paths(
+            root,
+            args.files.resolve(),
+            allow_migrations=args.mode in {"verify_migrations", "deploy_migrations"},
+        )
+        if args.mode in {"verify_data", "apply_data"}:
+            if not args.operation:
+                raise SystemExit("data mode requires --operation")
+            operation = PurePosixPath(args.operation)
+            if (
+                operation.is_absolute()
+                or ".." in operation.parts
+                or operation.parts[:2] != ("deploy", "data_updates")
+                or operation.suffix != ".py"
+            ):
+                raise SystemExit("data operation must be deploy/data_updates/*.py")
+            if operation not in {target for target, _ in paths}:
+                raise SystemExit("data operation is not included in the release file list")
+            metadata["operation"] = operation.as_posix()
     manifest_files = []
     payload: list[tuple[str, bytes]] = []
     for target, source in paths:
@@ -78,10 +152,11 @@ def main() -> None:
         payload.append((f"payload/{target_text}", data))
 
     manifest = {
-        "schema": 1,
+        "schema": 2,
         "mode": args.mode,
         "commit": args.commit,
         "files": manifest_files,
+        "metadata": metadata,
     }
     manifest_data = (json.dumps(manifest, ensure_ascii=False, sort_keys=True) + "\n").encode()
     args.output.parent.mkdir(parents=True, exist_ok=True)
