@@ -156,6 +156,11 @@ def main() -> None:
             if operation not in {target for target, _ in paths}:
                 raise SystemExit("data operation is not included in the release file list")
             metadata["operation"] = operation.as_posix()
+            paths = [
+                (target, source)
+                for target, source in paths
+                if target.parts[:2] == ("deploy", "data_updates")
+            ]
     manifest_files = []
     payload: list[tuple[str, bytes]] = []
     for target, source in paths:
