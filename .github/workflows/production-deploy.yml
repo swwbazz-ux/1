@@ -178,6 +178,7 @@ jobs:
           export COPPER_RELEASE_KEYSTORE_PROPERTIES="$credentials"
           npm ci
           npm test
+          chmod +x android/gradlew
           npm run "android:release:$APK_PROFILE"
           apk="dist/$APK_PROFILE-release.apk"
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
