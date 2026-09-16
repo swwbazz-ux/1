@@ -14,7 +14,7 @@ from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentSta
 from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanCalculationMode, ShiftClientAction
 from shifts.services import assign_shift_plan_snapshot
 from trips.models import Trip, TripStatus
-from users.models import Employee, EmployeeAccess, Role
+from users.models import Employee, EmployeeAccess, PersonnelPosition, Role
 
 from .models import (
     AssignmentStatus,
@@ -648,7 +648,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v164')
+        self.assertContains(response, 'mining-master-mobile-shell-v165')
         self.assertContains(response, 'mining-master-mobile-sync-queue-v3')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v1")')
         self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v2")')
@@ -725,10 +725,10 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v164', script)
+        self.assertIn('mining-master-mobile-shell-v165', script)
         self.assertEqual(
             response['X-App-Shell-Version'],
-            'mining-master-mobile-shell-v164',
+            'mining-master-mobile-shell-v165',
         )
         self.assertIn(
             f'const CACHE_NAME = "{response["X-App-Shell-Version"]}";',
@@ -1581,6 +1581,96 @@ class MiningMasterAssignmentsViewTests(TestCase):
         response = self.client.post(reverse('mining_master_assignments'), {'action': 'end_shift'})
         self.assertRedirects(response, reverse('mining_master_assignments'))
         self.assertFalse(EmployeeShift.objects.filter(employee=self.master, closed_at__isnull=True).exists())
+
+    def test_senior_mining_master_can_manage_subordinate_open_shift_in_parallel(self):
+        senior_position = PersonnelPosition.objects.get(code='position_040')
+        senior = Employee.objects.create(
+            full_name='Старший горный мастер Тест',
+            phone='79000000440',
+            personnel_position=senior_position,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        senior_access = EmployeeAccess.objects.create(
+            employee=senior,
+            role=self.master_role,
+            access_code='440000',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        session = self.client.session
+        session['employee_access_id'] = senior_access.id
+        session.save()
+
+        page = self.client.get(reverse('mining_master_assignments'))
+
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, 'Совместное управление')
+        self.assertContains(page, 'data-mm-mobile-readonly="false"')
+        self.assertNotContains(page, 'value="end_shift"')
+
+        expected_states = {
+            str(item.truck_id): item.id
+            for item in projected_haul_assignments_for_excavator(self.other_excavator)
+        }
+        response = self.client.post(
+            reverse('mining_master_move_excavator'),
+            data=json.dumps({
+                'excavator_id': self.other_excavator.id,
+                'zone': ExcavatorPlacement.Zone.INACTIVE,
+                'expected_zone': ExcavatorPlacement.Zone.ACTIVE,
+                'expected_assignment_states': expected_states,
+                'client_action_id': 'senior-mm-parallel-control',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        placement = ExcavatorPlacement.objects.get(excavator=self.other_excavator)
+        self.assertEqual(placement.zone, ExcavatorPlacement.Zone.INACTIVE)
+        self.assertEqual(placement.changed_by, senior)
+        self.shift.refresh_from_db()
+        self.assertIsNone(self.shift.closed_at)
+        self.assertFalse(
+            EmployeeShift.objects.filter(employee=senior, closed_at__isnull=True).exists()
+        )
+
+    def test_ordinary_mining_master_remains_read_only_during_another_master_shift(self):
+        other_master = Employee.objects.create(
+            full_name='Другой горный мастер Тест',
+            phone='79000000441',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        other_access = EmployeeAccess.objects.create(
+            employee=other_master,
+            role=self.master_role,
+            access_code='441111',
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        session = self.client.session
+        session['employee_access_id'] = other_access.id
+        session.save()
+
+        page = self.client.get(reverse('mining_master_assignments'))
+        self.assertContains(page, 'Режим наблюдателя')
+        self.assertContains(page, 'data-mm-mobile-readonly="true"')
+
+        response = self.client.post(
+            reverse('mining_master_assign_truck'),
+            data=json.dumps({
+                'action': 'release',
+                'truck_id': self.assigned_truck.id,
+                'expected_assignment_state_id': HaulAssignment.objects.get(
+                    truck=self.assigned_truck,
+                ).id,
+                'client_action_id': 'ordinary-mm-still-blocked',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Предыдущий горный мастер', response.json()['error'])
 
     def test_mining_master_start_is_refused_while_other_role_shift_is_open(self):
         # Боевой инцидент 10.09.2026: у сотрудника с несколькими ролями была

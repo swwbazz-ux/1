@@ -94,7 +94,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v164";
+const CACHE_NAME = "mining-master-mobile-shell-v165";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -306,6 +306,19 @@ WORKPLACE_ROLE_CODES = {
     'mining_master',
     'oup',
 }
+
+SENIOR_MINING_MASTER_POSITION_CODE = 'position_040'
+
+
+def is_senior_mining_master(employee):
+    """Return whether the employee is the senior mining master.
+
+    The personnel position is the stable HR distinction between an ordinary
+    mining master and the senior mining master. Both use the same application
+    role and therefore must not be split into separate login roles.
+    """
+    position = getattr(employee, 'personnel_position', None)
+    return bool(position and position.code == SENIOR_MINING_MASTER_POSITION_CODE)
 
 
 def mining_master_shift_queryset():
@@ -738,7 +751,7 @@ def mining_master_access_from_request(request):
         return None
     access = (
         EmployeeAccess.objects
-        .select_related('employee', 'role')
+        .select_related('employee', 'employee__personnel_position', 'role')
         .filter(id=access_id, is_active=True)
         .first()
     )
@@ -799,6 +812,8 @@ def mining_master_open_shift_or_error(access):
     if access.role.code != 'mining_master':
         return None, 'Изменять пульт Горного мастера может только Горный мастер.'
     current_shift, blocking_shift = get_shift_state_for_access(access)
+    if not current_shift and blocking_shift and is_senior_mining_master(access.employee):
+        return blocking_shift, ''
     if not current_shift:
         if blocking_shift:
             return None, 'Предыдущий горный мастер еще не закрыл смену.'
@@ -808,6 +823,12 @@ def mining_master_open_shift_or_error(access):
 
 def build_mining_master_dispatcher_header(request, access, current_shift, blocking_shift):
     reporting_shift = mining_master_reporting_shift(current_shift, blocking_shift)
+    is_senior_supervision = bool(
+        not current_shift
+        and blocking_shift
+        and is_senior_mining_master(access.employee)
+    )
+    control_shift = current_shift or (blocking_shift if is_senior_supervision else None)
     active_person = access.employee if current_shift else (blocking_shift.employee if blocking_shift else None)
     active_shift_opened_at = ''
     active_shift_date = ''
@@ -840,6 +861,11 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
         time_range = '07:00-19:00' if current_shift.shift_type == ShiftType.DAY else '19:00-07:00'
         clock_caption = 'в работе'
         shift_status_variant = 'open'
+    elif is_senior_supervision:
+        shift_label = 'Совместное управление'
+        time_range = f'с {active_shift_opened_at}' if active_shift_opened_at else 'активная смена'
+        clock_caption = 'старший мастер'
+        shift_status_variant = 'open'
     elif blocking_shift:
         shift_label = 'Режим наблюдателя'
         time_range = f'с {active_shift_opened_at}' if active_shift_opened_at else 'ожидание закрытия'
@@ -867,7 +893,8 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
             'active_shift_date': active_shift_date,
             'active_shift_opened_at': active_shift_opened_at,
             'can_toggle_shift': bool(current_shift or can_start_shift),
-            'shift_is_open': bool(current_shift),
+            'shift_is_open': bool(control_shift),
+            'is_senior_supervision': is_senior_supervision,
             'shift_status_variant': shift_status_variant,
             'active_role_label': 'горный мастер',
             'active_shift_title': 'Активная смена горного мастера',
@@ -1263,7 +1290,11 @@ def mining_master_assignments_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    access = EmployeeAccess.objects.select_related(
+        'employee',
+        'employee__personnel_position',
+        'role',
+    ).filter(id=access_id, is_active=True).first()
     if not access or access.role.code != 'mining_master':
         return redirect('role_home')
 

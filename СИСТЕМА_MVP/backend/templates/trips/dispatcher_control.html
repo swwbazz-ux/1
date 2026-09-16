@@ -21,7 +21,7 @@
         <meta name="apple-mobile-web-app-title" content="Горный мастер">
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
         <script src="{% static 'js/role-app-install-v1.js' %}?v=4" defer></script>
-        <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v164" defer></script>
+        <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v165" defer></script>
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
         <meta name="theme-color" content="#B33A4C">
@@ -488,6 +488,11 @@
             {% endif %}
 
             <div class="mm-mobile-shift-actions">
+            {% if dispatcher_header.is_senior_supervision %}
+            <div class="mm-mobile-shift-form">
+                <button class="mm-mobile-shift-button" type="button" disabled>Совместное управление</button>
+            </div>
+            {% else %}
             <form class="mm-mobile-shift-form" method="post" action="{% if dispatcher_header.shift_form_action %}{{ dispatcher_header.shift_form_action }}{% else %}{% url 'dispatcher_toggle_shift' %}{% endif %}">
                 {% csrf_token %}
                 {% if not dispatcher_header.shift_is_open %}
@@ -525,6 +530,7 @@
                     >Начать смену</button>
                 {% endif %}
             </form>
+            {% endif %}
             <button type="button" class="mm-mobile-logout-button" data-mm-mobile-logout data-mm-logout-url="{% url 'logout' %}" aria-label="Выйти из приложения, удерживайте кнопку"><span data-mobile-shift-label>Выйти</span></button>
             </div>
 
@@ -1398,7 +1404,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v164";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v165";
     function readDispatcherSyncQueue() {
         try {
             return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
