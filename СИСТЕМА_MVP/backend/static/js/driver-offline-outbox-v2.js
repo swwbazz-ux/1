@@ -16,7 +16,8 @@
     var IMMUTABLE_FIELDS = [
         "event_id", "event_type", "format_version", "actor_id", "access_id",
         "role_code", "device_id", "shift_id", "equipment_id", "trip_id",
-        "local_trip_id", "local_downtime_id", "occurred_at", "depends_on", "payload"
+        "local_trip_id", "local_downtime_id", "occurred_at", "depends_on", "payload",
+        "context_snapshot"
     ];
 
     function nowIso() { return new Date().toISOString(); }
@@ -126,11 +127,32 @@
             occurred_at: String(options.occurredAt || nowIso()),
             depends_on: pendingStartId ? [pendingStartId] : [],
             local_downtime_id: pendingStartId || null,
+            context_snapshot: clone(options.contextSnapshot || {}),
             payload: {
                 downtime_id: serverId,
                 local_downtime_id: pendingStartId || null
             }
         };
+    }
+
+    function selectDriverDowntimeProjection(events) {
+        return (Array.isArray(events) ? events : [])
+            .filter(function (event) {
+                return event
+                    && (event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended")
+                    && !TERMINAL_STATES.has(String(event.state || "pending"));
+            })
+            .slice()
+            .sort(function (left, right) { return Number(left.sequence) - Number(right.sequence); })
+            .pop() || null;
+    }
+
+    function downtimeProjectionReceiptKey(shiftId, equipmentId) {
+        shiftId = number(shiftId);
+        equipmentId = number(equipmentId);
+        return shiftId && equipmentId
+            ? "downtime-projection:" + shiftId + ":" + equipmentId
+            : "";
     }
 
     function localRepository(storage, accessId) {
@@ -302,6 +324,7 @@
                 sequence: null,
                 depends_on: Array.isArray(spec.depends_on) ? spec.depends_on.map(String) : [],
                 payload: clone(spec.payload || {}),
+                context_snapshot: clone(spec.context_snapshot || {}),
                 state: "pending",
                 attempt_count: 0,
                 next_retry_at: 0,
@@ -367,6 +390,24 @@
                     await repo.setMeta("event-identity:" + event.event_id, identityRecord(event));
                     if (result.server_ids) {
                         await repo.setMeta("server-map:" + event.event_id, clone(result.server_ids));
+                    }
+                    var downtimeReceiptKey = downtimeProjectionReceiptKey(event.shift_id, event.equipment_id);
+                    if (downtimeReceiptKey && (event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended")) {
+                        await repo.setMeta(downtimeReceiptKey, {
+                            event_id: event.event_id,
+                            event_type: event.event_type,
+                            shift_id: number(event.shift_id),
+                            equipment_id: number(event.equipment_id),
+                            occurred_at: event.occurred_at,
+                            confirmed_at: String(result.server_received_at || event.updated_at || event.occurred_at),
+                            payload: clone(event.payload || {}),
+                            projection: clone(
+                                event.context_snapshot
+                                && event.context_snapshot.downtime_projection
+                                || null
+                            ),
+                            server_ids: clone(result.server_ids || null)
+                        });
                     }
                     await repo.remove(event.event_id);
                     confirmed.push([clone(event), clone(result)]);
@@ -458,6 +499,12 @@
             var repo = await repoPromise;
             return clone(await repo.getMeta("server-map:" + String(eventId || "")) || null);
         }
+        async function getDowntimeProjectionReceipt(shiftId, equipmentId) {
+            var key = downtimeProjectionReceiptKey(shiftId, equipmentId);
+            if (!key) return null;
+            var repo = await repoPromise;
+            return clone(await repo.getMeta(key) || null);
+        }
         async function resumeAuthRequired(authGeneration) {
             authGeneration = String(authGeneration || "");
             if (!authGeneration) return publish();
@@ -521,7 +568,8 @@
             publish: publish,
             setBindings: setBindings,
             resumeAuthRequired: resumeAuthRequired,
-            getServerMapping: getServerMapping
+            getServerMapping: getServerMapping,
+            getDowntimeProjectionReceipt: getDowntimeProjectionReceipt
         };
     }
 
@@ -529,6 +577,7 @@
     root.createDriverPointChangeEvent = createDriverPointChangeEvent;
     root.isDriverSyncAuthResponse = isDriverSyncAuthResponse;
     root.createDriverDowntimeEndEvent = createDriverDowntimeEndEvent;
+    root.selectDriverDowntimeProjection = selectDriverDowntimeProjection;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = {
             createDriverOfflineOutbox: createDriverOfflineOutbox,
@@ -537,6 +586,7 @@
             createDriverPointChangeEvent: createDriverPointChangeEvent,
             isDriverSyncAuthResponse: isDriverSyncAuthResponse,
             createDriverDowntimeEndEvent: createDriverDowntimeEndEvent,
+            selectDriverDowntimeProjection: selectDriverDowntimeProjection,
             backoff: backoff
         };
     }

@@ -446,6 +446,78 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(results[0]['server_ids']['downtime_event_id'], event.id)
         self.assertEqual(results[1]['server_ids']['downtime_event_id'], event.id)
 
+    def test_driver_downtime_reason_switch_preserves_separate_intervals_and_total(self):
+        self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.truck_shift.save(update_fields=['opened_at'])
+        first_reason = DowntimeReason.objects.create(
+            name='Offline первая причина',
+            equipment_type=self.truck_type,
+            show_for_truck_driver=True,
+        )
+        second_reason = DowntimeReason.objects.create(
+            name='Offline вторая причина',
+            equipment_type=self.truck_type,
+            show_for_truck_driver=True,
+        )
+        first_at = timezone.now() - timedelta(minutes=3)
+        switched_at = first_at + timedelta(seconds=40)
+        repeated_at = switched_at + timedelta(seconds=15)
+        first = {
+            'event_id': 'driver-downtime-switch-first',
+            'event_type': 'driver.downtime.started',
+            'format_version': 1,
+            'occurred_at': first_at.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'payload': {'reason_id': first_reason.id},
+        }
+        second = {
+            'event_id': 'driver-downtime-switch-second',
+            'event_type': 'driver.downtime.started',
+            'format_version': 1,
+            'occurred_at': switched_at.isoformat(),
+            'sequence': 2,
+            'depends_on': [first['event_id']],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'payload': {'reason_id': second_reason.id},
+        }
+        repeated = {
+            'event_id': 'driver-downtime-switch-second-repeat',
+            'event_type': 'driver.downtime.started',
+            'format_version': 1,
+            'occurred_at': repeated_at.isoformat(),
+            'sequence': 3,
+            'depends_on': [second['event_id']],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'payload': {'reason_id': second_reason.id},
+        }
+
+        results = self.sync(
+            [repeated, second, first],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-device-downtime-switch',
+        ).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted', 'accepted'])
+        intervals = list(DowntimeEvent.objects.filter(equipment=self.truck).order_by('started_at', 'id'))
+        self.assertEqual(len(intervals), 2)
+        self.assertEqual(intervals[0].reason, first_reason)
+        self.assertEqual(intervals[0].started_at, first_at)
+        self.assertEqual(intervals[0].ended_at, switched_at)
+        self.assertEqual(intervals[1].reason, second_reason)
+        self.assertEqual(intervals[1].started_at, switched_at)
+        self.assertIsNone(intervals[1].ended_at)
+        by_id = {item['event_id']: item for item in results}
+        self.assertEqual(
+            by_id[repeated['event_id']]['server_ids']['downtime_event_id'],
+            intervals[1].id,
+        )
+
     def test_downtime_start_event_id_is_backward_compatible_local_reference(self):
         self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
         self.truck_shift.save(update_fields=['opened_at'])
@@ -527,6 +599,55 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(result['status'], 'accepted')
         downtime.refresh_from_db()
         self.assertEqual(downtime.ended_at, ended_at)
+
+    def test_excavator_offline_downtime_switch_uses_the_same_interval_contract(self):
+        self.shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.shift.save(update_fields=['opened_at'])
+        first_reason = DowntimeReason.objects.create(
+            name='Экскаватор offline причина 1',
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+        )
+        second_reason = DowntimeReason.objects.create(
+            name='Экскаватор offline причина 2',
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+        )
+        first_at = timezone.now() - timedelta(minutes=2)
+        switched_at = first_at + timedelta(seconds=25)
+        first = {
+            'event_id': 'excavator-downtime-switch-first',
+            'event_type': 'excavator.downtime.started',
+            'format_version': 1,
+            'occurred_at': first_at.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'payload': {'reason_id': first_reason.id},
+        }
+        second = {
+            'event_id': 'excavator-downtime-switch-second',
+            'event_type': 'excavator.downtime.started',
+            'format_version': 1,
+            'occurred_at': switched_at.isoformat(),
+            'sequence': 2,
+            'depends_on': [first['event_id']],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'payload': {'reason_id': second_reason.id},
+        }
+
+        results = self.sync([second, first]).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'])
+        intervals = list(DowntimeEvent.objects.filter(equipment=self.excavator).order_by('started_at', 'id'))
+        self.assertEqual(len(intervals), 2)
+        self.assertEqual(intervals[0].reason, first_reason)
+        self.assertEqual(intervals[0].ended_at, switched_at)
+        self.assertEqual(intervals[1].reason, second_reason)
+        self.assertEqual(intervals[1].started_at, switched_at)
+        self.assertIsNone(intervals[1].ended_at)
 
     def test_legacy_excavator_downtime_end_accepts_local_active_reference(self):
         self.shift.opened_at = timezone.now() - timedelta(minutes=10)

@@ -3471,6 +3471,66 @@ class AccessLoginTests(TestCase):
         self.assertEqual(close_payload['reason_totals'][str(second_reason.id)], 7)
         self.assertEqual(close_payload['reason_totals'][str(first_reason.id)], 120)
 
+    def test_driver_downtime_switch_closes_previous_interval_without_resetting_total(self):
+        truck = self.create_registered_driver_shift()
+        shift = EmployeeShift.objects.get(employee=self.employee, closed_at__isnull=True)
+        base_time = timezone.now()
+        shift.opened_at = base_time - timedelta(hours=1)
+        shift.save(update_fields=['opened_at'])
+        first_reason = DowntimeReason.objects.create(
+            name='Тест переключения 1',
+            short_label='Первый',
+            show_for_truck_driver=True,
+        )
+        second_reason = DowntimeReason.objects.create(
+            name='Тест переключения 2',
+            short_label='Второй',
+            show_for_truck_driver=True,
+        )
+
+        def post_reason(reason, at):
+            with patch('users.views.timezone.now', return_value=at):
+                return self.client.post(
+                    reverse('driver_downtime_action'),
+                    data=json.dumps({'action': 'start', 'reason_id': reason.id}),
+                    content_type='application/json',
+                    HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                    HTTP_ACCEPT='application/json',
+                    HTTP_HOST='localhost',
+                )
+
+        first_response = post_reason(first_reason, base_time)
+        switch_response = post_reason(second_reason, base_time + timedelta(seconds=7))
+        repeat_response = post_reason(second_reason, base_time + timedelta(seconds=10))
+        with patch('users.views.timezone.now', return_value=base_time + timedelta(seconds=12)):
+            close_response = self.client.post(
+                reverse('driver_downtime_action'),
+                data=json.dumps({'action': 'close'}),
+                content_type='application/json',
+                HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                HTTP_ACCEPT='application/json',
+                HTTP_HOST='localhost',
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(switch_response.status_code, 200)
+        self.assertEqual(switch_response.json()['action'], 'downtime_switched')
+        self.assertEqual(repeat_response.status_code, 200)
+        self.assertEqual(repeat_response.json()['action'], 'downtime_unchanged')
+        self.assertEqual(close_response.status_code, 200)
+        intervals = list(DowntimeEvent.objects.filter(equipment=truck).order_by('started_at', 'id'))
+        self.assertEqual(len(intervals), 2)
+        self.assertEqual(intervals[0].reason, first_reason)
+        self.assertEqual(intervals[0].started_at, base_time)
+        self.assertEqual(intervals[0].ended_at, base_time + timedelta(seconds=7))
+        self.assertEqual(intervals[1].reason, second_reason)
+        self.assertEqual(intervals[1].started_at, base_time + timedelta(seconds=7))
+        self.assertEqual(intervals[1].ended_at, base_time + timedelta(seconds=12))
+        close_payload = close_response.json()
+        self.assertEqual(close_payload['reason_totals'][str(first_reason.id)], 7)
+        self.assertEqual(close_payload['reason_totals'][str(second_reason.id)], 5)
+        self.assertEqual(close_payload['shift_total_seconds'], 12)
+
     def test_driver_downtime_action_validates_reason_by_workplace_and_equipment_type(self):
         truck = self.create_registered_driver_shift()
         DowntimeReason.objects.all().update(show_for_truck_driver=False)

@@ -1004,11 +1004,6 @@ def _process_downtime(access, normalized, *, role_code, close):
         reason = DowntimeReason.for_workplace(workplace, equipment.equipment_type).filter(pk=reason_id).first()
         if not reason:
             _conflict('downtime_reason_changed', 'Причина простоя больше недоступна.')
-        open_event = DowntimeEvent.objects.select_for_update(of=('self',)).filter(
-            equipment=equipment, ended_at__isnull=True,
-        ).order_by('-started_at', '-id').first()
-        if open_event:
-            _conflict('downtime_state_changed', 'На технике уже есть другой активный простой.')
         if role_code == 'driver' and driver_downtime_requires_empty_truck(reason):
             if Trip.objects.select_for_update().filter(truck=equipment, status__in=OPEN_TRIP_STATUSES).exists():
                 _conflict('empty_truck_required', 'Ожидание погрузки нельзя начать: самосвал уже загружен.')
@@ -1017,22 +1012,46 @@ def _process_downtime(access, normalized, *, role_code, close):
                 truck=equipment, status=TripStatus.LOADED_WAITING_UNLOAD,
             ).exists():
                 _conflict('loaded_trip_required', 'Этот простой доступен только после погрузки.')
-        event = DowntimeEvent.objects.create(
-            equipment=equipment,
-            employee=access.employee,
-            subject_employee=access.employee,
-            recorded_by=access.employee,
-            reason=reason,
-            started_at=normalized['occurred_at'],
-            comment=str(normalized['payload'].get('comment') or '')[:255],
-            recorded_at=normalized['received_at'],
-            ended_at=(
-                shift.closed_at
-                if shift.closed_at and shift.closed_at >= normalized['occurred_at']
-                else None
-            ),
-        )
-        action = 'downtime_started'
+        open_event = DowntimeEvent.objects.select_for_update(of=('self',)).filter(
+            equipment=equipment, ended_at__isnull=True,
+        ).order_by('-started_at', '-id').first()
+        if open_event and open_event.employee_id != access.employee_id:
+            _conflict(
+                'downtime_owner_changed',
+                'Активный простой начат другим сотрудником: его можно завершить, но нельзя подменить его причину.',
+            )
+        if open_event and normalized['occurred_at'] < open_event.started_at:
+            _conflict(
+                'downtime_switch_before_start',
+                'Время переключения причины раньше начала текущего простоя.',
+            )
+        if open_event and open_event.reason_id == reason.id:
+            # Repeated delivery or a repeated tap on the active reason is a no-op:
+            # it must not reset the interval's start time.
+            event = open_event
+            action = 'downtime_unchanged'
+        else:
+            if open_event:
+                # One timestamp closes the previous category and opens the next one,
+                # so the total downtime has neither a gap nor an overlap.
+                open_event.ended_at = normalized['occurred_at']
+                open_event.save(update_fields=['ended_at'])
+            event = DowntimeEvent.objects.create(
+                equipment=equipment,
+                employee=access.employee,
+                subject_employee=access.employee,
+                recorded_by=access.employee,
+                reason=reason,
+                started_at=normalized['occurred_at'],
+                comment=str(normalized['payload'].get('comment') or '')[:255],
+                recorded_at=normalized['received_at'],
+                ended_at=(
+                    shift.closed_at
+                    if shift.closed_at and shift.closed_at >= normalized['occurred_at']
+                    else None
+                ),
+            )
+            action = 'downtime_switched' if open_event else 'downtime_started'
     state = bump_operational_state(
         f'OfflineFieldEvent:{action}', event_type='downtime_changed',
         object_type='DowntimeEvent', object_id=event.id,

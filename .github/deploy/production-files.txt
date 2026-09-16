@@ -1,15 +1,6 @@
 # Paths are relative to the repository root. Only these files enter a release.
-СИСТЕМА_MVP/backend/deploy/data_updates/channel_probe.py
 СИСТЕМА_MVP/backend/core/offline_sync.py
-СИСТЕМА_MVP/backend/static/js/application-session-heartbeat.js
-СИСТЕМА_MVP/backend/static/js/client-error-report.js
-СИСТЕМА_MVP/backend/static/js/connection-indicators-v1.js
-СИСТЕМА_MVP/backend/static/js/mobile-operational-sounds-v1.js
-СИСТЕМА_MVP/backend/static/js/native-background-connection-v1.js
-СИСТЕМА_MVP/backend/static/js/realtime-client.js
-СИСТЕМА_MVP/backend/templates/base.html
-СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
+СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js
 СИСТЕМА_MVP/backend/templates/users/driver_shift.html
-СИСТЕМА_MVP/backend/trips/views.py
 СИСТЕМА_MVP/backend/users/role_apps.py
 СИСТЕМА_MVP/backend/users/views.py

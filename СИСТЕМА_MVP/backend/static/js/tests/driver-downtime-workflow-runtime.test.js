@@ -184,6 +184,91 @@ function loadUnloadGestureBinder() {
 }
 
 
+function loadDowntimeTimerRuntime() {
+    const signatures = [
+        "function formatDriverDowntimeDuration(seconds)",
+        "function clearDriverDowntimeTimer()",
+        "function renderDriverReasonDuration(button, totalSeconds, isActive)",
+        "function syncDriverReasonTotals(payload)",
+        "function startDriverDowntimeTimer(payload)",
+        "function snapshotDriverDowntimeTimer(atMs)",
+    ];
+    const source = signatures.map((signature) => (
+        extractBraceBlock(DRIVER_TEMPLATE_SOURCE, signature, signature)
+    )).join("\n");
+    let nowMs = Date.parse("2026-09-17T01:00:00.000Z");
+    let intervalCallback = null;
+    const duration = () => ({hidden: true, textContent: ""});
+    const makeButton = (id, baseSeconds) => {
+        const reasonDuration = duration();
+        return {
+            dataset: {
+                driverDowntimeReasonId: String(id),
+                driverReasonSeconds: String(baseSeconds),
+                driverReasonLabel: `Reason ${id}`,
+            },
+            classList: createClassList(),
+            getAttribute() { return null; },
+            setAttribute() {},
+            querySelector(selector) {
+                return selector === "[data-driver-reason-duration]" ? reasonDuration : null;
+            },
+            reasonDuration,
+        };
+    };
+    const buttons = [makeButton(1, 10), makeButton(2, 3)];
+    const downtimeCard = {dataset: {driverShiftDowntimeSeconds: "13", driverActiveElapsedSeconds: "10"}};
+    const downtimeDuration = {textContent: ""};
+    const runtimeWindow = {
+        driverDowntimeTimerId: null,
+        driverDowntimeClock: null,
+        setInterval(callback) {
+            intervalCallback = callback;
+            return 17;
+        },
+        clearInterval() {
+            intervalCallback = null;
+        },
+    };
+    const shell = {
+        querySelector(selector) {
+            const match = selector.match(/driver-downtime-reason-id="([^"]+)"/);
+            return match ? buttons.find((button) => button.dataset.driverDowntimeReasonId === match[1]) || null : null;
+        },
+    };
+    const RuntimeDate = {
+        now: () => nowMs,
+        parse: Date.parse,
+    };
+    const context = {};
+    vm.runInNewContext(
+        `${source}\ncontext.start = startDriverDowntimeTimer; context.snapshot = snapshotDriverDowntimeTimer;`,
+        {
+            context,
+            Date: RuntimeDate,
+            Math,
+            Number,
+            Object,
+            String,
+            downtimeCard,
+            downtimeDuration,
+            downtimeReasonButtons: buttons,
+            shell,
+            window: runtimeWindow,
+        },
+        {filename: "templates/users/driver_shift.html#downtime-timers"}
+    );
+    return {
+        buttons,
+        context,
+        downtimeCard,
+        downtimeDuration,
+        setNow(value) { nowMs = Date.parse(value); },
+        tick() { assert.ok(intervalCallback); intervalCallback(); },
+    };
+}
+
+
 test("all three unloading waits use one semantic workflow and template availability contract", () => {
     const tuple = DRIVER_WORKFLOW_SOURCE.match(
         /TRUCK_UNLOADING_WAIT_REASON_NAMES\s*=\s*\(([\s\S]*?)\)\s*\n/
@@ -233,6 +318,76 @@ test("all three unloading waits use one semantic workflow and template availabil
     assert.match(
         DRIVER_VIEWS_SOURCE,
         /reason\.driver_requires_empty_truck and driver_has_open_trip:[\s\S]*Самосвал уже загружен/
+    );
+});
+
+test("downtime review reconciles server truth and terminal events are not projected as active", () => {
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /window\.selectDriverDowntimeProjection\(ordered\)/
+    );
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /event\.event_type === "driver\.downtime\.started" \|\| event\.event_type === "driver\.downtime\.ended"[\s\S]*window\.AppRealtime\.requestReconcile\([\s\S]*"driver_downtime_review"/
+    );
+});
+
+test("a confirmed downtime receipt overrides only an older cached shell", () => {
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /function restoreDriverConfirmedDowntime\(outbox\)[\s\S]*getDowntimeProjectionReceipt\(context\.shiftId, context\.equipmentId\)/
+    );
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /receiptAt <= shellAt[\s\S]*receipt\.event_type === "driver\.downtime\.ended"[\s\S]*clearDriverActiveDowntime/
+    );
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /closedProjection\.shift_total_seconds[\s\S]*reason_totals: closedProjection\.reason_totals/
+    );
+});
+
+test("downtime switch freezes the previous reason while the shift total stays continuous", () => {
+    const runtime = loadDowntimeTimerRuntime();
+    runtime.context.start({
+        active: true,
+        reason_id: 1,
+        elapsed_seconds: 10,
+        shift_total_seconds: 13,
+        calculated_at: "2026-09-17T01:00:00.000Z",
+        reason_totals: {1: 10, 2: 3},
+    });
+    runtime.setNow("2026-09-17T01:00:05.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:18");
+    assert.equal(runtime.buttons[0].reasonDuration.textContent, "00:00:15");
+
+    assert.equal(runtime.context.snapshot(Date.parse("2026-09-17T01:00:05.000Z")), 18);
+    assert.equal(runtime.downtimeCard.dataset.driverShiftDowntimeSeconds, "18");
+    assert.equal(runtime.buttons[0].dataset.driverReasonSeconds, "15");
+
+    runtime.context.start({
+        active: true,
+        reason_id: 2,
+        elapsed_seconds: 0,
+        shift_total_seconds: 18,
+        calculated_at: "2026-09-17T01:00:05.000Z",
+    });
+    runtime.setNow("2026-09-17T01:00:09.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:22");
+    assert.equal(runtime.buttons[0].reasonDuration.textContent, "00:00:15");
+    assert.equal(runtime.buttons[1].reasonDuration.textContent, "00:00:07");
+});
+
+test("active downtime reason is a no-op and offline switches keep chronological dependencies", () => {
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /driverActiveReasonId[\s\S]*=== String\(button\.dataset\.driverDowntimeReasonId[\s\S]*return;/
+    );
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /var latestPendingDowntime[\s\S]*depends_on: latestPendingDowntime \? \[latestPendingDowntime\.event_id\] : \[\]/
     );
 });
 

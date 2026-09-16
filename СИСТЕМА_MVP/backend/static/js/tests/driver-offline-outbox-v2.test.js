@@ -7,9 +7,84 @@ const {
     createDriverPointChangeEvent,
     isDriverSyncAuthResponse,
     createDriverDowntimeEndEvent,
+    selectDriverDowntimeProjection,
     localRepository,
     backoff,
 } = require("../driver-offline-outbox-v2.js");
+
+test("terminal downtime events never replace the authoritative active downtime", () => {
+    const projection = selectDriverDowntimeProjection([
+        {
+            event_id: "pending-start",
+            event_type: "driver.downtime.started",
+            sequence: 10,
+            state: "pending",
+            payload: {reason_id: 4},
+        },
+        {
+            event_id: "rejected-switch",
+            event_type: "driver.downtime.started",
+            sequence: 11,
+            state: "conflict",
+            payload: {reason_id: 8},
+        },
+    ]);
+
+    assert.equal(projection.event_id, "pending-start");
+    assert.equal(selectDriverDowntimeProjection([
+        {
+            event_id: "only-terminal-start",
+            event_type: "driver.downtime.started",
+            sequence: 12,
+            state: "invalid",
+            payload: {reason_id: 9},
+        },
+    ]), null);
+});
+
+test("confirmed downtime close receipt survives queue removal and restart", async () => {
+    const local = storage();
+    const send = async batch => ({
+        results: batch.events.map((event, index) => ({
+            event_id: event.event_id,
+            status: "accepted",
+            server_received_at: `2026-09-17T00:00:0${index + 1}Z`,
+            server_ids: {downtime_event_id: 701, shift_id: 23},
+        })),
+    });
+    const first = runtime({local, send});
+    await first.enqueue({
+        event_id: "downtime-receipt-start",
+        event_type: "driver.downtime.started",
+        occurred_at: "2026-09-17T00:00:00Z",
+        payload: {reason_id: 9},
+    });
+    await first.flush();
+
+    const second = runtime({local, send});
+    await second.enqueue(createDriverDowntimeEndEvent({
+        eventId: "downtime-receipt-end",
+        occurredAt: "2026-09-17T00:01:00Z",
+        serverId: 701,
+        contextSnapshot: {
+            downtime_projection: {
+                shift_total_seconds: 60,
+                active_elapsed_seconds: 60,
+                reason_totals: {9: 60},
+            },
+        },
+    }));
+    await second.flush();
+
+    const restarted = runtime({local, send});
+    const receipt = await restarted.getDowntimeProjectionReceipt(23, 58);
+    assert.equal((await restarted.pending()).length, 0);
+    assert.equal(receipt.event_type, "driver.downtime.ended");
+    assert.equal(receipt.event_id, "downtime-receipt-end");
+    assert.equal(receipt.server_ids.downtime_event_id, 701);
+    assert.equal(receipt.projection.shift_total_seconds, 60);
+    assert.deepEqual(receipt.projection.reason_totals, {9: 60});
+});
 
 function storage() {
     const values = new Map();

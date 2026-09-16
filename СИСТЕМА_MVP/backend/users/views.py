@@ -278,7 +278,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v216'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v217'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -5133,10 +5133,22 @@ def driver_downtime_action_view(request):
                 )
             messages.error(request, error)
             return redirect(f'{reverse("driver_work")}?tab=downtimes')
-        active_event.reason = reason
-        active_event.save(update_fields=['reason'])
-        event = active_event
-        action_label = 'downtime_updated'
+        if active_event.reason_id == reason.id:
+            # Re-selecting the current reason must not reset its timer.
+            event = active_event
+            action_label = 'downtime_unchanged'
+        else:
+            switched_at = timezone.now()
+            active_event.ended_at = switched_at
+            active_event.save(update_fields=['ended_at'])
+            event = DowntimeEvent.objects.create(
+                equipment=open_shift.equipment,
+                employee=access.employee,
+                reason=reason,
+                started_at=switched_at,
+                comment='Зафиксировано водителем самосвала',
+            )
+            action_label = 'downtime_switched'
     else:
         event = DowntimeEvent.objects.create(
             equipment=open_shift.equipment,

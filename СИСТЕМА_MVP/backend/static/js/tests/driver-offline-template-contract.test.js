@@ -24,10 +24,10 @@ function functionSource(source, name) {
     throw new Error("function_not_closed");
 }
 
-test("driver v215 shell precaches the durable runtime and exact authenticated dependencies", () => {
+test("driver v217 shell precaches the durable runtime and exact authenticated dependencies", () => {
     assert.match(template, /driver-offline-outbox-v2\.js/);
     assert.doesNotMatch(template, /createDriverUnloadOutbox/);
-    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v216'/);
+    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v217'/);
     assert.match(views, /driver-offline-outbox-v2\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /async function isValidatedDriverShell/);
     assert.match(views, /html\.includes\("data-driver-shell"\)/);
@@ -40,7 +40,7 @@ test("driver v215 shell precaches the durable runtime and exact authenticated de
     assert.match(views, /hasValidatedCurrentShell/);
     const coreAssets = views.match(/const CORE_ASSETS = \[([\s\S]*?)\];/)[1];
     assert.doesNotMatch(coreAssets, /APP_SHELL_URL|LEGACY_SHELL_URL/);
-    assert.match(roleApps, /shell_version='driver-mobile-shell-v216'/);
+    assert.match(roleApps, /shell_version='driver-mobile-shell-v217'/);
 });
 
 test("expired session update migrates a valid shell without touching a nonempty event queue", () => {

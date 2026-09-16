@@ -7500,11 +7500,13 @@ window.bindDriverMobileShell = function () {
             var pointButton = pointForm && pointForm.closest("form") && pointForm.closest("form").querySelector(".driver-unload-tile");
             if (pointButton) pointButton.classList.add("is-current");
         }
-        var downtimeEvents = ordered.filter(function (event) {
-            return event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended";
-        });
-        if (downtimeEvents.length) {
-            var latestDowntime = downtimeEvents[downtimeEvents.length - 1];
+        var latestDowntime = typeof window.selectDriverDowntimeProjection === "function"
+            ? window.selectDriverDowntimeProjection(ordered)
+            : ordered.slice().reverse().find(function (event) {
+                return (event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended")
+                    && ["conflict", "auth_required", "invalid"].indexOf(String(event.state || "pending")) === -1;
+            });
+        if (latestDowntime) {
             if (latestDowntime.event_type === "driver.downtime.ended") {
                 clearDriverActiveDowntime({
                     shift_total_seconds: downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds || 0
@@ -7551,6 +7553,17 @@ window.bindDriverMobileShell = function () {
             },
             onReview: function (event, result) {
                 showDriverToast(result.message || "Событие сохранено и требует сверки.");
+                if (
+                    event
+                    && (event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended")
+                    && window.AppRealtime
+                    && typeof window.AppRealtime.requestReconcile === "function"
+                ) {
+                    window.AppRealtime.requestReconcile(
+                        "driver_downtime_review",
+                        Number(result.server_version || result.version || 0)
+                    );
+                }
             }
         };
     }
@@ -7562,7 +7575,8 @@ window.bindDriverMobileShell = function () {
                 flush: function () { return Promise.resolve([]); },
                 pending: function () { return Promise.resolve([]); },
                 publish: function () { return Promise.resolve([]); },
-                getServerMapping: function () { return Promise.resolve(null); }
+                getServerMapping: function () { return Promise.resolve(null); },
+                getDowntimeProjectionReceipt: function () { return Promise.resolve(null); }
             };
         }
         if (window.driverOfflineOutbox && window.driverOfflineOutboxAccessId === shell.dataset.driverAccessId) {
@@ -7627,6 +7641,49 @@ window.bindDriverMobileShell = function () {
     }
 
     var driverOfflineOutbox = createDriverOfflineRuntime();
+    function restoreDriverConfirmedDowntime(outbox) {
+        var context = driverOfflineContext();
+        if (!downtimeCard || !outbox || typeof outbox.getDowntimeProjectionReceipt !== "function") {
+            return Promise.resolve(false);
+        }
+        return outbox.getDowntimeProjectionReceipt(context.shiftId, context.equipmentId).then(function (receipt) {
+            if (!receipt) return false;
+            var receiptAt = Date.parse(receipt.confirmed_at || receipt.occurred_at || "");
+            var shellAt = Date.parse(downtimeCard.dataset.driverDowntimeCalculatedAt || "");
+            if (!Number.isFinite(receiptAt) || (Number.isFinite(shellAt) && receiptAt <= shellAt)) {
+                return false;
+            }
+            if (receipt.event_type === "driver.downtime.ended") {
+                var closedProjection = receipt.projection || {};
+                clearDriverActiveDowntime({
+                    shift_total_seconds: closedProjection.shift_total_seconds || downtimeCard.dataset.driverShiftDowntimeSeconds || 0,
+                    reason_totals: closedProjection.reason_totals || null,
+                    calculated_at: receipt.confirmed_at || receipt.occurred_at
+                });
+                return true;
+            }
+            if (receipt.event_type !== "driver.downtime.started") return false;
+            var reasonId = String(receipt.payload && receipt.payload.reason_id || "");
+            var reasonButton = shell.querySelector('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + reasonId + '"]');
+            var serverIds = receipt.server_ids || {};
+            var activeProjection = receipt.projection || {};
+            return applyDriverActiveDowntime({
+                active: true,
+                event_id: String(serverIds.downtime_event_id || serverIds.downtime_id || "confirmed:" + receipt.event_id),
+                reason_id: reasonId,
+                reason: reasonButton && reasonButton.dataset.driverReasonLabel || "Простой",
+                reason_label: reasonButton && reasonButton.dataset.driverReasonLabel || "Простой",
+                workflow: reasonButton && reasonButton.dataset.driverDowntimeFlow || "",
+                status_key: reasonButton && reasonButton.dataset.driverStatusKey || "yellow",
+                started_at: receipt.occurred_at,
+                elapsed_seconds: activeProjection.active_elapsed_seconds || 0,
+                shift_total_seconds: activeProjection.shift_total_seconds || downtimeCard.dataset.driverShiftDowntimeSeconds || 0,
+                reason_totals: activeProjection.reason_totals || null,
+                calculated_at: receipt.confirmed_at || receipt.occurred_at
+            });
+        });
+    }
+    restoreDriverConfirmedDowntime(driverOfflineOutbox).catch(function () {});
 
     function formatDriverDowntimeDuration(seconds) {
         seconds = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -7643,6 +7700,7 @@ window.bindDriverMobileShell = function () {
             window.clearInterval(window.driverDowntimeTimerId);
             window.driverDowntimeTimerId = null;
         }
+        window.driverDowntimeClock = null;
     }
 
     function renderDriverReasonDuration(button, totalSeconds, isActive) {
@@ -7693,18 +7751,23 @@ window.bindDriverMobileShell = function () {
         clearDriverDowntimeTimer();
         payload = payload || {};
         syncDriverReasonTotals(payload);
-        var startedAt = payload.started_at || "";
-        var fallbackElapsedSeconds = payload.elapsed_seconds || 0;
         var activeReasonId = String(payload.reason_id || "");
-        var startedAtMs = startedAt ? Date.parse(startedAt) : NaN;
-        var fallbackStartedAtMs = Date.now() - (Math.max(0, Number(fallbackElapsedSeconds) || 0) * 1000);
-        var startMs = Number.isNaN(startedAtMs) ? fallbackStartedAtMs : startedAtMs;
-        var syncedAtMs = Date.now();
+        var calculatedAtMs = Date.parse(payload.calculated_at || "");
+        var syncedAtMs = Number.isFinite(calculatedAtMs)
+            ? Math.min(Date.now(), calculatedAtMs)
+            : Date.now();
+        var clock = {
+            activeReasonId: activeReasonId,
+            baseActiveElapsedSeconds: Math.max(0, Math.floor(Number(payload.elapsed_seconds) || 0)),
+            baseShiftSeconds: Math.max(0, Math.floor(Number(payload.shift_total_seconds) || 0)),
+            syncedAtMs: syncedAtMs
+        };
+        window.driverDowntimeClock = clock;
         function tick() {
+            var liveSeconds = Math.max(0, Math.floor((Date.now() - clock.syncedAtMs) / 1000));
             if (downtimeDuration) {
-                downtimeDuration.textContent = formatDriverDowntimeDuration((Date.now() - startMs) / 1000);
+                downtimeDuration.textContent = formatDriverDowntimeDuration(clock.baseShiftSeconds + liveSeconds);
             }
-            var liveSeconds = Math.max(0, Math.floor((Date.now() - syncedAtMs) / 1000));
             downtimeReasonButtons.forEach(function (button) {
                 var reasonId = String(button.dataset.driverDowntimeReasonId || "");
                 var baseSeconds = Math.max(0, Math.floor(Number(button.dataset.driverReasonSeconds) || 0));
@@ -7718,6 +7781,48 @@ window.bindDriverMobileShell = function () {
         }
         tick();
         window.driverDowntimeTimerId = window.setInterval(tick, 1000);
+    }
+
+    function snapshotDriverDowntimeTimer(atMs) {
+        var clock = window.driverDowntimeClock;
+        if (!clock || !downtimeCard) {
+            return Math.max(0, Math.floor(Number(downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds) || 0));
+        }
+        atMs = Number.isFinite(Number(atMs)) ? Number(atMs) : Date.now();
+        var liveSeconds = Math.max(0, Math.floor((atMs - clock.syncedAtMs) / 1000));
+        var shiftTotalSeconds = clock.baseShiftSeconds + liveSeconds;
+        var activeReasonButton = shell.querySelector(
+            '[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + clock.activeReasonId + '"]'
+        );
+        if (activeReasonButton) {
+            var reasonTotalSeconds = Math.max(0, Math.floor(Number(activeReasonButton.dataset.driverReasonSeconds) || 0)) + liveSeconds;
+            activeReasonButton.dataset.driverReasonSeconds = String(reasonTotalSeconds);
+            renderDriverReasonDuration(activeReasonButton, reasonTotalSeconds, true);
+        }
+        clock.baseShiftSeconds = shiftTotalSeconds;
+        clock.baseActiveElapsedSeconds += liveSeconds;
+        clock.syncedAtMs = atMs;
+        downtimeCard.dataset.driverActiveElapsedSeconds = String(clock.baseActiveElapsedSeconds);
+        downtimeCard.dataset.driverShiftDowntimeSeconds = String(shiftTotalSeconds);
+        if (downtimeDuration) {
+            downtimeDuration.textContent = formatDriverDowntimeDuration(shiftTotalSeconds);
+        }
+        return shiftTotalSeconds;
+    }
+
+    function driverDowntimeProjectionSnapshot() {
+        var reasonTotals = {};
+        downtimeReasonButtons.forEach(function (button) {
+            var reasonId = String(button.dataset.driverDowntimeReasonId || "");
+            if (reasonId) {
+                reasonTotals[reasonId] = Math.max(0, Math.floor(Number(button.dataset.driverReasonSeconds) || 0));
+            }
+        });
+        return {
+            active_elapsed_seconds: Math.max(0, Math.floor(Number(downtimeCard && downtimeCard.dataset.driverActiveElapsedSeconds) || 0)),
+            shift_total_seconds: Math.max(0, Math.floor(Number(downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds) || 0)),
+            reason_totals: reasonTotals
+        };
     }
 
     function setDriverDowntimeStatusClass(statusKey) {
@@ -7794,6 +7899,7 @@ window.bindDriverMobileShell = function () {
             downtimeCard.dataset.driverActiveStartedAt = "";
             downtimeCard.dataset.driverActiveElapsedSeconds = String((payload && payload.elapsed_seconds) || 0);
             downtimeCard.dataset.driverShiftDowntimeSeconds = String(shiftTotalSeconds);
+            downtimeCard.dataset.driverDowntimeCalculatedAt = String((payload && payload.calculated_at) || downtimeCard.dataset.driverDowntimeCalculatedAt || "");
             downtimeCard.classList.remove("is-active");
             setDriverDowntimeStatusClass("yellow");
         }
@@ -7813,6 +7919,11 @@ window.bindDriverMobileShell = function () {
         payload = payload || {};
         var isClose = payload.action === "close";
         var occurredAt = new Date().toISOString();
+        snapshotDriverDowntimeTimer(Date.parse(occurredAt));
+        var projectionSnapshot = driverDowntimeProjectionSnapshot();
+        if (!isClose) {
+            projectionSnapshot.active_elapsed_seconds = 0;
+        }
         var context = driverOfflineContext();
         if (!context.shiftId || !context.equipmentId) {
             return Promise.reject(new Error("Нет подтверждённой смены или самосвала для сохранения простоя."));
@@ -7821,9 +7932,19 @@ window.bindDriverMobileShell = function () {
             return Promise.reject(new Error("Не выбрана причина простоя."));
         }
         return driverOfflineOutbox.pending().then(function (events) {
+            function isSameDowntimeContext(event) {
+                return Number(event && event.shift_id) === Number(context.shiftId)
+                    && Number(event && event.equipment_id) === Number(context.equipmentId);
+            }
+            var latestPendingDowntime = events.slice().reverse().find(function (event) {
+                return (event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended")
+                    && event.state === "pending"
+                    && isSameDowntimeContext(event);
+            });
             var unresolvedStart = events.slice().reverse().find(function (event) {
                 return event.event_type === "driver.downtime.started"
-                    && event.state === "pending";
+                    && event.state === "pending"
+                    && isSameDowntimeContext(event);
             });
             var reasonButton = !isClose
                 ? shell.querySelector('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + String(payload.reason_id || "") + '"]')
@@ -7848,14 +7969,16 @@ window.bindDriverMobileShell = function () {
                         eventId: payload.client_action_id,
                         occurredAt: occurredAt,
                         pendingStartId: unresolvedStart ? unresolvedStart.event_id : null,
-                        serverId: mappedServerId || directServerId
+                        serverId: mappedServerId || directServerId,
+                        contextSnapshot: {downtime_projection: projectionSnapshot}
                     }));
                 }
                 return driverOfflineOutbox.enqueue({
                     event_id: payload.client_action_id,
                     event_type: "driver.downtime.started",
                     occurred_at: occurredAt,
-                    depends_on: [],
+                    depends_on: latestPendingDowntime ? [latestPendingDowntime.event_id] : [],
+                    context_snapshot: {downtime_projection: projectionSnapshot},
                     payload: {reason_id: Number(payload.reason_id)}
                 });
             }).then(function (event) {
@@ -7926,6 +8049,13 @@ window.bindDriverMobileShell = function () {
     downtimeReasonButtons.forEach(function (button) {
         registerDriverDowntimeAction(button, function () {
             if (button.disabled) return;
+            if (
+                downtimeCard
+                && downtimeCard.dataset.driverActiveDowntimeId
+                && String(downtimeCard.dataset.driverActiveReasonId || "") === String(button.dataset.driverDowntimeReasonId || "")
+            ) {
+                return;
+            }
             downtimeReasonButtons.forEach(function (item) {
                 item.classList.remove("is-selected");
             });
