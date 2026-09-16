@@ -189,6 +189,8 @@ jobs:
           current_url="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["apkUrl"])' "$current_manifest")"
           curl --fail --silent --show-error --location "$current_url" -o "$current_apk"
           expected_cert="$($apksigner verify --print-certs "$current_apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          echo "Built certificate: $actual_cert"
+          echo "Production certificate: $expected_cert"
           test -n "$actual_cert"
           test -n "$expected_cert"
           test "$actual_cert" = "$expected_cert"
