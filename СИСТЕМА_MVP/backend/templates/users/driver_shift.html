@@ -317,20 +317,6 @@ body.driver-mobile-screen .driver-online span {
     line-height: 1;
 }
 
-body.driver-mobile-screen .driver-online [data-driver-sync-count] {
-    min-width: 20px;
-    height: 20px;
-    display: inline-grid;
-    place-items: center;
-    padding: 0 5px;
-    border-radius: 999px;
-    background: #ffd45b;
-    color: #261e05;
-    font-size: 11px;
-    line-height: 1;
-}
-
-body.driver-mobile-screen .driver-online [data-driver-sync-count][hidden] { display: none; }
 body.driver-mobile-screen [data-driver-sync-state="pending"] .driver-online span { color: #ffe79a; }
 body.driver-mobile-screen [data-driver-sync-state="sending"] .driver-online span { color: #a7dcff; }
 body.driver-mobile-screen [data-driver-sync-state="review"] .driver-online span,
@@ -4463,14 +4449,13 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
             <b class="driver-header-truck">{{ driver_header_truck_label }}</b>
             <span class="driver-header-person">{{ driver_header_person_label }}</span>
         </div>
-        <div class="driver-online" role="status" aria-live="polite" aria-atomic="true" aria-label="Связь с сервером: онлайн, неподтверждённых событий нет">
+        <div class="driver-online" role="status" aria-live="polite" aria-atomic="true" aria-label="Связь с сервером: онлайн">
             {% comment %} В приложении показываем версию самого приложения, в браузере — версию
                веб-оболочки. Если приложение версию не сообщило (старая сборка,
                метка без версии) — не показываем ничего: версия оболочки там
                вводит в заблуждение, человек решит, что это версия приложения. {% endcomment %}
             {% if not is_native_app %}<small class="driver-shell-version" aria-label="Версия приложения">{{ driver_shell_version|cut:'driver-mobile-shell-' }}</small>{% endif %}
             <span data-driver-sync-label>Онлайн</span>
-            <b data-driver-sync-count hidden>0</b>
             <i class="driver-online-dot" data-connection-indicator aria-hidden="true"></i>
             <strong></strong>
         </div>
@@ -7427,10 +7412,8 @@ window.bindDriverMobileShell = function () {
         driverOfflineEvents = Array.isArray(state.events) ? state.events : [];
         window.driverOfflineEvents = driverOfflineEvents;
         var label = current.querySelector("[data-driver-sync-label]");
-        var count = current.querySelector("[data-driver-sync-count]");
         var pending = Number(state.pending || 0);
         var review = Number(state.review || 0);
-        var total = pending + review;
         var previousPending = Number(window.driverOfflinePendingCount || 0);
         window.driverOfflinePendingCount = pending;
         window.operationalOutboxPendingCount = pending;
@@ -7441,17 +7424,12 @@ window.bindDriverMobileShell = function () {
         current.dataset.driverSyncState = mode;
         if (label) {
             label.textContent = mode === "review"
-                ? "Нужна сверка"
+                ? "Не подтверждено"
                 : mode === "sending"
-                    ? "Синхронизация"
+                    ? "Отправка"
                     : mode === "pending"
-                        ? "Сохранено на телефоне"
-                        : "Все действия отправлены";
-        }
-        if (count) {
-            count.textContent = String(total);
-            count.hidden = total < 1;
-            count.setAttribute("aria-label", total + " неподтверждённых событий");
+                        ? "Действие сохранено"
+                        : "Онлайн";
         }
         // Доступность сервера и accessible-label точки принадлежат общей машине связи.
         applyDriverOfflineProjection(current, driverOfflineEvents);
@@ -7481,7 +7459,7 @@ window.bindDriverMobileShell = function () {
                 button.classList.remove("is-loaded", "is-pending", "is-holding");
                 button.classList.add("is-empty");
             }
-            if (dialLabel) dialLabel.textContent = unloadNeedsReview ? "НУЖНА СВЕРКА" : "РАЗГРУЗКА СОХРАНЕНА";
+            if (dialLabel) dialLabel.textContent = unloadNeedsReview ? "НЕ ПОДТВЕРЖДЕНО" : "РАЗГРУЗКА СОХРАНЕНА";
             if (note) note.textContent = unloadNeedsReview ? "ПРОВЕРЬТЕ СОБЫТИЕ" : "ОЖИДАНИЕ СИНХРОНИЗАЦИИ";
             var pointCard = current.querySelector("[data-driver-point-open]");
             if (pointCard) { pointCard.removeAttribute("role"); pointCard.removeAttribute("tabindex"); pointCard.removeAttribute("data-driver-point-open"); }
@@ -7552,7 +7530,7 @@ window.bindDriverMobileShell = function () {
                 }
             },
             onReview: function (event, result) {
-                showDriverToast(result.message || "Событие сохранено и требует сверки.");
+                showDriverToast(result.message || "Действие не подтверждено сервером. Обновите экран; если состояние неверное — сообщите диспетчеру.");
                 if (
                     event
                     && (event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended")

@@ -1,6 +1,4 @@
 # Paths are relative to the repository root. Only these files enter a release.
-СИСТЕМА_MVP/backend/core/offline_sync.py
-СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js
 СИСТЕМА_MVP/backend/templates/users/driver_shift.html
 СИСТЕМА_MVP/backend/users/role_apps.py
 СИСТЕМА_MVP/backend/users/views.py

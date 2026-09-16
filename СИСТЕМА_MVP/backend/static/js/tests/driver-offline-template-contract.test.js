@@ -24,10 +24,10 @@ function functionSource(source, name) {
     throw new Error("function_not_closed");
 }
 
-test("driver v217 shell precaches the durable runtime and exact authenticated dependencies", () => {
+test("driver v218 shell precaches the durable runtime and exact authenticated dependencies", () => {
     assert.match(template, /driver-offline-outbox-v2\.js/);
     assert.doesNotMatch(template, /createDriverUnloadOutbox/);
-    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v217'/);
+    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v218'/);
     assert.match(views, /driver-offline-outbox-v2\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /async function isValidatedDriverShell/);
     assert.match(views, /html\.includes\("data-driver-shell"\)/);
@@ -40,7 +40,7 @@ test("driver v217 shell precaches the durable runtime and exact authenticated de
     assert.match(views, /hasValidatedCurrentShell/);
     const coreAssets = views.match(/const CORE_ASSETS = \[([\s\S]*?)\];/)[1];
     assert.doesNotMatch(coreAssets, /APP_SHELL_URL|LEGACY_SHELL_URL/);
-    assert.match(roleApps, /shell_version='driver-mobile-shell-v217'/);
+    assert.match(roleApps, /shell_version='driver-mobile-shell-v218'/);
 });
 
 test("expired session update migrates a valid shell without touching a nonempty event queue", () => {
@@ -85,8 +85,10 @@ test("sync uses canonical batch endpoint and distinguishes pending review and st
     assert.match(template, /setBindings/);
     assert.match(template, /window\.driverOfflinePendingCount/);
     assert.match(template, /window\.driverOfflinePendingCount = pending/);
-    assert.match(template, /Сохранено на телефоне/);
-    assert.match(template, /Нужна сверка/);
+    assert.match(template, /Действие сохранено/);
+    assert.match(template, /Не подтверждено/);
+    assert.doesNotMatch(template, /data-driver-sync-count/);
+    assert.doesNotMatch(template, /Нужна сверка/);
     assert.match(template, /Не удалось открыть защищённое хранилище/);
     assert.match(template, /aria-live="polite"/);
     assert.match(template, /driver-active-tab-v1:/);
