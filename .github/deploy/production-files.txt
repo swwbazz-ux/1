@@ -1,4 +1,5 @@
 # Paths are relative to the repository root. Only these files enter a release.
+СИСТЕМА_MVP/backend/deploy/data_updates/channel_probe.py
 СИСТЕМА_MVP/backend/core/offline_sync.py
 СИСТЕМА_MVP/backend/static/js/application-session-heartbeat.js
 СИСТЕМА_MVP/backend/static/js/client-error-report.js
