@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import tarfile
 
 
@@ -21,8 +23,14 @@ MODES = {
     "apply_data",
     "verify_receiver",
     "update_receiver",
+    "diagnose",
     "rollback",
 }
+
+DIAGNOSTIC_OPERATIONS = {"trip_accounting_incident_v1"}
+DIAGNOSTIC_EQUIPMENT_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё ._-]{1,64}\Z")
+DIAGNOSTIC_MAX_WINDOW = timedelta(hours=24)
+DIAGNOSTIC_MAX_ROWS = 500
 
 
 def sha256(data: bytes) -> str:
@@ -41,7 +49,59 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--operation")
     parser.add_argument("--receiver-source", type=Path)
     parser.add_argument("--rollback-id")
+    parser.add_argument("--event-file", type=Path)
     return parser.parse_args()
+
+
+def parse_diagnostic_utc(value: object, field: str) -> datetime:
+    if not isinstance(value, str):
+        raise SystemExit(f"diagnostic {field} must be a UTC timestamp")
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise SystemExit(f"diagnostic {field} must use YYYY-MM-DDTHH:MM:SSZ") from exc
+    return parsed
+
+
+def load_diagnostic_metadata(event_path: Path) -> dict[str, object]:
+    try:
+        event = json.loads(event_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("diagnostic event payload is invalid") from exc
+    inputs = event.get("inputs")
+    if not isinstance(inputs, dict):
+        raise SystemExit("diagnostic workflow inputs are missing")
+
+    operation = inputs.get("diagnostic_operation")
+    equipment = inputs.get("diagnostic_equipment")
+    from_text = inputs.get("diagnostic_from_utc")
+    to_text = inputs.get("diagnostic_to_utc")
+    max_rows_text = inputs.get("diagnostic_max_rows", "500")
+    if operation not in DIAGNOSTIC_OPERATIONS:
+        raise SystemExit("diagnostic operation is not allowlisted")
+    if (
+        not isinstance(equipment, str)
+        or equipment != equipment.strip()
+        or not DIAGNOSTIC_EQUIPMENT_RE.fullmatch(equipment)
+    ):
+        raise SystemExit("diagnostic equipment identifier is invalid")
+    from_utc = parse_diagnostic_utc(from_text, "from_utc")
+    to_utc = parse_diagnostic_utc(to_text, "to_utc")
+    if to_utc <= from_utc or to_utc - from_utc > DIAGNOSTIC_MAX_WINDOW:
+        raise SystemExit("diagnostic window must be positive and no longer than 24 hours")
+    try:
+        max_rows = int(max_rows_text)
+    except (TypeError, ValueError) as exc:
+        raise SystemExit("diagnostic max_rows is invalid") from exc
+    if max_rows < 1 or max_rows > DIAGNOSTIC_MAX_ROWS:
+        raise SystemExit(f"diagnostic max_rows must be between 1 and {DIAGNOSTIC_MAX_ROWS}")
+    return {
+        "operation": operation,
+        "equipment": equipment,
+        "from_utc": from_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "to_utc": to_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "max_rows": max_rows,
+    }
 
 
 def load_paths(
@@ -113,12 +173,17 @@ def add_bytes(archive: tarfile.TarFile, name: str, data: bytes, mode: int = 0o64
 def main() -> None:
     args = parse_args()
     root = args.root.resolve()
-    metadata: dict[str, str] = {}
+    metadata: dict[str, object] = {}
     if args.mode == "rollback":
         if not args.rollback_id or not args.rollback_id.startswith("github-"):
             raise SystemExit("rollback mode requires --rollback-id github-...")
         paths: list[tuple[PurePosixPath, Path]] = []
         metadata["rollback_id"] = args.rollback_id
+    elif args.mode == "diagnose":
+        if not args.event_file:
+            raise SystemExit("diagnose mode requires --event-file")
+        paths = []
+        metadata = load_diagnostic_metadata(args.event_file.resolve())
     elif args.mode in {"verify_apk", "publish_apk"}:
         if not args.apk_dist or not args.apk_profile:
             raise SystemExit("APK mode requires --apk-dist and --apk-profile")
@@ -184,9 +249,12 @@ def main() -> None:
         add_bytes(archive, "release-manifest.json", manifest_data)
         for name, data in payload:
             add_bytes(archive, name, data)
-    print(f"PACKAGE={args.output}")
-    print(f"FILES={len(payload)}")
-    print(f"SHA256={sha256(args.output.read_bytes())}")
+    if args.mode == "diagnose":
+        print("PACKAGE_READY mode=diagnose files=0")
+    else:
+        print(f"PACKAGE={args.output}")
+        print(f"FILES={len(payload)}")
+        print(f"SHA256={sha256(args.output.read_bytes())}")
 
 
 if __name__ == "__main__":

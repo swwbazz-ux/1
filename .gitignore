@@ -9,6 +9,10 @@ db.sqlite3
 venv/
 .env
 
+# Production diagnostic decryption keys (public certificate remains tracked)
+diagnostic-recipient-private.pem
+.github/deploy/diagnostic-recipient-private.pem
+
 # Android release signing secrets (keys must stay outside the repository)
 *.jks
 *.keystore
