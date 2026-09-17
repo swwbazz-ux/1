@@ -43,7 +43,10 @@ test("dial actions are positioned from the dial and clip their real hit areas", 
     assert.match(include, /mobile-dial-action__rim/);
     assert.match(include, /mobile-dial-action__face/);
     assert.match(css, /clip-path:\s*url\(#driver-dial-corner-clip\)/);
-    assert.match(css, /width:\s*clamp\(48px,\s*22%,\s*118px\)/);
+    assert.match(css, /width:\s*27%;/);
+    assert.match(css, /aspect-ratio:\s*1 \/ 1;/);
+    assert.match(include, /transform="scale\(\.01 \.01\)"/);
+    assert.match(include, /mobile-dial-action--spare/);
     assert.match(css, /\.mobile-dial-action:disabled\s*\{[\s\S]*pointer-events:\s*none;/);
     assert.match(css, /\.mobile-dial-action:disabled\s*\{[\s\S]*opacity:\s*\.46;/);
     assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);

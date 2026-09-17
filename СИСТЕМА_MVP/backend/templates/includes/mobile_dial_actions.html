@@ -2,7 +2,7 @@
     <svg class="mobile-dial-actions__defs" aria-hidden="true" focusable="false" width="0" height="0">
         <defs>
             <clipPath id="driver-dial-corner-clip" clipPathUnits="objectBoundingBox">
-                <path transform="scale(.01 .008620689655172414)" d="M14 4H86Q96 4 96 13Q96 18 90 22A248 248 0 0 0 22 105Q17 116 10 111Q4 108 4 99V16Q4 4 14 4Z" />
+                <path transform="scale(.01 .01)" d="M9.00 0.00H91.00Q100.00 0.00 100.00 9.00V16.60A188.89 188.89 0 0 0 16.60 100.00H9.00Q0.00 100.00 0.00 91.00V9.00Q0.00 0.00 9.00 0.00Z" />
             </clipPath>
             <linearGradient id="driver-dial-metal" x1="0" y1="0" x2=".25" y2="1">
                 <stop offset="0" stop-color="#849597" />
@@ -23,9 +23,9 @@
     </svg>
 
     <button class="mobile-dial-action mobile-dial-action--manual" type="button" data-mobile-dial-action="manual" disabled aria-disabled="true" aria-label="Ручной режим — пока недоступен" title="Ручной режим пока недоступен">
-        <svg class="mobile-dial-action__shape" viewBox="0 0 100 116" aria-hidden="true" focusable="false">
-            <path class="mobile-dial-action__rim" d="M14 4H86Q96 4 96 13Q96 18 90 22A248 248 0 0 0 22 105Q17 116 10 111Q4 108 4 99V16Q4 4 14 4Z" />
-            <path class="mobile-dial-action__face" transform="translate(3 3) scale(.94)" d="M14 4H86Q96 4 96 13Q96 18 90 22A248 248 0 0 0 22 105Q17 116 10 111Q4 108 4 99V16Q4 4 14 4Z" />
+        <svg class="mobile-dial-action__shape" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+            <path class="mobile-dial-action__rim" d="M9.00 0.00H91.00Q100.00 0.00 100.00 9.00V16.60A188.89 188.89 0 0 0 16.60 100.00H9.00Q0.00 100.00 0.00 91.00V9.00Q0.00 0.00 9.00 0.00Z" />
+            <path class="mobile-dial-action__face" d="M9.70 3.20H90.30Q96.80 3.20 96.80 9.70V14.64A192.09 192.09 0 0 0 14.64 96.80H9.70Q3.20 96.80 3.20 90.30V9.70Q3.20 3.20 9.70 3.20Z" />
         </svg>
         <svg class="mobile-dial-action__icon" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
             <path d="M17 27V13a3 3 0 0 1 6 0v11-3a3 3 0 0 1 6 0v4-2a3 3 0 0 1 6 0v4-1a3 3 0 0 1 6 0v9c0 7-5 11-12 11h-3c-5 0-8-3-10-7l-7-12a3 3 0 0 1 5-3l3 3Z" />
@@ -34,9 +34,9 @@
     </button>
 
     <button class="mobile-dial-action mobile-dial-action--dump-point" type="button" data-mobile-dial-action="dump-point"{% if mobile_dial_dump_point_enabled %} data-driver-point-open aria-label="Изменить точку разгрузки" title="Изменить точку разгрузки" aria-haspopup="dialog" aria-controls="driver-unload-dialog" aria-expanded="false"{% else %} disabled aria-disabled="true" aria-label="Изменить точку разгрузки — доступно только в активном рейсе" title="Точка разгрузки доступна только в активном рейсе"{% endif %}>
-        <svg class="mobile-dial-action__shape" viewBox="0 0 100 116" aria-hidden="true" focusable="false">
-            <path class="mobile-dial-action__rim" d="M14 4H86Q96 4 96 13Q96 18 90 22A248 248 0 0 0 22 105Q17 116 10 111Q4 108 4 99V16Q4 4 14 4Z" />
-            <path class="mobile-dial-action__face" transform="translate(3 3) scale(.94)" d="M14 4H86Q96 4 96 13Q96 18 90 22A248 248 0 0 0 22 105Q17 116 10 111Q4 108 4 99V16Q4 4 14 4Z" />
+        <svg class="mobile-dial-action__shape" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+            <path class="mobile-dial-action__rim" d="M9.00 0.00H91.00Q100.00 0.00 100.00 9.00V16.60A188.89 188.89 0 0 0 16.60 100.00H9.00Q0.00 100.00 0.00 91.00V9.00Q0.00 0.00 9.00 0.00Z" />
+            <path class="mobile-dial-action__face" d="M9.70 3.20H90.30Q96.80 3.20 96.80 9.70V14.64A192.09 192.09 0 0 0 14.64 96.80H9.70Q3.20 96.80 3.20 90.30V9.70Q3.20 3.20 9.70 3.20Z" />
         </svg>
         <svg class="mobile-dial-action__icon" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
             <path fill-rule="evenodd" d="M23 3a11 11 0 0 0-11 11c0 8 11 20 11 20s11-12 11-20A11 11 0 0 0 23 3Zm0 15a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z" />
@@ -45,9 +45,9 @@
     </button>
 
     <button class="mobile-dial-action mobile-dial-action--free-bucket" type="button" data-mobile-dial-action="free-bucket"{% if mobile_dial_free_bucket_enabled %} aria-label="Свободный ковш" title="Выбрать свободный ковш" aria-haspopup="dialog" aria-controls="driver-free-bucket-dialog" aria-expanded="false"{% else %} disabled aria-disabled="true" aria-label="{% if mobile_dial_has_active_trip %}Свободный ковш недоступен во время активного рейса{% elif not mobile_dial_has_open_shift %}Откройте смену, чтобы выбрать свободный ковш{% elif not mobile_dial_has_current_truck %}Сначала выберите самосвал для текущей смены{% else %}Свободный ковш недоступен: нет рабочего контекста{% endif %}" title="{% if mobile_dial_has_active_trip %}Свободный ковш недоступен во время активного рейса{% elif not mobile_dial_has_open_shift %}Откройте смену, чтобы выбрать свободный ковш{% elif not mobile_dial_has_current_truck %}Сначала выберите самосвал для текущей смены{% else %}Свободный ковш недоступен: нет рабочего контекста{% endif %}"{% endif %}>
-        <svg class="mobile-dial-action__shape" viewBox="0 0 100 116" aria-hidden="true" focusable="false">
-            <path class="mobile-dial-action__rim" d="M14 4H86Q96 4 96 13Q96 18 90 22A248 248 0 0 0 22 105Q17 116 10 111Q4 108 4 99V16Q4 4 14 4Z" />
-            <path class="mobile-dial-action__face" transform="translate(3 3) scale(.94)" d="M14 4H86Q96 4 96 13Q96 18 90 22A248 248 0 0 0 22 105Q17 116 10 111Q4 108 4 99V16Q4 4 14 4Z" />
+        <svg class="mobile-dial-action__shape" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+            <path class="mobile-dial-action__rim" d="M9.00 0.00H91.00Q100.00 0.00 100.00 9.00V16.60A188.89 188.89 0 0 0 16.60 100.00H9.00Q0.00 100.00 0.00 91.00V9.00Q0.00 0.00 9.00 0.00Z" />
+            <path class="mobile-dial-action__face" d="M9.70 3.20H90.30Q96.80 3.20 96.80 9.70V14.64A192.09 192.09 0 0 0 14.64 96.80H9.70Q3.20 96.80 3.20 90.30V9.70Q3.20 3.20 9.70 3.20Z" />
         </svg>
         <svg class="mobile-dial-action__icon" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
             <path d="m21 4 6 2-6 15c-1 8 3 14 10 19l-7 1-2 4-4-1-1-4-3-1-2 4-4-2 1-4C0 32 3 23 10 20l5-2Z" />
@@ -55,4 +55,11 @@
             <path class="mobile-dial-action__icon-line" d="M38 17v14m-7-7h14" />
         </svg>
     </button>
+    {% comment %} Четвёртый угол пока без функции: пустой слот держит симметрию четырёх углов вокруг круга. {% endcomment %}
+    <span class="mobile-dial-action mobile-dial-action--spare" aria-hidden="true">
+        <svg class="mobile-dial-action__shape" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+            <path class="mobile-dial-action__rim" d="M9.00 0.00H91.00Q100.00 0.00 100.00 9.00V16.60A188.89 188.89 0 0 0 16.60 100.00H9.00Q0.00 100.00 0.00 91.00V9.00Q0.00 0.00 9.00 0.00Z" />
+            <path class="mobile-dial-action__face" d="M9.70 3.20H90.30Q96.80 3.20 96.80 9.70V14.64A192.09 192.09 0 0 0 14.64 96.80H9.70Q3.20 96.80 3.20 90.30V9.70Q3.20 3.20 9.70 3.20Z" />
+        </svg>
+    </span>
 </nav>
