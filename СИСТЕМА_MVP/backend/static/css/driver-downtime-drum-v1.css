@@ -47,6 +47,8 @@ body.driver-mobile-screen .driver-downtime-drum-body {
         inset 0 2px 0 rgba(255, 255, 255, .05),
         inset 0 -2px 0 rgba(0, 0, 0, .55),
         inset 0 0 28px rgba(0, 0, 0, .55);
+    -webkit-clip-path: url(#driver-drum-body-clip);
+    clip-path: url(#driver-drum-body-clip);
     pointer-events: none;
 }
 
@@ -218,6 +220,7 @@ body.driver-mobile-screen .driver-drum-card-face i:nth-child(7) { --i: 6; --a: v
 
 body.driver-mobile-screen .driver-drum-card-body {
     position: relative;
+    top: 4%;
     display: grid;
     justify-items: center;
     gap: 4px;
