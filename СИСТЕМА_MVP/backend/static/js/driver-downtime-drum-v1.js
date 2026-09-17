@@ -52,7 +52,7 @@
             d.style.setProperty("--drum-step", step.toFixed(3) + "deg");
             // Полоски грани: грань выгнута сильнее самого барабана (радиус изгиба ~45%
             // радиуса цилиндра), чтобы выпуклость читалась глазом; яркость — по повороту к зрителю.
-            var bend = Math.max(60, radius * 0.45);
+            var bend = Math.max(50, radius * 0.32);
             for (var i = 0; i < STRIPS; i++) {
                 var arc = cardW * (i - (STRIPS - 1) / 2) / STRIPS;
                 var rad = arc / bend;
@@ -79,7 +79,8 @@
         var c = cylinder();
         if (!c || !geo.n) return;
         c.classList.toggle("is-snapping", !!snapping);
-        c.style.transform = "translateZ(" + (-geo.radius).toFixed(1) + "px) rotateY(" + geo.theta.toFixed(3) + "deg)";
+        // Барабан слегка наклонён от зрителя: так кромки граней читаются дугами, а не прямыми.
+        c.style.transform = "rotateX(-11deg) translateZ(" + (-geo.radius).toFixed(1) + "px) rotateY(" + geo.theta.toFixed(3) + "deg)";
         var front = frontIndex(geo.theta);
         cards().forEach(function (card, index) {
             // Угол грани относительно зрителя: 0 — прямо перед ним.

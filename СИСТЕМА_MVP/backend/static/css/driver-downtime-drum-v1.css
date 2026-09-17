@@ -48,8 +48,8 @@ body.driver-mobile-screen .driver-downtime-drum-stage {
     height: calc(var(--drum-card-h) + 12px);
     overflow: hidden;
     border-radius: 14px;
-    perspective: 900px;
-    perspective-origin: 50% 50%;
+    perspective: 720px;
+    perspective-origin: 50% 30%;
     touch-action: none;
     /* Края корпуса уходят в тень — так цилиндр читается круглым. */
     -webkit-mask: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
@@ -63,7 +63,7 @@ body.driver-mobile-screen .driver-downtime-drum-track {
     width: 0;
     height: 0;
     transform-style: preserve-3d;
-    transform: translateZ(calc(-1 * var(--drum-radius)));
+    transform: rotateX(-11deg) translateZ(calc(-1 * var(--drum-radius)));
     will-change: transform;
 }
 
