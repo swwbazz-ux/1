@@ -1,27 +1,31 @@
 {% comment %}
-Барабан простоев под циферблатом на вкладке «Работа». Прокрутка влево-вправо с
-фиксацией по центру; центральная карточка подсвечена, крайние серые. Свайп
-центральной карточки вверх на круг запускает простой — через ту же скрытую
-кнопку причины, что и на вкладке «Простои», поэтому офлайн-очередь, озвучка и
-переключение вкладок остаются общими. Активный простой синхронизируется с
-карточкой [data-driver-active-downtime-id]. Логика: static/js/driver-downtime-drum-v1.js.
+Барабан простоев под циферблатом на вкладке «Работа» — вертикальный цилиндр.
+Карточки причин стоят по окружности вокруг вертикальной оси и вращаются вместе;
+передняя грань подсвечена, боковые серые. Свайп передней грани вверх на круг
+запускает простой — через ту же скрытую кнопку причины, что и на вкладке
+«Простои», поэтому офлайн-очередь, озвучка и переключение вкладок остаются
+общими. Активный простой синхронизируется с карточкой
+[data-driver-active-downtime-id]. Логика: static/js/driver-downtime-drum-v1.js.
 {% endcomment %}
-<div class="driver-downtime-drum" data-driver-downtime-drum role="group" aria-label="Барабан простоев: проведите влево или вправо, чтобы выбрать причину, и вверх на круг, чтобы начать простой">
-    <div class="driver-downtime-drum-track" data-driver-drum-track>
-        {% for reason in downtime_reasons %}
-            <button class="driver-drum-card{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-drum-card data-driver-drum-reason-id="{{ reason.id }}" aria-label="Простой: {{ reason.button_label }}. Проведите вверх на круг, чтобы начать">
-                {% comment %} Выпуклая грань цилиндра: семь вертикальных полосок, каждая под своим углом. {% endcomment %}
-                <span class="driver-drum-card-face" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
-                <span class="driver-drum-card-body">
-                    <span class="driver-drum-card-label">{{ reason.button_label }}</span>
-                    <span class="driver-drum-card-total" data-driver-drum-total{% if not reason.driver_is_used %} hidden{% endif %}>{{ reason.driver_total_label }}</span>
-                </span>
-            </button>
-        {% empty %}
-            <div class="driver-inline-note">Активные причины простоев для самосвалов не найдены.</div>
-        {% endfor %}
+<div class="driver-downtime-drum" data-driver-downtime-drum role="group" aria-label="Барабан простоев: проведите влево или вправо, чтобы повернуть барабан, и вверх на круг, чтобы начать простой">
+    <div class="driver-downtime-drum-body" aria-hidden="true"></div>
+    <div class="driver-downtime-drum-stage">
+        <div class="driver-downtime-drum-track" data-driver-drum-track>
+            {% for reason in downtime_reasons %}
+                <button class="driver-drum-card{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-drum-card data-driver-drum-reason-id="{{ reason.id }}" aria-label="Простой: {{ reason.button_label }}. Проведите вверх на круг, чтобы начать">
+                    {% comment %} Грань натянута на цилиндр: семь вертикальных полосок, каждая под своим углом. {% endcomment %}
+                    <span class="driver-drum-card-face" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                    <span class="driver-drum-card-body">
+                        <span class="driver-drum-card-label">{{ reason.button_label }}</span>
+                        <span class="driver-drum-card-total" data-driver-drum-total{% if not reason.driver_is_used %} hidden{% endif %}>{{ reason.driver_total_label }}</span>
+                    </span>
+                </button>
+            {% empty %}
+                <div class="driver-inline-note">Активные причины простоев для самосвалов не найдены.</div>
+            {% endfor %}
+        </div>
     </div>
     <span class="driver-downtime-drum-hint" data-driver-drum-hint aria-hidden="true">▲ вверх — начать простой</span>
-    {% comment %} Контур «круг + центральная карточка»: серый в покое, жёлтый при активном простое. Геометрия считается скриптом. {% endcomment %}
-    <svg class="driver-drum-link" data-driver-drum-link aria-hidden="true" focusable="false"><path data-driver-drum-link-path d="" /></svg>
 </div>
+{% comment %} Контур «круг + передняя грань» лежит на уровне экрана, а не барабана: серый в покое, жёлтый при активном простое. Геометрия считается скриптом. {% endcomment %}
+<svg class="driver-drum-link" data-driver-drum-link aria-hidden="true" focusable="false"><path data-driver-drum-link-path d="" /></svg>

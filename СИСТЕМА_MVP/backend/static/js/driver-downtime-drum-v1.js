@@ -1,9 +1,10 @@
-/* Барабан простоев под циферблатом водителя.
-   Делегирование на document: разметка оболочки может подменяться целиком
-   (submitDriverFormInPlace), поэтому элементы ищутся в момент события, а не
-   запоминаются при загрузке. Запуск простоя — клик по скрытой кнопке причины
-   на вкладке «Простои»: там уже живут офлайн-очередь, озвучка, тосты и
-   переключение на вкладку «Работа». */
+/* Барабан простоев под циферблатом водителя — вертикальный цилиндр.
+   Карточки причин расставлены по окружности вокруг вертикальной оси и
+   вращаются как одно тело; передняя грань смотрит на водителя. Делегирование
+   на document: разметка оболочки может подменяться целиком
+   (submitDriverFormInPlace), поэтому элементы ищутся в момент события.
+   Запуск простоя — клик по скрытой кнопке причины на вкладке «Простои»: там
+   уже живут офлайн-очередь, озвучка, тосты и переключение на вкладку «Работа». */
 (function (root) {
     "use strict";
 
@@ -14,12 +15,14 @@
     var LIFT_ARM = 44;     // px, с которых круг подсвечивается «готово»
     var LIFT_TRIGGER = 64; // px, отпускание выше — старт простоя
     var LIFT_MAX = 96;
+    var STRIPS = 7;        // полосок в грани карточки
     var doc = root.document;
 
     function q(sel, base) { return (base || doc).querySelector(sel); }
     function all(sel, base) { return Array.prototype.slice.call((base || doc).querySelectorAll(sel)); }
     function drum() { return q("[data-driver-downtime-drum]"); }
-    function track() { return q("[data-driver-drum-track]"); }
+    function cylinder() { return q("[data-driver-drum-track]"); }
+    function cards() { var c = cylinder(); return c ? all("[data-driver-drum-card]", c) : []; }
     function dial() { return q(".driver-work-dial"); }
     function stateCard() { return q("[data-driver-active-downtime-id]"); }
     function activeReasonId() {
@@ -27,89 +30,116 @@
         return card ? String(card.dataset.driverActiveReasonId || "") : "";
     }
 
-    function centerCard() {
-        var t = track();
-        if (!t) return null;
-        var mid = t.getBoundingClientRect().left + t.clientWidth / 2;
-        var best = null, bestDist = Infinity;
-        all("[data-driver-drum-card]", t).forEach(function (card) {
-            var r = card.getBoundingClientRect();
-            var d = Math.abs(r.left + r.width / 2 - mid);
-            if (d < bestDist) { bestDist = d; best = card; }
-        });
-        return best;
-    }
+    // --- геометрия цилиндра ---
+    var geo = { n: 0, step: 0, radius: 0, cardW: 0, theta: 0, front: -1, built: null };
 
-    // Объём барабана: чем дальше карточка от центра, тем сильнее она повёрнута
-    // вокруг вертикальной оси и утоплена вглубь, как грань револьверного барабана.
-    var ROT_DEG = 34, DEPTH_PX = 80, SCALE_DROP = .08;
-    var lastCenter = null;
+    function mod(a, b) { return ((a % b) + b) % b; }
 
-    function markCenter() {
-        var t = track();
-        if (!t) return;
-        var mid = t.getBoundingClientRect().left + t.clientWidth / 2;
-        var half = Math.max(1, t.clientWidth / 2);
-        var best = null, bestDist = Infinity;
-        all("[data-driver-drum-card]", t).forEach(function (card) {
-            var r = card.getBoundingClientRect();
-            var offset = (r.left + r.width / 2 - mid) / half;
-            var k = Math.max(-1.6, Math.min(1.6, offset));
-            var a = Math.abs(k);
-            card.style.setProperty("--drum-rot", (k * ROT_DEG).toFixed(2) + "deg");
-            card.style.setProperty("--drum-depth", (-a * DEPTH_PX).toFixed(1) + "px");
-            card.style.setProperty("--drum-scale", (1 - Math.min(1, a) * SCALE_DROP).toFixed(3));
-            card.style.setProperty("--drum-fade", (Math.max(0, 1 - a * .42)).toFixed(3));
-            var d = Math.abs(offset);
-            if (d < bestDist) { bestDist = d; best = card; }
-        });
-        all("[data-driver-drum-card]", t).forEach(function (card) {
-            card.classList.toggle("is-center", card === best);
-        });
-        // Щелчок фиксации: новая карточка встала в центр.
-        if (best && lastCenter && best !== lastCenter && realCardFor(best) !== realCardFor(lastCenter)) {
-            if (root.navigator && typeof root.navigator.vibrate === "function") {
-                try { root.navigator.vibrate(9); } catch (e) {}
+    function build() {
+        var c = cylinder();
+        var list = cards();
+        if (!c || !list.length) return false;
+        if (geo.built === c && geo.n === list.length) return true;
+        var cardW = list[0].offsetWidth || list[0].getBoundingClientRect().width || 150;
+        var n = list.length;
+        var step = 360 / Math.max(n, 1);
+        // Радиус такой, чтобы соседние грани почти касались: полширины / tg(полшага).
+        var radius = n > 1 ? (cardW / 2) / Math.tan((step / 2) * Math.PI / 180) * 1.04 : 0;
+        geo.n = n; geo.step = step; geo.radius = radius; geo.cardW = cardW; geo.built = c;
+        var d = drum();
+        if (d) {
+            d.style.setProperty("--drum-radius", radius.toFixed(1) + "px");
+            d.style.setProperty("--drum-step", step.toFixed(3) + "deg");
+            // Полоски грани: грань выгнута сильнее самого барабана (радиус изгиба ~45%
+            // радиуса цилиндра), чтобы выпуклость читалась глазом; яркость — по повороту к зрителю.
+            var bend = Math.max(60, radius * 0.45);
+            for (var i = 0; i < STRIPS; i++) {
+                var arc = cardW * (i - (STRIPS - 1) / 2) / STRIPS;
+                var rad = arc / bend;
+                d.style.setProperty("--strip-a" + i, (rad * 180 / Math.PI).toFixed(3) + "deg");
+                d.style.setProperty("--strip-z" + i, (bend * (Math.cos(rad) - 1)).toFixed(2) + "px");
+                d.style.setProperty("--strip-b" + i, (0.78 + 0.3 * Math.cos(rad * 1.6)).toFixed(3));
             }
         }
-        lastCenter = best;
-    }
-
-    function scrollToCard(card, smooth) {
-        var t = track();
-        if (!t || !card) return;
-        var target = card.offsetLeft + card.offsetWidth / 2 - t.clientWidth / 2;
-        if (typeof t.scrollTo === "function") {
-            try { t.scrollTo({ left: target, behavior: smooth ? "smooth" : "auto" }); return; } catch (e) {}
-        }
-        t.scrollLeft = target;
-    }
-
-    function syncActive() {
-        var id = activeReasonId();
-        var d = drum(), w = dial();
-        var activeCard = null, activeDist = Infinity;
-        var t = track();
-        var mid = t ? t.getBoundingClientRect().left + t.clientWidth / 2 : 0;
-        all("[data-driver-drum-card]").forEach(function (card) {
-            var on = id !== "" && String(card.dataset.driverDrumReasonId) === id;
-            card.classList.toggle("is-active-downtime", on);
-            if (on) {
-                // Кольцо содержит копии: ведём к ближайшей, чтобы не крутить барабан через весь круг.
-                var r = card.getBoundingClientRect();
-                var dist = Math.abs(r.left + r.width / 2 - mid);
-                if (dist < activeDist) { activeDist = dist; activeCard = card; }
-            }
+        list.forEach(function (card, index) {
+            card.dataset.driverDrumIndex = String(index);
+            card.style.setProperty("--card-angle", (index * step).toFixed(3) + "deg");
         });
-        if (d) d.classList.toggle("is-active", id !== "");
-        if (w) w.classList.toggle("is-downtime-active", id !== "");
-        if (activeCard) scrollToCard(activeCard, true);
-        markCenter();
+        return true;
+    }
+
+    function frontIndex(theta) {
+        if (!geo.n) return -1;
+        return mod(Math.round(-theta / geo.step), geo.n);
+    }
+
+    var lastFront = -1;
+
+    function render(snapping) {
+        var c = cylinder();
+        if (!c || !geo.n) return;
+        c.classList.toggle("is-snapping", !!snapping);
+        c.style.transform = "translateZ(" + (-geo.radius).toFixed(1) + "px) rotateY(" + geo.theta.toFixed(3) + "deg)";
+        var front = frontIndex(geo.theta);
+        cards().forEach(function (card, index) {
+            // Угол грани относительно зрителя: 0 — прямо перед ним.
+            var rel = mod(index * geo.step + geo.theta + 180, 360) - 180;
+            var a = Math.abs(rel);
+            card.classList.toggle("is-center", index === front);
+            card.classList.toggle("is-back", a > 100);
+            card.style.setProperty("--drum-fade", Math.max(0, 1 - Math.max(0, a - 12) / 95).toFixed(3));
+        });
+        if (front !== lastFront) {
+            if (lastFront !== -1 && root.navigator && typeof root.navigator.vibrate === "function") {
+                try { root.navigator.vibrate(9); } catch (e) {} // щелчок фиксации
+            }
+            lastFront = front;
+            geo.front = front;
+        }
         drawLink();
     }
 
+    function centerCard() {
+        var list = cards();
+        var front = frontIndex(geo.theta);
+        return front >= 0 ? list[front] : null;
+    }
+
+    function nearestTheta(index) {
+        // Ближайший по кругу поворот, при котором грань index окажется спереди.
+        var target = -index * geo.step;
+        var k = Math.round((geo.theta - target) / 360);
+        return target + k * 360;
+    }
+
+    function rotateTo(index, animate) {
+        if (!geo.n) return;
+        geo.theta = nearestTheta(mod(index, geo.n));
+        render(animate);
+    }
+
+    function snap(animate) {
+        rotateTo(frontIndex(geo.theta), animate !== false);
+    }
+
+    // --- синхронизация с вкладкой «Простои» ---
+    function syncActive() {
+        var id = activeReasonId();
+        var d = drum(), w = dial();
+        var activeIndex = -1;
+        cards().forEach(function (card, index) {
+            var on = id !== "" && String(card.dataset.driverDrumReasonId) === id;
+            card.classList.toggle("is-active-downtime", on);
+            if (on) activeIndex = index;
+        });
+        if (d) d.classList.toggle("is-active", id !== "");
+        if (w) w.classList.toggle("is-downtime-active", id !== "");
+        if (activeIndex >= 0 && !drag) rotateTo(activeIndex, true);
+        else render(false);
+    }
+
     function syncTotals() {
-        all("[data-driver-drum-card]").forEach(function (card) {
+        cards().forEach(function (card) {
             var src = q('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + card.dataset.driverDrumReasonId + '"]');
             var total = q("[data-driver-drum-total]", card);
             var srcTotal = src ? q("[data-driver-reason-duration]", src) : null;
@@ -121,7 +151,6 @@
     }
 
     function startDowntime(card) {
-        card = realCardFor(card);
         var id = card.dataset.driverDrumReasonId;
         var button = q('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + id + '"]');
         if (!button) {
@@ -134,156 +163,168 @@
         button.click();
     }
 
-    // --- жест: вверх на круг ---
+    // --- жесты: горизонталь вращает барабан, вертикаль на передней грани — старт ---
     var drag = null;
+    var inertia = 0;
 
-    function resetDrag() {
-        if (!drag) return;
-        var card = drag.card;
+    function stopInertia() {
+        if (inertia) { root.cancelAnimationFrame(inertia); inertia = 0; }
+    }
+
+    // Призрак грани: сама грань остаётся в барабане (иначе её режет окно сцены),
+    // а вверх на круг летит её копия на уровне экрана.
+    var ghost = null;
+
+    function screenOf(el) {
+        while (el && !(el.classList && el.classList.contains("driver-work-screen"))) el = el.parentElement;
+        return el;
+    }
+
+    function makeGhost(card) {
+        var screen = screenOf(card);
+        if (!screen) return null;
+        var box = screen.getBoundingClientRect();
+        var r = card.getBoundingClientRect();
+        var g = doc.createElement("div");
+        g.className = "driver-drum-ghost";
+        g.textContent = (q(".driver-drum-card-label", card) || card).textContent.trim();
+        g.style.left = (r.left - box.left) + "px";
+        g.style.top = (r.top - box.top) + "px";
+        g.style.width = r.width + "px";
+        g.style.height = r.height + "px";
+        screen.appendChild(g);
+        // Докуда можно поднять: чтобы призрак лёг на нижнюю часть круга.
+        var w = dial();
+        var dr = w ? w.getBoundingClientRect() : null;
+        g.__liftMax = dr ? Math.max(LIFT_MAX, r.top - (dr.top + dr.height * 0.55)) : LIFT_MAX;
+        return g;
+    }
+
+    function resetLift(card) {
         card.classList.remove("is-lifting", "is-armed");
-        card.classList.add("is-settling");
-        card.style.setProperty("--drum-lift", "0px");
-        root.setTimeout(function () { card.classList.remove("is-settling"); }, 260);
         var w = dial();
         if (w) w.classList.remove("is-drum-lifting");
-        var t = track();
-        if (t) t.classList.remove("is-locked");
-        if (drag.captured && typeof card.releasePointerCapture === "function") {
-            try { card.releasePointerCapture(drag.pointerId); } catch (e) {}
+        if (ghost) {
+            var g = ghost; ghost = null;
+            g.classList.add("is-settling");
+            g.style.setProperty("--drum-lift", "0px");
+            g.style.setProperty("--drum-ghost-scale", "1");
+            root.setTimeout(function () { if (g.parentNode) g.parentNode.removeChild(g); }, 240);
         }
+    }
+
+    function endDrag() {
+        var state = drag;
         drag = null;
+        if (state && state.captured && state.target && typeof state.target.releasePointerCapture === "function") {
+            try { state.target.releasePointerCapture(state.pointerId); } catch (e) {}
+        }
+        return state;
     }
 
     doc.addEventListener("pointerdown", function (event) {
-        var card = event.target && event.target.closest ? event.target.closest("[data-driver-drum-card]") : null;
-        if (!card || event.button > 0) return;
-        drag = { card: card, pointerId: event.pointerId, x0: event.clientX, y0: event.clientY, dy: 0, captured: false, moved: false };
+        var d = event.target && event.target.closest ? event.target.closest("[data-driver-downtime-drum]") : null;
+        if (!d || event.button > 0) return;
+        stopInertia();
+        var card = event.target.closest("[data-driver-drum-card]");
+        drag = {
+            pointerId: event.pointerId, target: d, x0: event.clientX, y0: event.clientY,
+            lastX: event.clientX, lastT: event.timeStamp, vx: 0, dy: 0,
+            mode: "", card: card, captured: false, theta0: geo.theta
+        };
     }, true);
 
     doc.addEventListener("pointermove", function (event) {
         if (!drag || event.pointerId !== drag.pointerId) return;
         var dx = event.clientX - drag.x0;
         var dy = event.clientY - drag.y0;
-        drag.dy = dy;
-        if (!drag.moved) {
-            // Горизонтальный ход отдаём нативной прокрутке барабана.
-            if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) { drag = null; return; }
-            if (-dy < LIFT_START) return;
-            if (!drag.card.classList.contains("is-center")) { drag = null; return; }
-            drag.moved = true;
-            drag.card.classList.add("is-lifting");
-            var t = track();
-            if (t) t.classList.add("is-locked");
-            if (typeof drag.card.setPointerCapture === "function") {
-                try { drag.card.setPointerCapture(event.pointerId); drag.captured = true; } catch (e) {}
+        if (!drag.mode) {
+            if (Math.abs(dx) < 6 && Math.abs(dy) < LIFT_START) return;
+            if (Math.abs(dx) >= Math.abs(dy)) {
+                drag.mode = "spin";
+            } else if (dy < 0 && drag.card && drag.card.classList.contains("is-center")) {
+                drag.mode = "lift";
+                ghost = makeGhost(drag.card);
+                drag.card.classList.add("is-lifting");
+            } else {
+                drag = null;
+                return;
+            }
+            if (typeof drag.target.setPointerCapture === "function") {
+                try { drag.target.setPointerCapture(event.pointerId); drag.captured = true; } catch (e) {}
             }
         }
-        var lift = Math.max(-LIFT_MAX, Math.min(0, dy));
-        drag.card.style.setProperty("--drum-lift", lift + "px");
-        var armed = -dy >= LIFT_ARM;
-        drag.card.classList.toggle("is-armed", armed);
-        var w = dial();
-        if (w) w.classList.toggle("is-drum-lifting", armed);
+        if (drag.mode === "spin") {
+            // Ширина одной грани под пальцем = один шаг барабана.
+            geo.theta = drag.theta0 + dx * (geo.step / Math.max(geo.cardW, 1));
+            var dt = Math.max(1, event.timeStamp - drag.lastT);
+            drag.vx = 0.8 * drag.vx + 0.2 * ((event.clientX - drag.lastX) / dt);
+            drag.lastX = event.clientX; drag.lastT = event.timeStamp;
+            render(false);
+        } else {
+            var liftMax = ghost && ghost.__liftMax ? ghost.__liftMax : LIFT_MAX;
+            var lift = Math.max(-liftMax, Math.min(0, dy));
+            var armed = -dy >= LIFT_ARM;
+            if (ghost) {
+                ghost.style.setProperty("--drum-lift", lift + "px");
+                ghost.style.setProperty("--drum-ghost-scale", (1 + 0.12 * Math.min(1, -lift / liftMax)).toFixed(3));
+                ghost.classList.toggle("is-armed", armed);
+            }
+            drag.card.classList.toggle("is-armed", armed);
+            var w = dial();
+            if (w) w.classList.toggle("is-drum-lifting", armed);
+            drag.dy = dy;
+        }
         event.preventDefault();
     }, { passive: false, capture: true });
 
+    function finishSpin(state) {
+        // Инерция: докручиваем по скорости, затем фиксируем на ближайшем делении.
+        var v = state.vx * (geo.step / Math.max(geo.cardW, 1)) * 16; // градусов за кадр
+        v = Math.max(-geo.step * 0.9, Math.min(geo.step * 0.9, v));
+        function tick() {
+            v *= 0.88;
+            geo.theta += v;
+            render(false);
+            if (Math.abs(v) > 0.15) { inertia = root.requestAnimationFrame(tick); return; }
+            inertia = 0;
+            snap(true);
+        }
+        if (Math.abs(v) > 0.4) inertia = root.requestAnimationFrame(tick);
+        else snap(true);
+    }
+
     doc.addEventListener("pointerup", function (event) {
         if (!drag || event.pointerId !== drag.pointerId) return;
-        var card = drag.card, moved = drag.moved, dy = drag.dy;
-        resetDrag();
-        if (moved) {
-            if (-dy >= LIFT_TRIGGER) startDowntime(card);
-        } else if (!card.classList.contains("is-center")) {
-            scrollToCard(card, true); // тап по боковой карточке подводит её в центр
+        var state = endDrag();
+        if (state.mode === "spin") {
+            finishSpin(state);
+        } else if (state.mode === "lift") {
+            resetLift(state.card);
+            if (-state.dy >= LIFT_TRIGGER) startDowntime(state.card);
+        } else if (state.card && !state.card.classList.contains("is-center")) {
+            rotateTo(Number(state.card.dataset.driverDrumIndex), true); // тап по боковой грани — подвести её вперёд
         }
     }, true);
 
     doc.addEventListener("pointercancel", function (event) {
-        if (drag && event.pointerId === drag.pointerId) resetDrag();
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        var state = endDrag();
+        if (state.mode === "lift") resetLift(state.card);
+        else snap(true);
     }, true);
 
-    // --- кольцо: копии крайних карточек с обеих сторон, чтобы барабан крутился по кругу ---
-    var RING_COPIES = 4;
+    // Колесо мыши на стенде: одно деление за прокрутку.
+    doc.addEventListener("wheel", function (event) {
+        var d = event.target && event.target.closest ? event.target.closest("[data-driver-downtime-drum]") : null;
+        if (!d || !geo.n) return;
+        var delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+        if (!delta) return;
+        event.preventDefault();
+        rotateTo(frontIndex(geo.theta) + (delta > 0 ? 1 : -1), true);
+    }, { passive: false, capture: true });
 
-    function buildRing() {
-        var t = track();
-        if (!t || t.dataset.driverDrumRing === "1") return;
-        var cards = all("[data-driver-drum-card]", t);
-        if (cards.length < 2) return;
-        var n = Math.min(RING_COPIES, cards.length);
-        cards.forEach(function (card, index) { card.dataset.driverDrumIndex = String(index); });
-        function copyOf(card) {
-            var clone = card.cloneNode(true);
-            clone.dataset.driverDrumCloneOf = card.dataset.driverDrumIndex;
-            clone.setAttribute("aria-hidden", "true");
-            clone.tabIndex = -1;
-            return clone;
-        }
-        var head = doc.createDocumentFragment();
-        cards.slice(cards.length - n).forEach(function (card) { head.appendChild(copyOf(card)); });
-        t.insertBefore(head, cards[0]);
-        var tail = doc.createDocumentFragment();
-        cards.slice(0, n).forEach(function (card) { tail.appendChild(copyOf(card)); });
-        t.appendChild(tail);
-        t.dataset.driverDrumRing = "1";
-    }
-
-    function realCardFor(card) {
-        var t = track();
-        if (!card || !t) return card;
-        var idx = card.dataset.driverDrumCloneOf;
-        if (idx === undefined) return card;
-        return q('[data-driver-drum-card][data-driver-drum-index="' + idx + '"]:not([data-driver-drum-clone-of])', t) || card;
-    }
-
-    // Когда прокрутка остановилась на копии — мгновенно переносимся на оригинал.
-    // Позиция та же с точностью до пикселя, поэтому глазу перескок не виден.
-    function normalizeRing() {
-        var t = track();
-        if (!t || drag) return;
-        var card = centerCard();
-        if (!card || card.dataset.driverDrumCloneOf === undefined) return;
-        var real = realCardFor(card);
-        if (real === card) return;
-        var prev = t.style.scrollBehavior;
-        t.style.scrollBehavior = "auto";
-        t.scrollLeft += real.offsetLeft - card.offsetLeft;
-        t.style.scrollBehavior = prev;
-        markCenter();
-        drawLink();
-    }
-
-    // --- прокрутка: подсветка центральной карточки и замыкание кольца ---
-    var raf = 0, settle = 0;
-    doc.addEventListener("scroll", function (event) {
-        if (!event.target || !event.target.hasAttribute || !event.target.hasAttribute("data-driver-drum-track")) return;
-        if (!raf) raf = root.requestAnimationFrame(function () { raf = 0; markCenter(); });
-        root.clearTimeout(settle);
-        settle = root.setTimeout(normalizeRing, 140);
-    }, true);
-    doc.addEventListener("scrollend", function (event) {
-        if (!event.target || !event.target.hasAttribute || !event.target.hasAttribute("data-driver-drum-track")) return;
-        root.clearTimeout(settle);
-        normalizeRing();
-    }, true);
-
-    // --- состояние активного простоя: та же карточка, что и на вкладке «Простои» ---
-    var observer = new MutationObserver(function (mutations) {
-        var relevant = mutations.some(function (m) {
-            // Собственные изменения барабана (классы, текст итогов) не считаем.
-            if (m.target && m.target.closest && m.target.closest("[data-driver-downtime-drum]")) return false;
-            return m.type === "childList" || (m.target && m.target.hasAttribute && (
-                m.target.hasAttribute("data-driver-active-downtime-id")
-                || m.target.hasAttribute("data-driver-reason-duration")
-            ));
-        });
-        if (!relevant) return;
-        buildRing();
-        syncTotals();
-        syncActive();
-    });
-
-    // --- контур: круг циферблата + горлышко к центральной карточке ---
+    // --- контур: круг циферблата + горлышко к передней грани ---
     function drawLink() {
         var svg = q("[data-driver-drum-link]");
         var path = svg ? q("[data-driver-drum-link-path]", svg) : null;
@@ -325,23 +366,32 @@
         path.setAttribute("d", dd);
     }
 
+    // --- состояние активного простоя: та же карточка, что и на вкладке «Простои» ---
+    var observer = new MutationObserver(function (mutations) {
+        var relevant = mutations.some(function (m) {
+            // Собственные изменения барабана (классы, текст итогов) не считаем.
+            if (m.target && m.target.closest && m.target.closest("[data-driver-downtime-drum]")) return false;
+            return m.type === "childList" || (m.target && m.target.hasAttribute && (
+                m.target.hasAttribute("data-driver-active-downtime-id")
+                || m.target.hasAttribute("data-driver-reason-duration")
+            ));
+        });
+        if (!relevant) return;
+        if (build()) { syncTotals(); syncActive(); }
+    });
+
     function init() {
         if (!drum()) return;
-        buildRing();
+        if (!build()) return;
         syncTotals();
-        if (activeReasonId() === "") {
-            var first = q("[data-driver-drum-card]:not([data-driver-drum-clone-of])");
-            if (first) scrollToCard(first, false);
-        }
         syncActive();
         observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-reason-id", "data-driver-active-downtime-id", "hidden"] });
-        root.addEventListener("resize", function () { markCenter(); drawLink(); });
+        root.addEventListener("resize", function () { geo.built = null; build(); render(false); });
         if (root.ResizeObserver) {
             var w = dial();
             if (w) new root.ResizeObserver(function () { drawLink(); }).observe(w);
         }
-        drawLink();
-        root.setTimeout(drawLink, 300);
+        root.setTimeout(function () { render(false); }, 300);
     }
 
     if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", init);

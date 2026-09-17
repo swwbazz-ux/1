@@ -1,8 +1,9 @@
-/* Барабан простоев под циферблатом (вкладка «Работа»).
-   Прокрутка — нативный scroll-snap по горизонтали, поэтому инерция и фиксация
-   по центру приходят от браузера. Центральная карточка подсвечивается жёлтым
-   (--driver-yellow), крайние всегда серые. Активный простой мерцает вместе с
-   кольцом циферблата (.driver-work-dial.is-downtime-active). */
+/* Барабан простоев под циферблатом (вкладка «Работа») — вертикальный цилиндр.
+   Карточки причин стоят по окружности вокруг вертикальной оси (угол и радиус
+   считает скрипт: --card-angle, --drum-radius, --drum-step) и вращаются вместе.
+   Передняя грань подсвечена жёлтым (--driver-yellow), боковые серые и уходят
+   по дуге. Активный простой мерцает вместе с кольцом циферблата
+   (.driver-work-dial.is-downtime-active) и контуром .driver-drum-link. */
 body.driver-mobile-screen .driver-work-screen {
     position: relative;
 }
@@ -10,8 +11,10 @@ body.driver-mobile-screen .driver-work-screen {
 body.driver-mobile-screen .driver-downtime-drum {
     --drum-card-w: clamp(132px, 38vw, 168px);
     --drum-card-h: clamp(122px, 17dvh, 168px);
-    --drum-gap: 8px;
+    --drum-radius: 320px;
+    --drum-step: 25.714deg;
     grid-area: drum;
+    position: relative;
     width: var(--driver-work-column);
     justify-self: center;
     min-height: 0;
@@ -21,50 +24,70 @@ body.driver-mobile-screen .driver-downtime-drum {
     overflow: visible;
 }
 
-body.driver-mobile-screen .driver-downtime-drum-track {
-    display: flex;
-    gap: var(--drum-gap);
-    padding: 2px calc(50% - var(--drum-card-w) / 2) 6px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scroll-snap-type: x mandatory;
-    overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    scroll-behavior: auto;
-    /* Общая точка схода для всех граней барабана. */
-    perspective: 760px;
+/* Корпус барабана: тёмный цилиндр за гранями, светлее к оси, темнее к краям. */
+body.driver-mobile-screen .driver-downtime-drum-body {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: calc(var(--drum-card-h) + 12px);
+    border-radius: 14px;
+    background:
+        linear-gradient(90deg, rgba(0, 0, 0, .65) 0%, rgba(0, 0, 0, .18) 20%, rgba(255, 255, 255, .035) 50%, rgba(0, 0, 0, .18) 80%, rgba(0, 0, 0, .65) 100%),
+        linear-gradient(180deg, #0a1418, #101c22 20%, #0f1b21 80%, #070f13);
+    box-shadow:
+        inset 0 2px 0 rgba(255, 255, 255, .05),
+        inset 0 -2px 0 rgba(0, 0, 0, .55),
+        inset 0 0 28px rgba(0, 0, 0, .55);
+    pointer-events: none;
+}
+
+/* Сцена: перспектива общая для всех граней, боковые грани режутся по ширине колонки. */
+body.driver-mobile-screen .driver-downtime-drum-stage {
+    position: relative;
+    height: calc(var(--drum-card-h) + 12px);
+    overflow: hidden;
+    border-radius: 14px;
+    perspective: 900px;
     perspective-origin: 50% 50%;
+    touch-action: none;
+    /* Края корпуса уходят в тень — так цилиндр читается круглым. */
+    -webkit-mask: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
+    mask: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%);
 }
 
-body.driver-mobile-screen .driver-downtime-drum-track::-webkit-scrollbar {
-    display: none;
+body.driver-mobile-screen .driver-downtime-drum-track {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 0;
+    height: 0;
+    transform-style: preserve-3d;
+    transform: translateZ(calc(-1 * var(--drum-radius)));
+    will-change: transform;
 }
 
-body.driver-mobile-screen .driver-downtime-drum-track.is-locked {
-    overflow-x: hidden;
+body.driver-mobile-screen .driver-downtime-drum-track.is-snapping {
+    transition: transform .34s cubic-bezier(.2, .8, .3, 1);
 }
 
 body.driver-mobile-screen .driver-drum-card {
     --drum-lift: 0px;
-    --drum-scale: .92;
-    --drum-rot: 0deg;
-    --drum-depth: 0px;
     --drum-fade: 1;
-    flex: 0 0 var(--drum-card-w);
+    --card-angle: 0deg;
+    --drum-accent: rgba(150, 166, 172, .5);
+    --drum-face-top: #1b2d34;
+    --drum-face-bottom: #0c181e;
+    position: absolute;
+    left: calc(var(--drum-card-w) / -2);
+    top: calc(var(--drum-card-h) / -2);
+    width: var(--drum-card-w);
     height: var(--drum-card-h);
     margin: 0;
     padding: 8px 10px;
     display: grid;
     align-content: center;
     justify-items: center;
-    gap: 4px;
-    scroll-snap-align: center;
-    scroll-snap-stop: always;
-    --drum-accent: rgba(150, 166, 172, .5);
-    --drum-face-top: #1b2d34;
-    --drum-face-bottom: #0c181e;
-    position: relative;
     border: 0;
     border-radius: 22px;
     background: transparent;
@@ -79,21 +102,28 @@ body.driver-mobile-screen .driver-drum-card {
     user-select: none;
     -webkit-user-select: none;
     -webkit-tap-highlight-color: transparent;
-    touch-action: pan-x;
+    touch-action: none;
     transform-style: preserve-3d;
     backface-visibility: hidden;
-    transform: translateY(var(--drum-lift)) rotateY(var(--drum-rot)) translateZ(var(--drum-depth)) scale(var(--drum-scale));
+    transform: rotateY(var(--card-angle)) translateZ(var(--drum-radius)) translateY(var(--drum-lift));
     opacity: var(--drum-fade);
-    /* transform без перехода: он считается на каждом кадре прокрутки. */
-    transition: border-color .18s ease, color .18s ease, box-shadow .18s ease;
+    transition: color .18s ease;
 }
 
-body.driver-mobile-screen .driver-drum-card.is-settling {
-    transition: transform .22s cubic-bezier(.2, .8, .3, 1), border-color .18s ease, color .18s ease, box-shadow .18s ease;
+body.driver-mobile-screen .driver-drum-card.is-back {
+    visibility: hidden;
 }
 
 body.driver-mobile-screen .driver-drum-card.is-unavailable {
-    opacity: .45;
+    filter: saturate(.4) brightness(.7);
+}
+
+body.driver-mobile-screen .driver-drum-card.is-settling {
+    transition: transform .22s cubic-bezier(.2, .8, .3, 1), color .18s ease;
+}
+
+body.driver-mobile-screen .driver-drum-card.is-lifting {
+    z-index: 3;
 }
 
 body.driver-mobile-screen .driver-drum-card.is-center {
@@ -117,7 +147,12 @@ body.driver-mobile-screen .driver-drum-card.is-center::before {
     box-shadow: 0 0 26px rgba(255, 209, 42, .26), 0 10px 22px rgba(0, 0, 0, .5);
 }
 
-/* Грань: семь полосок по дуге цилиндра радиусом ~230px (по 20 градусов на краях). */
+body.driver-mobile-screen .driver-drum-card.is-center.is-armed::before {
+    box-shadow: 0 0 0 2px rgba(255, 209, 42, .7), 0 0 38px rgba(255, 209, 42, .55), 0 10px 22px rgba(0, 0, 0, .5);
+}
+
+/* Грань натянута на цилиндр: семь полосок, угол и глубина каждой считает скрипт
+   от радиуса барабана (--strip-a*, --strip-z*), яркость — по повороту к зрителю. */
 body.driver-mobile-screen .driver-drum-card-face {
     position: absolute;
     inset: 0;
@@ -141,13 +176,13 @@ body.driver-mobile-screen .driver-drum-card-face i {
     transition: border-color .18s ease, filter .18s ease;
 }
 
-body.driver-mobile-screen .driver-drum-card-face i:nth-child(1) { --i: 0; --a: -20deg; --z: -13.9px; --b: .72; border-left: 2px solid var(--drum-accent); border-radius: 22px 0 0 22px; }
-body.driver-mobile-screen .driver-drum-card-face i:nth-child(2) { --i: 1; --a: -13.3deg; --z: -6.2px; --b: .84; }
-body.driver-mobile-screen .driver-drum-card-face i:nth-child(3) { --i: 2; --a: -6.7deg; --z: -1.6px; --b: .96; }
-body.driver-mobile-screen .driver-drum-card-face i:nth-child(4) { --i: 3; --a: 0deg; --z: 0px; --b: 1.06; }
-body.driver-mobile-screen .driver-drum-card-face i:nth-child(5) { --i: 4; --a: 6.7deg; --z: -1.6px; --b: .96; }
-body.driver-mobile-screen .driver-drum-card-face i:nth-child(6) { --i: 5; --a: 13.3deg; --z: -6.2px; --b: .84; }
-body.driver-mobile-screen .driver-drum-card-face i:nth-child(7) { --i: 6; --a: 20deg; --z: -13.9px; --b: .72; border-right: 2px solid var(--drum-accent); border-radius: 0 22px 22px 0; }
+body.driver-mobile-screen .driver-drum-card-face i:nth-child(1) { --i: 0; --a: var(--strip-a0); --z: var(--strip-z0); --b: var(--strip-b0); border-left: 2px solid var(--drum-accent); border-radius: 22px 0 0 22px; }
+body.driver-mobile-screen .driver-drum-card-face i:nth-child(2) { --i: 1; --a: var(--strip-a1); --z: var(--strip-z1); --b: var(--strip-b1); }
+body.driver-mobile-screen .driver-drum-card-face i:nth-child(3) { --i: 2; --a: var(--strip-a2); --z: var(--strip-z2); --b: var(--strip-b2); }
+body.driver-mobile-screen .driver-drum-card-face i:nth-child(4) { --i: 3; --a: var(--strip-a3); --z: var(--strip-z3); --b: var(--strip-b3); }
+body.driver-mobile-screen .driver-drum-card-face i:nth-child(5) { --i: 4; --a: var(--strip-a4); --z: var(--strip-z4); --b: var(--strip-b4); }
+body.driver-mobile-screen .driver-drum-card-face i:nth-child(6) { --i: 5; --a: var(--strip-a5); --z: var(--strip-z5); --b: var(--strip-b5); }
+body.driver-mobile-screen .driver-drum-card-face i:nth-child(7) { --i: 6; --a: var(--strip-a6); --z: var(--strip-z6); --b: var(--strip-b6); border-right: 2px solid var(--drum-accent); border-radius: 0 22px 22px 0; }
 
 body.driver-mobile-screen .driver-drum-card-body {
     position: relative;
@@ -156,14 +191,6 @@ body.driver-mobile-screen .driver-drum-card-body {
     gap: 4px;
     transform: translateZ(4px);
     text-shadow: 0 1px 2px rgba(0, 0, 0, .7);
-}
-
-body.driver-mobile-screen .driver-drum-card.is-lifting {
-    z-index: 3;
-}
-
-body.driver-mobile-screen .driver-drum-card.is-center.is-armed::before {
-    box-shadow: 0 0 0 2px rgba(255, 209, 42, .7), 0 0 38px rgba(255, 209, 42, .55), 0 10px 22px rgba(0, 0, 0, .5);
 }
 
 body.driver-mobile-screen .driver-drum-card-total {
@@ -186,12 +213,61 @@ body.driver-mobile-screen .driver-downtime-drum.is-active .driver-downtime-drum-
     opacity: 0;
 }
 
-/* Активный простой: карточка в центре и кольцо циферблата мерцают жёлтым в такт. */
+/* Активный простой: передняя грань, кольцо циферблата и контур мерцают жёлтым в такт. */
 body.driver-mobile-screen .driver-drum-card.is-center.is-active-downtime::before {
     animation: driver-drum-card-pulse 1.15s ease-in-out infinite;
 }
 
-/* Контур «круг + центральная карточка»: серый в покое, жёлтый при активном простое. */
+body.driver-mobile-screen .driver-work-dial.is-downtime-active::before {
+    animation: driver-dial-downtime-pulse 1.15s ease-in-out infinite;
+}
+
+body.driver-mobile-screen .driver-work-dial.is-drum-lifting::before {
+    box-shadow:
+        inset 0 2px 2px rgba(240, 251, 251, .09),
+        inset 0 -10px 22px rgba(0, 0, 0, .48),
+        0 16px 34px rgba(0, 0, 0, .38),
+        0 0 0 3px rgba(255, 209, 42, .55),
+        0 0 40px rgba(255, 209, 42, .45);
+}
+
+/* Призрак передней грани при свайпе вверх: летит поверх круга, сама грань остаётся в барабане. */
+body.driver-mobile-screen .driver-drum-ghost {
+    position: absolute;
+    z-index: 12;
+    display: grid;
+    place-items: center;
+    padding: 8px 10px;
+    border: 2px solid var(--driver-yellow);
+    border-radius: 22px;
+    background: linear-gradient(180deg, #223439, #0c181e 72%);
+    color: var(--driver-yellow);
+    font-weight: 900;
+    font-size: clamp(15px, 4.2vw, 18px);
+    line-height: 1.12;
+    text-transform: uppercase;
+    text-align: center;
+    overflow-wrap: anywhere;
+    box-shadow: 0 0 22px rgba(255, 209, 42, .3), 0 14px 28px rgba(0, 0, 0, .55);
+    transform: translateY(var(--drum-lift, 0px)) scale(var(--drum-ghost-scale, 1));
+    pointer-events: none;
+    will-change: transform;
+}
+
+body.driver-mobile-screen .driver-drum-ghost.is-armed {
+    box-shadow: 0 0 0 2px rgba(255, 209, 42, .7), 0 0 40px rgba(255, 209, 42, .6), 0 14px 28px rgba(0, 0, 0, .55);
+}
+
+body.driver-mobile-screen .driver-drum-ghost.is-settling {
+    transition: transform .22s cubic-bezier(.2, .8, .3, 1), opacity .2s ease;
+    opacity: 0;
+}
+
+body.driver-mobile-screen .driver-drum-card.is-lifting {
+    opacity: .35;
+}
+
+/* Контур «круг + передняя грань»: серый в покое, жёлтый при активном простое. */
 body.driver-mobile-screen .driver-drum-link {
     position: absolute;
     inset: 0;
@@ -210,7 +286,7 @@ body.driver-mobile-screen .driver-drum-link path {
     transition: stroke .25s ease;
 }
 
-body.driver-mobile-screen .driver-downtime-drum.is-active .driver-drum-link path {
+body.driver-mobile-screen .driver-downtime-drum.is-active ~ .driver-drum-link path {
     stroke: var(--driver-yellow);
     filter: drop-shadow(0 0 6px rgba(255, 209, 42, .55));
     animation: driver-drum-link-pulse 1.15s ease-in-out infinite;
@@ -221,22 +297,9 @@ body.driver-mobile-screen .driver-downtime-drum.is-active .driver-drum-link path
     50% { stroke-opacity: 1; }
 }
 
-body.driver-mobile-screen .driver-work-dial.is-downtime-active::before {
-    animation: driver-dial-downtime-pulse 1.15s ease-in-out infinite;
-}
-
-body.driver-mobile-screen .driver-work-dial.is-drum-lifting::before {
-    box-shadow:
-        inset 0 2px 2px rgba(240, 251, 251, .09),
-        inset 0 -10px 22px rgba(0, 0, 0, .48),
-        0 16px 34px rgba(0, 0, 0, .38),
-        0 0 0 3px rgba(255, 209, 42, .55),
-        0 0 40px rgba(255, 209, 42, .45);
-}
-
 @keyframes driver-drum-card-pulse {
-    0%, 100% { box-shadow: 0 0 0 1px rgba(255, 209, 42, .3), 0 0 14px rgba(255, 209, 42, .18); }
-    50% { box-shadow: 0 0 0 2px rgba(255, 209, 42, .85), 0 0 34px rgba(255, 209, 42, .55); }
+    0%, 100% { box-shadow: 0 0 0 1px rgba(255, 209, 42, .3), 0 0 14px rgba(255, 209, 42, .18), 0 10px 22px rgba(0, 0, 0, .5); }
+    50% { box-shadow: 0 0 0 2px rgba(255, 209, 42, .85), 0 0 34px rgba(255, 209, 42, .55), 0 10px 22px rgba(0, 0, 0, .5); }
 }
 
 @keyframes driver-dial-downtime-pulse {
@@ -263,6 +326,9 @@ body.driver-mobile-screen .driver-work-dial.is-drum-lifting::before {
     body.driver-mobile-screen .driver-drum-link path,
     body.driver-mobile-screen .driver-work-dial.is-downtime-active::before {
         animation: none;
+    }
+    body.driver-mobile-screen .driver-downtime-drum-track.is-snapping {
+        transition: none;
     }
     body.driver-mobile-screen .driver-drum-card.is-center.is-active-downtime::before {
         box-shadow: 0 0 0 2px rgba(255, 209, 42, .8), 0 0 28px rgba(255, 209, 42, .45);
