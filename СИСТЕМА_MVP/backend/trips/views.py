@@ -5154,7 +5154,7 @@ def excavator_truck_loaded_view(request):
         return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
     payload = excavator_json_payload(request)
     client_action_id = str(payload.get('client_action_id') or '').strip()
-    if not client_action_id:
+    if not client_action_id or len(client_action_id) > 128:
         return JsonResponse({'ok': False, 'error': 'Не передан client_action_id.'}, status=400)
 
     with transaction.atomic():
@@ -8349,6 +8349,8 @@ def finish_service_closed_shift(shift, *, closed_by, close_kind, note, reading_f
         'service_close_kind',
         'service_close_note',
     ])
+    from trips.free_bucket import cancel_free_bucket_acceptances_for_shift
+    cancel_free_bucket_acceptances_for_shift(shift, cancelled_at=shift.closed_at)
     if not shift.equipment_id:
         return
     # Ожидания рабочего процесса не живут дольше смены; ремонт и прочие
@@ -8896,11 +8898,29 @@ def driver_change_unload_point_view(request, trip_id):
 
     with transaction.atomic():
         lock_idempotency_key('change_actual_unload_point', client_action_id)
-        existing_action = TripClientAction.objects.filter(
+        existing_action = TripClientAction.objects.select_related('trip').filter(
             action_type='change_actual_unload_point',
             client_action_id=client_action_id,
         ).first()
         if existing_action:
+            try:
+                repeated_dump_point_id = int(request.POST.get('dump_point') or 0)
+            except (TypeError, ValueError):
+                repeated_dump_point_id = 0
+            existing_point_id = (
+                existing_action.trip.actual_dump_point_id
+                or existing_action.trip.dump_point_id
+            )
+            if (
+                existing_action.actor_id == access.employee_id
+                and existing_action.trip_id == trip_id
+                and repeated_dump_point_id == existing_point_id
+            ):
+                return redirect('driver_shift')
+            messages.error(
+                request,
+                'Идентификатор действия уже использован для другого выбора. Обновите экран и повторите действие.',
+            )
             return redirect('driver_shift')
         Employee.objects.select_for_update().get(pk=access.employee_id)
         if not role_session_state(request, access)['is_active']:
@@ -8925,10 +8945,6 @@ def driver_change_unload_point_view(request, trip_id):
             dump_point_id = int(request.POST.get('dump_point') or 0)
         except (TypeError, ValueError):
             dump_point_id = 0
-        dump_point = DumpPoint.objects.filter(id=dump_point_id, is_active=True).first()
-        if not dump_point:
-            messages.error(request, 'Точка разгрузки не найдена.')
-            return redirect('driver_shift')
         trip = (
             Trip.objects
             .select_for_update()
@@ -8938,6 +8954,26 @@ def driver_change_unload_point_view(request, trip_id):
         )
         if not trip:
             messages.error(request, 'Активный рейс не найден или уже закрыт.')
+            return redirect('driver_shift')
+        from trips.free_bucket import free_bucket_snapshot_dump_points_for_trip
+
+        free_bucket_dump_points = free_bucket_snapshot_dump_points_for_trip(trip)
+        if free_bucket_dump_points is None:
+            dump_point = DumpPoint.objects.filter(id=dump_point_id, is_active=True).first()
+        else:
+            allowed_ids = {item['id'] for item in free_bucket_dump_points}
+            if dump_point_id not in allowed_ids:
+                messages.error(
+                    request,
+                    'Точка разгрузки не входила в сохранённые настройки свободного ковша.',
+                )
+                return redirect('driver_shift')
+            dump_point = DumpPoint.objects.filter(id=dump_point_id).first()
+        if not dump_point:
+            messages.error(request, 'Точка разгрузки не найдена.')
+            return redirect('driver_shift')
+        previous_dump_point_id = trip.actual_dump_point_id or trip.dump_point_id
+        if previous_dump_point_id == dump_point.id:
             return redirect('driver_shift')
         if trip.assigned_dump_point_id is None:
             trip.assigned_dump_point = trip.dump_point
@@ -8961,7 +8997,10 @@ def driver_change_unload_point_view(request, trip_id):
                 'truck_id': trip.truck_id,
                 'excavator_id': trip.excavator_id,
                 'assigned_dump_point_id': trip.assigned_dump_point_id or trip.dump_point_id,
+                'previous_dump_point_id': previous_dump_point_id,
                 'actual_dump_point_id': trip.actual_dump_point_id,
+                'actor_id': access.employee_id,
+                'occurred_at': timezone.now().isoformat(),
                 'status': trip.status,
             },
         )

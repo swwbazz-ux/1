@@ -331,6 +331,87 @@ test('accepted free-bucket load without server trip id remains queued', async ()
     assert.deepEqual(pending[0].depends_on, ['free-bucket-accept']);
 });
 
+test('confirmed free-bucket acceptance survives restart with identity and server mapping', async () => {
+    const local = storage();
+    const event = {
+        event_id: 'free-accept-confirmed',
+        event_type: 'excavator.free_bucket.accepted',
+        format_version: 1,
+        actor_id: 17,
+        access_id: 7,
+        role_code: 'excavator_operator',
+        device_id: 'device-1',
+        shift_id: 31,
+        equipment_id: 5,
+        trip_id: null,
+        local_trip_id: null,
+        local_downtime_id: null,
+        occurred_at: '2026-09-14T10:00:00.000Z',
+        sequence: 1,
+        depends_on: [],
+        payload: {truck_id: 63, truck_number: '63'},
+    };
+    const first = createOutbox({
+        localStorage: local,
+        queueKey: 'free-confirmed',
+        send: async events => ({results: events.map(item => ({
+            event_id: item.event_id,
+            status: 'accepted',
+            server_ids: {free_bucket_acceptance_id: 701},
+        }))}),
+    });
+    await first.queue(event);
+    await first.flush();
+    assert.deepEqual(await first.pending(), []);
+
+    const restarted = createOutbox({
+        localStorage: local,
+        queueKey: 'free-confirmed',
+        send: async () => ({results: []}),
+    });
+    const [confirmation] = await restarted.confirmed();
+    assert.equal(confirmation.event.event_id, event.event_id);
+    assert.equal(confirmation.event.payload.truck_id, 63);
+    assert.equal(confirmation.result.server_ids.free_bucket_acceptance_id, 701);
+    assert.deepEqual(await restarted.getServerMapping(event.event_id), {free_bucket_acceptance_id: 701});
+
+    const duplicate = await restarted.queue(event);
+    assert.equal(duplicate.sync_state, 'confirmed');
+    assert.deepEqual(duplicate.server_result.server_ids, {free_bucket_acceptance_id: 701});
+    await assert.rejects(
+        restarted.queue({...event, payload: {truck_id: 64, truck_number: '64'}}),
+        /Идентификатор события уже занят/
+    );
+});
+
+test('IndexedDB confirmation writes receipt and removes pending event in one restart-safe state', async () => {
+    const indexedDB = fakeIndexedDB();
+    const event = loadEvent('idb-confirmed-free', 1);
+    event.event_type = 'excavator.free_bucket.accepted';
+    event.local_trip_id = null;
+    const first = createOutbox({
+        indexedDB,
+        localStorage: storage(),
+        queueKey: 'free-idb-confirmed',
+        send: async events => ({results: events.map(item => ({
+            event_id: item.event_id,
+            status: 'accepted',
+            server_ids: {free_bucket_acceptance_id: 702},
+        }))}),
+    });
+    await first.queue(event);
+    await first.flush();
+
+    const restarted = createOutbox({
+        indexedDB,
+        localStorage: storage(),
+        queueKey: 'free-idb-confirmed',
+        send: async () => ({results: []}),
+    });
+    assert.deepEqual(await restarted.pending(), []);
+    assert.equal((await restarted.confirmed())[0].result.server_ids.free_bucket_acceptance_id, 702);
+});
+
 test('conflict and authorization outcomes remain for review and are not retried', async () => {
     let calls = 0;
     const box = createOutbox({

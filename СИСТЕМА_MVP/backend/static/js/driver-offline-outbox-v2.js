@@ -9,6 +9,8 @@
     var SUPPORTED_TYPES = new Set([
         "driver.trip.unloaded",
         "driver.trip.dump_point_changed",
+        "driver.free_bucket.selected",
+        "driver.free_bucket.cancelled",
         "driver.downtime.started",
         "driver.downtime.ended",
         "driver.shift.closed"
@@ -16,7 +18,8 @@
     var IMMUTABLE_FIELDS = [
         "event_id", "event_type", "format_version", "actor_id", "access_id",
         "role_code", "device_id", "shift_id", "equipment_id", "trip_id",
-        "local_trip_id", "local_downtime_id", "occurred_at", "depends_on", "payload"
+        "local_trip_id", "local_downtime_id", "occurred_at", "depends_on", "payload",
+        "context_snapshot"
     ];
 
     function nowIso() { return new Date().toISOString(); }
@@ -57,11 +60,37 @@
         if (!event.actor_id || !event.access_id || !event.device_id || !event.shift_id || !event.equipment_id) {
             throw new Error("offline_event_context_incomplete");
         }
+        if (!event.context_snapshot || typeof event.context_snapshot !== "object" || Array.isArray(event.context_snapshot)) {
+            throw new Error("offline_event_snapshot_invalid");
+        }
         if (event.event_type.indexOf("driver.trip.") === 0 && !event.trip_id) {
             throw new Error("offline_trip_required");
         }
         if (event.event_type === "driver.trip.dump_point_changed" && !number(event.payload.dump_point_id)) {
             throw new Error("offline_dump_point_required");
+        }
+        if (event.event_type === "driver.free_bucket.selected") {
+            if (!number(event.payload.truck_id) || !number(event.payload.excavator_id)) {
+                throw new Error("offline_free_bucket_context_incomplete");
+            }
+            if (number(event.payload.truck_id) !== number(event.equipment_id)) {
+                throw new Error("offline_free_bucket_truck_mismatch");
+            }
+            if (event.trip_id) throw new Error("offline_free_bucket_trip_not_permitted");
+        }
+        if (event.event_type === "driver.free_bucket.cancelled") {
+            var acceptanceId = number(event.payload.free_bucket_acceptance_id);
+            var localAcceptanceId = String(event.payload.free_bucket_acceptance_local_id || "");
+            if (acceptanceId && localAcceptanceId) {
+                throw new Error("offline_free_bucket_acceptance_ambiguous");
+            }
+            if (!acceptanceId && (!localAcceptanceId || event.depends_on.indexOf(localAcceptanceId) < 0)) {
+                throw new Error("offline_free_bucket_acceptance_required");
+            }
+            if (acceptanceId && event.depends_on.length) {
+                throw new Error("offline_free_bucket_server_reference_dependency");
+            }
+            if (event.trip_id) throw new Error("offline_free_bucket_trip_not_permitted");
         }
         if (event.event_type === "driver.downtime.started" && !number(event.payload.reason_id)) {
             throw new Error("offline_downtime_reason_required");
@@ -101,6 +130,47 @@
             }
         };
     }
+    function createDriverFreeBucketSelectedEvent(options) {
+        options = options || {};
+        var truckId = number(options.truckId);
+        var excavatorId = number(options.excavatorId);
+        if (!truckId || !excavatorId) throw new Error("offline_free_bucket_context_incomplete");
+        var payload = {
+            truck_id: truckId,
+            excavator_id: excavatorId
+        };
+        if (options.catalogVersion !== undefined && options.catalogVersion !== null && options.catalogVersion !== "") {
+            payload.catalog_version = Number(options.catalogVersion) || 0;
+        }
+        var generatedAt = options.catalogGeneratedAt || options.generatedAt;
+        if (generatedAt) payload.catalog_generated_at = String(generatedAt);
+        return {
+            event_id: String(options.eventId || randomId("driver-free-bucket-select")),
+            event_type: "driver.free_bucket.selected",
+            occurred_at: String(options.occurredAt || nowIso()),
+            trip_id: null,
+            depends_on: [],
+            context_snapshot: clone(options.contextSnapshot || {}),
+            payload: payload
+        };
+    }
+    function createDriverFreeBucketCancelledEvent(options) {
+        options = options || {};
+        var acceptanceId = number(options.acceptanceId);
+        var localAcceptanceId = String(options.localAcceptanceId || options.pendingSelectionId || "");
+        if (!acceptanceId && !localAcceptanceId) throw new Error("offline_free_bucket_acceptance_required");
+        return {
+            event_id: String(options.eventId || randomId("driver-free-bucket-cancel")),
+            event_type: "driver.free_bucket.cancelled",
+            occurred_at: String(options.occurredAt || nowIso()),
+            trip_id: null,
+            depends_on: acceptanceId ? [] : [localAcceptanceId],
+            payload: {
+                free_bucket_acceptance_id: acceptanceId,
+                free_bucket_acceptance_local_id: acceptanceId ? null : localAcceptanceId
+            }
+        };
+    }
     function isDriverSyncAuthResponse(response, body, baseUrl) {
         response = response || {};
         if (response.status === 401 || response.status === 403) return true;
@@ -126,11 +196,32 @@
             occurred_at: String(options.occurredAt || nowIso()),
             depends_on: pendingStartId ? [pendingStartId] : [],
             local_downtime_id: pendingStartId || null,
+            context_snapshot: clone(options.contextSnapshot || {}),
             payload: {
                 downtime_id: serverId,
                 local_downtime_id: pendingStartId || null
             }
         };
+    }
+
+    function selectDriverDowntimeProjection(events) {
+        return (Array.isArray(events) ? events : [])
+            .filter(function (event) {
+                return event
+                    && (event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended")
+                    && !TERMINAL_STATES.has(String(event.state || "pending"));
+            })
+            .slice()
+            .sort(function (left, right) { return Number(left.sequence) - Number(right.sequence); })
+            .pop() || null;
+    }
+
+    function downtimeProjectionReceiptKey(shiftId, equipmentId) {
+        shiftId = number(shiftId);
+        equipmentId = number(equipmentId);
+        return shiftId && equipmentId
+            ? "downtime-projection:" + shiftId + ":" + equipmentId
+            : "";
     }
 
     function localRepository(storage, accessId) {
@@ -263,13 +354,17 @@
         async function publish() {
             var items = await listAll();
             if (typeof callbacks.onState === "function") {
-                callbacks.onState({
-                    pending: items.filter(function (item) { return !TERMINAL_STATES.has(item.state); }).length,
-                    review: items.filter(function (item) { return TERMINAL_STATES.has(item.state); }).length,
-                    sending: !!running,
-                    storage: (await repoPromise).kind,
-                    events: clone(items)
-                });
+                try {
+                    callbacks.onState({
+                        pending: items.filter(function (item) { return !TERMINAL_STATES.has(item.state); }).length,
+                        review: items.filter(function (item) { return TERMINAL_STATES.has(item.state); }).length,
+                        sending: !!running,
+                        storage: (await repoPromise).kind,
+                        events: clone(items)
+                    });
+                } catch (error) {
+                    // The event is already durable. A rendering error must not be reported as a storage failure.
+                }
             }
             return items;
         }
@@ -281,12 +376,18 @@
             if (!deviceId) deviceId = randomId("install");
             await repo.setMeta("device_id", deviceId);
             var requestedId = String(spec.event_id || randomId("driver"));
+            var actorId = number(spec.actor_id || ctx.actorId);
+            var eventAccessId = number(spec.access_id || ctx.accessId || accessId);
+            var contextSnapshot = clone(spec.context_snapshot || {});
+            contextSnapshot.actor_id = number(ctx.actorId) || actorId;
+            contextSnapshot.access_id = number(ctx.accessId || accessId) || eventAccessId;
+            contextSnapshot.role_code = "driver";
             var event = {
                 event_id: requestedId,
                 event_type: String(spec.event_type || ""),
                 format_version: FORMAT_VERSION,
-                actor_id: number(spec.actor_id || ctx.actorId),
-                access_id: number(spec.access_id || ctx.accessId || accessId),
+                actor_id: actorId,
+                access_id: eventAccessId,
                 role_code: "driver",
                 device_id: deviceId,
                 shift_id: number(spec.shift_id || ctx.shiftId),
@@ -302,6 +403,7 @@
                 sequence: null,
                 depends_on: Array.isArray(spec.depends_on) ? spec.depends_on.map(String) : [],
                 payload: clone(spec.payload || {}),
+                context_snapshot: contextSnapshot,
                 state: "pending",
                 attempt_count: 0,
                 next_retry_at: 0,
@@ -367,6 +469,24 @@
                     await repo.setMeta("event-identity:" + event.event_id, identityRecord(event));
                     if (result.server_ids) {
                         await repo.setMeta("server-map:" + event.event_id, clone(result.server_ids));
+                    }
+                    var downtimeReceiptKey = downtimeProjectionReceiptKey(event.shift_id, event.equipment_id);
+                    if (downtimeReceiptKey && (event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended")) {
+                        await repo.setMeta(downtimeReceiptKey, {
+                            event_id: event.event_id,
+                            event_type: event.event_type,
+                            shift_id: number(event.shift_id),
+                            equipment_id: number(event.equipment_id),
+                            occurred_at: event.occurred_at,
+                            confirmed_at: String(result.server_received_at || event.updated_at || event.occurred_at),
+                            payload: clone(event.payload || {}),
+                            projection: clone(
+                                event.context_snapshot
+                                && event.context_snapshot.downtime_projection
+                                || null
+                            ),
+                            server_ids: clone(result.server_ids || null)
+                        });
                     }
                     await repo.remove(event.event_id);
                     confirmed.push([clone(event), clone(result)]);
@@ -458,6 +578,12 @@
             var repo = await repoPromise;
             return clone(await repo.getMeta("server-map:" + String(eventId || "")) || null);
         }
+        async function getDowntimeProjectionReceipt(shiftId, equipmentId) {
+            var key = downtimeProjectionReceiptKey(shiftId, equipmentId);
+            if (!key) return null;
+            var repo = await repoPromise;
+            return clone(await repo.getMeta(key) || null);
+        }
         async function resumeAuthRequired(authGeneration) {
             authGeneration = String(authGeneration || "");
             if (!authGeneration) return publish();
@@ -521,22 +647,29 @@
             publish: publish,
             setBindings: setBindings,
             resumeAuthRequired: resumeAuthRequired,
-            getServerMapping: getServerMapping
+            getServerMapping: getServerMapping,
+            getDowntimeProjectionReceipt: getDowntimeProjectionReceipt
         };
     }
 
     root.createDriverOfflineOutbox = createDriverOfflineOutbox;
     root.createDriverPointChangeEvent = createDriverPointChangeEvent;
+    root.createDriverFreeBucketSelectedEvent = createDriverFreeBucketSelectedEvent;
+    root.createDriverFreeBucketCancelledEvent = createDriverFreeBucketCancelledEvent;
     root.isDriverSyncAuthResponse = isDriverSyncAuthResponse;
     root.createDriverDowntimeEndEvent = createDriverDowntimeEndEvent;
+    root.selectDriverDowntimeProjection = selectDriverDowntimeProjection;
     if (typeof module !== "undefined" && module.exports) {
         module.exports = {
             createDriverOfflineOutbox: createDriverOfflineOutbox,
             localRepository: localRepository,
             indexedRepository: indexedRepository,
             createDriverPointChangeEvent: createDriverPointChangeEvent,
+            createDriverFreeBucketSelectedEvent: createDriverFreeBucketSelectedEvent,
+            createDriverFreeBucketCancelledEvent: createDriverFreeBucketCancelledEvent,
             isDriverSyncAuthResponse: isDriverSyncAuthResponse,
             createDriverDowntimeEndEvent: createDriverDowntimeEndEvent,
+            selectDriverDowntimeProjection: selectDriverDowntimeProjection,
             backoff: backoff
         };
     }

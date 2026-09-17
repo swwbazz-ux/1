@@ -47,10 +47,18 @@
     function createLocalStorageAdapter(storage, queueKey) {
         var key = LEGACY_PREFIX + queueKey;
         var sequenceKey = key + ":sequence";
+        var confirmedKey = key + ":confirmed";
         function read() {
             var parsed = JSON.parse(storage.getItem(key) || "[]");
             if (!Array.isArray(parsed)) throw new Error("Повреждена локальная очередь погрузок.");
             return parsed.sort(compareEvents);
+        }
+        function readConfirmed() {
+            var parsed = JSON.parse(storage.getItem(confirmedKey) || "[]");
+            if (!Array.isArray(parsed)) throw new Error("Повреждён журнал подтверждённых действий.");
+            return parsed.sort(function (left, right) {
+                return compareEvents(left.event || {}, right.event || {});
+            });
         }
         return {
             kind: "localStorage",
@@ -65,6 +73,26 @@
             remove: function (eventId) {
                 storage.setItem(key, JSON.stringify(read().filter(function (item) {
                     return item.event_id !== eventId;
+                })));
+                return Promise.resolve();
+            },
+            confirmed: function () { return Promise.resolve(readConfirmed().map(clone)); },
+            getConfirmed: function (eventId) {
+                var record = readConfirmed().find(function (item) {
+                    return item.event && item.event.event_id === eventId;
+                });
+                return Promise.resolve(record ? clone(record) : null);
+            },
+            confirm: function (event, result) {
+                var records = readConfirmed().filter(function (item) {
+                    return !item.event || item.event.event_id !== event.event_id;
+                });
+                records.push({event: clone(event), result: clone(result || {}), confirmed_at: new Date().toISOString()});
+                storage.setItem(confirmedKey, JSON.stringify(records.sort(function (left, right) {
+                    return compareEvents(left.event || {}, right.event || {});
+                }).slice(-200)));
+                storage.setItem(key, JSON.stringify(read().filter(function (item) {
+                    return item.event_id !== event.event_id;
                 })));
                 return Promise.resolve();
             },
@@ -107,6 +135,10 @@
     function createIndexedDbAdapter(indexedDB, queueKey) {
         var dbPromise = openIndexedDb(indexedDB);
         var sequenceStorageId = queueKey + ":__sequence__";
+        var confirmationQueueKey = queueKey + ":confirmations";
+        function confirmationStorageId(eventId) {
+            return queueKey + ":__confirmed__:" + eventId;
+        }
         function transaction(mode, operation) {
             return dbPromise.then(function (db) {
                 return new Promise(function (resolve, reject) {
@@ -140,6 +172,39 @@
             },
             remove: function (eventId) {
                 return transaction("readwrite", function (store) { store.delete(queueKey + ":" + eventId); });
+            },
+            confirmed: function () {
+                return dbPromise.then(function (db) {
+                    var tx = db.transaction(STORE_NAME, "readonly");
+                    var index = tx.objectStore(STORE_NAME).index("queue_key");
+                    return idbRequest(index.getAll(confirmationQueueKey)).then(function (rows) {
+                        return rows.map(function (row) { return clone(row.confirmation); }).sort(function (left, right) {
+                            return compareEvents(left.event || {}, right.event || {});
+                        });
+                    });
+                });
+            },
+            getConfirmed: function (eventId) {
+                return dbPromise.then(function (db) {
+                    var tx = db.transaction(STORE_NAME, "readonly");
+                    return idbRequest(tx.objectStore(STORE_NAME).get(confirmationStorageId(eventId))).then(function (row) {
+                        return row ? clone(row.confirmation) : null;
+                    });
+                });
+            },
+            confirm: function (event, result) {
+                return transaction("readwrite", function (store) {
+                    store.put({
+                        storage_id: confirmationStorageId(event.event_id),
+                        queue_key: confirmationQueueKey,
+                        confirmation: {
+                            event: clone(event),
+                            result: clone(result || {}),
+                            confirmed_at: new Date().toISOString()
+                        }
+                    });
+                    store.delete(queueKey + ":" + event.event_id);
+                });
             },
             replace: function (events) {
                 return dbPromise.then(function (db) {
@@ -256,6 +321,18 @@
             return adapterPromise.then(function (adapter) { return adapter.remove(eventId); });
         }
 
+        function confirmations() {
+            return adapterPromise.then(function (adapter) { return adapter.confirmed(); });
+        }
+
+        function getConfirmed(eventId) {
+            return adapterPromise.then(function (adapter) { return adapter.getConfirmed(eventId); });
+        }
+
+        function confirm(event, result) {
+            return adapterPromise.then(function (adapter) { return adapter.confirm(event, result); });
+        }
+
         function queue(event) {
             return list().then(function (events) {
                 var existing = events.find(function (item) { return item.event_id === event.event_id; });
@@ -265,6 +342,16 @@
                     }
                     return clone(existing);
                 }
+                return getConfirmed(event.event_id).then(function (acknowledged) {
+                    if (acknowledged) {
+                        if (!sameWireEvent(acknowledged.event, event)) {
+                            throw new Error("Идентификатор события уже занят другим действием.");
+                        }
+                        return Object.assign(clone(acknowledged.event), {
+                            sync_state: "confirmed",
+                            server_result: clone(acknowledged.result || {})
+                        });
+                    }
                 var stored = Object.assign({}, clone(event), {
                     sync_state: "pending",
                     attempt_count: Number(event.attempt_count || 0),
@@ -274,6 +361,7 @@
                 return persist(stored).then(function () {
                     storageError = null;
                     return list().then(function (next) { notify(next, {reason: "queued", event: clone(stored)}); return clone(stored); });
+                });
                 });
             });
         }
@@ -401,7 +489,7 @@
                         ) {
                             return markRetry(event, "Сервер не вернул ID созданного рейса.");
                         }
-                        return remove(event.event_id).then(list).then(function (remaining) {
+                        return confirm(event, result).then(list).then(function (remaining) {
                             notify(remaining, {reason: "confirmed", event: clone(event)});
                             if (typeof options.onConfirmed === "function") return options.onConfirmed(clone(event), clone(result));
                         });
@@ -511,6 +599,12 @@
             queue: queue,
             flush: flush,
             pending: list,
+            confirmed: confirmations,
+            getServerMapping: function (eventId) {
+                return getConfirmed(String(eventId || "")).then(function (record) {
+                    return record && record.result ? clone(record.result.server_ids || null) : null;
+                });
+            },
             allocateSequence: allocateSequence,
             discardUnsent: discardUnsent,
             retryNow: retryNow,

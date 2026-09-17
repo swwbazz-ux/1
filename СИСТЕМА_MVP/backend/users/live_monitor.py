@@ -652,6 +652,8 @@ def force_close_employee_shift(
     shift.closed_by = actor_access.employee
     shift.is_service_closed = True
     shift.save(update_fields=[*reading_fields, 'closed_at', 'closed_by', 'is_service_closed'])
+    from trips.free_bucket import cancel_free_bucket_acceptances_for_shift
+    cancel_free_bucket_acceptances_for_shift(shift, cancelled_at=shift.closed_at)
 
     if shift.equipment_id:
         if equipment_is_truck(shift.equipment):

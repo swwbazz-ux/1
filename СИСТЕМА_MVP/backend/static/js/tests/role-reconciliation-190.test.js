@@ -254,7 +254,7 @@ for (const role of ["driver", "excavator"]) {
         context[fn]({pending: 0, total: 0, events: []});
         assert.equal(window.operationalOutboxPendingCount, 0);
         assert.equal(events[1].pendingCount, 0);
-        assert.equal(label.textContent, "Все действия отправлены");
+        assert.equal(label.textContent, role === "driver" ? "Онлайн" : "Все действия отправлены");
         assert.equal(requests.length, 1);
     });
 }

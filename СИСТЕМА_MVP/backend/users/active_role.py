@@ -219,6 +219,9 @@ def _close_previous_role_shifts(employee, current_access, shifts):
             ).update(is_carryover=True)
     if closed:
         EmployeeShift.objects.bulk_update(closed, ['closed_at', 'closed_by'])
+        from trips.free_bucket import cancel_free_bucket_acceptances_for_shift
+        for shift in closed:
+            cancel_free_bucket_acceptances_for_shift(shift, cancelled_at=now)
         from reports.driver_shift_passport_snapshots import (
             enqueue_driver_shift_passport_capture,
         )
