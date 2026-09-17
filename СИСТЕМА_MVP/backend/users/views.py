@@ -278,7 +278,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v227'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v228'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -338,6 +338,8 @@ const CORE_ASSETS = [
     "/static/js/mobile-dial-actions-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/css/driver-free-bucket-v1.css?v={DRIVER_SHELL_VERSION}",
     "/static/js/driver-free-bucket-v1.js?v={DRIVER_SHELL_VERSION}",
+    "/static/css/driver-downtime-drum-v1.css?v={DRIVER_SHELL_VERSION}",
+    "/static/js/driver-downtime-drum-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/portal/js/portal-shell-v5.js",
     "/static/css/app.css",
     "/static/css/mobile-role-login-v1.css",
