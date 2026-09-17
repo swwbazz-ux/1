@@ -1,0 +1,659 @@
+/* ============================================================================
+   Часовая сетка смены — новый вид почасового отчёта диспетчера.
+
+   Старая форма «экскаватор × парк × час × точка разгрузки» занимает три-четыре
+   экрана по ширине. Здесь та же выборка показана целиком: часы колонками, парк
+   машин строками, а разрез по точкам раскрывается по требованию — колонками
+   внутри часа или строками внутри экскаватора.
+
+   Файл подключается только на этом экране, поверх app.css.
+   ============================================================================ */
+
+/* Экран живёт внутри «бумажного листа» печатных отчётов: у него белая заливка,
+   рамка и тень, и она пробивалась во все промежутки между тёмными карточками.
+   Для этого экрана лист становится прозрачным. */
+.dispatcher-shift-report-paper.is-screen {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    box-shadow: none;
+    overflow: visible;
+}
+
+/* Прокрутка принадлежит странице, а не таблице: иначе колесо над сеткой крутит
+   внутренний контейнер, страница стоит на месте, и нижние строки вместе с
+   журналом рейсов недостижимы. В развёрнутом виде таблица прокручивается сама. */
+.gd-hgrid {
+    color: var(--gd-ink);
+    --hg-cell: color-mix(in srgb, var(--gd-panel) 82%, #000);
+    --hg-line: var(--gd-line);
+    --p1: #4fb3e8; --p2: #8fd94a; --p3: #ffb21d; --p4: #c58cf5; --p5: #ff8a5c;
+    --p6: #5ce1c6; --p7: #f06ea9; --p8: #9aa7b2; --p9: #d6d34a;
+    display: grid;
+    grid-template-rows: auto auto;
+    gap: 10px;
+}
+
+.dispatcher-day .gd-hgrid {
+    color: var(--gd-ink);
+    --hg-cell: #ffffff;
+}
+
+/* --- полоса показателей --------------------------------------------------- */
+.gd-hgrid-strip {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(0, 1.4fr);
+    gap: 10px;
+}
+
+.gd-hgrid-kpi {
+    padding: 6px 10px;
+    border: 1px solid var(--gd-line);
+    border-radius: 8px;
+    background: var(--gd-panel);
+}
+
+.gd-hgrid-kpi span {
+    display: block;
+    color: var(--gd-muted);
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.gd-hgrid-kpi strong {
+    display: block;
+    margin-top: 3px;
+    /* «Бумажный лист» печатных отчётов задаёт color: #111 — без своего цвета
+       крупные цифры сливались с тёмной карточкой. */
+    color: var(--gd-ink);
+    font-size: 24px;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.gd-hgrid-kpi em {
+    display: block;
+    margin-top: 3px;
+    color: var(--gd-muted);
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 700;
+}
+
+.gd-hgrid-kpi.is-good strong { color: var(--gd-green); }
+.gd-hgrid-kpi.is-warn strong { color: var(--gd-yellow); }
+.gd-hgrid-kpi.is-bad strong { color: var(--gd-red); }
+
+.gd-hgrid-issues {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding: 6px 10px;
+    border: 1px solid var(--gd-line);
+    border-radius: 8px;
+    background: var(--gd-panel);
+}
+
+.gd-hgrid-issues b {
+    color: var(--gd-muted);
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.gd-hgrid-issues span {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.gd-hgrid-issues .is-danger { background: var(--gd-red-soft); color: var(--gd-red); }
+.gd-hgrid-issues .is-risk { background: var(--gd-yellow-soft); color: var(--gd-yellow); }
+.gd-hgrid-issues .is-ok { background: var(--gd-green-soft); color: var(--gd-green); }
+
+/* --- рабочая область ------------------------------------------------------ */
+.gd-hgrid-work {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 330px;
+    align-items: start;
+    gap: 10px;
+}
+
+.gd-hgrid-card {
+    display: grid;
+    grid-template-rows: auto auto;
+    padding: 7px 9px 8px;
+    border: 1px solid var(--gd-line);
+    border-radius: 8px;
+    background: var(--gd-panel);
+    min-height: 0;
+}
+
+.gd-hgrid-card > header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.gd-hgrid-card > header h3 {
+    margin: 0;
+    color: var(--gd-muted);
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+}
+
+.gd-hgrid-card > header .gd-hgrid-note {
+    color: var(--gd-muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.gd-hgrid-spacer { margin-left: auto; }
+
+.gd-hgrid-build {
+    color: var(--gd-muted);
+    font-size: 10px;
+    font-weight: 700;
+    opacity: .65;
+}
+
+.gd-hgrid-box {
+    display: grid;
+    grid-template-rows: auto auto;
+    overflow: visible;
+}
+
+.gd-hgrid-card.is-expanded .gd-hgrid-box {
+    grid-template-rows: minmax(0, 1fr) auto;
+    overflow: auto;
+    overflow-anchor: none;
+    min-height: 0;
+}
+
+/* --- таблица -------------------------------------------------------------- */
+.gd-hgrid-table {
+    width: 100%;
+    height: auto;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.gd-hgrid-table th,
+.gd-hgrid-table td {
+    padding: 0;
+    border: 1px solid var(--hg-line);
+}
+
+.gd-hgrid-table thead th {
+    padding: 5px 2px;
+    background: var(--gd-panel-soft);
+    color: var(--gd-muted);
+    font-size: 12px;
+    font-weight: 900;
+    text-align: center;
+}
+
+.gd-hgrid-table thead th.is-hour { cursor: pointer; }
+.gd-hgrid-table thead th.is-now {
+    color: var(--gd-ink);
+    background: color-mix(in srgb, var(--gd-cyan) 24%, var(--gd-panel));
+}
+.gd-hgrid-table thead th.is-open {
+    color: var(--gd-ink);
+    background: color-mix(in srgb, var(--gd-cyan) 14%, var(--gd-panel));
+}
+.gd-hgrid-table thead th.is-future { opacity: .4; cursor: default; }
+.gd-hgrid-table thead th.is-point { padding: 4px 2px; font-size: 11px; line-height: 1.1; }
+
+.gd-hgrid-table th.is-exc {
+    width: 96px;
+    padding: 0 8px;
+    background: var(--gd-panel-soft);
+    color: var(--gd-ink);
+    font-size: 15px;
+    font-weight: 900;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.gd-hgrid-table th.is-exc[data-hgrid-exc] { cursor: pointer; }
+.gd-hgrid-table th.is-exc.is-open { color: var(--gd-cyan); }
+
+.gd-hgrid-table th.is-fleet {
+    width: 60px;
+    padding: 0 7px;
+    background: var(--gd-panel-soft);
+    font-size: 12px;
+    font-weight: 900;
+    text-align: left;
+}
+
+.gd-hgrid-table tr.is-belaz th.is-fleet { color: var(--gd-cyan); }
+.gd-hgrid-table tr.is-nhl th.is-fleet { color: var(--gd-green); }
+
+.gd-hgrid-table th.is-total,
+.gd-hgrid-table td.is-total {
+    width: 132px;
+    padding: 0 8px;
+    background: var(--gd-panel-soft);
+    text-align: right;
+    white-space: nowrap;
+}
+
+.gd-hgrid-table td.is-total b { font-size: 14px; font-weight: 900; }
+.gd-hgrid-table td.is-total i {
+    margin-left: 5px;
+    color: var(--gd-muted);
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 700;
+}
+
+.gd-hgrid-table td.is-cell {
+    position: relative;
+    height: 34px;
+    background: var(--hg-cell);
+    color: var(--gd-ink);
+    text-align: center;
+    font-size: 15px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.gd-hgrid-table tr.is-nhl td.is-cell,
+.gd-hgrid-table tr.is-nhl td.is-point {
+    background: color-mix(in srgb, var(--gd-green) 7%, var(--hg-cell));
+}
+
+.gd-hgrid-table td.is-cell.is-zero { color: var(--gd-muted); font-weight: 700; opacity: .5; }
+.gd-hgrid-table td.is-cell.is-future { background: transparent; cursor: default; }
+.gd-hgrid-table td.is-cell.is-idle {
+    background: repeating-linear-gradient(135deg, var(--gd-red-soft) 0 5px, transparent 5px 10px);
+}
+.gd-hgrid-table td.is-cell.is-selected { box-shadow: inset 0 0 0 2px var(--gd-cyan); }
+.gd-hgrid-table td.is-cell:hover:not(.is-future) { box-shadow: inset 0 0 0 1px var(--gd-cyan); }
+
+.gd-hgrid-mix {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    height: 3px;
+}
+
+.gd-hgrid-mix i { display: block; height: 100%; }
+
+.gd-hgrid-run {
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--gd-cyan);
+}
+
+.gd-hgrid-table td.is-point {
+    background: color-mix(in srgb, var(--gd-cyan) 6%, var(--hg-cell));
+    text-align: center;
+    font-size: 15px;
+    font-weight: 900;
+}
+
+.gd-hgrid-table td.is-point.is-zero { color: var(--gd-muted); opacity: .4; font-weight: 700; }
+
+/* подстроки раскрытого экскаватора */
+.gd-hgrid-table tr.is-sub td.is-cell,
+.gd-hgrid-table tr.is-sub td.is-point,
+.gd-hgrid-table tr.is-sub td.is-total {
+    background: color-mix(in srgb, var(--gd-cyan) 4%, var(--gd-panel-soft));
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.gd-hgrid-table tr.is-sub th.is-sub {
+    padding: 0 8px 0 18px;
+    background: var(--gd-panel-soft);
+    color: var(--gd-ink);
+    font-size: 13px;
+    font-weight: 800;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.gd-hgrid-table tr.is-sub th.is-sub i {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 5px;
+    border-radius: 2px;
+    vertical-align: -1px;
+}
+
+.gd-hgrid-table tr.is-idle-row td.is-cell { color: var(--gd-red); }
+
+.gd-hgrid-table tfoot th {
+    padding: 5px 2px;
+    background: var(--gd-panel-soft);
+    font-size: 13px;
+    font-weight: 900;
+    text-align: center;
+}
+
+.gd-hgrid-table tfoot th small {
+    display: block;
+    color: var(--gd-muted);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.gd-hgrid-table tfoot th.is-exc { text-align: left; }
+.gd-hgrid-table tfoot th.is-total { text-align: right; }
+
+.gd-hgrid-legend {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 7px;
+    color: var(--gd-muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.gd-hgrid-legend i {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    margin-right: 4px;
+    border-radius: 2px;
+    vertical-align: -1px;
+}
+
+.gd-hgrid-legend .is-idle {
+    background: repeating-linear-gradient(135deg, var(--gd-red) 0 3px, transparent 3px 6px);
+}
+
+.gd-hgrid-legend .is-run { background: var(--gd-cyan); border-radius: 50%; }
+
+/* --- правая колонка ------------------------------------------------------- */
+.gd-hgrid-side {
+    display: grid;
+    grid-template-rows: auto auto;
+    gap: 10px;
+}
+
+.gd-hgrid-side h4 {
+    margin: 0 0 5px;
+    color: var(--gd-muted);
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.gd-hgrid-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 8px;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.gd-hgrid-bar b {
+    font-size: 13px;
+    font-weight: 800;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.gd-hgrid-bar em { font-style: normal; font-size: 13px; font-weight: 900; white-space: nowrap; }
+
+.gd-hgrid-bar span {
+    grid-column: 1 / -1;
+    height: 5px;
+    border-radius: 999px;
+    background: var(--gd-line-soft);
+    overflow: hidden;
+}
+
+.gd-hgrid-bar span i { display: block; height: 100%; border-radius: 999px; }
+
+.gd-hgrid-chips { display: flex; flex-wrap: wrap; gap: 3px; }
+
+.gd-hgrid-chip {
+    padding: 3px 9px;
+    border: 1px solid var(--gd-line);
+    border-radius: 999px;
+    background: var(--gd-panel-soft);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.gd-hgrid-chip small { color: var(--gd-muted); font-weight: 700; }
+.gd-hgrid-chip.is-nhl { border-color: color-mix(in srgb, var(--gd-green) 55%, var(--gd-line)); }
+
+.gd-hgrid-idle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    border-top: 1px solid var(--gd-line-soft);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.gd-hgrid-idle i { width: 6px; height: 6px; border-radius: 50%; background: var(--gd-red); flex: none; }
+.gd-hgrid-idle b { font-weight: 900; }
+.gd-hgrid-idle span:last-child { margin-left: auto; color: var(--gd-muted); }
+
+.gd-hgrid-empty {
+    padding: 10px 4px;
+    color: var(--gd-muted);
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.gd-hgrid-scroll { overflow: auto; min-height: 0; }
+
+@media (max-width: 1400px) {
+    .gd-hgrid-work { grid-template-columns: minmax(0, 1fr); }
+    .gd-hgrid-side { grid-template-rows: none; }
+}
+
+@media print {
+    .gd-hgrid-side, .gd-hgrid-legend { display: none; }
+    .gd-hgrid-work { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Переключатель «в клетке»: тихие кнопки в тон панели, а не яркие вкладки. */
+.gd-hgrid-switch { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; }
+
+.gd-hgrid-switch > span {
+    color: var(--gd-muted);
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.gd-hgrid-switch button {
+    padding: 3px 9px;
+    border: 1px solid var(--gd-line);
+    border-radius: 6px;
+    background: var(--gd-panel-soft);
+    color: var(--gd-muted);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.gd-hgrid-switch button:hover { color: var(--gd-ink); }
+
+.gd-hgrid-switch button.is-active {
+    border-color: color-mix(in srgb, var(--gd-cyan) 60%, var(--gd-line));
+    background: color-mix(in srgb, var(--gd-cyan) 12%, var(--gd-panel));
+    color: var(--gd-ink);
+}
+
+
+/* --- Разворот сетки на весь экран ----------------------------------------- */
+
+.gd-hgrid-expand {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 11px;
+    border: 1px solid var(--gd-line);
+    border-radius: 6px;
+    background: var(--gd-panel-soft);
+    color: var(--gd-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+    width: auto;
+}
+
+.gd-hgrid-expand:hover { border-color: var(--gd-cyan); }
+
+.gd-hgrid-card.is-expanded {
+    position: fixed;
+    inset: 10px;
+    z-index: 9000;
+    padding: 12px 14px 14px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .6);
+}
+
+.gd-hgrid-card.is-expanded .gd-hgrid-box { min-height: 0; }
+.gd-hgrid-box:focus { outline: none; }
+
+/* Блокировка прокрутки страницы держится на факте, а не на классе: класс мог
+   остаться от прошлой версии скрипта, когда развёрнутая карточка исчезала
+   вместе с подменённым блоком, и страница оставалась заблокированной навсегда.
+   Теперь прокрутка закрыта ровно тогда, когда развёрнутая карточка есть. */
+body.gd-hgrid-locked { overflow: hidden; }
+
+body.gd-hgrid-locked:not(:has(.gd-hgrid-card.is-expanded)) {
+    overflow: auto;
+}
+
+body:has(.gd-hgrid-card.is-expanded) {
+    overflow: hidden;
+}
+
+/* На развёрнутом экране строкам можно дышать. */
+.gd-hgrid-card.is-expanded .gd-hgrid-table td.is-cell { height: 40px; font-size: 17px; }
+.gd-hgrid-card.is-expanded .gd-hgrid-table td.is-point { font-size: 17px; }
+.gd-hgrid-card.is-expanded .gd-hgrid-table th.is-exc { font-size: 17px; }
+.gd-hgrid-card.is-expanded .gd-hgrid-table thead th { font-size: 14px; }
+.gd-hgrid-card.is-expanded .gd-hgrid-table tfoot th { font-size: 15px; }
+.gd-hgrid-card.is-expanded .gd-hgrid-table td.is-total b { font-size: 16px; }
+
+
+/* --- Часы вне смены ------------------------------------------------------- */
+/* Колонка за час, которого в смене нет, но рейсы в нём были: смену открыли
+   раньше или закрыли позже. Показываем приглушённо и с косой штриховкой по
+   верху, чтобы её не путали с обычным часом смены. */
+.gd-hgrid-table th.is-hour.is-outside {
+    color: var(--gd-muted);
+    box-shadow: inset 0 3px 0 -1px var(--gd-line);
+    font-style: italic;
+}
+
+.gd-hgrid-table td.is-cell.is-outside {
+    background: color-mix(in srgb, var(--hg-cell) 82%, transparent);
+}
+
+/* --- Один экран, одна прокрутка ------------------------------------------ */
+/* Высота считается не в vh, а в долях холста. Экраны диспетчера живут внутри
+   .dispatcher-canvas: холст постоянной высоты 1108, который целиком
+   масштабируется под окно. Единицы vh внутри него продолжают мерить настоящее
+   окно (886 точек у пульта), и блок, растянутый на 100vh, после масштаба
+   занимал только 80% высоты — отсюда пустая полоса под отчётом. --gd-vh
+   выставляет скрипт холста; без холста берётся обычный 1vh. */
+/* Прокруток было две: наружная страница и блок отчёта. Стоило крутнуть
+   страницу — блок отчёта фиксированной высоты уезжал вверх, и под ним
+   открывалась пустая полоса до низа окна. Поэтому оболочка, страница и доска
+   отчёта жёстко занимают ровно окно и ничего не прокручивают, а единственным
+   прокручиваемым остаётся блок с содержимым: он забирает весь остаток высоты
+   сам, без замеров скриптом, сколько бы полос ни было над ним. */
+body.dispatcher-shift-report-screen:has(.gd-hgrid) {
+    height: calc(100 * var(--gd-vh, 1vh));
+    min-height: 0;
+    overflow: hidden;
+}
+
+body.dispatcher-shift-report-screen:has(.gd-hgrid) .dispatcher-analytics-shell,
+body.dispatcher-shift-report-screen:has(.gd-hgrid) .dispatcher-shift-report-page {
+    box-sizing: border-box;
+    display: flex !important;
+    flex-direction: column !important;
+    height: calc(100 * var(--gd-vh, 1vh)) !important;
+    min-height: 0 !important;
+    max-height: calc(100 * var(--gd-vh, 1vh)) !important;
+    overflow: hidden !important;
+}
+
+body.dispatcher-shift-report-screen:has(.gd-hgrid) .dispatcher-analytics-board {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: hidden !important;
+    /* Снизу у доски отчётов свой запас в 24 точки — на экране, который занимает
+       ровно окно, он превращался в пустую полосу под отчётом. Оставляем такой
+       же зазор, как по бокам (их держит сама оболочка). */
+    padding-bottom: 0 !important;
+}
+
+/* Шапка с фильтрами и полоса замечаний остаются своей высоты и не сжимаются. */
+body.dispatcher-shift-report-screen:has(.gd-hgrid) .dispatcher-analytics-board > * {
+    flex: 0 0 auto;
+}
+
+body.dispatcher-shift-report-screen:has(.gd-hgrid) [data-dispatcher-shift-report-live] {
+    display: block;
+    /* Браузер сам подкручивает прокручиваемый блок, когда содержимое в нём
+       перерисовывается, — держит видимую строку на месте. Таблицу сетки
+       скрипт рисует заново при каждом автообновлении, и эта услужливость
+       складывалась с нашим восстановлением позиции: отчёт уезжал на строку
+       вниз каждые несколько секунд. */
+    overflow-anchor: none;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    max-height: none;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+/* Блок держит фокус ради стрелок — рамку фокуса при этом не рисуем. */
+body.dispatcher-shift-report-screen:has(.gd-hgrid) [data-dispatcher-shift-report-live]:focus {
+    outline: none;
+}
+
+body.dispatcher-shift-report-screen:has(.gd-hgrid) .dispatcher-shift-report-paper.is-screen {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+}
+

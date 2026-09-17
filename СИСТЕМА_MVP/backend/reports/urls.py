@@ -158,6 +158,12 @@ urlpatterns = [
         name='dispatcher_shift_hourly',
     ),
     path(
+        'dispatcher/shift-reports/hourly-grid/',
+        dispatcher_shift_report_view,
+        {'report_kind': 'hourly_grid'},
+        name='dispatcher_shift_hourly_grid',
+    ),
+    path(
         'dispatcher/shift-reports/hourly/export/',
         dispatcher_shift_report_export_view,
         {'report_kind': 'hourly'},
