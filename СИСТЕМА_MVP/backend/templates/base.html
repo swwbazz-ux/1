@@ -2647,5 +2647,99 @@ window.AppRealtimeConfig = {
 };
 </script>
 <script src="{% static 'js/realtime-client.js' %}?v={{ static_asset_release }}"></script>
+<script>
+(function dispatcherBoardSelfHeal() {
+    /* Самовосстановление настольного пульта после «заморозки» окна.
+       Наблюдение с боевого: в установленном через Яндекс Браузер пульте после
+       нескольких минут простоя экран внешне цел, но не откликается — карточки,
+       кнопка смены, перетаскивание, — пока человек не обновит страницу.
+       Здесь пульт делает то же самое сам: если скрипты страницы были
+       приостановлены (тик таймера опоздал больше чем на полторы минуты) или
+       после возвращения в окно сервер не отвечает больше 10 секунд, пульт
+       перезагружается — но только когда это безопасно (нет перетаскивания,
+       ввода, открытого окна) и не чаще раза в три минуты. На здоровом пульте
+       ни одно из условий не наступает, и код ничего не делает. */
+    var TICK_MS = 5000;
+    var FREEZE_GAP_MS = 90000;
+    var RESUME_WAIT_MS = 10000;
+    var STALE_SUCCESS_MS = 90000;
+    var MIN_RELOAD_INTERVAL_MS = 180000;
+    var STORAGE_KEY = "dispatcher-self-heal-reload-at";
+
+    function isDesktopBoard() {
+        return !!document.querySelector(".dispatcher-board")
+            && !document.body.classList.contains("mining-master-mobile-screen")
+            && document.body.dataset.nativeApp !== "true";
+    }
+    if (!document.body || !isDesktopBoard()) return;
+
+    var lastTick = Date.now();
+    var freezeDetectedAt = 0;
+    var checkTimer = null;
+
+    function realtimeState() {
+        var client = window.AppRealtime;
+        return client && typeof client.getDebugState === "function" ? client.getDebugState() : null;
+    }
+    function unsafeNow() {
+        var guard = window.AppPwaContractGuard;
+        if (guard && typeof guard.hasUnsafeWorkInProgress === "function" && guard.hasUnsafeWorkInProgress()) return true;
+        return !!document.querySelector(".is-dragging, [data-dispatcher-action-pending=\"true\"], .app-confirm-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden])");
+    }
+    function recentlyReloaded() {
+        try {
+            var at = Number(window.sessionStorage.getItem(STORAGE_KEY) || 0);
+            return at && Date.now() - at < MIN_RELOAD_INTERVAL_MS;
+        } catch (error) { return false; }
+    }
+    function reloadBoard(reason) {
+        if (recentlyReloaded() || document.hidden === true) return;
+        if (unsafeNow()) { scheduleCheck(reason); return; }
+        try { window.sessionStorage.setItem(STORAGE_KEY, String(Date.now())); } catch (error) {}
+        if (typeof window.showAppSyncOverlay === "function") {
+            window.showAppSyncOverlay({
+                title: "Возобновляем пульт",
+                text: "Окно было приостановлено. Загружаем свежую расстановку."
+            });
+        }
+        window.setTimeout(function () { window.location.reload(); }, 120);
+    }
+    function scheduleCheck(reason) {
+        if (checkTimer !== null) return;
+        var armedAt = Date.now();
+        checkTimer = window.setTimeout(function () {
+            checkTimer = null;
+            if (document.hidden === true) return;
+            var state = realtimeState();
+            var lastSuccess = state ? Number(state.lastSuccessAt || 0) : 0;
+            var serverAnswered = lastSuccess >= armedAt;
+            if (serverAnswered) { freezeDetectedAt = 0; return; }
+            reloadBoard(reason);
+        }, RESUME_WAIT_MS);
+    }
+    function onResume(reason) {
+        if (document.hidden === true) return;
+        var state = realtimeState();
+        var lastSuccess = state ? Number(state.lastSuccessAt || 0) : 0;
+        var stale = lastSuccess && Date.now() - lastSuccess > STALE_SUCCESS_MS;
+        if (freezeDetectedAt || stale) scheduleCheck(reason);
+    }
+
+    window.setInterval(function () {
+        var now = Date.now();
+        if (now - lastTick > FREEZE_GAP_MS) {
+            freezeDetectedAt = now;
+            onResume("timer-gap");
+        }
+        lastTick = now;
+    }, TICK_MS);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) onResume("visible"); });
+    window.addEventListener("focus", function () { onResume("focus"); });
+    window.addEventListener("pageshow", function () { onResume("pageshow"); });
+    document.addEventListener("resume", function () { onResume("resume"); });
+    document.addEventListener("pointerdown", function () { onResume("pointer"); }, {passive: true, capture: true});
+})();
+</script>
+
 </body>
 </html>
