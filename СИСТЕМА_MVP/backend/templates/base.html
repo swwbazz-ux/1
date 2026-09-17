@@ -2649,21 +2649,35 @@ window.AppRealtimeConfig = {
 <script src="{% static 'js/realtime-client.js' %}?v={{ static_asset_release }}"></script>
 <script>
 (function dispatcherBoardSelfHeal() {
-    /* Самовосстановление настольного пульта после «заморозки» окна.
-       Наблюдение с боевого: в установленном через Яндекс Браузер пульте после
-       нескольких минут простоя экран внешне цел, но не откликается — карточки,
-       кнопка смены, перетаскивание, — пока человек не обновит страницу.
-       Здесь пульт делает то же самое сам: если скрипты страницы были
-       приостановлены (тик таймера опоздал больше чем на полторы минуты) или
-       после возвращения в окно сервер не отвечает больше 10 секунд, пульт
-       перезагружается — но только когда это безопасно (нет перетаскивания,
-       ввода, открытого окна) и не чаще раза в три минуты. На здоровом пульте
-       ни одно из условий не наступает, и код ничего не делает. */
+    /* Самовосстановление настольного пульта.
+
+       Наблюдение с боевого (Chrome и Яндекс одинаково): после нескольких минут
+       простоя пульт внешне цел, но карточка техники отвечает «Данные
+       изменились — закройте карточку и откройте её снова», а действия
+       молчат. Причина — доска на экране отстала от версии сервера: пульт
+       обновляет доску только когда это «безопасно» (нет фокуса в поле ввода,
+       открытого окна, перетаскивания, неотправленных действий), и если
+       что-то из этого залипло, обновление откладывается бесконечно. Карточка
+       же сверяет версию доски с версией сервера и при расхождении отказывает.
+
+       Три лекарства, от мягкого к жёсткому:
+       1) доска отстала дольше двух минут — принудительно перечитать её с
+          сервера (сняв залипший фокус с поля ввода, если дело в нём);
+       2) карточка отказана как устаревшая — закрыть её, догнать доску и
+          открыть карточку заново без участия человека;
+       3) скрипты были приостановлены, сервер не отвечает после возвращения
+          в окно или доска не догоняется — безопасная перезагрузка страницы,
+          не чаще раза в три минуты.
+       На здоровом пульте условия не наступают, код молчит. */
     var TICK_MS = 5000;
     var FREEZE_GAP_MS = 90000;
     var RESUME_WAIT_MS = 10000;
     var STALE_SUCCESS_MS = 90000;
+    var DRIFT_REFRESH_MS = 120000;
+    var DRIFT_RELOAD_MS = 240000;
     var MIN_RELOAD_INTERVAL_MS = 180000;
+    var CARD_RETRY_MIN_INTERVAL_MS = 15000;
+    var STALE_CARD_TEXT = "Данные изменились";
     var STORAGE_KEY = "dispatcher-self-heal-reload-at";
 
     function isDesktopBoard() {
@@ -2675,16 +2689,45 @@ window.AppRealtimeConfig = {
 
     var lastTick = Date.now();
     var freezeDetectedAt = 0;
+    var driftSince = 0;
+    var driftRefreshRequestedAt = 0;
     var checkTimer = null;
+    var lastCardRetryAt = 0;
+    var cardRecoveryBusy = false;
+    var log = [];
 
+    function note(event, extra) {
+        log.push({at: new Date().toISOString(), event: event, extra: extra === undefined ? null : extra});
+        if (log.length > 40) log.shift();
+    }
     function realtimeState() {
         var client = window.AppRealtime;
         return client && typeof client.getDebugState === "function" ? client.getDebugState() : null;
     }
+    function boardVersion() {
+        var board = document.querySelector(".dispatcher-board");
+        var parsed = Number(board && board.dataset ? board.dataset.operationalStateVersion : 0);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+    function serverVersion(state) {
+        if (!state) return 0;
+        return Math.max(
+            Number(state.observedVersion || 0),
+            Number(state.currentVersion || 0),
+            Number(state.pendingReconcileVersion || 0)
+        );
+    }
+    function detailLayer() {
+        return document.querySelector("[data-gd-equipment-detail]");
+    }
+    function cardOpen() {
+        var layer = detailLayer();
+        return !!layer && !layer.hidden;
+    }
     function unsafeNow() {
         var guard = window.AppPwaContractGuard;
         if (guard && typeof guard.hasUnsafeWorkInProgress === "function" && guard.hasUnsafeWorkInProgress()) return true;
-        return !!document.querySelector(".is-dragging, [data-dispatcher-action-pending=\"true\"], .app-confirm-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden])");
+        return !!document.querySelector('.is-dragging, .dispatcher-dragging, [data-dispatcher-action-pending="true"], .app-confirm-modal:not([hidden])');
     }
     function recentlyReloaded() {
         try {
@@ -2694,15 +2737,53 @@ window.AppRealtimeConfig = {
     }
     function reloadBoard(reason) {
         if (recentlyReloaded() || document.hidden === true) return;
-        if (unsafeNow()) { scheduleCheck(reason); return; }
+        if (unsafeNow() || cardOpen()) { scheduleCheck(reason); return; }
         try { window.sessionStorage.setItem(STORAGE_KEY, String(Date.now())); } catch (error) {}
+        note("reload", reason);
         if (typeof window.showAppSyncOverlay === "function") {
             window.showAppSyncOverlay({
                 title: "Возобновляем пульт",
-                text: "Окно было приостановлено. Загружаем свежую расстановку."
+                text: "Загружаем свежую расстановку с сервера."
             });
         }
         window.setTimeout(function () { window.location.reload(); }, 120);
+    }
+    function releaseStuckFocus() {
+        var active = document.activeElement;
+        var tag = active && active.tagName ? active.tagName.toLowerCase() : "";
+        if (active && (tag === "input" || tag === "textarea" || tag === "select") && typeof active.blur === "function") {
+            active.blur();
+            note("blur-stuck-input", tag);
+            return true;
+        }
+        return false;
+    }
+    function forceBoardRefresh(reason, version) {
+        if (typeof window.applyOperationalStateRefresh !== "function") return Promise.resolve(null);
+        note("force-refresh", reason + ":" + version);
+        if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+            try { window.AppRealtime.wake("self_heal_" + reason, {explicit: true, reconcile: true}); } catch (error) {}
+        }
+        return Promise.resolve().then(function () {
+            /* Версию просим «текущую» (0): сервер отдаёт свежую доску вместе с
+               её номером. Запрос номера новее серверного отвергается как
+               несовпадение контракта, а реальный номер здесь знать не обязательно. */
+            return window.applyOperationalStateRefresh({
+                version: 0,
+                previousVersion: boardVersion(),
+                events: [],
+                eventsTruncated: true,
+                screen: "dispatcher-control",
+                mode: "custom",
+                role: "dispatcher"
+            });
+        }).then(function (result) {
+            note("force-refresh-result", result ? (result.applied ? "applied" : (result.reason || "deferred")) : "empty");
+            return result;
+        }, function (error) {
+            note("force-refresh-error", String(error && error.message || error));
+            return null;
+        });
     }
     function scheduleCheck(reason) {
         if (checkTimer !== null) return;
@@ -2712,8 +2793,7 @@ window.AppRealtimeConfig = {
             if (document.hidden === true) return;
             var state = realtimeState();
             var lastSuccess = state ? Number(state.lastSuccessAt || 0) : 0;
-            var serverAnswered = lastSuccess >= armedAt;
-            if (serverAnswered) { freezeDetectedAt = 0; return; }
+            if (lastSuccess >= armedAt) { freezeDetectedAt = 0; return; }
             reloadBoard(reason);
         }, RESUME_WAIT_MS);
     }
@@ -2721,23 +2801,98 @@ window.AppRealtimeConfig = {
         if (document.hidden === true) return;
         var state = realtimeState();
         var lastSuccess = state ? Number(state.lastSuccessAt || 0) : 0;
-        var stale = lastSuccess && Date.now() - lastSuccess > STALE_SUCCESS_MS;
+        var stale = !lastSuccess || Date.now() - lastSuccess > STALE_SUCCESS_MS;
         if (freezeDetectedAt || stale) scheduleCheck(reason);
+    }
+    function inspectDrift() {
+        if (document.hidden === true || cardOpen() || unsafeNow()) { driftSince = 0; return; }
+        var state = realtimeState();
+        var server = serverVersion(state);
+        var board = boardVersion();
+        if (!server || !board || server <= board) { driftSince = 0; driftRefreshRequestedAt = 0; return; }
+        var now = Date.now();
+        if (!driftSince) { driftSince = now; return; }
+        var age = now - driftSince;
+        if (age >= DRIFT_RELOAD_MS) { reloadBoard("board-drift"); return; }
+        if (age >= DRIFT_REFRESH_MS && now - driftRefreshRequestedAt > 30000) {
+            driftRefreshRequestedAt = now;
+            releaseStuckFocus();
+            forceBoardRefresh("drift", server);
+        }
+    }
+    function recoverStaleCard() {
+        var layer = detailLayer();
+        var message = document.querySelector("[data-gd-detail-load-message]");
+        if (!layer || layer.hidden || !message) return;
+        if (String(message.textContent || "").indexOf(STALE_CARD_TEXT) < 0) return;
+        var now = Date.now();
+        if (cardRecoveryBusy || now - lastCardRetryAt < CARD_RETRY_MIN_INTERVAL_MS) return;
+        var cardId = String(layer.dataset.gdActiveCardId || "");
+        if (!cardId) return;
+        cardRecoveryBusy = true;
+        lastCardRetryAt = now;
+        note("stale-card", cardId);
+        var closeButton = layer.querySelector("button[data-gd-detail-close]");
+        if (closeButton) closeButton.click();
+        /* Закрытие карточки будит опрос и сброс очереди — пару мгновений пульт
+           считает себя занятым. Даём ему успокоиться, при «занят» повторяем раз. */
+        var attempt = function (retriesLeft) {
+            return forceBoardRefresh("stale-card", serverVersion(realtimeState())).then(function (result) {
+                var busy = result && result.deferred && /busy/.test(String(result.reason || ""));
+                if (busy && retriesLeft > 0) {
+                    return new Promise(function (resolve) { window.setTimeout(resolve, 1500); }).then(function () {
+                        return attempt(retriesLeft - 1);
+                    });
+                }
+                return result;
+            });
+        };
+        window.setTimeout(function () {
+            attempt(2).then(function (result) {
+                cardRecoveryBusy = false;
+                if (!result || result.applied !== true) { note("reopen-skipped", result ? result.reason : "no-result"); return; }
+                var tile = document.querySelector('[data-equipment-card-id="' + cardId + '"]');
+                if (tile) { note("reopen-card", cardId); tile.click(); }
+            });
+        }, 350);
+    }
+    var messageNode = document.querySelector("[data-gd-detail-load-message]");
+    if (messageNode && typeof MutationObserver === "function") {
+        new MutationObserver(function () { recoverStaleCard(); })
+            .observe(messageNode, {childList: true, characterData: true, subtree: true});
     }
 
     window.setInterval(function () {
         var now = Date.now();
         if (now - lastTick > FREEZE_GAP_MS) {
             freezeDetectedAt = now;
+            note("freeze-gap", now - lastTick);
             onResume("timer-gap");
         }
         lastTick = now;
+        inspectDrift();
     }, TICK_MS);
     document.addEventListener("visibilitychange", function () { if (!document.hidden) onResume("visible"); });
     window.addEventListener("focus", function () { onResume("focus"); });
     window.addEventListener("pageshow", function () { onResume("pageshow"); });
     document.addEventListener("resume", function () { onResume("resume"); });
     document.addEventListener("pointerdown", function () { onResume("pointer"); }, {passive: true, capture: true});
+
+    window.DispatcherSelfHeal = {
+        version: 2,
+        log: log,
+        state: function () {
+            return {
+                boardVersion: boardVersion(),
+                serverVersion: serverVersion(realtimeState()),
+                driftSince: driftSince,
+                freezeDetectedAt: freezeDetectedAt
+            };
+        },
+        inspectDrift: inspectDrift,
+        recoverStaleCard: recoverStaleCard,
+        forceBoardRefresh: forceBoardRefresh
+    };
 })();
 </script>
 
