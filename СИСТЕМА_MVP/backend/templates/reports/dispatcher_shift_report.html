@@ -1,10 +1,19 @@
 {% extends "base.html" %}
-{% load l10n %}
+{% load static %}
+{% load l10n static %}
 
-{% block title %}{% if report_kind == 'hourly' %}Почасовая сводка смены{% elif report_kind == 'excavation' %}Выемочное оборудование{% else %}Итоги смены по самосвалам{% endif %}{% endblock %}
+{% block title %}{% if report_kind == 'hourly' %}Почасовая сводка смены{% elif report_kind == 'hourly_grid' %}Часовая сетка смены{% elif report_kind == 'excavation' %}Выемочное оборудование{% else %}Итоги смены по самосвалам{% endif %}{% endblock %}
 {% block body_class %}dispatcher-control-screen dispatcher-shift-report-screen{% endblock %}
 
+{% block extra_head %}{% if report_kind == 'hourly_grid' %}<link rel="stylesheet" href="{% static 'css/dispatcher-hourly-grid-v1.css' %}?v={{ static_asset_release }}">{% endif %}{% endblock %}
+
+{% block app_stylesheets %}
+<link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v={{ static_asset_release }}">
+{% endblock %}
+
 {% block body %}
+{# Холст: экран масштабируется под окно целиком, как пульт (static/js/dispatcher-canvas-v1.js). #}
+<div class="dispatcher-canvas" data-dispatcher-canvas="off">
 <main class="dispatcher-shell dispatcher-analytics-shell dispatcher-shift-report-page" data-dispatcher-theme>
     <section class="dispatcher-analytics-board">
         <header class="dispatcher-topbar dispatcher-unified-topbar no-print">
@@ -18,6 +27,7 @@
                     <a class="{% if report_kind == 'trucks' %}is-active{% endif %}" href="{% url 'dispatcher_shift_trucks' %}?{{ query_string }}">Самосвалы</a>
                     <a class="{% if report_kind == 'excavation' %}is-active{% endif %}" href="{% url 'dispatcher_shift_excavation' %}?{{ query_string }}">Выемочное оборудование</a>
                     <a class="{% if report_kind == 'hourly' %}is-active{% endif %}" href="{% url 'dispatcher_shift_hourly' %}?{{ query_string }}">Почасовая сводка</a>
+                    <a class="{% if report_kind == 'hourly_grid' %}is-active{% endif %}" href="{% url 'dispatcher_shift_hourly_grid' %}?{{ query_string }}">Часовая сетка</a>
                 </nav>
             </div>
 
@@ -43,7 +53,7 @@
             </form>
 
             <div class="dispatcher-report-actions">
-                {% if report_kind == 'hourly' %}
+                {% if report_kind == 'hourly' or report_kind == 'hourly_grid' %}
                     <a href="{% url 'dispatcher_shift_hourly_export' %}?{{ query_string }}">Excel</a>
                 {% elif report_kind == 'excavation' %}
                     <a href="{% url 'dispatcher_shift_excavation_export' %}?{{ query_string }}">Excel</a>
@@ -60,7 +70,7 @@
             </div>
         {% endif %}
 
-        <div data-dispatcher-shift-report-live>
+        <div data-dispatcher-shift-report-live{% if report_kind == 'hourly_grid' %} tabindex="0"{% endif %}>
         {% if report.issues %}
             <section class="dispatcher-shift-report-issues no-print" aria-label="Замечания перед выгрузкой">
                 <strong>Проверить перед выгрузкой:</strong>
@@ -70,8 +80,47 @@
             <section class="dispatcher-shift-report-ready no-print">Данные смены заполнены. Отчёт готов к выгрузке или печати.</section>
         {% endif %}
 
-        <section class="dispatcher-shift-report-paper" id="{{ report_kind }}">
-            {% if report_kind == 'hourly' %}
+        <section class="dispatcher-shift-report-paper{% if report_kind == 'hourly_grid' %} is-screen{% endif %}" id="{{ report_kind }}">
+            {% if report_kind == 'hourly_grid' %}
+                <section class="gd-hgrid" aria-label="Часовая сетка смены">
+                    <div id="hourly-grid-data" data-hourly-grid="{{ hourly_grid_json }}" hidden></div>
+                    <div class="gd-hgrid-strip" id="hourly-grid-strip"></div>
+                    <div class="gd-hgrid-work">
+                        <div class="gd-hgrid-card">
+                            <header>
+                                <h3>Часы смены</h3>
+                                <span class="gd-hgrid-note" id="hourly-grid-note"></span><span class="gd-hgrid-build" id="hourly-grid-build" data-page-release="{{ static_asset_release }}"></span>
+                                <span class="gd-hgrid-spacer"></span>
+                                <span class="gd-hgrid-note">час подписан по своему началу · клик по часу раскрывает точки колонками, клик по экскаватору — строками</span>
+                                <span class="gd-hgrid-switch" role="group" aria-label="Что показывать в клетке">
+                                    <span>в клетке</span>
+                                    <button type="button" data-hgrid-unit="trips" class="is-active">рейсы</button>
+                                    <button type="button" data-hgrid-unit="volume">объём</button>
+                                </span>
+                                <button type="button" class="gd-hgrid-expand" data-hgrid-expand>Развернуть</button>
+                            </header>
+                            <div class="gd-hgrid-box">
+                                <table class="gd-hgrid-table" id="hourly-grid-table"></table>
+                                <div class="gd-hgrid-legend" id="hourly-grid-legend"></div>
+                            </div>
+                        </div>
+                        <aside class="gd-hgrid-side">
+                            <div class="gd-hgrid-card" style="grid-template-rows:auto auto">
+                                <header><h3 id="hourly-grid-hour-title">Час</h3></header>
+                                <div>
+                                    <div id="hourly-grid-hour-note" style="margin-bottom:5px;font-size:11px;font-weight:800"></div>
+                                    <h4>Куда ушёл объём</h4>
+                                    <div id="hourly-grid-points"></div>
+                                </div>
+                            </div>
+                            <div class="gd-hgrid-card" style="grid-template-rows:auto auto">
+                                <header><h3>Кто работал в часу</h3></header>
+                                <div><div id="hourly-grid-trucks"></div><div id="hourly-grid-idles" style="margin-top:6px"></div></div>
+                            </div>
+                        </aside>
+                    </div>
+                </section>
+            {% elif report_kind == 'hourly' %}
                 <header class="dispatcher-shift-report-paper-title is-hourly">
                     <h1>Почасовая сводка смены</h1>
                     <p>{{ report.date|date:"d.m.Y" }} · {{ report.meta.label }} смена {{ report.meta.time_range }}</p>
@@ -190,6 +239,8 @@
             {% endif %}
         </section>
 
+        {% if report_kind == 'hourly_grid' %}<script src="{% static 'js/dispatcher-hourly-grid-v1.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
+
         <section class="dispatcher-shift-source no-print">
             <div class="dispatcher-shift-source-head">
                 <div><span>Исходные данные</span><h2>Завершённые рейсы смены</h2></div>
@@ -204,7 +255,7 @@
                             <span>{{ trip.rock_type }}</span>
                             <span>{{ trip.volume_m3|floatformat:"2g"|default:"нет объёма" }} м³</span>
                             <span>{{ trip.transport_distance_km|floatformat:"2g"|default:"нет плеча" }} км</span>
-                            {% if can_correct and trip.status == 'completed' %}<b>Корректировать</b>{% elif report_kind == 'hourly' %}<b>В пути</b>{% endif %}
+                            {% if can_correct and trip.status == 'completed' %}<b>Корректировать</b>{% elif report_kind == 'hourly' or report_kind == 'hourly_grid' %}<b>В пути</b>{% endif %}
                         </summary>
                         {% if can_correct and trip.status == 'completed' %}
                             <form method="post" class="dispatcher-shift-correction-form">
@@ -233,6 +284,8 @@
         </div>
     </section>
 </main>
+<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v={{ static_asset_release }}"></script>
+</div>
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
@@ -342,7 +395,26 @@ document.addEventListener("DOMContentLoaded", function () {
                 left: currentHourlyScroll.scrollLeft,
                 top: currentHourlyScroll.scrollTop
             } : null;
+            // Блок отчёта сам может быть прокручиваемым (часовая сетка): его
+            // позицию переносим на новый узел. Ставим и сразу, и отметкой —
+            // содержимое сетки дорисовывает скрипт, и до этого позиция
+            // обрезалась бы по короткому содержимому.
+            var liveScrollTop = currentRoot.scrollTop;
+            var currentGridBox = currentRoot.querySelector(".gd-hgrid-box");
+            var gridBoxScroll = currentGridBox
+                ? currentGridBox.scrollTop + ":" + currentGridBox.scrollLeft
+                : "";
             currentRoot.replaceWith(freshRoot);
+            if (liveScrollTop > 0) {
+                // Позицию ставит только скрипт сетки и только после отрисовки
+                // таблицы. Если задать её здесь, по ещё пустой таблице она
+                // обрежется, а браузер потом до-подкрутит блок сам — и позиция
+                // уползает на строку за каждое обновление.
+                freshRoot.dataset.restoreScroll = String(liveScrollTop);
+            }
+            if (gridBoxScroll && gridBoxScroll !== "0:0") {
+                freshRoot.dataset.restoreGridBoxScroll = gridBoxScroll;
+            }
             if (hourlyScrollPosition) {
                 var freshHourlyScroll = freshRoot.querySelector("[data-hourly-report-scroll]");
                 if (freshHourlyScroll) {

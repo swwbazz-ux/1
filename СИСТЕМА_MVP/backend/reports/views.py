@@ -1,3 +1,4 @@
+import json
 import mimetypes
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -81,6 +82,7 @@ from .driver_rating_scope_membership import (
     discover_driver_rating_current_scope,
 )
 from .forms import PilotFeedbackForm
+from .hourly_grid import build_hourly_grid, hourly_grid_payload
 from .dispatcher_shift_forms import (
     build_dispatcher_shift_report,
     build_shift_report_workbook,
@@ -3388,6 +3390,16 @@ def dispatcher_reports_context(request, access):
             'export_url': reverse('dispatcher_shift_hourly_export'),
         },
         {
+            'title': 'Часовая сетка смены',
+            'kind': 'shift-hourly-grid',
+            'status': 'ok' if trips else 'risk',
+            'primary': f'{len(trips)} рейс.',
+            'secondary': f'{len({trip.excavator_id for trip in trips if trip.excavator_id})} экск. / {format_volume(volume_total)} м³',
+            'readiness': 'Вся смена на одном экране: часы, парки машин, точки разгрузки и простои',
+            'view_url': reverse('dispatcher_shift_hourly_grid'),
+            'export_url': reverse('dispatcher_shift_hourly_export'),
+        },
+        {
             'title': 'Сменные объемы',
             'kind': 'mining',
             'status': report_status('mining'),
@@ -3636,6 +3648,15 @@ def dispatcher_shift_report_view(request, report_kind='trucks'):
         if correction_response:
             return correction_response
     report = build_dispatcher_shift_report(selected_date, shift_type)
+    hourly_grid_json = ''
+    if report_kind == 'hourly_grid':
+        # Часовая сетка считает свой разрез из тех же рейсов и отдаёт его
+        # странице одним JSON: раскрытия часов и экскаваторов — состояние
+        # экрана, сервер о них не знает.
+        hourly_grid_json = json.dumps(
+            hourly_grid_payload(build_hourly_grid(selected_date, shift_type)),
+            ensure_ascii=False,
+        )
     query_string = urlencode({'date': selected_date.isoformat(), 'shift_type': shift_type})
     operational_state = (
         OperationalStateVersion.objects
@@ -3654,7 +3675,8 @@ def dispatcher_shift_report_view(request, report_kind='trucks'):
         'rock_types': RockType.objects.filter(is_active=True).order_by('name'),
         'dump_points': DumpPoint.objects.filter(is_active=True).order_by('name'),
         'operational_state_version': operational_state_version,
-        'source_trips': report['hourly_trips'] if report_kind == 'hourly' else report['trips'],
+        'hourly_grid_json': hourly_grid_json,
+        'source_trips': report['hourly_trips'] if report_kind in {'hourly', 'hourly_grid'} else report['trips'],
     })
     if request.GET.get('_operational_fragment', '').strip() == 'dispatcher-shift-report':
         return operational_fragment_response(
