@@ -79,8 +79,14 @@
         var c = cylinder();
         if (!c || !geo.n) return;
         c.classList.toggle("is-snapping", !!snapping);
+        if (snapping) {
+            // Пока идёт анимация фиксации, грань ещё движется — контур дорисуем по её окончании.
+            c.__snapUntil = Date.now() + 360;
+            root.clearTimeout(c.__snapTimer);
+            c.__snapTimer = root.setTimeout(function () { c.__snapUntil = 0; drawLink(); }, 370);
+        }
         // Барабан слегка наклонён от зрителя: так кромки граней читаются дугами, а не прямыми.
-        c.style.transform = "rotateX(-11deg) translateZ(" + (-geo.radius).toFixed(1) + "px) rotateY(" + geo.theta.toFixed(3) + "deg)";
+        c.style.transform = "rotateX(-6deg) translateZ(" + (-geo.radius).toFixed(1) + "px) rotateY(" + geo.theta.toFixed(3) + "deg)";
         var front = frontIndex(geo.theta);
         cards().forEach(function (card, index) {
             // Угол грани относительно зрителя: 0 — прямо перед ним.
@@ -88,7 +94,8 @@
             var a = Math.abs(rel);
             card.classList.toggle("is-center", index === front);
             card.classList.toggle("is-back", a > 100);
-            card.style.setProperty("--drum-fade", Math.max(0, 1 - Math.max(0, a - 12) / 95).toFixed(3));
+            // Боковые грани погасшие: уже соседняя заметно темнее передней.
+            card.style.setProperty("--drum-fade", Math.max(0.22, 1 - Math.max(0, a - 6) / 48).toFixed(3));
         });
         if (front !== lastFront) {
             if (lastFront !== -1 && root.navigator && typeof root.navigator.vibrate === "function") {
@@ -97,7 +104,10 @@
             lastFront = front;
             geo.front = front;
         }
-        drawLink();
+        // Контур статичен: пересчитываем его только когда барабан стоит на делении,
+        // иначе он «дышал» бы вместе с поворачивающейся передней гранью.
+        var offDetent = Math.abs(geo.theta / geo.step - Math.round(geo.theta / geo.step));
+        if (offDetent < 0.002 && !snapping) drawLink();
     }
 
     function centerCard() {
@@ -326,6 +336,11 @@
     }, { passive: false, capture: true });
 
     // --- контур: круг циферблата + горлышко к передней грани ---
+    function c_snapping() {
+        var c = cylinder();
+        return !!(c && c.classList.contains("is-snapping") && c.__snapUntil && c.__snapUntil > Date.now());
+    }
+
     function drawLink() {
         var svg = q("[data-driver-drum-link]");
         var path = svg ? q("[data-driver-drum-link-path]", svg) : null;
@@ -334,6 +349,7 @@
         var screen = svg ? svg.parentElement : null;
         while (screen && !screen.classList.contains("driver-work-screen")) screen = screen.parentElement;
         if (!svg || !path || !w || !card || !screen) return;
+        if (c_snapping()) return;
         var box = screen.getBoundingClientRect();
         var d = w.getBoundingClientRect();
         var c = card.getBoundingClientRect();

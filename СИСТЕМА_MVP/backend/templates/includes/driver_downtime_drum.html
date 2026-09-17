@@ -8,6 +8,14 @@
 [data-driver-active-downtime-id]. Логика: static/js/driver-downtime-drum-v1.js.
 {% endcomment %}
 <div class="driver-downtime-drum" data-driver-downtime-drum role="group" aria-label="Барабан простоев: проведите влево или вправо, чтобы повернуть барабан, и вверх на круг, чтобы начать простой">
+    <svg class="driver-downtime-drum-defs" aria-hidden="true" focusable="false" width="0" height="0">
+        <defs>
+            {% comment %} Бочкообразный силуэт грани: верх и низ — дуги, как у грани на вертикальном цилиндре. {% endcomment %}
+            <clipPath id="driver-drum-barrel" clipPathUnits="objectBoundingBox">
+                <path d="M0 .09Q.5 -.09 1 .09V.91Q.5 1.09 0 .91Z" />
+            </clipPath>
+        </defs>
+    </svg>
     <div class="driver-downtime-drum-body" aria-hidden="true"></div>
     <div class="driver-downtime-drum-stage">
         <div class="driver-downtime-drum-track" data-driver-drum-track>
@@ -15,6 +23,7 @@
                 <button class="driver-drum-card{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-drum-card data-driver-drum-reason-id="{{ reason.id }}" aria-label="Простой: {{ reason.button_label }}. Проведите вверх на круг, чтобы начать">
                     {% comment %} Грань натянута на цилиндр: семь вертикальных полосок, каждая под своим углом. {% endcomment %}
                     <span class="driver-drum-card-face" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                    <svg class="driver-drum-card-edge" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 9Q50 -9 100 9V91Q50 109 0 91Z" vector-effect="non-scaling-stroke" /></svg>
                     <span class="driver-drum-card-body">
                         <span class="driver-drum-card-label">{{ reason.button_label }}</span>
                         <span class="driver-drum-card-total" data-driver-drum-total{% if not reason.driver_is_used %} hidden{% endif %}>{{ reason.driver_total_label }}</span>
