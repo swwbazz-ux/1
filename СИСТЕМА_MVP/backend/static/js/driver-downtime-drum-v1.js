@@ -278,11 +278,6 @@
             d.classList.toggle("is-active", id !== "");
             d.classList.toggle("is-locked", id !== "");   // барабан зафиксирован, пока идёт простой
         }
-        var hint = q("[data-driver-drum-hint]");
-        if (hint) {
-            var text = id !== "" ? "\u25bc вниз \u2014 завершить простой" : "\u25b2 вверх \u2014 начать простой";
-            if (hint.textContent !== text) hint.textContent = text;
-        }
         if (w) w.classList.toggle("is-downtime-active", id !== "");
         // Подводим активную причину вперёд только если она не спереди: иначе каждое
         // обновление таймера запускало бы анимацию фиксации и блокировало контур.
@@ -347,8 +342,8 @@
         card.classList.remove("is-lifting", "is-armed", "is-dropping", "is-drop-armed");
         var dd0 = drum();
         if (dd0) dd0.classList.remove("is-dropping");
-        var w0 = dial();
-        if (w0) w0.classList.remove("is-drum-dropping");
+        var link0 = q("[data-driver-drum-link]");
+        if (link0) link0.classList.remove("is-armed", "is-drop-armed");
         card.classList.add("is-settling");
         card.style.setProperty("--lift-y", "0px");
         card.style.setProperty("--lift-z", "0px");
@@ -360,8 +355,6 @@
             if (d) d.classList.remove("is-lifting");
             syncLinkVars();
         }, 300);
-        var w = dial();
-        if (w) w.classList.remove("is-drum-lifting");
     }
 
     function endDrag() {
@@ -422,8 +415,8 @@
             var dropArmed = dy >= DROP_ARM;
             if (dropArmed && !drag.card.classList.contains("is-drop-armed")) { haptic(12); click(0.7); }
             drag.card.classList.toggle("is-drop-armed", dropArmed);
-            var wd = dial();
-            if (wd) wd.classList.toggle("is-drum-dropping", dropArmed);
+            var linkD = q("[data-driver-drum-link]");
+            if (linkD) linkD.classList.toggle("is-drop-armed", dropArmed);
             drag.dy = dy;
             event.preventDefault();
             return;
@@ -451,8 +444,8 @@
             // По ходу подъёма грань разворачивается лицом к зрителю (снимает наклон барабана).
             drag.card.style.setProperty("--lift-tilt", (Math.abs(TILT) * Math.min(1, -lift / liftMax)).toFixed(2) + "deg");
             drag.card.classList.toggle("is-armed", armed);
-            var w = dial();
-            if (w) w.classList.toggle("is-drum-lifting", armed);
+            var link = q("[data-driver-drum-link]");
+            if (link) link.classList.toggle("is-armed", armed);
             drag.dy = dy;
         }
         event.preventDefault();
@@ -661,10 +654,8 @@
             "Q", p(xL), p(y1), p(xL), p(y1 - rr),
             "Z"
         ].join(" ");
-        var ring = ["M", p(cx - r), p(cy), "A", p(r), p(r), "0 1 1", p(cx + r), p(cy), "A", p(r), p(r), "0 1 1", p(cx - r), p(cy), "Z"].join(" ");
         var root_ = doc.documentElement.style;
         root_.setProperty("--link-path", 'path("' + keyhole + '")');
-        root_.setProperty("--link-ring", 'path("' + ring + '")');
     }
 
     // --- состояние активного простоя: та же карточка, что и на вкладке «Простои» ---

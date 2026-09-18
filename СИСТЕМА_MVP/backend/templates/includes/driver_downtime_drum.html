@@ -18,6 +18,8 @@
                        тень к боковым кромкам), а не набором объёмных полосок. На слабых телефонах это
                        решает: 12 слоёв вместо 108, и ни одного пересчёта при вращении. {% endcomment %}
                     <span class="driver-drum-card-face" aria-hidden="true"></span>
+                    {% comment %} Стрелка на верхней кромке передней грани: вверх — начать простой, вниз — завершить. {% endcomment %}
+                    <span class="driver-drum-card-arrow" aria-hidden="true"></span>
                     <span class="driver-drum-card-body">
                         <span class="driver-drum-card-label">{{ reason.button_label }}</span>
                         <span class="driver-drum-card-total" data-driver-drum-total{% if not reason.driver_is_used %} hidden{% endif %}>{{ reason.driver_total_label }}</span>
@@ -28,7 +30,6 @@
             {% endfor %}
         </div>
     </div>
-    <span class="driver-downtime-drum-hint" data-driver-drum-hint aria-hidden="true">▲ вверх — начать простой</span>
 </div>
 {% comment %} Контур «кольцо → линии → рамка грани» — ОДНА непрерывная кривая. Сама кривая лежит в
    CSS-переменной на <html> (её ставит скрипт один раз при смене размеров), а путь берёт её через
