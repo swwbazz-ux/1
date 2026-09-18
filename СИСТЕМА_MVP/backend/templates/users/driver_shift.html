@@ -4270,6 +4270,12 @@ window.driverFragmentSnapshot = function (shell) {
     all("[data-driver-reason-seconds]").forEach(function (node) { node.removeAttribute("data-driver-reason-seconds"); });
     all("[data-driver-downtime-reason-button]").forEach(function (node) { node.removeAttribute("aria-label"); });
     all("[data-driver-report-downtime-total]").forEach(function (node) { node.removeAttribute("data-driver-report-downtime-total"); });
+    /* Длительности в путёвке считаются на сервере в минутах и растут, пока идёт простой:
+       сами строки (состав журнала) сравниваем, их секундомеры — нет. */
+    all("[data-driver-tab-panel='manifest'] .driver-report-row").forEach(function (row) {
+        row.removeAttribute("data-duration");
+        Array.prototype.slice.call(row.querySelectorAll("strong")).forEach(function (node) { node.textContent = ""; });
+    });
     var full = copy.outerHTML;
     all("[data-driver-tab-panel='downtimes'], [data-driver-tab-panel='manifest']").forEach(function (node) { node.parentNode.removeChild(node); });
     all(".driver-work-dial, [data-driver-work-dial-control]").forEach(function (node) {

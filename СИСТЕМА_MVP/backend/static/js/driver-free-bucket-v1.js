@@ -330,18 +330,30 @@
             }
         }
 
+        var mainCardApplied = false;
+
         function applyMainCard(item) {
             rememberBaseline();
             if (!item) {
+                // Возвращать исходные подписи есть смысл только после того, как модуль
+                // сам их подменил: иначе каждая отрисовка состояния перетирала подпись
+                // круга, которую во время простоя выставляет режим ожидания
+                // («ОЖИДАНИЕ ПОГРУЗКИ» превращалось обратно в «НА ЗАГРУЗКУ»).
+                if (!mainCardApplied) return;
+                mainCardApplied = false;
                 setNode("[data-driver-context-excavator]", shell.dataset.driverFreeBucketBaselineExcavator || "—");
                 setNode("[data-driver-context-complex]", shell.dataset.driverFreeBucketBaselineComplex || "К-—");
                 setNode("[data-driver-context-horizon]", shell.dataset.driverFreeBucketBaselineHorizon || "Горизонт —");
                 setNode("[data-driver-context-block]", shell.dataset.driverFreeBucketBaselineBlock || "Блок —");
                 setNode("[data-driver-context-rock]", shell.dataset.driverFreeBucketBaselineRock || "—");
                 setDialLabel(shell.dataset.driverFreeBucketBaselineDial || "—");
-                setNode(".driver-work-note", shell.dataset.driverFreeBucketBaselineNote || "НА ЗАГРУЗКУ");
+                // Подпись круга во время ожидания принадлежит простою — её не трогаем.
+                if (!shell.querySelector(".driver-work-dial-button.is-waiting-operation")) {
+                    setNode(".driver-work-note", shell.dataset.driverFreeBucketBaselineNote || "НА ЗАГРУЗКУ");
+                }
                 return;
             }
+            mainCardApplied = true;
             setNode("[data-driver-context-excavator]", item.label);
             setNode("[data-driver-context-complex]", item.complex_label || "К-—");
             setNode("[data-driver-context-horizon]", "Горизонт " + (item.loading_horizon || "—"));
