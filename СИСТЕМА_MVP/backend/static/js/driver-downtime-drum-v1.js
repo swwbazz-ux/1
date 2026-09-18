@@ -15,6 +15,9 @@
     var LIFT_ARM = 44;     // px, с которых круг подсвечивается «готово»
     var LIFT_TRIGGER = 64; // px, отпускание выше — старт простоя
     var LIFT_MAX = 96;
+    var DROP_ARM = 36;     // px вниз, с которых грань «готова» выключить простой
+    var DROP_TRIGGER = 56; // px вниз, отпускание ниже — завершение простоя
+    var DROP_MAX = 64;
     var STRIPS = 9;        // полосок в грани карточки
     var SLATS = 72;        // пластин в стенке цилиндра (по 5 градусов)
     var TILT = -20;        // наклон барабана от зрителя, градусов: видны крышка и ободья
@@ -94,6 +97,36 @@
 
     var lastFront = -1;
 
+    // Звуковой щелчок фиксации: короткий «тик» синтезируется на месте, без файлов.
+    // Аудио разрешается браузером только после касания — контекст создаём на первом pointerdown.
+    var audio = null;
+    function unlockAudio() {
+        if (audio || !(root.AudioContext || root.webkitAudioContext)) return;
+        try { audio = new (root.AudioContext || root.webkitAudioContext)(); } catch (e) { audio = null; }
+    }
+    function click(strength) {
+        if (!audio) return;
+        try {
+            if (audio.state === "suspended") audio.resume();
+            var t0 = audio.currentTime;
+            var osc = audio.createOscillator();
+            var gain = audio.createGain();
+            osc.type = "square";
+            osc.frequency.setValueAtTime(1900, t0);
+            osc.frequency.exponentialRampToValueAtTime(700, t0 + 0.02);
+            gain.gain.setValueAtTime(0.0001, t0);
+            gain.gain.exponentialRampToValueAtTime(0.09 * (strength || 1), t0 + 0.002);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.028);
+            osc.connect(gain); gain.connect(audio.destination);
+            osc.start(t0); osc.stop(t0 + 0.03);
+        } catch (e) {}
+    }
+    function haptic(pattern) {
+        if (root.navigator && typeof root.navigator.vibrate === "function") {
+            try { root.navigator.vibrate(pattern); } catch (e) {}
+        }
+    }
+
     function render(snapping) {
         var c = cylinder();
         if (!c || !geo.n) return;
@@ -132,9 +165,7 @@
             card.style.setProperty("--drum-fade", Math.max(0.22, 1 - Math.max(0, a - 6) / 48).toFixed(3));
         });
         if (front !== lastFront) {
-            if (lastFront !== -1 && root.navigator && typeof root.navigator.vibrate === "function") {
-                try { root.navigator.vibrate(9); } catch (e) {} // щелчок фиксации
-            }
+            if (lastFront !== -1) { haptic(9); click(1); } // щелчок фиксации: вибро + звук
             lastFront = front;
             geo.front = front;
         }
@@ -177,7 +208,15 @@
             card.classList.toggle("is-active-downtime", on);
             if (on) activeIndex = index;
         });
-        if (d) d.classList.toggle("is-active", id !== "");
+        if (d) {
+            d.classList.toggle("is-active", id !== "");
+            d.classList.toggle("is-locked", id !== "");   // барабан зафиксирован, пока идёт простой
+        }
+        var hint = q("[data-driver-drum-hint]");
+        if (hint) {
+            var text = id !== "" ? "\u25bc вниз \u2014 завершить простой" : "\u25b2 вверх \u2014 начать простой";
+            if (hint.textContent !== text) hint.textContent = text;
+        }
         if (w) w.classList.toggle("is-downtime-active", id !== "");
         // Подводим активную причину вперёд только если она не спереди: иначе каждое
         // обновление таймера запускало бы анимацию фиксации и блокировало контур.
@@ -204,13 +243,21 @@
             if (typeof root.showDriverToast === "function") root.showDriverToast("Причина простоя недоступна");
             return;
         }
-        if (root.navigator && typeof root.navigator.vibrate === "function") {
-            try { root.navigator.vibrate([16, 40, 24]); } catch (e) {}
-        }
+        haptic([16, 40, 24]); click(1.6);
         button.click();
     }
 
-    // --- жесты: горизонталь вращает барабан, вертикаль на передней грани — старт ---
+    function stopDowntime() {
+        var button = q("[data-driver-close-downtime]");
+        if (!button || button.disabled) {
+            if (typeof root.showDriverToast === "function") root.showDriverToast("Активного простоя нет");
+            return;
+        }
+        haptic([24, 30, 12]); click(1.3);
+        button.click();
+    }
+
+    // --- жесты: горизонталь вращает барабан, вертикаль на передней грани — старт (вверх) / стоп (вниз) ---
     var drag = null;
     var inertia = 0;
 
@@ -231,7 +278,11 @@
     }
 
     function resetLift(card) {
-        card.classList.remove("is-lifting", "is-armed");
+        card.classList.remove("is-lifting", "is-armed", "is-dropping", "is-drop-armed");
+        var dd0 = drum();
+        if (dd0) dd0.classList.remove("is-dropping");
+        var w0 = dial();
+        if (w0) w0.classList.remove("is-drum-dropping");
         card.classList.add("is-settling");
         card.style.setProperty("--lift-y", "0px");
         card.style.setProperty("--lift-z", "0px");
@@ -260,6 +311,7 @@
         var d = event.target && event.target.closest ? event.target.closest("[data-driver-downtime-drum]") : null;
         if (!d || event.button > 0) return;
         stopInertia();
+        unlockAudio();
         var card = event.target.closest("[data-driver-drum-card]");
         drag = {
             pointerId: event.pointerId, target: d, x0: event.clientX, y0: event.clientY,
@@ -275,6 +327,8 @@
         if (!drag.mode) {
             if (Math.abs(dx) < 6 && Math.abs(dy) < LIFT_START) return;
             if (Math.abs(dx) >= Math.abs(dy)) {
+                // При активном простое барабан зафиксирован: крутить нельзя.
+                if (activeReasonId() !== "") { drag = null; return; }
                 drag.mode = "spin";
             } else if (dy < 0 && drag.card && drag.card.classList.contains("is-center")) {
                 drag.mode = "lift";
@@ -282,6 +336,12 @@
                 drag.card.classList.add("is-lifting");
                 var dd = drum();
                 if (dd) dd.classList.add("is-lifting");
+            } else if (dy > 0 && drag.card && drag.card.classList.contains("is-center") && drag.card.classList.contains("is-active-downtime")) {
+                // Активную причину тянут вниз, «в барабан» — принудительное выключение простоя.
+                drag.mode = "drop";
+                drag.card.classList.add("is-dropping");
+                var dd2 = drum();
+                if (dd2) dd2.classList.add("is-dropping");
             } else {
                 drag = null;
                 return;
@@ -289,6 +349,19 @@
             if (typeof drag.target.setPointerCapture === "function") {
                 try { drag.target.setPointerCapture(event.pointerId); drag.captured = true; } catch (e) {}
             }
+        }
+        if (drag.mode === "drop") {
+            var down = Math.min(DROP_MAX, Math.max(0, dy));
+            drag.card.style.setProperty("--lift-y", down.toFixed(1) + "px");   // вниз вдоль стенки
+            var dropArmed = dy >= DROP_ARM;
+            if (dropArmed && !drag.card.classList.contains("is-drop-armed")) { haptic(12); click(0.7); }
+            drag.card.classList.toggle("is-drop-armed", dropArmed);
+            var wd = dial();
+            if (wd) wd.classList.toggle("is-drum-dropping", dropArmed);
+            drag.dy = dy;
+            drawLink();
+            event.preventDefault();
+            return;
         }
         if (drag.mode === "spin") {
             // Ширина одной грани под пальцем = один шаг барабана.
@@ -300,6 +373,7 @@
         } else {
             var lift = Math.max(-liftMax, Math.min(0, dy));
             var armed = -dy >= LIFT_ARM;
+            if (armed && !drag.card.classList.contains("is-armed")) { haptic(12); click(0.7); }
             // Грань отрывается от стенки: поднимается по экрану и одновременно идёт к зрителю
             // (D), чтобы всегда оставаться перед наклонённой стенкой, а не проваливаться в барабан.
             // Вектор (0, L, D) мира раскладываем на оси барабана, наклонённого на TILT градусов.
@@ -345,7 +419,10 @@
         } else if (state.mode === "lift") {
             resetLift(state.card);
             if (-state.dy >= LIFT_TRIGGER) startDowntime(state.card);
-        } else if (state.card && !state.card.classList.contains("is-center")) {
+        } else if (state.mode === "drop") {
+            resetLift(state.card);
+            if (state.dy >= DROP_TRIGGER) stopDowntime();
+        } else if (state.card && !state.card.classList.contains("is-center") && activeReasonId() === "") {
             rotateTo(Number(state.card.dataset.driverDrumIndex), true); // тап по боковой грани — подвести её вперёд
         }
     }, true);
@@ -353,7 +430,7 @@
     doc.addEventListener("pointercancel", function (event) {
         if (!drag || event.pointerId !== drag.pointerId) return;
         var state = endDrag();
-        if (state.mode === "lift") resetLift(state.card);
+        if (state.mode === "lift" || state.mode === "drop") resetLift(state.card);
         else snap(true);
     }, true);
 
@@ -361,7 +438,7 @@
     function abortGesture() {
         if (!drag) return;
         var state = endDrag();
-        if (state.mode === "lift") resetLift(state.card);
+        if (state.mode === "lift" || state.mode === "drop") resetLift(state.card);
         else snap(true);
     }
     root.addEventListener("blur", abortGesture);
@@ -370,7 +447,7 @@
     // Колесо мыши на стенде: одно деление за прокрутку.
     doc.addEventListener("wheel", function (event) {
         var d = event.target && event.target.closest ? event.target.closest("[data-driver-downtime-drum]") : null;
-        if (!d || !geo.n) return;
+        if (!d || !geo.n || activeReasonId() !== "") return;
         var delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
         if (!delta) return;
         event.preventDefault();
@@ -383,69 +460,73 @@
         return !!(c && c.classList.contains("is-snapping") && c.__snapUntil && c.__snapUntil > Date.now());
     }
 
-    function drawLink() {
+    // Геометрия гнезда передней грани снимается ОДИН раз, когда барабан стоит на делении и
+    // ничего не движется, и хранится. Контур рисуется только из неё: ни жесты, ни анимации,
+    // ни обновления таймера не могут его сдвинуть. Пересъёмка — только при смене размеров.
+    var slot = null;
+
+    function captureSlot() {
         var svg = q("[data-driver-drum-link]");
-        var path = svg ? q("[data-driver-drum-link-path]", svg) : null;
         var w = dial();
         var card = centerCard();
         var screen = svg ? svg.parentElement : null;
         while (screen && !screen.classList.contains("driver-work-screen")) screen = screen.parentElement;
-        if (!svg || !path || !w || !card || !screen) return;
-        if (c_snapping()) return;
+        if (!svg || !w || !card || !screen || !geo.n) return null;
+        if (drag || c_snapping()) return null;
+        if (Math.abs(geo.theta / geo.step - Math.round(geo.theta / geo.step)) > 0.002) return null;
+        if (card.classList.contains("is-lifting") || card.classList.contains("is-dropping") || card.classList.contains("is-settling")) return null;
+        var strips = all(".driver-drum-card-face i", card);
+        if (strips.length < 2) return null;
         var box = screen.getBoundingClientRect();
         var d = w.getBoundingClientRect();
-        var cx = d.left + d.width / 2 - box.left, cy = d.top + d.height / 2 - box.top;
-        // Ровно в зазор между кольцом (48.5% стороны) и дугой угловых кнопок (51%).
-        var r = d.width * .4975;
-        function p(v) { return Number(v).toFixed(1); }
-        svg.setAttribute("viewBox", "0 0 " + p(box.width) + " " + p(box.height));
-
-        // Грань поднята или ещё не встала на место — рамка не рисуется, остаётся одно кольцо.
-        var lifted = card.classList.contains("is-lifting") || card.classList.contains("is-settling") || (drag && drag.mode === "lift");
-        var ring = ["M", p(cx - r), p(cy), "A", p(r), p(r), "0 1 1", p(cx + r), p(cy), "A", p(r), p(r), "0 1 1", p(cx - r), p(cy), "Z"].join(" ");
-        if (lifted) { path.setAttribute("d", ring); return; }
-
-        // Рамка обнимает грань по её реальным кромкам: верх и низ грани — дуги на цилиндре,
-        // поэтому берём точки с каждой полоски грани, а не прямоугольник.
-        var strips = all(".driver-drum-card-face i", card);
-        if (strips.length < 2) { path.setAttribute("d", ring); return; }
         var pad = 3;
-        var top = [], bottom = [];
+        var bottom = [];
         strips.forEach(function (s) {
             var sr = s.getBoundingClientRect();
-            top.push([sr.left - box.left, sr.top - box.top - pad]);
-            top.push([sr.right - box.left, sr.top - box.top - pad]);
             bottom.push([sr.left - box.left, sr.bottom - box.top + pad]);
             bottom.push([sr.right - box.left, sr.bottom - box.top + pad]);
         });
-        var xL = top[0][0] - pad, xR = top[top.length - 1][0] + pad;
-        top[0][0] = xL; bottom[0][0] = xL;
-        top[top.length - 1][0] = xR; bottom[bottom.length - 1][0] = xR;
-        function yAt(pts, x) {
-            for (var i = 1; i < pts.length; i++) {
-                if (x <= pts[i][0]) {
-                    var a = pts[i - 1], b = pts[i];
-                    var k = b[0] === a[0] ? 0 : (x - a[0]) / (b[0] - a[0]);
-                    return a[1] + (b[1] - a[1]) * k;
-                }
-            }
-            return pts[pts.length - 1][1];
+        var first = strips[0].getBoundingClientRect(), last = strips[strips.length - 1].getBoundingClientRect();
+        var xL = first.left - box.left - pad, xR = last.right - box.left + pad;
+        bottom[0][0] = xL; bottom[bottom.length - 1][0] = xR;
+        return {
+            boxW: box.width, boxH: box.height,
+            cx: d.left + d.width / 2 - box.left, cy: d.top + d.height / 2 - box.top,
+            r: d.width * .4975,               // в зазоре между кольцом (48.5%) и угловыми кнопками (51%)
+            xL: xL, xR: xR,
+            yTopL: first.top - box.top - pad, yTopR: last.top - box.top - pad,
+            bottom: bottom
+        };
+    }
+
+    function drawLink() {
+        var svg = q("[data-driver-drum-link]");
+        var path = svg ? q("[data-driver-drum-link-path]", svg) : null;
+        var card = centerCard();
+        if (!svg || !path || !card) return;
+        var screen = svg.parentElement;
+        while (screen && !screen.classList.contains("driver-work-screen")) screen = screen.parentElement;
+        if (!screen) return;
+        var box = screen.getBoundingClientRect();
+        if (!slot || Math.abs(slot.boxW - box.width) > 1 || Math.abs(slot.boxH - box.height) > 1) {
+            var fresh = captureSlot();
+            if (!fresh) return;   // условий для съёмки нет — оставляем прежний контур
+            slot = fresh;
         }
-        // Горлышко шириной с грань: две линии от кольца прямо вниз до её верхних углов,
-        // саму грань контур не обходит — у неё есть своя рамка.
-        var nL = Math.max(1, cx - xL), nR = Math.max(1, xR - cx);
-        var yNL = cy + Math.sqrt(Math.max(0, r * r - nL * nL));
-        var yNR = cy + Math.sqrt(Math.max(0, r * r - nR * nR));
-        var yTopL = top[0][1], yTopR = top[top.length - 1][1];
-        if (yTopL < yNL + 4 || yTopR < yNR + 4 || nL >= r || nR >= r) { path.setAttribute("d", ring); return; }
-        // От кольца вниз по ширине грани, дальше по её боковым кромкам и по нижней кромке (дуга низа).
-        var dd = [
-            "M", p(xL), p(yNL),
-            "A", p(r), p(r), "0 1 1", p(xR), p(yNR),
-            "L", p(xR), p(yTopR)
-        ];
-        for (var i = bottom.length - 1; i >= 0; i--) dd.push("L", p(bottom[i][0]), p(bottom[i][1]));
-        dd.push("L", p(xL), p(yTopL), "Z");
+        function p(v) { return Number(v).toFixed(1); }
+        svg.setAttribute("viewBox", "0 0 " + p(slot.boxW) + " " + p(slot.boxH));
+        var s = slot;
+        var ring = ["M", p(s.cx - s.r), p(s.cy), "A", p(s.r), p(s.r), "0 1 1", p(s.cx + s.r), p(s.cy), "A", p(s.r), p(s.r), "0 1 1", p(s.cx - s.r), p(s.cy), "Z"].join(" ");
+        var busy = card.classList.contains("is-lifting") || card.classList.contains("is-dropping") || card.classList.contains("is-settling") || (drag && (drag.mode === "lift" || drag.mode === "drop"));
+        if (busy) { path.setAttribute("d", ring); return; }
+        var nL = Math.max(1, s.cx - s.xL), nR = Math.max(1, s.xR - s.cx);
+        if (nL >= s.r || nR >= s.r) { path.setAttribute("d", ring); return; }
+        var yNL = s.cy + Math.sqrt(s.r * s.r - nL * nL);
+        var yNR = s.cy + Math.sqrt(s.r * s.r - nR * nR);
+        // Кольцо → вниз по ширине грани → её правая кромка → нижняя кромка (дуга) → левая кромка → кольцо.
+        var dd = ["M", p(s.xL), p(yNL), "A", p(s.r), p(s.r), "0 1 1", p(s.xR), p(yNR), "L", p(s.xR), p(s.yTopR)];
+        for (var i = s.bottom.length - 1; i >= 0; i--) dd.push("L", p(s.bottom[i][0]), p(s.bottom[i][1]));
+        dd.push("L", p(s.xL), p(s.yTopL), "Z");
         path.setAttribute("d", dd.join(" "));
     }
 
@@ -469,7 +550,7 @@
         syncTotals();
         syncActive();
         observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-reason-id", "data-driver-active-downtime-id", "hidden"] });
-        root.addEventListener("resize", function () { geo.built = null; build(); render(false); });
+        root.addEventListener("resize", function () { geo.built = null; slot = null; build(); render(false); });
         if (root.ResizeObserver) {
             var w = dial();
             if (w) new root.ResizeObserver(function () { drawLink(); }).observe(w);
