@@ -10,25 +10,21 @@
 <div class="driver-downtime-drum" data-driver-downtime-drum role="group" aria-label="Барабан простоев: проведите влево или вправо, чтобы повернуть барабан, и вверх на круг, чтобы начать простой">
     <svg class="driver-downtime-drum-defs" aria-hidden="true" focusable="false" width="0" height="0">
         <defs>
-            {% comment %} Грань, наклеенная на вертикальный цилиндр (вид чуть сверху): верх и низ —
-               дуги в одну сторону, середина ниже краёв, боковые кромки вертикальные. {% endcomment %}
+            {% comment %} Силуэт летящей копии грани при свайпе: как этикетка на вертикальном цилиндре. {% endcomment %}
             <clipPath id="driver-drum-barrel" clipPathUnits="objectBoundingBox">
                 <path d="M0 0Q.5 .24 1 0V.88Q.5 1.12 0 .88Z" />
             </clipPath>
-            {% comment %} Корпус барабана: те же дуги, но мягче — это верхний и нижний обод цилиндра. {% endcomment %}
-            <clipPath id="driver-drum-body-clip" clipPathUnits="objectBoundingBox">
-                <path d="M0 0Q.5 .16 1 0V.92Q.5 1.08 0 .92Z" />
-            </clipPath>
         </defs>
     </svg>
-    <div class="driver-downtime-drum-body" aria-hidden="true"></div>
     <div class="driver-downtime-drum-stage">
+        {% comment %} Единый цилиндр: стенка из узких пластин и крышки строятся скриптом (data-driver-drum-wall),
+           карточки лежат на той же окружности тем же радиусом — как этикетки на банке. {% endcomment %}
         <div class="driver-downtime-drum-track" data-driver-drum-track>
+            <span class="driver-drum-wall" data-driver-drum-wall aria-hidden="true"></span>
             {% for reason in downtime_reasons %}
                 <button class="driver-drum-card{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-drum-card data-driver-drum-reason-id="{{ reason.id }}" aria-label="Простой: {{ reason.button_label }}. Проведите вверх на круг, чтобы начать">
-                    {% comment %} Грань натянута на цилиндр: семь вертикальных полосок, каждая под своим углом. {% endcomment %}
-                    <span class="driver-drum-card-face" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
-                    <svg class="driver-drum-card-edge" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 0Q50 24 100 0V88Q50 112 0 88Z" vector-effect="non-scaling-stroke" /></svg>
+                    {% comment %} Грань наклеена на цилиндр: девять вертикальных полосок лежат на его окружности тем же радиусом. {% endcomment %}
+                    <span class="driver-drum-card-face" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
                     <span class="driver-drum-card-body">
                         <span class="driver-drum-card-label">{{ reason.button_label }}</span>
                         <span class="driver-drum-card-total" data-driver-drum-total{% if not reason.driver_is_used %} hidden{% endif %}>{{ reason.driver_total_label }}</span>

@@ -15,7 +15,9 @@
     var LIFT_ARM = 44;     // px, с которых круг подсвечивается «готово»
     var LIFT_TRIGGER = 64; // px, отпускание выше — старт простоя
     var LIFT_MAX = 96;
-    var STRIPS = 7;        // полосок в грани карточки
+    var STRIPS = 9;        // полосок в грани карточки
+    var SLATS = 72;        // пластин в стенке цилиндра (по 5 градусов)
+    var TILT = -20;        // наклон барабана от зрителя, градусов: видны крышка и ободья
     var doc = root.document;
 
     function q(sel, base) { return (base || doc).querySelector(sel); }
@@ -50,17 +52,34 @@
         if (d) {
             d.style.setProperty("--drum-radius", radius.toFixed(1) + "px");
             d.style.setProperty("--drum-step", step.toFixed(3) + "deg");
-            // Полоски грани: грань выгнута сильнее самого барабана (радиус изгиба ~45%
-            // радиуса цилиндра), чтобы выпуклость читалась глазом; яркость — по повороту к зрителю.
-            var bend = Math.max(50, radius * 0.32);
-            for (var i = 0; i < STRIPS; i++) {
-                var arc = cardW * (i - (STRIPS - 1) / 2) / STRIPS;
-                var rad = arc / bend;
-                d.style.setProperty("--strip-a" + i, (rad * 180 / Math.PI).toFixed(3) + "deg");
-                d.style.setProperty("--strip-z" + i, (bend * (Math.cos(rad) - 1)).toFixed(2) + "px");
-                d.style.setProperty("--strip-b" + i, (0.78 + 0.3 * Math.cos(rad * 1.6)).toFixed(3));
+            // Стенка: узкие пластины по окружности того же радиуса и крышки сверху/снизу.
+            var wallH = (list[0].offsetHeight || 130) + 26;
+            var slatW = radius > 0 ? 2 * radius * Math.tan(Math.PI / SLATS) + 1.2 : cardW;
+            d.style.setProperty("--wall-h", wallH.toFixed(1) + "px");
+            d.style.setProperty("--slat-w", slatW.toFixed(2) + "px");
+            var wall = q("[data-driver-drum-wall]", c);
+            if (wall && wall.childElementCount !== SLATS + 2) {
+                wall.innerHTML = "";
+                for (var s = 0; s < SLATS; s++) {
+                    var slat = doc.createElement("i");
+                    slat.style.setProperty("--a", (s * 360 / SLATS).toFixed(3) + "deg");
+                    wall.appendChild(slat);
+                }
+                var capTop = doc.createElement("b"); capTop.className = "driver-drum-cap is-top";
+                var capBottom = doc.createElement("b"); capBottom.className = "driver-drum-cap is-bottom";
+                wall.appendChild(capTop); wall.appendChild(capBottom);
             }
         }
+        // Полоски грани лежат точно на окружности стенки (тот же радиус), чуть выше её поверхности.
+        list.forEach(function (card) {
+            all(".driver-drum-card-face i", card).forEach(function (strip, i) {
+                var arc = cardW * (i - (STRIPS - 1) / 2) / STRIPS;
+                var rad = radius > 0 ? arc / radius : 0;
+                strip.style.setProperty("--i", String(i));
+                strip.style.setProperty("--a", (rad * 180 / Math.PI).toFixed(3) + "deg");
+                strip.style.setProperty("--z", (radius * (Math.cos(rad) - 1) + 1.5).toFixed(2) + "px");
+            });
+        });
         list.forEach(function (card, index) {
             card.dataset.driverDrumIndex = String(index);
             card.style.setProperty("--card-angle", (index * step).toFixed(3) + "deg");
@@ -85,9 +104,24 @@
             root.clearTimeout(c.__snapTimer);
             c.__snapTimer = root.setTimeout(function () { c.__snapUntil = 0; drawLink(); }, 370);
         }
-        // Барабан слегка наклонён от зрителя: так кромки граней читаются дугами, а не прямыми.
-        c.style.transform = "rotateX(-6deg) translateZ(" + (-geo.radius).toFixed(1) + "px) rotateY(" + geo.theta.toFixed(3) + "deg)";
+        // Барабан наклонён от зрителя: видны крышка и ободья, кромки граней — дуги.
+        c.style.transform = "rotateX(" + TILT + "deg) translateZ(" + (-geo.radius).toFixed(1) + "px) rotateY(" + geo.theta.toFixed(3) + "deg)";
         var front = frontIndex(geo.theta);
+        // Освещение стенки: пластина ярче, когда смотрит на зрителя.
+        all("[data-driver-drum-wall] i", c).forEach(function (slat, s) {
+            var relS = mod(s * 360 / SLATS + geo.theta + 180, 360) - 180;
+            var k = Math.cos(relS * Math.PI / 180);
+            slat.style.setProperty("--b", (0.42 + 0.58 * Math.max(0, k)).toFixed(3));
+        });
+        // Освещение полосок грани: по повороту к зрителю, как у стенки под ними.
+        cards().forEach(function (card, index) {
+            all(".driver-drum-card-face i", card).forEach(function (strip, i) {
+                var arc = geo.cardW * (i - (STRIPS - 1) / 2) / STRIPS;
+                var relI = mod(index * geo.step + (geo.radius > 0 ? arc / geo.radius * 180 / Math.PI : 0) + geo.theta + 180, 360) - 180;
+                var kk = Math.cos(relI * Math.PI / 180);
+                strip.style.setProperty("--b", (0.55 + 0.5 * Math.max(0, kk)).toFixed(3));
+            });
+        });
         cards().forEach(function (card, index) {
             // Угол грани относительно зрителя: 0 — прямо перед ним.
             var rel = mod(index * geo.step + geo.theta + 180, 360) - 180;
