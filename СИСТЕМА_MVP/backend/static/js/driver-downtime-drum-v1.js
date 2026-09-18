@@ -219,6 +219,7 @@
     // Подъём грани на круг: двигается сама грань внутри 3D-сцены (окно сцены на это время
     // открыто вверх), поэтому она сохраняет изгиб цилиндра до самого круга.
     var liftMax = LIFT_MAX;
+    var liftRaf = 0;
 
     function liftLimit(card) {
         var w = dial();
@@ -307,6 +308,8 @@
             drag.card.style.setProperty("--lift-z", lz.toFixed(1) + "px");
             // По ходу подъёма грань разворачивается лицом к зрителю (снимает наклон барабана).
             drag.card.style.setProperty("--lift-tilt", (Math.abs(TILT) * Math.min(1, -lift / liftMax)).toFixed(2) + "deg");
+            // Контур идёт за гранью: рамка поднимается вместе с ней, горлышко укорачивается.
+            if (!liftRaf) liftRaf = root.requestAnimationFrame(function () { liftRaf = 0; drawLink(); });
             drag.card.classList.toggle("is-armed", armed);
             var w = dial();
             if (w) w.classList.toggle("is-drum-lifting", armed);
@@ -376,8 +379,6 @@
         while (screen && !screen.classList.contains("driver-work-screen")) screen = screen.parentElement;
         if (!svg || !path || !w || !card || !screen) return;
         if (c_snapping()) return;
-        // Пока грань поднимают на круг, её прямоугольник не годится для контура — оставляем прежний.
-        if (card.classList.contains("is-lifting") || (drag && drag.mode === "lift")) return;
         var box = screen.getBoundingClientRect();
         var d = w.getBoundingClientRect();
         var c = card.getBoundingClientRect();
@@ -390,6 +391,16 @@
         var x0 = c.left - box.left - pad, x1 = c.right - box.left + pad;
         var y0 = c.top - box.top - pad, y1 = c.bottom - box.top + pad;
         function p(v) { return Number(v).toFixed(1); }
+        svg.setAttribute("viewBox", "0 0 " + p(box.width) + " " + p(box.height));
+        // Грань поднята в круг: горлышко уже не помещается — остаётся одно кольцо.
+        if (y0 < yN + f + 4) {
+            path.setAttribute("d", [
+                "M", p(cx - r), p(cy),
+                "A", p(r), p(r), "0 1 1", p(cx + r), p(cy),
+                "A", p(r), p(r), "0 1 1", p(cx - r), p(cy), "Z"
+            ].join(" "));
+            return;
+        }
         var dd = [
             "M", p(cx - n), p(yN),
             "A", p(r), p(r), "0 1 1", p(cx + n), p(yN),
@@ -407,7 +418,6 @@
             "Q", p(cx - n), p(y0), p(cx - n), p(y0 - f),
             "Z"
         ].join(" ");
-        svg.setAttribute("viewBox", "0 0 " + p(box.width) + " " + p(box.height));
         path.setAttribute("d", dd);
     }
 
