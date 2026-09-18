@@ -434,8 +434,8 @@
             var down = Math.min(DROP_MAX, Math.max(0, dy));
             if (ghost) ghost.style.setProperty("--ghost-lift", down.toFixed(1) + "px");
             var dropArmed = dy >= DROP_ARM;
-            if (dropArmed && !drag.card.classList.contains("is-drop-armed")) { haptic(12); click(0.7); }
-            drag.card.classList.toggle("is-drop-armed", dropArmed);
+            if (dropArmed && !drag.armed) { haptic(12); click(0.7); drag.armed = true; }
+            if (!dropArmed) drag.armed = false;
             if (ghost) ghost.classList.toggle("is-armed", dropArmed);
             var linkD = q("[data-driver-drum-link]");
             if (linkD) linkD.classList.toggle("is-drop-armed", dropArmed);
@@ -453,14 +453,15 @@
         } else {
             var lift = Math.max(-liftMax, Math.min(0, dy));
             var armed = -dy >= LIFT_ARM;
-            if (armed && !drag.card.classList.contains("is-armed")) { haptic(12); click(0.7); }
+            if (armed && !drag.armed) { haptic(12); click(0.7); }
+            // Состояние «готово» показывает ТОЛЬКО копия. Ни обводку контура, ни оригинал грани
+            // трогать нельзя: замер на телефоне — 1651 мс на перекраску контура и 594 мс на
+            // смену цвета грани внутри 3D-сцены против 17 мс у копии.
             if (ghost) {
                 ghost.style.setProperty("--ghost-lift", lift.toFixed(1) + "px");
                 ghost.classList.toggle("is-armed", armed);
             }
-            drag.card.classList.toggle("is-armed", armed);
-            var link = q("[data-driver-drum-link]");
-            if (link) link.classList.toggle("is-armed", armed);
+            if (armed !== drag.armed) drag.armed = armed;
             drag.dy = dy;
         }
         event.preventDefault();
