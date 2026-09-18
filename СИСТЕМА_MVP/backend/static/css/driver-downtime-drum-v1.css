@@ -38,7 +38,6 @@ body.driver-mobile-screen .driver-downtime-drum-stage {
     /* Позиция 50% при высоте маски 400%: картинка маски лежит от -1.5 до +2.5 высоты сцены. */
     -webkit-mask: linear-gradient(90deg, transparent 0, #000 7%, #000 93%, transparent 100%) 0 50% / 100% 400% no-repeat;
     mask: linear-gradient(90deg, transparent 0, #000 7%, #000 93%, transparent 100%) 0 50% / 100% 400% no-repeat;
-    background: radial-gradient(ellipse at 50% 60%, rgba(20, 36, 44, .55), transparent 70%);
 }
 
 /* Пока грань поднимают на круг, окно сцены открыто вверх: грань уезжает выше барабана. */
@@ -54,62 +53,7 @@ body.driver-mobile-screen .driver-downtime-drum.is-lifting .driver-downtime-drum
     mask-clip: no-clip;
 }
 
-/* Без обрезки по рамке стала бы видна задняя половина крышки над барабаном — прячем крышки на время подъёма. */
-body.driver-mobile-screen .driver-downtime-drum.is-lifting .driver-drum-cap {
-    visibility: hidden;
-}
 
-/* Стенка цилиндра: узкие пластины по окружности, яркость каждой считает скрипт (--b) от угла к зрителю. */
-body.driver-mobile-screen .driver-drum-wall {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 0;
-    height: 0;
-    transform-style: preserve-3d;
-    pointer-events: none;
-}
-
-body.driver-mobile-screen .driver-drum-wall i {
-    --a: 0deg;
-    --b: 1;
-    position: absolute;
-    left: calc(var(--slat-w) / -2);
-    top: calc(var(--wall-h) / -2);
-    width: var(--slat-w);
-    height: var(--wall-h);
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, .06), transparent 12%, transparent 88%, rgba(0, 0, 0, .35)),
-        linear-gradient(90deg, rgba(0, 0, 0, .12), transparent 40%, transparent 60%, rgba(0, 0, 0, .12)),
-        #13232a;
-    border-top: 1px solid rgba(190, 210, 216, .18);
-    border-bottom: 1px solid rgba(0, 0, 0, .6);
-    transform: rotateY(var(--a)) translateZ(calc(var(--drum-radius) - 2px));
-    backface-visibility: hidden;
-    filter: brightness(var(--b));
-    will-change: filter;
-}
-
-/* Крышки цилиндра: горизонтальные диски сверху и снизу. */
-body.driver-mobile-screen .driver-drum-cap {
-    position: absolute;
-    left: calc(var(--drum-radius) * -1);
-    top: calc(var(--drum-radius) * -1);
-    width: calc(var(--drum-radius) * 2);
-    height: calc(var(--drum-radius) * 2);
-    border-radius: 50%;
-    background: radial-gradient(circle at 50% 50%, #0b161b 0, #0f1d23 55%, #172b33 100%);
-    box-shadow: inset 0 0 0 2px rgba(190, 210, 216, .16);
-    pointer-events: none;
-}
-
-body.driver-mobile-screen .driver-drum-cap.is-top {
-    transform: translateY(calc(var(--wall-h) / -2)) rotateX(90deg);
-}
-
-body.driver-mobile-screen .driver-drum-cap.is-bottom {
-    transform: translateY(calc(var(--wall-h) / 2)) rotateX(90deg);
-}
 
 body.driver-mobile-screen .driver-downtime-drum-track {
     position: absolute;
@@ -129,6 +73,7 @@ body.driver-mobile-screen .driver-downtime-drum-track.is-snapping {
 body.driver-mobile-screen .driver-drum-card {
     --drum-lift: 0px;
     --drum-fade: 1;
+    --card-shade: 1;
     --card-angle: 0deg;
     --drum-accent: rgba(150, 166, 172, .5);
     --drum-face-top: #1b2d34;
@@ -216,8 +161,8 @@ body.driver-mobile-screen .driver-drum-card-face i {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), inset 0 -8px 14px rgba(0, 0, 0, .38);
     transform: translateZ(var(--z)) rotateY(var(--a));
     backface-visibility: hidden;
-    /* Освещение по углу к зрителю × затухание боковых граней × недоступность причины. */
-    filter: brightness(calc(var(--b) * var(--drum-fade) * var(--drum-unavailable, 1)));
+    /* Светотень кривизны (статична) × освещение карточки по углу к зрителю × затухание × недоступность. */
+    filter: brightness(calc(var(--b) * var(--card-shade, 1) * var(--drum-fade) * var(--drum-unavailable, 1)));
     transition: border-color .18s ease, filter .18s ease;
 }
 

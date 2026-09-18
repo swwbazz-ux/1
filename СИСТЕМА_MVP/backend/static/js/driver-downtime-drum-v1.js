@@ -19,7 +19,6 @@
     var DROP_TRIGGER = 56; // px вниз, отпускание ниже — завершение простоя
     var DROP_MAX = 64;
     var STRIPS = 9;        // полосок в грани карточки
-    var SLATS = 72;        // пластин в стенке цилиндра (по 5 градусов)
     var MIN_FACES = 12;    // барабан всегда полноразмерный, как минимум на 12 граней
     var TILT = -20;        // наклон барабана от зрителя, градусов: видны крышка и ободья
     var doc = root.document;
@@ -79,25 +78,10 @@
         if (d) {
             d.style.setProperty("--drum-radius", radius.toFixed(1) + "px");
             d.style.setProperty("--drum-step", step.toFixed(3) + "deg");
-            // Стенка: узкие пластины по окружности того же радиуса и крышки сверху/снизу.
-            var wallH = (list[0].offsetHeight || 130) + 26;
-            var slatW = radius > 0 ? 2 * radius * Math.tan(Math.PI / SLATS) + 1.2 : cardW;
-            d.style.setProperty("--wall-h", wallH.toFixed(1) + "px");
-            d.style.setProperty("--slat-w", slatW.toFixed(2) + "px");
-            var wall = q("[data-driver-drum-wall]", c);
-            if (wall && wall.childElementCount !== SLATS + 2) {
-                wall.innerHTML = "";
-                for (var s = 0; s < SLATS; s++) {
-                    var slat = doc.createElement("i");
-                    slat.style.setProperty("--a", (s * 360 / SLATS).toFixed(3) + "deg");
-                    wall.appendChild(slat);
-                }
-                var capTop = doc.createElement("b"); capTop.className = "driver-drum-cap is-top";
-                var capBottom = doc.createElement("b"); capBottom.className = "driver-drum-cap is-bottom";
-                wall.appendChild(capTop); wall.appendChild(capBottom);
-            }
         }
-        // Полоски грани лежат точно на окружности стенки (тот же радиус), чуть выше её поверхности.
+        // Полоски грани лежат на окружности барабана. Их кривизна и собственная светотень
+        // (блик по центру, тень к краям) задаются ОДИН раз здесь; при вращении меняется только
+        // одно значение на всю карточку (--card-shade), а не каждая полоска отдельно.
         list.forEach(function (card) {
             all(".driver-drum-card-face i", card).forEach(function (strip, i) {
                 var arc = cardW * (i - (STRIPS - 1) / 2) / STRIPS;
@@ -105,6 +89,7 @@
                 strip.style.setProperty("--i", String(i));
                 strip.style.setProperty("--a", (rad * 180 / Math.PI).toFixed(3) + "deg");
                 strip.style.setProperty("--z", (radius * (Math.cos(rad) - 1) + 1.5).toFixed(2) + "px");
+                strip.style.setProperty("--b", (0.86 + 0.16 * Math.cos(rad * 6)).toFixed(3));
             });
         });
         list.forEach(function (card, index) {
@@ -173,21 +158,7 @@
         // Барабан наклонён от зрителя: видны крышка и ободья, кромки граней — дуги.
         c.style.transform = "rotateX(" + TILT + "deg) translateZ(" + (-geo.radius).toFixed(1) + "px) rotateY(" + geo.theta.toFixed(3) + "deg)";
         var front = frontIndex(geo.theta);
-        // Освещение стенки: пластина ярче, когда смотрит на зрителя.
-        all("[data-driver-drum-wall] i", c).forEach(function (slat, s) {
-            var relS = mod(s * 360 / SLATS + geo.theta + 180, 360) - 180;
-            var k = Math.cos(relS * Math.PI / 180);
-            slat.style.setProperty("--b", (0.42 + 0.58 * Math.max(0, k)).toFixed(3));
-        });
-        // Освещение полосок грани: по повороту к зрителю, как у стенки под ними.
-        cards().forEach(function (card, index) {
-            all(".driver-drum-card-face i", card).forEach(function (strip, i) {
-                var arc = geo.cardW * (i - (STRIPS - 1) / 2) / STRIPS;
-                var relI = mod(index * geo.step + (geo.radius > 0 ? arc / geo.radius * 180 / Math.PI : 0) + geo.theta + 180, 360) - 180;
-                var kk = Math.cos(relI * Math.PI / 180);
-                strip.style.setProperty("--b", (0.55 + 0.5 * Math.max(0, kk)).toFixed(3));
-            });
-        });
+
         cards().forEach(function (card, index) {
             // Угол грани относительно зрителя: 0 — прямо перед ним.
             var rel = mod(index * geo.step + geo.theta + 180, 360) - 180;
@@ -196,6 +167,8 @@
             card.classList.toggle("is-back", a > 100);
             // Боковые грани погасшие: уже соседняя заметно темнее передней.
             card.style.setProperty("--drum-fade", Math.max(0.22, 1 - Math.max(0, a - 6) / 48).toFixed(3));
+            // Освещение по повороту к зрителю — одно значение на карточку.
+            card.style.setProperty("--card-shade", (0.6 + 0.4 * Math.max(0, Math.cos(rel * Math.PI / 180))).toFixed(3));
         });
         if (front !== lastFront) {
             if (lastFront !== -1) { haptic(9); click(1); } // щелчок фиксации: вибро + звук

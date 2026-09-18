@@ -9,10 +9,9 @@
 {% endcomment %}
 <div class="driver-downtime-drum" data-driver-downtime-drum data-driver-quick-url="{% url 'driver_quick_reasons' %}" data-driver-quick-min="{{ driver_quick_reasons_min|default:3 }}" data-driver-quick-updated-at="{{ driver_quick_reasons_updated_at }}" role="group" aria-label="Барабан простоев: проведите влево или вправо, чтобы повернуть барабан, и вверх на круг, чтобы начать простой">
     <div class="driver-downtime-drum-stage">
-        {% comment %} Единый цилиндр: стенка из узких пластин и крышки строятся скриптом (data-driver-drum-wall),
-           карточки лежат на той же окружности тем же радиусом — как этикетки на банке. {% endcomment %}
+        {% comment %} Карточки стоят на невидимой окружности вокруг вертикальной оси и вращаются вместе;
+           самой стенки нет — так телефону легче, а изгиб граней и ободья читаются по карточкам. {% endcomment %}
         <div class="driver-downtime-drum-track" data-driver-drum-track>
-            <span class="driver-drum-wall" data-driver-drum-wall aria-hidden="true"></span>
             {% for reason in downtime_reasons %}
                 <button class="driver-drum-card{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-drum-card data-driver-drum-reason-id="{{ reason.id }}" data-driver-drum-quick="{% if reason.driver_in_drum %}1{% else %}0{% endif %}"{% if not reason.driver_in_drum %} hidden{% endif %} aria-label="Простой: {{ reason.button_label }}. Проведите вверх на круг, чтобы начать">
                     {% comment %} Грань наклеена на цилиндр: девять вертикальных полосок лежат на его окружности тем же радиусом. {% endcomment %}
