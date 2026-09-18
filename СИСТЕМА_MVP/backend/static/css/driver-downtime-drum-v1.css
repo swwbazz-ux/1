@@ -63,7 +63,7 @@ body.driver-mobile-screen .driver-downtime-drum-track {
     width: 0;
     height: 0;
     transform-style: preserve-3d;
-    transform: rotateX(-12deg) translateZ(calc(-1 * var(--drum-radius)));
+    transform: translateZ(calc(-1 * var(--drum-radius)));
     will-change: transform;
 }
 

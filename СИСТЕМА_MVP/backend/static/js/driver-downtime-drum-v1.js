@@ -19,7 +19,7 @@
     var DROP_TRIGGER = 56; // px вниз, отпускание ниже — завершение простоя
     var DROP_MAX = 64;
     var MIN_FACES = 12;    // барабан всегда полноразмерный, как минимум на 12 граней
-    var TILT = -12;        // наклон барабана от зрителя: больше наклон — сильнее дальние грани уезжают вверх
+    var TILT = 0;          // барабан смотрит строго в лоб: при наклоне боковые грани поднимаются и заходят на угловые кнопки
     var doc = root.document;
 
     function q(sel, base) { return (base || doc).querySelector(sel); }
@@ -112,8 +112,9 @@
         var cardW = list[0].offsetWidth || list[0].getBoundingClientRect().width || 150;
         var n = list.length;
         var step = 360 / n;
-        // Радиус такой, чтобы соседние грани почти касались: полширины / tg(полшага).
-        var radius = (cardW / 2) / Math.tan((step / 2) * Math.PI / 180) * 1.04;
+        // Радиус чуть больше «касания» соседних граней: между карточками остаётся просвет,
+        // сквозь который проходит обводка контура (множитель 1.22 ≈ зазор в 18% ширины грани).
+        var radius = (cardW / 2) / Math.tan((step / 2) * Math.PI / 180) * 1.22;
         geo.n = n; geo.step = step; geo.radius = radius; geo.cardW = cardW; geo.built = c;
         geo.reasons = reasons;
         geo.signature = drumSignature(c);
@@ -187,7 +188,8 @@
             root.clearTimeout(c.__snapTimer);
             c.__snapTimer = root.setTimeout(function () { c.__snapUntil = 0; syncLinkVars(); }, 370);
         }
-        // Барабан наклонён от зрителя: видны крышка и ободья, кромки граней — дуги.
+        // Ось барабана строго вертикальна (TILT = 0): грани остаются на одной высоте,
+        // боковые не уезжают вверх и не наползают на угловые кнопки круга.
         c.style.transform = "rotateX(" + TILT + "deg) translateZ(" + (-geo.radius).toFixed(1) + "px) rotateY(" + geo.theta.toFixed(3) + "deg)";
         var front = frontIndex(geo.theta);
 
