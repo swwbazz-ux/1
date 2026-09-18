@@ -202,10 +202,9 @@
             lastFront = front;
             geo.front = front;
         }
-        // Контур статичен: пересчитываем его только когда барабан стоит на делении,
-        // иначе он «дышал» бы вместе с поворачивающейся передней гранью.
-        var offDetent = Math.abs(geo.theta / geo.step - Math.round(geo.theta / geo.step));
-        if (offDetent < 0.002 && !snapping) drawLink();
+        // Контур статичен и берётся из сохранённой геометрии гнезда — рисуем его на каждом
+        // кадре (запись в DOM происходит только если путь реально изменился).
+        drawLink();
     }
 
     function centerCard() {
@@ -629,6 +628,23 @@
     // ничего не движется, и хранится. Контур рисуется только из неё: ни жесты, ни анимации,
     // ни обновления таймера не могут его сдвинуть. Пересъёмка — только при смене размеров.
     var slot = null;
+    var lastLinkPath = "", lastLinkViewBox = "";
+
+    // Оболочка экрана периодически подменяется свежей копией с сервера, и контур в новой
+    // копии пустой. Возвращаем последний нарисованный путь сразу, до следующего кадра.
+    function restoreLink() {
+        var path = q("[data-driver-drum-link-path]");
+        var svg = q("[data-driver-drum-link]");
+        if (!path || !lastLinkPath) return;
+        if (svg && lastLinkViewBox && svg.getAttribute("viewBox") !== lastLinkViewBox) svg.setAttribute("viewBox", lastLinkViewBox);
+        if (!path.getAttribute("d")) path.setAttribute("d", lastLinkPath);
+    }
+
+    function setLink(svg, path, viewBox, d) {
+        if (svg.getAttribute("viewBox") !== viewBox) svg.setAttribute("viewBox", viewBox);
+        if (path.getAttribute("d") !== d) path.setAttribute("d", d);
+        lastLinkPath = d; lastLinkViewBox = viewBox;
+    }
 
     function captureSlot() {
         var svg = q("[data-driver-drum-link]");
@@ -668,31 +684,31 @@
         var svg = q("[data-driver-drum-link]");
         var path = svg ? q("[data-driver-drum-link-path]", svg) : null;
         var card = centerCard();
-        if (!svg || !path || !card) return;
+        if (!svg || !path || !card) { restoreLink(); return; }
         var screen = svg.parentElement;
         while (screen && !screen.classList.contains("driver-work-screen")) screen = screen.parentElement;
-        if (!screen) return;
+        if (!screen) { restoreLink(); return; }
         var box = screen.getBoundingClientRect();
         if (!slot || Math.abs(slot.boxW - box.width) > 1 || Math.abs(slot.boxH - box.height) > 1) {
             var fresh = captureSlot();
-            if (!fresh) return;   // условий для съёмки нет — оставляем прежний контур
+            if (!fresh) { restoreLink(); return; }   // условий для съёмки нет — держим прежний контур
             slot = fresh;
         }
         function p(v) { return Number(v).toFixed(1); }
-        svg.setAttribute("viewBox", "0 0 " + p(slot.boxW) + " " + p(slot.boxH));
+        var viewBox = "0 0 " + p(slot.boxW) + " " + p(slot.boxH);
         var s = slot;
         var ring = ["M", p(s.cx - s.r), p(s.cy), "A", p(s.r), p(s.r), "0 1 1", p(s.cx + s.r), p(s.cy), "A", p(s.r), p(s.r), "0 1 1", p(s.cx - s.r), p(s.cy), "Z"].join(" ");
         var busy = card.classList.contains("is-lifting") || card.classList.contains("is-dropping") || card.classList.contains("is-settling") || (drag && (drag.mode === "lift" || drag.mode === "drop"));
-        if (busy) { path.setAttribute("d", ring); return; }
+        if (busy) { setLink(svg, path, viewBox, ring); return; }
         var nL = Math.max(1, s.cx - s.xL), nR = Math.max(1, s.xR - s.cx);
-        if (nL >= s.r || nR >= s.r) { path.setAttribute("d", ring); return; }
+        if (nL >= s.r || nR >= s.r) { setLink(svg, path, viewBox, ring); return; }
         var yNL = s.cy + Math.sqrt(s.r * s.r - nL * nL);
         var yNR = s.cy + Math.sqrt(s.r * s.r - nR * nR);
         // Кольцо → вниз по ширине грани → её правая кромка → нижняя кромка (дуга) → левая кромка → кольцо.
         var dd = ["M", p(s.xL), p(yNL), "A", p(s.r), p(s.r), "0 1 1", p(s.xR), p(yNR), "L", p(s.xR), p(s.yTopR)];
         for (var i = s.bottom.length - 1; i >= 0; i--) dd.push("L", p(s.bottom[i][0]), p(s.bottom[i][1]));
         dd.push("L", p(s.xL), p(s.yTopL), "Z");
-        path.setAttribute("d", dd.join(" "));
+        setLink(svg, path, viewBox, dd.join(" "));
     }
 
     // --- состояние активного простоя: та же карточка, что и на вкладке «Простои» ---
@@ -706,6 +722,7 @@
             ));
         });
         if (!relevant) return;
+        restoreLink();
         if (build()) { syncTotals(); syncActive(); }
     });
 
