@@ -179,7 +179,9 @@
         });
         if (d) d.classList.toggle("is-active", id !== "");
         if (w) w.classList.toggle("is-downtime-active", id !== "");
-        if (activeIndex >= 0 && !drag) rotateTo(activeIndex, true);
+        // Подводим активную причину вперёд только если она не спереди: иначе каждое
+        // обновление таймера запускало бы анимацию фиксации и блокировало контур.
+        if (activeIndex >= 0 && !drag && frontIndex(geo.theta) !== activeIndex) rotateTo(activeIndex, true);
         else render(false);
     }
 
@@ -234,12 +236,13 @@
         card.style.setProperty("--lift-y", "0px");
         card.style.setProperty("--lift-z", "0px");
         card.style.setProperty("--lift-tilt", "0deg");
+        drawLink();
         root.setTimeout(function () {
             card.classList.remove("is-settling");
             var d = drum();
             if (d) d.classList.remove("is-lifting");
             drawLink();
-        }, 260);
+        }, 300);
         var w = dial();
         if (w) w.classList.remove("is-drum-lifting");
     }
@@ -309,7 +312,7 @@
             // По ходу подъёма грань разворачивается лицом к зрителю (снимает наклон барабана).
             drag.card.style.setProperty("--lift-tilt", (Math.abs(TILT) * Math.min(1, -lift / liftMax)).toFixed(2) + "deg");
             // Контур идёт за гранью: рамка поднимается вместе с ней, горлышко укорачивается.
-            if (!liftRaf) liftRaf = root.requestAnimationFrame(function () { liftRaf = 0; drawLink(); });
+            drawLink();
             drag.card.classList.toggle("is-armed", armed);
             var w = dial();
             if (w) w.classList.toggle("is-drum-lifting", armed);
@@ -354,6 +357,16 @@
         else snap(true);
     }, true);
 
+    // Страховка: если указатель потерян (сворачивание, звонок), подъём и вращение сбрасываются.
+    function abortGesture() {
+        if (!drag) return;
+        var state = endDrag();
+        if (state.mode === "lift") resetLift(state.card);
+        else snap(true);
+    }
+    root.addEventListener("blur", abortGesture);
+    doc.addEventListener("visibilitychange", function () { if (doc.hidden) abortGesture(); });
+
     // Колесо мыши на стенде: одно деление за прокрутку.
     doc.addEventListener("wheel", function (event) {
         var d = event.target && event.target.closest ? event.target.closest("[data-driver-downtime-drum]") : null;
@@ -381,42 +394,56 @@
         if (c_snapping()) return;
         var box = screen.getBoundingClientRect();
         var d = w.getBoundingClientRect();
-        var c = card.getBoundingClientRect();
         var cx = d.left + d.width / 2 - box.left, cy = d.top + d.height / 2 - box.top;
         // Ровно в зазор между кольцом (48.5% стороны) и дугой угловых кнопок (51%).
         var r = d.width * .4975;
-        var n = Math.min(c.width * .3, r * .7);  // полуширина горлышка
-        var yN = cy + Math.sqrt(Math.max(0, r * r - n * n));
-        var pad = 7, rr = 26, f = 0; // f = 0: горлышко входит в рамку прямыми линиями, без скруглений
-        var x0 = c.left - box.left - pad, x1 = c.right - box.left + pad;
-        var y0 = c.top - box.top - pad, y1 = c.bottom - box.top + pad;
         function p(v) { return Number(v).toFixed(1); }
         svg.setAttribute("viewBox", "0 0 " + p(box.width) + " " + p(box.height));
-        // Грань поднята в круг: горлышко уже не помещается — остаётся одно кольцо.
-        if (y0 < yN + f + 4) {
-            path.setAttribute("d", [
-                "M", p(cx - r), p(cy),
-                "A", p(r), p(r), "0 1 1", p(cx + r), p(cy),
-                "A", p(r), p(r), "0 1 1", p(cx - r), p(cy), "Z"
-            ].join(" "));
-            return;
+
+        // Грань поднята или ещё не встала на место — рамка не рисуется, остаётся одно кольцо.
+        var lifted = card.classList.contains("is-lifting") || card.classList.contains("is-settling") || (drag && drag.mode === "lift");
+        var ring = ["M", p(cx - r), p(cy), "A", p(r), p(r), "0 1 1", p(cx + r), p(cy), "A", p(r), p(r), "0 1 1", p(cx - r), p(cy), "Z"].join(" ");
+        if (lifted) { path.setAttribute("d", ring); return; }
+
+        // Рамка обнимает грань по её реальным кромкам: верх и низ грани — дуги на цилиндре,
+        // поэтому берём точки с каждой полоски грани, а не прямоугольник.
+        var strips = all(".driver-drum-card-face i", card);
+        if (strips.length < 2) { path.setAttribute("d", ring); return; }
+        var pad = 3;
+        var top = [], bottom = [];
+        strips.forEach(function (s) {
+            var sr = s.getBoundingClientRect();
+            top.push([sr.left - box.left, sr.top - box.top - pad]);
+            top.push([sr.right - box.left, sr.top - box.top - pad]);
+            bottom.push([sr.left - box.left, sr.bottom - box.top + pad]);
+            bottom.push([sr.right - box.left, sr.bottom - box.top + pad]);
+        });
+        var xL = top[0][0] - pad, xR = top[top.length - 1][0] + pad;
+        top[0][0] = xL; bottom[0][0] = xL;
+        top[top.length - 1][0] = xR; bottom[bottom.length - 1][0] = xR;
+        function yAt(pts, x) {
+            for (var i = 1; i < pts.length; i++) {
+                if (x <= pts[i][0]) {
+                    var a = pts[i - 1], b = pts[i];
+                    var k = b[0] === a[0] ? 0 : (x - a[0]) / (b[0] - a[0]);
+                    return a[1] + (b[1] - a[1]) * k;
+                }
+            }
+            return pts[pts.length - 1][1];
         }
+        // Горлышко шириной с грань: две линии от кольца прямо вниз до её верхних углов,
+        // саму грань контур не обходит — у неё есть своя рамка.
+        var nL = Math.max(1, cx - xL), nR = Math.max(1, xR - cx);
+        var yNL = cy + Math.sqrt(Math.max(0, r * r - nL * nL));
+        var yNR = cy + Math.sqrt(Math.max(0, r * r - nR * nR));
+        var yTopL = top[0][1], yTopR = top[top.length - 1][1];
+        if (yTopL < yNL + 4 || yTopR < yNR + 4 || nL >= r || nR >= r) { path.setAttribute("d", ring); return; }
         var dd = [
-            "M", p(cx - n), p(yN),
-            "A", p(r), p(r), "0 1 1", p(cx + n), p(yN),
-            "L", p(cx + n), p(y0),
-            "L", p(x1 - rr), p(y0),
-            "Q", p(x1), p(y0), p(x1), p(y0 + rr),
-            "L", p(x1), p(y1 - rr),
-            "Q", p(x1), p(y1), p(x1 - rr), p(y1),
-            "L", p(x0 + rr), p(y1),
-            "Q", p(x0), p(y1), p(x0), p(y1 - rr),
-            "L", p(x0), p(y0 + rr),
-            "Q", p(x0), p(y0), p(x0 + rr), p(y0),
-            "L", p(cx - n), p(y0),
-            "Z"
-        ].join(" ");
-        path.setAttribute("d", dd);
+            "M", p(xL), p(yTopL), "L", p(xL), p(yNL),
+            "A", p(r), p(r), "0 1 1", p(xR), p(yNR),
+            "L", p(xR), p(yTopR)
+        ];
+        path.setAttribute("d", dd.join(" "));
     }
 
     // --- состояние активного простоя: та же карточка, что и на вкладке «Простои» ---
