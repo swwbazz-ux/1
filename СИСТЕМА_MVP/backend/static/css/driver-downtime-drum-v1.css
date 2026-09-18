@@ -2,8 +2,8 @@
    Карточки причин стоят по окружности вокруг вертикальной оси (угол и радиус
    считает скрипт: --card-angle, --drum-radius, --drum-step) и вращаются вместе.
    Передняя грань подсвечена жёлтым (--driver-yellow), боковые серые и уходят
-   по дуге. Активный простой мерцает вместе с кольцом циферблата
-   (.driver-work-dial.is-downtime-active) и контуром .driver-drum-link. */
+   по дуге. Активный простой обозначает мигание контура .driver-drum-link —
+   он единственный, второго кольца вокруг циферблата нет. */
 body.driver-mobile-screen .driver-work-screen {
     position: relative;
 }
@@ -199,10 +199,12 @@ body.driver-mobile-screen .driver-drum-ghost {
     position: absolute;
     z-index: 12;
     margin: 0;
-    transform: translateY(var(--ghost-lift, 0px));
+    transform: translateY(0);
     transform-style: flat;
     pointer-events: none;
     will-change: transform;
+    /* Копия — самостоятельный слой: её перерисовка не трогает остальной экран. */
+    contain: layout paint;
 }
 
 body.driver-mobile-screen .driver-drum-ghost .driver-drum-card-face {
@@ -338,14 +340,6 @@ body.driver-mobile-screen .driver-drum-card.is-dropping .driver-drum-card-body {
 }
 
 /* Активный простой: передняя грань, кольцо циферблата и контур мерцают жёлтым в такт. */
-body.driver-mobile-screen .driver-drum-card.is-center.is-active-downtime .driver-drum-card-face {
-    animation: driver-drum-card-pulse 1.15s ease-in-out infinite;
-}
-
-body.driver-mobile-screen .driver-work-dial.is-downtime-active::before {
-    animation: driver-dial-downtime-pulse 1.15s ease-in-out infinite;
-}
-
 body.driver-mobile-screen .driver-drum-card.is-lifting .driver-drum-card-body {
     opacity: 1;
 }
@@ -366,65 +360,54 @@ body.driver-mobile-screen .driver-drum-link {
 body.driver-mobile-screen .driver-drum-link path {
     d: var(--link-path, path(""));
     fill: none;
-    stroke: rgba(150, 166, 172, .55);
-    stroke-width: 2;
     stroke-linejoin: round;
     stroke-linecap: round;
-    transition: stroke .25s ease;
+}
+
+body.driver-mobile-screen .driver-drum-link-base {
+    stroke: rgba(150, 166, 172, .55);
+    stroke-width: 2;
+}
+
+/* Жёлтые слои нарисованы заранее и лежат прозрачными: при простое мигает только их
+   прозрачность. Перекраска этого пути стоит на телефоне 1651 мс, поэтому менять
+   stroke/filter на ходу нельзя — экран замирал бы каждый цикл мигания. */
+body.driver-mobile-screen .driver-drum-link-glow,
+body.driver-mobile-screen .driver-drum-link-live {
+    opacity: 0;
+}
+
+body.driver-mobile-screen .driver-drum-link-glow {
+    stroke: rgba(255, 209, 42, .3);
+    stroke-width: 9;
+}
+
+body.driver-mobile-screen .driver-drum-link-live {
+    stroke: var(--driver-yellow);
+    stroke-width: 2.5;
+}
+
+/* Два состояния — яркий жёлтый и погасший — чередуются примерно два раза в секунду.
+   Переключается только прозрачность готовых слоёв: композитор делает это без единой
+   перерисовки, поэтому мигание не стоит ничего даже на слабом телефоне. */
+body.driver-mobile-screen .driver-downtime-drum.is-active ~ .driver-drum-link .driver-drum-link-live {
+    animation: driver-downtime-blink 1.2s steps(1, end) infinite;
+}
+
+body.driver-mobile-screen .driver-downtime-drum.is-active ~ .driver-drum-link .driver-drum-link-glow {
+    animation: driver-downtime-blink-soft 1.2s steps(1, end) infinite;
 }
 
 /* Обводку контура в момент жеста НЕ трогаем: перекраска этого пути стоит на телефоне
    1651 мс — «готово» показывает только летящая копия грани. */
-body.driver-mobile-screen .driver-downtime-drum.is-active ~ .driver-drum-link path {
-    stroke: var(--driver-yellow);
-    stroke-width: 2.5;
-    filter: drop-shadow(0 0 3px rgba(255, 209, 42, .9)) drop-shadow(0 0 10px rgba(255, 209, 42, .55));
-    animation: driver-drum-link-pulse 1.4s ease-in-out infinite;
+@keyframes driver-downtime-blink {
+    0% { opacity: 1; }
+    50% { opacity: 0; }
 }
 
-@keyframes driver-drum-link-pulse {
-    0%, 100% { opacity: .62; }
-    50% { opacity: 1; }
-}
-}
+@keyframes driver-downtime-blink-soft {
+    0% { opacity: .7; }
+    50% { opacity: 0; }
 }
 
-@keyframes driver-drum-card-pulse {
-    0%, 100% {
-        box-shadow: inset 0 2px 0 var(--drum-accent), inset 0 -2px 0 var(--drum-accent),
-            inset 2px 0 0 var(--drum-accent), inset -2px 0 0 var(--drum-accent),
-            inset 0 0 10px rgba(255, 209, 42, .12);
-    }
-    50% {
-        box-shadow: inset 0 3px 0 var(--driver-yellow), inset 0 -3px 0 var(--driver-yellow),
-            inset 3px 0 0 var(--driver-yellow), inset -3px 0 0 var(--driver-yellow),
-            inset 0 0 28px rgba(255, 209, 42, .55);
-    }
-}
 
-@keyframes driver-dial-downtime-pulse {
-    0%, 100% {
-        box-shadow:
-            inset 0 2px 2px rgba(240, 251, 251, .09),
-            inset 0 -10px 22px rgba(0, 0, 0, .48),
-            0 16px 34px rgba(0, 0, 0, .38),
-            0 0 0 2px rgba(255, 209, 42, .18),
-            0 0 10px rgba(255, 209, 42, .1);
-    }
-    50% {
-        box-shadow:
-            inset 0 2px 2px rgba(240, 251, 251, .09),
-            inset 0 -10px 22px rgba(0, 0, 0, .48),
-            0 16px 34px rgba(0, 0, 0, .38),
-            0 0 0 4px rgba(255, 209, 42, .95),
-            0 0 0 12px rgba(255, 209, 42, .22),
-            0 0 64px rgba(255, 209, 42, .7);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    /* Мигание активного простоя — сигнал состояния, оно остаётся; отключаем только анимацию фиксации барабана. */
-    body.driver-mobile-screen .driver-downtime-drum-track.is-snapping {
-        transition: none;
-    }
-}

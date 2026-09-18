@@ -34,4 +34,4 @@
 {% comment %} Контур «кольцо → линии → рамка грани» — ОДНА непрерывная кривая. Сама кривая лежит в
    CSS-переменной на <html> (её ставит скрипт один раз при смене размеров), а путь берёт её через
    свойство d — так контур монолитный, не считается на кадрах и переживает обновление экрана. {% endcomment %}
-<svg class="driver-drum-link" data-driver-drum-link aria-hidden="true" focusable="false"><path /></svg>
+<svg class="driver-drum-link" data-driver-drum-link aria-hidden="true" focusable="false"><path class="driver-drum-link-base" /><path class="driver-drum-link-glow" /><path class="driver-drum-link-live" /></svg>

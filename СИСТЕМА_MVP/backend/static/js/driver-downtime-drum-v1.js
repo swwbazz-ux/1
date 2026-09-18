@@ -280,7 +280,6 @@
             d.classList.toggle("is-active", id !== "");
             d.classList.toggle("is-locked", id !== "");   // барабан зафиксирован, пока идёт простой
         }
-        if (w) w.classList.toggle("is-downtime-active", id !== "");
         // Подводим активную причину вперёд только если она не спереди: иначе каждое
         // обновление таймера запускало бы анимацию фиксации и блокировало контур.
         if (activeIndex >= 0 && !drag && frontIndex(geo.theta) !== activeIndex) rotateTo(activeIndex, true);
@@ -334,6 +333,20 @@
     var liftRaf = 0;
 
     var ghost = null;
+    var ghostRaf = 0, ghostY = 0;
+
+    // Позиция копии пишется напрямую в transform и не чаще одного раза за кадр:
+    // запись CSS-переменной стоит втрое дороже (16,5 против 5 микросекунд на телефоне)
+    // и пересчитывает стили всего поддерева копии, а событий движения приходит больше,
+    // чем кадров успевает отрисоваться.
+    function moveGhost(y) {
+        ghostY = y;
+        if (ghostRaf || !ghost) return;
+        ghostRaf = root.requestAnimationFrame(function () {
+            ghostRaf = 0;
+            if (ghost) ghost.style.transform = "translateY(" + ghostY.toFixed(1) + "px)";
+        });
+    }
 
     function screenOf(el) {
         while (el && !(el.classList && el.classList.contains("driver-work-screen"))) el = el.parentElement;
@@ -360,7 +373,7 @@
         g.style.top = (r.top - box.top) + "px";
         g.style.width = r.width + "px";
         g.style.height = r.height + "px";
-        g.style.setProperty("--ghost-lift", "0px");
+        g.style.transform = "translateY(0px)";
         screen.appendChild(g);
         var w = dial();
         var dr = w ? w.getBoundingClientRect() : null;
@@ -374,8 +387,9 @@
         if (link0) link0.classList.remove("is-armed", "is-drop-armed");
         if (ghost) {
             var g = ghost; ghost = null;
+            if (ghostRaf) { root.cancelAnimationFrame(ghostRaf); ghostRaf = 0; }
             g.classList.add("is-settling");
-            g.style.setProperty("--ghost-lift", "0px");
+            g.style.transform = "translateY(0px)";
             root.setTimeout(function () { if (g.parentNode) g.parentNode.removeChild(g); }, 240);
         }
     }
@@ -432,11 +446,13 @@
         }
         if (drag.mode === "drop") {
             var down = Math.min(DROP_MAX, Math.max(0, dy));
-            if (ghost) ghost.style.setProperty("--ghost-lift", down.toFixed(1) + "px");
+            moveGhost(down);
             var dropArmed = dy >= DROP_ARM;
-            if (dropArmed && !drag.armed) { haptic(12); click(0.7); drag.armed = true; }
-            if (!dropArmed) drag.armed = false;
-            if (ghost) ghost.classList.toggle("is-armed", dropArmed);
+            if (dropArmed !== drag.armed) {
+                drag.armed = dropArmed;
+                if (dropArmed) { haptic(12); click(0.7); }
+                if (ghost) ghost.classList.toggle("is-armed", dropArmed);
+            }
             var linkD = q("[data-driver-drum-link]");
             if (linkD) linkD.classList.toggle("is-drop-armed", dropArmed);
             drag.dy = dy;
@@ -457,11 +473,11 @@
             // Состояние «готово» показывает ТОЛЬКО копия. Ни обводку контура, ни оригинал грани
             // трогать нельзя: замер на телефоне — 1651 мс на перекраску контура и 594 мс на
             // смену цвета грани внутри 3D-сцены против 17 мс у копии.
-            if (ghost) {
-                ghost.style.setProperty("--ghost-lift", lift.toFixed(1) + "px");
-                ghost.classList.toggle("is-armed", armed);
+            moveGhost(lift);
+            if (armed !== drag.armed) {
+                drag.armed = armed;
+                if (ghost) ghost.classList.toggle("is-armed", armed);
             }
-            if (armed !== drag.armed) drag.armed = armed;
             drag.dy = dy;
         }
         event.preventDefault();
