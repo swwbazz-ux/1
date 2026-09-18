@@ -4755,6 +4755,49 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
 {% include "includes/achievement_prize.html" %}
 
 <script>
+/* DRIVER_FRAGMENT_SNAPSHOT_START */
+/* Снимок серверного экрана без переменных полей. Полная подмена DOM стоит на телефоне
+   1–3 с замирания (растр 3D-барабана, градиентов круга, сотни строк журнала), а клиент
+   реального времени просит «серверную правду» каждые 20 с. Поэтому свежий фрагмент
+   сначала сравнивается с тем снимком, из которого собран текущий экран: совпал —
+   подменять нечего. «full» — всё, что рисует сервер, кроме CSRF, номера действия,
+   секундомеров и активной вкладки; «core» — то же без состояния простоя (его уже
+   показала местная проекция) и без скрытых вкладок «Простои» и «Журнал». */
+window.driverFragmentSnapshot = function (shell) {
+    if (!shell || typeof shell.cloneNode !== "function") return null;
+    var copy = shell.cloneNode(true);
+    var all = function (selector) { return Array.prototype.slice.call(copy.querySelectorAll(selector)); };
+    copy.removeAttribute("data-active-tab");
+    all("[data-driver-fragment-shell]").forEach(function (node) { node.parentNode.removeChild(node); });
+    all("input[name='csrfmiddlewaretoken'], input[name='client_action_id']").forEach(function (node) { node.setAttribute("value", ""); });
+    all("[data-driver-tab-panel]").forEach(function (node) { node.classList.remove("is-active"); });
+    all("[data-driver-active-downtime-id]").forEach(function (node) {
+        ["data-driver-active-elapsed-seconds", "data-driver-shift-downtime-seconds", "data-driver-downtime-calculated-at"]
+            .forEach(function (name) { node.removeAttribute(name); });
+    });
+    all("[data-driver-active-duration], [data-driver-reason-duration], [data-driver-drum-total]").forEach(function (node) {
+        node.textContent = "";
+        node.removeAttribute("hidden");
+    });
+    all("[data-driver-reason-seconds]").forEach(function (node) { node.removeAttribute("data-driver-reason-seconds"); });
+    all("[data-driver-downtime-reason-button]").forEach(function (node) { node.removeAttribute("aria-label"); });
+    all("[data-driver-report-downtime-total]").forEach(function (node) { node.removeAttribute("data-driver-report-downtime-total"); });
+    var full = copy.outerHTML;
+    all("[data-driver-tab-panel='downtimes'], [data-driver-tab-panel='manifest']").forEach(function (node) { node.parentNode.removeChild(node); });
+    all(".driver-work-dial, [data-driver-work-dial-control]").forEach(function (node) {
+        Array.prototype.slice.call(node.classList).forEach(function (name) {
+            if (name.indexOf("is-waiting-") === 0) node.classList.remove(name);
+        });
+    });
+    all(".driver-work-note").forEach(function (node) { node.textContent = ""; });
+    return {full: full, core: copy.outerHTML};
+};
+/* Базовая линия — разметка, из которой собран экран при загрузке (до любых правок скриптами). */
+window.driverAppliedFragmentSnapshot = window.driverFragmentSnapshot(document.querySelector("[data-driver-shell]"));
+/* Скрытые вкладки отстали от сервера после нашего же простоя: при их открытии экран подтягивается целиком. */
+window.driverDomBehindBaseline = false;
+window.driverForceFragmentApply = false;
+/* DRIVER_FRAGMENT_SNAPSHOT_END */
 /* DRIVER_ROLE_HOLD_GUARD_START */
 window.createDriverRoleHoldGuard = function (options) {
     options = options || {};
@@ -5220,7 +5263,7 @@ function isDriverOperationalRefreshUnsafe(shell) {
         return true;
     }
     return !!(
-        shell.querySelector(".is-touch-armed, .is-holding, .is-pending, .is-dragging, [data-driver-point-sheet]:not([hidden]), [data-driver-free-bucket-sheet]:not([hidden])") ||
+        shell.querySelector(".is-touch-armed, .is-holding, .is-pending, .is-dragging, .is-lifting, .is-dropping, .is-snapping, .driver-drum-ghost, [data-driver-point-sheet]:not([hidden]), [data-driver-free-bucket-sheet]:not([hidden])") ||
         document.querySelector("[data-driver-pwa-update-modal]:not([hidden]), .app-confirm-modal:not([hidden])")
     );
 }
@@ -5603,6 +5646,19 @@ function syncDriverTabMarkup(shell, tab) {
 }
 
 window.applyOperationalStateRefresh = function (context) {
+    // Все события дельты — наши же подтверждённые простои (их номера записал
+    // onConfirmed). Пустая или усечённая дельта доказательством не считается.
+    function refreshEventsAreOwnDowntime(ctx) {
+        var events = ctx && Array.isArray(ctx.events) ? ctx.events : [];
+        var own = Array.isArray(window.driverOwnDowntimeEventIds) ? window.driverOwnDowntimeEventIds : [];
+        if (!events.length || !own.length || (ctx && ctx.eventsTruncated)) return false;
+        return events.every(function (event) {
+            if (!event || event.type !== "downtime_changed") return false;
+            var payload = event.payload || {};
+            var id = String(payload.event_id || payload.downtime_id || event.object_id || "");
+            return id !== "" && own.indexOf(id) >= 0;
+        });
+    }
     // Outbox, poll и resume разделяют один запрос; новая версия остаётся
     // pending у AppRealtime, если она появилась во время текущего fragment.
     if (window.driverOperationalRefreshPromise) return window.driverOperationalRefreshPromise;
@@ -5623,6 +5679,32 @@ window.applyOperationalStateRefresh = function (context) {
             "[data-driver-shell]"
         );
         if (!freshShell) return {deferred: true, reason: "driver_fragment_invalid"};
+        /* Сервер прислал тот же экран (или он отличается только нашим же простоем, который
+           местная проекция уже показала): DOM не трогаем, версию подтверждаем. Полная подмена
+           на телефоне — это 1–3 с замирания, и по таймеру она шла каждые 20 с. */
+        var freshSnapshot = typeof window.driverFragmentSnapshot === "function"
+            ? window.driverFragmentSnapshot(freshShell)
+            : null;
+        var baseSnapshot = window.driverAppliedFragmentSnapshot || null;
+        if (freshSnapshot && baseSnapshot && window.driverForceFragmentApply !== true) {
+            var unchanged = freshSnapshot.full === baseSnapshot.full;
+            var ownDowntimeOnly = !unchanged
+                && freshSnapshot.core === baseSnapshot.core
+                && refreshEventsAreOwnDowntime(context);
+            if (unchanged || ownDowntimeOnly) {
+                window.driverAppliedFragmentSnapshot = freshSnapshot;
+                if (ownDowntimeOnly) window.driverDomBehindBaseline = true;
+                if (window.DriverFreeBucket && typeof window.DriverFreeBucket.receiveFragment === "function") {
+                    window.DriverFreeBucket.receiveFragment(
+                        payload.driver_free_bucket_catalog,
+                        payload.driver_free_bucket_state
+                    );
+                }
+                var acceptedVersion = Number(payload.version || 0);
+                document.body.dataset.operationalStateVersion = String(acceptedVersion);
+                return {applied: true, version: acceptedVersion, skipped: unchanged ? "unchanged" : "own_downtime"};
+            }
+        }
         var previousDowntimeCard = oldShell.querySelector("[data-driver-active-downtime-flow]");
         var previousDowntimeFlow = previousDowntimeCard
             ? String(previousDowntimeCard.dataset.driverActiveDowntimeFlow || "")
@@ -5708,6 +5790,9 @@ window.applyOperationalStateRefresh = function (context) {
         }
         var appliedVersion = Number(payload.version || 0);
         document.body.dataset.operationalStateVersion = String(appliedVersion);
+        window.driverAppliedFragmentSnapshot = freshSnapshot;
+        window.driverDomBehindBaseline = false;
+        window.driverForceFragmentApply = false;
         return {applied: true, version: appliedVersion};
     }).catch(function () {
         return {deferred: true, reason: "driver_refresh_failed"};
@@ -6559,6 +6644,10 @@ window.bindDriverMobileShell = function () {
             ".driver-timeline, button, input, select"
         );
         return Array.prototype.some.call(probes, function (node) {
+            /* Грани барабана простоев повёрнуты в 3D: по замерам они выходят за экран, хотя
+               сцена их обрезает. Считать это переполнением нельзя — из-за него весь экран
+               водителя жил в плотности «tight», а при каждом простое дёргался на 2 px. */
+            if (node.closest && node.closest("[data-driver-downtime-drum]")) return false;
             var rect = node.getBoundingClientRect();
             return (
                 node.scrollHeight > node.clientHeight + 1
@@ -7235,6 +7324,11 @@ window.bindDriverMobileShell = function () {
             || shell.dataset.driverDensity
             || "normal";
         syncDriverTabMarkup(shell, tab);
+        if (tab !== "work" && window.driverDomBehindBaseline === true
+            && window.AppRealtime && typeof window.AppRealtime.requestReconcile === "function") {
+            window.driverForceFragmentApply = true;
+            window.AppRealtime.requestReconcile("driver_tab_opened");
+        }
         if (window.history && window.history.replaceState) {
             var url = new URL(window.location.href);
             url.searchParams.set("tab", tab);
@@ -7649,11 +7743,26 @@ window.bindDriverMobileShell = function () {
                     window.setTimeout(function () { window.driverOfflineConfirmationCueScheduled = false; }, 750);
                 }
                 var result = args[1] || {};
+                var isDowntime = event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended";
+                if (isDowntime) {
+                    var serverIds = result.server_ids || {};
+                    var downtimeId = String(serverIds.downtime_event_id || serverIds.downtime_id || "");
+                    if (downtimeId) {
+                        window.driverOwnDowntimeEventIds = (window.driverOwnDowntimeEventIds || []).concat(downtimeId).slice(-50);
+                    }
+                }
                 if (window.AppRealtime && typeof window.AppRealtime.requestReconcile === "function") {
-                    window.AppRealtime.requestReconcile(
-                        "driver_offline_event_confirmed",
-                        Number(result.server_version || result.version || 0)
-                    );
+                    // Для простоя версию не передаём: иначе опрос спросит события «после неё»
+                    // и не вернёт наш же простой — а он и есть доказательство, что экран
+                    // подменять не нужно (см. applyOperationalStateRefresh).
+                    if (isDowntime) {
+                        window.AppRealtime.requestReconcile("driver_offline_event_confirmed");
+                    } else {
+                        window.AppRealtime.requestReconcile(
+                            "driver_offline_event_confirmed",
+                            Number(result.server_version || result.version || 0)
+                        );
+                    }
                 }
             },
             onReview: function (event, result) {
