@@ -18,7 +18,6 @@
     var DROP_ARM = 36;     // px вниз, с которых грань «готова» выключить простой
     var DROP_TRIGGER = 56; // px вниз, отпускание ниже — завершение простоя
     var DROP_MAX = 64;
-    var STRIPS = 9;        // полосок в грани карточки
     var MIN_FACES = 12;    // барабан всегда полноразмерный, как минимум на 12 граней
     var TILT = -20;        // наклон барабана от зрителя, градусов: видны крышка и ободья
     var doc = root.document;
@@ -39,9 +38,39 @@
     }
 
     // --- геометрия цилиндра ---
-    var geo = { n: 0, step: 0, radius: 0, cardW: 0, theta: 0, front: -1, built: null, full: true, reasons: 0 };
+    var geo = { n: 0, step: 0, radius: 0, cardW: 0, theta: 0, front: -1, built: null, full: true, reasons: 0, signature: "" };
 
     function mod(a, b) { return ((a % b) + b) % b; }
+
+    // Подпись состава барабана: пока она не меняется, пересобирать нечего. Экран водителя
+    // периодически подменяется свежей копией с сервера — на слабом телефоне полная пересборка
+    // (клонирование граней и замеры размеров) давала заметное замирание.
+    function drumSignature(c) {
+        var ids = [];
+        all("[data-driver-drum-card]:not([data-driver-drum-clone]):not([hidden])", c).forEach(function (card) {
+            ids.push(card.dataset.driverDrumReasonId);
+        });
+        return ids.join(",");
+    }
+
+    function reapply(c) {
+        // Тот же состав в новой копии экрана: восстанавливаем углы и поворот без замеров.
+        var list = cards();
+        if (list.length !== geo.n) return false;
+        list.forEach(function (card, index) {
+            card.dataset.driverDrumIndex = String(index);
+            card.style.setProperty("--card-angle", (index * geo.step).toFixed(3) + "deg");
+        });
+        var d = drum();
+        if (d) {
+            d.style.setProperty("--drum-radius", geo.radius.toFixed(1) + "px");
+            d.style.setProperty("--drum-step", geo.step.toFixed(3) + "deg");
+        }
+        geo.built = c;
+        lastFront = -1;
+        render(false);
+        return true;
+    }
 
     function build() {
         var c = cylinder();
@@ -49,6 +78,20 @@
         // Копии от прошлой сборки убираем и собираем кольцо заново из выбранных причин.
         var selected = all("[data-driver-drum-card]:not([data-driver-drum-clone]):not([hidden])", c);
         if (geo.built === c && geo.reasons === selected.length && geo.n === cards().length && cards().length) return true;
+        var signature = drumSignature(c);
+        if (geo.n && geo.signature === signature && !all("[data-driver-drum-card][data-driver-drum-clone]", c).length) {
+            // Новая копия экрана с тем же составом: клонируем грани заново, но без замеров.
+            var need = geo.n - selected.length;
+            for (var k = 0; k < need; k++) {
+                var copy = selected[k % selected.length].cloneNode(true);
+                copy.setAttribute("data-driver-drum-clone", "1");
+                copy.setAttribute("aria-hidden", "true");
+                copy.tabIndex = -1;
+                copy.hidden = false;
+                c.appendChild(copy);
+            }
+            if (reapply(c)) return true;
+        }
         all("[data-driver-drum-card][data-driver-drum-clone]", c).forEach(function (clone) { clone.parentNode.removeChild(clone); });
         if (!selected.length) return false;
         // Кольцо всегда полное: если причин меньше MIN_FACES, они повторяются по кругу —
@@ -73,25 +116,14 @@
         var radius = (cardW / 2) / Math.tan((step / 2) * Math.PI / 180) * 1.04;
         geo.n = n; geo.step = step; geo.radius = radius; geo.cardW = cardW; geo.built = c;
         geo.reasons = reasons;
+        geo.signature = drumSignature(c);
         geo.full = true;   // полное кольцо — крутится бесконечно в обе стороны
         var d = drum();
         if (d) {
             d.style.setProperty("--drum-radius", radius.toFixed(1) + "px");
             d.style.setProperty("--drum-step", step.toFixed(3) + "deg");
         }
-        // Полоски грани лежат на окружности барабана. Их кривизна и собственная светотень
-        // (блик по центру, тень к краям) задаются ОДИН раз здесь; при вращении меняется только
-        // одно значение на всю карточку (--card-shade), а не каждая полоска отдельно.
-        list.forEach(function (card) {
-            all(".driver-drum-card-face i", card).forEach(function (strip, i) {
-                var arc = cardW * (i - (STRIPS - 1) / 2) / STRIPS;
-                var rad = radius > 0 ? arc / radius : 0;
-                strip.style.setProperty("--i", String(i));
-                strip.style.setProperty("--a", (rad * 180 / Math.PI).toFixed(3) + "deg");
-                strip.style.setProperty("--z", (radius * (Math.cos(rad) - 1) + 1.5).toFixed(2) + "px");
-                strip.style.setProperty("--b", (0.86 + 0.16 * Math.cos(rad * 6)).toFixed(3));
-            });
-        });
+        // Выпуклость грани рисует градиент в CSS — считать при сборке нечего.
         list.forEach(function (card, index) {
             card.dataset.driverDrumIndex = String(index);
             card.style.setProperty("--card-angle", (index * step).toFixed(3) + "deg");
@@ -153,7 +185,7 @@
             // Пока идёт анимация фиксации, грань ещё движется — контур дорисуем по её окончании.
             c.__snapUntil = Date.now() + 360;
             root.clearTimeout(c.__snapTimer);
-            c.__snapTimer = root.setTimeout(function () { c.__snapUntil = 0; drawLink(); }, 370);
+            c.__snapTimer = root.setTimeout(function () { c.__snapUntil = 0; syncLinkVars(); }, 370);
         }
         // Барабан наклонён от зрителя: видны крышка и ободья, кромки граней — дуги.
         c.style.transform = "rotateX(" + TILT + "deg) translateZ(" + (-geo.radius).toFixed(1) + "px) rotateY(" + geo.theta.toFixed(3) + "deg)";
@@ -163,21 +195,20 @@
             // Угол грани относительно зрителя: 0 — прямо перед ним.
             var rel = mod(index * geo.step + geo.theta + 180, 360) - 180;
             var a = Math.abs(rel);
-            card.classList.toggle("is-center", index === front);
-            card.classList.toggle("is-back", a > 100);
-            // Боковые грани погасшие: уже соседняя заметно темнее передней.
-            card.style.setProperty("--drum-fade", Math.max(0.22, 1 - Math.max(0, a - 6) / 48).toFixed(3));
-            // Освещение по повороту к зрителю — одно значение на карточку.
-            card.style.setProperty("--card-shade", (0.6 + 0.4 * Math.max(0, Math.cos(rel * Math.PI / 180))).toFixed(3));
+            var isCenter = index === front;
+            if (card.classList.contains("is-center") !== isCenter) card.classList.toggle("is-center", isCenter);
+            var isBack = a > 100;
+            if (card.classList.contains("is-back") !== isBack) card.classList.toggle("is-back", isBack);
+            // Боковые грани погасшие: одно значение на карточку, и только если оно изменилось
+            // (запись в стиль дороже самой анимации — на слабых телефонах это заметно).
+            var fade = Math.max(0.22, 1 - Math.max(0, a - 6) / 48).toFixed(2);
+            if (card.__fade !== fade) { card.__fade = fade; card.style.setProperty("--drum-fade", fade); }
         });
         if (front !== lastFront) {
             if (lastFront !== -1) { haptic(9); click(1); } // щелчок фиксации: вибро + звук
             lastFront = front;
             geo.front = front;
         }
-        // Контур статичен и берётся из сохранённой геометрии гнезда — рисуем его на каждом
-        // кадре (запись в DOM происходит только если путь реально изменился).
-        drawLink();
     }
 
     function centerCard() {
@@ -322,12 +353,12 @@
         card.style.setProperty("--lift-y", "0px");
         card.style.setProperty("--lift-z", "0px");
         card.style.setProperty("--lift-tilt", "0deg");
-        drawLink();
+        syncLinkVars();
         root.setTimeout(function () {
             card.classList.remove("is-settling");
             var d = drum();
             if (d) d.classList.remove("is-lifting");
-            drawLink();
+            syncLinkVars();
         }, 300);
         var w = dial();
         if (w) w.classList.remove("is-drum-lifting");
@@ -394,7 +425,6 @@
             var wd = dial();
             if (wd) wd.classList.toggle("is-drum-dropping", dropArmed);
             drag.dy = dy;
-            drawLink();
             event.preventDefault();
             return;
         }
@@ -420,8 +450,6 @@
             drag.card.style.setProperty("--lift-z", lz.toFixed(1) + "px");
             // По ходу подъёма грань разворачивается лицом к зрителю (снимает наклон барабана).
             drag.card.style.setProperty("--lift-tilt", (Math.abs(TILT) * Math.min(1, -lift / liftMax)).toFixed(2) + "deg");
-            // Контур идёт за гранью: рамка поднимается вместе с ней, горлышко укорачивается.
-            drawLink();
             drag.card.classList.toggle("is-armed", armed);
             var w = dial();
             if (w) w.classList.toggle("is-drum-lifting", armed);
@@ -597,91 +625,36 @@
         return !!(c && c.classList.contains("is-snapping") && c.__snapUntil && c.__snapUntil > Date.now());
     }
 
-    // Геометрия гнезда передней грани снимается ОДИН раз, когда барабан стоит на делении и
-    // ничего не движется, и хранится. Контур рисуется только из неё: ни жесты, ни анимации,
-    // ни обновления таймера не могут его сдвинуть. Пересъёмка — только при смене размеров.
-    var slot = null;
-    var lastLinkPath = "", lastLinkViewBox = "";
-
-    // Оболочка экрана периодически подменяется свежей копией с сервера, и контур в новой
-    // копии пустой. Возвращаем последний нарисованный путь сразу, до следующего кадра.
-    function restoreLink() {
-        var path = q("[data-driver-drum-link-path]");
-        var svg = q("[data-driver-drum-link]");
-        if (!path || !lastLinkPath) return;
-        if (svg && lastLinkViewBox && svg.getAttribute("viewBox") !== lastLinkViewBox) svg.setAttribute("viewBox", lastLinkViewBox);
-        if (!path.getAttribute("d")) path.setAttribute("d", lastLinkPath);
-    }
-
-    function setLink(svg, path, viewBox, d) {
-        if (svg.getAttribute("viewBox") !== viewBox) svg.setAttribute("viewBox", viewBox);
-        if (path.getAttribute("d") !== d) path.setAttribute("d", d);
-        lastLinkPath = d; lastLinkViewBox = viewBox;
-    }
-
-    function captureSlot() {
-        var svg = q("[data-driver-drum-link]");
+    // Контур рисует CSS. Здесь только три размера гнезда, и ставятся они на <html> —
+    // элемент, который не подменяется при обновлении экрана, поэтому контур переживает
+    // любое обновление и не пересчитывается на кадрах вращения.
+    function syncLinkVars() {
         var w = dial();
         var card = centerCard();
-        var screen = svg ? svg.parentElement : null;
+        var link = q("[data-driver-drum-link]");
+        if (!w || !card || !link) return;
+        // Горлышко позиционируется относительно экрана «Работа» — от него и считаем.
+        var screen = link.parentElement;
         while (screen && !screen.classList.contains("driver-work-screen")) screen = screen.parentElement;
-        if (!svg || !w || !card || !screen || !geo.n) return null;
-        if (drag || c_snapping()) return null;
-        if (Math.abs(geo.theta / geo.step - Math.round(geo.theta / geo.step)) > 0.002) return null;
-        if (card.classList.contains("is-lifting") || card.classList.contains("is-dropping") || card.classList.contains("is-settling")) return null;
-        var strips = all(".driver-drum-card-face i", card);
-        if (strips.length < 2) return null;
+        if (!screen) return;
+        var dr = w.getBoundingClientRect();
+        var cr = card.getBoundingClientRect();
         var box = screen.getBoundingClientRect();
-        var d = w.getBoundingClientRect();
-        var pad = 3;
-        var bottom = [];
-        strips.forEach(function (s) {
-            var sr = s.getBoundingClientRect();
-            bottom.push([sr.left - box.left, sr.bottom - box.top + pad]);
-            bottom.push([sr.right - box.left, sr.bottom - box.top + pad]);
-        });
-        var first = strips[0].getBoundingClientRect(), last = strips[strips.length - 1].getBoundingClientRect();
-        var xL = first.left - box.left - pad, xR = last.right - box.left + pad;
-        bottom[0][0] = xL; bottom[bottom.length - 1][0] = xR;
-        return {
-            boxW: box.width, boxH: box.height,
-            cx: d.left + d.width / 2 - box.left, cy: d.top + d.height / 2 - box.top,
-            r: d.width * .4975,               // в зазоре между кольцом (48.5%) и угловыми кнопками (51%)
-            xL: xL, xR: xR,
-            yTopL: first.top - box.top - pad, yTopR: last.top - box.top - pad,
-            bottom: bottom
-        };
-    }
-
-    function drawLink() {
-        var svg = q("[data-driver-drum-link]");
-        var path = svg ? q("[data-driver-drum-link-path]", svg) : null;
-        var card = centerCard();
-        if (!svg || !path || !card) { restoreLink(); return; }
-        var screen = svg.parentElement;
-        while (screen && !screen.classList.contains("driver-work-screen")) screen = screen.parentElement;
-        if (!screen) { restoreLink(); return; }
-        var box = screen.getBoundingClientRect();
-        if (!slot || Math.abs(slot.boxW - box.width) > 1 || Math.abs(slot.boxH - box.height) > 1) {
-            var fresh = captureSlot();
-            if (!fresh) { restoreLink(); return; }   // условий для съёмки нет — держим прежний контур
-            slot = fresh;
-        }
-        function p(v) { return Number(v).toFixed(1); }
-        var viewBox = "0 0 " + p(slot.boxW) + " " + p(slot.boxH);
-        var s = slot;
-        var ring = ["M", p(s.cx - s.r), p(s.cy), "A", p(s.r), p(s.r), "0 1 1", p(s.cx + s.r), p(s.cy), "A", p(s.r), p(s.r), "0 1 1", p(s.cx - s.r), p(s.cy), "Z"].join(" ");
-        var busy = card.classList.contains("is-lifting") || card.classList.contains("is-dropping") || card.classList.contains("is-settling") || (drag && (drag.mode === "lift" || drag.mode === "drop"));
-        if (busy) { setLink(svg, path, viewBox, ring); return; }
-        var nL = Math.max(1, s.cx - s.xL), nR = Math.max(1, s.xR - s.cx);
-        if (nL >= s.r || nR >= s.r) { setLink(svg, path, viewBox, ring); return; }
-        var yNL = s.cy + Math.sqrt(s.r * s.r - nL * nL);
-        var yNR = s.cy + Math.sqrt(s.r * s.r - nR * nR);
-        // Кольцо → вниз по ширине грани → её правая кромка → нижняя кромка (дуга) → левая кромка → кольцо.
-        var dd = ["M", p(s.xL), p(yNL), "A", p(s.r), p(s.r), "0 1 1", p(s.xR), p(yNR), "L", p(s.xR), p(s.yTopR)];
-        for (var i = s.bottom.length - 1; i >= 0; i--) dd.push("L", p(s.bottom[i][0]), p(s.bottom[i][1]));
-        dd.push("L", p(s.xL), p(s.yTopL), "Z");
-        setLink(svg, path, viewBox, dd.join(" "));
+        if (!dr.width || !cr.width) return;
+        var pad = 5;
+        var half = cr.width / 2 + pad;
+        var r = dr.width * 0.4975;
+        if (half >= r) return;
+        var cx = dr.left + dr.width / 2, cy = dr.top + dr.height / 2;
+        // Линии горлышка начинаются там, где их x пересекает кольцо.
+        var yTop = cy + Math.sqrt(r * r - half * half);
+        var root_ = doc.documentElement.style;
+        root_.setProperty("--neck-w", (half * 2).toFixed(1) + "px");
+        root_.setProperty("--neck-top", (yTop - box.top).toFixed(1) + "px");
+        root_.setProperty("--neck-bottom", (box.bottom - (cr.bottom + pad)).toFixed(1) + "px");
+        // Проём в кольце ровно по ширине горлышка.
+        root_.setProperty("--ring-gap", (2 * Math.asin(Math.min(1, half / r)) * 180 / Math.PI).toFixed(2) + "deg");
+        void cx;
     }
 
     // --- состояние активного простоя: та же карточка, что и на вкладке «Простои» ---
@@ -695,7 +668,6 @@
             ));
         });
         if (!relevant) return;
-        restoreLink();
         if (build()) { syncTotals(); syncActive(); }
     });
 
@@ -709,7 +681,7 @@
         root.addEventListener("resize", function () { geo.built = null; slot = null; build(); render(false); });
         if (root.ResizeObserver) {
             var w = dial();
-            if (w) new root.ResizeObserver(function () { drawLink(); }).observe(w);
+            if (w) new root.ResizeObserver(function () { syncLinkVars(); }).observe(w);
         }
         root.setTimeout(function () { render(false); }, 300);
     }

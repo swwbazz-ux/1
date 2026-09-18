@@ -111,6 +111,8 @@ body.driver-mobile-screen .driver-drum-card {
     /* Подъём: грань отрывается от стенки к зрителю (смещение считает скрипт в осях
        наклонённого барабана) и разворачивается лицом (--lift-tilt снимает наклон барабана). */
     transform: rotateY(var(--card-angle)) translateZ(var(--drum-radius)) translate3d(0, var(--lift-y), var(--lift-z)) rotateX(var(--lift-tilt));
+    /* Затухание боковых граней — opacity: композитор применяет его без перерисовки слоя. */
+    opacity: calc(var(--drum-fade) * var(--drum-unavailable, 1));
     /* Никакой прозрачности и фильтров на самой карточке: они сплющивают её 3D-полоски
        в плоскость, и грань перестаёт лежать на цилиндре. Гасим полоски и текст по отдельности. */
     transition: color .18s ease;
@@ -121,7 +123,7 @@ body.driver-mobile-screen .driver-drum-card.is-back {
 }
 
 body.driver-mobile-screen .driver-drum-card.is-unavailable {
-    --drum-unavailable: .6;
+    --drum-unavailable: .55;
 }
 
 body.driver-mobile-screen .driver-drum-card.is-settling {
@@ -138,66 +140,35 @@ body.driver-mobile-screen .driver-drum-card.is-center {
     color: var(--driver-yellow);
 }
 
-/* Грань натянута на цилиндр: семь полосок, угол и глубина каждой считает скрипт
-   от радиуса барабана (--strip-a*, --strip-z*), яркость — по повороту к зрителю. */
+/* Грань — один слой. Выпуклость цилиндра даёт градиент: блик по центру, тень к боковым
+   кромкам; верх и низ срезаны общей «этикеточной» дугой. Ни filter, ни вложенных 3D-слоёв:
+   при вращении браузер только перемещает готовую картинку. */
 body.driver-mobile-screen .driver-drum-card-face {
     position: absolute;
     inset: 0;
     display: block;
-    transform-style: preserve-3d;
+    border-radius: 6px;
+    background:
+        linear-gradient(90deg,
+            rgba(0, 0, 0, .5) 0%,
+            rgba(0, 0, 0, .22) 12%,
+            rgba(0, 0, 0, 0) 32%,
+            rgba(255, 255, 255, .05) 50%,
+            rgba(0, 0, 0, 0) 68%,
+            rgba(0, 0, 0, .22) 88%,
+            rgba(0, 0, 0, .5) 100%),
+        linear-gradient(180deg, var(--drum-face-top), var(--drum-face-bottom) 72%);
+    box-shadow:
+        inset 0 2px 0 var(--drum-accent),
+        inset 0 -2px 0 var(--drum-accent),
+        inset 2px 0 0 var(--drum-accent),
+        inset -2px 0 0 var(--drum-accent),
+        inset 0 6px 12px rgba(255, 255, 255, .05),
+        inset 0 -10px 16px rgba(0, 0, 0, .4);
+    -webkit-clip-path: url(#driver-drum-barrel);
+    clip-path: url(#driver-drum-barrel);
     pointer-events: none;
 }
-
-body.driver-mobile-screen .driver-drum-card-face i {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: calc(100% / 9 + 2.5px);
-    left: calc(var(--i) * 100% / 9 - 1.25px);
-    box-sizing: border-box;
-    border-top: 2px solid var(--drum-accent);
-    border-bottom: 2px solid var(--drum-accent);
-    background: linear-gradient(180deg, var(--drum-face-top), var(--drum-face-bottom) 72%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), inset 0 -8px 14px rgba(0, 0, 0, .38);
-    transform: translateZ(var(--z)) rotateY(var(--a));
-    backface-visibility: hidden;
-    /* Светотень кривизны (статична) × освещение карточки по углу к зрителю × затухание × недоступность. */
-    filter: brightness(calc(var(--b) * var(--card-shade, 1) * var(--drum-fade) * var(--drum-unavailable, 1)));
-    transition: border-color .18s ease, filter .18s ease;
-}
-
-body.driver-mobile-screen .driver-drum-card.is-lifting {
-    z-index: 3;
-}
-
-/* Поднятая грань: полоски светлеют, кромка жёлтая; «готово» — ещё ярче. */
-body.driver-mobile-screen .driver-drum-card.is-lifting .driver-drum-card-face i {
-    --drum-accent: var(--driver-yellow);
-    filter: brightness(calc(var(--b) * 1.25));
-    box-shadow: inset 0 0 18px rgba(255, 209, 42, .22);
-}
-
-body.driver-mobile-screen .driver-drum-card.is-armed .driver-drum-card-face i {
-    --drum-accent: #fff1a8;
-    filter: brightness(calc(var(--b) * 1.5));
-    box-shadow: inset 0 0 26px rgba(255, 209, 42, .55);
-}
-
-body.driver-mobile-screen .driver-drum-card-face i:first-child {
-    border-left: 2px solid var(--drum-accent);
-    border-radius: 6px 0 0 6px;
-}
-
-body.driver-mobile-screen .driver-drum-card-face i:last-child {
-    border-right: 2px solid var(--drum-accent);
-    border-radius: 0 6px 6px 0;
-}
-
-/* Передняя грань светится: подсветка полосок, а не плоской рамки. */
-body.driver-mobile-screen .driver-drum-card.is-center .driver-drum-card-face i {
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1), inset 0 -8px 14px rgba(0, 0, 0, .3), inset 0 0 18px rgba(255, 209, 42, .12);
-}
-
 
 body.driver-mobile-screen .driver-drum-card-body {
     position: relative;
@@ -296,8 +267,8 @@ body.driver-mobile-screen .driver-downtime-drum-count {
 }
 
 /* Барабан зафиксирован на время простоя: боковые грани почти гаснут. */
-body.driver-mobile-screen .driver-downtime-drum.is-locked .driver-drum-card:not(.is-center) .driver-drum-card-face i {
-    filter: brightness(calc(var(--b) * var(--drum-fade) * .45));
+body.driver-mobile-screen .driver-downtime-drum.is-locked .driver-drum-card:not(.is-center) {
+    opacity: calc(var(--drum-fade) * .45);
 }
 
 body.driver-mobile-screen .driver-downtime-drum.is-locked .driver-drum-card:not(.is-center) .driver-drum-card-body {
@@ -305,15 +276,15 @@ body.driver-mobile-screen .driver-downtime-drum.is-locked .driver-drum-card:not(
 }
 
 /* Опускание активной грани «в барабан»: полоски гаснут, кромка серая; «готово» — совсем тёмная. */
-body.driver-mobile-screen .driver-drum-card.is-dropping .driver-drum-card-face i {
+body.driver-mobile-screen .driver-drum-card.is-dropping .driver-drum-card-face {
     --drum-accent: rgba(150, 166, 172, .7);
-    filter: brightness(calc(var(--b) * .8));
+    --drum-face-top: #16242a;
     animation: none;
 }
 
-body.driver-mobile-screen .driver-drum-card.is-drop-armed .driver-drum-card-face i {
+body.driver-mobile-screen .driver-drum-card.is-drop-armed .driver-drum-card-face {
     --drum-accent: rgba(150, 166, 172, .95);
-    filter: brightness(calc(var(--b) * .55));
+    --drum-face-top: #101c21;
 }
 
 body.driver-mobile-screen .driver-drum-card.is-dropping .driver-drum-card-body {
@@ -333,7 +304,7 @@ body.driver-mobile-screen .driver-work-dial.is-drum-dropping::before {
 }
 
 /* Активный простой: передняя грань, кольцо циферблата и контур мерцают жёлтым в такт. */
-body.driver-mobile-screen .driver-drum-card.is-center.is-active-downtime .driver-drum-card-face i {
+body.driver-mobile-screen .driver-drum-card.is-center.is-active-downtime .driver-drum-card-face {
     animation: driver-drum-card-pulse 1.15s ease-in-out infinite;
 }
 
@@ -356,44 +327,72 @@ body.driver-mobile-screen .driver-drum-card.is-lifting .driver-drum-card-body {
     opacity: 1;
 }
 
-/* Контур «круг + передняя грань»: серый в покое, жёлтый при активном простое. */
+/* Контур «круг + передняя грань» — только CSS, без единой строки JS на кадр.
+   Кольцо концентрично кругу (ребёнок .driver-work-dial), внизу вырезан проём под горлышко;
+   горлышко и рамка грани берут размеры из переменных на <html>. */
+body.driver-mobile-screen .driver-dial-ring {
+    position: absolute;
+    inset: .25%;
+    z-index: 9;
+    border: 2px solid rgba(150, 166, 172, .55);
+    border-radius: 50%;
+    pointer-events: none;
+    /* Проём внизу под горлышко: угол задаёт --ring-gap (по ширине передней грани). */
+    -webkit-mask: conic-gradient(from calc(180deg - var(--ring-gap, 30deg) / 2), transparent 0 var(--ring-gap, 30deg), #000 var(--ring-gap, 30deg) 360deg);
+    mask: conic-gradient(from calc(180deg - var(--ring-gap, 30deg) / 2), transparent 0 var(--ring-gap, 30deg), #000 var(--ring-gap, 30deg) 360deg);
+    transition: border-color .25s ease;
+}
+
+body.driver-mobile-screen .driver-work-dial.is-downtime-active .driver-dial-ring {
+    border-color: var(--driver-yellow);
+    box-shadow: 0 0 10px rgba(255, 209, 42, .5), inset 0 0 10px rgba(255, 209, 42, .35);
+    animation: driver-drum-link-pulse 1.4s ease-in-out infinite;
+}
+
 body.driver-mobile-screen .driver-drum-link {
     position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
+    left: 50%;
+    width: var(--neck-w, 160px);
+    top: var(--neck-top, 60%);
+    bottom: var(--neck-bottom, 10px);
+    transform: translateX(-50%);
+    border: 2px solid rgba(150, 166, 172, .55);
+    border-top: 0;
+    border-radius: 0 0 14px 14px;
     z-index: 9;
-    overflow: visible;
     pointer-events: none;
+    transition: border-color .25s ease;
 }
 
-body.driver-mobile-screen .driver-drum-link path {
-    fill: none;
-    stroke: rgba(150, 166, 172, .55);
-    stroke-width: 2;
-    stroke-linejoin: round;
-    transition: stroke .25s ease;
-}
-
-body.driver-mobile-screen .driver-downtime-drum.is-active ~ .driver-drum-link path {
-    stroke: var(--driver-yellow);
-    stroke-width: 2.5;
-    /* Три слоя рассеянного света: тонкий ореол, широкий ореол и дальняя дымка. */
-    filter:
-        drop-shadow(0 0 3px rgba(255, 209, 42, .95))
-        drop-shadow(0 0 10px rgba(255, 209, 42, .65))
-        drop-shadow(0 0 26px rgba(255, 209, 42, .45));
+body.driver-mobile-screen .driver-downtime-drum.is-active ~ .driver-drum-link {
+    border-color: var(--driver-yellow);
+    box-shadow: 0 0 10px rgba(255, 209, 42, .45);
     animation: driver-drum-link-pulse 1.4s ease-in-out infinite;
+}
+
+/* Пока грань поднимают или опускают, гнездо пустое — рамку прячем, остаётся кольцо. */
+body.driver-mobile-screen .driver-downtime-drum.is-lifting ~ .driver-drum-link,
+body.driver-mobile-screen .driver-downtime-drum.is-dropping ~ .driver-drum-link {
+    opacity: 0;
 }
 
 @keyframes driver-drum-link-pulse {
     0%, 100% { opacity: .62; }
     50% { opacity: 1; }
 }
+}
 
 @keyframes driver-drum-card-pulse {
-    0%, 100% { box-shadow: inset 0 0 10px rgba(255, 209, 42, .1); }
-    50% { box-shadow: inset 0 0 26px rgba(255, 209, 42, .5); }
+    0%, 100% {
+        box-shadow: inset 0 2px 0 var(--drum-accent), inset 0 -2px 0 var(--drum-accent),
+            inset 2px 0 0 var(--drum-accent), inset -2px 0 0 var(--drum-accent),
+            inset 0 0 10px rgba(255, 209, 42, .12);
+    }
+    50% {
+        box-shadow: inset 0 3px 0 var(--driver-yellow), inset 0 -3px 0 var(--driver-yellow),
+            inset 3px 0 0 var(--driver-yellow), inset -3px 0 0 var(--driver-yellow),
+            inset 0 0 28px rgba(255, 209, 42, .55);
+    }
 }
 
 @keyframes driver-dial-downtime-pulse {

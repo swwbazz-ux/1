@@ -14,8 +14,10 @@
         <div class="driver-downtime-drum-track" data-driver-drum-track>
             {% for reason in downtime_reasons %}
                 <button class="driver-drum-card{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-drum-card data-driver-drum-reason-id="{{ reason.id }}" data-driver-drum-quick="{% if reason.driver_in_drum %}1{% else %}0{% endif %}"{% if not reason.driver_in_drum %} hidden{% endif %} aria-label="Простой: {{ reason.button_label }}. Проведите вверх на круг, чтобы начать">
-                    {% comment %} Грань наклеена на цилиндр: девять вертикальных полосок лежат на его окружности тем же радиусом. {% endcomment %}
-                    <span class="driver-drum-card-face" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                    {% comment %} Грань — один слой: выпуклость цилиндра нарисована градиентом (блик по центру,
+                       тень к боковым кромкам), а не набором объёмных полосок. На слабых телефонах это
+                       решает: 12 слоёв вместо 108, и ни одного пересчёта при вращении. {% endcomment %}
+                    <span class="driver-drum-card-face" aria-hidden="true"></span>
                     <span class="driver-drum-card-body">
                         <span class="driver-drum-card-label">{{ reason.button_label }}</span>
                         <span class="driver-drum-card-total" data-driver-drum-total{% if not reason.driver_is_used %} hidden{% endif %}>{{ reason.driver_total_label }}</span>
@@ -28,5 +30,7 @@
     </div>
     <span class="driver-downtime-drum-hint" data-driver-drum-hint aria-hidden="true">▲ вверх — начать простой</span>
 </div>
-{% comment %} Контур «круг + передняя грань» лежит на уровне экрана, а не барабана: серый в покое, жёлтый при активном простое. Геометрия считается скриптом. {% endcomment %}
-<svg class="driver-drum-link" data-driver-drum-link aria-hidden="true" focusable="false"><path data-driver-drum-link-path d="" /></svg>
+{% comment %} Горлышко и рамка передней грани — чистый CSS: две линии вниз от кольца и рамка
+   вокруг грани. Размеры берутся из переменных на <html>, которые ставятся один раз и переживают
+   любое обновление экрана, поэтому контуру нечем пропадать. {% endcomment %}
+<span class="driver-drum-link" data-driver-drum-link aria-hidden="true"></span>
