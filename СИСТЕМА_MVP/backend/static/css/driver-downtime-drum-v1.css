@@ -42,8 +42,10 @@ body.driver-mobile-screen .driver-downtime-drum-stage {
        и наползают на нижние угловые кнопки круга. На время подъёма грани обрезка снимается. */
     overflow: hidden;
     border-radius: 14px;
-    perspective: 820px;
-    perspective-origin: 50% 28%;
+    perspective: 900px;
+    /* Точка схода строго в центре сцены: при 28% дальние грани уезжали вверх и срезались
+       верхним краем сцены — на телефоне это читалось как горизонтальный разрез барабана. */
+    perspective-origin: 50% 50%;
     touch-action: none;
     /* Края корпуса уходят в тень — так цилиндр читается круглым. Маска продлена вверх
        на две высоты сцены: при свайпе грань поднимается над сценой и не должна обрезаться. */
@@ -61,7 +63,7 @@ body.driver-mobile-screen .driver-downtime-drum-track {
     width: 0;
     height: 0;
     transform-style: preserve-3d;
-    transform: rotateX(-20deg) translateZ(calc(-1 * var(--drum-radius)));
+    transform: rotateX(-12deg) translateZ(calc(-1 * var(--drum-radius)));
     will-change: transform;
 }
 
