@@ -331,30 +331,51 @@
     var liftMax = LIFT_MAX;
     var liftRaf = 0;
 
-    function liftLimit(card) {
+    var ghost = null;
+
+    function screenOf(el) {
+        while (el && !(el.classList && el.classList.contains("driver-work-screen"))) el = el.parentElement;
+        return el;
+    }
+
+    // Копия передней грани для жеста: сцена барабана всегда обрезана по своей рамке (иначе
+    // боковые грани наползают на угловые кнопки круга), а переключать обрезку в момент жеста
+    // нельзя — на телефоне это стоит ~1,4 с. Поэтому вверх/вниз летит копия поверх экрана.
+    function makeGhost(card, isDrop) {
+        var screen = screenOf(card);
+        if (!screen) return null;
+        var box = screen.getBoundingClientRect();
+        var r = card.getBoundingClientRect();
+        var g = card.cloneNode(true);
+        g.classList.add("driver-drum-ghost");
+        g.classList.remove("is-lifting", "is-armed", "is-dropping", "is-drop-armed");
+        if (isDrop) g.classList.add("is-drop");
+        g.removeAttribute("data-driver-drum-card");
+        g.setAttribute("aria-hidden", "true");
+        g.tabIndex = -1;
+        g.hidden = false;
+        g.style.left = (r.left - box.left) + "px";
+        g.style.top = (r.top - box.top) + "px";
+        g.style.width = r.width + "px";
+        g.style.height = r.height + "px";
+        g.style.setProperty("--ghost-lift", "0px");
+        screen.appendChild(g);
         var w = dial();
         var dr = w ? w.getBoundingClientRect() : null;
-        var r = card.getBoundingClientRect();
-        return dr ? Math.max(LIFT_MAX, r.top - (dr.top + dr.height * 0.55)) : LIFT_MAX;
+        g.__liftMax = dr ? Math.max(LIFT_MAX, r.top - (dr.top + dr.height * 0.55)) : LIFT_MAX;
+        return g;
     }
 
     function resetLift(card) {
         card.classList.remove("is-lifting", "is-armed", "is-dropping", "is-drop-armed");
-        var dd0 = drum();
-        if (dd0) dd0.classList.remove("is-dropping");
         var link0 = q("[data-driver-drum-link]");
         if (link0) link0.classList.remove("is-armed", "is-drop-armed");
-        card.classList.add("is-settling");
-        card.style.setProperty("--lift-y", "0px");
-        card.style.setProperty("--lift-z", "0px");
-        card.style.setProperty("--lift-tilt", "0deg");
-        syncLinkVars();
-        root.setTimeout(function () {
-            card.classList.remove("is-settling");
-            var d = drum();
-            if (d) d.classList.remove("is-lifting");
-            syncLinkVars();
-        }, 300);
+        if (ghost) {
+            var g = ghost; ghost = null;
+            g.classList.add("is-settling");
+            g.style.setProperty("--ghost-lift", "0px");
+            root.setTimeout(function () { if (g.parentNode) g.parentNode.removeChild(g); }, 240);
+        }
     }
 
     function endDrag() {
@@ -391,16 +412,14 @@
                 drag.mode = "spin";
             } else if (dy < 0 && drag.card && drag.card.classList.contains("is-center")) {
                 drag.mode = "lift";
-                liftMax = liftLimit(drag.card);
+                ghost = makeGhost(drag.card, false);
+                liftMax = (ghost && ghost.__liftMax) || LIFT_MAX;
                 drag.card.classList.add("is-lifting");
-                var dd = drum();
-                if (dd) dd.classList.add("is-lifting");
             } else if (dy > 0 && drag.card && drag.card.classList.contains("is-center") && drag.card.classList.contains("is-active-downtime")) {
                 // Активную причину тянут вниз, «в барабан» — принудительное выключение простоя.
                 drag.mode = "drop";
+                ghost = makeGhost(drag.card, true);
                 drag.card.classList.add("is-dropping");
-                var dd2 = drum();
-                if (dd2) dd2.classList.add("is-dropping");
             } else {
                 drag = null;
                 return;
@@ -411,10 +430,11 @@
         }
         if (drag.mode === "drop") {
             var down = Math.min(DROP_MAX, Math.max(0, dy));
-            drag.card.style.setProperty("--lift-y", down.toFixed(1) + "px");   // вниз вдоль стенки
+            if (ghost) ghost.style.setProperty("--ghost-lift", down.toFixed(1) + "px");
             var dropArmed = dy >= DROP_ARM;
             if (dropArmed && !drag.card.classList.contains("is-drop-armed")) { haptic(12); click(0.7); }
             drag.card.classList.toggle("is-drop-armed", dropArmed);
+            if (ghost) ghost.classList.toggle("is-armed", dropArmed);
             var linkD = q("[data-driver-drum-link]");
             if (linkD) linkD.classList.toggle("is-drop-armed", dropArmed);
             drag.dy = dy;
@@ -432,17 +452,10 @@
             var lift = Math.max(-liftMax, Math.min(0, dy));
             var armed = -dy >= LIFT_ARM;
             if (armed && !drag.card.classList.contains("is-armed")) { haptic(12); click(0.7); }
-            // Грань отрывается от стенки: поднимается по экрану и одновременно идёт к зрителю
-            // (D), чтобы всегда оставаться перед наклонённой стенкой, а не проваливаться в барабан.
-            // Вектор (0, L, D) мира раскладываем на оси барабана, наклонённого на TILT градусов.
-            var tilt = Math.abs(TILT) * Math.PI / 180;
-            var D = -lift * Math.tan(tilt) + 24 * Math.min(1, -lift / 40);
-            var ly = lift * Math.cos(tilt) - D * Math.sin(tilt);
-            var lz = lift * Math.sin(tilt) + D * Math.cos(tilt);
-            drag.card.style.setProperty("--lift-y", ly.toFixed(1) + "px");
-            drag.card.style.setProperty("--lift-z", lz.toFixed(1) + "px");
-            // По ходу подъёма грань разворачивается лицом к зрителю (снимает наклон барабана).
-            drag.card.style.setProperty("--lift-tilt", (Math.abs(TILT) * Math.min(1, -lift / liftMax)).toFixed(2) + "deg");
+            if (ghost) {
+                ghost.style.setProperty("--ghost-lift", lift.toFixed(1) + "px");
+                ghost.classList.toggle("is-armed", armed);
+            }
             drag.card.classList.toggle("is-armed", armed);
             var link = q("[data-driver-drum-link]");
             if (link) link.classList.toggle("is-armed", armed);

@@ -38,9 +38,9 @@ body.driver-mobile-screen .driver-downtime-drum-stage {
     position: relative;
     height: min(100%, calc(var(--drum-card-h) + 30px));
     align-self: center;
-    /* Сцена открыта всегда: никаких переключений overflow/mask-clip в момент жеста —
-       на телефоне каждое переключение перерисовывало всю сцену (замирание ~1,4 с). */
-    overflow: visible;
+    /* Сцена обрезает грани по своей рамке: без этого боковые грани 3D-сцены вылезают вверх
+       и наползают на нижние угловые кнопки круга. На время подъёма грани обрезка снимается. */
+    overflow: hidden;
     border-radius: 14px;
     perspective: 820px;
     perspective-origin: 50% 28%;
@@ -50,8 +50,6 @@ body.driver-mobile-screen .driver-downtime-drum-stage {
     /* Позиция 50% при высоте маски 400%: картинка маски лежит от -1.5 до +2.5 высоты сцены. */
     -webkit-mask: linear-gradient(90deg, transparent 0, #000 7%, #000 93%, transparent 100%) 0 50% / 100% 400% no-repeat;
     mask: linear-gradient(90deg, transparent 0, #000 7%, #000 93%, transparent 100%) 0 50% / 100% 400% no-repeat;
-    -webkit-mask-clip: no-clip;
-    mask-clip: no-clip;
 }
 
 
@@ -190,6 +188,47 @@ body.driver-mobile-screen .driver-drum-card-total {
 
 body.driver-mobile-screen .driver-drum-card.is-center .driver-drum-card-total {
     color: #fff3b0;
+}
+
+/* Копия передней грани для жеста: сцена барабана всегда обрезана по своей рамке (иначе боковые
+   грани наползают на угловые кнопки), а переключать обрезку в момент жеста нельзя — на телефоне
+   это стоит ~1,4 с. Поэтому вверх/вниз летит копия грани, лежащая поверх экрана. */
+body.driver-mobile-screen .driver-drum-ghost {
+    position: absolute;
+    z-index: 12;
+    margin: 0;
+    transform: translateY(var(--ghost-lift, 0px));
+    transform-style: flat;
+    pointer-events: none;
+    will-change: transform;
+}
+
+body.driver-mobile-screen .driver-drum-ghost .driver-drum-card-face {
+    --drum-accent: var(--driver-yellow);
+    --drum-face-top: #2a3b40;
+}
+
+body.driver-mobile-screen .driver-drum-ghost.is-drop .driver-drum-card-face {
+    --drum-accent: rgba(150, 166, 172, .9);
+    --drum-face-top: #16242a;
+}
+
+body.driver-mobile-screen .driver-drum-ghost.is-armed .driver-drum-card-face {
+    --drum-accent: #fff1a8;
+    --drum-face-top: #33443f;
+}
+
+body.driver-mobile-screen .driver-drum-ghost.is-settling {
+    transition: transform .22s cubic-bezier(.2, .8, .3, 1), opacity .2s ease;
+    opacity: 0;
+}
+
+/* Оригинал на время жеста прячем через visibility. ИМЕННО visibility: opacity у элемента
+   внутри preserve-3d заставляет браузер пересобрать всю объёмную сцену — замер на живом
+   телефоне 645 мс против 17 мс у visibility. */
+body.driver-mobile-screen .driver-drum-card.is-lifting,
+body.driver-mobile-screen .driver-drum-card.is-dropping {
+    visibility: hidden;
 }
 
 /* Стрелка на верхней кромке передней грани: треугольник вверх (начать) или вниз (завершить). */
