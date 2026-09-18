@@ -162,9 +162,10 @@ body.driver-mobile-screen .driver-drum-card {
     backface-visibility: hidden;
     --lift-y: 0px;
     --lift-z: 0px;
-    /* Подъём идёт строго вверх по экрану: скрипт раскладывает его на оси наклонённого барабана,
-       поэтому грань не меняет ни наклон, ни перспективу — только положение. */
-    transform: rotateY(var(--card-angle)) translateZ(var(--drum-radius)) translate3d(0, var(--lift-y), var(--lift-z));
+    --lift-tilt: 0deg;
+    /* Подъём: грань отрывается от стенки к зрителю (смещение считает скрипт в осях
+       наклонённого барабана) и разворачивается лицом (--lift-tilt снимает наклон барабана). */
+    transform: rotateY(var(--card-angle)) translateZ(var(--drum-radius)) translate3d(0, var(--lift-y), var(--lift-z)) rotateX(var(--lift-tilt));
     /* Никакой прозрачности и фильтров на самой карточке: они сплющивают её 3D-полоски
        в плоскость, и грань перестаёт лежать на цилиндре. Гасим полоски и текст по отдельности. */
     transition: color .18s ease;

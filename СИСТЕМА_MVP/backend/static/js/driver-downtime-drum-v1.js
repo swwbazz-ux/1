@@ -232,6 +232,7 @@
         card.classList.add("is-settling");
         card.style.setProperty("--lift-y", "0px");
         card.style.setProperty("--lift-z", "0px");
+        card.style.setProperty("--lift-tilt", "0deg");
         root.setTimeout(function () {
             card.classList.remove("is-settling");
             var d = drum();
@@ -295,10 +296,17 @@
         } else {
             var lift = Math.max(-liftMax, Math.min(0, dy));
             var armed = -dy >= LIFT_ARM;
-            // Вектор «вверх по экрану» в осях барабана, наклонённого на TILT градусов.
-            var tilt = TILT * Math.PI / 180;
-            drag.card.style.setProperty("--lift-y", (lift * Math.cos(tilt)).toFixed(1) + "px");
-            drag.card.style.setProperty("--lift-z", (-lift * Math.sin(tilt)).toFixed(1) + "px");
+            // Грань отрывается от стенки: поднимается по экрану и одновременно идёт к зрителю
+            // (D), чтобы всегда оставаться перед наклонённой стенкой, а не проваливаться в барабан.
+            // Вектор (0, L, D) мира раскладываем на оси барабана, наклонённого на TILT градусов.
+            var tilt = Math.abs(TILT) * Math.PI / 180;
+            var D = -lift * Math.tan(tilt) + 24 * Math.min(1, -lift / 40);
+            var ly = lift * Math.cos(tilt) - D * Math.sin(tilt);
+            var lz = lift * Math.sin(tilt) + D * Math.cos(tilt);
+            drag.card.style.setProperty("--lift-y", ly.toFixed(1) + "px");
+            drag.card.style.setProperty("--lift-z", lz.toFixed(1) + "px");
+            // По ходу подъёма грань разворачивается лицом к зрителю (снимает наклон барабана).
+            drag.card.style.setProperty("--lift-tilt", (Math.abs(TILT) * Math.min(1, -lift / liftMax)).toFixed(2) + "deg");
             drag.card.classList.toggle("is-armed", armed);
             var w = dial();
             if (w) w.classList.toggle("is-drum-lifting", armed);
