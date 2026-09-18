@@ -305,13 +305,6 @@ body.driver-mobile-screen .driver-header-id.is-inactive {
     text-shadow: 0 0 18px rgba(255, 81, 76, 0.28);
 }
 
-body.driver-mobile-screen .driver-header-identity {
-    min-width: 0;
-    display: grid;
-    align-content: center;
-    gap: 3px;
-}
-
 body.driver-mobile-screen .driver-header span,
 body.driver-mobile-screen .driver-section-title strong,
 body.driver-mobile-screen label > span,
@@ -669,99 +662,6 @@ body.driver-mobile-screen .driver-work-context-rock {
     font-size: clamp(11px, 2.9vw, 18px);
     line-height: 1.08;
     white-space: nowrap;
-}
-
-body.driver-mobile-screen .driver-work-cards {
-    grid-area: cards;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: clamp(10px, 3vw, 16px);
-}
-
-body.driver-mobile-screen .driver-work-card {
-    position: relative;
-    min-height: clamp(78px, 10.4dvh, 98px);
-    overflow: hidden;
-    border: 1px solid rgba(134, 171, 181, 0.30);
-    border-radius: 8px;
-    padding: clamp(13px, 3.4vw, 18px) clamp(12px, 3.3vw, 17px) clamp(12px, 3vw, 15px);
-    background:
-        linear-gradient(180deg, rgba(255,255,255,0.045), transparent 34%),
-        linear-gradient(140deg, rgba(14, 42, 52, 0.96), rgba(6, 20, 27, 0.88));
-    box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.07),
-        inset 0 -16px 24px rgba(0,0,0,0.22),
-        0 16px 38px rgba(0,0,0,0.22);
-}
-
-body.driver-mobile-screen .driver-work-card::before {
-    content: "";
-    position: absolute;
-    left: 12px;
-    right: 12px;
-    top: 0;
-    height: 3px;
-    border-radius: 0 0 4px 4px;
-    background: linear-gradient(90deg, transparent, rgba(140,255,46,0.78), transparent);
-    opacity: 0.55;
-    box-shadow: 0 0 14px rgba(140,255,46,0.22);
-}
-
-body.driver-mobile-screen .driver-work-card span {
-    display: block;
-    color: rgba(159, 183, 192, 0.88);
-    text-transform: uppercase;
-    font-size: clamp(12px, 3.1vw, 14px);
-    line-height: 1;
-    font-weight: 800;
-}
-
-body.driver-mobile-screen .driver-work-card strong {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    min-height: 1.08em;
-    align-items: end;
-    margin-top: clamp(12px, 2dvh, 16px);
-    color: var(--driver-ink);
-    text-transform: uppercase;
-    font-size: clamp(24px, 7.2vw, 34px);
-    line-height: 0.95;
-    font-weight: 900;
-    overflow-wrap: anywhere;
-    text-shadow: 0 0 18px rgba(226, 255, 221, 0.10);
-}
-
-body.driver-mobile-screen .driver-work-excavator {
-    position: absolute;
-    right: 8px;
-    bottom: 7px;
-    width: min(48%, 82px);
-    opacity: 0.42;
-    filter: saturate(0.74) brightness(1.2) drop-shadow(0 0 12px rgba(140,255,46,0.15));
-}
-
-body.driver-mobile-screen .driver-work-card-target.is-action {
-    border-color: rgba(140,255,46,0.42);
-    background:
-        linear-gradient(180deg, rgba(140,255,46,0.09), transparent 36%),
-        linear-gradient(140deg, rgba(16, 48, 47, 0.98), rgba(5, 23, 24, 0.90));
-    box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.08),
-        inset 0 -18px 28px rgba(0,0,0,0.24),
-        0 18px 42px rgba(0,0,0,0.24),
-        0 0 22px rgba(140,255,46,0.10);
-}
-
-body.driver-mobile-screen .driver-work-arrow {
-    position: absolute;
-    right: 18px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--driver-green);
-    font-size: 36px;
-    line-height: 1;
-    font-weight: 900;
 }
 
 body.driver-mobile-screen .driver-work-dial-zone {
@@ -1350,7 +1250,6 @@ body.driver-mobile-screen .driver-work-dial-button.is-error .driver-work-progres
     stroke: #ff5a50;
 }
 
-
 /* Отсутствие плана показывает только внешнее кольцо. Сердцевина остаётся за
    состоянием самосвала: серая — не загружен, зелёная — загружен и можно
    разгружаться. Раньше это правило шло ниже по файлу при равной силе селектора
@@ -1524,15 +1423,6 @@ body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active {
     padding-bottom: 0 !important;
 }
 
-body.driver-mobile-screen .driver-shift-workspace {
-    min-height: 0;
-    height: 100%;
-    display: grid;
-    grid-template-rows: auto minmax(0, 1.3fr) minmax(0, .9fr) auto;
-    gap: clamp(8px, 1.15dvh, 12px);
-    overflow: hidden;
-}
-
 body.driver-mobile-screen [data-driver-shift-close-form] {
     grid-template-rows: auto minmax(0, 1fr) auto;
 }
@@ -1550,77 +1440,6 @@ body.driver-mobile-screen .driver-shift-scroll {
 body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-section {
     flex: none;
     overflow: visible;
-}
-
-body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-metrics {
-    flex: none;
-    grid-template-rows: repeat(3, minmax(58px, auto));
-}
-
-body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-result-grid {
-    flex: none;
-    grid-auto-rows: minmax(68px, auto);
-}
-
-body.driver-mobile-screen .driver-shift-titlebar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 10px;
-}
-
-body.driver-mobile-screen .driver-shift-section-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-}
-
-body.driver-mobile-screen .driver-shift-titlebar h2 {
-    margin: 0;
-    color: #f6fbfd;
-    font-size: clamp(28px, 6.8vw, 31px);
-    font-weight: 700;
-    line-height: 1;
-    text-transform: none;
-}
-
-body.driver-mobile-screen .driver-shift-update {
-    display: inline-grid;
-    grid-template-columns: auto auto;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    min-height: 42px;
-    max-width: 132px;
-    border: 1px solid rgba(139, 159, 170, .44);
-    border-radius: 8px;
-    padding: 0 12px;
-    color: #cbd6dc;
-    background: rgba(18, 27, 33, .7);
-    font-size: 12px;
-    font-weight: 700;
-}
-
-body.driver-mobile-screen .driver-shift-update-icon {
-    position: relative;
-    width: 14px;
-    height: 14px;
-    border: 2px solid currentColor;
-    border-left-color: transparent;
-    border-radius: 50%;
-    opacity: .82;
-}
-
-body.driver-mobile-screen .driver-shift-update-icon::after {
-    content: "";
-    position: absolute;
-    top: -3px;
-    right: -4px;
-    border-top: 4px solid transparent;
-    border-bottom: 4px solid transparent;
-    border-left: 5px solid currentColor;
-    transform: rotate(-35deg);
 }
 
 body.driver-mobile-screen .driver-shift-section {
@@ -1641,152 +1460,13 @@ body.driver-mobile-screen .driver-shift-section {
     box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
 }
 
-body.driver-mobile-screen .driver-shift-section-head {
-    margin-bottom: clamp(11px, 1.55dvh, 15px);
-}
-
-body.driver-mobile-screen .driver-shift-section-head span {
-    color: #dbe7e9;
-    font-size: clamp(14px, 3.5vw, 15px);
-    font-weight: 600;
-    letter-spacing: .14em;
-    text-transform: uppercase;
-}
-
-body.driver-mobile-screen .driver-shift-section-head b {
-    color: rgba(185, 200, 205, .62);
-    font-size: clamp(12px, 2.95vw, 13px);
-    font-weight: 500;
-    text-transform: none;
-}
-
-body.driver-mobile-screen .driver-shift-metrics {
-    min-height: 0;
-    flex: 1 1 auto;
-    display: grid;
-    grid-template-columns: 1fr;
-    grid-template-rows: repeat(3, minmax(54px, 1fr));
-    gap: clamp(8px, 1.15dvh, 12px);
-}
-
-body.driver-mobile-screen .driver-shift-field {
-    min-width: 0;
-    min-height: 0;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(72px, auto);
-    align-items: center;
-    gap: 12px;
-    padding: clamp(10px, 1.45dvh, 14px) clamp(13px, 3.5vw, 17px);
-    border: 1px solid rgba(127, 163, 177, .24);
-    border-radius: 7px;
-    background: rgba(2, 12, 17, .76);
-}
-
 /* О том, что поле выбрано, раньше говорил только мигающий курсор — на тёмном
    фоне в кабине его попросту не видно. Подсвечиваем всю строку и делаем
    курсор заметным. */
-body.driver-mobile-screen .driver-shift-field:focus-within {
-    border-color: var(--driver-green, #8cff2e);
-    background: rgba(12, 30, 22, .88);
-    box-shadow: 0 0 0 2px rgba(140, 255, 46, .26);
-}
-
-body.driver-mobile-screen .driver-shift-field:focus-within .driver-shift-field-label > span {
-    color: var(--driver-green, #8cff2e);
-}
-
-body.driver-mobile-screen .driver-shift-metric-value input {
-    caret-color: var(--driver-green, #8cff2e);
-}
 
 /* Фокус на вкладке нужен только чтобы убрать клавиатуру — рамку не рисуем. */
 body.driver-mobile-screen [data-driver-tab-panel]:focus {
     outline: none;
-}
-
-
-body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-field {
-    margin: 0;
-}
-
-body.driver-mobile-screen .driver-shift-field > span:first-child {
-    color: #91a4aa;
-    font-size: clamp(14px, 3.55vw, 15px);
-    line-height: 1;
-    text-transform: uppercase;
-}
-
-body.driver-mobile-screen .driver-shift-inputs[hidden],
-body.driver-mobile-screen .driver-shift-review[hidden] {
-    display: none !important;
-}
-
-body.driver-mobile-screen .driver-shift-field-label {
-    min-width: 0;
-    display: grid;
-    gap: 5px;
-}
-
-body.driver-mobile-screen .driver-shift-field-label small {
-    color: #6f858d;
-    font-size: clamp(10px, 2.55vw, 12px);
-    font-weight: 500;
-    line-height: 1;
-    white-space: nowrap;
-}
-
-body.driver-mobile-screen .driver-shift-field-label small strong {
-    color: #c6d5d9;
-    font: inherit;
-    font-weight: 700;
-}
-
-body.driver-mobile-screen .driver-shift-metric-value {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 6px;
-}
-
-body.driver-mobile-screen .driver-shift-metric-value input {
-    width: min(52%, 180px);
-    min-width: 0;
-    height: 100%;
-    min-height: 0;
-    border: 0;
-    padding: 0;
-    color: #f6fbfd;
-    background: transparent;
-    outline: none;
-    /* Курсор ввода по высоте равен шрифту поля — своей настройки размера у него
-       нет, поэтому крупный шрифт заодно делает заметным и курсор. */
-    font-size: clamp(25px, 6.6vw, 30px);
-    font-weight: 600;
-    text-align: right;
-}
-
-body.driver-mobile-screen .driver-shift-metric-value strong {
-    min-width: 2ch;
-    color: #f6fbfd;
-    font-size: clamp(23px, 6vw, 26px);
-    font-weight: 600;
-    line-height: 1;
-    text-align: right;
-}
-
-body.driver-mobile-screen .driver-shift-metric-value em {
-    color: #82969d;
-    font-size: clamp(12px, 3vw, 13px);
-    font-style: normal;
-}
-
-body.driver-mobile-screen .driver-shift-result-grid {
-    flex: 1 1 auto;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: repeat(2, minmax(0, 1fr));
-    gap: clamp(8px, 1.15dvh, 12px);
 }
 
 body.driver-mobile-screen .driver-shift-result-cell {
@@ -1820,64 +1500,6 @@ body.driver-mobile-screen .driver-shift-result-cell strong {
     white-space: nowrap;
 }
 
-body.driver-mobile-screen .driver-shift-review {
-    min-height: 0;
-    display: grid;
-    align-content: center;
-    gap: clamp(9px, 1.35dvh, 13px);
-    padding: clamp(14px, 2dvh, 20px) clamp(14px, 3.8vw, 18px);
-    border: 1px solid rgba(140, 255, 46, .34);
-    border-radius: 8px;
-    background: rgba(5, 23, 22, .88);
-    overflow: hidden;
-}
-body.driver-mobile-screen .driver-shift-review-row {
-    min-width: 0;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
-    color: #adc0c5;
-    font-size: clamp(14px, 3.55vw, 16px);
-    line-height: 1.15;
-}
-body.driver-mobile-screen .driver-shift-review-row strong {
-    min-width: 0;
-    color: #f0fff0;
-    text-align: right;
-    white-space: nowrap;
-}
-
-@media (max-width: 420px) {
-    body.driver-mobile-screen .driver-shift-review-row {
-        grid-template-columns: 1fr;
-        gap: 3px;
-    }
-
-    body.driver-mobile-screen .driver-shift-review-row strong {
-        text-align: left;
-        white-space: normal;
-    }
-}
-body.driver-mobile-screen .driver-shift-edit {
-    justify-self: end;
-    min-height: 40px;
-    margin-top: 2px;
-    border: 1px solid rgba(127, 163, 177, .3);
-    border-radius: 7px;
-    padding: 0 13px;
-    color: #9bd2dc;
-    background: rgba(7, 18, 23, .78);
-    font-size: 13px;
-    font-weight: 700;
-}
-
-body.driver-mobile-screen .driver-shift-actions {
-    min-height: 0;
-    display: grid;
-    grid-template-columns: minmax(0, 2.25fr) minmax(116px, 1fr);
-    gap: clamp(10px, 2.7vw, 12px);
-}
-
 body.driver-mobile-screen .driver-shift-submit,
 body.driver-mobile-screen .driver-shift-open,
 body.driver-mobile-screen .driver-shift-logout {
@@ -1908,28 +1530,6 @@ body.driver-mobile-screen .driver-shift-opening-form {
     display: contents;
 }
 
-body.driver-mobile-screen .driver-shift-empty-state {
-    display: grid;
-    gap: 5px;
-    margin-bottom: 10px;
-    padding: 10px 12px;
-    border: 1px solid rgba(255, 207, 29, .5);
-    border-radius: 7px;
-    color: #e7eef0;
-    background: rgba(55, 45, 7, .42);
-}
-
-body.driver-mobile-screen .driver-shift-empty-state strong {
-    color: #ffdf58;
-    font-size: 14px;
-}
-
-body.driver-mobile-screen .driver-shift-empty-state span {
-    color: #b9c8cd;
-    font-size: 12px;
-    line-height: 1.35;
-}
-
 body.driver-mobile-screen .driver-shift-open {
     border-color: rgba(140, 255, 46, .72);
     color: #071006;
@@ -1944,24 +1544,12 @@ body.driver-mobile-screen .driver-shift-open:disabled {
     box-shadow: none;
 }
 
-body.driver-mobile-screen .driver-shift-field .errorlist {
-    grid-column: 1 / -1;
-    margin: 4px 0 0;
-    padding: 0;
-    color: #ff7d7d;
-    font-size: 11px;
-    list-style: none;
-}
-
 @media (max-height: 780px) {
     body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-section {
         padding: 10px 12px;
     }
 
-    body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-section-head {
-        margin-bottom: 8px;
     }
-}
 
 body.driver-mobile-screen .driver-shift-submit::before {
     content: "";
@@ -1991,10 +1579,7 @@ body.driver-mobile-screen .driver-shift-logout::before {
 }
 
 @media (max-width: 640px) {
-    body.driver-mobile-screen .driver-shift-workspace {
-        grid-template-rows: auto minmax(0, 1.3fr) minmax(0, .9fr) auto;
-    }
-
+    
     body.driver-mobile-screen [data-driver-shift-close-form] {
         grid-template-rows: auto minmax(0, 1fr) auto;
     }
@@ -2003,10 +1588,7 @@ body.driver-mobile-screen .driver-shift-logout::before {
         padding: 10px 12px;
     }
 
-    body.driver-mobile-screen .driver-shift-field {
-        padding: 8px 12px;
-    }
-
+    
 }
 
 /* Shift cards keep the same left-aligned two-line hierarchy as the operator screen. */
@@ -3494,12 +3076,6 @@ body.driver-mobile-screen .driver-push-later {
     font-size: clamp(12px, 3.1vw, 14px);
 }
 
-body.driver-mobile-screen .driver-shift-workspace,
-body.driver-mobile-screen .driver-shift-opening {
-    grid-template-rows: auto minmax(0, 1.15fr) minmax(0, .85fr) auto;
-    overflow: hidden;
-}
-
 body.driver-mobile-screen [data-driver-shift-close-form] {
     grid-template-rows: auto minmax(0, 1fr) auto;
 }
@@ -3511,50 +3087,14 @@ body.driver-mobile-screen .driver-shift-scroll {
     padding: 0;
 }
 
-body.driver-mobile-screen [data-driver-shift-close-form].is-reviewed .driver-shift-scroll {
-    grid-template-rows: minmax(0, .72fr) minmax(0, 1fr);
-}
-
-body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-section,
-body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-metrics,
-body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-result-grid {
+body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-section {
     min-height: 0;
     flex: 1 1 auto;
     overflow: hidden;
 }
 
-body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-metrics {
-    grid-template-rows: repeat(3, minmax(0, 1fr));
-}
-
-body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-result-grid {
-    grid-auto-rows: minmax(0, 1fr);
-}
-
 body.driver-mobile-screen .driver-shift-section {
     padding: clamp(8px, 1.25dvh, 12px) clamp(10px, 3vw, 16px);
-}
-
-body.driver-mobile-screen .driver-shift-section-head {
-    margin-bottom: clamp(6px, .85dvh, 9px);
-}
-
-body.driver-mobile-screen .driver-shift-field,
-body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-field {
-    min-height: 0;
-    padding: clamp(5px, .8dvh, 9px) clamp(9px, 2.6vw, 13px);
-}
-
-body.driver-mobile-screen .driver-shift-empty-state {
-    flex: 0 1 auto;
-    min-height: 0;
-    margin-bottom: clamp(5px, .75dvh, 8px);
-    padding: clamp(7px, 1dvh, 10px);
-    overflow: hidden;
-}
-
-body.driver-mobile-screen .driver-shift-actions {
-    height: clamp(48px, 6.6dvh, 58px);
 }
 
 body.driver-mobile-screen .driver-shift-submit,
@@ -3753,8 +3293,6 @@ body.driver-mobile-screen .driver-shell[data-driver-density="compact"] {
     --driver-edge: clamp(9px, 3vw, 16px);
 }
 
-body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-shift-workspace,
-body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-shift-opening,
 body.driver-mobile-screen .driver-shell[data-driver-density="compact"] [data-driver-tab-panel="downtimes"].is-active,
 body.driver-mobile-screen .driver-shell[data-driver-density="compact"] [data-driver-tab-panel="manifest"].is-active {
     gap: clamp(4px, .65dvh, 6px) !important;
@@ -3764,11 +3302,6 @@ body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-s
     padding: clamp(6px, .85dvh, 8px) clamp(8px, 2.4vw, 11px);
 }
 
-body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-shift-section-head {
-    margin-bottom: clamp(3px, .5dvh, 5px);
-}
-
-body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-shift-field,
 body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-shift-result-cell {
     padding: clamp(4px, .55dvh, 6px) clamp(7px, 2vw, 10px);
 }
@@ -3803,8 +3336,6 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] {
     --driver-edge: clamp(7px, 2.5vw, 12px);
 }
 
-body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-workspace,
-body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-opening,
 body.driver-mobile-screen .driver-shell[data-driver-density="tight"] [data-driver-tab-panel="downtimes"].is-active,
 body.driver-mobile-screen .driver-shell[data-driver-density="tight"] [data-driver-tab-panel="manifest"].is-active {
     gap: 3px !important;
@@ -3814,24 +3345,15 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shi
     padding: 4px 6px;
 }
 
-body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-section-head {
-    margin-bottom: 2px;
-}
-
-body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-field,
 body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-result-cell {
     padding: 3px 5px;
 }
 
-body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-section-head span,
-body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-field-label > span,
 body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-result-cell span {
     font-size: clamp(10px, min(3.1vw, 1.65dvh), 12px);
 }
 
-body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-result-cell strong,
-body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-metric-value input,
-body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-metric-value strong {
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-result-cell strong {
     font-size: clamp(15px, min(4.5vw, 2.35dvh), 20px);
 }
 
@@ -3871,9 +3393,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         min-height: clamp(42px, 16dvh, 62px);
     }
 
-    body.driver-mobile-screen .driver-work-context-card > header,
-    body.driver-mobile-screen .driver-work-context-label,
-    body.driver-mobile-screen .driver-work-context-subline {
+    body.driver-mobile-screen .driver-work-context-card > header {
         display: none;
     }
 
@@ -3882,32 +3402,15 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         padding-block: 3px;
     }
 
-    body.driver-mobile-screen .driver-shift-workspace,
-    body.driver-mobile-screen .driver-shift-opening,
     body.driver-mobile-screen [data-driver-shift-close-form] {
         grid-template-columns: clamp(88px, 15vw, 122px) minmax(0, 1fr) clamp(112px, 19vw, 168px);
         grid-template-rows: minmax(0, 1fr);
         gap: 5px;
     }
 
-    body.driver-mobile-screen .driver-shift-titlebar {
-        grid-column: 1;
-        grid-row: 1;
-        align-content: start;
-        grid-template-columns: 1fr;
-        grid-template-rows: auto auto;
-        gap: 8px;
-    }
-
-    body.driver-mobile-screen .driver-shift-titlebar h2 {
-        font-size: clamp(22px, 4vw, 30px);
-    }
-
-    body.driver-mobile-screen .driver-shift-update {
-        min-height: 34px;
-        padding-inline: 6px;
-    }
-
+    
+    
+    
     body.driver-mobile-screen .driver-shift-scroll,
     body.driver-mobile-screen .driver-shift-opening-form {
         grid-column: 2;
@@ -3917,49 +3420,27 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         gap: 5px;
     }
 
-    body.driver-mobile-screen .driver-shift-opening {
-        grid-template-columns: clamp(88px, 15vw, 122px) minmax(0, 1fr);
-    }
-
+    
     body.driver-mobile-screen .driver-shift-opening-form {
         grid-template-columns: repeat(2, minmax(0, 1fr)) clamp(112px, 19vw, 168px);
     }
 
-    body.driver-mobile-screen .driver-shift-actions {
-        grid-column: 3;
-        grid-row: 1;
-        width: 100%;
-        height: 100%;
-        grid-template-columns: 1fr;
-        grid-template-rows: repeat(2, minmax(0, 1fr));
-        gap: 5px;
-    }
-
+    
     body.driver-mobile-screen .driver-shift-section {
         padding: 5px 7px;
     }
 
-    body.driver-mobile-screen .driver-shift-section-head {
-        margin-bottom: 3px;
-    }
-
-    body.driver-mobile-screen .driver-shift-section-head span,
-    body.driver-mobile-screen .driver-shift-field-label > span,
+    
     body.driver-mobile-screen .driver-shift-result-cell span {
         font-size: clamp(9px, 1.55vw, 11px);
     }
 
-    body.driver-mobile-screen .driver-shift-field {
-        padding: 3px 5px;
-    }
-
+    
     body.driver-mobile-screen .driver-shift-result-cell {
         padding: 3px 5px;
     }
 
-    body.driver-mobile-screen .driver-shift-result-cell strong,
-    body.driver-mobile-screen .driver-shift-metric-value input,
-    body.driver-mobile-screen .driver-shift-metric-value strong {
+    body.driver-mobile-screen .driver-shift-result-cell strong {
         font-size: clamp(14px, 2.4vw, 19px);
     }
 
@@ -4044,24 +3525,14 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
 }
 
 @media (max-height: 760px) {
-    body.driver-mobile-screen .driver-shift-titlebar h2,
     body.driver-mobile-screen .driver-manifest-head h2,
-    body.driver-mobile-screen .driver-downtime-title-row h2 {
+body.driver-mobile-screen .driver-downtime-title-row h2 {
         font-size: clamp(25px, 6.5vw, 29px);
     }
 
-    body.driver-mobile-screen .driver-shift-workspace,
-    body.driver-mobile-screen .driver-shift-opening {
-        gap: 6px;
-    }
-
-    body.driver-mobile-screen .driver-shift-section-head span {
-        font-size: 12px;
-    }
-
-    body.driver-mobile-screen .driver-shift-result-cell strong,
-    body.driver-mobile-screen .driver-shift-metric-value input,
-    body.driver-mobile-screen .driver-shift-metric-value strong {
+    
+    
+    body.driver-mobile-screen .driver-shift-result-cell strong {
         font-size: clamp(18px, 5vw, 22px);
     }
 }
@@ -4075,11 +3546,7 @@ body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-rep
         margin: 0;
     }
 
-    body.driver-mobile-screen .driver-work-card {
-        min-height: 80px;
-        padding: 13px 12px 12px;
-    }
-
+    
     body.driver-mobile-screen .driver-downtime-list {
         max-height: none;
     }
