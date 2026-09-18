@@ -319,13 +319,11 @@ body.driver-mobile-screen .driver-downtime-drum-count {
     white-space: nowrap;
 }
 
-/* Барабан зафиксирован на время простоя: боковые грани почти гаснут. */
+/* Барабан зафиксирован на время простоя: боковые грани притушены. Через filter, а не
+   opacity: смена opacity у грани внутри preserve-3d пересобирает всю сцену (776 мс),
+   filter композитор накладывает на готовый слой (17 мс). */
 body.driver-mobile-screen .driver-downtime-drum.is-locked .driver-drum-card:not(.is-center) {
-    opacity: calc(var(--drum-fade) * .45);
-}
-
-body.driver-mobile-screen .driver-downtime-drum.is-locked .driver-drum-card:not(.is-center) .driver-drum-card-body {
-    opacity: .35;
+    filter: brightness(.45);
 }
 
 /* Опускание активной грани «в барабан»: полоски гаснут, кромка серая; «готово» — совсем тёмная. */
@@ -369,17 +367,19 @@ body.driver-mobile-screen .driver-drum-link-base {
     stroke-width: 2;
 }
 
-/* Жёлтые слои нарисованы заранее и лежат прозрачными: при простое мигает только их
-   прозрачность. Перекраска этого пути стоит на телефоне 1651 мс, поэтому менять
-   stroke/filter на ходу нельзя — экран замирал бы каждый цикл мигания. */
-body.driver-mobile-screen .driver-drum-link-glow,
-body.driver-mobile-screen .driver-drum-link-live {
+/* Жёлтый контур — отдельный слой <svg> с will-change: opacity: он растеризуется один
+   раз, а включение, выключение и само мигание меняют только прозрачность слоя
+   (композитор, 17 мс на телефоне). Менять прозрачность отдельных <path> нельзя:
+   внутренние элементы SVG не композитятся, и каждый шаг стоил 0,5–1,6 с перерисовки. */
+body.driver-mobile-screen .driver-drum-link-active-layer {
     opacity: 0;
+    will-change: opacity;
 }
 
 body.driver-mobile-screen .driver-drum-link-glow {
     stroke: rgba(255, 209, 42, .3);
     stroke-width: 9;
+    opacity: .7;
 }
 
 body.driver-mobile-screen .driver-drum-link-live {
@@ -387,26 +387,15 @@ body.driver-mobile-screen .driver-drum-link-live {
     stroke-width: 2.5;
 }
 
-/* Два состояния — яркий жёлтый и погасший — чередуются примерно два раза в секунду.
-   Переключается только прозрачность готовых слоёв: композитор делает это без единой
-   перерисовки, поэтому мигание не стоит ничего даже на слабом телефоне. */
-body.driver-mobile-screen .driver-downtime-drum.is-active ~ .driver-drum-link .driver-drum-link-live {
+/* Два состояния — яркий жёлтый и погасший — чередуются раз в 0,6 с. */
+body.driver-mobile-screen .driver-downtime-drum.is-active ~ .driver-drum-link-active-layer {
     animation: driver-downtime-blink 1.2s steps(1, end) infinite;
-}
-
-body.driver-mobile-screen .driver-downtime-drum.is-active ~ .driver-drum-link .driver-drum-link-glow {
-    animation: driver-downtime-blink-soft 1.2s steps(1, end) infinite;
 }
 
 /* Обводку контура в момент жеста НЕ трогаем: перекраска этого пути стоит на телефоне
    1651 мс — «готово» показывает только летящая копия грани. */
 @keyframes driver-downtime-blink {
     0% { opacity: 1; }
-    50% { opacity: 0; }
-}
-
-@keyframes driver-downtime-blink-soft {
-    0% { opacity: .7; }
     50% { opacity: 0; }
 }
 

@@ -1251,9 +1251,46 @@ body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation {
     --driver-green: #facc15;
 }
 
-body.driver-mobile-screen .driver-work-dial.is-waiting-operation::before,
-body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-dial-core {
+/* Ожидание: подсветка сердцевины — готовые слои (ореол снаружи, тон внутри), которые
+   включаются и пульсируют только прозрачностью. Раньше состояние меняло border и
+   box-shadow сердцевины и гоняло пульс через filter на кольце и сердцевине: на телефоне
+   каждая такая перерисовка стоила до 1,5 с, и старт/стоп простоя замораживал экран. */
+body.driver-mobile-screen .driver-work-wait-halo {
+    position: absolute;
+    inset: 13%;
+    z-index: 1;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(250, 204, 21, .82), 0 0 48px rgba(250, 204, 21, .42);
+    opacity: 0;
+    will-change: opacity;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-dial-core .driver-work-wait-tint {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(250, 204, 21, .82);
+    box-shadow: inset 0 12px 22px rgba(254, 249, 195, .1), inset 0 0 44px rgba(250, 204, 21, .18);
+    opacity: 0;
+    will-change: opacity;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-wait-halo {
+    opacity: 1;
     animation: driver-waiting-operation-pulse 1.05s ease-in-out infinite;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-wait-tint {
+    opacity: 1;
+}
+
+/* Подписи в сердцевине живут на своих слоях: смена текста не перерисовывает градиенты круга. */
+body.driver-mobile-screen .driver-work-label,
+body.driver-mobile-screen .driver-work-note {
+    will-change: transform;
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-note {
@@ -1263,35 +1300,19 @@ body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-
 
 body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-progress {
     stroke: #facc15;
-    filter: drop-shadow(0 0 18px rgba(250, 204, 21, .88));
 }
 
-body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-dial-core {
-    border-color: rgba(250, 204, 21, .82);
-    box-shadow:
-        inset 0 12px 22px rgba(254, 249, 195, .1),
-        inset 0 -26px 36px rgba(0, 0, 0, .5),
-        inset 0 0 44px rgba(250, 204, 21, .18),
-        0 10px 28px rgba(0, 0, 0, .42),
-        0 0 48px rgba(250, 204, 21, .42);
-}
-
+/* Цвет подписи даёт --driver-green (жёлтый в ожидании); градиент по тексту и два
+   drop-shadow убраны — они заставляли перерисовывать слой подписи целиком. */
 body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-label-line {
-    background: linear-gradient(180deg, #fff7b2 0%, #fde047 34%, #facc15 66%, #ca8a04 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
     text-shadow:
         0 -1px 0 rgba(255, 251, 235, .5),
         0 2px 0 rgba(113, 63, 18, .78);
-    filter:
-        drop-shadow(0 3px 2px rgba(0, 0, 0, .46))
-        drop-shadow(0 0 10px rgba(250, 204, 21, .3));
 }
 
 @keyframes driver-waiting-operation-pulse {
-    0%, 100% { filter: drop-shadow(0 0 8px rgba(250, 204, 21, .24)); }
-    50% { filter: drop-shadow(0 0 26px rgba(250, 204, 21, .78)); }
+    0%, 100% { opacity: .35; }
+    50% { opacity: 1; }
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-pending {
@@ -4455,7 +4476,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                             <span class="driver-work-ticks" aria-hidden="true"></span>
                             <span class="driver-work-hold-bar is-outer" aria-hidden="true"></span>
                             <span class="driver-work-hold-bar is-core" aria-hidden="true"></span>
-                            <span class="driver-work-dial-core">
+                            <span class="driver-work-wait-halo" aria-hidden="true"></span><span class="driver-work-dial-core"><span class="driver-work-wait-tint" aria-hidden="true"></span>
                                 <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}%{% else %}{{ shift_plan_short_label|default:"нет плана" }}{% endif %}</span>
                                 {% if shift_plan_visual.has_completed_loops %}<b class="driver-work-progress-loop" aria-label="Завершено циклов: {{ shift_plan_visual.completed_loops }}">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
                                 <strong class="driver-work-label" data-driver-dial-label>{{ driver_dial_label }}</strong>
@@ -4473,7 +4494,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                         <span class="driver-work-ticks" aria-hidden="true"></span>
                         <span class="driver-work-hold-bar is-outer" aria-hidden="true"></span>
                         <span class="driver-work-hold-bar is-core" aria-hidden="true"></span>
-                        <span class="driver-work-dial-core">
+                        <span class="driver-work-wait-halo" aria-hidden="true"></span><span class="driver-work-dial-core"><span class="driver-work-wait-tint" aria-hidden="true"></span>
                             <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}%{% else %}{{ shift_plan_short_label|default:"нет плана" }}{% endif %}</span>
                             {% if shift_plan_visual.has_completed_loops %}<b class="driver-work-progress-loop" aria-label="Завершено циклов: {{ shift_plan_visual.completed_loops }}">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
                             <strong class="driver-work-label" data-driver-dial-label>{{ driver_dial_label }}</strong>
