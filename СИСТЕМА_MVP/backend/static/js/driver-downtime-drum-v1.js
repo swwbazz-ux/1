@@ -438,11 +438,14 @@
         var yNR = cy + Math.sqrt(Math.max(0, r * r - nR * nR));
         var yTopL = top[0][1], yTopR = top[top.length - 1][1];
         if (yTopL < yNL + 4 || yTopR < yNR + 4 || nL >= r || nR >= r) { path.setAttribute("d", ring); return; }
+        // От кольца вниз по ширине грани, дальше по её боковым кромкам и по нижней кромке (дуга низа).
         var dd = [
-            "M", p(xL), p(yTopL), "L", p(xL), p(yNL),
+            "M", p(xL), p(yNL),
             "A", p(r), p(r), "0 1 1", p(xR), p(yNR),
             "L", p(xR), p(yTopR)
         ];
+        for (var i = bottom.length - 1; i >= 0; i--) dd.push("L", p(bottom[i][0]), p(bottom[i][1]));
+        dd.push("L", p(xL), p(yTopL), "Z");
         path.setAttribute("d", dd.join(" "));
     }
 
