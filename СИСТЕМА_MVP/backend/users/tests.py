@@ -455,19 +455,19 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v267')
+        self.assertContains(response, 'driver-mobile-shell-v270')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(
             response,
-            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v267',
+            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v270',
         )
         self.assertContains(
             response,
-            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v267',
+            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v270',
         )
         self.assertContains(
             response,
-            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v267',
+            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v270',
         )
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertContains(response, 'playDriverSound("truck_assigned")')
@@ -551,9 +551,11 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-percent')
         self.assertContains(response, 'body.driver-mobile-screen .driver-work-dial-core::before')
         self.assertContains(response, 'isolation: isolate')
-        self.assertContains(response, '-webkit-background-clip: text')
-        self.assertContains(response, '-webkit-text-fill-color: transparent')
-        self.assertContains(response, 'drop-shadow(0 3px 2px rgba(0,0,0,0.46))')
+        # Зелень загруженного круга — готовые слои; градиента по тексту и фильтров нет.
+        self.assertContains(response, 'class="driver-work-loaded-halo"')
+        self.assertContains(response, 'class="driver-work-loaded-tint"')
+        self.assertNotContains(response, '-webkit-text-fill-color: transparent')
+        self.assertNotContains(response, 'drop-shadow(0 3px 2px rgba(0,0,0,0.46))')
         self.assertContains(response, 'body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-core')
         self.assertContains(response, 'transform: scale(0.985)')
         self.assertContains(response, 'body.driver-mobile-screen .driver-work-ticks::before')
@@ -692,7 +694,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v267', script)
+        self.assertIn('driver-mobile-shell-v270', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3588,7 +3590,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v267')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v270')
 
     def test_driver_quick_reasons_render_stars_and_drum_subset(self):
         self.create_registered_driver_shift()

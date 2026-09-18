@@ -27,7 +27,7 @@ function functionSource(source, name) {
 test("driver v226 shell precaches the durable runtime and exact authenticated dependencies", () => {
     assert.match(template, /driver-offline-outbox-v2\.js/);
     assert.doesNotMatch(template, /createDriverUnloadOutbox/);
-    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v267'/);
+    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v270'/);
     assert.match(views, /driver-offline-outbox-v2\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /async function isValidatedDriverShell/);
     assert.match(views, /html\.includes\("data-driver-shell"\)/);
@@ -40,7 +40,7 @@ test("driver v226 shell precaches the durable runtime and exact authenticated de
     assert.match(views, /hasValidatedCurrentShell/);
     const coreAssets = views.match(/const CORE_ASSETS = \[([\s\S]*?)\];/)[1];
     assert.doesNotMatch(coreAssets, /APP_SHELL_URL|LEGACY_SHELL_URL/);
-    assert.match(roleApps, /shell_version='driver-mobile-shell-v267'/);
+    assert.match(roleApps, /shell_version='driver-mobile-shell-v270'/);
 });
 
 test("a legacy loaded shell reloads before adopting a fragment that requires newer assets", () => {
@@ -55,7 +55,7 @@ test("a legacy loaded shell reloads before adopting a fragment that requires new
         let reloads = 0;
         let removals = 0;
         const node = {
-            dataset: {driverFragmentShell: "driver-mobile-shell-v267"},
+            dataset: {driverFragmentShell: "driver-mobile-shell-v270"},
             remove() { removals += 1; },
         };
         vm.runInNewContext(`(function(){${handler}}).call(node)`, {
@@ -69,7 +69,7 @@ test("a legacy loaded shell reloads before adopting a fragment that requires new
         return {reloads, removals};
     }
     assert.deepEqual(execute("driver-mobile-shell-v218"), {reloads: 1, removals: 0});
-    assert.deepEqual(execute("driver-mobile-shell-v267"), {reloads: 0, removals: 1});
+    assert.deepEqual(execute("driver-mobile-shell-v270"), {reloads: 0, removals: 1});
 });
 
 test("expired session update migrates a valid shell without touching a nonempty event queue", () => {
@@ -188,7 +188,7 @@ test("unload hold keeps the existing dial and avoids per-frame style writes", ()
     assert.doesNotMatch(template, /driver-work-hold-progress|driver-work-hold-angle/);
     // Кольцо удержания: в покое невидимо, набирается только поворотом двух полуколец
     // (композитор), без conic-gradient, масок и перекрасок за кадр.
-    assert.match(template, /\.driver-work-hold-ring \{[\s\S]*?visibility: hidden;/);
+    assert.match(template, /\.driver-work-hold-ring \{[\s\S]*?opacity: 0;[\s\S]*?will-change: opacity;/);
     assert.doesNotMatch(template, /driver-work-hold-bar/);
     const holdKeyframes = template.match(/@keyframes driver-hold-right \{([\s\S]*?to \{[^}]*\})/)[1];
     assert.match(holdKeyframes, /transform: rotate\(/);

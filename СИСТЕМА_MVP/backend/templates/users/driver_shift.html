@@ -711,34 +711,10 @@ body.driver-mobile-screen .driver-work-dial::before {
         0 0 22px rgba(153,180,187,0.08);
 }
 
+/* Тонкое декоративное кольцо у сердцевины убрано: с секциями удержания оно
+   читалось как вторая полоска. */
 body.driver-mobile-screen .driver-work-dial::after {
-    display: block;
-    inset: 13.5%;
-    z-index: 0;
-    border: 1px solid rgba(155,181,187,0.26);
-    background: transparent;
-    box-shadow:
-        inset 0 2px 4px rgba(235,250,247,0.06),
-        inset 0 -4px 9px rgba(0,0,0,0.42),
-        0 0 0 1px rgba(0,0,0,0.42),
-        0 0 20px rgba(104,138,145,0.08);
-}
-
-body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-loaded)::before {
-    box-shadow:
-        inset 0 2px 2px rgba(240,255,231,0.11),
-        inset 0 -10px 22px rgba(0,0,0,0.48),
-        0 16px 36px rgba(0,0,0,0.40),
-        0 0 34px rgba(140,255,46,0.12);
-}
-
-body.driver-mobile-screen .driver-work-dial:has(.driver-work-dial-button.is-loaded)::after {
-    border-color: rgba(140,255,46,0.30);
-    box-shadow:
-        inset 0 2px 4px rgba(220,255,202,0.07),
-        inset 0 -4px 9px rgba(0,0,0,0.42),
-        0 0 0 1px rgba(0,0,0,0.42),
-        0 0 22px rgba(140,255,46,0.10);
+    display: none;
 }
 
 body.driver-mobile-screen .driver-work-dial-form {
@@ -798,10 +774,15 @@ body.driver-mobile-screen .driver-work-dial-svg {
    Длительности анимаций (450 + 450 мс) равны holdMs: 900 в скрипте удержания. */
 body.driver-mobile-screen .driver-work-hold-ring {
     position: absolute;
-    inset: 5%;
+    /* Внешний край секций — внешний край больших делений (кольцо делений: inset 3%,
+       большие штрихи до 90% его радиуса). */
+    inset: 7.7%;
     z-index: 5;
     border-radius: 50%;
-    visibility: hidden;
+    /* Не visibility: hidden — иначе секции рисуются впервые в момент нажатия, и первое
+       за сеанс удержание стоило одного кадра в 99 мс. Прозрачный слой готовится заранее. */
+    opacity: 0;
+    will-change: opacity;
     pointer-events: none;
 }
 
@@ -816,48 +797,61 @@ body.driver-mobile-screen .driver-work-hold-half {
 body.driver-mobile-screen .driver-work-hold-half.is-right { right: 0; }
 body.driver-mobile-screen .driver-work-hold-half.is-left { left: 0; }
 
+/* Полукруг из шести секций между большими делениями (по 27°, зазор 3° на штрих),
+   нарисован один раз; в окне поворачивается рывками по 30° — секции загораются по одной,
+   и на каждом шаге зазоры совпадают с делениями. */
 body.driver-mobile-screen .driver-work-hold-fill {
     position: absolute;
     top: 0;
     bottom: 0;
     width: 200%;
-    box-sizing: border-box;
     border-radius: 50%;
-    border: 4.5px solid transparent;
-    border-top-color: currentColor;
-    border-right-color: currentColor;
-    transform: rotate(-135deg);
+    background: conic-gradient(from 0deg, transparent 0deg 1.5deg, currentColor 1.5deg 28.5deg, transparent 28.5deg 31.5deg, currentColor 31.5deg 58.5deg, transparent 58.5deg 61.5deg, currentColor 61.5deg 88.5deg, transparent 88.5deg 91.5deg, currentColor 91.5deg 118.5deg, transparent 118.5deg 121.5deg, currentColor 121.5deg 148.5deg, transparent 148.5deg 151.5deg, currentColor 151.5deg 178.5deg, transparent 178.5deg 360deg);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px), #000 calc(100% - 1px), transparent 100%);
+    mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px), #000 calc(100% - 1px), transparent 100%);
+    transform: rotate(-180deg);
     will-change: transform;
 }
 
 body.driver-mobile-screen .driver-work-hold-half.is-right .driver-work-hold-fill { left: -100%; }
-body.driver-mobile-screen .driver-work-hold-half.is-left .driver-work-hold-fill { left: 0; transform: rotate(45deg); }
+body.driver-mobile-screen .driver-work-hold-half.is-left .driver-work-hold-fill { left: 0; transform: rotate(0deg); }
+
+/* Пока кольцо набирается, дорожка плана спрятана: две окружности на одном круге
+   читались как лишние полоски. Слой у <svg> свой, прозрачность меняет композитор. */
+body.driver-mobile-screen .driver-work-dial-svg {
+    will-change: opacity;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-svg,
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-dial-svg {
+    opacity: 0;
+}
 
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-ring,
 body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-ring {
-    visibility: visible;
+    opacity: 1;
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-half.is-right .driver-work-hold-fill {
-    animation: driver-hold-right 450ms linear forwards;
+    animation: driver-hold-right 450ms steps(6, end) forwards;
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-half.is-left .driver-work-hold-fill {
-    animation: driver-hold-left 450ms linear 450ms forwards;
+    animation: driver-hold-left 450ms steps(6, end) 450ms forwards;
 }
 
-/* Удержание завершено — кольцо остаётся полным до ответа. */
-body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-right .driver-work-hold-fill { transform: rotate(45deg); }
-body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-left .driver-work-hold-fill { transform: rotate(225deg); }
+/* Удержание завершено — все двенадцать секций горят до ответа. */
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-right .driver-work-hold-fill { transform: rotate(0deg); }
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-left .driver-work-hold-fill { transform: rotate(180deg); }
 
 @keyframes driver-hold-right {
-    from { transform: rotate(-135deg); }
-    to { transform: rotate(45deg); }
+    from { transform: rotate(-180deg); }
+    to { transform: rotate(0deg); }
 }
 
 @keyframes driver-hold-left {
-    from { transform: rotate(45deg); }
-    to { transform: rotate(225deg); }
+    from { transform: rotate(0deg); }
+    to { transform: rotate(180deg); }
 }
 
 body.driver-mobile-screen .driver-work-track,
@@ -868,29 +862,36 @@ body.driver-mobile-screen .driver-work-over-progress {
     stroke-linecap: round;
 }
 
+/* Полный круг: по нему набираются секции удержания и по нему же идёт дуга плана. */
 body.driver-mobile-screen .driver-work-track {
     stroke: rgba(101, 125, 133, 0.48);
     stroke-width: 3;
-    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.72));
 }
 
+/* Дуга выполнения плана. Длина задаётся самой штриховкой: «столько-то единиц линии,
+   дальше разрыв на весь круг». Прежняя запись (штрих во весь круг + сдвиг) при нулевом
+   плане рисовала два обрывка дуги — пользователь видел их как лишние полукольца. */
 body.driver-mobile-screen .driver-work-progress {
     stroke: rgba(206, 226, 231, 0.62);
     stroke-width: 4.5;
-    stroke-dasharray: 100;
-    stroke-dashoffset: calc(100 - var(--driver-progress-capped));
-    transition: stroke-dashoffset 240ms ease;
-    filter: drop-shadow(0 0 6px rgba(210,230,230,0.14));
+    stroke-dasharray: var(--driver-progress-capped) 100;
+    stroke-dashoffset: 0;
+    transition: stroke-dasharray 240ms ease;
+}
+
+/* Плана нет — показывать нечего, остаётся чистый круг. */
+body.driver-mobile-screen .driver-work-dial[data-driver-has-plan="0"] .driver-work-progress,
+body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-progress {
+    display: none;
 }
 
 body.driver-mobile-screen .driver-work-over-progress {
     opacity: 0;
     stroke: var(--driver-plan-over-color);
     stroke-width: 2.5;
-    stroke-dasharray: 100;
-    stroke-dashoffset: calc(100 - var(--driver-over-progress));
-    transition: opacity 180ms ease, stroke-dashoffset 240ms ease;
-    filter: drop-shadow(0 0 7px var(--driver-plan-over-glow));
+    stroke-dasharray: var(--driver-over-progress) 100;
+    stroke-dashoffset: 0;
+    transition: opacity 180ms ease, stroke-dasharray 240ms ease;
 }
 
 body.driver-mobile-screen .driver-work-dial.is-over-plan .driver-work-over-progress {
@@ -983,7 +984,7 @@ body.driver-mobile-screen .driver-work-dial-core {
         0 10px 26px rgba(0,0,0,0.42),
         0 0 38px rgba(190,210,220,0.10);
     text-align: center;
-    transition: transform 120ms ease, box-shadow 120ms ease;
+    transition: transform 120ms ease;
 }
 
 body.driver-mobile-screen .driver-work-dial-core::before {
@@ -1079,7 +1080,7 @@ body.driver-mobile-screen .driver-work-label {
         inset 0 -2px 3px rgba(0,0,0,0.32),
         0 5px 12px rgba(0,0,0,0.20);
     text-shadow: 0 0 18px rgba(140,255,46,0.30);
-    transition: transform 120ms ease, box-shadow 120ms ease;
+    transition: transform 120ms ease;
 }
 
 body.driver-mobile-screen .driver-work-label-line {
@@ -1140,36 +1141,43 @@ body.driver-mobile-screen .driver-work-dial-button.is-loaded::after {
 
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-progress {
     stroke: var(--driver-green);
-    filter: drop-shadow(0 0 18px rgba(140,255,46,0.88));
 }
-
-body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-dial-core {
-    border-color: rgba(140,255,46,0.78);
-    box-shadow:
-        inset 0 12px 22px rgba(238,255,230,0.10),
-        inset 0 -26px 36px rgba(0,0,0,0.50),
-        inset 0 0 44px rgba(140,255,46,0.16),
-        0 10px 28px rgba(0,0,0,0.42),
-        0 0 48px rgba(140,255,46,0.34);
+/* Зелень загруженного круга — готовые слои (ореол снаружи, тон внутри), включаются
+   прозрачностью. Раньше переход «загружен → пустой» менял border/box-shadow сердцевины,
+   градиент по тексту и фильтры — после разгрузки телефон замирал на 0,4 с. */
+body.driver-mobile-screen .driver-work-loaded-halo {
+    position: absolute;
+    inset: 13%;
+    z-index: 1;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(140,255,46,0.78), 0 0 48px rgba(140,255,46,0.34);
+    opacity: 0;
+    will-change: opacity;
+    pointer-events: none;
 }
-
+body.driver-mobile-screen .driver-work-dial-core .driver-work-loaded-tint {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(140,255,46,0.78);
+    box-shadow: inset 0 12px 22px rgba(238,255,230,0.10), inset 0 0 44px rgba(140,255,46,0.16);
+    opacity: 0;
+    will-change: opacity;
+    pointer-events: none;
+}
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-loaded-halo,
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-loaded-tint {
+    opacity: 1;
+}
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label {
     color: var(--driver-green);
     text-shadow: 0 0 18px rgba(140,255,46,0.36);
 }
-
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label-line {
-    color: transparent;
-    background: linear-gradient(180deg, #e0ffc5 0%, #a8ff5c 34%, #7dea20 66%, #54bd05 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
     text-shadow:
         0 -1px 0 rgba(247,255,239,0.48),
         0 2px 0 rgba(39,102,7,0.78);
-    filter:
-        drop-shadow(0 3px 2px rgba(0,0,0,0.46))
-        drop-shadow(0 0 10px rgba(140,255,46,0.22));
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-percent {
@@ -1196,20 +1204,6 @@ body.driver-mobile-screen .driver-work-dial-button.is-empty::after {
 
 body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-progress {
     stroke: rgba(142, 158, 164, 0.46);
-    filter: drop-shadow(0 0 8px rgba(170, 188, 194, 0.08));
-}
-
-body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-dial-core {
-    background:
-        radial-gradient(circle at 50% 24%, rgba(188,215,211,0.16), transparent 38%),
-        radial-gradient(circle at 50% 46%, rgba(91,124,124,0.32), rgba(31,56,61,0.78) 62%, rgba(7,19,23,0.98));
-    border-color: rgba(210,229,232,0.36);
-    box-shadow:
-        inset 0 10px 20px rgba(255,255,255,0.07),
-        inset 0 -24px 34px rgba(0,0,0,0.48),
-        inset 0 0 46px rgba(255,255,255,0.05),
-        0 9px 24px rgba(0,0,0,0.38),
-        0 0 38px rgba(190,210,220,0.10);
 }
 
 body.driver-mobile-screen .driver-work-dial.is-waiting-operation,
@@ -4014,7 +4008,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                             </svg>
                             <span class="driver-work-ticks" aria-hidden="true"></span>
                             <span class="driver-work-hold-ring" aria-hidden="true"><span class="driver-work-hold-half is-right"><i class="driver-work-hold-fill"></i></span><span class="driver-work-hold-half is-left"><i class="driver-work-hold-fill"></i></span></span>
-                            <span class="driver-work-wait-halo" aria-hidden="true"></span><span class="driver-work-dial-core"><span class="driver-work-wait-tint" aria-hidden="true"></span>
+                            <span class="driver-work-wait-halo" aria-hidden="true"></span><span class="driver-work-loaded-halo" aria-hidden="true"></span><span class="driver-work-dial-core"><span class="driver-work-wait-tint" aria-hidden="true"></span><span class="driver-work-loaded-tint" aria-hidden="true"></span>
                                 <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}%{% else %}{{ shift_plan_short_label|default:"нет плана" }}{% endif %}</span>
                                 {% if shift_plan_visual.has_completed_loops %}<b class="driver-work-progress-loop" aria-label="Завершено циклов: {{ shift_plan_visual.completed_loops }}">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
                                 <strong class="driver-work-label" data-driver-dial-label>{{ driver_dial_label }}</strong>
@@ -4031,7 +4025,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                         </svg>
                         <span class="driver-work-ticks" aria-hidden="true"></span>
                         <span class="driver-work-hold-ring" aria-hidden="true"><span class="driver-work-hold-half is-right"><i class="driver-work-hold-fill"></i></span><span class="driver-work-hold-half is-left"><i class="driver-work-hold-fill"></i></span></span>
-                        <span class="driver-work-wait-halo" aria-hidden="true"></span><span class="driver-work-dial-core"><span class="driver-work-wait-tint" aria-hidden="true"></span>
+                        <span class="driver-work-wait-halo" aria-hidden="true"></span><span class="driver-work-loaded-halo" aria-hidden="true"></span><span class="driver-work-dial-core"><span class="driver-work-wait-tint" aria-hidden="true"></span><span class="driver-work-loaded-tint" aria-hidden="true"></span>
                             <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}%{% else %}{{ shift_plan_short_label|default:"нет плана" }}{% endif %}</span>
                             {% if shift_plan_visual.has_completed_loops %}<b class="driver-work-progress-loop" aria-label="Завершено циклов: {{ shift_plan_visual.completed_loops }}">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
                             <strong class="driver-work-label" data-driver-dial-label>{{ driver_dial_label }}</strong>
@@ -6771,26 +6765,33 @@ window.bindDriverMobileShell = function () {
         var low = minSize;
         var high = maxSize;
         var best = minSize;
+        /* Высота соседей, зазор сетки и ширина подписи от кегля не зависят — меряем их
+           один раз до перебора. Раньше каждый шаг перебора читал их заново, и браузер
+           пересчитывал раскладку круга до десяти раз подряд: на телефоне водителя это
+           116 мс на каждую смену подписи (а при разгрузке их две подряд). */
+        var percentNode = core.querySelector(".driver-work-percent");
+        var noteNode = core.querySelector(".driver-work-note");
+        var coreStyle = window.getComputedStyle(core);
+        var gap = parseFloat(coreStyle.rowGap || coreStyle.gap) || 0;
+        var availableHeight = core.clientHeight
+            - (percentNode ? percentNode.offsetHeight : 0)
+            - (noteNode ? noteNode.offsetHeight : 0)
+            - (gap * 2)
+            - 4;
+        var availableWidth = label.clientWidth + 1;
         function fits(size) {
             label.style.fontSize = size.toFixed(2) + "px";
-            var percent = core.querySelector(".driver-work-percent");
-            var note = core.querySelector(".driver-work-note");
-            var coreStyle = window.getComputedStyle(core);
-            var gap = parseFloat(coreStyle.rowGap || coreStyle.gap) || 0;
-            var availableHeight = core.clientHeight
-                - (percent ? percent.offsetHeight : 0)
-                - (note ? note.offsetHeight : 0)
-                - (gap * 2)
-                - 4;
             var linesFit = Array.prototype.every.call(label.children, function (lineNode) {
-                return lineNode.scrollWidth <= label.clientWidth + 1;
+                return lineNode.scrollWidth <= availableWidth;
             });
             return linesFit && label.scrollHeight <= availableHeight;
         }
         if (fits(high)) {
             best = high;
         } else {
-            for (var step = 0; step < 9; step += 1) {
+            /* Шесть шагов дают точность меньше половины пикселя на всём рабочем
+               диапазоне кеглей — дальше перебирать нечего. */
+            for (var step = 0; step < 6; step += 1) {
                 var middle = (low + high) / 2;
                 if (fits(middle)) {
                     best = middle;
