@@ -30,7 +30,7 @@
     </div>
     <span class="driver-downtime-drum-hint" data-driver-drum-hint aria-hidden="true">▲ вверх — начать простой</span>
 </div>
-{% comment %} Горлышко и рамка передней грани — чистый CSS: две линии вниз от кольца и рамка
-   вокруг грани. Размеры берутся из переменных на <html>, которые ставятся один раз и переживают
-   любое обновление экрана, поэтому контуру нечем пропадать. {% endcomment %}
-<span class="driver-drum-link" data-driver-drum-link aria-hidden="true"></span>
+{% comment %} Контур «кольцо → линии → рамка грани» — ОДНА непрерывная кривая. Сама кривая лежит в
+   CSS-переменной на <html> (её ставит скрипт один раз при смене размеров), а путь берёт её через
+   свойство d — так контур монолитный, не считается на кадрах и переживает обновление экрана. {% endcomment %}
+<svg class="driver-drum-link" data-driver-drum-link aria-hidden="true" focusable="false"><path /></svg>

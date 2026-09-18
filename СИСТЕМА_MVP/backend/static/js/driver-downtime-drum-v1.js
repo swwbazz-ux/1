@@ -633,7 +633,6 @@
         var card = centerCard();
         var link = q("[data-driver-drum-link]");
         if (!w || !card || !link) return;
-        // Горлышко позиционируется относительно экрана «Работа» — от него и считаем.
         var screen = link.parentElement;
         while (screen && !screen.classList.contains("driver-work-screen")) screen = screen.parentElement;
         if (!screen) return;
@@ -641,20 +640,31 @@
         var cr = card.getBoundingClientRect();
         var box = screen.getBoundingClientRect();
         if (!dr.width || !cr.width) return;
-        var pad = 5;
+        var pad = 5, rr = 10;
         var half = cr.width / 2 + pad;
+        // Кольцо — в зазоре между кольцом циферблата (48.5% стороны) и угловыми кнопками (51%).
         var r = dr.width * 0.4975;
         if (half >= r) return;
-        var cx = dr.left + dr.width / 2, cy = dr.top + dr.height / 2;
-        // Линии горлышка начинаются там, где их x пересекает кольцо.
-        var yTop = cy + Math.sqrt(r * r - half * half);
+        var cx = dr.left + dr.width / 2 - box.left, cy = dr.top + dr.height / 2 - box.top;
+        var xL = cx - half, xR = cx + half;
+        var yN = cy + Math.sqrt(r * r - half * half);   // линии начинаются точно на кольце
+        var y1 = cr.bottom - box.top + pad;
+        function p(v) { return Number(v).toFixed(1); }
+        // Одна кривая: от левой точки кольца по большой дуге вправо, вниз по правой линии,
+        // по нижней рамке с двумя скруглениями, вверх по левой линии — и замыкание на кольцо.
+        var keyhole = [
+            "M", p(xL), p(yN),
+            "A", p(r), p(r), "0 1 1", p(xR), p(yN),
+            "L", p(xR), p(y1 - rr),
+            "Q", p(xR), p(y1), p(xR - rr), p(y1),
+            "L", p(xL + rr), p(y1),
+            "Q", p(xL), p(y1), p(xL), p(y1 - rr),
+            "Z"
+        ].join(" ");
+        var ring = ["M", p(cx - r), p(cy), "A", p(r), p(r), "0 1 1", p(cx + r), p(cy), "A", p(r), p(r), "0 1 1", p(cx - r), p(cy), "Z"].join(" ");
         var root_ = doc.documentElement.style;
-        root_.setProperty("--neck-w", (half * 2).toFixed(1) + "px");
-        root_.setProperty("--neck-top", (yTop - box.top).toFixed(1) + "px");
-        root_.setProperty("--neck-bottom", (box.bottom - (cr.bottom + pad)).toFixed(1) + "px");
-        // Проём в кольце ровно по ширине горлышка.
-        root_.setProperty("--ring-gap", (2 * Math.asin(Math.min(1, half / r)) * 180 / Math.PI).toFixed(2) + "deg");
-        void cx;
+        root_.setProperty("--link-path", 'path("' + keyhole + '")');
+        root_.setProperty("--link-ring", 'path("' + ring + '")');
     }
 
     // --- состояние активного простоя: та же карточка, что и на вкладке «Простои» ---
