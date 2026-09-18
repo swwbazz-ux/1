@@ -75,7 +75,6 @@ function roleRuntime(role) {
             captureView: () => ({scroll: ++now}),
             restoreView(_shell, saved) {assert.ok(saved.scroll); restored++;},
         },
-        driverTransplantLiveNodes: () => [],
         bindDriverMobileShell() {if (bindFailure) throw new Error("DOM init failed");},
         bindMobileShiftScreens() {if (bindFailure) throw new Error("DOM init failed");},
         initExcavatorWorkShell() {},
@@ -236,72 +235,6 @@ test("driver downtime acknowledgement records the server id and reconciles witho
     context.bindings.onConfirmed({event_type: "driver.downtime.ended"}, {server_version: 109, server_ids: {downtime_event_id: 59}});
     assert.deepEqual(calls, [["driver_offline_event_confirmed"]]);
     assert.deepEqual(Array.from(window.driverOwnDowntimeEventIds), ["59"]);
-});
-
-function drumSide(ids, updatedAt, quick, unavailable) {
-    const cards = ids.map((id) => {
-        const classes = new Set(unavailable && unavailable.includes(id) ? ["is-unavailable"] : []);
-        const attrs = {"aria-label": "Простой: причина " + id};
-        return {
-            dataset: {driverDrumReasonId: String(id), driverDrumQuick: quick || "1"},
-            classList: {
-                contains: (name) => classes.has(name),
-                toggle: (name, on) => {on ? classes.add(name) : classes.delete(name);},
-            },
-            getAttribute: (name) => attrs[name] || "",
-            setAttribute: (name, value) => {attrs[name] = value;},
-            querySelector: () => ({textContent: "Причина " + id}),
-            classes,
-            attrs,
-        };
-    });
-    const drum = {dataset: {driverQuickMin: "3", driverQuickUpdatedAt: updatedAt || "t1"}, querySelectorAll: () => cards, cards};
-    const nodes = {"[data-driver-downtime-drum]": drum};
-    ["[data-driver-drum-link]", "[data-driver-drum-link-active]"].forEach((sel) => {nodes[sel] = {sel};});
-    const replaced = [];
-    Object.values(nodes).forEach((node) => {node.replaceWith = (live) => replaced.push(live);});
-    return {shell: {querySelector: (sel) => nodes[sel] || null}, nodes, replaced, cards};
-}
-
-function transplantRuntime() {
-    const window = {};
-    const context = {window, Array, String, Object};
-    vm.runInNewContext(
-        extract(driver, "window.driverDrumComposition = function (root)") + ";\n"
-        + extract(driver, "window.driverTransplantLiveNodes = function (oldShell, freshShell)"),
-        context
-    );
-    return window;
-}
-
-test("driver refresh transplants the live drum when the reason set is unchanged", () => {
-    const api = transplantRuntime();
-    const live = drumSide([1, 2, 3]);
-    const fresh = drumSide([1, 2, 3]);
-    const moved = api.driverTransplantLiveNodes(live.shell, fresh.shell);
-    assert.deepEqual(Array.from(moved), ["[data-driver-downtime-drum]", "[data-driver-drum-link]", "[data-driver-drum-link-active]"]);
-    // в свежий экран встали именно живые узлы, а не серверные копии
-    assert.deepEqual(Array.from(fresh.replaced), [live.nodes["[data-driver-downtime-drum]"], live.nodes["[data-driver-drum-link]"], live.nodes["[data-driver-drum-link-active]"]]);
-});
-
-test("driver refresh rebuilds the drum when the server changed its reasons or quick set", () => {
-    const api = transplantRuntime();
-    assert.deepEqual(Array.from(api.driverTransplantLiveNodes(drumSide([1, 2, 3]).shell, drumSide([1, 2, 4]).shell)), []);
-    assert.deepEqual(Array.from(api.driverTransplantLiveNodes(drumSide([1, 2, 3]).shell, drumSide([1, 2, 3], "t1", "0").shell)), []);
-    assert.deepEqual(Array.from(api.driverTransplantLiveNodes(null, drumSide([1]).shell)), []);
-});
-
-test("driver refresh keeps the live drum when only reason availability changed", () => {
-    // Сразу после разгрузки сервер меняет доступность части причин. Кольцо от этого
-    // не перестраивается: переносим живой барабан и переносим на грани новые флаги.
-    const api = transplantRuntime();
-    const live = drumSide([1, 2, 3]);
-    const fresh = drumSide([1, 2, 3], "t2", "1", [2]);
-    const moved = api.driverTransplantLiveNodes(live.shell, fresh.shell);
-    assert.equal(moved.length, 3);
-    assert.equal(live.cards[0].classes.has("is-unavailable"), false);
-    assert.equal(live.cards[1].classes.has("is-unavailable"), true);
-    assert.equal(live.nodes["[data-driver-downtime-drum]"].dataset.driverQuickUpdatedAt, "t2");
 });
 
 test("driver refresh skips the DOM when the fragment equals the applied snapshot", async () => {

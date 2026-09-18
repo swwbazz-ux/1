@@ -4362,67 +4362,6 @@ window.driverForceFragmentApply = false;
    сохраняются, а скрипт барабана видит тот же элемент и не пересобирает геометрию.
    Своих обработчиков на барабане нет (он слушает document), поэтому перенос безопасен;
    во время жеста обновление и так отложено — см. isDriverOperationalRefreshUnsafe. */
-/* Состав барабана: порядок причин и то, какие из них выбраны в быстрый доступ. Именно
-   это определяет геометрию кольца — сколько граней и под каким углом. Доступность
-   причины (is-unavailable) в состав не входит: она меняется от состояния рейса
-   (например, сразу после разгрузки), но кольцо от неё не перестраивается. */
-window.driverDrumComposition = function (root) {
-    var drum = root && root.querySelector ? root.querySelector("[data-driver-downtime-drum]") : null;
-    if (!drum) return "";
-    var parts = [String(drum.dataset.driverQuickMin || "")];
-    Array.prototype.forEach.call(
-        drum.querySelectorAll("[data-driver-drum-card]:not([data-driver-drum-clone])"),
-        function (card) {
-            var label = card.querySelector(".driver-drum-card-label");
-            parts.push([
-                card.dataset.driverDrumReasonId || "",
-                card.dataset.driverDrumQuick || "",
-                label ? label.textContent.trim() : ""
-            ].join(":"));
-        }
-    );
-    return parts.join("|");
-};
-
-window.driverTransplantLiveNodes = function (oldShell, freshShell) {
-    var moved = [];
-    if (!oldShell || !freshShell) return moved;
-    if (window.driverDrumComposition(oldShell) !== window.driverDrumComposition(freshShell)) return moved;
-    var freshDrum = freshShell.querySelector("[data-driver-downtime-drum]");
-    var liveDrum = oldShell.querySelector("[data-driver-downtime-drum]");
-    if (!freshDrum || !liveDrum) return moved;
-    /* Состав тот же — переносим живой барабан. Всё, что сервер мог изменить у граней,
-       переносим на них по номеру причины: копии граней тоже, иначе повтор причины
-       на кольце остался бы со старой доступностью. */
-    var state = {};
-    Array.prototype.forEach.call(freshDrum.querySelectorAll("[data-driver-drum-card]"), function (card) {
-        state[card.dataset.driverDrumReasonId || ""] = {
-            unavailable: card.classList.contains("is-unavailable"),
-            label: card.getAttribute("aria-label") || ""
-        };
-    });
-    Array.prototype.forEach.call(liveDrum.querySelectorAll("[data-driver-drum-card]"), function (card) {
-        var next = state[card.dataset.driverDrumReasonId || ""];
-        if (!next) return;
-        if (card.classList.contains("is-unavailable") !== next.unavailable) {
-            card.classList.toggle("is-unavailable", next.unavailable);
-        }
-        if (next.label && card.getAttribute("aria-label") !== next.label) {
-            card.setAttribute("aria-label", next.label);
-        }
-    });
-    if (liveDrum.dataset.driverQuickUpdatedAt !== freshDrum.dataset.driverQuickUpdatedAt) {
-        liveDrum.dataset.driverQuickUpdatedAt = freshDrum.dataset.driverQuickUpdatedAt || "";
-    }
-    ["[data-driver-downtime-drum]", "[data-driver-drum-link]", "[data-driver-drum-link-active]"].forEach(function (selector) {
-        var live = oldShell.querySelector(selector);
-        var placeholder = freshShell.querySelector(selector);
-        if (!live || !placeholder || typeof placeholder.replaceWith !== "function") return;
-        placeholder.replaceWith(live);
-        moved.push(selector);
-    });
-    return moved;
-};
 /* DRIVER_FRAGMENT_SNAPSHOT_END */
 /* DRIVER_ROLE_HOLD_GUARD_START */
 window.createDriverRoleHoldGuard = function (options) {
@@ -5370,9 +5309,6 @@ window.applyOperationalStateRefresh = function (context) {
         var viewState = window.AppOperationalFragment.captureView
             ? window.AppOperationalFragment.captureView(oldShell, "[data-driver-tab-panel]", "data-driver-tab-panel")
             : null;
-        if (typeof window.driverTransplantLiveNodes === "function") {
-            window.driverTransplantLiveNodes(oldShell, freshShell);
-        }
         oldShell.replaceWith(freshShell);
         if (typeof window.bindDriverMobileShell === "function") {
             window.bindDriverMobileShell();
