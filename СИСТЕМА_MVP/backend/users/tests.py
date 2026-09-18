@@ -455,19 +455,19 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v247')
+        self.assertContains(response, 'driver-mobile-shell-v248')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(
             response,
-            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v247',
+            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v248',
         )
         self.assertContains(
             response,
-            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v247',
+            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v248',
         )
         self.assertContains(
             response,
-            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v247',
+            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v248',
         )
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertContains(response, 'playDriverSound("truck_assigned")')
@@ -505,15 +505,21 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'body.driver-mobile-screen .driver-online::after')
         self.assertContains(response, 'display: none !important')
         self.assertNotContains(response, '>Активная смена<')
-        self.assertContains(response, '--driver-dial-size: clamp(220px, min(92vw, 62dvh), 520px)')
+        # Круг — строго во всю ширину колонки; ограничение по высоте только аварийное.
+        self.assertContains(response, 'width: min(100%, 520px, calc(100dvh')
         self.assertContains(response, 'grid-template-areas:')
         self.assertContains(response, '"context"')
         self.assertContains(response, '"dial"')
+        self.assertContains(response, '"drum"')
         self.assertContains(response, '"assign"')
+        # Остаток высоты отдан барабану: его строка 1fr, круг задаёт свою строку сам.
+        self.assertContains(response, 'grid-template-rows: auto auto minmax(0, 1fr) auto')
         self.assertContains(response, 'gap: var(--driver-work-gap)')
         self.assertContains(response, 'class="driver-work-context-card"')
         self.assertContains(response, '--driver-work-column: min(100%, 720px)')
-        self.assertContains(response, 'class="driver-work-context-heading"')
+        # Заголовок секции убран ради места на экране; значок свободного ковша остался.
+        self.assertNotContains(response, 'class="driver-work-context-heading"')
+        self.assertContains(response, 'data-driver-free-bucket-chip')
         self.assertContains(response, 'class="driver-work-context-machine"')
         self.assertContains(response, 'class="driver-work-context-geology"')
         self.assertContains(response, 'class="driver-work-context-geology-values"')
@@ -681,7 +687,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v247', script)
+        self.assertIn('driver-mobile-shell-v248', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3577,7 +3583,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v247')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v248')
 
     def test_driver_quick_reasons_render_stars_and_drum_subset(self):
         self.create_registered_driver_shift()
