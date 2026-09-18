@@ -167,12 +167,6 @@ body.driver-mobile-screen .mobile-dial-action:focus-visible .mobile-dial-action_
     stroke-opacity: 1;
 }
 
-@media (hover: hover) {
-    body.driver-mobile-screen .mobile-dial-action:hover {
-        filter: brightness(1.18);
-    }
-}
-
 body.driver-mobile-screen .mobile-dial-action:active,
 body.driver-mobile-screen .mobile-dial-action.is-pressed {
     filter: brightness(.83);

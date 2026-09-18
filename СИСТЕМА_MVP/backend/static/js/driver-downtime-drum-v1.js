@@ -216,46 +216,28 @@
         if (inertia) { root.cancelAnimationFrame(inertia); inertia = 0; }
     }
 
-    // Призрак грани: сама грань остаётся в барабане (иначе её режет окно сцены),
-    // а вверх на круг летит её копия на уровне экрана.
-    var ghost = null;
+    // Подъём грани на круг: двигается сама грань внутри 3D-сцены (окно сцены на это время
+    // открыто вверх), поэтому она сохраняет изгиб цилиндра до самого круга.
+    var liftMax = LIFT_MAX;
 
-    function screenOf(el) {
-        while (el && !(el.classList && el.classList.contains("driver-work-screen"))) el = el.parentElement;
-        return el;
-    }
-
-    function makeGhost(card) {
-        var screen = screenOf(card);
-        if (!screen) return null;
-        var box = screen.getBoundingClientRect();
-        var r = card.getBoundingClientRect();
-        var g = doc.createElement("div");
-        g.className = "driver-drum-ghost";
-        g.textContent = (q(".driver-drum-card-label", card) || card).textContent.trim();
-        g.style.left = (r.left - box.left) + "px";
-        g.style.top = (r.top - box.top) + "px";
-        g.style.width = r.width + "px";
-        g.style.height = r.height + "px";
-        screen.appendChild(g);
-        // Докуда можно поднять: чтобы призрак лёг на нижнюю часть круга.
+    function liftLimit(card) {
         var w = dial();
         var dr = w ? w.getBoundingClientRect() : null;
-        g.__liftMax = dr ? Math.max(LIFT_MAX, r.top - (dr.top + dr.height * 0.55)) : LIFT_MAX;
-        return g;
+        var r = card.getBoundingClientRect();
+        return dr ? Math.max(LIFT_MAX, r.top - (dr.top + dr.height * 0.55)) : LIFT_MAX;
     }
 
     function resetLift(card) {
         card.classList.remove("is-lifting", "is-armed");
+        card.classList.add("is-settling");
+        card.style.setProperty("--drum-lift", "0px");
+        root.setTimeout(function () {
+            card.classList.remove("is-settling");
+            var d = drum();
+            if (d) d.classList.remove("is-lifting");
+        }, 260);
         var w = dial();
         if (w) w.classList.remove("is-drum-lifting");
-        if (ghost) {
-            var g = ghost; ghost = null;
-            g.classList.add("is-settling");
-            g.style.setProperty("--drum-lift", "0px");
-            g.style.setProperty("--drum-ghost-scale", "1");
-            root.setTimeout(function () { if (g.parentNode) g.parentNode.removeChild(g); }, 240);
-        }
     }
 
     function endDrag() {
@@ -289,8 +271,10 @@
                 drag.mode = "spin";
             } else if (dy < 0 && drag.card && drag.card.classList.contains("is-center")) {
                 drag.mode = "lift";
-                ghost = makeGhost(drag.card);
+                liftMax = liftLimit(drag.card);
                 drag.card.classList.add("is-lifting");
+                var dd = drum();
+                if (dd) dd.classList.add("is-lifting");
             } else {
                 drag = null;
                 return;
@@ -307,14 +291,9 @@
             drag.lastX = event.clientX; drag.lastT = event.timeStamp;
             render(false);
         } else {
-            var liftMax = ghost && ghost.__liftMax ? ghost.__liftMax : LIFT_MAX;
             var lift = Math.max(-liftMax, Math.min(0, dy));
             var armed = -dy >= LIFT_ARM;
-            if (ghost) {
-                ghost.style.setProperty("--drum-lift", lift + "px");
-                ghost.style.setProperty("--drum-ghost-scale", (1 + 0.12 * Math.min(1, -lift / liftMax)).toFixed(3));
-                ghost.classList.toggle("is-armed", armed);
-            }
+            drag.card.style.setProperty("--drum-lift", lift + "px");
             drag.card.classList.toggle("is-armed", armed);
             var w = dial();
             if (w) w.classList.toggle("is-drum-lifting", armed);
