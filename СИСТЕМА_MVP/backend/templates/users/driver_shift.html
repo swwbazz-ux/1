@@ -771,7 +771,7 @@ body.driver-mobile-screen .driver-work-dial-svg {
    поворачиваются трансформацией, и композитор рисует это сам. На бою кольца
    набирались conic-gradient'ом с маской и drop-shadow, который скрипт перекрашивал
    каждый кадр: на телефоне водителя это 19 кадров в секунду и кадры по 280 мс.
-   Длительности анимаций (450 + 450 мс) равны holdMs: 900 в скрипте удержания. */
+   Длительности анимаций (500 + 500 мс) равны holdMs: 1000 в скрипте удержания. */
 body.driver-mobile-screen .driver-work-hold-ring {
     position: absolute;
     /* Внешний край секций — внешний край больших делений (кольцо делений: inset 3%,
@@ -833,11 +833,11 @@ body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-half.is-right .driver-work-hold-fill {
-    animation: driver-hold-right 450ms steps(6, end) forwards;
+    animation: driver-hold-right 500ms steps(6, end) forwards;
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-half.is-left .driver-work-hold-fill {
-    animation: driver-hold-left 450ms steps(6, end) 450ms forwards;
+    animation: driver-hold-left 500ms steps(6, end) 500ms forwards;
 }
 
 /* Удержание завершено — все двенадцать секций горят до ответа. */
@@ -4000,7 +4000,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                     <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-work-dial-form" data-driver-hold-form data-driver-trip-id="{{ active_trip.id }}" data-driver-unload-one-tap="{% if driver_unloading_wait_active %}true{% else %}false{% endif %}">
                         {% csrf_token %}
                         <input type="hidden" name="client_action_id" value="" data-driver-client-action>
-                        <button class="driver-work-dial-button is-loaded{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}" type="submit" data-driver-work-dial-control data-driver-hold-button data-driver-pending-label="ОТПРАВКА" aria-label="Подтвердить разгрузку. {% if driver_unloading_wait_active %}Нажмите один раз.{% else %}Удерживайте 0,9 секунды.{% endif %}">
+                        <button class="driver-work-dial-button is-loaded{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}" type="submit" data-driver-work-dial-control data-driver-hold-button data-driver-pending-label="ОТПРАВКА" aria-label="Подтвердить разгрузку. {% if driver_unloading_wait_active %}Нажмите один раз.{% else %}Удерживайте 1 секунду.{% endif %}">
                             <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
                                 <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                                 <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
@@ -4355,6 +4355,74 @@ window.driverAppliedFragmentSnapshot = window.driverFragmentSnapshot(document.qu
 /* Скрытые вкладки отстали от сервера после нашего же простоя: при их открытии экран подтягивается целиком. */
 window.driverDomBehindBaseline = false;
 window.driverForceFragmentApply = false;
+/* Барабан простоев — самый дорогой узел экрана: двенадцать граней, повёрнутых в 3D.
+   При подмене экрана браузер растеризует их заново; по замеру на телефоне водителя это
+   ~0,28 с из ~0,45 с всей подмены, хотя состав причин почти никогда не меняется.
+   Если он совпал, переносим ЖИВОЙ узел в свежий экран вместо серверной копии: слои
+   сохраняются, а скрипт барабана видит тот же элемент и не пересобирает геометрию.
+   Своих обработчиков на барабане нет (он слушает document), поэтому перенос безопасен;
+   во время жеста обновление и так отложено — см. isDriverOperationalRefreshUnsafe. */
+/* Состав барабана: порядок причин и то, какие из них выбраны в быстрый доступ. Именно
+   это определяет геометрию кольца — сколько граней и под каким углом. Доступность
+   причины (is-unavailable) в состав не входит: она меняется от состояния рейса
+   (например, сразу после разгрузки), но кольцо от неё не перестраивается. */
+window.driverDrumComposition = function (root) {
+    var drum = root && root.querySelector ? root.querySelector("[data-driver-downtime-drum]") : null;
+    if (!drum) return "";
+    var parts = [String(drum.dataset.driverQuickMin || "")];
+    Array.prototype.forEach.call(
+        drum.querySelectorAll("[data-driver-drum-card]:not([data-driver-drum-clone])"),
+        function (card) {
+            var label = card.querySelector(".driver-drum-card-label");
+            parts.push([
+                card.dataset.driverDrumReasonId || "",
+                card.dataset.driverDrumQuick || "",
+                label ? label.textContent.trim() : ""
+            ].join(":"));
+        }
+    );
+    return parts.join("|");
+};
+
+window.driverTransplantLiveNodes = function (oldShell, freshShell) {
+    var moved = [];
+    if (!oldShell || !freshShell) return moved;
+    if (window.driverDrumComposition(oldShell) !== window.driverDrumComposition(freshShell)) return moved;
+    var freshDrum = freshShell.querySelector("[data-driver-downtime-drum]");
+    var liveDrum = oldShell.querySelector("[data-driver-downtime-drum]");
+    if (!freshDrum || !liveDrum) return moved;
+    /* Состав тот же — переносим живой барабан. Всё, что сервер мог изменить у граней,
+       переносим на них по номеру причины: копии граней тоже, иначе повтор причины
+       на кольце остался бы со старой доступностью. */
+    var state = {};
+    Array.prototype.forEach.call(freshDrum.querySelectorAll("[data-driver-drum-card]"), function (card) {
+        state[card.dataset.driverDrumReasonId || ""] = {
+            unavailable: card.classList.contains("is-unavailable"),
+            label: card.getAttribute("aria-label") || ""
+        };
+    });
+    Array.prototype.forEach.call(liveDrum.querySelectorAll("[data-driver-drum-card]"), function (card) {
+        var next = state[card.dataset.driverDrumReasonId || ""];
+        if (!next) return;
+        if (card.classList.contains("is-unavailable") !== next.unavailable) {
+            card.classList.toggle("is-unavailable", next.unavailable);
+        }
+        if (next.label && card.getAttribute("aria-label") !== next.label) {
+            card.setAttribute("aria-label", next.label);
+        }
+    });
+    if (liveDrum.dataset.driverQuickUpdatedAt !== freshDrum.dataset.driverQuickUpdatedAt) {
+        liveDrum.dataset.driverQuickUpdatedAt = freshDrum.dataset.driverQuickUpdatedAt || "";
+    }
+    ["[data-driver-downtime-drum]", "[data-driver-drum-link]", "[data-driver-drum-link-active]"].forEach(function (selector) {
+        var live = oldShell.querySelector(selector);
+        var placeholder = freshShell.querySelector(selector);
+        if (!live || !placeholder || typeof placeholder.replaceWith !== "function") return;
+        placeholder.replaceWith(live);
+        moved.push(selector);
+    });
+    return moved;
+};
 /* DRIVER_FRAGMENT_SNAPSHOT_END */
 /* DRIVER_ROLE_HOLD_GUARD_START */
 window.createDriverRoleHoldGuard = function (options) {
@@ -5302,6 +5370,9 @@ window.applyOperationalStateRefresh = function (context) {
         var viewState = window.AppOperationalFragment.captureView
             ? window.AppOperationalFragment.captureView(oldShell, "[data-driver-tab-panel]", "data-driver-tab-panel")
             : null;
+        if (typeof window.driverTransplantLiveNodes === "function") {
+            window.driverTransplantLiveNodes(oldShell, freshShell);
+        }
         oldShell.replaceWith(freshShell);
         if (typeof window.bindDriverMobileShell === "function") {
             window.bindDriverMobileShell();
@@ -6746,6 +6817,19 @@ window.bindDriverMobileShell = function () {
     function fitDriverDialLabel(label, force) {
         var core = label.closest(".driver-work-dial-core");
         var rawText = label.dataset.driverDialRaw || label.textContent.trim().replace(/\s+/g, " ");
+        /* Если текст записали напрямую, строк-спанов нет: значит показывают не то, что
+           лежит в driverDialRaw. Берём показанное за исходное и подгоняем заново —
+           иначе подпись осталась бы кеглем прежней надписи и вылезла за круг. */
+        var firstLine = label.firstElementChild;
+        var hasLineNodes = !!(firstLine && firstLine.classList && firstLine.classList.contains("driver-work-label-line"));
+        if (!hasLineNodes) {
+            var shownText = label.textContent.trim().replace(/\s+/g, " ");
+            if (shownText && shownText !== rawText) {
+                rawText = shownText;
+                label.dataset.driverDialRaw = shownText;
+                delete label.dataset.driverDialFitKey;
+            }
+        }
         if (!rawText) return;
         if (!driverDialCoreHasVisibleGeometry(core)) {
             if (force) delete label.dataset.driverDialFitKey;
@@ -6778,7 +6862,14 @@ window.bindDriverMobileShell = function () {
             - (noteNode ? noteNode.offsetHeight : 0)
             - (gap * 2)
             - 4;
-        var availableWidth = label.clientWidth + 1;
+        /* clientWidth включает внутренние отступы подписи, а строки меряются по полю
+           содержимого: без вычета отступов длинная строка «пролезала» проверку и
+           вылезала за рамку на их ширину. */
+        var labelStyle = window.getComputedStyle(label);
+        var availableWidth = label.clientWidth
+            - (parseFloat(labelStyle.paddingLeft) || 0)
+            - (parseFloat(labelStyle.paddingRight) || 0)
+            + 1;
         function fits(size) {
             label.style.fontSize = size.toFixed(2) + "px";
             var linesFit = Array.prototype.every.call(label.children, function (lineNode) {
@@ -7238,7 +7329,16 @@ window.bindDriverMobileShell = function () {
                 button.classList.remove("is-loaded", "is-pending", "is-holding");
                 button.classList.add("is-empty");
             }
-            if (dialLabel) dialLabel.textContent = unloadNeedsReview ? "НЕ ПОДТВЕРЖДЕНО" : "РАЗГРУЗКА СОХРАНЕНА";
+            if (dialLabel) {
+                /* Подпись обязана пройти подгонку под круг: раньше сюда писали только текст,
+                   прежний ключ подгонки оставался прежним, и длинная надпись выводилась
+                   кеглем короткой — она вылезала за круг и обрезалась. */
+                var unloadDialText = unloadNeedsReview ? "НЕ ПОДТВЕРЖДЕНО" : "РАЗГРУЗКА СОХРАНЕНА";
+                dialLabel.textContent = unloadDialText;
+                dialLabel.dataset.driverDialRaw = unloadDialText;
+                delete dialLabel.dataset.driverDialFitKey;
+                if (typeof scheduleDriverDialLabelFit === "function") scheduleDriverDialLabelFit();
+            }
             if (note) note.textContent = unloadNeedsReview ? "ПРОВЕРЬТЕ СОБЫТИЕ" : "ОЖИДАНИЕ СИНХРОНИЗАЦИИ";
             var pointCard = current.querySelector("[data-driver-point-open]");
             if (pointCard) {
@@ -8016,9 +8116,9 @@ window.bindDriverMobileShell = function () {
             return true;
         }
         unloadHoldGuard = window.createDriverRoleHoldGuard({
-            /* Разгрузка повторяется десятки раз за смену — удерживать кнопку
-               дольше одной секунды на каждом рейсе слишком долго. */
-            holdMs: 900,
+            /* Разгрузка повторяется десятки раз за смену: ровно секунда — достаточно,
+               чтобы случайное касание не отправило рейс, и не утомляет за смену. */
+            holdMs: 1000,
             onStart: function () {
                 holdButton.classList.add("is-holding");
             },

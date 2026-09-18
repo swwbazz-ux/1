@@ -637,6 +637,7 @@ test("an armed one-tap gesture blocks operational fragment replacement", () => {
     let touchArmed = true;
     const unsafeSelector = (
         ".is-touch-armed, .is-holding, .is-pending, .is-dragging, "
+        + ".is-lifting, .is-dropping, .is-snapping, .driver-drum-ghost, "
         + "[data-driver-point-sheet]:not([hidden]), "
         + "[data-driver-free-bucket-sheet]:not([hidden])"
     );
@@ -660,7 +661,7 @@ test("an armed one-tap gesture blocks operational fragment replacement", () => {
 
     assert.match(
         unsafeSource,
-        /shell\.querySelector\(["']\.is-touch-armed,\s*\.is-holding,\s*\.is-pending,\s*\.is-dragging,\s*\[data-driver-point-sheet\]:not\(\[hidden\]\),\s*\[data-driver-free-bucket-sheet\]:not\(\[hidden\]\)["']\)/,
+        /shell\.querySelector\(["']\.is-touch-armed,\s*\.is-holding,\s*\.is-pending,\s*\.is-dragging,\s*\.is-lifting,\s*\.is-dropping,\s*\.is-snapping,\s*\.driver-drum-ghost,\s*\[data-driver-point-sheet\]:not\(\[hidden\]\),\s*\[data-driver-free-bucket-sheet\]:not\(\[hidden\]\)["']\)/,
         "The static refresh guard must include the armed touch state."
     );
     assert.equal(context.isUnsafe(shell), true);
