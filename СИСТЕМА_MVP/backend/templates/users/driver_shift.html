@@ -105,7 +105,11 @@ body.driver-mobile-screen .driver-shell {
     --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
     --driver-work-gap: clamp(12px, 1.8dvh, 20px);
     --driver-work-column: min(100%, 720px);
-    --driver-dial-size: clamp(220px, min(92vw, 62dvh), 520px);
+    /* Единая пропорция экрана «Работа»: круг считается от высоты, что остаётся после шапки,
+       карточки назначения, барабана (0.42 круга) и меню; барабан — от круга. Так композиция
+       одинакова на любом экране, а не зависит от того, что первым упрётся — ширина или высота. */
+    --driver-dial-fit: calc((100dvh - var(--driver-header-total-h) - var(--driver-nav-total-h) - clamp(96px, 11dvh, 118px) - 4 * var(--driver-work-gap) - 58px) / 1.42);
+    --driver-dial-size: clamp(200px, min(92vw, var(--driver-dial-fit)), 520px);
     width: 100%;
     max-width: none;
     min-width: 320px;
@@ -3366,7 +3370,8 @@ body.driver-mobile-screen .driver-work-dial {
    whole circle instead of slicing it or squashing it into an ellipse. */
 @supports (width: 1cqh) {
     body.driver-mobile-screen .driver-work-dial {
-        width: min(var(--driver-dial-size), 100cqw, 100cqh);
+        /* 94% высоты зоны: у круга всегда есть воздух сверху и снизу. */
+        width: min(var(--driver-dial-size), 100cqw, 94cqh);
         max-height: none;
     }
 }

@@ -9,8 +9,9 @@ body.driver-mobile-screen .driver-work-screen {
 }
 
 body.driver-mobile-screen .driver-downtime-drum {
-    --drum-card-w: clamp(132px, 38vw, 168px);
-    --drum-card-h: clamp(122px, 17dvh, 168px);
+    /* Размер карточки — доля круга (см. --driver-dial-size), ширина — от высоты. */
+    --drum-card-h: clamp(72px, calc(var(--driver-dial-size) * 0.40), 150px);
+    --drum-card-w: clamp(96px, calc(var(--drum-card-h) * 1.24), 180px);
     --drum-radius: 320px;
     --drum-step: 25.714deg;
     grid-area: drum;
@@ -27,7 +28,7 @@ body.driver-mobile-screen .driver-downtime-drum {
 /* Сцена: перспектива общая для всех граней, боковые грани режутся по ширине колонки. */
 body.driver-mobile-screen .driver-downtime-drum-stage {
     position: relative;
-    height: calc(var(--drum-card-h) + 44px);
+    height: calc(var(--drum-card-h) + 36px);
     overflow: hidden;
     border-radius: 14px;
     perspective: 820px;
@@ -93,7 +94,7 @@ body.driver-mobile-screen .driver-drum-card {
     background: transparent;
     color: #8fa0a6;
     font-weight: 900;
-    font-size: clamp(15px, 4.2vw, 18px);
+    font-size: clamp(12px, calc(var(--drum-card-h) * 0.13), 18px);
     line-height: 1.12;
     text-transform: uppercase;
     text-align: center;
@@ -182,7 +183,7 @@ body.driver-mobile-screen .driver-drum-card-body {
 
 body.driver-mobile-screen .driver-drum-card-total {
     margin-top: 2px;
-    font-size: clamp(15px, 4.4vw, 19px);
+    font-size: clamp(12px, calc(var(--drum-card-h) * 0.15), 19px);
     font-weight: 800;
     font-variant-numeric: tabular-nums;
     letter-spacing: .03em;
