@@ -790,8 +790,74 @@ body.driver-mobile-screen .driver-work-dial-svg {
 /* The familiar dial stays visually intact while it is held.  The former
    conic-gradient was repainted from JavaScript every frame; the hold now uses
    only the existing pressed state and one completion timer. */
-body.driver-mobile-screen .driver-work-hold-bar {
-    display: none;
+/* Кольцо удержания. Никаких перерисовок за кадр: две половины кольца — обычные
+   рамки-полукруги, каждая в своём «окне» (половина круга с overflow: hidden) —
+   поворачиваются трансформацией, и композитор рисует это сам. На бою кольца
+   набирались conic-gradient'ом с маской и drop-shadow, который скрипт перекрашивал
+   каждый кадр: на телефоне водителя это 19 кадров в секунду и кадры по 280 мс.
+   Длительности анимаций (450 + 450 мс) равны holdMs: 900 в скрипте удержания. */
+body.driver-mobile-screen .driver-work-hold-ring {
+    position: absolute;
+    inset: 5%;
+    z-index: 5;
+    border-radius: 50%;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-hold-half {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 50%;
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-work-hold-half.is-right { right: 0; }
+body.driver-mobile-screen .driver-work-hold-half.is-left { left: 0; }
+
+body.driver-mobile-screen .driver-work-hold-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 200%;
+    box-sizing: border-box;
+    border-radius: 50%;
+    border: 4.5px solid transparent;
+    border-top-color: currentColor;
+    border-right-color: currentColor;
+    transform: rotate(-135deg);
+    will-change: transform;
+}
+
+body.driver-mobile-screen .driver-work-hold-half.is-right .driver-work-hold-fill { left: -100%; }
+body.driver-mobile-screen .driver-work-hold-half.is-left .driver-work-hold-fill { left: 0; transform: rotate(45deg); }
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-ring,
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-ring {
+    visibility: visible;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-half.is-right .driver-work-hold-fill {
+    animation: driver-hold-right 450ms linear forwards;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-half.is-left .driver-work-hold-fill {
+    animation: driver-hold-left 450ms linear 450ms forwards;
+}
+
+/* Удержание завершено — кольцо остаётся полным до ответа. */
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-right .driver-work-hold-fill { transform: rotate(45deg); }
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-left .driver-work-hold-fill { transform: rotate(225deg); }
+
+@keyframes driver-hold-right {
+    from { transform: rotate(-135deg); }
+    to { transform: rotate(45deg); }
+}
+
+@keyframes driver-hold-left {
+    from { transform: rotate(45deg); }
+    to { transform: rotate(225deg); }
 }
 
 body.driver-mobile-screen .driver-work-track,
@@ -1257,6 +1323,12 @@ body.driver-mobile-screen .driver-work-dial-button.is-error .driver-work-progres
 
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-core {
     transform: scale(0.985);
+}
+
+/* Сердцевина держится на своём слое: иначе на старте и конце удержания браузер
+   создавал и разбирал слой с её градиентами (по 150–200 мс на телефоне). */
+body.driver-mobile-screen .driver-work-dial-core {
+    will-change: transform;
 }
 
 body.driver-mobile-screen .driver-work-assignment {
@@ -3941,8 +4013,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                                 <circle class="driver-work-over-progress" cx="50" cy="50" r="41" pathLength="100"></circle>
                             </svg>
                             <span class="driver-work-ticks" aria-hidden="true"></span>
-                            <span class="driver-work-hold-bar is-outer" aria-hidden="true"></span>
-                            <span class="driver-work-hold-bar is-core" aria-hidden="true"></span>
+                            <span class="driver-work-hold-ring" aria-hidden="true"><span class="driver-work-hold-half is-right"><i class="driver-work-hold-fill"></i></span><span class="driver-work-hold-half is-left"><i class="driver-work-hold-fill"></i></span></span>
                             <span class="driver-work-wait-halo" aria-hidden="true"></span><span class="driver-work-dial-core"><span class="driver-work-wait-tint" aria-hidden="true"></span>
                                 <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}%{% else %}{{ shift_plan_short_label|default:"нет плана" }}{% endif %}</span>
                                 {% if shift_plan_visual.has_completed_loops %}<b class="driver-work-progress-loop" aria-label="Завершено циклов: {{ shift_plan_visual.completed_loops }}">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
@@ -3959,8 +4030,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                             <circle class="driver-work-over-progress" cx="50" cy="50" r="41" pathLength="100"></circle>
                         </svg>
                         <span class="driver-work-ticks" aria-hidden="true"></span>
-                        <span class="driver-work-hold-bar is-outer" aria-hidden="true"></span>
-                        <span class="driver-work-hold-bar is-core" aria-hidden="true"></span>
+                        <span class="driver-work-hold-ring" aria-hidden="true"><span class="driver-work-hold-half is-right"><i class="driver-work-hold-fill"></i></span><span class="driver-work-hold-half is-left"><i class="driver-work-hold-fill"></i></span></span>
                         <span class="driver-work-wait-halo" aria-hidden="true"></span><span class="driver-work-dial-core"><span class="driver-work-wait-tint" aria-hidden="true"></span>
                             <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}%{% else %}{{ shift_plan_short_label|default:"нет плана" }}{% endif %}</span>
                             {% if shift_plan_visual.has_completed_loops %}<b class="driver-work-progress-loop" aria-label="Завершено циклов: {{ shift_plan_visual.completed_loops }}">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
@@ -7955,7 +8025,9 @@ window.bindDriverMobileShell = function () {
                 delete holdForm.dataset.holdComplete;
                 holdButton.classList.remove("is-holding", "is-pending");
                 holdButton.classList.add("is-loaded");
-                if (dialLabel && readyDialLabel) {
+                // После обычного отпускания подпись и так исходная — подгонка текста
+                // (замеры ширины в цикле) на слабом телефоне стоила заметного кадра.
+                if (dialLabel && readyDialLabel && (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " ")) !== readyDialLabel) {
                     renderDriverDialLabel(dialLabel, readyDialLabel);
                     scheduleDriverDialLabelFit();
                 }

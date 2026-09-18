@@ -455,19 +455,19 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v266')
+        self.assertContains(response, 'driver-mobile-shell-v267')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(
             response,
-            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v266',
+            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v267',
         )
         self.assertContains(
             response,
-            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v266',
+            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v267',
         )
         self.assertContains(
             response,
-            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v266',
+            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v267',
         )
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertContains(response, 'playDriverSound("truck_assigned")')
@@ -561,9 +561,14 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'repeating-conic-gradient(from -0.35deg')
         self.assertContains(response, 'stroke-linecap: round')
         self.assertContains(response, 'class="driver-work-over-progress"')
-        self.assertContains(response, 'class="driver-work-hold-bar is-core"')
-        self.assertContains(response, 'class="driver-work-hold-bar is-outer"')
-        self.assertContains(response, '.driver-work-hold-bar {')
+        # Кольцо удержания: две половины-окна с полукольцами, которые только поворачиваются.
+        self.assertContains(response, 'class="driver-work-hold-ring"')
+        self.assertContains(response, 'class="driver-work-hold-half is-right"')
+        self.assertContains(response, 'class="driver-work-hold-half is-left"')
+        self.assertContains(response, '.driver-work-hold-ring {')
+        self.assertContains(response, '@keyframes driver-hold-right')
+        self.assertNotContains(response, 'driver-work-hold-bar')
+        self.assertNotContains(response, '--driver-hold-color')
         self.assertNotContains(response, 'var(--driver-hold-angle)')
         self.assertNotContains(response, 'driver-work-hold-progress')
         self.assertNotContains(response, 'class="driver-work-hold-svg"')
@@ -687,7 +692,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v266', script)
+        self.assertIn('driver-mobile-shell-v267', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3583,7 +3588,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v266')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v267')
 
     def test_driver_quick_reasons_render_stars_and_drum_subset(self):
         self.create_registered_driver_shift()
