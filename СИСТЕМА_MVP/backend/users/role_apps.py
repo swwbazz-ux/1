@@ -219,7 +219,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v231',
+        shell_version='driver-mobile-shell-v235',
     ),
     RoleApp(
         role_code='excavator_operator',

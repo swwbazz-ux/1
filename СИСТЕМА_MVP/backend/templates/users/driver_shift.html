@@ -2052,6 +2052,7 @@ body.driver-mobile-screen .driver-downtime-list {
 
 body.driver-mobile-screen .driver-downtime-list form {
     min-width: 0;
+    position: relative;
 }
 
 body.driver-mobile-screen .driver-downtime-list button {
@@ -2117,7 +2118,7 @@ body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active {
 body.driver-mobile-screen .driver-downtime-title-row {
     grid-row: 1;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
     gap: 10px;
 }
@@ -4612,6 +4613,7 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
     <section class="driver-panel driver-tab {% if active_tab == 'downtimes' %}is-active{% endif %}" data-driver-tab-panel="downtimes" data-driver-downtime-url="{% url 'driver_downtime_action' %}">
         <div class="driver-downtime-title-row">
             <h2>Простои</h2>
+            <span class="driver-downtime-drum-count" data-driver-drum-count aria-live="polite" title="Звёздочка на причине добавляет её в барабан на экране «Работа»"></span>
             <button class="driver-downtime-refresh" type="button" aria-label="Обновить" data-driver-downtime-refresh>↻</button>
         </div>
         <div class="driver-downtime-card status-{{ active_downtime_status_key }}{% if active_downtime %} is-active{% endif %}" data-driver-active-downtime-id="{% if active_downtime %}{{ active_downtime.id }}{% endif %}" data-driver-active-reason-id="{% if active_downtime %}{{ active_downtime.reason_id }}{% endif %}" data-driver-active-downtime-flow="{{ active_downtime_flow }}" data-driver-active-started-at="{{ active_downtime_started_at }}" data-driver-active-elapsed-seconds="{{ active_downtime_elapsed_seconds }}" data-driver-shift-downtime-seconds="{{ shift_downtime_total_seconds }}" data-driver-downtime-calculated-at="{{ downtime_calculated_at }}" role="status" aria-label="{% if active_downtime %}Простой активен{% else %}Простои за смену: {{ shift_downtime_total_label }}{% endif %}">
@@ -4630,6 +4632,8 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                         <span class="driver-downtime-reason-label" data-driver-reason-label>{{ reason.button_label }}</span>
                         <span class="driver-downtime-reason-duration" data-driver-reason-duration{% if not reason.driver_is_used %} hidden{% endif %}>{{ reason.driver_total_label }}</span>
                     </button>
+                    {% comment %} Звёздочка: причина в барабане быстрого доступа на экране «Работа». {% endcomment %}
+                    <button class="driver-reason-star{% if reason.driver_in_drum %} is-on{% endif %}" type="button" data-driver-reason-star data-driver-reason-star-id="{{ reason.id }}" aria-pressed="{% if reason.driver_in_drum %}true{% else %}false{% endif %}" aria-label="{{ reason.button_label }}: {% if reason.driver_in_drum %}убрать из барабана{% else %}добавить в барабан{% endif %}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2.6l2.9 6.1 6.7.8-4.9 4.6 1.3 6.6L12 17.4l-6 3.3 1.3-6.6L2.4 9.5l6.7-.8z" /></svg></button>
                 </form>
             {% empty %}
                 <div class="driver-inline-note">Активные причины простоев для самосвалов не найдены.</div>

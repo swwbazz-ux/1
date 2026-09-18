@@ -48,6 +48,7 @@ from .views import (
     app_choose_view,
     driver_accept_assignment_view,
     driver_downtime_action_view,
+    driver_quick_reasons_view,
     driver_close_shift_view,
     driver_manifest_view,
     driver_registration_view,
@@ -128,6 +129,7 @@ urlpatterns = [
     path('driver/shift/', driver_shift_view, name='driver_shift'),
     path('driver/shift/close/', driver_close_shift_view, name='driver_close_shift'),
     path('driver/downtime/', driver_downtime_action_view, name='driver_downtime_action'),
+    path('driver/quick-reasons/', driver_quick_reasons_view, name='driver_quick_reasons'),
     path('driver/assignment/<int:assignment_id>/accept/', driver_accept_assignment_view, name='driver_accept_assignment'),
     path('system-admin/', system_admin_dashboard_view, name='system_admin_dashboard'),
     path(

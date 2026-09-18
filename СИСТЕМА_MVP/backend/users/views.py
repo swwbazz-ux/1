@@ -278,7 +278,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v231'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v235'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -4759,6 +4759,7 @@ def driver_shift_view(request):
     downtime_reasons = list(
         DowntimeReason.for_workplace('truck_driver', downtime_equipment_type)
     )
+    driver_quick_reason_ids = driver_quick_reason_ids_for(access, downtime_reasons)
     downtime_calculated_at = timezone.now()
     downtime_reason_totals = driver_shift_downtime_seconds_by_reason(
         open_shift.equipment if open_shift else current_truck,
@@ -4766,6 +4767,7 @@ def driver_shift_view(request):
         until=downtime_calculated_at,
     )
     for reason in downtime_reasons:
+        reason.driver_in_drum = (not driver_quick_reason_ids) or reason.id in driver_quick_reason_ids
         reason.driver_workflow = driver_downtime_flow(reason)
         reason.driver_requires_loaded_trip = driver_downtime_requires_loaded_trip(reason)
         reason.driver_requires_empty_truck = driver_downtime_requires_empty_truck(reason)
@@ -4908,6 +4910,12 @@ def driver_shift_view(request):
             'shift_downtime_report_total_label': shift_downtime_report_total_label,
             'active_downtime_status_key': active_downtime_status_key,
             'downtime_reasons': downtime_reasons,
+            'driver_quick_reason_ids': driver_quick_reason_ids,
+            'driver_quick_reasons_min': DRIVER_QUICK_REASONS_MIN,
+            'driver_quick_reasons_updated_at': (
+                access.driver_quick_reasons_updated_at.isoformat()
+                if access.driver_quick_reasons_updated_at else ''
+            ),
             'shift_trips': shift_trips,
             'shift_trip_count': shift_trip_count,
             'driver_shift_report_trip_rows': driver_shift_report_trip_rows,
@@ -5239,6 +5247,71 @@ def driver_close_shift_view(request):
     request.GET = request.GET.copy()
     request.GET['tab'] = 'shift'
     return driver_shift_view(request)
+
+
+DRIVER_QUICK_REASONS_MIN = 3
+
+
+def driver_quick_reason_ids_for(access, reasons):
+    """Личный набор причин для барабана: только существующие для этого водителя,
+    без дублей, в порядке справочника. Короче минимума — считается незаданным."""
+    available = [reason.id for reason in reasons]
+    raw = access.driver_quick_reasons if isinstance(access.driver_quick_reasons, list) else []
+    chosen = set()
+    for value in raw:
+        try:
+            chosen.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    ids = [reason_id for reason_id in available if reason_id in chosen]
+    if len(ids) < DRIVER_QUICK_REASONS_MIN:
+        return []
+    return ids
+
+
+@require_POST
+def driver_quick_reasons_view(request):
+    """Сохранить личный набор причин простоя для барабана водителя."""
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану водителя.'}, status=403)
+    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    if not access or access.role.code != 'driver':
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану водителя.'}, status=403)
+    payload = driver_json_payload(request)
+    raw_ids = payload.get('reason_ids') if isinstance(payload, dict) else None
+    if raw_ids is None and hasattr(payload, 'getlist'):
+        raw_ids = payload.getlist('reason_ids')
+    if isinstance(raw_ids, str):
+        raw_ids = [part for part in raw_ids.split(',') if part.strip()]
+    if not isinstance(raw_ids, (list, tuple)):
+        raw_ids = []
+    available = list(DowntimeReason.for_workplace('truck_driver'))
+    available_ids = {reason.id for reason in available}
+    chosen = set()
+    for value in raw_ids:
+        try:
+            reason_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if reason_id in available_ids:
+            chosen.add(reason_id)
+    ids = [reason.id for reason in available if reason.id in chosen]
+    if ids and len(ids) < DRIVER_QUICK_REASONS_MIN:
+        return JsonResponse({
+            'ok': False,
+            'error': f'В барабане должно быть не меньше {DRIVER_QUICK_REASONS_MIN} причин.',
+            'min': DRIVER_QUICK_REASONS_MIN,
+        }, status=422)
+    access.driver_quick_reasons = ids
+    access.driver_quick_reasons_updated_at = timezone.now()
+    access.save(update_fields=['driver_quick_reasons', 'driver_quick_reasons_updated_at'])
+    return JsonResponse({
+        'ok': True,
+        'reason_ids': ids,
+        'updated_at': access.driver_quick_reasons_updated_at.isoformat(),
+        'min': DRIVER_QUICK_REASONS_MIN,
+    })
 
 
 @transaction.atomic

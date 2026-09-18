@@ -20,6 +20,7 @@
     var DROP_MAX = 64;
     var STRIPS = 9;        // полосок в грани карточки
     var SLATS = 72;        // пластин в стенке цилиндра (по 5 градусов)
+    var MIN_FACES = 12;    // барабан всегда полноразмерный, как минимум на 12 граней
     var TILT = -20;        // наклон барабана от зрителя, градусов: видны крышка и ободья
     var doc = root.document;
 
@@ -27,7 +28,10 @@
     function all(sel, base) { return Array.prototype.slice.call((base || doc).querySelectorAll(sel)); }
     function drum() { return q("[data-driver-downtime-drum]"); }
     function cylinder() { return q("[data-driver-drum-track]"); }
-    function cards() { var c = cylinder(); return c ? all("[data-driver-drum-card]", c) : []; }
+    // Грани барабана: выбранные причины и их копии по кругу (см. build). Оригиналы —
+    // по одному на причину, из них считается набор быстрого доступа.
+    function cards() { var c = cylinder(); return c ? all("[data-driver-drum-card]:not([hidden])", c) : []; }
+    function allCards() { var c = cylinder(); return c ? all("[data-driver-drum-card]:not([data-driver-drum-clone])", c) : []; }
     function dial() { return q(".driver-work-dial"); }
     function stateCard() { return q("[data-driver-active-downtime-id]"); }
     function activeReasonId() {
@@ -36,21 +40,41 @@
     }
 
     // --- геометрия цилиндра ---
-    var geo = { n: 0, step: 0, radius: 0, cardW: 0, theta: 0, front: -1, built: null };
+    var geo = { n: 0, step: 0, radius: 0, cardW: 0, theta: 0, front: -1, built: null, full: true, reasons: 0 };
 
     function mod(a, b) { return ((a % b) + b) % b; }
 
     function build() {
         var c = cylinder();
+        if (!c) return false;
+        // Копии от прошлой сборки убираем и собираем кольцо заново из выбранных причин.
+        var selected = all("[data-driver-drum-card]:not([data-driver-drum-clone]):not([hidden])", c);
+        if (geo.built === c && geo.reasons === selected.length && geo.n === cards().length && cards().length) return true;
+        all("[data-driver-drum-card][data-driver-drum-clone]", c).forEach(function (clone) { clone.parentNode.removeChild(clone); });
+        if (!selected.length) return false;
+        // Кольцо всегда полное: если причин меньше MIN_FACES, они повторяются по кругу —
+        // граней столько, чтобы набор уложился целое число раз (нет пустых мест и «швов»).
+        var reasons = selected.length;
+        var faces = reasons;
+        while (faces < MIN_FACES) faces += reasons;
+        for (var f = reasons; f < faces; f++) {
+            var src = selected[f % reasons];
+            var clone = src.cloneNode(true);
+            clone.setAttribute("data-driver-drum-clone", "1");
+            clone.setAttribute("aria-hidden", "true");
+            clone.tabIndex = -1;
+            clone.hidden = false;
+            c.appendChild(clone);
+        }
         var list = cards();
-        if (!c || !list.length) return false;
-        if (geo.built === c && geo.n === list.length) return true;
         var cardW = list[0].offsetWidth || list[0].getBoundingClientRect().width || 150;
         var n = list.length;
-        var step = 360 / Math.max(n, 1);
+        var step = 360 / n;
         // Радиус такой, чтобы соседние грани почти касались: полширины / tg(полшага).
-        var radius = n > 1 ? (cardW / 2) / Math.tan((step / 2) * Math.PI / 180) * 1.04 : 0;
+        var radius = (cardW / 2) / Math.tan((step / 2) * Math.PI / 180) * 1.04;
         geo.n = n; geo.step = step; geo.radius = radius; geo.cardW = cardW; geo.built = c;
+        geo.reasons = reasons;
+        geo.full = true;   // полное кольцо — крутится бесконечно в обе стороны
         var d = drum();
         if (d) {
             d.style.setProperty("--drum-radius", radius.toFixed(1) + "px");
@@ -92,7 +116,16 @@
 
     function frontIndex(theta) {
         if (!geo.n) return -1;
-        return mod(Math.round(-theta / geo.step), geo.n);
+        var index = Math.round(-theta / geo.step);
+        if (geo.full) return mod(index, geo.n);
+        return Math.max(0, Math.min(geo.n - 1, index));
+    }
+
+    // Неполное кольцо: поворот ограничен первой и последней гранью (с небольшим упором).
+    function clampTheta(theta, slack) {
+        if (geo.full) return theta;
+        var lo = -(geo.n - 1) * geo.step - (slack || 0), hi = (slack || 0);
+        return Math.max(lo, Math.min(hi, theta));
     }
 
     var lastFront = -1;
@@ -184,13 +217,15 @@
     function nearestTheta(index) {
         // Ближайший по кругу поворот, при котором грань index окажется спереди.
         var target = -index * geo.step;
+        if (!geo.full) return target;
         var k = Math.round((geo.theta - target) / 360);
         return target + k * 360;
     }
 
     function rotateTo(index, animate) {
         if (!geo.n) return;
-        geo.theta = nearestTheta(mod(index, geo.n));
+        var target = geo.full ? mod(index, geo.n) : Math.max(0, Math.min(geo.n - 1, index));
+        geo.theta = nearestTheta(target);
         render(animate);
     }
 
@@ -199,14 +234,42 @@
     }
 
     // --- синхронизация с вкладкой «Простои» ---
+    var rebuilding = false;
+
+    function rebuildDrum(keepReasonId) {
+        // Пересобрать цилиндр после смены набора граней; переднюю грань по возможности сохранить.
+        if (rebuilding) return;
+        rebuilding = true;
+        try {
+            geo.built = null; slot = null; lastFront = -1;
+            if (!build()) return;
+            var index = 0, found = false;
+            cards().forEach(function (card, i) { if (!found && keepReasonId && card.dataset.driverDrumReasonId === keepReasonId) { index = i; found = true; } });
+            geo.theta = -index * geo.step;
+            render(false);
+        } finally { rebuilding = false; }
+    }
+
     function syncActive() {
         var id = activeReasonId();
         var d = drum(), w = dial();
-        var activeIndex = -1;
+        var activeIndex = -1, activeDist = Infinity;
+        // Простой запущен причиной, которой нет в барабане, — она встаёт в барабан на время простоя.
+        var changed = false;
+        allCards().forEach(function (card) {
+            var isActive = id !== "" && String(card.dataset.driverDrumReasonId) === id;
+            if (isActive && card.hidden) { card.dataset.driverDrumTemp = "1"; card.hidden = false; changed = true; }
+            if (!isActive && card.dataset.driverDrumTemp === "1") { delete card.dataset.driverDrumTemp; card.hidden = card.dataset.driverDrumQuick !== "1"; changed = true; }
+        });
+        if (changed) rebuildDrum(id !== "" ? id : null);
         cards().forEach(function (card, index) {
             var on = id !== "" && String(card.dataset.driverDrumReasonId) === id;
             card.classList.toggle("is-active-downtime", on);
-            if (on) activeIndex = index;
+            if (on && geo.n) {
+                // Причина может стоять на нескольких гранях (копии) — подводим ближайшую.
+                var dist = Math.abs(nearestTheta(index) - geo.theta);
+                if (dist < activeDist) { activeDist = dist; activeIndex = index; }
+            }
         });
         if (d) {
             d.classList.toggle("is-active", id !== "");
@@ -365,7 +428,7 @@
         }
         if (drag.mode === "spin") {
             // Ширина одной грани под пальцем = один шаг барабана.
-            geo.theta = drag.theta0 + dx * (geo.step / Math.max(geo.cardW, 1));
+            geo.theta = clampTheta(drag.theta0 + dx * (geo.step / Math.max(geo.cardW, 1)), geo.step * 0.35);
             var dt = Math.max(1, event.timeStamp - drag.lastT);
             drag.vx = 0.8 * drag.vx + 0.2 * ((event.clientX - drag.lastX) / dt);
             drag.lastX = event.clientX; drag.lastT = event.timeStamp;
@@ -401,7 +464,8 @@
         v = Math.max(-geo.step * 0.9, Math.min(geo.step * 0.9, v));
         function tick() {
             v *= 0.88;
-            geo.theta += v;
+            geo.theta = clampTheta(geo.theta + v, geo.step * 0.2);
+            if (!geo.full && (geo.theta >= 0 || geo.theta <= -(geo.n - 1) * geo.step)) v *= 0.5; // упор
             render(false);
             if (Math.abs(v) > 0.15) { inertia = root.requestAnimationFrame(tick); return; }
             inertia = 0;
@@ -453,6 +517,107 @@
         event.preventDefault();
         rotateTo(frontIndex(geo.theta) + (delta > 0 ? 1 : -1), true);
     }, { passive: false, capture: true });
+
+    // --- быстрый доступ: какие причины крутятся в барабане ---
+    function quickMin() { var d = drum(); return Math.max(1, Number(d && d.dataset.driverQuickMin) || 3); }
+    function quickStorageKey() { var shell = q("[data-driver-shell]"); return "driver-quick-reasons:" + (shell ? shell.dataset.driverAccessId : "x"); }
+    function readLocalQuick() { try { var raw = root.localStorage.getItem(quickStorageKey()); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }
+    function writeLocalQuick(ids, updatedAt) { try { root.localStorage.setItem(quickStorageKey(), JSON.stringify({ ids: ids, updated_at: updatedAt })); } catch (e) {} }
+    function reasonOrder() { return allCards().map(function (c) { return String(c.dataset.driverDrumReasonId); }); }
+    function currentQuickIds() { return allCards().filter(function (c) { return c.dataset.driverDrumQuick === "1"; }).map(function (c) { return String(c.dataset.driverDrumReasonId); }); }
+
+    function toast(message) {
+        if (typeof root.showDriverToast === "function") { root.showDriverToast(message); return; }
+        var el = q("[data-driver-toast]");
+        if (!el) return;
+        el.textContent = message; el.hidden = false;
+        root.clearTimeout(el.__drumToast);
+        el.__drumToast = root.setTimeout(function () { el.hidden = true; }, 2600);
+    }
+
+    function updateCount() {
+        var el = q("[data-driver-drum-count]");
+        if (!el) return;
+        var total = allCards().length, on = currentQuickIds().length;
+        el.textContent = total ? ("В барабане " + on + " из " + total) : "";
+    }
+
+    function applyQuick(ids, rebuild) {
+        var min = quickMin();
+        var useAll = !ids || ids.length < min;
+        var frontId = (function () { var c = centerCard(); return c ? String(c.dataset.driverDrumReasonId) : null; })();
+        allCards().forEach(function (card) {
+            var rid = String(card.dataset.driverDrumReasonId);
+            var on = useAll || ids.indexOf(rid) !== -1;
+            card.dataset.driverDrumQuick = on ? "1" : "0";
+            card.hidden = !on && card.dataset.driverDrumTemp !== "1";
+        });
+        all("[data-driver-reason-star]").forEach(function (star) {
+            var on = useAll || ids.indexOf(String(star.dataset.driverReasonStarId)) !== -1;
+            star.classList.toggle("is-on", on);
+            star.setAttribute("aria-pressed", on ? "true" : "false");
+        });
+        updateCount();
+        if (rebuild) rebuildDrum(frontId);
+    }
+
+    function saveQuick(ids, stamp) {
+        var d = drum();
+        var url = d && d.dataset.driverQuickUrl;
+        if (!url || typeof root.fetch !== "function") return;
+        var csrf = q('meta[name="csrf-token"]');
+        root.fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest", "X-CSRFToken": csrf ? csrf.content : "" },
+            body: JSON.stringify({ reason_ids: ids.map(Number), updated_at: stamp })
+        }).then(function (r) { return r.json(); }).then(function (data) {
+            if (data && data.ok) {
+                writeLocalQuick((data.reason_ids || []).map(String), data.updated_at || stamp);
+            } else if (data && data.error) {
+                toast(data.error);
+            }
+        }).catch(function () { /* без сети: набор сохранён в телефоне, отправим при следующей загрузке */ });
+    }
+
+    doc.addEventListener("click", function (event) {
+        var star = event.target && event.target.closest ? event.target.closest("[data-driver-reason-star]") : null;
+        if (!star) return;
+        event.preventDefault();
+        event.stopPropagation();
+        var min = quickMin();
+        var ids = currentQuickIds();
+        var id = String(star.dataset.driverReasonStarId);
+        var at = ids.indexOf(id);
+        if (at === -1) {
+            ids.push(id);
+        } else {
+            if (ids.length <= min) { toast("В барабане должно быть не меньше " + min + " причин"); haptic([20, 40, 20]); return; }
+            ids.splice(at, 1);
+        }
+        var order = reasonOrder();
+        ids.sort(function (a, b) { return order.indexOf(a) - order.indexOf(b); });
+        var stamp = new Date().toISOString();
+        haptic(10); click(0.8);
+        applyQuick(ids, true);
+        writeLocalQuick(ids, stamp);
+        saveQuick(ids, stamp);
+    }, true);
+
+    function reconcileQuick() {
+        var d = drum();
+        if (!d) return;
+        var serverStamp = String(d.dataset.driverQuickUpdatedAt || "");
+        var local = readLocalQuick();
+        if (local && Array.isArray(local.ids) && local.updated_at && (!serverStamp || local.updated_at > serverStamp)) {
+            // В телефоне набор новее (меняли без сети) — применяем его и досылаем на сервер.
+            applyQuick(local.ids.map(String), true);
+            saveQuick(local.ids.map(String), local.updated_at);
+        } else {
+            writeLocalQuick(currentQuickIds(), serverStamp);
+        }
+        updateCount();
+    }
 
     // --- контур: круг циферблата + горлышко к передней грани ---
     function c_snapping() {
@@ -548,6 +713,7 @@
         if (!drum()) return;
         if (!build()) return;
         syncTotals();
+        reconcileQuick();
         syncActive();
         observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-reason-id", "data-driver-active-downtime-id", "hidden"] });
         root.addEventListener("resize", function () { geo.built = null; slot = null; build(); render(false); });

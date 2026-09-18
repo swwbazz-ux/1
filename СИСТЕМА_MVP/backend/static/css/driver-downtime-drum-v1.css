@@ -290,6 +290,66 @@ body.driver-mobile-screen .driver-downtime-drum.is-active .driver-downtime-drum-
     color: #b9a25a;
 }
 
+/* Звёздочка на причине (вкладка «Простои»): причина в барабане быстрого доступа.
+   Без кружка: жёлтая заполненная — в барабане, серый контур — нет. Зона нажатия 28px,
+   сама звезда 14px. Селектор с .driver-downtime-list перебивает общее правило кнопок списка. */
+body.driver-mobile-screen .driver-downtime-list .driver-reason-star,
+body.driver-mobile-screen .driver-reason-star {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    width: 28px;
+    height: 28px;
+    min-height: 0;
+    aspect-ratio: auto;
+    display: grid;
+    place-items: center;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: rgba(150, 166, 172, .75);
+    z-index: 2;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: color .15s ease, filter .15s ease;
+}
+
+body.driver-mobile-screen .driver-reason-star svg {
+    display: block;
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linejoin: round;
+}
+
+body.driver-mobile-screen .driver-reason-star.is-on {
+    color: var(--driver-yellow);
+    filter: drop-shadow(0 0 4px rgba(255, 209, 42, .55));
+}
+
+body.driver-mobile-screen .driver-reason-star.is-on svg {
+    fill: currentColor;
+}
+
+/* Место под звёздочку: длинные названия переносятся раньше и не заходят под неё. */
+body.driver-mobile-screen .driver-downtime-list .driver-downtime-hold {
+    padding-left: 22px !important;
+    padding-right: 22px !important;
+}
+
+body.driver-mobile-screen .driver-downtime-drum-count {
+    color: #8fa0a6;
+    font-size: 12px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
 /* Барабан зафиксирован на время простоя: боковые грани почти гаснут. */
 body.driver-mobile-screen .driver-downtime-drum.is-locked .driver-drum-card:not(.is-center) .driver-drum-card-face i {
     filter: brightness(calc(var(--b) * var(--drum-fade) * .45));

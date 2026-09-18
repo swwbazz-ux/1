@@ -36,3 +36,6 @@
 СИСТЕМА_MVP/backend/templates/includes/driver_downtime_drum.html
 СИСТЕМА_MVP/backend/static/css/driver-downtime-drum-v1.css
 СИСТЕМА_MVP/backend/static/js/driver-downtime-drum-v1.js
+СИСТЕМА_MVP/backend/users/models.py
+СИСТЕМА_MVP/backend/users/urls.py
+СИСТЕМА_MVP/backend/users/migrations/0025_employeeaccess_driver_quick_reasons.py
