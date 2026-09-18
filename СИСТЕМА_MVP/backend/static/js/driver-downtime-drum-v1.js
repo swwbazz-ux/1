@@ -387,7 +387,7 @@
         var r = d.width * .4975;
         var n = Math.min(c.width * .3, r * .7);  // полуширина горлышка
         var yN = cy + Math.sqrt(Math.max(0, r * r - n * n));
-        var pad = 7, rr = 26, f = 12;
+        var pad = 7, rr = 26, f = 0; // f = 0: горлышко входит в рамку прямыми линиями, без скруглений
         var x0 = c.left - box.left - pad, x1 = c.right - box.left + pad;
         var y0 = c.top - box.top - pad, y1 = c.bottom - box.top + pad;
         function p(v) { return Number(v).toFixed(1); }
@@ -404,8 +404,7 @@
         var dd = [
             "M", p(cx - n), p(yN),
             "A", p(r), p(r), "0 1 1", p(cx + n), p(yN),
-            "L", p(cx + n), p(y0 - f),
-            "Q", p(cx + n), p(y0), p(cx + n + f), p(y0),
+            "L", p(cx + n), p(y0),
             "L", p(x1 - rr), p(y0),
             "Q", p(x1), p(y0), p(x1), p(y0 + rr),
             "L", p(x1), p(y1 - rr),
@@ -414,8 +413,7 @@
             "Q", p(x0), p(y1), p(x0), p(y1 - rr),
             "L", p(x0), p(y0 + rr),
             "Q", p(x0), p(y0), p(x0 + rr), p(y0),
-            "L", p(cx - n - f), p(y0),
-            "Q", p(cx - n), p(y0), p(cx - n), p(y0 - f),
+            "L", p(cx - n), p(y0),
             "Z"
         ].join(" ");
         path.setAttribute("d", dd);
