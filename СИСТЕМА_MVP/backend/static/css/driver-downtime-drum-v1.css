@@ -42,8 +42,21 @@ body.driver-mobile-screen .driver-downtime-drum-stage {
 }
 
 /* Пока грань поднимают на круг, окно сцены открыто вверх: грань уезжает выше барабана. */
+body.driver-mobile-screen .driver-downtime-drum.is-lifting {
+    z-index: 11;
+}
+
 body.driver-mobile-screen .driver-downtime-drum.is-lifting .driver-downtime-drum-stage {
     overflow: visible;
+    /* Маска по умолчанию режет всё по рамке сцены (mask-clip: border-box) — на время подъёма
+       снимаем и это ограничение, иначе грань исчезает, выйдя за рамку. */
+    -webkit-mask-clip: no-clip;
+    mask-clip: no-clip;
+}
+
+/* Без обрезки по рамке стала бы видна задняя половина крышки над барабаном — прячем крышки на время подъёма. */
+body.driver-mobile-screen .driver-downtime-drum.is-lifting .driver-drum-cap {
+    visibility: hidden;
 }
 
 /* Стенка цилиндра: узкие пластины по окружности, яркость каждой считает скрипт (--b) от угла к зрителю. */
@@ -147,7 +160,11 @@ body.driver-mobile-screen .driver-drum-card {
     touch-action: none;
     transform-style: preserve-3d;
     backface-visibility: hidden;
-    transform: rotateY(var(--card-angle)) translateZ(var(--drum-radius)) translateY(var(--drum-lift));
+    --lift-y: 0px;
+    --lift-z: 0px;
+    /* Подъём идёт строго вверх по экрану: скрипт раскладывает его на оси наклонённого барабана,
+       поэтому грань не меняет ни наклон, ни перспективу — только положение. */
+    transform: rotateY(var(--card-angle)) translateZ(var(--drum-radius)) translate3d(0, var(--lift-y), var(--lift-z));
     /* Никакой прозрачности и фильтров на самой карточке: они сплющивают её 3D-полоски
        в плоскость, и грань перестаёт лежать на цилиндре. Гасим полоски и текст по отдельности. */
     transition: color .18s ease;
@@ -247,10 +264,16 @@ body.driver-mobile-screen .driver-drum-card-body {
 }
 
 body.driver-mobile-screen .driver-drum-card-total {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: .04em;
-    opacity: .75;
+    margin-top: 2px;
+    font-size: clamp(15px, 4.4vw, 19px);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .03em;
+    color: #d9e4e7;
+}
+
+body.driver-mobile-screen .driver-drum-card.is-center .driver-drum-card-total {
+    color: #fff3b0;
 }
 
 body.driver-mobile-screen .driver-downtime-drum-hint {

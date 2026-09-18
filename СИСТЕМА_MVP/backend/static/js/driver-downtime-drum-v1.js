@@ -230,11 +230,13 @@
     function resetLift(card) {
         card.classList.remove("is-lifting", "is-armed");
         card.classList.add("is-settling");
-        card.style.setProperty("--drum-lift", "0px");
+        card.style.setProperty("--lift-y", "0px");
+        card.style.setProperty("--lift-z", "0px");
         root.setTimeout(function () {
             card.classList.remove("is-settling");
             var d = drum();
             if (d) d.classList.remove("is-lifting");
+            drawLink();
         }, 260);
         var w = dial();
         if (w) w.classList.remove("is-drum-lifting");
@@ -293,7 +295,10 @@
         } else {
             var lift = Math.max(-liftMax, Math.min(0, dy));
             var armed = -dy >= LIFT_ARM;
-            drag.card.style.setProperty("--drum-lift", lift + "px");
+            // Вектор «вверх по экрану» в осях барабана, наклонённого на TILT градусов.
+            var tilt = TILT * Math.PI / 180;
+            drag.card.style.setProperty("--lift-y", (lift * Math.cos(tilt)).toFixed(1) + "px");
+            drag.card.style.setProperty("--lift-z", (-lift * Math.sin(tilt)).toFixed(1) + "px");
             drag.card.classList.toggle("is-armed", armed);
             var w = dial();
             if (w) w.classList.toggle("is-drum-lifting", armed);
@@ -363,6 +368,8 @@
         while (screen && !screen.classList.contains("driver-work-screen")) screen = screen.parentElement;
         if (!svg || !path || !w || !card || !screen) return;
         if (c_snapping()) return;
+        // Пока грань поднимают на круг, её прямоугольник не годится для контура — оставляем прежний.
+        if (card.classList.contains("is-lifting") || (drag && drag.mode === "lift")) return;
         var box = screen.getBoundingClientRect();
         var d = w.getBoundingClientRect();
         var c = card.getBoundingClientRect();
