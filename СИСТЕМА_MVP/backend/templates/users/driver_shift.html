@@ -8051,14 +8051,44 @@ window.bindDriverMobileShell = function () {
             });
             return true;
         }
+        /* Кольцо удержания набирается секциями между делениями (12 штук за holdMs).
+           Каждая секция — короткий отклик, заполненное кольцо — длинный. Отклики идут
+           по таймеру, а не по кадрам: ни одного лишнего пересчёта во время удержания.
+           Если в системных настройках телефона выключен виброотклик при касании,
+           Android глушит эти вызовы (в dumpsys они видны со scale 0). */
+        var HOLD_SEGMENTS = 12;
+        var holdSegmentTimer = null;
+        function driverVibrate(pattern) {
+            if (!window.navigator || typeof window.navigator.vibrate !== "function") return;
+            try { window.navigator.vibrate(pattern); } catch (error) {}
+        }
+        function stopHoldSegmentFeedback() {
+            if (holdSegmentTimer !== null) {
+                window.clearInterval(holdSegmentTimer);
+                holdSegmentTimer = null;
+            }
+        }
+        function startHoldSegmentFeedback(totalMs) {
+            stopHoldSegmentFeedback();
+            var fired = 0;
+            holdSegmentTimer = window.setInterval(function () {
+                fired += 1;
+                // Последнюю границу не отбиваем: там срабатывает длинный отклик завершения.
+                if (fired >= HOLD_SEGMENTS) { stopHoldSegmentFeedback(); return; }
+                driverVibrate(14);
+            }, totalMs / HOLD_SEGMENTS);
+        }
         unloadHoldGuard = window.createDriverRoleHoldGuard({
             /* Разгрузка повторяется десятки раз за смену: ровно секунда — достаточно,
                чтобы случайное касание не отправило рейс, и не утомляет за смену. */
             holdMs: 1000,
             onStart: function () {
                 holdButton.classList.add("is-holding");
+                startHoldSegmentFeedback(1000);
             },
             onReset: function () {
+                stopHoldSegmentFeedback();
+                driverVibrate(0);
                 delete holdForm.dataset.holdComplete;
                 holdButton.classList.remove("is-holding", "is-pending");
                 holdButton.classList.add("is-loaded");
@@ -8070,6 +8100,8 @@ window.bindDriverMobileShell = function () {
                 }
             },
             onComplete: function () {
+                stopHoldSegmentFeedback();
+                driverVibrate(140);   // кольцо заполнено
                 if (!submitDriverUnloadOnce()) {
                     unloadHoldGuard.cancel();
                 }

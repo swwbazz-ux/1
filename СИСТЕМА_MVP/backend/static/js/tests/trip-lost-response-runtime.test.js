@@ -312,7 +312,7 @@ test("production Driver unload recovery keeps one action id across hold, one-tap
     );
     assert.match(
         template,
-        /onComplete:\s*function\s*\(\)\s*\{\s*if\s*\(!submitDriverUnloadOnce\(\)\)/,
+        /onComplete:\s*function\s*\(\)\s*\{[^}]*if\s*\(!submitDriverUnloadOnce\(\)\)/,
         "The normal hold completion must route through the shared unload submit."
     );
     assert.match(

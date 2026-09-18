@@ -207,7 +207,9 @@
             if (card.__fade !== fade) { card.__fade = fade; card.style.setProperty("--drum-fade", fade); }
         });
         if (front !== lastFront) {
-            if (lastFront !== -1) { haptic(9); click(1); } // щелчок фиксации: вибро + звук
+            // Щелчок фиксации: вибро + звук. 9 мс мотор телефона почти не отрабатывает,
+            // короткий и отчётливый отклик начинается примерно с 18 мс.
+            if (lastFront !== -1) { haptic(18); click(1); }
             lastFront = front;
             geo.front = front;
         }
