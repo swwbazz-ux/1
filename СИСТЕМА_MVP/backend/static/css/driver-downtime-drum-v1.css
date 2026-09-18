@@ -149,8 +149,8 @@ body.driver-mobile-screen .driver-drum-card {
     transform-style: preserve-3d;
     backface-visibility: hidden;
     transform: rotateY(var(--card-angle)) translateZ(var(--drum-radius)) translateY(var(--drum-lift));
-    opacity: var(--drum-fade);
-    /* Сама кнопка — только зона касания; видимая грань — это полоски на стенке цилиндра. */
+    /* Никакой прозрачности и фильтров на самой карточке: они сплющивают её 3D-полоски
+       в плоскость, и грань перестаёт лежать на цилиндре. Гасим полоски и текст по отдельности. */
     transition: color .18s ease;
 }
 
@@ -159,7 +159,7 @@ body.driver-mobile-screen .driver-drum-card.is-back {
 }
 
 body.driver-mobile-screen .driver-drum-card.is-unavailable {
-    filter: saturate(.4) brightness(.7);
+    --drum-unavailable: .6;
 }
 
 body.driver-mobile-screen .driver-drum-card.is-settling {
@@ -199,8 +199,13 @@ body.driver-mobile-screen .driver-drum-card-face i {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), inset 0 -8px 14px rgba(0, 0, 0, .38);
     transform: translateZ(var(--z)) rotateY(var(--a));
     backface-visibility: hidden;
-    filter: brightness(var(--b));
+    /* Освещение по углу к зрителю × затухание боковых граней × недоступность причины. */
+    filter: brightness(calc(var(--b) * var(--drum-fade) * var(--drum-unavailable, 1)));
     transition: border-color .18s ease, filter .18s ease;
+}
+
+body.driver-mobile-screen .driver-drum-card.is-lifting .driver-drum-card-face i {
+    filter: brightness(calc(var(--b) * .35));
 }
 
 body.driver-mobile-screen .driver-drum-card-face i:first-child {
@@ -225,6 +230,7 @@ body.driver-mobile-screen .driver-drum-card.is-center.is-armed .driver-drum-card
 
 body.driver-mobile-screen .driver-drum-card-body {
     position: relative;
+    opacity: calc(.35 + .65 * var(--drum-fade));
     display: grid;
     justify-items: center;
     gap: 4px;
@@ -304,7 +310,7 @@ body.driver-mobile-screen .driver-drum-ghost.is-settling {
     opacity: 0;
 }
 
-body.driver-mobile-screen .driver-drum-card.is-lifting {
+body.driver-mobile-screen .driver-drum-card.is-lifting .driver-drum-card-body {
     opacity: .35;
 }
 
