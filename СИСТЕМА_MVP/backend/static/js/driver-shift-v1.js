@@ -1040,6 +1040,17 @@ window.bindDriverMobileShell = function () {
         var previousPending = Number(window.driverOfflinePendingCount || 0);
         window.driverOfflinePendingCount = pending;
         window.operationalOutboxPendingCount = pending;
+        /* Обновление экрана держит только СВЕЖЕЕ действие, которое ещё ни разу
+           не пытались отправить: пока идёт первая доставка, серверная разметка
+           не должна перекрыть местную проекцию. Запись, у которой уже была
+           неудачная попытка или которой больше 15 с, экран не блокирует —
+           иначе одна застрявшая запись замораживала экран навсегда
+           (боевой случай 20.09.2026: busy=outbox:1 без единого касания). */
+        window.driverOfflineBlockingCount = driverOfflineEvents.filter(function (event) {
+            if (!event || event.state !== "pending" || Number(event.attempt_count || 0) > 0) return false;
+            var occurredAt = Date.parse(event.occurred_at || "");
+            return !occurredAt || Date.now() - occurredAt < 15000;
+        }).length;
         window.dispatchEvent(new CustomEvent("operational-outbox-state", {detail: {
             role: "driver", pendingCount: pending, reviewCount: review
         }}));
@@ -1105,6 +1116,14 @@ window.bindDriverMobileShell = function () {
         }
         setDriverPointSyncState(current, mode || "confirmed");
     }
+
+    /* После подмены разметки с сервера местная проекция неотправленных действий
+       обязана лечь поверх заново — иначе снятая с сервера разметка вернула бы
+       на круг рейс, разгрузку которого телефон ещё не доставил. */
+    window.addEventListener("operational-state-refresh-applied", function () {
+        var current = document.querySelector("[data-driver-shell]");
+        if (current && driverOfflineEvents.length) applyDriverOfflineProjection(current, driverOfflineEvents);
+    });
 
     function applyDriverOfflineProjection(current, events) {
         if (!current) return;
