@@ -26,3 +26,12 @@ test("driver sets the flag before the realtime client reads it", () => {
     const client = read("static/js/realtime-client.js");
     assert.match(client, /visibilityOnlyActivity = document\.body\.dataset\.realtimeVisibilityOnly === "true"/);
 });
+
+test("driver template has no multi-line {# #} comments — Django renders those as visible text", () => {
+    /* 20.09.2026: пояснение к признаку было оформлено многострочным {# … #},
+       и Django вывел его на экран водителя как обычный текст. */
+    const driver = read("templates/users/driver_shift.html");
+    for (const match of driver.matchAll(/\{#([\s\S]*?)#\}/g)) {
+        assert.ok(!match[1].includes("\n"), `многострочный комментарий: ${match[1].slice(0, 60)}…`);
+    }
+});
