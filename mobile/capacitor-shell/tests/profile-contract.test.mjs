@@ -6,6 +6,24 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const backendRoot = resolve(root, "..", "..", "СИСТЕМА_MVP", "backend");
+
+// Разметка, стили и код экрана водителя разложены по отдельным файлам —
+// собираем тот же набор, что и СИСТЕМА_MVP/backend/static/js/tests/driver-screen-source.js,
+// чтобы регулярки видели код независимо от того, в каком из файлов он сейчас лежит.
+function driverScreenSource() {
+  return [
+    resolve(backendRoot, "templates", "users", "driver_shift.html"),
+    resolve(backendRoot, "static", "js", "driver-shift-fragment-v1.js"),
+    resolve(backendRoot, "static", "js", "driver-shift-gestures-v1.js"),
+    resolve(backendRoot, "static", "js", "driver-shift-voice-v1.js"),
+    resolve(backendRoot, "static", "js", "driver-shift-refresh-v1.js"),
+    resolve(backendRoot, "static", "js", "driver-shift-close-v1.js"),
+    resolve(backendRoot, "static", "js", "driver-shift-v1.js"),
+  ]
+    .map((file) => readFileSync(file, "utf8"))
+    .join("\n");
+}
 
 function profile(name) {
   return Object.fromEntries(
@@ -484,7 +502,7 @@ test("recorded equipment numbers are packaged and routed through native sequence
   const announcer = readFileSync(resolve(javaRoot, "OperationalVoiceAnnouncer.java"), "utf8");
   const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
   const sounds = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "static", "js", "mobile-operational-sounds-v1.js"), "utf8");
-  const driverTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "users", "driver_shift.html"), "utf8");
+  const driverTemplate = driverScreenSource();
   const excavatorTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "trips", "excavator_work.html"), "utf8");
 
   assert.match(plugin, /public void announceEquipment\(PluginCall call\)/);
@@ -529,7 +547,7 @@ test("foreground driver screen uses the same deduplicated recorded voice bridge"
   const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
   const player = readFileSync(resolve(javaRoot, "DriverVoicePlayer.java"), "utf8");
   const sounds = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "static", "js", "mobile-operational-sounds-v1.js"), "utf8");
-  const driverTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "users", "driver_shift.html"), "utf8");
+  const driverTemplate = driverScreenSource();
 
   assert.match(plugin, /@PluginMethod\s+public void announceDumpPoint\(PluginCall call\)/);
   assert.match(plugin, /call\.getData\(\)\.opt\(name\)/);
