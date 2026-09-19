@@ -61,8 +61,14 @@ def _resolve_free_bucket_acceptance(access, normalized):
     acceptance_filter = Q(client_acceptance_id=reference)
     if reference.isdigit():
         acceptance_filter |= Q(pk=int(reference))
+    # Блокируем только саму строку приёма: связи loading_shift, primary_assignment,
+    # requested_by, requesting_shift необязательны, и PostgreSQL отвергает
+    # FOR UPDATE поверх их внешнего соединения («FOR UPDATE cannot be applied to
+    # the nullable side of an outer join»). На SQLite select_for_update — пустышка,
+    # поэтому локально ошибка не воспроизводилась; на бою она 5 часов держала
+    # отмену свободного ковша в очереди телефона (20.09.2026).
     acceptance = (
-        FreeBucketAcceptance.objects.select_for_update()
+        FreeBucketAcceptance.objects.select_for_update(of=('self',))
         .select_related(
             'truck', 'excavator', 'loading_shift', 'primary_assignment',
             'requested_by', 'requesting_shift',
@@ -88,7 +94,7 @@ def _resolve_free_bucket_acceptance(access, normalized):
         )
         acceptance_id = (source.result_payload or {}).get('server_ids', {}).get('free_bucket_acceptance_id') if source else None
         acceptance = (
-            FreeBucketAcceptance.objects.select_for_update()
+            FreeBucketAcceptance.objects.select_for_update(of=('self',))
             .select_related(
                 'truck', 'excavator', 'loading_shift', 'primary_assignment',
                 'requested_by', 'requesting_shift',

@@ -57,8 +57,20 @@ window.applyOperationalStateRefresh = function (context) {
             var freshShellVersion = String(freshShellMark.dataset.driverFragmentShell || "");
             freshShellMark.parentNode.removeChild(freshShellMark);
             if (loadedShellVersion && freshShellVersion && loadedShellVersion !== freshShellVersion) {
-                window.location.reload();
-                return {deferred: true, reason: "driver_shell_outdated"};
+                /* Пока сервер перезапускается после выкладки, страница по сети ещё
+                   старая: перезагрузка на каждый фрагмент давала шторм перезагрузок
+                   раз в секунду, а сама разметка (погрузка!) при этом выбрасывалась —
+                   экран слеп на всё окно перезапуска (боевой замер 20.09.2026: 14 с).
+                   Теперь свежую разметку применяем как обычно, а перезагрузку просим
+                   не чаще раза в 30 с: обновлённые стили и скрипты подъедут со
+                   следующей загрузкой страницы, разметка между версиями совместима. */
+                var reloadKey = "driver-shell-outdated-reload-at";
+                var lastReloadAt = 0;
+                try { lastReloadAt = Number(window.sessionStorage.getItem(reloadKey) || 0); } catch (error) {}
+                if (!lastReloadAt || Date.now() - lastReloadAt > 30000) {
+                    try { window.sessionStorage.setItem(reloadKey, String(Date.now())); } catch (error) {}
+                    window.setTimeout(function () { window.location.reload(); }, 1500);
+                }
             }
         }
         /* Сервер прислал тот же экран (или он отличается только нашим же простоем, который
