@@ -116,6 +116,28 @@ test("newer confirmed inactive server snapshot clears saved selection", () => {
     assert.equal(installed.active, false);
 });
 
+test("rejected local attempt never outlives a fresh inactive server snapshot, even if it looks newer", () => {
+    // Живой случай: телефон сохранил выбор, сервер его отклонил (sync_mode
+    // "review"), и с тех пор ни разу не было confirmed-снимка НОВЕЕ этой
+    // отклонённой попытки — сервер стабильно отдаёт то же старое "ничего не
+    // активно". Раньше это застревало навсегда: ни выбрать другой экскаватор
+    // (select() не пускает, пока state.active), ни отменить то, чего сервер
+    // не подтверждает. "review" значит "сервер уже отказал" — этого одного
+    // достаточно, чтобы больше не доверять локальной копии, независимо от
+    // version/generated_at.
+    const installed = resolveInstalledState(
+        {active: false, version: 12, generated_at: "2026-09-14T03:00:00Z"},
+        {
+            active: true,
+            version: 12,
+            generated_at: "2026-09-14T03:01:00Z",
+            sync_mode: "review",
+            selection: item(),
+        },
+    );
+    assert.equal(installed.active, false);
+});
+
 test("cached HTML catalog is marked stale while the device is offline", () => {
     const localStorage = storage();
     const controller = createDriverFreeBucketController({
