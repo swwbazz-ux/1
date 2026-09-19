@@ -28,6 +28,13 @@
 {% endblock %}
 
 {% block body %}
+{# Внутри Android-приложения WebView не держит DOM-фокус: заставка при старте
+   забирает его себе, а событие focus потом может не прийти. Без этого признака
+   realtime-клиент считает экран неактивным, выключает свой опрос раз в 2 с и
+   откладывает применение обновлений — экран живёт только от 10-секундного
+   нативного пульса, а связь вечно «восстанавливается». У экскаваторщика тот же
+   признак стоит давно; водителю он нужен ровно по той же причине. #}
+<script>document.body.dataset.realtimeVisibilityOnly = "true";</script>
 <main class="driver-shell" data-driver-shell data-driver-access-id="{{ access.id }}" data-driver-actor-id="{{ access.employee_id }}" data-driver-auth-generation="{{ driver_auth_generation }}" data-driver-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}" data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-has-open-trip="{% if driver_has_open_trip %}true{% else %}false{% endif %}" data-driver-has-loaded-trip="{% if driver_has_loaded_trip %}true{% else %}false{% endif %}" data-driver-active-trip-id="{% if active_trip %}{{ active_trip.id }}{% endif %}" data-driver-assigned-dump-point-id="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point.id }}{% endif %}" data-driver-actual-dump-point-id="{{ active_trip_actual_dump_point_id|default:'' }}" data-driver-actual-dump-point-name="{% if active_trip_current_dump_point %}{{ active_trip_current_dump_point }}{% endif %}" data-driver-assigned-dump-point-name="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point }}{% endif %}" data-driver-free-bucket-enabled="{% if driver_free_bucket_can_open %}true{% else %}false{% endif %}" data-driver-pwa-version="{{ driver_shell_version }}" data-driver-sw-scope="{% if role_app.role_code == 'driver' %}/{% else %}/driver/{% endif %}" data-driver-sync-state="confirmed">
     {% if driver_operational_fragment %}
         {# A legacy open shell must reload before it adopts markup that needs newer CSS/JS. #}
