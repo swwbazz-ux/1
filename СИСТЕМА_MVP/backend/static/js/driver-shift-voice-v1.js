@@ -9,10 +9,6 @@ function isDriverOperationalRefreshUnsafe(shell) {
     if (document.hidden) return true;
     shell = shell || document.querySelector("[data-driver-shell]");
     if (!shell) return false;
-    if (
-        typeof window !== "undefined" &&
-        Number(window.driverOfflinePendingCount || 0) > 0
-    ) return true;
     var active = document.activeElement;
     var activeTag = active && active.tagName ? active.tagName.toLowerCase() : "";
     if (
@@ -37,6 +33,20 @@ function isDriverOperationalRefreshUnsafe(shell) {
     )) {
         return true;
     }
+    /* Всё, что выше, — жёсткие причины: прервать их значит потерять то, что
+       водитель уже ввёл руками. Ниже — мягкие: залипший признак начатого
+       жеста, открытая шторка, неотправленное действие. Любой из них может
+       залипнуть и остановить экран навсегда, поэтому самовосстановление
+       (driver-self-heal-v1.js) после минуты отставания от сервера открывает
+       окно, в котором мягкие причины обновление больше не держат. */
+    if (
+        typeof window !== "undefined" &&
+        Number(window.driverRefreshBypassBusyUntil || 0) > Date.now()
+    ) return false;
+    if (
+        typeof window !== "undefined" &&
+        Number(window.driverOfflinePendingCount || 0) > 0
+    ) return true;
     return !!(
         shell.querySelector(".is-touch-armed, .is-holding, .is-pending, .is-dragging, .is-lifting, .is-dropping, .is-snapping, .driver-drum-ghost, [data-driver-point-sheet]:not([hidden]), [data-driver-free-bucket-sheet]:not([hidden])") ||
         document.querySelector("[data-driver-pwa-update-modal]:not([hidden]), .app-confirm-modal:not([hidden])")

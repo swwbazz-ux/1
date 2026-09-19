@@ -13,6 +13,7 @@ const DRIVER_SCREEN_SCRIPTS = [
     "driver-shift-refresh-v1.js",
     "driver-shift-close-v1.js",
     "driver-shift-v1.js",
+    "driver-self-heal-v1.js",
 ];
 
 const DRIVER_SCREEN_FILES = [
