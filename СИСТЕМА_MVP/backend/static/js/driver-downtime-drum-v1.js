@@ -208,8 +208,9 @@
         });
         if (front !== lastFront) {
             // Щелчок фиксации: вибро + звук. 9 мс мотор телефона почти не отрабатывает,
-            // короткий и отчётливый отклик начинается примерно с 18 мс.
-            if (lastFront !== -1) { haptic(18); click(1); }
+            // 18 мс на Xiaomi пользователь не чувствует вовсе (20.09.2026); отчётливый
+            // щелчок, сравнимый с кольцом круга, начинается примерно с 30 мс.
+            if (lastFront !== -1) { haptic(32); click(1); }
             lastFront = front;
             geo.front = front;
         }
@@ -248,7 +249,7 @@
         if (rebuilding) return;
         rebuilding = true;
         try {
-            geo.built = null; slot = null; lastFront = -1;
+            geo.built = null; lastFront = -1;
             if (!build()) return;
             var index = 0, found = false;
             cards().forEach(function (card, i) { if (!found && keepReasonId && card.dataset.driverDrumReasonId === keepReasonId) { index = i; found = true; } });
@@ -307,7 +308,7 @@
             if (typeof root.showDriverToast === "function") root.showDriverToast("Причина простоя недоступна");
             return;
         }
-        haptic([16, 40, 24]); click(1.6);
+        haptic([35, 45, 70]); click(1.6);   // старт простоя: короткий-длинный
         button.click();
     }
 
@@ -317,7 +318,7 @@
             if (typeof root.showDriverToast === "function") root.showDriverToast("Активного простоя нет");
             return;
         }
-        haptic([24, 30, 12]); click(1.3);
+        haptic([70, 45, 35]); click(1.3);   // стоп простоя: длинный-короткий
         button.click();
     }
 
@@ -452,7 +453,7 @@
             var dropArmed = dy >= DROP_ARM;
             if (dropArmed !== drag.armed) {
                 drag.armed = dropArmed;
-                if (dropArmed) { haptic(12); click(0.7); }
+                if (dropArmed) { haptic(25); click(0.7); }
                 if (ghost) ghost.classList.toggle("is-armed", dropArmed);
             }
             var linkD = q("[data-driver-drum-link]");
@@ -471,7 +472,7 @@
         } else {
             var lift = Math.max(-liftMax, Math.min(0, dy));
             var armed = -dy >= LIFT_ARM;
-            if (armed && !drag.armed) { haptic(12); click(0.7); }
+            if (armed && !drag.armed) { haptic(25); click(0.7); }
             // Состояние «готово» показывает ТОЛЬКО копия. Ни обводку контура, ни оригинал грани
             // трогать нельзя: замер на телефоне — 1651 мс на перекраску контура и 594 мс на
             // смену цвета грани внутри 3D-сцены против 17 мс у копии.
@@ -619,13 +620,13 @@
         if (at === -1) {
             ids.push(id);
         } else {
-            if (ids.length <= min) { toast("В барабане должно быть не меньше " + min + " причин"); haptic([20, 40, 20]); return; }
+            if (ids.length <= min) { toast("В барабане должно быть не меньше " + min + " причин"); haptic([45, 60, 45]); return; }
             ids.splice(at, 1);
         }
         var order = reasonOrder();
         ids.sort(function (a, b) { return order.indexOf(a) - order.indexOf(b); });
         var stamp = new Date().toISOString();
-        haptic(10); click(0.8);
+        haptic(22); click(0.8);
         applyQuick(ids, true);
         writeLocalQuick(ids, stamp);
         saveQuick(ids, stamp);
@@ -708,7 +709,7 @@
         reconcileQuick();
         syncActive();
         observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-reason-id", "data-driver-active-downtime-id", "hidden"] });
-        root.addEventListener("resize", function () { geo.built = null; slot = null; build(); render(false); });
+        root.addEventListener("resize", function () { geo.built = null; build(); render(false); });
         if (root.ResizeObserver) {
             var w = dial();
             if (w) new root.ResizeObserver(function () { syncLinkVars(); }).observe(w);

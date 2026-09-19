@@ -6,7 +6,14 @@ if (typeof window.bindAchievementPrizeUnlock === "function") {
 }
 
 function isDriverOperationalRefreshUnsafe(shell) {
-    if (document.hidden) return true;
+    /* Причина последнего отказа кладётся в window.driverRefreshBusyReason: на
+       боевом телефоне её пишет в журнал driver-self-heal-v1.js. Сама функция
+       остаётся булевой — её сигнатуру и селектор закрепляют тесты. */
+    function busy(reason) {
+        if (typeof window !== "undefined") window.driverRefreshBusyReason = reason;
+        return true;
+    }
+    if (document.hidden) return busy("hidden");
     shell = shell || document.querySelector("[data-driver-shell]");
     if (!shell) return false;
     var active = document.activeElement;
@@ -16,7 +23,7 @@ function isDriverOperationalRefreshUnsafe(shell) {
         shell.contains(active) &&
         (active.isContentEditable || activeTag === "input" || activeTag === "textarea" || activeTag === "select")
     ) {
-        return true;
+        return busy("focus:" + activeTag + (active.name ? ":" + active.name : ""));
     }
     var openingShiftForm = shell.querySelector(".driver-shift-opening-form");
     if (openingShiftForm && (
@@ -24,14 +31,14 @@ function isDriverOperationalRefreshUnsafe(shell) {
         openingShiftForm.dataset.driverShiftOpeningPending === "true" ||
         openingShiftForm.querySelector(".errorlist")
     )) {
-        return true;
+        return busy("opening_form");
     }
     var activeShiftForm = shell.querySelector("[data-driver-shift-close-form]");
     if (activeShiftForm && (
         activeShiftForm.dataset.driverShiftDirty === "true" ||
         activeShiftForm.querySelector(".errorlist")
     )) {
-        return true;
+        return busy("close_form");
     }
     /* Всё, что выше, — жёсткие причины: прервать их значит потерять то, что
        водитель уже ввёл руками. Ниже — мягкие: залипший признак начатого
@@ -46,11 +53,19 @@ function isDriverOperationalRefreshUnsafe(shell) {
     if (
         typeof window !== "undefined" &&
         Number(window.driverOfflinePendingCount || 0) > 0
-    ) return true;
-    return !!(
-        shell.querySelector(".is-touch-armed, .is-holding, .is-pending, .is-dragging, .is-lifting, .is-dropping, .is-snapping, .driver-drum-ghost, [data-driver-point-sheet]:not([hidden]), [data-driver-free-bucket-sheet]:not([hidden])") ||
-        document.querySelector("[data-driver-pwa-update-modal]:not([hidden]), .app-confirm-modal:not([hidden])")
-    );
+    ) return busy("outbox:" + String(window.driverOfflinePendingCount));
+    var gestureNode = shell.querySelector(".is-touch-armed, .is-holding, .is-pending, .is-dragging, .is-lifting, .is-dropping, .is-snapping, .driver-drum-ghost, [data-driver-point-sheet]:not([hidden]), [data-driver-free-bucket-sheet]:not([hidden])")
+        || document.querySelector("[data-driver-pwa-update-modal]:not([hidden]), .app-confirm-modal:not([hidden])");
+    if (!gestureNode) {
+        if (typeof window !== "undefined") window.driverRefreshBusyReason = "";
+        return false;
+    }
+    var gestureTag = gestureNode.tagName ? String(gestureNode.tagName).toLowerCase() : "node";
+    var gestureClasses = typeof gestureNode.className === "string"
+        ? gestureNode.className.split(/\s+/).filter(function (name) { return /^is-|drum-ghost|sheet|modal/.test(name); }).join(".")
+        : "";
+    var gestureId = gestureNode.id ? "#" + gestureNode.id : "";
+    return busy("gesture:" + gestureTag + gestureId + (gestureClasses ? "." + gestureClasses : ""));
 }
 window.driverHasPendingWork = isDriverOperationalRefreshUnsafe;
 if (
