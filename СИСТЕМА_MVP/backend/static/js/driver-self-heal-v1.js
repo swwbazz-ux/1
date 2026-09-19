@@ -188,7 +188,7 @@
         /* В нативном приложении консоль попадает в logcat — это единственный
            журнал, который можно снять с боевого телефона по USB. */
         if (window.console && typeof window.console.info === "function") {
-            window.console.info("driver-refresh-deferred " + String(detail.reason || "") + " v=" + String(detail.version || ""));
+            window.console.info("driver-refresh-deferred " + String(detail.reason || "") + " v=" + String(detail.version || "") + " busy=" + String(window.driverRefreshBusyReason || ""));
         }
     });
 
