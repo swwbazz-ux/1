@@ -39,6 +39,84 @@ from .views import (
 )
 
 
+class DowntimeReportCriticalFilterTests(TestCase):
+    """Экран отчёта по простоям (reports/downtimes/) показывает фильтр «Критичность»,
+    но фактическая фильтрация живёт не в apply_downtime_report_filters (она работает
+    с queryset), а в downtime_report_context — по вычисленному row['is_critical'].
+    Раньше это было видно только по неиспользуемой переменной в первой функции;
+    здесь закрепляем поведение на уровне HTTP-ответа, чтобы регрессия была видна
+    сразу, а не через линтер."""
+
+    def setUp(self):
+        self.admin_role = Role.objects.create(code='admin', name='Администратор')
+        self.admin = Employee.objects.create(full_name='Администратор отчётов')
+        self.admin_access = EmployeeAccess.objects.create(
+            employee=self.admin,
+            role=self.admin_role,
+            access_code='900001',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        session = self.client.session
+        session['employee_access_id'] = self.admin_access.id
+        session.save()
+
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        self.excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='ЭКС-1')
+
+        # is_critical=True без привязанного equipment_state даёт effective-состояние
+        # 'breakdown' (см. downtimes.defaults.infer_downtime_reason_state_code),
+        # а это входит в RED_DOWNTIME_STATE_CODES — то есть reason читается как красный.
+        self.critical_reason = DowntimeReason.objects.create(
+            name='Тестовая поломка узла',
+            is_critical=True,
+        )
+        self.normal_reason = DowntimeReason.objects.create(
+            name='Тестовое ожидание погрузки',
+            is_critical=False,
+        )
+        now = timezone.now()
+        self.critical_event = DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            reason=self.critical_reason,
+            started_at=now - timedelta(hours=2),
+            ended_at=now - timedelta(hours=1),
+        )
+        self.normal_event = DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            reason=self.normal_reason,
+            started_at=now - timedelta(hours=2),
+            ended_at=now - timedelta(hours=1),
+        )
+
+    def test_critical_filter_yes_returns_only_critical_events(self):
+        response = self.client.get(reverse('downtime_report'), {'critical': 'yes'})
+        self.assertEqual(response.status_code, 200)
+        reason_ids = {row['reason'].id for row in response.context['rows']}
+        self.assertIn(self.critical_reason.id, reason_ids)
+        self.assertNotIn(self.normal_reason.id, reason_ids)
+        self.assertEqual(response.context['critical_count'], 1)
+        self.assertEqual(response.context['total_count'], 1)
+
+    def test_critical_filter_no_returns_only_normal_events(self):
+        response = self.client.get(reverse('downtime_report'), {'critical': 'no'})
+        self.assertEqual(response.status_code, 200)
+        reason_ids = {row['reason'].id for row in response.context['rows']}
+        self.assertIn(self.normal_reason.id, reason_ids)
+        self.assertNotIn(self.critical_reason.id, reason_ids)
+        self.assertEqual(response.context['critical_count'], 0)
+        self.assertEqual(response.context['total_count'], 1)
+
+    def test_critical_filter_unset_returns_both_events(self):
+        response = self.client.get(reverse('downtime_report'))
+        self.assertEqual(response.status_code, 200)
+        reason_ids = {row['reason'].id for row in response.context['rows']}
+        self.assertIn(self.critical_reason.id, reason_ids)
+        self.assertIn(self.normal_reason.id, reason_ids)
+        self.assertEqual(response.context['critical_count'], 1)
+        self.assertEqual(response.context['total_count'], 2)
+
+
 class ManagementDashboardPlanTests(TestCase):
     def test_management_dashboard_uses_manual_shift_plan_without_trips(self):
         role = Role.objects.create(code='manager', name='Руководство')
