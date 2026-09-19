@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
 from unittest.mock import patch
-from zoneinfo import ZoneInfo
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -39,26 +38,21 @@ import django  # noqa: E402
 django.setup()
 
 from django.conf import settings  # noqa: E402
-from django.core.exceptions import ValidationError  # noqa: E402
 from django.db import connection  # noqa: E402
 from django.db.models import Count, Sum  # noqa: E402
 from django.test import Client  # noqa: E402
-from django.utils import timezone  # noqa: E402
 
 from assignments.models import (  # noqa: E402
     AssignmentStatus,
     CrewPlan,
     CrewPlanSlot,
     CrewPlanStatus,
-    EquipmentAssignment,
     ExcavatorPlacement,
     HaulAssignment,
     WorkShiftType,
 )
 from core.production_time import (  # noqa: E402
     BUSINESS_TIME_ZONE,
-    production_shift_context,
-    production_work_date,
 )
 from downtimes.models import DowntimeEvent, DowntimeReason  # noqa: E402
 from references.models import (  # noqa: E402

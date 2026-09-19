@@ -13,7 +13,6 @@
 `build_hourly_shift_matrix`: час берётся по времени погрузки на экскаваторе,
 в сводку входят рейсы «загружен, едет» и «завершён».
 """
-from collections import defaultdict
 from datetime import timedelta
 
 from django.db.models import Q

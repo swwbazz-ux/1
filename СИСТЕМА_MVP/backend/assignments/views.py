@@ -1,12 +1,11 @@
 import re
 import json
-from decimal import Decimal
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q
-from django.http import HttpResponse, JsonResponse
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
@@ -502,92 +501,6 @@ def build_employee_short_name(employee):
     return f'{surname} {initials}'.strip()
 
 
-def get_complex_truck_scale_class(truck_count):
-    if truck_count <= 6:
-        return 'truck-fill-1'
-    if truck_count <= 12:
-        return 'truck-fill-2'
-    if truck_count <= 18:
-        return 'truck-fill-3'
-    return 'truck-fill-4'
-
-
-def build_equipment_card_data(
-    equipment,
-    tile,
-    zone_label,
-    status_label,
-    active_assignment=None,
-    active_trip=None,
-    downtime=None,
-    shift_stats=None,
-    truck_count=None,
-    latest_trip=None,
-    current_employee=None,
-):
-    model = equipment.model
-    details = []
-    details.append({'label': 'Гаражный N', 'value': equipment.garage_number})
-    if equipment.vin:
-        details.append({'label': 'VIN/серийный N', 'value': equipment.vin})
-    if model:
-        details.append({'label': 'Модель', 'value': model.name})
-        if model.payload_tons:
-            details.append({'label': 'ГП, т', 'value': format_decimal_short(model.payload_tons)})
-        if model.body_volume_m3:
-            details.append({'label': 'Кузов/ковш, м3', 'value': format_decimal_short(model.body_volume_m3)})
-    else:
-        details.append({'label': 'Модель', 'value': 'не указана'})
-    if equipment.equipment_type.name == 'Самосвал':
-        if active_assignment:
-            details.append({'label': 'Назначен', 'value': format_datetime_short(active_assignment.assigned_at)})
-        if active_trip:
-            details.append({'label': 'Рейс', 'value': 'активный'})
-            details.append({'label': 'Экскаватор рейса', 'value': get_excavator_label(active_trip.excavator)})
-            details.append({'label': 'Разгрузка', 'value': str(active_trip.dump_point)})
-            details.append({'label': 'Порода', 'value': str(active_trip.rock_type)})
-            if active_trip.volume_m3:
-                details.append({'label': 'Объем, м3', 'value': format_decimal_short(active_trip.volume_m3)})
-        elif not active_assignment:
-            details.append({'label': 'Назначение', 'value': 'ожидает'})
-    else:
-        stats = shift_stats or {}
-        details.append({'label': 'Самосвалы', 'value': str(truck_count or 0)})
-        details.append({'label': 'Рейсы', 'value': str(stats.get('total') or 0)})
-        details.append({'label': 'Объем, м3', 'value': format_decimal_short(stats.get('volume') or Decimal('0'))})
-        source_trip = active_trip or latest_trip
-        details.append({'label': 'Горизонт', 'value': (source_trip.loading_horizon if source_trip else '') or 'не указан'})
-        details.append({'label': 'Блок', 'value': (source_trip.loading_block if source_trip else '') or 'не указан'})
-
-    if downtime:
-        details.append({'label': 'Простой', 'value': str(downtime.reason)})
-        details.append({'label': 'С начала', 'value': format_datetime_short(downtime.started_at)})
-
-    return {
-        'id': equipment.id,
-        'type': equipment.equipment_type.name,
-        'label': tile['label'],
-        'number': tile['number'],
-        'icon': tile['icon'],
-        'status_key': tile['status_key'],
-        'status_label': status_label,
-        'zone': zone_label,
-        'employee': build_employee_badge(current_employee),
-        'details': details,
-    }
-
-
-def close_active_assignment(assignment, now):
-    assignment.status = AssignmentStatus.CANCELLED
-    assignment.ended_at = now
-    assignment.save(update_fields=['status', 'ended_at'])
-
-
-def close_active_assignments(assignments, now):
-    for assignment in assignments:
-        close_active_assignment(assignment, now)
-
-
 def handle_shift_action(request, action, access, current_shift, blocking_shift):
     now = timezone.now()
     if action == 'start_shift':
@@ -666,63 +579,6 @@ def authenticate_shared_shift_start(request):
     return access, ''
 
 
-def handle_assignment_action(request, action, access, current_shift):
-    if not current_shift:
-        messages.error(request, 'Сначала откройте смену горного мастера.')
-        return
-
-    now = timezone.now()
-    truck_id = request.POST.get('truck')
-    if not truck_id:
-        messages.error(request, 'Самосвал не выбран.')
-        return
-
-    truck = get_object_or_404(
-        Equipment.objects.select_related('equipment_type', 'model'),
-        id=truck_id,
-        equipment_type__name='Самосвал',
-        is_active=True,
-    )
-    active_assignments = list(
-        HaulAssignment.objects
-        .filter(truck=truck, ended_at__isnull=True)
-        .exclude(status=AssignmentStatus.CANCELLED)
-        .select_related('excavator')
-        .order_by('-assigned_at')
-    )
-    active_assignment = next(
-        (assignment for assignment in active_assignments if assignment.status == AssignmentStatus.ACCEPTED),
-        active_assignments[0] if active_assignments else None,
-    )
-
-    if action == 'release':
-        if not active_assignment:
-            messages.info(request, f'{get_truck_label(truck)} уже находится в гараже.')
-            return
-        schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)
-        messages.success(request, f'{get_truck_label(truck)} получит снятие назначения через 5 минут.')
-        return
-
-    excavator_id = request.POST.get('excavator')
-    if not excavator_id:
-        messages.error(request, 'Экскаватор не выбран.')
-        return
-    excavator = get_object_or_404(
-        Equipment.objects.select_related('equipment_type', 'model'),
-        id=excavator_id,
-        equipment_type__name='Экскаватор',
-        is_active=True,
-    )
-
-    schedule_haul_assignment(
-        truck=truck,
-        excavator=excavator,
-        assigned_by=access.employee,
-        now=now,
-    )
-    messages.success(request, f'{get_truck_label(truck)} назначен на {get_excavator_label(excavator)}.')
-
-
 def get_active_assignments_queryset():
     return (
         HaulAssignment.objects
@@ -752,15 +608,6 @@ def mining_master_json_payload(request):
         return json.loads(request.body.decode('utf-8') or '{}')
     except json.JSONDecodeError:
         return {}
-
-
-def mining_master_json_ok(payload=None, **extra):
-    response = {'ok': True}
-    response.update(extra)
-    client_action_id = (payload or {}).get('client_action_id')
-    if client_action_id:
-        response['client_action_id'] = client_action_id
-    return JsonResponse(response)
 
 
 def mining_master_client_action_error(payload, error, *, code='stale_client'):
@@ -1171,92 +1018,6 @@ def mining_master_assign_truck_view(request):
         response_payload=response_payload,
     )
     return JsonResponse(response_payload)
-
-
-def handle_bulk_release_action(request, action, current_shift, access):
-    if not current_shift:
-        messages.error(request, 'Сначала откройте смену горного мастера.')
-        return
-
-    now = timezone.now()
-    assignments = get_active_assignments_queryset()
-
-    if action == 'release_excavator':
-        excavator_id = request.POST.get('excavator')
-        if not excavator_id:
-            messages.error(request, 'Экскаватор не выбран.')
-            return
-        excavator = get_object_or_404(
-            Equipment.objects.select_related('equipment_type', 'model'),
-            id=excavator_id,
-            equipment_type__name='Экскаватор',
-            is_active=True,
-        )
-        assignments = list(assignments.filter(excavator=excavator))
-        if not assignments:
-            messages.info(request, f'{get_excavator_label(excavator)} уже пустой.')
-            return
-        trucks = {assignment.truck_id: assignment.truck for assignment in assignments}
-        for truck in trucks.values():
-            schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)
-        messages.success(request, f'{get_excavator_label(excavator)} расформировывается. Водителям дано 5 минут.')
-        return
-
-    if action == 'release_all':
-        assignments = list(assignments)
-        active_excavator_placements = list(
-            ExcavatorPlacement.objects
-            .filter(zone=ExcavatorPlacement.Zone.ACTIVE, excavator__is_active=True)
-            .select_related('excavator')
-        )
-        if not assignments and not active_excavator_placements:
-            messages.info(request, 'Вся техника уже находится в неактивной смене.')
-            return
-        trucks = {assignment.truck_id: assignment.truck for assignment in assignments}
-        for truck in trucks.values():
-            schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)
-        for placement in active_excavator_placements:
-            placement.zone = ExcavatorPlacement.Zone.INACTIVE
-            placement.changed_by = access.employee
-            placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
-        messages.success(request, 'Все комплексы расформированы. Вся техника возвращена в неактивную смену.')
-
-
-def handle_excavator_placement_action(request, action, access, current_shift):
-    if not current_shift:
-        messages.error(request, 'Сначала откройте смену горного мастера.')
-        return
-
-    excavator_id = request.POST.get('excavator')
-    if not excavator_id:
-        messages.error(request, 'Экскаватор не выбран.')
-        return
-
-    excavator = get_object_or_404(
-        Equipment.objects.select_related('equipment_type', 'model'),
-        id=excavator_id,
-        equipment_type__name='Экскаватор',
-        is_active=True,
-    )
-    placement, _ = ExcavatorPlacement.objects.get_or_create(excavator=excavator)
-    now = timezone.now()
-
-    if action == 'activate_excavator':
-        placement.zone = ExcavatorPlacement.Zone.ACTIVE
-        placement.changed_by = access.employee
-        placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
-        messages.success(request, f'{get_excavator_label(excavator)} добавлен в активную смену.')
-        return
-
-    if action == 'deactivate_excavator':
-        active_assignments = list(get_active_assignments_queryset().filter(excavator=excavator))
-        trucks = {assignment.truck_id: assignment.truck for assignment in active_assignments}
-        for truck in trucks.values():
-            schedule_haul_release(truck=truck, assigned_by=access.employee, now=now)
-        placement.zone = ExcavatorPlacement.Zone.INACTIVE
-        placement.changed_by = access.employee
-        placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
-        messages.success(request, f'{get_excavator_label(excavator)} перенесен в неактивную смену.')
 
 
 def mining_master_assignments_view(request):

@@ -39,10 +39,6 @@ def detect_session_device_kind(request):
     return 'personal' if is_mobile_request(request) else 'shared'
 
 
-def mark_session_device_kind(request):
-    return set_session_device_kind(request, detect_session_device_kind(request))
-
-
 def set_session_device_kind(request, device_kind):
     if device_kind not in {'personal', 'shared'}:
         device_kind = detect_session_device_kind(request)
@@ -58,5 +54,3 @@ def get_session_device_kind(request):
     return request.session.get('device_kind') or detect_session_device_kind(request)
 
 
-def is_shared_session(request):
-    return get_session_device_kind(request) == 'shared'

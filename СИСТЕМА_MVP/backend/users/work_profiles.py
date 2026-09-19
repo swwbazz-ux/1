@@ -5,7 +5,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .protected_cards import protected_writes_allowed
-from .models import Employee, EmployeeAccess, ProductionSpecialization, TemporaryWorkTransfer
+from .models import Employee, EmployeeAccess, TemporaryWorkTransfer
 
 
 PRODUCTION_APP_ROLE_CODES = frozenset({'driver', 'excavator_operator'})

@@ -18,7 +18,7 @@ from core.production_time import (
     production_work_date_for_shift,
 )
 from downtimes.models import DowntimeEvent
-from shifts.models import EmployeeShift, ShiftReadingCorrection, ShiftType
+from shifts.models import EmployeeShift, ShiftReadingCorrection
 from trips.models import Trip, TripStatus
 
 

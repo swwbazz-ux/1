@@ -13,7 +13,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q, Sum
 from django.db.models.functions import Coalesce
-from django.http import HttpResponse, JsonResponse
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -28,14 +28,12 @@ from assignments.models import (
     HaulAssignment,
     HaulAssignmentAction,
     HaulAssignmentHandoff,
-    HaulAssignmentHandoffStatus,
 )
 from assignments.services import (
     HaulAssignmentStateConflict,
     active_haul_handoffs,
     excavator_load_assignment_queryset,
     get_active_equipment_assignment,
-    open_haul_handoffs_for_shift,
     projected_haul_assignments_for_excavator,
     reconcile_due_haul_assignments,
     resolve_excavator_load_authority,
@@ -57,7 +55,6 @@ from core.production_time import (
     production_shift_bounds,
     production_shift_context,
     production_shift_type,
-    production_work_date,
     production_work_date_for_shift,
 )
 from downtimes.driver_workflow import (
@@ -76,7 +73,6 @@ from shifts.services import (
     ExcavatorShiftCloseConfirmationRequired,
     ExcavatorShiftError,
     aggregate_completed_trip_facts_by_shift,
-    assign_shift_plan_snapshot,
     calculate_open_shift_progress,
     calculate_progress_from_snapshot_facts,
     calculate_truck_shift_progress,
@@ -231,14 +227,6 @@ def equipment_state_icon_color(color_group):
     if color_group in {'green', 'yellow', 'red', 'gray', 'blue'}:
         return color_group
     return 'gray'
-
-
-def trip_equipment_state_code(trip):
-    if not trip:
-        return ''
-    if trip.status in OPEN_TRIP_STATUSES:
-        return 'loaded_waiting_unload'
-    return ''
 
 
 def downtime_reason_equipment_state_code(reason):
@@ -2321,7 +2309,7 @@ def build_dispatcher_dashboard_context(
     # The dispatcher keeps a truck in its primary complex.  This separate
     # annotation explains a temporary free-bucket operation without turning it
     # into a dispatcher reassignment.
-    from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+    from trips.models import FreeBucketAcceptance
     free_bucket_marker_by_truck_id = {}
     free_bucket_marker_now = timezone.now()
     for acceptance in (
@@ -2945,7 +2933,6 @@ def build_dispatcher_dashboard_context(
                 target_by_truck[trip.truck_id] = str(trip.dump_point)
             if trip.rock_type:
                 rock_by_truck[trip.truck_id] = str(trip.rock_type)
-        max_truck_volume = max(volume_by_truck.values(), default=Decimal('0'))
         truck_by_id = {truck.id: truck for truck in trucks_list}
         for truck_id in sorted(current_truck_ids, key=lambda item: garage_number_int(truck_by_id.get(item)) if item in truck_by_id else 9999):
             truck = truck_by_id.get(truck_id)
@@ -3948,28 +3935,6 @@ def required_projected_assignment_states(payload):
     return payload.get('expected_assignment_states')
 
 
-def close_haul_assignments(queryset, now, *, action='bulk_close_assignments', source='dispatcher'):
-    assignments = list(queryset)
-    for assignment in assignments:
-        assignment.status = AssignmentStatus.CANCELLED
-        assignment.ended_at = now
-    if assignments:
-        HaulAssignment.objects.bulk_update(assignments, ['status', 'ended_at'])
-        bump_operational_state(
-            'HaulAssignment:bulk_close',
-            event_type='assignment_changed',
-            object_type='HaulAssignment',
-            payload={
-                'action': action,
-                'source': source,
-                'closed_count': len(assignments),
-                'excavator_ids': sorted({assignment.excavator_id for assignment in assignments}),
-                'truck_ids': sorted({assignment.truck_id for assignment in assignments}),
-            },
-        )
-    return assignments
-
-
 @require_POST
 @transaction.atomic
 def dispatcher_move_excavator_view(request):
@@ -4613,10 +4578,6 @@ def excavator_assigned_truck_counts(excavator):
         if not excavator_truck_load_block(assignment, current_excavator=excavator, manual_control=True)
     )
     return len(assignments), loadable, has_inactive_assigned_truck
-
-
-def excavator_has_loadable_assigned_truck(excavator):
-    return excavator_assigned_truck_counts(excavator)[1] > 0
 
 
 def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_when_empty=False):
@@ -5695,13 +5656,6 @@ def parse_excavator_shift_decimal(value, field_label):
 
 def default_excavator_shift_type(now=None):
     return production_shift_type(now)
-
-
-def get_excavator_for_shift_start(employee, payload):
-    assignment = get_active_equipment_assignment(employee, 'excavator_operator')
-    if work_assignment_state(employee, assignment) != 'assigned':
-        return None
-    return assignment.equipment
 
 
 def work_assignment_error_message(state):

@@ -9,7 +9,7 @@ from django.db import IntegrityError, models, transaction
 
 from settlement.models import SettlementResident
 from shifts.models import WatchPeriod
-from users.models import Employee, TemporaryWorkTransfer
+from users.models import TemporaryWorkTransfer
 
 from .arrival_rosters import (
     _access_snapshot,

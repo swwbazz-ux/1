@@ -145,7 +145,6 @@ from .forms import (
     DriverCloseShiftForm,
     DriverOpenShiftForm,
     DriverPrimaryRegistrationForm,
-    is_valid_russian_mobile_phone,
     normalize_phone,
     PersonnelPositionReferenceForm,
 )
@@ -681,7 +680,6 @@ def log_admin_action(actor, action, obj=None, old_value='', new_value='', commen
         new_value=new_value,
         comment=comment,
     )
-
 
 
 def redirect_after_admin_action(request, fallback_view, **kwargs):
@@ -4311,17 +4309,6 @@ def driver_free_bucket_payload(*, current_truck, current_assignment, version):
     return catalog, state, active_acceptance
 
 
-def driver_compact_context_value(prefix, compact_prefix, value):
-    value = str(value or '').strip()
-    if not value:
-        return f'{compact_prefix}—'
-    for candidate in (prefix, compact_prefix):
-        if value.lower().startswith(candidate.lower()):
-            value = value[len(candidate):].strip()
-            break
-    return f'{compact_prefix}{value}'
-
-
 def driver_open_shift_queryset(employee):
     return (
         EmployeeShift.objects
@@ -4422,7 +4409,6 @@ def driver_shift_view(request):
             equipment=work_assignment.equipment,
         )
     current_truck = open_shift.equipment if open_shift else None
-    assigned_truck = work_assignment.equipment if work_assignment and assignment_state == 'assigned' else None
     assignment_truck = (
         work_assignment.equipment
         if work_assignment and assignment_state in {'assigned', 'assignment_conflict'}

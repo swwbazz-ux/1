@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import time
 import urllib.error
@@ -78,17 +77,6 @@ def push_is_configured() -> bool:
     return bool(_load_private_key() and public_key_for_browser())
 
 
-def generate_vapid_keypair() -> dict[str, str]:
-    """Пара ключей для первичной настройки. Приватный хранится в .env."""
-    private_key = ec.generate_private_key(ec.SECP256R1())
-    secret = private_key.private_numbers().private_value.to_bytes(32, 'big')
-    public = private_key.public_key().public_bytes(
-        serialization.Encoding.X962,
-        serialization.PublicFormat.UncompressedPoint,
-    )
-    return {'private': _b64(secret), 'public': _b64(public)}
-
-
 def _authorization_header(endpoint: str) -> str | None:
     private_key = _load_private_key()
     if not private_key:
@@ -146,7 +134,7 @@ def notify_employee(employee, *, title, body, url='', tag='', kind='') -> int:
     """
     from .models import PushNotification, WebPushSubscription
 
-    notification = PushNotification.objects.create(
+    PushNotification.objects.create(
         employee=employee,
         title=title,
         body=body,

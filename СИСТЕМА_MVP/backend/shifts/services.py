@@ -14,7 +14,6 @@ from django.utils import timezone
 from core.db_locks import lock_idempotency_key
 from core.production_time import (
     production_day_bounds,
-    production_shift_type,
     production_work_date_for_shift,
 )
 from trips.models import Trip, TripStatus
@@ -1077,10 +1076,6 @@ def shift_plan_totals_for_dates(dates):
     }
 
 
-def shift_plan_totals_by_shift(date):
-    return shift_plan_totals_for_dates([date])[date]['by_shift']
-
-
 def shift_plan_totals(date):
     return shift_plan_totals_for_dates([date])[date]
 
@@ -1406,10 +1401,6 @@ def calculate_truck_shift_progress(truck, reference_shift=None):
         )
         return calculate_equipment_shift_progress(truck, date, reference_shift.shift_type)
     return empty_progress(truck, status=PlanAssignmentStatus.NO_PLAN_GROUP)
-
-
-def calculate_truck_progress_for_excavator_shift(truck, excavator_shift):
-    return calculate_truck_shift_progress(truck, reference_shift=excavator_shift)
 
 
 def calculate_open_shift_progress(open_shift):

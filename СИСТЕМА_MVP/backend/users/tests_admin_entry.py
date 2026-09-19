@@ -22,7 +22,7 @@ from .active_role import (
 )
 from .live_monitor import OBSERVER_MODE_CONTROL, create_observer_token
 from .middleware import ObserverModeMiddleware
-from .models import AdminActionLog, Employee, EmployeeAccess, PersonnelPosition, Role
+from .models import Employee, EmployeeAccess, PersonnelPosition, Role
 
 
 def make_employee(full_name, phone):

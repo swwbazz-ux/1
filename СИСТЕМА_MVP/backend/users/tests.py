@@ -3878,7 +3878,7 @@ class AccessLoginTests(TestCase):
             follow=True,
             HTTP_HOST='localhost',
         )
-        allowed_response = self.client.post(
+        self.client.post(
             reverse('driver_downtime_action'),
             {'reason_id': allowed_reason.id},
             follow=True,
@@ -5991,7 +5991,7 @@ class AccessLoginTests(TestCase):
         rock = RockType.objects.create(name='Rock')
         dump_point = DumpPoint.objects.create(name='Dump')
         mechanic_role = Role.objects.create(code='mechanic', name='Mechanic')
-        operator_role = Role.objects.create(code='excavator_operator', name='Operator')
+        Role.objects.create(code='excavator_operator', name='Operator')
         mechanic = Employee.objects.create(full_name='Mechanic MVP')
         operator = Employee.objects.create(full_name='Operator MVP')
         EmployeeAccess.objects.create(employee=mechanic, role=mechanic_role, access_code='7000')
@@ -6240,7 +6240,7 @@ class AccessLoginTests(TestCase):
         excavator_type = EquipmentType.objects.create(name='Excavator')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
         dispatcher_role = Role.objects.create(code='dispatcher', name='Dispatcher')
-        mechanic_role = Role.objects.create(code='mechanic', name='Mechanic')
+        Role.objects.create(code='mechanic', name='Mechanic')
         dispatcher = Employee.objects.create(full_name='Dispatcher MVP')
         mechanic = Employee.objects.create(full_name='Mechanic MVP')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
@@ -6265,7 +6265,7 @@ class AccessLoginTests(TestCase):
         excavator_type = EquipmentType.objects.create(name='Excavator')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
         dispatcher_role = Role.objects.create(code='dispatcher', name='Dispatcher')
-        mechanic_role = Role.objects.create(code='mechanic', name='Mechanic')
+        Role.objects.create(code='mechanic', name='Mechanic')
         dispatcher = Employee.objects.create(full_name='Dispatcher MVP')
         mechanic = Employee.objects.create(full_name='Mechanic MVP')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
@@ -6305,7 +6305,7 @@ class AccessLoginTests(TestCase):
         excavator_type = EquipmentType.objects.create(name='Excavator')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
         manager_role = Role.objects.create(code='manager', name='Manager')
-        mechanic_role = Role.objects.create(code='mechanic', name='Mechanic')
+        Role.objects.create(code='mechanic', name='Mechanic')
         manager = Employee.objects.create(full_name='Manager MVP')
         mechanic = Employee.objects.create(full_name='Mechanic MVP')
         EmployeeAccess.objects.create(employee=manager, role=manager_role, access_code='6000')

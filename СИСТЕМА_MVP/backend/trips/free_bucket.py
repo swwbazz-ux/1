@@ -58,7 +58,7 @@ def active_free_bucket_acceptance_filter(*, now=None):
 
 def active_free_bucket_acceptance_for_truck(truck, *, for_update=False, now=None):
     """Return an unspent request/acceptance while the caller holds the truck lock."""
-    from .models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+    from .models import FreeBucketAcceptance
 
     queryset = FreeBucketAcceptance.objects.select_related(
         'excavator', 'operator', 'loading_shift', 'requested_by', 'requesting_shift',

@@ -1295,7 +1295,6 @@ class RatingLiveQAIncrementalContractTests(SimpleTestCase):
             )
             for index in range(52)
         ]
-        other_request = other_requests[0]
         all_requests = [target_request, *other_requests]
 
         class FakeRequestManager:

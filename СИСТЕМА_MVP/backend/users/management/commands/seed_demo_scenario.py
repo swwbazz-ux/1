@@ -60,7 +60,7 @@ class Command(BaseCommand):
             start_engine_hours=Decimal('1200.00'),
         )
 
-        accepted_assignment = self.get_or_create_haul_assignment(
+        self.get_or_create_haul_assignment(
             truck=truck,
             excavator=excavator,
             status=AssignmentStatus.ACCEPTED,

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, models, transaction
+from django.db import models, transaction
 from django.utils import timezone
 
 from settlement.models import SettlementResident
@@ -729,7 +729,7 @@ def add_employee_to_arrival_roster(*, version_id, employee_id, basis,
         access_snapshot,
         locked_employees=locked_employees,
     )
-    actor_access = _verified_timekeeper_access(actor_context)
+    _verified_timekeeper_access(actor_context)
     period = (
         WatchPeriod.objects
         .select_for_update(of=('self',))

@@ -757,7 +757,6 @@ def _validate_apply_date(*, period, work_shift, now):
 
 
 def _validate_shift_scope(locked):
-    run = locked['run']
     period = locked['period']
     work_shift = locked['work_shift']
     members_by_id = {row.pk: row for row in locked['members']}
@@ -815,9 +814,6 @@ def _validate_shift_scope(locked):
 
 
 def _classify_changes(*, locked, confirm_replace_manual):
-    run = locked['run']
-    period = locked['period']
-    work_shift = locked['work_shift']
     members_by_id = {row.pk: row for row in locked['members']}
     members_by_resident = {row.resident_id: row for row in locked['members']}
     placements_by_resident = {

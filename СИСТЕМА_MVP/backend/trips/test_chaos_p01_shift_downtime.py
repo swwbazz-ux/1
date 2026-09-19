@@ -119,7 +119,7 @@ class ChaosDriverShiftHandoffRegressionTests(TestCase):
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
-        access = EmployeeAccess.objects.create(
+        EmployeeAccess.objects.create(
             employee=employee,
             role=self.driver_role,
             access_code=access_code,

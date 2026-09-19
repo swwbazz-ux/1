@@ -294,10 +294,6 @@ def _effective_equipment_assignments(*, employee_ids, effective_date):
     )
 
 
-def _overlaps(start_a, end_a, start_b, end_b) -> bool:
-    return start_a < end_b and start_b < end_a
-
-
 def _slot_candidates(cohort: SettlementCohort) -> tuple[dict[int, _SlotCandidate], list[dict]]:
     slots = list(
         AccommodationAnchorCalendarSlot.objects.filter(
