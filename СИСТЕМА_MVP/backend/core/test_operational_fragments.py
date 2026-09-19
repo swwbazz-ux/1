@@ -211,6 +211,9 @@ class OperationalFragmentViewTests(TestCase):
                 'screen': 'driver',
                 'root': 'data-driver-shell',
                 'equipment_cards': False,
+                # У водителя стили и код вынесены в отдельные файлы, поэтому сама
+                # страница лёгкая: фрагмент не вырос, но его доля от страницы выше.
+                'max_ratio': 0.40,
             },
             {
                 'role': 'excavator_operator',
@@ -285,8 +288,9 @@ class OperationalFragmentViewTests(TestCase):
                     len(gzip.compress(fragment_response.content))
                     / len(gzip.compress(full_response.content))
                 )
-                self.assertLess(raw_ratio, 0.20)
-                self.assertLess(gzip_ratio, 0.20)
+                max_ratio = case.get('max_ratio', 0.20)
+                self.assertLess(raw_ratio, max_ratio)
+                self.assertLess(gzip_ratio, max_ratio)
 
     def test_one_hundred_personal_driver_fragment_gets_do_not_write_session(self):
         client = self._authorized_client(self.accesses['driver'])

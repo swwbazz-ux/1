@@ -49,6 +49,12 @@ def driver_stylesheet():
     return Path(finders.find('css/driver-shift-v1.css')).read_text(encoding='utf-8')
 
 
+def driver_script():
+    """Код экрана водителя вынесен из шаблона в отдельный файл, поэтому проверки
+    поведения читают его, а не HTML-ответ."""
+    return Path(finders.find('js/driver-shift-v1.js')).read_text(encoding='utf-8')
+
+
 class AccessLoginTests(TestCase):
     def setUp(self):
         self.role = Role.objects.create(code='driver', name='Водитель самосвала')
@@ -353,7 +359,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '0 шт.')
         self.assertContains(response, 'mobile-shift__actions')
         self.assertContains(response, 'aria-label="Удерживайте 1 секунду, чтобы начать смену"')
-        self.assertContains(response, 'function bindDriverShiftHoldAction(form, button, options)')
+        self.assertIn('function bindDriverShiftHoldAction(form, button, options)', driver_script())
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertNotContains(response, 'class="driver-form-card"')
         self.assertEqual(self.client.session.get('employee_access_id'), self.access.id)
@@ -369,11 +375,11 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'data-mobile-shift-state="open"')
         self.assertContains(response, 'Показатели техники')
         self.assertContains(response, 'Итог смены')
-        self.assertContains(response, 'data-driver-shift-close-button')
+        self.assertIn('data-driver-shift-close-button', driver_script())
         self.assertContains(response, 'aria-label="Удерживайте 1 секунду, чтобы закрыть смену"')
-        self.assertContains(response, 'holdMs: 1000')
-        self.assertContains(response, 'data-driver-shift-inputs')
-        self.assertContains(response, 'data-driver-shift-scroll')
+        self.assertIn('holdMs: 1000', driver_script())
+        self.assertIn('data-driver-shift-inputs', driver_script())
+        self.assertIn('data-driver-shift-scroll', driver_script())
         self.assertContains(response, "css/mobile-shift-unified-v1.css")
         self.assertNotContains(response, 'mobile-shift__assignment')
         self.assertContains(response, 'mobile-shift__readings')
@@ -390,13 +396,13 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'step="1"')
         self.assertNotContains(response, 'inputmode="decimal"')
         self.assertContains(response, '>Закрыть смену<')
-        self.assertContains(response, 'Начало')
+        self.assertIn('Начало', driver_script())
         self.assertContains(response, '12560')
         self.assertContains(response, '1354')
         self.assertContains(response, '>Выйти<')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
-        self.assertContains(response, 'data-mobile-shift-label')
-        self.assertContains(response, 'if (logoutLabel) logoutLabel.textContent = "Выходим";')
+        self.assertIn('data-mobile-shift-label', driver_script())
+        self.assertIn('if (logoutLabel) logoutLabel.textContent = "Выходим";', driver_script())
         self.assertNotContains(response, '>Закрытие смены<')
         self.assertNotContains(response, 'Проверить показания')
         self.assertNotContains(response, 'data-eo-shift-review')
@@ -406,12 +412,12 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'data-driver-manifest-view-open="timeline"')
         self.assertContains(response, 'data-driver-report-delivery')
         self.assertContains(response, 'Подготовить путёвку')
-        self.assertContains(response, 'Открыть группу')
+        self.assertIn('Открыть группу', driver_script())
         self.assertContains(response, 'https://max.ru/join/haXmcD7Efa-2_dVX3_VLqfftNKU1QyMlnVTWgiQSDdE')
         self.assertNotContains(response, 'data-driver-report-share')
         self.assertNotContains(response, 'navigator.share')
-        self.assertContains(response, 'buildDriverShiftReportText')
-        self.assertContains(response, 'createDriverReportDeliveryController')
+        self.assertIn('buildDriverShiftReportText', driver_script())
+        self.assertIn('createDriverReportDeliveryController', driver_script())
         self.assertIn('grid-auto-rows: minmax(64px, auto);', driver_stylesheet())
         self.assertIn('overflow-x: hidden;', driver_stylesheet())
         self.assertIn('overflow-y: auto;', driver_stylesheet())
@@ -462,28 +468,28 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v284')
+        self.assertContains(response, 'driver-mobile-shell-v285')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(
             response,
-            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v284',
+            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v285',
         )
         self.assertContains(
             response,
-            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v284',
+            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v285',
         )
         self.assertContains(
             response,
-            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v284',
+            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v285',
         )
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
-        self.assertContains(response, 'playDriverSound("truck_assigned")')
-        self.assertContains(response, 'driverAppliedActionVoice(actionKind, freshShell)')
-        self.assertContains(response, 'voice_shift_opened')
-        self.assertContains(response, 'voice_shift_closed')
-        self.assertContains(response, 'voice_downtime_started')
-        self.assertContains(response, 'voice_downtime_finished')
-        self.assertContains(response, 'voice_trip_finished')
+        self.assertIn('playDriverSound("truck_assigned")', driver_script())
+        self.assertIn('driverAppliedActionVoice(actionKind, freshShell)', driver_script())
+        self.assertIn('voice_shift_opened', driver_script())
+        self.assertIn('voice_shift_closed', driver_script())
+        self.assertIn('voice_downtime_started', driver_script())
+        self.assertIn('voice_downtime_finished', driver_script())
+        self.assertIn('voice_trip_finished', driver_script())
         self.assertNotContains(response, 'driverAppliedActionSound(actionKind, freshShell)')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
@@ -491,9 +497,9 @@ class AccessLoginTests(TestCase):
             response,
             'mode: "custom", path: "^/driver/(?:shift(?:/close)?/?)?$"',
         )
-        self.assertContains(response, 'window.applyOperationalStateRefresh')
-        self.assertContains(response, 'window.bindDriverMobileShell')
-        self.assertContains(response, 'body.set("occurred_at", occurredAt)')
+        self.assertIn('window.applyOperationalStateRefresh', driver_script())
+        self.assertIn('window.bindDriverMobileShell', driver_script())
+        self.assertIn('body.set("occurred_at", occurredAt)', driver_script())
         self.assertNotContains(response, '?version_check')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/driver-sw.js"')
         self.assertNotContains(response, 'window.' + 'alert')
@@ -518,7 +524,7 @@ class AccessLoginTests(TestCase):
         self.assertIn('"context"', driver_stylesheet())
         self.assertIn('"dial"', driver_stylesheet())
         self.assertIn('"drum"', driver_stylesheet())
-        self.assertContains(response, '"assign"')
+        self.assertIn('"assign"', driver_script())
         # Остаток высоты отдан барабану: его строка 1fr, круг задаёт свою строку сам.
         self.assertIn('grid-template-rows: auto auto minmax(0, 1fr) auto', driver_stylesheet())
         self.assertIn('gap: var(--driver-work-gap)', driver_stylesheet())
@@ -537,17 +543,17 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, 'function enhanceDriverContextLine()')
         self.assertContains(response, 'class="driver-work-ticks"')
         self.assertContains(response, 'data-driver-dial-label')
-        self.assertContains(response, 'className = "driver-work-label-line"')
-        self.assertContains(response, 'function splitDriverDialLabel(text)')
-        self.assertContains(response, 'function preferredDriverDialFontSize(coreWidth, lineCount, textLength)')
-        self.assertContains(response, 'function minimumDriverDialFontSize(lineCount, textLength)')
-        self.assertContains(response, 'function fitDriverDialLabel(label, force)')
-        self.assertContains(response, 'Math.min(60, Math.max(50, coreWidth * 0.23))')
-        self.assertContains(response, 'Math.min(54, Math.max(42, coreWidth * 0.2))')
-        self.assertContains(response, 'Math.min(48, Math.max(35, coreWidth * 0.18))')
-        self.assertContains(response, 'Math.min(40, Math.max(30, coreWidth * 0.15))')
-        self.assertContains(response, 'return 25')
-        self.assertContains(response, 'has-multiline-label')
+        self.assertIn('className = "driver-work-label-line"', driver_script())
+        self.assertIn('function splitDriverDialLabel(text)', driver_script())
+        self.assertIn('function preferredDriverDialFontSize(coreWidth, lineCount, textLength)', driver_script())
+        self.assertIn('function minimumDriverDialFontSize(lineCount, textLength)', driver_script())
+        self.assertIn('function fitDriverDialLabel(label, force)', driver_script())
+        self.assertIn('Math.min(60, Math.max(50, coreWidth * 0.23))', driver_script())
+        self.assertIn('Math.min(54, Math.max(42, coreWidth * 0.2))', driver_script())
+        self.assertIn('Math.min(48, Math.max(35, coreWidth * 0.18))', driver_script())
+        self.assertIn('Math.min(40, Math.max(30, coreWidth * 0.15))', driver_script())
+        self.assertIn('return 25', driver_script())
+        self.assertIn('has-multiline-label', driver_script())
         self.assertIn('row-gap: 6px', driver_stylesheet())
         self.assertIn('row-gap: 4px', driver_stylesheet())
         self.assertIn('line-height: 1.04', driver_stylesheet())
@@ -584,14 +590,14 @@ class AccessLoginTests(TestCase):
         self.assertIn('width: 74%', driver_stylesheet())
         self.assertIn('width: max-content', driver_stylesheet())
         self.assertNotContains(response, '--driver-dial-size: clamp(260px, 76vw, 380px)')
-        self.assertContains(response, 'var holdMs = Math.max(0, Number(options.holdMs || 2000))')
-        self.assertContains(response, 'if (typeof options.onProgress === "function")')
-        self.assertContains(response, 'timerId = window.setTimeout(complete, holdMs)')
+        self.assertIn('var holdMs = Math.max(0, Number(options.holdMs || 2000))', driver_script())
+        self.assertIn('if (typeof options.onProgress === "function")', driver_script())
+        self.assertIn('timerId = window.setTimeout(complete, holdMs)', driver_script())
         self.assertContains(response, 'data-driver-progress=')
-        self.assertContains(response, 'function syncDriverDialProgress()')
+        self.assertIn('function syncDriverDialProgress()', driver_script())
         self.assertContains(response, '--driver-progress-capped')
         self.assertContains(response, '--driver-over-progress')
-        self.assertContains(response, 'is-over-plan')
+        self.assertIn('is-over-plan', driver_stylesheet())
         self.assertIn('body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-label', driver_stylesheet())
         self.assertIn('max-width: 88%', driver_stylesheet())
         self.assertIn('body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-percent', driver_stylesheet())
@@ -701,7 +707,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v284', script)
+        self.assertIn('driver-mobile-shell-v285', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3602,7 +3608,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v284')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v285')
 
     def test_driver_quick_reasons_render_stars_and_drum_subset(self):
         self.create_registered_driver_shift()
@@ -3698,7 +3704,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'driver-downtime-state-icon-pause')
         self.assertContains(response, 'class="driver-downtime-list"')
         self.assertContains(response, 'aria-label="Начать простой: Фронт"')
-        self.assertContains(response, 'registerDriverDowntimeAction')
+        self.assertIn('registerDriverDowntimeAction', driver_script())
         self.assertNotContains(response, 'registerDriverDowntimeHold')
         self.assertNotContains(response, 'Удерживайте полсекунды')
         self.assertNotContains(response, 'driverShiftOpenConfirmed')

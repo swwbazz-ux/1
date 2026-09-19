@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -13,7 +14,7 @@ const DRIVER_TEMPLATE_PATH = path.resolve(
     "users",
     "driver_shift.html"
 );
-const DRIVER_TEMPLATE_SOURCE = fs.readFileSync(DRIVER_TEMPLATE_PATH, "utf8");
+const DRIVER_TEMPLATE_SOURCE = driverScreenSource();
 const MOBILE_SHIFT_HOLD_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "mobile-shift-unified-v1.js"),
     "utf8"

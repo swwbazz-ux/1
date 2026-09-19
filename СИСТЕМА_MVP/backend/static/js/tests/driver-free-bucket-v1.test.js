@@ -1,6 +1,7 @@
 "use strict";
 
 const test = require("node:test");
+const {driverScreenSource} = require("./driver-screen-source");
 const assert = require("node:assert/strict");
 
 const {
@@ -275,7 +276,7 @@ test("browser lifecycle drops the controller for disabled and detached shells", 
 });
 
 test("template always renders a hidden cancel control for restored offline selection", () => {
-    const template = fs.readFileSync(path.join(__dirname, "../../../templates/users/driver_shift.html"), "utf8");
+    const template = driverScreenSource();
     assert.match(template, /data-driver-free-bucket-remove\{% if not driver_free_bucket_state\.can_cancel %\} hidden/);
     assert.doesNotMatch(template, /\{% if driver_free_bucket_state\.can_cancel %\}[\s\S]{0,160}data-driver-free-bucket-remove/);
 });
@@ -283,7 +284,7 @@ test("template always renders a hidden cancel control for restored offline selec
 test("free-bucket projection keeps the dial label short and renders a compact mode chip", () => {
     const source = fs.readFileSync(path.join(__dirname, "../driver-free-bucket-v1.js"), "utf8");
     const styles = fs.readFileSync(path.join(__dirname, "../../css/driver-free-bucket-v1.css"), "utf8");
-    const template = fs.readFileSync(path.join(__dirname, "../../../templates/users/driver_shift.html"), "utf8");
+    const template = driverScreenSource();
     assert.match(source, /setDialLabel\(item\.label\)/);
     assert.doesNotMatch(source, /setDialLabel\("Свободный ковш · " \+ item\.label\)/);
     assert.match(source, /chip\.textContent = active \? "Свободный ковш · " \+ state\.selection\.label : ""/);

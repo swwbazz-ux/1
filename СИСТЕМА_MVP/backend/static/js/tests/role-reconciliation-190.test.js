@@ -1,11 +1,12 @@
 "use strict";
 const assert = require("node:assert/strict");
+const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 const templates = process.env.ROLE_RECONCILIATION_TEMPLATE_ROOT || path.resolve(__dirname, "../../../templates");
-const driver = fs.readFileSync(path.join(templates, "users/driver_shift.html"), "utf8");
+const driver = driverScreenSource();
 const excavator = fs.readFileSync(path.join(templates, "trips/excavator_work.html"), "utf8");
 // The existing brace extractor understands comments and quoted braces; use it
 // to execute the production functions, never a test copy of their algorithm.

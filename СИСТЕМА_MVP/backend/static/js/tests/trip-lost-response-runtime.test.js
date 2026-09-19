@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -109,7 +110,7 @@ class EventTargetStub {
 
 
 function loadDriverUnloadRecoveryRuntime() {
-    const template = fs.readFileSync(driverTemplatePath, "utf8");
+    const template = driverScreenSource();
     const source = extractMarkedSource(
         template,
         "/* DRIVER_UNLOAD_RECOVERY_START */",

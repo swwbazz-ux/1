@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -12,10 +13,7 @@ const BASE_TEMPLATE_SOURCE = fs.readFileSync(
     path.join(TEMPLATE_ROOT, "base.html"),
     "utf8"
 );
-const DRIVER_TEMPLATE_SOURCE = fs.readFileSync(
-    path.join(TEMPLATE_ROOT, "users", "driver_shift.html"),
-    "utf8"
-);
+const DRIVER_TEMPLATE_SOURCE = driverScreenSource();
 const EXCAVATOR_TEMPLATE_SOURCE = fs.readFileSync(
     path.join(TEMPLATE_ROOT, "trips", "excavator_work.html"),
     "utf8"

@@ -8,6 +8,7 @@
    одного события озвучивают его ровно один раз. */
 
 const assert = require("node:assert/strict");
+const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -17,7 +18,7 @@ const BACKEND_ROOT = path.resolve(__dirname, "..", "..", "..");
 const REALTIME_CLIENT_PATH = path.join(BACKEND_ROOT, "static", "js", "realtime-client.js");
 const REALTIME_CLIENT_SOURCE = fs.readFileSync(REALTIME_CLIENT_PATH, "utf8");
 const DRIVER_TEMPLATE_PATH = path.join(BACKEND_ROOT, "templates", "users", "driver_shift.html");
-const DRIVER_TEMPLATE_SOURCE = fs.readFileSync(DRIVER_TEMPLATE_PATH, "utf8");
+const DRIVER_TEMPLATE_SOURCE = driverScreenSource();
 const MOBILE_QUEUE_KEY = "driver-voice-early-announce-queue";
 
 /* ------------------------------------------------------------------ */

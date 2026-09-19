@@ -1,12 +1,13 @@
 "use strict";
 
 const test = require("node:test");
+const {driverScreenSource} = require("./driver-screen-source");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const include = fs.readFileSync(path.resolve(__dirname, "../../../templates/includes/mobile_dial_actions.html"), "utf8");
-const template = fs.readFileSync(path.resolve(__dirname, "../../../templates/users/driver_shift.html"), "utf8");
+const template = driverScreenSource();
 const css = fs.readFileSync(path.resolve(__dirname, "../../css/mobile-dial-actions-v1.css"), "utf8");
 
 test("shared dial component provides three independent accessible slots", () => {
