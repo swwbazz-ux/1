@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -11,10 +12,7 @@ const baseTemplate = fs.readFileSync(
     path.join(backendRoot, "templates", "base.html"),
     "utf8"
 );
-const driverTemplate = fs.readFileSync(
-    path.join(backendRoot, "templates", "users", "driver_shift.html"),
-    "utf8"
-);
+const driverTemplate = driverScreenSource();
 
 function extractBetween(source, startMarker, endMarker) {
     const start = source.indexOf(startMarker);

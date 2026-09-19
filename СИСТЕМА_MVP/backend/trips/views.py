@@ -13,7 +13,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q, Sum
 from django.db.models.functions import Coalesce
-from django.http import HttpResponse, JsonResponse
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -28,14 +28,12 @@ from assignments.models import (
     HaulAssignment,
     HaulAssignmentAction,
     HaulAssignmentHandoff,
-    HaulAssignmentHandoffStatus,
 )
 from assignments.services import (
     HaulAssignmentStateConflict,
     active_haul_handoffs,
     excavator_load_assignment_queryset,
     get_active_equipment_assignment,
-    open_haul_handoffs_for_shift,
     projected_haul_assignments_for_excavator,
     reconcile_due_haul_assignments,
     resolve_excavator_load_authority,
@@ -57,7 +55,6 @@ from core.production_time import (
     production_shift_bounds,
     production_shift_context,
     production_shift_type,
-    production_work_date,
     production_work_date_for_shift,
 )
 from downtimes.driver_workflow import (
@@ -76,7 +73,6 @@ from shifts.services import (
     ExcavatorShiftCloseConfirmationRequired,
     ExcavatorShiftError,
     aggregate_completed_trip_facts_by_shift,
-    assign_shift_plan_snapshot,
     calculate_open_shift_progress,
     calculate_progress_from_snapshot_facts,
     calculate_truck_shift_progress,
@@ -231,14 +227,6 @@ def equipment_state_icon_color(color_group):
     if color_group in {'green', 'yellow', 'red', 'gray', 'blue'}:
         return color_group
     return 'gray'
-
-
-def trip_equipment_state_code(trip):
-    if not trip:
-        return ''
-    if trip.status in OPEN_TRIP_STATUSES:
-        return 'loaded_waiting_unload'
-    return ''
 
 
 def downtime_reason_equipment_state_code(reason):
@@ -2321,7 +2309,7 @@ def build_dispatcher_dashboard_context(
     # The dispatcher keeps a truck in its primary complex.  This separate
     # annotation explains a temporary free-bucket operation without turning it
     # into a dispatcher reassignment.
-    from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+    from trips.models import FreeBucketAcceptance
     free_bucket_marker_by_truck_id = {}
     free_bucket_marker_now = timezone.now()
     for acceptance in (
@@ -2945,7 +2933,6 @@ def build_dispatcher_dashboard_context(
                 target_by_truck[trip.truck_id] = str(trip.dump_point)
             if trip.rock_type:
                 rock_by_truck[trip.truck_id] = str(trip.rock_type)
-        max_truck_volume = max(volume_by_truck.values(), default=Decimal('0'))
         truck_by_id = {truck.id: truck for truck in trucks_list}
         for truck_id in sorted(current_truck_ids, key=lambda item: garage_number_int(truck_by_id.get(item)) if item in truck_by_id else 9999):
             truck = truck_by_id.get(truck_id)
@@ -3948,28 +3935,6 @@ def required_projected_assignment_states(payload):
     return payload.get('expected_assignment_states')
 
 
-def close_haul_assignments(queryset, now, *, action='bulk_close_assignments', source='dispatcher'):
-    assignments = list(queryset)
-    for assignment in assignments:
-        assignment.status = AssignmentStatus.CANCELLED
-        assignment.ended_at = now
-    if assignments:
-        HaulAssignment.objects.bulk_update(assignments, ['status', 'ended_at'])
-        bump_operational_state(
-            'HaulAssignment:bulk_close',
-            event_type='assignment_changed',
-            object_type='HaulAssignment',
-            payload={
-                'action': action,
-                'source': source,
-                'closed_count': len(assignments),
-                'excavator_ids': sorted({assignment.excavator_id for assignment in assignments}),
-                'truck_ids': sorted({assignment.truck_id for assignment in assignments}),
-            },
-        )
-    return assignments
-
-
 @require_POST
 @transaction.atomic
 def dispatcher_move_excavator_view(request):
@@ -4615,10 +4580,6 @@ def excavator_assigned_truck_counts(excavator):
     return len(assignments), loadable, has_inactive_assigned_truck
 
 
-def excavator_has_loadable_assigned_truck(excavator):
-    return excavator_assigned_truck_counts(excavator)[1] > 0
-
-
 def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_when_empty=False):
     if not excavator:
         return None
@@ -5154,7 +5115,7 @@ def excavator_truck_loaded_view(request):
         return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
     payload = excavator_json_payload(request)
     client_action_id = str(payload.get('client_action_id') or '').strip()
-    if not client_action_id:
+    if not client_action_id or len(client_action_id) > 128:
         return JsonResponse({'ok': False, 'error': 'Не передан client_action_id.'}, status=400)
 
     with transaction.atomic():
@@ -5695,13 +5656,6 @@ def parse_excavator_shift_decimal(value, field_label):
 
 def default_excavator_shift_type(now=None):
     return production_shift_type(now)
-
-
-def get_excavator_for_shift_start(employee, payload):
-    assignment = get_active_equipment_assignment(employee, 'excavator_operator')
-    if work_assignment_state(employee, assignment) != 'assigned':
-        return None
-    return assignment.equipment
 
 
 def work_assignment_error_message(state):
@@ -8349,6 +8303,8 @@ def finish_service_closed_shift(shift, *, closed_by, close_kind, note, reading_f
         'service_close_kind',
         'service_close_note',
     ])
+    from trips.free_bucket import cancel_free_bucket_acceptances_for_shift
+    cancel_free_bucket_acceptances_for_shift(shift, cancelled_at=shift.closed_at)
     if not shift.equipment_id:
         return
     # Ожидания рабочего процесса не живут дольше смены; ремонт и прочие
@@ -8896,11 +8852,29 @@ def driver_change_unload_point_view(request, trip_id):
 
     with transaction.atomic():
         lock_idempotency_key('change_actual_unload_point', client_action_id)
-        existing_action = TripClientAction.objects.filter(
+        existing_action = TripClientAction.objects.select_related('trip').filter(
             action_type='change_actual_unload_point',
             client_action_id=client_action_id,
         ).first()
         if existing_action:
+            try:
+                repeated_dump_point_id = int(request.POST.get('dump_point') or 0)
+            except (TypeError, ValueError):
+                repeated_dump_point_id = 0
+            existing_point_id = (
+                existing_action.trip.actual_dump_point_id
+                or existing_action.trip.dump_point_id
+            )
+            if (
+                existing_action.actor_id == access.employee_id
+                and existing_action.trip_id == trip_id
+                and repeated_dump_point_id == existing_point_id
+            ):
+                return redirect('driver_shift')
+            messages.error(
+                request,
+                'Идентификатор действия уже использован для другого выбора. Обновите экран и повторите действие.',
+            )
             return redirect('driver_shift')
         Employee.objects.select_for_update().get(pk=access.employee_id)
         if not role_session_state(request, access)['is_active']:
@@ -8925,10 +8899,6 @@ def driver_change_unload_point_view(request, trip_id):
             dump_point_id = int(request.POST.get('dump_point') or 0)
         except (TypeError, ValueError):
             dump_point_id = 0
-        dump_point = DumpPoint.objects.filter(id=dump_point_id, is_active=True).first()
-        if not dump_point:
-            messages.error(request, 'Точка разгрузки не найдена.')
-            return redirect('driver_shift')
         trip = (
             Trip.objects
             .select_for_update()
@@ -8938,6 +8908,26 @@ def driver_change_unload_point_view(request, trip_id):
         )
         if not trip:
             messages.error(request, 'Активный рейс не найден или уже закрыт.')
+            return redirect('driver_shift')
+        from trips.free_bucket import free_bucket_snapshot_dump_points_for_trip
+
+        free_bucket_dump_points = free_bucket_snapshot_dump_points_for_trip(trip)
+        if free_bucket_dump_points is None:
+            dump_point = DumpPoint.objects.filter(id=dump_point_id, is_active=True).first()
+        else:
+            allowed_ids = {item['id'] for item in free_bucket_dump_points}
+            if dump_point_id not in allowed_ids:
+                messages.error(
+                    request,
+                    'Точка разгрузки не входила в сохранённые настройки свободного ковша.',
+                )
+                return redirect('driver_shift')
+            dump_point = DumpPoint.objects.filter(id=dump_point_id).first()
+        if not dump_point:
+            messages.error(request, 'Точка разгрузки не найдена.')
+            return redirect('driver_shift')
+        previous_dump_point_id = trip.actual_dump_point_id or trip.dump_point_id
+        if previous_dump_point_id == dump_point.id:
             return redirect('driver_shift')
         if trip.assigned_dump_point_id is None:
             trip.assigned_dump_point = trip.dump_point
@@ -8961,7 +8951,10 @@ def driver_change_unload_point_view(request, trip_id):
                 'truck_id': trip.truck_id,
                 'excavator_id': trip.excavator_id,
                 'assigned_dump_point_id': trip.assigned_dump_point_id or trip.dump_point_id,
+                'previous_dump_point_id': previous_dump_point_id,
                 'actual_dump_point_id': trip.actual_dump_point_id,
+                'actor_id': access.employee_id,
+                'occurred_at': timezone.now().isoformat(),
                 'status': trip.status,
             },
         )

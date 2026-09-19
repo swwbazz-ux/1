@@ -510,7 +510,7 @@ class DriverWatchObservationTests(TestCase):
             status=Employee.Status.ACTIVE,
         )
         first_start = self.start - timedelta(hours=12)
-        first_shift = EmployeeShift.objects.create(
+        EmployeeShift.objects.create(
             employee=self.driver,
             shift_type=ShiftType.DAY,
             workplace_code='driver',

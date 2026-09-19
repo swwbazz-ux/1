@@ -19,7 +19,7 @@ from rotations.models import (
 )
 from settlement.models import SettlementCohort, SettlementCohortMember
 from shifts.models import WatchPeriod
-from users.models import Employee, EmployeeAccess
+from users.models import EmployeeAccess
 
 
 class SettlementArrivalRosterRoutingQueueTests(TestCase):

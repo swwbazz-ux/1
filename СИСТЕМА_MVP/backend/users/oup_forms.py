@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from .forms import EmployeeCardForm
-from .models import Employee, Role
+from .models import Role
 
 
 class OupAccessRoleForm(forms.Form):

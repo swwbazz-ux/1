@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from io import BytesIO
 
 from django.templatetags.static import static
 
@@ -89,35 +88,3 @@ def app_catalog_items(request):
     return items
 
 
-def render_role_app_qr_png(target_url):
-    from PIL import Image, ImageDraw
-    from reportlab.graphics.barcode.qr import QrCodeWidget
-
-    qr_code = QrCodeWidget(target_url, barLevel='M')
-    qr_code.qr.make()
-    module_count = qr_code.qr.getModuleCount()
-    margin_modules = (APP_CATALOG_QR_CANVAS_MODULES - module_count) // 2
-    if margin_modules < 4 or module_count + (margin_modules * 2) != APP_CATALOG_QR_CANVAS_MODULES:
-        raise ValueError('QR matrix does not fit the fixed integer-pixel canvas')
-
-    image = Image.new('RGB', (APP_CATALOG_QR_SIZE, APP_CATALOG_QR_SIZE), 'white')
-    draw = ImageDraw.Draw(image)
-    for row in range(module_count):
-        for column in range(module_count):
-            if not qr_code.qr.isDark(row, column):
-                continue
-            left = (margin_modules + column) * APP_CATALOG_QR_MODULE_PIXELS
-            top = (margin_modules + row) * APP_CATALOG_QR_MODULE_PIXELS
-            draw.rectangle(
-                (
-                    left,
-                    top,
-                    left + APP_CATALOG_QR_MODULE_PIXELS - 1,
-                    top + APP_CATALOG_QR_MODULE_PIXELS - 1,
-                ),
-                fill='black',
-            )
-
-    output = BytesIO()
-    image.save(output, format='PNG', optimize=False, compress_level=9)
-    return output.getvalue()

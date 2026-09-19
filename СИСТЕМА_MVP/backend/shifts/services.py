@@ -14,7 +14,6 @@ from django.utils import timezone
 from core.db_locks import lock_idempotency_key
 from core.production_time import (
     production_day_bounds,
-    production_shift_type,
     production_work_date_for_shift,
 )
 from trips.models import Trip, TripStatus
@@ -262,6 +261,8 @@ def handover_other_role_shift(shift, *, closed_by):
     shift.closed_by = closed_by
     shift.is_service_closed = True
     shift.save(update_fields=['closed_at', 'closed_by', 'is_service_closed'])
+    from trips.free_bucket import cancel_free_bucket_acceptances_for_shift
+    cancel_free_bucket_acceptances_for_shift(shift, cancelled_at=now)
     from downtimes.driver_workflow import close_workflow_downtimes
     close_workflow_downtimes(shift.equipment, ended_at=now)
     from trips.models import OPEN_TRIP_STATUSES
@@ -838,6 +839,8 @@ def close_driver_shift(
         locked_shift.closed_at = closed_at
         locked_shift.closed_by = employee
         locked_shift.save(update_fields=[*readings, 'closed_at', 'closed_by'])
+        from trips.free_bucket import cancel_free_bucket_acceptances_for_shift
+        cancel_free_bucket_acceptances_for_shift(locked_shift, cancelled_at=closed_at)
         from downtimes.driver_workflow import close_workflow_downtimes
         close_workflow_downtimes(locked_shift.equipment, ended_at=locked_shift.closed_at)
         Trip.objects.filter(
@@ -1071,10 +1074,6 @@ def shift_plan_totals_for_dates(dates):
         }
         for date, by_shift in totals_by_date.items()
     }
-
-
-def shift_plan_totals_by_shift(date):
-    return shift_plan_totals_for_dates([date])[date]['by_shift']
 
 
 def shift_plan_totals(date):
@@ -1402,10 +1401,6 @@ def calculate_truck_shift_progress(truck, reference_shift=None):
         )
         return calculate_equipment_shift_progress(truck, date, reference_shift.shift_type)
     return empty_progress(truck, status=PlanAssignmentStatus.NO_PLAN_GROUP)
-
-
-def calculate_truck_progress_for_excavator_shift(truck, excavator_shift):
-    return calculate_truck_shift_progress(truck, reference_shift=excavator_shift)
 
 
 def calculate_open_shift_progress(open_shift):
@@ -2160,6 +2155,8 @@ def close_excavator_shift(
     shift.closed_at = closed_at
     shift.closed_by = employee
     shift.save(update_fields=['end_fuel', 'end_mileage', 'end_engine_hours', 'closed_at', 'closed_by'])
+    from trips.free_bucket import cancel_free_bucket_acceptances_for_shift
+    cancel_free_bucket_acceptances_for_shift(shift, cancelled_at=closed_at)
     from downtimes.driver_workflow import close_workflow_downtimes
     close_workflow_downtimes(shift.equipment, ended_at=shift.closed_at)
     # Переходное право существует только до конца конкретной смены старого

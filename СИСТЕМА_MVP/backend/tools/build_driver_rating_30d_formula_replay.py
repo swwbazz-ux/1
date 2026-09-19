@@ -19,7 +19,6 @@ import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path, PurePosixPath
-from typing import Any
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]

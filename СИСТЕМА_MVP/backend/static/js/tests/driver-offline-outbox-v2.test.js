@@ -5,11 +5,88 @@ const assert = require("node:assert/strict");
 const {
     createDriverOfflineOutbox,
     createDriverPointChangeEvent,
+    createDriverFreeBucketSelectedEvent,
+    createDriverFreeBucketCancelledEvent,
     isDriverSyncAuthResponse,
     createDriverDowntimeEndEvent,
+    selectDriverDowntimeProjection,
     localRepository,
     backoff,
 } = require("../driver-offline-outbox-v2.js");
+
+test("terminal downtime events never replace the authoritative active downtime", () => {
+    const projection = selectDriverDowntimeProjection([
+        {
+            event_id: "pending-start",
+            event_type: "driver.downtime.started",
+            sequence: 10,
+            state: "pending",
+            payload: {reason_id: 4},
+        },
+        {
+            event_id: "rejected-switch",
+            event_type: "driver.downtime.started",
+            sequence: 11,
+            state: "conflict",
+            payload: {reason_id: 8},
+        },
+    ]);
+
+    assert.equal(projection.event_id, "pending-start");
+    assert.equal(selectDriverDowntimeProjection([
+        {
+            event_id: "only-terminal-start",
+            event_type: "driver.downtime.started",
+            sequence: 12,
+            state: "invalid",
+            payload: {reason_id: 9},
+        },
+    ]), null);
+});
+
+test("confirmed downtime close receipt survives queue removal and restart", async () => {
+    const local = storage();
+    const send = async batch => ({
+        results: batch.events.map((event, index) => ({
+            event_id: event.event_id,
+            status: "accepted",
+            server_received_at: `2026-09-17T00:00:0${index + 1}Z`,
+            server_ids: {downtime_event_id: 701, shift_id: 23},
+        })),
+    });
+    const first = runtime({local, send});
+    await first.enqueue({
+        event_id: "downtime-receipt-start",
+        event_type: "driver.downtime.started",
+        occurred_at: "2026-09-17T00:00:00Z",
+        payload: {reason_id: 9},
+    });
+    await first.flush();
+
+    const second = runtime({local, send});
+    await second.enqueue(createDriverDowntimeEndEvent({
+        eventId: "downtime-receipt-end",
+        occurredAt: "2026-09-17T00:01:00Z",
+        serverId: 701,
+        contextSnapshot: {
+            downtime_projection: {
+                shift_total_seconds: 60,
+                active_elapsed_seconds: 60,
+                reason_totals: {9: 60},
+            },
+        },
+    }));
+    await second.flush();
+
+    const restarted = runtime({local, send});
+    const receipt = await restarted.getDowntimeProjectionReceipt(23, 58);
+    assert.equal((await restarted.pending()).length, 0);
+    assert.equal(receipt.event_type, "driver.downtime.ended");
+    assert.equal(receipt.event_id, "downtime-receipt-end");
+    assert.equal(receipt.server_ids.downtime_event_id, 701);
+    assert.equal(receipt.projection.shift_total_seconds, 60);
+    assert.deepEqual(receipt.projection.reason_totals, {9: 60});
+});
 
 function storage() {
     const values = new Map();
@@ -42,6 +119,26 @@ function runtime({send, local = storage(), accessId = 7, context, batchSize, onS
         })),
     });
 }
+
+test("a projection callback failure does not turn a durable enqueue into a storage error", async () => {
+    let stateCalls = 0;
+    const box = runtime({
+        onState() {
+            stateCalls += 1;
+            throw new Error("broken_projection");
+        },
+        send: async () => { throw new Error("offline"); },
+    });
+    const saved = await box.enqueue({
+        event_id: "durable-despite-projection",
+        event_type: "driver.trip.unloaded",
+        trip_id: 91,
+        payload: {trip_id: 91},
+    });
+    assert.equal(saved.event_id, "durable-despite-projection");
+    assert.equal((await box.pending()).length, 1);
+    assert.equal(stateCalls, 1);
+});
 
 function fakeIndexedDB() {
     const stores = new Map();
@@ -479,6 +576,78 @@ test("A to B to A point changes always get new ids CAS state and dependencies", 
     assert.equal(second.payload.expected_actual_dump_point_id, 2);
 });
 
+test("free bucket selection captures the exact truck excavator and catalog snapshot", async () => {
+    const box = runtime({send: async () => { throw new Error("offline"); }});
+    const contextSnapshot = {
+        excavator_id: 17,
+        excavator_label: "ЭКГ-17",
+        loading_horizon: "Горизонт 210",
+        actor_id: 999,
+        access_id: 999,
+        role_code: "dispatcher",
+    };
+    const selected = createDriverFreeBucketSelectedEvent({
+        eventId: "driver-free-select-1",
+        truckId: 58,
+        excavatorId: 17,
+        catalogVersion: 41,
+        catalogGeneratedAt: "2026-09-14T10:00:00Z",
+        contextSnapshot,
+        occurredAt: "2026-09-14T10:01:00Z",
+    });
+    contextSnapshot.excavator_label = "mutated-after-build";
+    const stored = await box.enqueue(selected);
+    assert.equal(stored.event_type, "driver.free_bucket.selected");
+    assert.equal(stored.trip_id, null);
+    assert.deepEqual(stored.depends_on, []);
+    assert.deepEqual(stored.payload, {
+        truck_id: 58,
+        excavator_id: 17,
+        catalog_version: 41,
+        catalog_generated_at: "2026-09-14T10:00:00Z",
+    });
+    assert.deepEqual(stored.context_snapshot, {
+        excavator_id: 17,
+        excavator_label: "ЭКГ-17",
+        loading_horizon: "Горизонт 210",
+        actor_id: 11,
+        access_id: 7,
+        role_code: "driver",
+    });
+    assert.equal(stored.actor_id, 11);
+    assert.equal(stored.access_id, 7);
+    assert.equal(stored.role_code, "driver");
+    assert.equal(stored.occurred_at, "2026-09-14T10:01:00Z");
+    assert.equal((await box.pending()).length, 1);
+    await assert.rejects(
+        box.enqueue({...selected, context_snapshot: {...selected.context_snapshot, excavator_label: "other"}}),
+        /offline_event_id_reused/
+    );
+});
+
+test("free bucket cancellation depends only on an unresolved local selection", () => {
+    const local = createDriverFreeBucketCancelledEvent({
+        eventId: "driver-free-cancel-local",
+        localAcceptanceId: "driver-free-select-1",
+    });
+    assert.deepEqual(local.depends_on, ["driver-free-select-1"]);
+    assert.deepEqual(local.payload, {
+        free_bucket_acceptance_id: null,
+        free_bucket_acceptance_local_id: "driver-free-select-1",
+    });
+
+    const confirmed = createDriverFreeBucketCancelledEvent({
+        eventId: "driver-free-cancel-server",
+        acceptanceId: 701,
+        localAcceptanceId: "driver-free-select-origin-device",
+    });
+    assert.deepEqual(confirmed.depends_on, []);
+    assert.deepEqual(confirmed.payload, {
+        free_bucket_acceptance_id: 701,
+        free_bucket_acceptance_local_id: null,
+    });
+});
+
 test("actual IndexedDB repository path survives a new runtime instance", async () => {
     const indexedDB = fakeIndexedDB();
     const first = runtime({indexedDB, send: async () => { throw new Error("offline"); }});
@@ -511,6 +680,26 @@ test("local guards reject ungranted or incomplete driver actions before storage"
     await assert.rejects(
         box.enqueue({event_id: "access", event_type: "driver.downtime.started", access_id: 8, payload: {reason_id: 1}}),
         /offline_event_access_mismatch/
+    );
+    await assert.rejects(
+        box.enqueue({event_id: "free-incomplete", event_type: "driver.free_bucket.selected", payload: {truck_id: 58}}),
+        /offline_free_bucket_context_incomplete/
+    );
+    await assert.rejects(
+        box.enqueue({event_id: "free-wrong-truck", event_type: "driver.free_bucket.selected", payload: {truck_id: 59, excavator_id: 17}}),
+        /offline_free_bucket_truck_mismatch/
+    );
+    await assert.rejects(
+        box.enqueue({event_id: "free-cancel-unbound", event_type: "driver.free_bucket.cancelled", payload: {free_bucket_acceptance_local_id: "selection-1"}}),
+        /offline_free_bucket_acceptance_required/
+    );
+    await assert.rejects(
+        box.enqueue({event_id: "free-cancel-server-dependent", event_type: "driver.free_bucket.cancelled", depends_on: ["other-device"], payload: {free_bucket_acceptance_id: 701}}),
+        /offline_free_bucket_server_reference_dependency/
+    );
+    await assert.rejects(
+        box.enqueue({event_id: "free-cancel-ambiguous", event_type: "driver.free_bucket.cancelled", payload: {free_bucket_acceptance_id: 701, free_bucket_acceptance_local_id: "selection-1"}}),
+        /offline_free_bucket_acceptance_ambiguous/
     );
     assert.equal((await box.pending()).length, 0);
 });

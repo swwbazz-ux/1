@@ -1279,31 +1279,6 @@ def active_haul_handoffs(*, for_update=False):
     return queryset
 
 
-def open_haul_handoffs_for_shift(shift, *, for_update=False):
-    """Открытые исходящие переходы, которые видит прежняя смена."""
-    if not shift or shift.closed_at or not shift.equipment_id:
-        return HaulAssignmentHandoff.objects.none()
-    queryset = (
-        active_haul_handoffs()
-        .filter(
-            source_shift=shift,
-            source_excavator_id=shift.equipment_id,
-        )
-        .select_related(
-            'truck',
-            'source_assignment',
-            'source_assignment__truck',
-            'source_assignment__truck__model',
-            'source_assignment__excavator',
-            'target_assignment',
-        )
-        .order_by('-created_at', '-id')
-    )
-    if for_update:
-        queryset = queryset.select_for_update(of=('self',))
-    return queryset
-
-
 def excavator_load_assignment_queryset(shift):
     """Карточки текущего экскаватора, включая обе стороны перевода."""
     if not shift or shift.closed_at or not shift.equipment_id:

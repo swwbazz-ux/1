@@ -2307,7 +2307,7 @@ class ArrivalRosterT14aApprovalTests(TestCase):
             is_active=True, hired_at=date(2025, 1, 1),
             watch_composition=self.period.watch_composition,
         )
-        second_resident = SettlementResident.objects.create(
+        SettlementResident.objects.create(
             employee=second_employee,
             resident_type=SettlementResident.ResidentType.EMPLOYEE,
             status=SettlementResident.Status.ACTIVE,
@@ -2339,7 +2339,7 @@ class ArrivalRosterT14aApprovalTests(TestCase):
 
         version = self._ready_version()
         match = version.matches.get()
-        context = _lock_timekeeper_access(_access_snapshot(self.access.pk))
+        _lock_timekeeper_access(_access_snapshot(self.access.pk))
         issue = _trusted_create_arrival_roster_issue(
             version=version, match=match, severity='error', code='future_unknown',
             message='Будущая неизвестная ошибка.', details={},

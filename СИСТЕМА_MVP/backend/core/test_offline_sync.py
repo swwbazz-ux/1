@@ -398,6 +398,288 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual([item['status'] for item in repeated], ['deduplicated', 'deduplicated'])
         self.assertEqual(TripClientAction.objects.filter(action_type='change_actual_unload_point').count(), 2)
 
+    def test_dump_point_current_choice_is_accepted_without_business_change(self):
+        self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.truck_shift.save(update_fields=['opened_at'])
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            loading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            driver_participation_recorded=True,
+            driver_control_shift=self.truck_shift,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=timezone.now() - timedelta(minutes=2),
+        )
+        event = {
+            'event_id': 'dump-current-noop',
+            'event_type': 'driver.trip.dump_point_changed',
+            'format_version': 1,
+            'occurred_at': timezone.now().isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'payload': {
+                'trip_id': trip.id,
+                'dump_point_id': self.dump_point.id,
+                'expected_actual_dump_point_id': self.dump_point.id,
+            },
+        }
+
+        result = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-device-noop',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['no_change'])
+        self.assertEqual(TripClientAction.objects.filter(action_type='change_actual_unload_point').count(), 0)
+        trip.refresh_from_db()
+        self.assertIsNone(trip.actual_dump_point_id)
+        self.assertEqual(trip.dump_point_id, self.dump_point.id)
+
+    def test_dump_point_change_rejects_inactive_reference(self):
+        self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.truck_shift.save(update_fields=['opened_at'])
+        inactive = DumpPoint.objects.create(name='Закрытая точка offline', is_active=False)
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            loading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            driver_participation_recorded=True,
+            driver_control_shift=self.truck_shift,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=timezone.now() - timedelta(minutes=2),
+        )
+        event = {
+            'event_id': 'dump-inactive-point',
+            'event_type': 'driver.trip.dump_point_changed',
+            'format_version': 1,
+            'occurred_at': timezone.now().isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'payload': {
+                'trip_id': trip.id,
+                'dump_point_id': inactive.id,
+                'expected_actual_dump_point_id': self.dump_point.id,
+            },
+        }
+
+        result = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-device-inactive',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(result['code'], 'dump_point_changed')
+        trip.refresh_from_db()
+        self.assertEqual(trip.dump_point_id, self.dump_point.id)
+        self.assertEqual(TripClientAction.objects.filter(action_type='change_actual_unload_point').count(), 0)
+
+    def test_dump_point_change_and_dependent_unload_complete_same_exact_trip(self):
+        self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.truck_shift.save(update_fields=['opened_at'])
+        changed_point = DumpPoint.objects.create(name='Склад offline')
+        loaded_at = timezone.now() - timedelta(minutes=2)
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            loading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            driver_participation_recorded=True,
+            driver_control_shift=self.truck_shift,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=loaded_at,
+        )
+        changed_at = loaded_at + timedelta(minutes=1)
+        point_event = {
+            'event_id': 'dump-before-unload',
+            'event_type': 'driver.trip.dump_point_changed',
+            'format_version': 1,
+            'occurred_at': changed_at.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'payload': {
+                'trip_id': trip.id,
+                'dump_point_id': changed_point.id,
+                'expected_actual_dump_point_id': self.dump_point.id,
+            },
+        }
+        unload_event = {
+            'event_id': 'unload-after-dump-change',
+            'event_type': 'driver.trip.unloaded',
+            'format_version': 1,
+            'occurred_at': (changed_at + timedelta(seconds=1)).isoformat(),
+            'sequence': 2,
+            'depends_on': [point_event['event_id']],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'payload': {'trip_id': trip.id},
+        }
+
+        results = self.sync(
+            [unload_event, point_event],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-device-change-unload',
+        ).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'])
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(trip.assigned_dump_point_id, self.dump_point.id)
+        self.assertEqual(trip.actual_dump_point_id, changed_point.id)
+        self.assertEqual(trip.dump_point_id, changed_point.id)
+        self.assertEqual(Trip.objects.count(), 1)
+
+    def test_late_equal_timestamp_dump_point_change_cannot_roll_back_newer_state(self):
+        self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.truck_shift.save(update_fields=['opened_at'])
+        point_b = DumpPoint.objects.create(name='Склад равного времени Б')
+        event_time = timezone.now() - timedelta(minutes=1)
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            loading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            driver_participation_recorded=True,
+            driver_control_shift=self.truck_shift,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=event_time - timedelta(minutes=1),
+        )
+
+        first = {
+            'event_id': 'dump-equal-time-first',
+            'event_type': 'driver.trip.dump_point_changed',
+            'format_version': 1,
+            'occurred_at': event_time.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'payload': {
+                'trip_id': trip.id,
+                'dump_point_id': point_b.id,
+                'expected_actual_dump_point_id': self.dump_point.id,
+            },
+        }
+        late_rollback = {
+            'event_id': 'dump-equal-time-late',
+            'event_type': 'driver.trip.dump_point_changed',
+            'format_version': 1,
+            'occurred_at': event_time.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'payload': {
+                'trip_id': trip.id,
+                'dump_point_id': self.dump_point.id,
+                'expected_actual_dump_point_id': point_b.id,
+            },
+        }
+
+        first_result = self.sync(
+            [first], client=self.driver_client(), role_code='driver', device_id='driver-device-equal-a',
+        ).json()['results'][0]
+        late_result = self.sync(
+            [late_rollback], client=self.driver_client(), role_code='driver', device_id='driver-device-equal-b',
+        ).json()['results'][0]
+
+        self.assertEqual(first_result['status'], 'accepted', first_result)
+        self.assertEqual(late_result['status'], 'conflict', late_result)
+        self.assertEqual(late_result['code'], 'stale_dump_point_change')
+        trip.refresh_from_db()
+        self.assertEqual(trip.actual_dump_point_id, point_b.id)
+        self.assertEqual(trip.dump_point_id, point_b.id)
+
+    def test_equal_timestamp_dependent_point_changes_keep_device_order(self):
+        self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.truck_shift.save(update_fields=['opened_at'])
+        point_b = DumpPoint.objects.create(name='Склад одной миллисекунды Б')
+        point_c = DumpPoint.objects.create(name='Склад одной миллисекунды В')
+        event_time = timezone.now() - timedelta(minutes=1)
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            loading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            driver_participation_recorded=True,
+            driver_control_shift=self.truck_shift,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=event_time - timedelta(minutes=1),
+        )
+
+        first = {
+            'event_id': 'dump-equal-dependent-first',
+            'event_type': 'driver.trip.dump_point_changed',
+            'format_version': 1,
+            'occurred_at': event_time.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'payload': {
+                'trip_id': trip.id,
+                'dump_point_id': point_b.id,
+                'expected_actual_dump_point_id': self.dump_point.id,
+            },
+        }
+        second = {
+            'event_id': 'dump-equal-dependent-second',
+            'event_type': 'driver.trip.dump_point_changed',
+            'format_version': 1,
+            'occurred_at': event_time.isoformat(),
+            'sequence': 2,
+            'depends_on': [first['event_id']],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'payload': {
+                'trip_id': trip.id,
+                'dump_point_id': point_c.id,
+                'expected_actual_dump_point_id': point_b.id,
+            },
+        }
+
+        results = self.sync(
+            [second, first],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-device-equal-chain',
+        ).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'])
+        trip.refresh_from_db()
+        self.assertEqual(trip.actual_dump_point_id, point_c.id)
+        self.assertEqual(trip.dump_point_id, point_c.id)
+
     def test_downtime_local_reference_maps_to_server_id(self):
         self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
         self.truck_shift.save(update_fields=['opened_at'])
@@ -445,6 +727,78 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(event.ended_at, ended_at)
         self.assertEqual(results[0]['server_ids']['downtime_event_id'], event.id)
         self.assertEqual(results[1]['server_ids']['downtime_event_id'], event.id)
+
+    def test_driver_downtime_reason_switch_preserves_separate_intervals_and_total(self):
+        self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.truck_shift.save(update_fields=['opened_at'])
+        first_reason = DowntimeReason.objects.create(
+            name='Offline первая причина',
+            equipment_type=self.truck_type,
+            show_for_truck_driver=True,
+        )
+        second_reason = DowntimeReason.objects.create(
+            name='Offline вторая причина',
+            equipment_type=self.truck_type,
+            show_for_truck_driver=True,
+        )
+        first_at = timezone.now() - timedelta(minutes=3)
+        switched_at = first_at + timedelta(seconds=40)
+        repeated_at = switched_at + timedelta(seconds=15)
+        first = {
+            'event_id': 'driver-downtime-switch-first',
+            'event_type': 'driver.downtime.started',
+            'format_version': 1,
+            'occurred_at': first_at.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'payload': {'reason_id': first_reason.id},
+        }
+        second = {
+            'event_id': 'driver-downtime-switch-second',
+            'event_type': 'driver.downtime.started',
+            'format_version': 1,
+            'occurred_at': switched_at.isoformat(),
+            'sequence': 2,
+            'depends_on': [first['event_id']],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'payload': {'reason_id': second_reason.id},
+        }
+        repeated = {
+            'event_id': 'driver-downtime-switch-second-repeat',
+            'event_type': 'driver.downtime.started',
+            'format_version': 1,
+            'occurred_at': repeated_at.isoformat(),
+            'sequence': 3,
+            'depends_on': [second['event_id']],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'payload': {'reason_id': second_reason.id},
+        }
+
+        results = self.sync(
+            [repeated, second, first],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-device-downtime-switch',
+        ).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted', 'accepted'])
+        intervals = list(DowntimeEvent.objects.filter(equipment=self.truck).order_by('started_at', 'id'))
+        self.assertEqual(len(intervals), 2)
+        self.assertEqual(intervals[0].reason, first_reason)
+        self.assertEqual(intervals[0].started_at, first_at)
+        self.assertEqual(intervals[0].ended_at, switched_at)
+        self.assertEqual(intervals[1].reason, second_reason)
+        self.assertEqual(intervals[1].started_at, switched_at)
+        self.assertIsNone(intervals[1].ended_at)
+        by_id = {item['event_id']: item for item in results}
+        self.assertEqual(
+            by_id[repeated['event_id']]['server_ids']['downtime_event_id'],
+            intervals[1].id,
+        )
 
     def test_downtime_start_event_id_is_backward_compatible_local_reference(self):
         self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
@@ -527,6 +881,55 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(result['status'], 'accepted')
         downtime.refresh_from_db()
         self.assertEqual(downtime.ended_at, ended_at)
+
+    def test_excavator_offline_downtime_switch_uses_the_same_interval_contract(self):
+        self.shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.shift.save(update_fields=['opened_at'])
+        first_reason = DowntimeReason.objects.create(
+            name='Экскаватор offline причина 1',
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+        )
+        second_reason = DowntimeReason.objects.create(
+            name='Экскаватор offline причина 2',
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+        )
+        first_at = timezone.now() - timedelta(minutes=2)
+        switched_at = first_at + timedelta(seconds=25)
+        first = {
+            'event_id': 'excavator-downtime-switch-first',
+            'event_type': 'excavator.downtime.started',
+            'format_version': 1,
+            'occurred_at': first_at.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'payload': {'reason_id': first_reason.id},
+        }
+        second = {
+            'event_id': 'excavator-downtime-switch-second',
+            'event_type': 'excavator.downtime.started',
+            'format_version': 1,
+            'occurred_at': switched_at.isoformat(),
+            'sequence': 2,
+            'depends_on': [first['event_id']],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'payload': {'reason_id': second_reason.id},
+        }
+
+        results = self.sync([second, first]).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'])
+        intervals = list(DowntimeEvent.objects.filter(equipment=self.excavator).order_by('started_at', 'id'))
+        self.assertEqual(len(intervals), 2)
+        self.assertEqual(intervals[0].reason, first_reason)
+        self.assertEqual(intervals[0].ended_at, switched_at)
+        self.assertEqual(intervals[1].reason, second_reason)
+        self.assertEqual(intervals[1].started_at, switched_at)
+        self.assertIsNone(intervals[1].ended_at)
 
     def test_legacy_excavator_downtime_end_accepts_local_active_reference(self):
         self.shift.opened_at = timezone.now() - timedelta(minutes=10)

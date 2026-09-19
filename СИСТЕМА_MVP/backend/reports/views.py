@@ -3959,10 +3959,13 @@ def get_downtime_report_filters(request):
 
 
 def apply_downtime_report_filters(queryset, filters):
+    # Критичность фильтруется не здесь: она вычисляется на уровне готовых строк
+    # (downtime_report_context проверяет row['is_critical'] после сборки rows),
+    # а не в самом queryset — у DowntimeReason.effective_color_group нет прямого
+    # отражения в SQL. Поэтому это фильтр даты/статуса/техники/причины.
     date_from = parse_filter_date(filters.get('date_from'))
     date_to = parse_filter_date(filters.get('date_to'))
     status = filters.get('status')
-    critical = filters.get('critical')
     equipment = filters.get('equipment', '')
     reason = filters.get('reason', '')
 

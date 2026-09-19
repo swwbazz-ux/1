@@ -10,7 +10,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt, RGBColor
 
-from .models import RotationCollectionCycle, RotationResponse, WatchExtensionCase
+from .models import RotationCollectionCycle, RotationResponse
 
 
 PACKET_MARKER = "ПАКЕТ ИСХОДНЫХ ДАННЫХ — НЕ ПРИКАЗ"

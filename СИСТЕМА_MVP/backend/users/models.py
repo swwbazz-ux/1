@@ -719,6 +719,10 @@ class EmployeeAccess(models.Model):
     is_active = models.BooleanField('Активен', default=True)
     created_at = models.DateTimeField('Создан', auto_now_add=True)
     deactivated_at = models.DateTimeField('Отключен', null=True, blank=True)
+    # Личный набор причин простоя для барабана на экране «Работа» (id причин в порядке
+    # справочника). Пустой список — набор не задан, барабан показывает все причины.
+    driver_quick_reasons = models.JSONField('Причины простоя в барабане водителя', default=list, blank=True)
+    driver_quick_reasons_updated_at = models.DateTimeField('Барабан настроен', null=True, blank=True)
 
     class Meta:
         verbose_name = 'Доступ сотрудника'

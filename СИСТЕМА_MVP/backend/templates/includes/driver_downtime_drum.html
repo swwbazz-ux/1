@@ -1,0 +1,40 @@
+{% comment %}
+Барабан простоев под циферблатом на вкладке «Работа» — вертикальный цилиндр.
+Карточки причин стоят по окружности вокруг вертикальной оси и вращаются вместе;
+передняя грань подсвечена, боковые серые. Свайп передней грани вверх на круг
+запускает простой — через ту же скрытую кнопку причины, что и на вкладке
+«Простои», поэтому офлайн-очередь, озвучка и переключение вкладок остаются
+общими. Активный простой синхронизируется с карточкой
+[data-driver-active-downtime-id]. Логика: static/js/driver-downtime-drum-v1.js.
+{% endcomment %}
+<div class="driver-downtime-drum" data-driver-downtime-drum data-driver-quick-url="{% url 'driver_quick_reasons' %}" data-driver-quick-min="{{ driver_quick_reasons_min|default:3 }}" data-driver-quick-updated-at="{{ driver_quick_reasons_updated_at }}" role="group" aria-label="Барабан простоев: проведите влево или вправо, чтобы повернуть барабан, и вверх на круг, чтобы начать простой">
+    <div class="driver-downtime-drum-stage">
+        {% comment %} Карточки стоят на невидимой окружности вокруг вертикальной оси и вращаются вместе;
+           самой стенки нет — так телефону легче, а изгиб граней и ободья читаются по карточкам. {% endcomment %}
+        <div class="driver-downtime-drum-track" data-driver-drum-track>
+            {% for reason in downtime_reasons %}
+                <button class="driver-drum-card{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-drum-card data-driver-drum-reason-id="{{ reason.id }}" data-driver-drum-quick="{% if reason.driver_in_drum %}1{% else %}0{% endif %}"{% if not reason.driver_in_drum %} hidden{% endif %} aria-label="Простой: {{ reason.button_label }}. Проведите вверх на круг, чтобы начать">
+                    {% comment %} Грань — один слой: выпуклость цилиндра нарисована градиентом (блик по центру,
+                       тень к боковым кромкам), а не набором объёмных полосок. На слабых телефонах это
+                       решает: 12 слоёв вместо 108, и ни одного пересчёта при вращении. {% endcomment %}
+                    <span class="driver-drum-card-face" aria-hidden="true"></span>
+                    {% comment %} Стрелка на верхней кромке передней грани: вверх — начать простой, вниз — завершить. {% endcomment %}
+                    <span class="driver-drum-card-arrow" aria-hidden="true"></span>
+                    <span class="driver-drum-card-body">
+                        <span class="driver-drum-card-label">{{ reason.button_label }}</span>
+                        <span class="driver-drum-card-total" data-driver-drum-total{% if not reason.driver_is_used %} hidden{% endif %}>{{ reason.driver_total_label }}</span>
+                    </span>
+                </button>
+            {% empty %}
+                <div class="driver-inline-note">Активные причины простоев для самосвалов не найдены.</div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% comment %} Контур «кольцо → линии → рамка грани» — ОДНА непрерывная кривая. Сама кривая лежит в
+   CSS-переменной на <html> (её ставит скрипт один раз при смене размеров), а путь берёт её через
+   свойство d — так контур монолитный, не считается на кадрах и переживает обновление экрана. {% endcomment %}
+{% comment %} Контур — два слоя: серый статичный и жёлтый (мигает целиком через opacity слоя,
+   чтобы включение и мигание не перерисовывали путь). {% endcomment %}
+<svg class="driver-drum-link" data-driver-drum-link aria-hidden="true" focusable="false"><path class="driver-drum-link-base" /></svg>
+<svg class="driver-drum-link driver-drum-link-active-layer" data-driver-drum-link-active aria-hidden="true" focusable="false"><path class="driver-drum-link-glow" /><path class="driver-drum-link-live" /></svg>

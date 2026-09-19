@@ -1,6 +1,5 @@
 import inspect
 import re
-import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -55,7 +54,6 @@ from users.models import Employee, EmployeeAccess, PersonnelPosition, Role, Watc
 
 from .admin import PhysicalRoomAdmin
 from .calendar_bindings import (
-    close_employee_accommodation_binding,
     confirm_calendar_slot,
     confirm_employee_accommodation_binding,
     create_calendar_slot,
@@ -120,9 +118,7 @@ from .services import (
     current_roster_resolution,
     effective_occupancy_at_q,
     relocate_employee_to_bed,
-    relocate_resident_to_bed,
     release_employee_from_bed,
-    release_resident_from_bed,
     settle_employee_on_bed,
     settle_resident_on_bed,
     unsettled_current_roster_employees,
@@ -13336,7 +13332,7 @@ class AutoSettlementM7M8HttpTests(TestCase):
             content_type='application/json',
         )
         run_id = created.json()['preview']['id']
-        confirmed = self.client.post(
+        self.client.post(
             reverse('settlement_auto_preview_confirm'),
             data={'run_id': run_id},
             content_type='application/json',

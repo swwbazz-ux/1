@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const {confirmedAcceptanceIsAbsent} = require('../excavator-free-bucket-v1.js');
 
 const backend = path.resolve(__dirname, '..', '..', '..');
 const template = fs.readFileSync(path.join(backend, 'templates', 'trips', 'excavator_work.html'), 'utf8');
@@ -51,6 +52,10 @@ test('catalog and accepted cards survive offline shell lifecycle', () => {
     assert.match(template, /node\.type = 'application\/json'/);
     assert.match(source, /var selectedTruckId = truckIdOf\(selectedTruck\)/);
     assert.match(source, /catalog\.find\(function \(item\) \{ return truckIdOf\(item\) === selectedTruckId; \}\)/);
+    assert.match(source, /if \(embedded\) \{[\s\S]*localStorageWrite\(scope, embedded\)/);
+    assert.doesNotMatch(source, /embedded && embedded\.trucks\.length/);
+    assert.match(source, /fieldOutbox\.confirmed\(\)/);
+    assert.match(source, /confirmed\.then\(function \(records\) \{ return reconcileConfirmed\(records, snapshot\); \}\)/);
 });
 
 test('accept cancel and load use the durable field outbox', () => {

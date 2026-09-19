@@ -1,5 +1,4 @@
 import json
-from collections import defaultdict
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 
@@ -50,10 +49,6 @@ DYNAMICS_CHART_X_AXIS_LABELS = {
     'day': 'дни',
     'month': 'месяцы',
 }
-
-
-def zero_decimal():
-    return Decimal('0')
 
 
 def as_decimal(value):

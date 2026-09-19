@@ -1,16 +1,14 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
 
-const TEMPLATE_SOURCE = fs.readFileSync(
-    path.resolve(__dirname, "..", "..", "..", "templates", "users", "driver_shift.html"),
-    "utf8"
-);
+const TEMPLATE_SOURCE = driverScreenSource();
 
 
 function extractBraceBlock(source, signature, label) {

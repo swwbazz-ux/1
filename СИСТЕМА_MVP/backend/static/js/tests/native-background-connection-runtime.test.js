@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -12,10 +13,7 @@ const baseTemplate = fs.readFileSync(
     path.resolve(__dirname, "../../../templates/base.html"),
     "utf8"
 );
-const driverTemplate = fs.readFileSync(
-    path.resolve(__dirname, "../../../templates/users/driver_shift.html"),
-    "utf8"
-);
+const driverTemplate = driverScreenSource();
 const excavatorTemplate = fs.readFileSync(
     path.resolve(__dirname, "../../../templates/trips/excavator_work.html"),
     "utf8"

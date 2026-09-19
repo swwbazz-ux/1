@@ -5,10 +5,23 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const shellRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const driverTemplate = readFileSync(
-  resolve(shellRoot, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "users", "driver_shift.html"),
-  "utf8"
-);
+const backendRoot = resolve(shellRoot, "..", "..", "СИСТЕМА_MVP", "backend");
+
+// Разметка, стили и код экрана водителя разложены по отдельным файлам
+// (СИСТЕМА_MVP/backend/static/js/tests/driver-screen-source.js держит их список
+// для тестов бэкенда) — здесь собираем тот же набор, чтобы регулярки видели
+// код независимо от того, в каком из файлов он сейчас лежит.
+const driverTemplate = [
+  resolve(backendRoot, "templates", "users", "driver_shift.html"),
+  resolve(backendRoot, "static", "js", "driver-shift-fragment-v1.js"),
+  resolve(backendRoot, "static", "js", "driver-shift-gestures-v1.js"),
+  resolve(backendRoot, "static", "js", "driver-shift-voice-v1.js"),
+  resolve(backendRoot, "static", "js", "driver-shift-refresh-v1.js"),
+  resolve(backendRoot, "static", "js", "driver-shift-close-v1.js"),
+  resolve(backendRoot, "static", "js", "driver-shift-v1.js"),
+]
+  .map((file) => readFileSync(file, "utf8"))
+  .join("\n");
 
 test("Driver release keeps recorded voice calls wired to operational actions", () => {
   assert.match(driverTemplate, /function driverAppliedActionVoice\(actionKind, freshShell\)/);

@@ -2,6 +2,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -28,7 +29,7 @@ const miningMasterTemplatePath = path.join(
     "trips",
     "dispatcher_control.html"
 );
-const driverTemplate = fs.readFileSync(driverTemplatePath, "utf8");
+const driverTemplate = driverScreenSource();
 const excavatorTemplate = fs.readFileSync(excavatorTemplatePath, "utf8");
 const miningMasterTemplate = fs.readFileSync(
     miningMasterTemplatePath,

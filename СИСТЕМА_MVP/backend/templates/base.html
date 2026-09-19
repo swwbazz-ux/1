@@ -100,12 +100,26 @@
             box-shadow: 0 0 14px rgba(255, 212, 91, .82);
         }
         /* Цвет связи держим одной переменной: её же берут кольца планов в шапках
-           приложений, чтобы связь везде читалась одинаково. */
-        body { --app-connection-color: #58df52; }
-        body[data-connection-state="unknown"] { --app-connection-color: #8b9da3; }
-        body[data-connection-state="weak"] { --app-connection-color: #ffd45b; }
-        body[data-connection-state="lost"] { --app-connection-color: #ff5a50; }
-        body[data-connection-state="recovering"] { --app-connection-color: #78c9ee; }
+           приложений, чтобы связь везде читалась одинаково.
+           Объявлена она на самих индикаторах, а не на body: смена унаследованной
+           переменной на body заставляет браузер пересчитать стили всего экрана —
+           на телефоне водителя это 1,5 с замирания при каждой сверке с сервером
+           (состояние связи мигает ok → recovering → ok каждые 20 с). */
+        .app-connection-dot,
+        .driver-online-dot,
+        .mm-mobile-plan-ring[data-connection-indicator] { --app-connection-color: #58df52; }
+        body[data-connection-state="unknown"] .app-connection-dot,
+        body[data-connection-state="unknown"] .driver-online-dot,
+        body[data-connection-state="unknown"] .mm-mobile-plan-ring[data-connection-indicator] { --app-connection-color: #8b9da3; }
+        body[data-connection-state="weak"] .app-connection-dot,
+        body[data-connection-state="weak"] .driver-online-dot,
+        body[data-connection-state="weak"] .mm-mobile-plan-ring[data-connection-indicator] { --app-connection-color: #ffd45b; }
+        body[data-connection-state="lost"] .app-connection-dot,
+        body[data-connection-state="lost"] .driver-online-dot,
+        body[data-connection-state="lost"] .mm-mobile-plan-ring[data-connection-indicator] { --app-connection-color: #ff5a50; }
+        body[data-connection-state="recovering"] .app-connection-dot,
+        body[data-connection-state="recovering"] .driver-online-dot,
+        body[data-connection-state="recovering"] .mm-mobile-plan-ring[data-connection-indicator] { --app-connection-color: #78c9ee; }
         body[data-connection-state="unknown"].driver-mobile-screen .driver-online-dot,
         body[data-connection-state="recovering"].driver-mobile-screen .driver-online-dot {
             background: var(--app-connection-color);

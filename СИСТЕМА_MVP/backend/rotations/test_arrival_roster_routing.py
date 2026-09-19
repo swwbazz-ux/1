@@ -1,7 +1,6 @@
 from datetime import date
 from unittest.mock import patch
 
-from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, models, transaction
 from django.db.migrations.executor import MigrationExecutor

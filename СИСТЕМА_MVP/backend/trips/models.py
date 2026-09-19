@@ -19,6 +19,7 @@ class DispatcherActionType(models.TextChoices):
 
 
 class FreeBucketAcceptanceStatus(models.TextChoices):
+    REQUESTED = 'requested', 'Запрошен водителем'
     ACCEPTED = 'accepted', 'Принят под свободный ковш'
     CANCELLED = 'cancelled', 'Отменён до погрузки'
     USED = 'used', 'Погружен'
@@ -39,11 +40,19 @@ class FreeBucketAcceptance(models.Model):
     )
     operator = models.ForeignKey(
         'users.Employee', verbose_name='Машинист экскаватора', on_delete=models.PROTECT,
-        related_name='free_bucket_acceptances',
+        related_name='free_bucket_acceptances', null=True, blank=True,
     )
     loading_shift = models.ForeignKey(
         'shifts.EmployeeShift', verbose_name='Смена приёма', on_delete=models.PROTECT,
-        related_name='free_bucket_acceptances',
+        related_name='free_bucket_acceptances', null=True, blank=True,
+    )
+    requested_by = models.ForeignKey(
+        'users.Employee', verbose_name='Водитель, запросивший свободный ковш', on_delete=models.PROTECT,
+        related_name='requested_free_bucket_acceptances', null=True, blank=True,
+    )
+    requesting_shift = models.ForeignKey(
+        'shifts.EmployeeShift', verbose_name='Смена водителя при запросе', on_delete=models.PROTECT,
+        related_name='requested_free_bucket_acceptances', null=True, blank=True,
     )
     primary_assignment = models.ForeignKey(
         'assignments.HaulAssignment', verbose_name='Основное закрепление при приёме',
@@ -56,6 +65,7 @@ class FreeBucketAcceptance(models.Model):
     )
     occurred_at = models.DateTimeField('Принят на устройстве')
     received_at = models.DateTimeField('Принят сервером', default=timezone.now)
+    accepted_at = models.DateTimeField('Согласован с машинистом', null=True, blank=True)
     cancelled_at = models.DateTimeField('Отменён', null=True, blank=True)
     used_at = models.DateTimeField('Погружен', null=True, blank=True)
     closed_at = models.DateTimeField('Закрыт', null=True, blank=True)
@@ -63,6 +73,7 @@ class FreeBucketAcceptance(models.Model):
         'trips.Trip', verbose_name='Рейс свободного ковша', on_delete=models.PROTECT,
         null=True, blank=True, related_name='free_bucket_acceptance',
     )
+    work_context_snapshot = models.JSONField('Контекст погрузки при выборе', default=dict, blank=True)
 
     class Meta:
         verbose_name = 'Приём под свободный ковш'
@@ -71,8 +82,80 @@ class FreeBucketAcceptance(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=['truck'],
-                condition=models.Q(status=FreeBucketAcceptanceStatus.ACCEPTED),
+                condition=models.Q(status__in=[
+                    FreeBucketAcceptanceStatus.REQUESTED,
+                    FreeBucketAcceptanceStatus.ACCEPTED,
+                    FreeBucketAcceptanceStatus.USED,
+                ]),
                 name='unique_open_free_bucket_acceptance_per_truck',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(requested_by__isnull=True, requesting_shift__isnull=True)
+                    | models.Q(requested_by__isnull=False, requesting_shift__isnull=False)
+                ),
+                name='free_bucket_request_fields_consistent',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(operator__isnull=True, loading_shift__isnull=True, accepted_at__isnull=True)
+                    | models.Q(operator__isnull=False, loading_shift__isnull=False, accepted_at__isnull=False)
+                ),
+                name='free_bucket_accept_fields_consistent',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status=FreeBucketAcceptanceStatus.REQUESTED,
+                        requested_by__isnull=False,
+                        operator__isnull=True,
+                        cancelled_at__isnull=True,
+                        used_at__isnull=True,
+                        used_trip__isnull=True,
+                        closed_at__isnull=True,
+                    )
+                    | models.Q(
+                        status=FreeBucketAcceptanceStatus.ACCEPTED,
+                        operator__isnull=False,
+                        cancelled_at__isnull=True,
+                        used_at__isnull=True,
+                        used_trip__isnull=True,
+                        closed_at__isnull=True,
+                    )
+                    | models.Q(
+                        status=FreeBucketAcceptanceStatus.CANCELLED,
+                        requested_by__isnull=False,
+                        cancelled_at__isnull=False,
+                        used_at__isnull=True,
+                        used_trip__isnull=True,
+                        closed_at__isnull=True,
+                    )
+                    | models.Q(
+                        status=FreeBucketAcceptanceStatus.CANCELLED,
+                        operator__isnull=False,
+                        cancelled_at__isnull=False,
+                        used_at__isnull=True,
+                        used_trip__isnull=True,
+                        closed_at__isnull=True,
+                    )
+                    | models.Q(
+                        status=FreeBucketAcceptanceStatus.USED,
+                        operator__isnull=False,
+                        cancelled_at__isnull=True,
+                        used_at__isnull=False,
+                        used_trip__isnull=False,
+                        closed_at__isnull=True,
+                    )
+                    | models.Q(
+                        status=FreeBucketAcceptanceStatus.CLOSED,
+                        operator__isnull=False,
+                        cancelled_at__isnull=True,
+                        used_at__isnull=False,
+                        used_trip__isnull=False,
+                        closed_at__isnull=False,
+                    )
+                ),
+                name='free_bucket_status_fields_consistent',
             ),
         ]
         indexes = [

@@ -1,11 +1,12 @@
 "use strict";
 const assert = require("node:assert/strict");
+const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 const templates = process.env.ROLE_RECONCILIATION_TEMPLATE_ROOT || path.resolve(__dirname, "../../../templates");
-const driver = fs.readFileSync(path.join(templates, "users/driver_shift.html"), "utf8");
+const driver = driverScreenSource();
 const excavator = fs.readFileSync(path.join(templates, "trips/excavator_work.html"), "utf8");
 // The existing brace extractor understands comments and quoted braces; use it
 // to execute the production functions, never a test copy of their algorithm.
@@ -110,7 +111,7 @@ function roleRuntime(role) {
         loaded: () => current.dataset.driverHasLoadedTrip === "true",
         requestCount: () => requestCount, replacements: () => replacements, restored: () => restored,
         applied: () => Number(document.body.dataset.operationalStateVersion),
-        requestedVersions, marks, stored, proofs,
+        requestedVersions, marks, stored, proofs, window,
     };
 }
 
@@ -218,11 +219,69 @@ test("excavator POST acknowledgement maps server IDs but leaves DOM applied vers
 
 test("driver outbox acknowledgement uses only common reconciliation owner", () => {
     const calls = [];
+    const window = {AppRealtime: {requestReconcile: (...args) => calls.push(args)}, setTimeout() {}};
+    const context = {window, driverOfflineContext() {}, renderDriverOfflineState() {}, playDriverVoice() {}, showDriverToast() {}};
+    vm.runInNewContext(extract(driver, "function driverOfflineBindings()") + "\nvar bindings = driverOfflineBindings();", context);
+    context.bindings.onConfirmed({event_type: "driver.trip.unloaded"}, {server_version: 109});
+    assert.deepEqual(calls, [["driver_offline_event_confirmed", 109]]);
+});
+
+test("driver downtime acknowledgement records the server id and reconciles without a version", () => {
+    // Версия не передаётся нарочно: опрос «после версии» не вернул бы наш же простой,
+    // а он — доказательство для applyOperationalStateRefresh, что экран подменять не нужно.
+    const calls = [];
     const window = {AppRealtime: {requestReconcile: (...args) => calls.push(args)}};
     const context = {window, driverOfflineContext() {}, renderDriverOfflineState() {}, playDriverVoice() {}, showDriverToast() {}};
     vm.runInNewContext(extract(driver, "function driverOfflineBindings()") + "\nvar bindings = driverOfflineBindings();", context);
-    context.bindings.onConfirmed({event_type: "driver.downtime.ended"}, {server_version: 109});
-    assert.deepEqual(calls, [["driver_offline_event_confirmed", 109]]);
+    context.bindings.onConfirmed({event_type: "driver.downtime.ended"}, {server_version: 109, server_ids: {downtime_event_id: 59}});
+    assert.deepEqual(calls, [["driver_offline_event_confirmed"]]);
+    assert.deepEqual(Array.from(window.driverOwnDowntimeEventIds), ["59"]);
+});
+
+test("driver refresh skips the DOM when the fragment equals the applied snapshot", async () => {
+    const r = roleRuntime("driver");
+    r.window.driverFragmentSnapshot = () => ({full: "same", core: "same"});
+    r.window.driverAppliedFragmentSnapshot = {full: "same", core: "same"};
+    const first = r.apply(101);
+    r.resolve();
+    const result = await first;
+    assert.equal(result.applied, true);
+    assert.equal(result.skipped, "unchanged");
+    assert.equal(r.replacements(), 0);
+    assert.equal(r.applied(), 101);
+});
+
+test("driver refresh skips the DOM for its own confirmed downtime but not for foreign events", async () => {
+    const r = roleRuntime("driver");
+    let full = 0;
+    r.window.driverFragmentSnapshot = () => ({full: "fresh-" + (++full), core: "core"});
+    r.window.driverAppliedFragmentSnapshot = {full: "fresh-0", core: "core"};
+    r.window.driverOwnDowntimeEventIds = ["59"];
+    const own = [{version: 102, type: "downtime_changed", object_id: 59, payload: {event_id: 59}}];
+    const first = r.window.applyOperationalStateRefresh({version: 102, events: own, foregroundReconcile: true});
+    r.resolve();
+    assert.equal((await first).skipped, "own_downtime");
+    assert.equal(r.replacements(), 0);
+    assert.equal(r.window.driverDomBehindBaseline, true);
+    const foreign = [{version: 103, type: "downtime_changed", object_id: 60, payload: {event_id: 60}}];
+    r.setVersion(103);
+    const second = r.window.applyOperationalStateRefresh({version: 103, events: foreign, foregroundReconcile: true});
+    r.resolve();
+    assert.equal((await second).skipped, undefined);
+    assert.equal(r.replacements(), 1);
+    assert.equal(r.window.driverDomBehindBaseline, false);
+});
+
+test("driver refresh applies for real when a hidden tab was opened after an own downtime", async () => {
+    const r = roleRuntime("driver");
+    r.window.driverFragmentSnapshot = () => ({full: "same", core: "same"});
+    r.window.driverAppliedFragmentSnapshot = {full: "same", core: "same"};
+    r.window.driverForceFragmentApply = true;
+    const first = r.apply(101);
+    r.resolve();
+    assert.equal((await first).skipped, undefined);
+    assert.equal(r.replacements(), 1);
+    assert.equal(r.window.driverForceFragmentApply, false);
 });
 
 for (const role of ["driver", "excavator"]) {
@@ -254,7 +313,7 @@ for (const role of ["driver", "excavator"]) {
         context[fn]({pending: 0, total: 0, events: []});
         assert.equal(window.operationalOutboxPendingCount, 0);
         assert.equal(events[1].pendingCount, 0);
-        assert.equal(label.textContent, "Все действия отправлены");
+        assert.equal(label.textContent, role === "driver" ? "Онлайн" : "Все действия отправлены");
         assert.equal(requests.length, 1);
     });
 }

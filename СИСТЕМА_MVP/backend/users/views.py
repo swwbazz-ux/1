@@ -145,7 +145,6 @@ from .forms import (
     DriverCloseShiftForm,
     DriverOpenShiftForm,
     DriverPrimaryRegistrationForm,
-    is_valid_russian_mobile_phone,
     normalize_phone,
     PersonnelPositionReferenceForm,
 )
@@ -278,7 +277,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v216'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v286'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -334,6 +333,12 @@ const CORE_ASSETS = [
     PRIVACY_POLICY_URL,
     "/static/portal/css/portal-shell-v5.css?v=7",
     "/static/js/driver-offline-outbox-v2.js?v={DRIVER_SHELL_VERSION}",
+    "/static/css/mobile-dial-actions-v1.css?v={DRIVER_SHELL_VERSION}",
+    "/static/js/mobile-dial-actions-v1.js?v={DRIVER_SHELL_VERSION}",
+    "/static/css/driver-free-bucket-v1.css?v={DRIVER_SHELL_VERSION}",
+    "/static/js/driver-free-bucket-v1.js?v={DRIVER_SHELL_VERSION}",
+    "/static/css/driver-downtime-drum-v1.css?v={DRIVER_SHELL_VERSION}",
+    "/static/js/driver-downtime-drum-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/portal/js/portal-shell-v5.js",
     "/static/css/app.css",
     "/static/css/mobile-role-login-v1.css",
@@ -675,7 +680,6 @@ def log_admin_action(actor, action, obj=None, old_value='', new_value='', commen
         new_value=new_value,
         comment=comment,
     )
-
 
 
 def redirect_after_admin_action(request, fallback_view, **kwargs):
@@ -4111,15 +4115,198 @@ def driver_prefixed_context_value(prefix, value):
     return f'{prefix} {value}'
 
 
-def driver_compact_context_value(prefix, compact_prefix, value):
-    value = str(value or '').strip()
-    if not value:
-        return f'{compact_prefix}—'
-    for candidate in (prefix, compact_prefix):
-        if value.lower().startswith(candidate.lower()):
-            value = value[len(candidate):].strip()
-            break
-    return f'{compact_prefix}{value}'
+def driver_free_bucket_payload(*, current_truck, current_assignment, version):
+    """Build the real, cacheable driver-side free-bucket directory and state."""
+    from trips.models import FreeBucketAcceptance
+
+    generated_at = timezone.now().isoformat()
+    primary_excavator_id = current_assignment.excavator_id if current_assignment else None
+    placements = list(
+        ExcavatorPlacement.objects
+        .filter(
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+            excavator__is_active=True,
+            excavator__equipment_type__name='Экскаватор',
+        )
+        .select_related(
+            'excavator',
+            'excavator__equipment_type',
+            'work_rock_type',
+            'work_dump_point',
+        )
+        .prefetch_related('dump_point_settings__dump_point')
+        .order_by('excavator__garage_number', 'excavator_id')
+    )
+    excavators = []
+    catalog_missing_fields = set()
+    for placement in placements:
+        dump_points = [
+            {
+                'id': setting.dump_point_id,
+                'name': str(setting.dump_point),
+                'transport_distance_km': (
+                    str(setting.transport_distance_km)
+                    if setting.transport_distance_km is not None else ''
+                ),
+            }
+            for setting in placement.dump_point_settings.all()
+            if setting.dump_point.is_active
+        ]
+        if (
+            not dump_points
+            and placement.work_dump_point_id
+            and placement.work_dump_point.is_active
+        ):
+            dump_points.append({
+                'id': placement.work_dump_point_id,
+                'name': str(placement.work_dump_point),
+                'transport_distance_km': (
+                    str(placement.transport_distance_km)
+                    if placement.transport_distance_km is not None else ''
+                ),
+            })
+        missing_fields = []
+        if not placement.loading_horizon:
+            missing_fields.append('loading_horizon')
+        if not placement.loading_block:
+            missing_fields.append('loading_block')
+        if not placement.work_rock_type_id or not placement.work_rock_type.is_active:
+            missing_fields.append('rock_type')
+        if not dump_points:
+            missing_fields.append('dump_points')
+        catalog_missing_fields.update(missing_fields)
+        excavators.append({
+            'id': placement.excavator_id,
+            'label': driver_excavator_short_label(placement.excavator),
+            'complex_label': driver_complex_label_for_excavator(placement.excavator),
+            'is_primary': placement.excavator_id == primary_excavator_id,
+            'available': not missing_fields,
+            'loading_horizon': str(placement.loading_horizon or ''),
+            'loading_block': str(placement.loading_block or ''),
+            'rock_type_id': (
+                placement.work_rock_type_id
+                if placement.work_rock_type and placement.work_rock_type.is_active
+                else None
+            ),
+            'rock_type': (
+                str(placement.work_rock_type)
+                if placement.work_rock_type and placement.work_rock_type.is_active
+                else ''
+            ),
+            'dump_point_id': dump_points[0]['id'] if dump_points else None,
+            'dump_point': dump_points[0]['name'] if dump_points else '',
+            'dump_points': dump_points,
+            'transport_distance_km': (
+                str(placement.transport_distance_km)
+                if placement.transport_distance_km is not None else ''
+            ),
+            'placement_updated_at': (
+                placement.work_context_updated_at.isoformat()
+                if placement.work_context_updated_at else ''
+            ),
+            'missing_fields': missing_fields,
+        })
+
+    active_acceptance = None
+    if current_truck:
+        active_acceptance = (
+            FreeBucketAcceptance.objects
+            .filter(
+                truck=current_truck,
+                status__in=('requested', 'accepted', 'used'),
+            )
+            .select_related('excavator', 'excavator__equipment_type')
+            .order_by('-occurred_at', '-id')
+            .first()
+        )
+    active_item = next(
+        (item for item in excavators if active_acceptance and item['id'] == active_acceptance.excavator_id),
+        None,
+    )
+    if active_acceptance:
+        immutable_snapshot = dict(getattr(active_acceptance, 'work_context_snapshot', {}) or {})
+        immutable_display = immutable_snapshot.get('display')
+        if isinstance(immutable_display, dict):
+            immutable_snapshot = immutable_display
+        immutable_dump_points = list(immutable_snapshot.get('dump_points') or [])
+        immutable_primary_dump_point = (
+            immutable_dump_points[0]
+            if immutable_dump_points and isinstance(immutable_dump_points[0], dict)
+            else {}
+        )
+        immutable_missing_fields = []
+        if not immutable_snapshot.get('loading_horizon'):
+            immutable_missing_fields.append('loading_horizon')
+        if not immutable_snapshot.get('loading_block'):
+            immutable_missing_fields.append('loading_block')
+        if not (
+            immutable_snapshot.get('rock_type_name')
+            or immutable_snapshot.get('rock_type')
+        ):
+            immutable_missing_fields.append('rock_type')
+        if not immutable_dump_points:
+            immutable_missing_fields.append('dump_points')
+        immutable_missing_fields = list(
+            immutable_snapshot.get('missing_fields')
+            or immutable_missing_fields
+        )
+        active_item = {
+            'id': active_acceptance.excavator_id,
+            'label': str(immutable_snapshot.get('excavator_label') or driver_excavator_short_label(active_acceptance.excavator)),
+            'complex_label': str(immutable_snapshot.get('complex_label') or driver_complex_label_for_excavator(active_acceptance.excavator)),
+            'is_primary': bool(immutable_snapshot.get('is_primary')),
+            'available': not immutable_missing_fields,
+            'loading_horizon': str(immutable_snapshot.get('loading_horizon') or ''),
+            'loading_block': str(immutable_snapshot.get('loading_block') or ''),
+            'rock_type_id': immutable_snapshot.get('rock_type_id'),
+            'rock_type': str(
+                immutable_snapshot.get('rock_type_name')
+                or immutable_snapshot.get('rock_type')
+                or ''
+            ),
+            'dump_point_id': (
+                immutable_snapshot.get('dump_point_id')
+                or immutable_primary_dump_point.get('id')
+            ),
+            'dump_point': str(
+                immutable_snapshot.get('dump_point')
+                or immutable_primary_dump_point.get('name')
+                or ''
+            ),
+            'dump_points': immutable_dump_points,
+            'transport_distance_km': str(
+                immutable_snapshot.get('transport_distance_km')
+                or immutable_primary_dump_point.get('transport_distance_km')
+                or ''
+            ),
+            'placement_updated_at': str(immutable_snapshot.get('placement_updated_at') or ''),
+            'missing_fields': immutable_missing_fields,
+        }
+
+    catalog = {
+        'schema': 'driver-free-bucket-catalog-v1',
+        'generated_at': generated_at,
+        'version': int(version or 0),
+        'complete': True,
+        'stale': False,
+        'missing_fields': sorted(catalog_missing_fields),
+        'primary_assignment_label': driver_excavator_short_label(
+            current_assignment.excavator if current_assignment else None
+        ),
+        'excavators': excavators,
+    }
+    state = {
+        'schema': 'driver-free-bucket-state-v1',
+        'generated_at': generated_at,
+        'version': int(version or 0),
+        'active': bool(active_acceptance),
+        'acceptance_id': active_acceptance.id if active_acceptance else None,
+        'acceptance_local_id': active_acceptance.client_acceptance_id if active_acceptance else '',
+        'status': active_acceptance.status if active_acceptance else '',
+        'can_cancel': bool(active_acceptance and active_acceptance.status in {'requested', 'accepted'}),
+        'selection': active_item,
+    }
+    return catalog, state, active_acceptance
 
 
 def driver_open_shift_queryset(employee):
@@ -4222,7 +4409,6 @@ def driver_shift_view(request):
             equipment=work_assignment.equipment,
         )
     current_truck = open_shift.equipment if open_shift else None
-    assigned_truck = work_assignment.equipment if work_assignment and assignment_state == 'assigned' else None
     assignment_truck = (
         work_assignment.equipment
         if work_assignment and assignment_state in {'assigned', 'assignment_conflict'}
@@ -4267,6 +4453,7 @@ def driver_shift_view(request):
             'dump_point',
             'assigned_dump_point',
             'actual_dump_point',
+            'free_bucket_acceptance',
         ).order_by('-created_at').first()
         active_downtime = (
             DowntimeEvent.objects
@@ -4387,6 +4574,13 @@ def driver_shift_view(request):
     active_tab = request.GET.get('tab', 'work' if open_shift else 'shift')
     if active_tab not in {'work', 'shift', 'downtimes', 'manifest'}:
         active_tab = 'work'
+    operational_state_version = (
+        OperationalStateVersion.objects
+        .filter(key='production')
+        .values_list('version', flat=True)
+        .first()
+        or 0
+    )
     driver_status = 'ПУСТОЙ'
     driver_status_class = 'is-empty'
     driver_target_label = '—'
@@ -4419,9 +4613,30 @@ def driver_shift_view(request):
         and active_downtime_flow == DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD
     )
 
-    driver_work_excavator = active_trip.excavator if active_trip else (current_assignment.excavator if current_assignment else None)
+    (
+        driver_free_bucket_catalog,
+        driver_free_bucket_state,
+        driver_free_bucket_acceptance,
+    ) = driver_free_bucket_payload(
+        current_truck=current_truck,
+        current_assignment=current_assignment,
+        version=operational_state_version,
+    )
+    driver_free_bucket_can_open = bool(open_shift and current_truck and not active_trip)
+    driver_free_bucket_primary_label = driver_excavator_short_label(
+        current_assignment.excavator if current_assignment else None
+    )
+    driver_work_excavator = (
+        active_trip.excavator
+        if active_trip
+        else driver_free_bucket_acceptance.excavator
+        if driver_free_bucket_acceptance
+        else current_assignment.excavator
+        if current_assignment
+        else None
+    )
     driver_work_context_placement = None
-    if driver_work_excavator:
+    if driver_work_excavator and not driver_free_bucket_acceptance:
         driver_work_context_placement = (
             ExcavatorPlacement.objects
             .select_related('work_rock_type', 'work_dump_point')
@@ -4464,6 +4679,19 @@ def driver_shift_view(request):
         driver_prefixed_context_value('Блок', getattr(driver_trip_context_source, 'loading_block', '')),
         str(driver_context_rock or '—'),
     ]
+    if driver_free_bucket_acceptance and driver_free_bucket_state['selection']:
+        free_bucket_selection = driver_free_bucket_state['selection']
+        driver_excavator_label = free_bucket_selection['label']
+        driver_complex_label = free_bucket_selection['complex_label']
+        driver_geology_parts = [
+            driver_prefixed_context_value(
+                'Горизонт', free_bucket_selection['loading_horizon'],
+            ),
+            driver_prefixed_context_value(
+                'Блок', free_bucket_selection['loading_block'],
+            ),
+            free_bucket_selection['rock_type'] or '—',
+        ]
     driver_context_parts = [driver_complex_label, *driver_geology_parts]
     driver_context_label = ' · '.join(driver_context_parts)
     if active_trip:
@@ -4472,6 +4700,17 @@ def driver_shift_view(request):
             active_downtime.reason.button_label.upper()
             if driver_unloading_wait_active
             else 'ТОЧКА РАЗГРУЗКИ'
+        )
+    elif driver_free_bucket_acceptance:
+        # The mode is shown by the compact context chip. Keeping only the
+        # excavator here prevents long labels from overflowing the main dial.
+        driver_dial_label = driver_excavator_label
+        driver_dial_note = (
+            'ПОГРУЖЕН'
+            if driver_free_bucket_acceptance.status == 'used'
+            else 'ПРИНЯТ МАШИНИСТОМ'
+            if driver_free_bucket_acceptance.status == 'accepted'
+            else 'ОЖИДАНИЕ ПРИЁМА'
         )
     elif driver_loading_wait_active:
         # Во время ожидания сохраняем полезный ориентир погрузки в крупной
@@ -4506,6 +4745,7 @@ def driver_shift_view(request):
     downtime_reasons = list(
         DowntimeReason.for_workplace('truck_driver', downtime_equipment_type)
     )
+    driver_quick_reason_ids = driver_quick_reason_ids_for(access, downtime_reasons)
     downtime_calculated_at = timezone.now()
     downtime_reason_totals = driver_shift_downtime_seconds_by_reason(
         open_shift.equipment if open_shift else current_truck,
@@ -4513,6 +4753,7 @@ def driver_shift_view(request):
         until=downtime_calculated_at,
     )
     for reason in downtime_reasons:
+        reason.driver_in_drum = (not driver_quick_reason_ids) or reason.id in driver_quick_reason_ids
         reason.driver_workflow = driver_downtime_flow(reason)
         reason.driver_requires_loaded_trip = driver_downtime_requires_loaded_trip(reason)
         reason.driver_requires_empty_truck = driver_downtime_requires_empty_truck(reason)
@@ -4527,12 +4768,24 @@ def driver_shift_view(request):
             reason.driver_unavailable_message = 'Доступно только после погрузки'
         elif reason.driver_requires_empty_truck and driver_has_open_trip:
             reason.driver_unavailable_message = 'Самосвал уже загружен'
-    unload_points = DumpPoint.objects.filter(is_active=True).order_by('name')[:10]
+    # Полный серверный справочник активных точек должен остаться доступен и
+    # после offline-перезапуска; срез первых десяти скрывал допустимые точки.
+    unload_points = [
+        {'id': point.id, 'name': str(point)}
+        for point in DumpPoint.objects.filter(is_active=True).order_by('name')
+    ]
     active_trip_assigned_dump_point = None
+    active_trip_current_dump_point = None
     active_trip_actual_dump_point_id = None
     if active_trip:
+        from trips.free_bucket import free_bucket_snapshot_dump_points_for_trip
+
+        free_bucket_unload_points = free_bucket_snapshot_dump_points_for_trip(active_trip)
+        if free_bucket_unload_points is not None:
+            unload_points = free_bucket_unload_points
         active_trip_assigned_dump_point = active_trip.assigned_dump_point or active_trip.dump_point
-        active_trip_actual_dump_point_id = (active_trip.actual_dump_point_id or active_trip.dump_point_id)
+        active_trip_current_dump_point = active_trip.actual_dump_point or active_trip.dump_point
+        active_trip_actual_dump_point_id = active_trip_current_dump_point.id
     active_downtime_elapsed_seconds = 0
     active_downtime_elapsed_label = '00:00:00'
     shift_downtime_total_seconds = sum(downtime_reason_totals.values())
@@ -4611,13 +4864,6 @@ def driver_shift_view(request):
             initial={'client_action_id': secrets.token_urlsafe(24)},
         )
 
-    operational_state_version = (
-        OperationalStateVersion.objects
-        .filter(key='production')
-        .values_list('version', flat=True)
-        .first()
-        or 0
-    )
     response = render(
         request,
         'users/driver_shift.html',
@@ -4650,6 +4896,12 @@ def driver_shift_view(request):
             'shift_downtime_report_total_label': shift_downtime_report_total_label,
             'active_downtime_status_key': active_downtime_status_key,
             'downtime_reasons': downtime_reasons,
+            'driver_quick_reason_ids': driver_quick_reason_ids,
+            'driver_quick_reasons_min': DRIVER_QUICK_REASONS_MIN,
+            'driver_quick_reasons_updated_at': (
+                access.driver_quick_reasons_updated_at.isoformat()
+                if access.driver_quick_reasons_updated_at else ''
+            ),
             'shift_trips': shift_trips,
             'shift_trip_count': shift_trip_count,
             'driver_shift_report_trip_rows': driver_shift_report_trip_rows,
@@ -4675,6 +4927,10 @@ def driver_shift_view(request):
             'driver_status_class': driver_status_class,
             'driver_has_open_trip': driver_has_open_trip,
             'driver_has_loaded_trip': driver_has_loaded_trip,
+            'driver_free_bucket_can_open': driver_free_bucket_can_open,
+            'driver_free_bucket_catalog': driver_free_bucket_catalog,
+            'driver_free_bucket_state': driver_free_bucket_state,
+            'driver_free_bucket_primary_label': driver_free_bucket_primary_label,
             'driver_waiting_operation_active': driver_waiting_operation_active,
             'driver_loading_wait_active': driver_loading_wait_active,
             'driver_unloading_wait_active': driver_unloading_wait_active,
@@ -4697,9 +4953,11 @@ def driver_shift_view(request):
             'pending_assignment_action': pending_assignment_action,
             'unload_points': unload_points,
             'active_trip_assigned_dump_point': active_trip_assigned_dump_point,
+            'active_trip_current_dump_point': active_trip_current_dump_point,
             'active_trip_actual_dump_point_id': active_trip_actual_dump_point_id,
             'trip_status_loaded': TripStatus.LOADED_WAITING_UNLOAD,
             'driver_shell_version': DRIVER_SHELL_VERSION,
+            'driver_operational_fragment': requested_fragment == 'driver',
             'driver_auth_generation': request.session.get(ACTIVE_ROLE_GENERATION_SESSION_KEY, ''),
             'operational_state_version': operational_state_version,
         },
@@ -4710,6 +4968,10 @@ def driver_shift_view(request):
             screen='driver',
             selector='[data-driver-shell]',
             version=operational_state_version,
+            extra={
+                'driver_free_bucket_catalog': driver_free_bucket_catalog,
+                'driver_free_bucket_state': driver_free_bucket_state,
+            },
         )
     response['Cache-Control'] = 'no-cache'
     return response
@@ -4973,6 +5235,71 @@ def driver_close_shift_view(request):
     return driver_shift_view(request)
 
 
+DRIVER_QUICK_REASONS_MIN = 3
+
+
+def driver_quick_reason_ids_for(access, reasons):
+    """Личный набор причин для барабана: только существующие для этого водителя,
+    без дублей, в порядке справочника. Короче минимума — считается незаданным."""
+    available = [reason.id for reason in reasons]
+    raw = access.driver_quick_reasons if isinstance(access.driver_quick_reasons, list) else []
+    chosen = set()
+    for value in raw:
+        try:
+            chosen.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    ids = [reason_id for reason_id in available if reason_id in chosen]
+    if len(ids) < DRIVER_QUICK_REASONS_MIN:
+        return []
+    return ids
+
+
+@require_POST
+def driver_quick_reasons_view(request):
+    """Сохранить личный набор причин простоя для барабана водителя."""
+    access_id = request.session.get('employee_access_id')
+    if not access_id:
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану водителя.'}, status=403)
+    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    if not access or access.role.code != 'driver':
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану водителя.'}, status=403)
+    payload = driver_json_payload(request)
+    raw_ids = payload.get('reason_ids') if isinstance(payload, dict) else None
+    if raw_ids is None and hasattr(payload, 'getlist'):
+        raw_ids = payload.getlist('reason_ids')
+    if isinstance(raw_ids, str):
+        raw_ids = [part for part in raw_ids.split(',') if part.strip()]
+    if not isinstance(raw_ids, (list, tuple)):
+        raw_ids = []
+    available = list(DowntimeReason.for_workplace('truck_driver'))
+    available_ids = {reason.id for reason in available}
+    chosen = set()
+    for value in raw_ids:
+        try:
+            reason_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if reason_id in available_ids:
+            chosen.add(reason_id)
+    ids = [reason.id for reason in available if reason.id in chosen]
+    if ids and len(ids) < DRIVER_QUICK_REASONS_MIN:
+        return JsonResponse({
+            'ok': False,
+            'error': f'В барабане должно быть не меньше {DRIVER_QUICK_REASONS_MIN} причин.',
+            'min': DRIVER_QUICK_REASONS_MIN,
+        }, status=422)
+    access.driver_quick_reasons = ids
+    access.driver_quick_reasons_updated_at = timezone.now()
+    access.save(update_fields=['driver_quick_reasons', 'driver_quick_reasons_updated_at'])
+    return JsonResponse({
+        'ok': True,
+        'reason_ids': ids,
+        'updated_at': access.driver_quick_reasons_updated_at.isoformat(),
+        'min': DRIVER_QUICK_REASONS_MIN,
+    })
+
+
 @transaction.atomic
 def driver_downtime_action_view(request):
     wants_json = driver_wants_json(request)
@@ -5133,10 +5460,22 @@ def driver_downtime_action_view(request):
                 )
             messages.error(request, error)
             return redirect(f'{reverse("driver_work")}?tab=downtimes')
-        active_event.reason = reason
-        active_event.save(update_fields=['reason'])
-        event = active_event
-        action_label = 'downtime_updated'
+        if active_event.reason_id == reason.id:
+            # Re-selecting the current reason must not reset its timer.
+            event = active_event
+            action_label = 'downtime_unchanged'
+        else:
+            switched_at = timezone.now()
+            active_event.ended_at = switched_at
+            active_event.save(update_fields=['ended_at'])
+            event = DowntimeEvent.objects.create(
+                equipment=open_shift.equipment,
+                employee=access.employee,
+                reason=reason,
+                started_at=switched_at,
+                comment='Зафиксировано водителем самосвала',
+            )
+            action_label = 'downtime_switched'
     else:
         event = DowntimeEvent.objects.create(
             equipment=open_shift.equipment,

@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -649,7 +650,7 @@ function extractDriverHoldGuardSource() {
         "users",
         "driver_shift.html"
     );
-    const source = fs.readFileSync(templatePath, "utf8");
+    const source = driverScreenSource();
     const startMarker = "/* DRIVER_ROLE_HOLD_GUARD_START */";
     const endMarker = "/* DRIVER_ROLE_HOLD_GUARD_END */";
     const start = source.indexOf(startMarker);
@@ -669,7 +670,7 @@ function extractDriverShiftCloseBindingSource() {
         "users",
         "driver_shift.html"
     );
-    const source = fs.readFileSync(templatePath, "utf8");
+    const source = driverScreenSource();
     const startMarker = '        if (form && closeButton && closeButton.dataset.driverShiftBound !== "true") {';
     // Раньше границей служила привязка кнопки «Обновить» рядом со сменой. Её
     // убрали совсем: она проверяла обновление веб-оболочки, а стояла во

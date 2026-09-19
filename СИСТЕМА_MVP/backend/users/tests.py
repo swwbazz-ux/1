@@ -19,7 +19,7 @@ from django.utils.dateparse import parse_datetime
 from openpyxl import load_workbook
 from PIL import Image
 
-from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorPlacement, HaulAssignment, WorkShiftType
+from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorDumpPointSetting, ExcavatorPlacement, HaulAssignment, WorkShiftType
 from core.models import OperationalStateEvent
 from core.production_time import production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
@@ -36,10 +36,36 @@ from references.models import (
 )
 from reports.models import PilotFeedback, ReportTemplate, ReportType
 from shifts.models import AchievementPrize, DriverShiftReadingConfirmation, EmployeeShift, EquipmentPlanGroup, EquipmentShiftPlan, PlanAssignmentStatus, PlanCalculationMode, ShiftClientAction, ShiftPlan
-from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
+from trips.models import DispatcherActionLog, DispatcherActionType, FreeBucketAcceptance, FreeBucketAcceptanceStatus, Trip, TripClientAction, TripStatus
 
 from .forms import AdminEmployeeEditForm
 from .models import AdminActionLog, AdminConflict, DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+
+
+
+def driver_stylesheet():
+    """Стили экрана водителя вынесены из шаблона в отдельный файл, поэтому
+    проверки вёрстки читают его, а не HTML-ответ."""
+    return Path(finders.find('css/driver-shift-v1.css')).read_text(encoding='utf-8')
+
+
+DRIVER_SCREEN_SCRIPTS = (
+    'js/driver-shift-fragment-v1.js',
+    'js/driver-shift-gestures-v1.js',
+    'js/driver-shift-voice-v1.js',
+    'js/driver-shift-refresh-v1.js',
+    'js/driver-shift-close-v1.js',
+    'js/driver-shift-v1.js',
+)
+
+
+def driver_script():
+    """Код экрана водителя вынесен из шаблона в static/js и разложен по темам,
+    поэтому проверки поведения читают эти файлы, а не HTML-ответ."""
+    return '\n'.join(
+        Path(finders.find(name)).read_text(encoding='utf-8')
+        for name in DRIVER_SCREEN_SCRIPTS
+    )
 
 
 class AccessLoginTests(TestCase):
@@ -149,6 +175,176 @@ class AccessLoginTests(TestCase):
             status=status,
         )
 
+    def test_driver_free_bucket_catalog_is_complete_and_contains_all_dump_points(self):
+        from .views import driver_free_bucket_payload
+
+        truck = self.create_registered_driver_shift()
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        primary = Equipment.objects.create(equipment_type=excavator_type, garage_number='FB-1')
+        alternate = Equipment.objects.create(equipment_type=excavator_type, garage_number='FB-2')
+        assignment = HaulAssignment.objects.create(
+            truck=truck,
+            excavator=primary,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+        rock = RockType.objects.create(name='Free bucket rock')
+        north = DumpPoint.objects.create(name='Free bucket north')
+        south = DumpPoint.objects.create(name='Free bucket south')
+        ExcavatorPlacement.objects.create(
+            excavator=primary,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+            work_rock_type=rock,
+            work_dump_point=north,
+            loading_horizon='Primary horizon',
+            loading_block='Primary block',
+        )
+        alternate_placement = ExcavatorPlacement.objects.create(
+            excavator=alternate,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+            work_rock_type=rock,
+            loading_horizon='Alternate horizon',
+            loading_block='Alternate block',
+        )
+        ExcavatorDumpPointSetting.objects.create(
+            placement=alternate_placement,
+            dump_point=north,
+            transport_distance_km=Decimal('1.20'),
+            position=0,
+        )
+        ExcavatorDumpPointSetting.objects.create(
+            placement=alternate_placement,
+            dump_point=south,
+            transport_distance_km=Decimal('2.40'),
+            position=1,
+        )
+
+        catalog, state, acceptance = driver_free_bucket_payload(
+            current_truck=truck,
+            current_assignment=assignment,
+            version=41,
+        )
+        alternate_item = next(item for item in catalog['excavators'] if item['id'] == alternate.id)
+        primary_item = next(item for item in catalog['excavators'] if item['id'] == primary.id)
+
+        self.assertTrue(catalog['complete'])
+        self.assertEqual(catalog['version'], 41)
+        self.assertEqual([item['name'] for item in alternate_item['dump_points']], [north.name, south.name])
+        self.assertTrue(alternate_item['available'])
+        self.assertTrue(primary_item['is_primary'])
+        self.assertFalse(state['active'])
+        self.assertIsNone(acceptance)
+
+    def test_driver_free_bucket_active_state_uses_immutable_acceptance_snapshot(self):
+        from .views import driver_free_bucket_payload
+
+        truck = self.create_registered_driver_shift()
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        primary = Equipment.objects.create(equipment_type=excavator_type, garage_number='FB-P')
+        alternate = Equipment.objects.create(equipment_type=excavator_type, garage_number='FB-A')
+        assignment = HaulAssignment.objects.create(
+            truck=truck,
+            excavator=primary,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+        current_rock = RockType.objects.create(name='Current placement rock')
+        current_dump = DumpPoint.objects.create(name='Current placement dump')
+        ExcavatorPlacement.objects.create(
+            excavator=alternate,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+            work_rock_type=current_rock,
+            work_dump_point=current_dump,
+            loading_horizon='Current horizon',
+            loading_block='Current block',
+        )
+        shift = EmployeeShift.objects.get(employee=self.employee, closed_at__isnull=True)
+        acceptance = FreeBucketAcceptance.objects.create(
+            client_acceptance_id='driver-free-bucket-snapshot-1',
+            truck=truck,
+            excavator=alternate,
+            requested_by=self.employee,
+            requesting_shift=shift,
+            primary_assignment=assignment,
+            status=FreeBucketAcceptanceStatus.REQUESTED,
+            occurred_at=timezone.now(),
+            work_context_snapshot={
+                'format_version': 1,
+                'rock_type_id': current_rock.id,
+                'rock_type_name': 'Immutable rock',
+                'loading_horizon': 'Immutable horizon',
+                'loading_block': 'Immutable block',
+                'dump_points': [
+                    {'id': current_dump.id, 'name': 'Immutable dump', 'transport_distance_km': '3.10'},
+                ],
+            },
+        )
+
+        catalog, state, active = driver_free_bucket_payload(
+            current_truck=truck,
+            current_assignment=assignment,
+            version=42,
+        )
+
+        self.assertEqual(active, acceptance)
+        self.assertTrue(catalog['complete'])
+        self.assertTrue(state['active'])
+        self.assertEqual(state['selection']['rock_type'], 'Immutable rock')
+        self.assertEqual(state['selection']['loading_horizon'], 'Immutable horizon')
+        self.assertEqual(state['selection']['loading_block'], 'Immutable block')
+        self.assertEqual(state['selection']['dump_point'], 'Immutable dump')
+        self.assertEqual(state['selection']['dump_points'][0]['name'], 'Immutable dump')
+
+        response = self.client.get('/driver/', HTTP_HOST='localhost')
+        html = response.content.decode('utf-8')
+        main_card = html.split('class="driver-work-context-card"', 1)[1].split('class="driver-work-dial-zone"', 1)[0]
+        self.assertIn('Immutable rock', main_card)
+        self.assertIn('Immutable horizon', main_card)
+        self.assertIn('Immutable block', main_card)
+        compact_label = f'Свободный ковш · {state["selection"]["label"]}'
+        self.assertIn('data-driver-free-bucket-chip', main_card)
+        self.assertIn(compact_label, main_card)
+        self.assertNotIn('Current placement rock', main_card)
+        self.assertNotIn('Current horizon', main_card)
+        self.assertNotIn('Current block', main_card)
+        dial_zone = html.split('class="driver-work-dial-zone"', 1)[1].split(
+            'class="driver-free-bucket-sheet"', 1,
+        )[0]
+        self.assertIn(
+            f'data-driver-dial-label>{state["selection"]["label"]}</strong>',
+            dial_zone,
+        )
+        self.assertNotIn(compact_label, dial_zone)
+
+    def test_driver_free_bucket_rejects_inactive_rock_setting(self):
+        from .views import driver_free_bucket_payload
+
+        truck = self.create_registered_driver_shift()
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        alternate = Equipment.objects.create(equipment_type=excavator_type, garage_number='FB-INACTIVE')
+        inactive_rock = RockType.objects.create(name='Inactive free bucket rock', is_active=False)
+        dump_point = DumpPoint.objects.create(name='Active free bucket dump')
+        ExcavatorPlacement.objects.create(
+            excavator=alternate,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+            work_rock_type=inactive_rock,
+            work_dump_point=dump_point,
+            loading_horizon='Horizon',
+            loading_block='Block',
+        )
+
+        catalog, _state, _acceptance = driver_free_bucket_payload(
+            current_truck=truck,
+            current_assignment=None,
+            version=43,
+        )
+        item = next(candidate for candidate in catalog['excavators'] if candidate['id'] == alternate.id)
+
+        self.assertFalse(item['available'])
+        self.assertIn('rock_type', item['missing_fields'])
+        self.assertIsNone(item['rock_type_id'])
+        self.assertEqual(item['rock_type'], '')
+
     def test_registered_driver_opens_shift_screen(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
@@ -176,7 +372,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '0 шт.')
         self.assertContains(response, 'mobile-shift__actions')
         self.assertContains(response, 'aria-label="Удерживайте 1 секунду, чтобы начать смену"')
-        self.assertContains(response, 'function bindDriverShiftHoldAction(form, button, options)')
+        self.assertIn('function bindDriverShiftHoldAction(form, button, options)', driver_script())
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertNotContains(response, 'class="driver-form-card"')
         self.assertEqual(self.client.session.get('employee_access_id'), self.access.id)
@@ -192,11 +388,11 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'data-mobile-shift-state="open"')
         self.assertContains(response, 'Показатели техники')
         self.assertContains(response, 'Итог смены')
-        self.assertContains(response, 'data-driver-shift-close-button')
+        self.assertIn('data-driver-shift-close-button', driver_script())
         self.assertContains(response, 'aria-label="Удерживайте 1 секунду, чтобы закрыть смену"')
-        self.assertContains(response, 'holdMs: 1000')
-        self.assertContains(response, 'data-driver-shift-inputs')
-        self.assertContains(response, 'data-driver-shift-scroll')
+        self.assertIn('holdMs: 1000', driver_script())
+        self.assertIn('data-driver-shift-inputs', driver_script())
+        self.assertIn('data-driver-shift-scroll', driver_script())
         self.assertContains(response, "css/mobile-shift-unified-v1.css")
         self.assertNotContains(response, 'mobile-shift__assignment')
         self.assertContains(response, 'mobile-shift__readings')
@@ -213,13 +409,13 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'step="1"')
         self.assertNotContains(response, 'inputmode="decimal"')
         self.assertContains(response, '>Закрыть смену<')
-        self.assertContains(response, 'Начало')
+        self.assertIn('Начало', driver_script())
         self.assertContains(response, '12560')
         self.assertContains(response, '1354')
         self.assertContains(response, '>Выйти<')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
-        self.assertContains(response, 'data-mobile-shift-label')
-        self.assertContains(response, 'if (logoutLabel) logoutLabel.textContent = "Выходим";')
+        self.assertIn('data-mobile-shift-label', driver_script())
+        self.assertIn('if (logoutLabel) logoutLabel.textContent = "Выходим";', driver_script())
         self.assertNotContains(response, '>Закрытие смены<')
         self.assertNotContains(response, 'Проверить показания')
         self.assertNotContains(response, 'data-eo-shift-review')
@@ -229,17 +425,17 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'data-driver-manifest-view-open="timeline"')
         self.assertContains(response, 'data-driver-report-delivery')
         self.assertContains(response, 'Подготовить путёвку')
-        self.assertContains(response, 'Открыть группу')
+        self.assertIn('Открыть группу', driver_script())
         self.assertContains(response, 'https://max.ru/join/haXmcD7Efa-2_dVX3_VLqfftNKU1QyMlnVTWgiQSDdE')
         self.assertNotContains(response, 'data-driver-report-share')
         self.assertNotContains(response, 'navigator.share')
-        self.assertContains(response, 'buildDriverShiftReportText')
-        self.assertContains(response, 'createDriverReportDeliveryController')
-        self.assertContains(response, 'grid-auto-rows: minmax(64px, auto);')
-        self.assertContains(response, 'overflow-x: hidden;')
-        self.assertContains(response, 'overflow-y: auto;')
-        self.assertContains(response, 'overscroll-behavior-y: contain;')
-        self.assertContains(response, 'touch-action: pan-y;')
+        self.assertIn('buildDriverShiftReportText', driver_script())
+        self.assertIn('createDriverReportDeliveryController', driver_script())
+        self.assertIn('grid-auto-rows: minmax(64px, auto);', driver_stylesheet())
+        self.assertIn('overflow-x: hidden;', driver_stylesheet())
+        self.assertIn('overflow-y: auto;', driver_stylesheet())
+        self.assertIn('overscroll-behavior-y: contain;', driver_stylesheet())
+        self.assertIn('touch-action: pan-y;', driver_stylesheet())
         self.assertContains(response, 'Событий в текущей смене пока нет')
 
     def test_shared_shift_hold_distinguishes_soft_and_native_disabled_actions(self):
@@ -285,28 +481,28 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v216')
+        self.assertContains(response, 'driver-mobile-shell-v286')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(
             response,
-            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v216',
+            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v286',
         )
         self.assertContains(
             response,
-            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v216',
+            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v286',
         )
         self.assertContains(
             response,
-            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v216',
+            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v286',
         )
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
-        self.assertContains(response, 'playDriverSound("truck_assigned")')
-        self.assertContains(response, 'driverAppliedActionVoice(actionKind, freshShell)')
-        self.assertContains(response, 'voice_shift_opened')
-        self.assertContains(response, 'voice_shift_closed')
-        self.assertContains(response, 'voice_downtime_started')
-        self.assertContains(response, 'voice_downtime_finished')
-        self.assertContains(response, 'voice_trip_finished')
+        self.assertIn('playDriverSound("truck_assigned")', driver_script())
+        self.assertIn('driverAppliedActionVoice(actionKind, freshShell)', driver_script())
+        self.assertIn('voice_shift_opened', driver_script())
+        self.assertIn('voice_shift_closed', driver_script())
+        self.assertIn('voice_downtime_started', driver_script())
+        self.assertIn('voice_downtime_finished', driver_script())
+        self.assertIn('voice_trip_finished', driver_script())
         self.assertNotContains(response, 'driverAppliedActionSound(actionKind, freshShell)')
         self.assertContains(response, 'data-driver-pwa-update-modal')
         self.assertContains(response, 'data-driver-pwa-update-badge')
@@ -314,36 +510,42 @@ class AccessLoginTests(TestCase):
             response,
             'mode: "custom", path: "^/driver/(?:shift(?:/close)?/?)?$"',
         )
-        self.assertContains(response, 'window.applyOperationalStateRefresh')
-        self.assertContains(response, 'window.bindDriverMobileShell')
-        self.assertContains(response, 'body.set("occurred_at", occurredAt)')
+        self.assertIn('window.applyOperationalStateRefresh', driver_script())
+        self.assertIn('window.bindDriverMobileShell', driver_script())
+        self.assertIn('body.set("occurred_at", occurredAt)', driver_script())
         self.assertNotContains(response, '?version_check')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/driver-sw.js"')
         self.assertNotContains(response, 'window.' + 'alert')
-        self.assertContains(response, '--driver-nav-total-h')
-        self.assertContains(response, '--driver-edge: clamp(16px, 5vw, 34px)')
-        self.assertContains(response, '--driver-header-h: 54px')
-        self.assertContains(response, '--driver-header-total-h')
-        self.assertContains(response, '--driver-nav-content-h: var(--mobile-shift-role-nav-h, 78px)')
-        self.assertContains(response, 'height: var(--driver-header-total-h)')
-        self.assertContains(response, 'height: var(--driver-nav-total-h, 78px)')
-        self.assertContains(response, 'grid-template-columns: minmax(0, 1fr) auto')
+        self.assertIn('--driver-nav-total-h', driver_stylesheet())
+        self.assertIn('--driver-edge: clamp(16px, 5vw, 34px)', driver_stylesheet())
+        self.assertIn('--driver-header-h: 54px', driver_stylesheet())
+        self.assertIn('--driver-header-total-h', driver_stylesheet())
+        self.assertIn('--driver-nav-content-h: var(--mobile-shift-role-nav-h, 78px)', driver_stylesheet())
+        self.assertIn('height: var(--driver-header-total-h)', driver_stylesheet())
+        self.assertIn('height: var(--driver-nav-total-h, 78px)', driver_stylesheet())
+        self.assertIn('grid-template-columns: minmax(0, 1fr) auto', driver_stylesheet())
         self.assertContains(response, 'class="driver-header-id')
         self.assertContains(response, 'Самосвал')
-        self.assertContains(response, 'white-space: nowrap')
-        self.assertContains(response, 'text-overflow: clip')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-online::after')
-        self.assertContains(response, 'display: none !important')
+        self.assertIn('white-space: nowrap', driver_stylesheet())
+        self.assertIn('text-overflow: clip', driver_stylesheet())
+        self.assertIn('body.driver-mobile-screen .driver-online::after', driver_stylesheet())
+        self.assertIn('display: none !important', driver_stylesheet())
         self.assertNotContains(response, '>Активная смена<')
-        self.assertContains(response, '--driver-dial-size: clamp(220px, min(92vw, 62dvh), 520px)')
-        self.assertContains(response, 'grid-template-areas:')
-        self.assertContains(response, '"context"')
-        self.assertContains(response, '"dial"')
-        self.assertContains(response, '"assign"')
-        self.assertContains(response, 'gap: var(--driver-work-gap)')
+        # Круг — строго во всю ширину колонки; ограничение по высоте только аварийное.
+        self.assertIn('width: min(100%, 520px, calc(100dvh', driver_stylesheet())
+        self.assertIn('grid-template-areas:', driver_stylesheet())
+        self.assertIn('"context"', driver_stylesheet())
+        self.assertIn('"dial"', driver_stylesheet())
+        self.assertIn('"drum"', driver_stylesheet())
+        self.assertIn('"assign"', driver_script())
+        # Остаток высоты отдан барабану: его строка 1fr, круг задаёт свою строку сам.
+        self.assertIn('grid-template-rows: auto auto minmax(0, 1fr) auto', driver_stylesheet())
+        self.assertIn('gap: var(--driver-work-gap)', driver_stylesheet())
         self.assertContains(response, 'class="driver-work-context-card"')
-        self.assertContains(response, '--driver-work-column: min(100%, 720px)')
-        self.assertContains(response, 'class="driver-work-context-heading"')
+        self.assertIn('--driver-work-column: min(100%, 720px)', driver_stylesheet())
+        # Заголовок секции убран ради места на экране; значок свободного ковша остался.
+        self.assertNotContains(response, 'class="driver-work-context-heading"')
+        self.assertContains(response, 'data-driver-free-bucket-chip')
         self.assertContains(response, 'class="driver-work-context-machine"')
         self.assertContains(response, 'class="driver-work-context-geology"')
         self.assertContains(response, 'class="driver-work-context-geology-values"')
@@ -354,88 +556,87 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, 'function enhanceDriverContextLine()')
         self.assertContains(response, 'class="driver-work-ticks"')
         self.assertContains(response, 'data-driver-dial-label')
-        self.assertContains(response, 'className = "driver-work-label-line"')
-        self.assertContains(response, 'function splitDriverDialLabel(text)')
-        self.assertContains(response, 'function preferredDriverDialFontSize(coreWidth, lineCount, textLength)')
-        self.assertContains(response, 'function minimumDriverDialFontSize(lineCount, textLength)')
-        self.assertContains(response, 'function fitDriverDialLabel(label, force)')
-        self.assertContains(response, 'Math.min(60, Math.max(50, coreWidth * 0.23))')
-        self.assertContains(response, 'Math.min(54, Math.max(42, coreWidth * 0.2))')
-        self.assertContains(response, 'Math.min(48, Math.max(35, coreWidth * 0.18))')
-        self.assertContains(response, 'Math.min(40, Math.max(30, coreWidth * 0.15))')
-        self.assertContains(response, 'return 25')
-        self.assertContains(response, 'has-multiline-label')
-        self.assertContains(response, 'row-gap: 6px')
-        self.assertContains(response, 'row-gap: 4px')
-        self.assertContains(response, 'line-height: 1.04')
-        self.assertContains(response, 'font-size: 22px')
-        self.assertContains(response, 'font-size: 15px')
-        self.assertContains(response, 'linear-gradient(180deg, rgba(153,255,104,0.08)')
-        self.assertContains(response, 'linear-gradient(90deg, transparent, rgba(20,54,35,0.34)')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-percent')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-work-dial-core::before')
-        self.assertContains(response, 'isolation: isolate')
-        self.assertContains(response, '-webkit-background-clip: text')
-        self.assertContains(response, '-webkit-text-fill-color: transparent')
-        self.assertContains(response, 'drop-shadow(0 3px 2px rgba(0,0,0,0.46))')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-label')
-        self.assertContains(response, 'transform: translateY(2px)')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-work-ticks::before')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-work-ticks::after')
-        self.assertContains(response, 'repeating-conic-gradient(from -0.35deg')
-        self.assertContains(response, 'stroke-linecap: round')
+        self.assertIn('className = "driver-work-label-line"', driver_script())
+        self.assertIn('function splitDriverDialLabel(text)', driver_script())
+        self.assertIn('function preferredDriverDialFontSize(coreWidth, lineCount, textLength)', driver_script())
+        self.assertIn('function minimumDriverDialFontSize(lineCount, textLength)', driver_script())
+        self.assertIn('function fitDriverDialLabel(label, force)', driver_script())
+        self.assertIn('Math.min(60, Math.max(50, coreWidth * 0.23))', driver_script())
+        self.assertIn('Math.min(54, Math.max(42, coreWidth * 0.2))', driver_script())
+        self.assertIn('Math.min(48, Math.max(35, coreWidth * 0.18))', driver_script())
+        self.assertIn('Math.min(40, Math.max(30, coreWidth * 0.15))', driver_script())
+        self.assertIn('return 25', driver_script())
+        self.assertIn('has-multiline-label', driver_script())
+        self.assertIn('row-gap: 6px', driver_stylesheet())
+        self.assertIn('row-gap: 4px', driver_stylesheet())
+        self.assertIn('line-height: 1.04', driver_stylesheet())
+        self.assertIn('font-size: 22px', driver_stylesheet())
+        self.assertIn('font-size: 15px', driver_stylesheet())
+        self.assertIn('linear-gradient(180deg, rgba(153,255,104,0.08)', driver_stylesheet())
+        self.assertIn('linear-gradient(90deg, transparent, rgba(20,54,35,0.34)', driver_stylesheet())
+        self.assertIn('body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-percent', driver_stylesheet())
+        self.assertIn('body.driver-mobile-screen .driver-work-dial-core::before', driver_stylesheet())
+        self.assertIn('isolation: isolate', driver_stylesheet())
+        # Зелень загруженного круга — готовые слои; градиента по тексту и фильтров нет.
+        self.assertContains(response, 'class="driver-work-loaded-halo"')
+        self.assertContains(response, 'class="driver-work-loaded-tint"')
+        self.assertNotContains(response, '-webkit-text-fill-color: transparent')
+        self.assertNotContains(response, 'drop-shadow(0 3px 2px rgba(0,0,0,0.46))')
+        self.assertIn('body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-core', driver_stylesheet())
+        self.assertIn('transform: scale(0.985)', driver_stylesheet())
+        self.assertIn('body.driver-mobile-screen .driver-work-ticks::before', driver_stylesheet())
+        self.assertIn('body.driver-mobile-screen .driver-work-ticks::after', driver_stylesheet())
+        self.assertIn('repeating-conic-gradient(from -0.35deg', driver_stylesheet())
+        self.assertIn('stroke-linecap: round', driver_stylesheet())
         self.assertContains(response, 'class="driver-work-over-progress"')
-        self.assertContains(response, 'class="driver-work-hold-bar is-core"')
-        self.assertContains(response, 'class="driver-work-hold-bar is-outer"')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-work-hold-bar.is-core')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-work-hold-bar.is-outer')
-        self.assertContains(response, 'conic-gradient(')
-        self.assertContains(response, 'var(--driver-hold-angle)')
-        self.assertContains(response, 'transform: scaleX(-1)')
-        self.assertContains(response, 'inset: 13%')
-        self.assertContains(response, 'inset: 1.5%')
+        # Кольцо удержания: две половины-окна с полукольцами, которые только поворачиваются.
+        self.assertContains(response, 'class="driver-work-hold-ring"')
+        self.assertContains(response, 'class="driver-work-hold-half is-right"')
+        self.assertContains(response, 'class="driver-work-hold-half is-left"')
+        self.assertIn('.driver-work-hold-ring {', driver_stylesheet())
+        self.assertIn('@keyframes driver-hold-right', driver_stylesheet())
+        self.assertNotContains(response, 'driver-work-hold-bar')
+        self.assertNotContains(response, '--driver-hold-color')
+        self.assertNotContains(response, 'var(--driver-hold-angle)')
+        self.assertNotContains(response, 'driver-work-hold-progress')
         self.assertNotContains(response, 'class="driver-work-hold-svg"')
-        self.assertContains(response, 'width: 74%')
-        self.assertContains(response, 'width: max-content')
+        self.assertIn('width: 74%', driver_stylesheet())
+        self.assertIn('width: max-content', driver_stylesheet())
         self.assertNotContains(response, '--driver-dial-size: clamp(260px, 76vw, 380px)')
-        self.assertContains(response, 'var holdMs = Math.max(0, Number(options.holdMs || 2000))')
-        self.assertContains(
-            response,
-            'holdButton.style.setProperty("--driver-hold", percent.toFixed(2))',
-        )
-        self.assertContains(response, '((percent / 100) * 360).toFixed(2) + "deg"')
-        self.assertContains(response, 'window.requestAnimationFrame(function ()')
+        self.assertIn('var holdMs = Math.max(0, Number(options.holdMs || 2000))', driver_script())
+        self.assertIn('if (typeof options.onProgress === "function")', driver_script())
+        self.assertIn('timerId = window.setTimeout(complete, holdMs)', driver_script())
         self.assertContains(response, 'data-driver-progress=')
-        self.assertContains(response, 'function syncDriverDialProgress()')
+        self.assertIn('function syncDriverDialProgress()', driver_script())
         self.assertContains(response, '--driver-progress-capped')
         self.assertContains(response, '--driver-over-progress')
-        self.assertContains(response, 'is-over-plan')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-label')
-        self.assertContains(response, 'max-width: 88%')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-percent')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-work-assignment')
-        self.assertContains(response, 'width: min(var(--driver-dial-size), 100%)')
-        self.assertContains(response, 'max-width: 520px')
-        self.assertContains(response, '--driver-dial-size: clamp(320px, min(42vw, 58dvh), 520px)')
-        self.assertContains(response, 'max-width: 520px')
+        self.assertIn('is-over-plan', driver_stylesheet())
+        self.assertIn('body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-label', driver_stylesheet())
+        self.assertIn('max-width: 88%', driver_stylesheet())
+        self.assertIn('body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-percent', driver_stylesheet())
+        self.assertIn('body.driver-mobile-screen .driver-work-assignment', driver_stylesheet())
+        self.assertIn('width: min(var(--driver-dial-size), 100%)', driver_stylesheet())
+        self.assertIn('max-width: 520px', driver_stylesheet())
+        self.assertIn('--driver-dial-size: clamp(320px, min(42vw, 58dvh), 520px)', driver_stylesheet())
+        self.assertIn('max-width: 520px', driver_stylesheet())
         self.assertNotContains(response, 'width: min(var(--driver-dial-size), 57dvh, 100%)')
         self.assertNotContains(response, '"context dial"')
         self.assertNotContains(response, '"assign dial"')
-        self.assertContains(response, 'grid-template-rows: auto minmax(0, 1fr) auto')
-        self.assertContains(response, '[data-driver-tab-panel="downtimes"].is-active')
-        self.assertContains(response, 'max-height: 100%')
-        self.assertContains(response, 'padding: 0 0 max(10px, var(--driver-safe-bottom, 0px))')
-        self.assertContains(response, 'width: 100%')
-        self.assertContains(response, 'max-width: none')
-        self.assertContains(response, 'min-width: 320px')
+        self.assertIn('grid-template-rows: auto minmax(0, 1fr) auto', driver_stylesheet())
+        self.assertIn('[data-driver-tab-panel="downtimes"].is-active', driver_stylesheet())
+        self.assertIn('max-height: 100%', driver_stylesheet())
+        self.assertIn('padding: 0 0 max(10px, var(--driver-safe-bottom, 0px))', driver_stylesheet())
+        self.assertIn('width: 100%', driver_stylesheet())
+        self.assertIn('max-width: none', driver_stylesheet())
+        self.assertIn('min-width: 320px', driver_stylesheet())
         self.assertNotContains(response, 'width: min(100vw, 430px)')
         self.assertNotContains(response, 'max-width: 430px')
         self.assertNotContains(response, 'margin: 0 auto')
-        self.assertContains(response, 'position: fixed')
-        self.assertContains(response, 'right: 0')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::after')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item:focus-visible')
-        self.assertContains(response, 'body.driver-mobile-screen .driver-nav-truck')
+        self.assertIn('position: fixed', driver_stylesheet())
+        self.assertIn('right: 0', driver_stylesheet())
+        self.assertIn('body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::after', driver_stylesheet())
+        self.assertIn('body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item:focus-visible', driver_stylesheet())
+        self.assertIn('body.driver-mobile-screen .driver-nav-truck', driver_stylesheet())
         self.assertNotContains(response, 'driver-work-' + 'bottom-nav')
 
     def test_browser_driver_keeps_pwa_update_ui(self):
@@ -519,7 +720,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v216', script)
+        self.assertIn('driver-mobile-shell-v286', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3190,7 +3391,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'Горизонт 75')
         self.assertContains(driver_shift_response, 'Блок 52')
         self.assertContains(driver_shift_response, 'ТОЧКА РАЗГРУЗКИ')
-        self.assertContains(driver_shift_response, 'Выбор точки')
+        self.assertContains(driver_shift_response, 'Изменить точку разгрузки')
         self.assertNotContains(driver_shift_response, 'Активный рейс')
         self.assertNotContains(driver_shift_response, 'Разгрузился')
 
@@ -3235,6 +3436,101 @@ class AccessLoginTests(TestCase):
                 trip=trip,
                 actor=self.employee,
             ).exists()
+        )
+
+    def test_driver_dump_point_modal_uses_compact_action_and_all_active_points(self):
+        truck = self.create_registered_driver_shift()
+        trip = self.create_driver_trip(truck)
+        for index in range(12):
+            DumpPoint.objects.create(name=f'Точка {index:02d}')
+        inactive = DumpPoint.objects.create(name='Закрытая точка', is_active=False)
+
+        response = self.client.get(reverse('driver_shift'), HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-mobile-dial-action="manual" disabled aria-disabled="true"')
+        self.assertContains(response, 'data-mobile-dial-action="dump-point" data-driver-point-open')
+        self.assertContains(response, 'data-mobile-dial-action="free-bucket" disabled aria-disabled="true"')
+        self.assertContains(response, 'Изменить точку разгрузки')
+        self.assertContains(response, f'Рейс №{trip.id}')
+        self.assertContains(response, 'Текущая')
+        self.assertContains(response, 'Точка 11')
+        self.assertNotContains(response, inactive.name)
+        self.assertNotContains(response, 'driver-work-context-card" role="button"')
+
+    def test_driver_dump_point_action_is_disabled_without_open_trip(self):
+        self.create_registered_driver_shift()
+
+        response = self.client.get(reverse('driver_shift'), HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-mobile-dial-action="dump-point" disabled aria-disabled="true"')
+        self.assertNotContains(response, 'data-mobile-dial-action="dump-point" data-driver-point-open')
+        # Окно смены точки есть всегда, но закрыто, а его плитки неактивны: открыть его
+        # без рейса нечем. Постоянная разметка нужна, чтобы разгрузка не меняла структуру
+        # экрана и его можно было обновлять послойно.
+        self.assertContains(response, 'aria-labelledby="driver-unload-title" hidden>')
+        self.assertNotContains(response, "driver_change_unload_point")
+        self.assertNotContains(response, '<form method="post" action="/driver/trip/')
+
+    def test_driver_selecting_current_dump_point_is_server_noop(self):
+        truck = self.create_registered_driver_shift()
+        trip = self.create_driver_trip(truck)
+        before_event_count = OperationalStateEvent.objects.count()
+
+        response = self.client.post(
+            reverse('driver_change_unload_point', args=[trip.id]),
+            {'client_action_id': 'driver-current-point-noop', 'dump_point': trip.dump_point_id},
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 302)
+        trip.refresh_from_db()
+        self.assertEqual(trip.assigned_dump_point_id, trip.dump_point_id)
+        self.assertIsNone(trip.actual_dump_point_id)
+        self.assertEqual(Trip.objects.count(), 1)
+        self.assertFalse(
+            TripClientAction.objects.filter(client_action_id='driver-current-point-noop').exists()
+        )
+        self.assertEqual(OperationalStateEvent.objects.count(), before_event_count)
+
+    def test_driver_dump_point_action_id_cannot_be_reused_for_another_point(self):
+        truck = self.create_registered_driver_shift()
+        trip = self.create_driver_trip(truck)
+        first_point = DumpPoint.objects.create(name='Склад для первого выбора')
+        incompatible_point = DumpPoint.objects.create(name='Склад для подмены')
+        url = reverse('driver_change_unload_point', args=[trip.id])
+
+        first_response = self.client.post(
+            url,
+            {'client_action_id': 'driver-point-immutable', 'dump_point': first_point.id},
+            HTTP_HOST='localhost',
+        )
+        exact_repeat_response = self.client.post(
+            url,
+            {'client_action_id': 'driver-point-immutable', 'dump_point': first_point.id},
+            HTTP_HOST='localhost',
+        )
+        repeated_response = self.client.post(
+            url,
+            {'client_action_id': 'driver-point-immutable', 'dump_point': incompatible_point.id},
+            follow=True,
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(first_response.status_code, 302)
+        self.assertEqual(exact_repeat_response.status_code, 302)
+        self.assertEqual(repeated_response.status_code, 200)
+        self.assertContains(repeated_response, 'Идентификатор действия уже использован для другого выбора.')
+        trip.refresh_from_db()
+        self.assertEqual(trip.actual_dump_point_id, first_point.id)
+        self.assertEqual(trip.dump_point_id, first_point.id)
+        self.assertEqual(
+            TripClientAction.objects.filter(
+                action_type='change_actual_unload_point',
+                client_action_id='driver-point-immutable',
+            ).count(),
+            1,
         )
 
     def test_driver_sees_truck_loaded_event_from_excavator_realtime_shell(self):
@@ -3325,7 +3621,62 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v216')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v286')
+
+    def test_driver_quick_reasons_render_stars_and_drum_subset(self):
+        self.create_registered_driver_shift()
+        DowntimeReason.objects.all().update(show_for_truck_driver=False)
+        reasons = [
+            DowntimeReason.objects.create(name=f'Быстрая причина {index}', short_label=f'Б{index}', show_for_truck_driver=True, sort_order=index)
+            for index in range(1, 6)
+        ]
+        self.access.driver_quick_reasons = [reasons[0].id, reasons[2].id, reasons[4].id]
+        self.access.save(update_fields=['driver_quick_reasons'])
+        response = self.client.get(reverse('driver_work') + '?tab=work')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-driver-reason-star-id="%d" aria-pressed="true"' % reasons[0].id)
+        self.assertContains(response, 'data-driver-reason-star-id="%d" aria-pressed="false"' % reasons[1].id)
+        self.assertContains(response, 'data-driver-drum-reason-id="%d" data-driver-drum-quick="1"' % reasons[0].id)
+        self.assertContains(response, 'data-driver-drum-reason-id="%d" data-driver-drum-quick="0" hidden' % reasons[1].id)
+
+    def test_driver_quick_reasons_default_shows_every_reason_in_drum(self):
+        self.create_registered_driver_shift()
+        DowntimeReason.objects.all().update(show_for_truck_driver=False)
+        reasons = [
+            DowntimeReason.objects.create(name=f'Обычная причина {index}', short_label=f'О{index}', show_for_truck_driver=True, sort_order=index)
+            for index in range(1, 4)
+        ]
+        # Набор короче минимума считается незаданным — в барабане все причины.
+        self.access.driver_quick_reasons = [reasons[0].id]
+        self.access.save(update_fields=['driver_quick_reasons'])
+        response = self.client.get(reverse('driver_work') + '?tab=work')
+        for reason in reasons:
+            self.assertContains(response, 'data-driver-drum-reason-id="%d" data-driver-drum-quick="1"' % reason.id)
+        self.assertNotContains(response, 'data-driver-drum-quick="0"')
+
+    def test_driver_quick_reasons_endpoint_enforces_minimum_and_keeps_reference_order(self):
+        self.create_registered_driver_shift()
+        DowntimeReason.objects.all().update(show_for_truck_driver=False)
+        reasons = [
+            DowntimeReason.objects.create(name=f'Настройка {index}', short_label=f'Н{index}', show_for_truck_driver=True, sort_order=index)
+            for index in range(1, 5)
+        ]
+        url = reverse('driver_quick_reasons')
+        response = self.client.post(url, data=json.dumps({'reason_ids': [reasons[0].id, reasons[1].id]}), content_type='application/json')
+        self.assertEqual(response.status_code, 422)
+        response = self.client.post(
+            url,
+            data=json.dumps({'reason_ids': [reasons[3].id, reasons[0].id, 999999, reasons[2].id]}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.access.refresh_from_db()
+        self.assertEqual(self.access.driver_quick_reasons, [reasons[0].id, reasons[2].id, reasons[3].id])
+        self.assertIsNotNone(self.access.driver_quick_reasons_updated_at)
+        response = self.client.post(url, data=json.dumps({'reason_ids': []}), content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+        self.access.refresh_from_db()
+        self.assertEqual(self.access.driver_quick_reasons, [])
 
     def test_driver_downtime_buttons_are_rendered_from_server_reference(self):
         truck = self.create_registered_driver_shift()
@@ -3366,7 +3717,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'driver-downtime-state-icon-pause')
         self.assertContains(response, 'class="driver-downtime-list"')
         self.assertContains(response, 'aria-label="Начать простой: Фронт"')
-        self.assertContains(response, 'registerDriverDowntimeAction')
+        self.assertIn('registerDriverDowntimeAction', driver_script())
         self.assertNotContains(response, 'registerDriverDowntimeHold')
         self.assertNotContains(response, 'Удерживайте полсекунды')
         self.assertNotContains(response, 'driverShiftOpenConfirmed')
@@ -3471,6 +3822,66 @@ class AccessLoginTests(TestCase):
         self.assertEqual(close_payload['reason_totals'][str(second_reason.id)], 7)
         self.assertEqual(close_payload['reason_totals'][str(first_reason.id)], 120)
 
+    def test_driver_downtime_switch_closes_previous_interval_without_resetting_total(self):
+        truck = self.create_registered_driver_shift()
+        shift = EmployeeShift.objects.get(employee=self.employee, closed_at__isnull=True)
+        base_time = timezone.now()
+        shift.opened_at = base_time - timedelta(hours=1)
+        shift.save(update_fields=['opened_at'])
+        first_reason = DowntimeReason.objects.create(
+            name='Тест переключения 1',
+            short_label='Первый',
+            show_for_truck_driver=True,
+        )
+        second_reason = DowntimeReason.objects.create(
+            name='Тест переключения 2',
+            short_label='Второй',
+            show_for_truck_driver=True,
+        )
+
+        def post_reason(reason, at):
+            with patch('users.views.timezone.now', return_value=at):
+                return self.client.post(
+                    reverse('driver_downtime_action'),
+                    data=json.dumps({'action': 'start', 'reason_id': reason.id}),
+                    content_type='application/json',
+                    HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                    HTTP_ACCEPT='application/json',
+                    HTTP_HOST='localhost',
+                )
+
+        first_response = post_reason(first_reason, base_time)
+        switch_response = post_reason(second_reason, base_time + timedelta(seconds=7))
+        repeat_response = post_reason(second_reason, base_time + timedelta(seconds=10))
+        with patch('users.views.timezone.now', return_value=base_time + timedelta(seconds=12)):
+            close_response = self.client.post(
+                reverse('driver_downtime_action'),
+                data=json.dumps({'action': 'close'}),
+                content_type='application/json',
+                HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                HTTP_ACCEPT='application/json',
+                HTTP_HOST='localhost',
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(switch_response.status_code, 200)
+        self.assertEqual(switch_response.json()['action'], 'downtime_switched')
+        self.assertEqual(repeat_response.status_code, 200)
+        self.assertEqual(repeat_response.json()['action'], 'downtime_unchanged')
+        self.assertEqual(close_response.status_code, 200)
+        intervals = list(DowntimeEvent.objects.filter(equipment=truck).order_by('started_at', 'id'))
+        self.assertEqual(len(intervals), 2)
+        self.assertEqual(intervals[0].reason, first_reason)
+        self.assertEqual(intervals[0].started_at, base_time)
+        self.assertEqual(intervals[0].ended_at, base_time + timedelta(seconds=7))
+        self.assertEqual(intervals[1].reason, second_reason)
+        self.assertEqual(intervals[1].started_at, base_time + timedelta(seconds=7))
+        self.assertEqual(intervals[1].ended_at, base_time + timedelta(seconds=12))
+        close_payload = close_response.json()
+        self.assertEqual(close_payload['reason_totals'][str(first_reason.id)], 7)
+        self.assertEqual(close_payload['reason_totals'][str(second_reason.id)], 5)
+        self.assertEqual(close_payload['shift_total_seconds'], 12)
+
     def test_driver_downtime_action_validates_reason_by_workplace_and_equipment_type(self):
         truck = self.create_registered_driver_shift()
         DowntimeReason.objects.all().update(show_for_truck_driver=False)
@@ -3493,7 +3904,7 @@ class AccessLoginTests(TestCase):
             follow=True,
             HTTP_HOST='localhost',
         )
-        allowed_response = self.client.post(
+        self.client.post(
             reverse('driver_downtime_action'),
             {'reason_id': allowed_reason.id},
             follow=True,
@@ -3594,10 +4005,12 @@ class AccessLoginTests(TestCase):
             response,
             'driver-work-dial is-empty is-waiting-operation is-waiting-loading',
         )
+        # Круг устроен одинаково в обоих состояниях: без рейса та же кнопка выключена.
         self.assertContains(
             response,
             'driver-work-dial-button is-empty is-waiting-operation is-waiting-loading" '
-            'data-driver-work-dial-control aria-disabled="true"',
+            'type="button" data-driver-work-dial-control data-driver-hold-button '
+            'data-driver-pending-label="ОТПРАВКА" disabled aria-disabled="true"',
         )
         self.assertContains(response, '>ОЖИДАНИЕ ПОГРУЗКИ</em>')
         self.assertNotContains(response, '>ПРИЧИНА ПРОСТОЯ</em>')
@@ -5604,7 +6017,7 @@ class AccessLoginTests(TestCase):
         rock = RockType.objects.create(name='Rock')
         dump_point = DumpPoint.objects.create(name='Dump')
         mechanic_role = Role.objects.create(code='mechanic', name='Mechanic')
-        operator_role = Role.objects.create(code='excavator_operator', name='Operator')
+        Role.objects.create(code='excavator_operator', name='Operator')
         mechanic = Employee.objects.create(full_name='Mechanic MVP')
         operator = Employee.objects.create(full_name='Operator MVP')
         EmployeeAccess.objects.create(employee=mechanic, role=mechanic_role, access_code='7000')
@@ -5853,7 +6266,7 @@ class AccessLoginTests(TestCase):
         excavator_type = EquipmentType.objects.create(name='Excavator')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
         dispatcher_role = Role.objects.create(code='dispatcher', name='Dispatcher')
-        mechanic_role = Role.objects.create(code='mechanic', name='Mechanic')
+        Role.objects.create(code='mechanic', name='Mechanic')
         dispatcher = Employee.objects.create(full_name='Dispatcher MVP')
         mechanic = Employee.objects.create(full_name='Mechanic MVP')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
@@ -5878,7 +6291,7 @@ class AccessLoginTests(TestCase):
         excavator_type = EquipmentType.objects.create(name='Excavator')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
         dispatcher_role = Role.objects.create(code='dispatcher', name='Dispatcher')
-        mechanic_role = Role.objects.create(code='mechanic', name='Mechanic')
+        Role.objects.create(code='mechanic', name='Mechanic')
         dispatcher = Employee.objects.create(full_name='Dispatcher MVP')
         mechanic = Employee.objects.create(full_name='Mechanic MVP')
         EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
@@ -5918,7 +6331,7 @@ class AccessLoginTests(TestCase):
         excavator_type = EquipmentType.objects.create(name='Excavator')
         excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
         manager_role = Role.objects.create(code='manager', name='Manager')
-        mechanic_role = Role.objects.create(code='mechanic', name='Mechanic')
+        Role.objects.create(code='mechanic', name='Mechanic')
         manager = Employee.objects.create(full_name='Manager MVP')
         mechanic = Employee.objects.create(full_name='Mechanic MVP')
         EmployeeAccess.objects.create(employee=manager, role=manager_role, access_code='6000')

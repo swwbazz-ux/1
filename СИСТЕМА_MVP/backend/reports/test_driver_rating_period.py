@@ -120,19 +120,19 @@ class DriverRatingPeriodTests(
         at_start = self.employee('Водитель на начале периода')
         before_end = self.employee('Водитель перед концом периода')
         at_end = self.employee('Водитель на исключённой границе')
-        start_snapshot = self._snapshot_on_production_date(
+        self._snapshot_on_production_date(
             at_start,
             production_date=starts_on,
             ordinal=1,
             trip_count=20,
         )
-        before_end_snapshot = self._snapshot_on_production_date(
+        self._snapshot_on_production_date(
             before_end,
             production_date=ends_before - timedelta(days=1),
             ordinal=2,
             trip_count=20,
         )
-        end_snapshot = self._snapshot_on_production_date(
+        self._snapshot_on_production_date(
             at_end,
             production_date=ends_before,
             ordinal=3,
