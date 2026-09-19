@@ -455,19 +455,19 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v280')
+        self.assertContains(response, 'driver-mobile-shell-v282')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(
             response,
-            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v280',
+            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v282',
         )
         self.assertContains(
             response,
-            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v280',
+            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v282',
         )
         self.assertContains(
             response,
-            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v280',
+            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v282',
         )
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertContains(response, 'playDriverSound("truck_assigned")')
@@ -694,7 +694,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v280', script)
+        self.assertIn('driver-mobile-shell-v282', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3440,7 +3440,12 @@ class AccessLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-mobile-dial-action="dump-point" disabled aria-disabled="true"')
         self.assertNotContains(response, 'data-mobile-dial-action="dump-point" data-driver-point-open')
-        self.assertNotContains(response, 'id="driver-unload-dialog"')
+        # Окно смены точки есть всегда, но закрыто, а его плитки неактивны: открыть его
+        # без рейса нечем. Постоянная разметка нужна, чтобы разгрузка не меняла структуру
+        # экрана и его можно было обновлять послойно.
+        self.assertContains(response, 'aria-labelledby="driver-unload-title" hidden>')
+        self.assertNotContains(response, "driver_change_unload_point")
+        self.assertNotContains(response, '<form method="post" action="/driver/trip/')
 
     def test_driver_selecting_current_dump_point_is_server_noop(self):
         truck = self.create_registered_driver_shift()
@@ -3590,7 +3595,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v280')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v282')
 
     def test_driver_quick_reasons_render_stars_and_drum_subset(self):
         self.create_registered_driver_shift()

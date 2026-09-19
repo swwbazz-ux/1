@@ -4039,13 +4039,16 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
         {% endif %}
     </section>
 
-    {% if active_trip %}
+    {% comment %} Окно смены точки разгрузки есть всегда и всегда скрыто: открыть его можно только
+       при загруженном рейсе (кнопка на круге в остальное время выключена и спрятана). Пока секция
+       отрисовывалась по условию, её исчезновение после разгрузки меняло структуру экрана, и
+       обновить экран послойно было нельзя — приходилось пересобирать его целиком. {% endcomment %}
         <section class="driver-unload-sheet" id="driver-unload-dialog" data-driver-point-sheet role="dialog" aria-modal="true" aria-labelledby="driver-unload-title" hidden>
             <div class="driver-unload-dialog">
                 <button class="driver-unload-close" type="button" data-driver-point-close aria-label="Закрыть окно изменения точки разгрузки">×</button>
                 <div class="driver-unload-head">
                     <h2 id="driver-unload-title">Изменить точку разгрузки</h2>
-                    <p>Рейс №{{ active_trip.id }} · самосвал {{ active_trip.truck }} · погрузил экскаватор {{ active_trip.excavator }}</p>
+                    <p>{% if active_trip %}Рейс №{{ active_trip.id }} · самосвал {{ active_trip.truck }} · погрузил экскаватор {{ active_trip.excavator }}{% else %}Загруженного рейса нет{% endif %}</p>
                     <p>Первоначально назначено: {{ active_trip_assigned_dump_point }}</p>
                 </div>
                 <div class="driver-unload-current">
@@ -4055,11 +4058,11 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                 </div>
                 <div class="driver-unload-grid">
                     {% for point in unload_points %}
-                        <form method="post" action="{% url 'driver_change_unload_point' active_trip.id %}" class="driver-unload-tile-form" data-driver-in-place="change-unload-point">
+                        <form method="post"{% if active_trip %} action="{% url 'driver_change_unload_point' active_trip.id %}"{% endif %} class="driver-unload-tile-form" data-driver-in-place="change-unload-point">
                             {% csrf_token %}
                             <input type="hidden" name="client_action_id" value="" data-driver-client-action>
                             <input type="hidden" name="dump_point" value="{{ point.id }}">
-                            <button class="driver-unload-tile{% if point.id == active_trip_actual_dump_point_id %} is-current{% endif %}" type="submit" data-driver-point-name="{{ point.name }}"{% if point.id == active_trip_actual_dump_point_id %} aria-current="true"{% endif %}>
+                            <button class="driver-unload-tile{% if point.id == active_trip_actual_dump_point_id %} is-current{% endif %}" type="submit" data-driver-point-name="{{ point.name }}"{% if not active_trip %} disabled{% endif %}{% if point.id == active_trip_actual_dump_point_id %} aria-current="true"{% endif %}>
                                 <strong class="{% if point.name|length > 15 %}is-extra-long{% elif point.name|length > 8 %}is-long{% endif %}">{{ point.name }}</strong>
                                 <span class="driver-unload-tile-status" data-driver-point-tile-status>{% if point.id == active_trip_actual_dump_point_id %}<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8 3 3 7-7" /></svg>Текущая{% endif %}</span>
                             </button>
@@ -4071,7 +4074,6 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                 <button class="driver-unload-cancel" type="button" data-driver-point-close>Отмена</button>
             </div>
         </section>
-    {% endif %}
 
     {% if driver_free_bucket_can_open %}
         <section class="driver-free-bucket-sheet" id="driver-free-bucket-dialog" data-driver-free-bucket-sheet role="dialog" aria-modal="true" aria-labelledby="driver-free-bucket-title" hidden>
