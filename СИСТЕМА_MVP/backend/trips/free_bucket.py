@@ -17,6 +17,12 @@ from django.utils import timezone
 FREE_BUCKET_DUMP_CARD_VISIBILITY = timedelta(
     seconds=getattr(settings, 'EXCAVATOR_FREE_BUCKET_DUMP_CARD_SECONDS', 300)
 )
+# Срок жизни включённого свободного ковша: с момента включения водителем и до
+# первой погрузки или отмены, но не дольше этого окна. Приём машинистом окно
+# не продлевает — отсчёт идёт от включения (решение пользователя 20.09.2026).
+FREE_BUCKET_REQUEST_TTL = timedelta(
+    seconds=getattr(settings, 'FREE_BUCKET_REQUEST_TTL_SECONDS', 600)
+)
 
 
 def free_bucket_acceptance_expires_at(acceptance):
@@ -47,7 +53,11 @@ def active_free_bucket_acceptance_filter(*, now=None):
     """
     from .models import FreeBucketAcceptanceStatus
 
-    cutoff = (now or timezone.now()) - FREE_BUCKET_DUMP_CARD_VISIBILITY
+    now = now or timezone.now()
+    cutoff = now - FREE_BUCKET_DUMP_CARD_VISIBILITY
+    # Включённый, но не использованный ковш живёт не дольше FREE_BUCKET_REQUEST_TTL
+    # с момента включения (occurred_at — момент выбора на устройстве водителя).
+    request_is_fresh = Q(occurred_at__gt=now - FREE_BUCKET_REQUEST_TTL)
     used_time_is_recent = Q(used_trip__loaded_at__gt=cutoff) | Q(
         used_trip__loaded_at__isnull=True,
         used_at__gt=cutoff,
@@ -69,7 +79,7 @@ def active_free_bucket_acceptance_filter(*, now=None):
         Q(status__in=(
             FreeBucketAcceptanceStatus.REQUESTED,
             FreeBucketAcceptanceStatus.ACCEPTED,
-        )) & shift_is_alive
+        )) & shift_is_alive & request_is_fresh
     ) | (
         Q(status=FreeBucketAcceptanceStatus.USED)
         & used_time_is_recent

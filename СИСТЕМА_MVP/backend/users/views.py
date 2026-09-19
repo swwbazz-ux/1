@@ -4215,12 +4215,16 @@ def driver_free_bucket_payload(*, current_truck, current_assignment, version, op
         # заявка из прошлой (или просто другой) смены протекала на экран новой
         # и подменяла собой настоящее назначение — водитель видел старый
         # экскаватор, не мог ни выбрать другой, ни отменить этот.
+        # Тот же общий признак «право активно», что у пульта и экскаваторщика
+        # (жива смена, не старше срока с момента включения), плюс погруженный
+        # рейс этой смены — его экран показывает до закрытия карточки.
+        from trips.free_bucket import active_free_bucket_acceptance_filter
         active_acceptance = (
             FreeBucketAcceptance.objects
             .filter(
+                Q(status='used') | active_free_bucket_acceptance_filter(),
                 truck=current_truck,
                 requesting_shift=open_shift,
-                status__in=('requested', 'accepted', 'used'),
             )
             .select_related('excavator', 'excavator__equipment_type')
             .order_by('-occurred_at', '-id')
