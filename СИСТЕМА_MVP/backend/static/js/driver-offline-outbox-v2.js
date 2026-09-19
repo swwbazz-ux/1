@@ -345,11 +345,27 @@
             await repo.setMeta("sequence:" + accessId, current);
             return current;
         }
+        /* Записи «на сверке» (conflict / invalid / auth_required) — конечные: сервер
+           их уже отклонил и сообщил об этом всплывающим сообщением. Раньше они
+           лежали в хранилище вечно: на боевом телефоне 20.09.2026 нашлись восемь
+           отклонённых стартов простоя трёхдневной давности, из-за которых подпись
+           связи навсегда показывала «Не подтверждено». Старше суток — убираем. */
+        var reviewRetentionMs = Number(options.reviewRetentionMs) > 0 ? Number(options.reviewRetentionMs) : 24 * 60 * 60 * 1000;
         async function listAll() {
             var repo = await repoPromise;
             var items = await repo.list();
-            return items.filter(function (item) { return String(item.access_id) === accessId; })
-                .sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
+            var mine = items.filter(function (item) { return String(item.access_id) === accessId; });
+            var now = Date.now();
+            var kept = [];
+            for (var item of mine) {
+                var stamp = Date.parse(item.updated_at || item.occurred_at || "") || 0;
+                if (TERMINAL_STATES.has(item.state) && stamp && now - stamp > reviewRetentionMs) {
+                    try { await repo.remove(item.event_id); } catch (error) {}
+                    continue;
+                }
+                kept.push(item);
+            }
+            return kept.sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
         }
         async function publish() {
             var items = await listAll();

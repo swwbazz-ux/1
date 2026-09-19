@@ -230,7 +230,12 @@
         if (detail.role && detail.role !== "driver") return;
         if (!window.console || typeof window.console.info !== "function") return;
         var events = Array.isArray(window.driverOfflineEvents) ? window.driverOfflineEvents : [];
-        var summary = events.slice(0, 6).map(function (item) {
+        /* Сначала ожидающие отправки — именно они держат экран и индикатор,
+           а «на сверке» могут лежать днями. */
+        var ordered = events.slice().sort(function (a, b) {
+            return (a.state === "pending" ? 0 : 1) - (b.state === "pending" ? 0 : 1);
+        });
+        var summary = ordered.slice(0, 6).map(function (item) {
             var age = Date.parse(item.occurred_at || "") ? Math.round((Date.now() - Date.parse(item.occurred_at)) / 1000) : -1;
             return String(item.event_type || "?") + "/" + String(item.state || "?")
                 + "/try" + String(item.attempt_count || 0)

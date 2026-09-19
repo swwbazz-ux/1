@@ -13,7 +13,7 @@ function renderedWorkerSource() {
     assert.ok(match);
     return match[1]
         .replaceAll("{json.dumps(APP_CONTRACT_VERSION)}", JSON.stringify("test-contract"))
-        .replaceAll("{DRIVER_SHELL_VERSION}", "driver-mobile-shell-v293")
+        .replaceAll("{DRIVER_SHELL_VERSION}", "driver-mobile-shell-v294")
         .replaceAll("{{", "{")
         .replaceAll("}}", "}")
         .replaceAll("\\\\b", "\\b")
@@ -67,7 +67,7 @@ async function createExpiredSessionRuntime({missingDependency = "", freshShell =
     const exactDependencies = [
         "/static/css/app.css?v=release-231",
         "/static/js/native-background-connection-v1.js?v=release-231",
-        "/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v293",
+        "/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v294",
     ];
     const renderedDriverShell = [
         '<link rel="stylesheet" href="' + exactDependencies[0] + '">',
@@ -150,7 +150,7 @@ test("fresh authenticated install caches the exact rendered Driver dependency cl
     runtime.listeners.get("install")({waitUntil(value) { installPromise = value; }});
     await installPromise;
 
-    const current = runtime.stores.get("driver-mobile-shell-v293");
+    const current = runtime.stores.get("driver-mobile-shell-v294");
     assert.match((await current.match("/driver/")).body, /data-driver-shell/);
     for (const dependency of runtime.exactDependencies) {
         assert.equal((await current.match(dependency)).body, "new:" + dependency);
@@ -172,7 +172,7 @@ test("expired-session update migrates real exact Driver shell dependencies and s
 
     assert.equal(runtime.stores.has(runtime.oldName), true);
     assert.deepEqual(runtime.deleted, []);
-    const current = runtime.stores.get("driver-mobile-shell-v293");
+    const current = runtime.stores.get("driver-mobile-shell-v294");
     assert.match((await current.match("/driver/")).body, /old authenticated shell/);
     for (const dependency of runtime.exactDependencies) {
         assert.equal((await current.match(dependency)).body, "old:" + dependency);
@@ -229,7 +229,7 @@ test("confirmed logout clears authenticated Driver shells but keeps exact assets
     await messagePromise;
     await Promise.resolve();
 
-    const current = runtime.stores.get("driver-mobile-shell-v293");
+    const current = runtime.stores.get("driver-mobile-shell-v294");
     assert.equal(await current.match("/driver/"), undefined);
     assert.equal(await runtime.stores.get(runtime.oldName).match("/driver/"), undefined);
     assert.ok(await current.match(runtime.exactDependencies[0]));

@@ -1039,7 +1039,6 @@ window.bindDriverMobileShell = function () {
         var review = Number(state.review || 0);
         var previousPending = Number(window.driverOfflinePendingCount || 0);
         window.driverOfflinePendingCount = pending;
-        window.operationalOutboxPendingCount = pending;
         /* Обновление экрана держит только СВЕЖЕЕ действие, которое ещё ни разу
            не пытались отправить: пока идёт первая доставка, серверная разметка
            не должна перекрыть местную проекцию. Запись, у которой уже была
@@ -1051,6 +1050,10 @@ window.bindDriverMobileShell = function () {
             var occurredAt = Date.parse(event.occurred_at || "");
             return !occurredAt || Date.now() - occurredAt < 15000;
         }).length;
+        /* Общей машине связи по-прежнему уходит вся очередь: неотправленное
+           действие честно держит индикатор в «восстанавливаем данные», пока
+           запись не уйдёт. Экран же держит только свежая запись (см. выше). */
+        window.operationalOutboxPendingCount = pending;
         window.dispatchEvent(new CustomEvent("operational-outbox-state", {detail: {
             role: "driver", pendingCount: pending, reviewCount: review
         }}));
