@@ -185,7 +185,37 @@
         if (document.body) {
             document.body.dataset.driverRefreshDeferReason = String(detail.reason || "");
         }
+        /* В нативном приложении консоль попадает в logcat — это единственный
+           журнал, который можно снять с боевого телефона по USB. */
+        if (window.console && typeof window.console.info === "function") {
+            window.console.info("driver-refresh-deferred " + String(detail.reason || "") + " v=" + String(detail.version || ""));
+        }
     });
+
+    /* Замер запроса фрагмента: в нативном приложении консоль попадает в logcat,
+       и по USB видно, сколько шёл каждый запрос и чем кончился (таймаут 15 с,
+       несовпадение версии, HTTP-ошибка). Поведение запроса не меняется. */
+    (function traceFragmentRequests() {
+        var fragment = window.AppOperationalFragment;
+        if (!fragment || typeof fragment.request !== "function" || fragment.__driverTraced) return;
+        var original = fragment.request;
+        fragment.__driverTraced = true;
+        fragment.request = function (screenName, version, options) {
+            var startedAt = Date.now();
+            var log = function (outcome) {
+                if (window.console && typeof window.console.info === "function") {
+                    window.console.info("driver-fragment " + outcome + " v=" + String(version || 0) + " ms=" + String(Date.now() - startedAt));
+                }
+            };
+            return original.apply(this, arguments).then(function (payload) {
+                log("ok server_v=" + String(payload && payload.version));
+                return payload;
+            }, function (error) {
+                log("fail " + String(error && (error.code || error.status || error.message) || "unknown"));
+                throw error;
+            });
+        };
+    })();
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", start);
