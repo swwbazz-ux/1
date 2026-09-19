@@ -49,10 +49,23 @@ def driver_stylesheet():
     return Path(finders.find('css/driver-shift-v1.css')).read_text(encoding='utf-8')
 
 
+DRIVER_SCREEN_SCRIPTS = (
+    'js/driver-shift-fragment-v1.js',
+    'js/driver-shift-gestures-v1.js',
+    'js/driver-shift-voice-v1.js',
+    'js/driver-shift-refresh-v1.js',
+    'js/driver-shift-close-v1.js',
+    'js/driver-shift-v1.js',
+)
+
+
 def driver_script():
-    """Код экрана водителя вынесен из шаблона в отдельный файл, поэтому проверки
-    поведения читают его, а не HTML-ответ."""
-    return Path(finders.find('js/driver-shift-v1.js')).read_text(encoding='utf-8')
+    """Код экрана водителя вынесен из шаблона в static/js и разложен по темам,
+    поэтому проверки поведения читают эти файлы, а не HTML-ответ."""
+    return '\n'.join(
+        Path(finders.find(name)).read_text(encoding='utf-8')
+        for name in DRIVER_SCREEN_SCRIPTS
+    )
 
 
 class AccessLoginTests(TestCase):
@@ -468,19 +481,19 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v285')
+        self.assertContains(response, 'driver-mobile-shell-v286')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(
             response,
-            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v285',
+            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v286',
         )
         self.assertContains(
             response,
-            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v285',
+            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v286',
         )
         self.assertContains(
             response,
-            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v285',
+            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v286',
         )
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertIn('playDriverSound("truck_assigned")', driver_script())
@@ -707,7 +720,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v285', script)
+        self.assertIn('driver-mobile-shell-v286', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3608,7 +3621,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v285')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v286')
 
     def test_driver_quick_reasons_render_stars_and_drum_subset(self):
         self.create_registered_driver_shift()

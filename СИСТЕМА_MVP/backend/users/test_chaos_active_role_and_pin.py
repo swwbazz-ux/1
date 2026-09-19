@@ -62,16 +62,25 @@ class LiveRoleReadOnlyClientContractTests(TestCase):
             / 'trips'
             / 'dispatcher_control.html'
         ).read_text(encoding='utf-8')
-        # Код экрана водителя вынесен в static/js/driver-shift-v1.js,
-        # поэтому контракт экрана — это шаблон вместе с ним.
+        # Код экрана водителя вынесен в static/js и разложен по темам,
+        # поэтому контракт экрана — это шаблон вместе со всеми его частями.
+        driver_static = Path(settings.BASE_DIR) / 'static' / 'js'
         driver_template = (
             Path(settings.BASE_DIR)
             / 'templates'
             / 'users'
             / 'driver_shift.html'
-        ).read_text(encoding='utf-8') + (
-            Path(settings.BASE_DIR) / 'static' / 'js' / 'driver-shift-v1.js'
-        ).read_text(encoding='utf-8')
+        ).read_text(encoding='utf-8') + '\n'.join(
+            (driver_static / name).read_text(encoding='utf-8')
+            for name in (
+                'driver-shift-fragment-v1.js',
+                'driver-shift-gestures-v1.js',
+                'driver-shift-voice-v1.js',
+                'driver-shift-refresh-v1.js',
+                'driver-shift-close-v1.js',
+                'driver-shift-v1.js',
+            )
+        )
 
         self.assertIn("static 'js/role-readonly.js'", base_template)
         self.assertNotIn(
