@@ -415,6 +415,55 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
         self.assertIsNone(self.assignment.ended_at)
 
+    def test_acceptance_of_another_shift_never_leaks_into_the_open_shift_screen(self):
+        """Право на свободный ковш живёт внутри своей смены и не течёт в чужую.
+
+        Найдено на боевом 20.09.2026: экран водителя несколько дней показывал
+        заявку на чужой экскаватор вместо настоящего назначения, выбрать другой
+        было нельзя (мешала «активная» заявка), отменить — тоже. Причина: экран
+        искал заявку по самосвалу без привязки к смене, поэтому подхватывал
+        заявку из другой смены, которую штатная отмена при закрытии её смены
+        уже не касалась.
+        """
+        from users.views import driver_free_bucket_payload
+
+        selected = self.select_event(event_id='driver-free-bucket-shift-scope')
+        self.assertEqual(self.sync_driver([selected]).json()['results'][0]['status'], 'accepted')
+        acceptance = FreeBucketAcceptance.objects.get()
+        self.assertEqual(acceptance.requesting_shift_id, self.truck_shift.id)
+
+        _, own_shift_state, own_shift_acceptance = driver_free_bucket_payload(
+            current_truck=self.truck,
+            current_assignment=self.assignment,
+            version=1,
+            open_shift=self.truck_shift,
+        )
+        self.assertTrue(own_shift_state['active'])
+        self.assertEqual(own_shift_acceptance, acceptance)
+
+        # Воспроизводим боевую ситуацию: прошлая смена закрылась, НЕ погасив
+        # заявку (именно такая осиротевшая запись и висела несколько дней),
+        # после чего водитель открыл новую смену на том же самосвале.
+        EmployeeShift.objects.filter(pk=self.truck_shift.pk).update(closed_at=timezone.now())
+        other_shift = EmployeeShift.objects.create(
+            employee=self.driver,
+            equipment=self.truck,
+            opened_at=timezone.now(),
+            workplace_code='driver',
+        )
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.REQUESTED)
+        _, other_shift_state, other_shift_acceptance = driver_free_bucket_payload(
+            current_truck=self.truck,
+            current_assignment=self.assignment,
+            version=1,
+            open_shift=other_shift,
+        )
+        self.assertFalse(other_shift_state['active'])
+        self.assertIsNone(other_shift_acceptance)
+        self.assertIsNone(other_shift_state['selection'])
+        self.assertFalse(other_shift_state['can_cancel'])
+
     def test_driver_shift_close_keeps_used_acceptance_and_loaded_trip(self):
         selected = self.select_event(event_id='driver-free-before-used-shift-close')
         self.assertEqual(self.sync_driver([selected]).json()['results'][0]['status'], 'accepted')
