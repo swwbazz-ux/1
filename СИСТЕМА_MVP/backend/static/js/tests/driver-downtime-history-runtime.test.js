@@ -7,8 +7,13 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const BACKEND_ROOT = path.resolve(__dirname, "..", "..", "..");
+// Стили экрана водителя вынесены в static/css/driver-shift-v1.css,
+// поэтому контракт экрана — это шаблон вместе с его таблицей стилей.
 const TEMPLATE_SOURCE = fs.readFileSync(
     path.join(BACKEND_ROOT, "templates", "users", "driver_shift.html"),
+    "utf8"
+) + fs.readFileSync(
+    path.join(BACKEND_ROOT, "static", "css", "driver-shift-v1.css"),
     "utf8"
 );
 

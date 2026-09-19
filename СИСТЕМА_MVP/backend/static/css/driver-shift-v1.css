@@ -1,0 +1,3909 @@
+/* Стили экрана водителя. Вынесены из templates/users/driver_shift.html без изменений. */
+html {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    /* Системную полосу навигации Android красит фон корня страницы. Без него
+       она оставалась белой под тёмным приложением. */
+    background: #02080b;
+    /* Говорит системе, что оформление тёмное: полосы и системные элементы
+       перестают рисоваться в светлой теме. */
+    color-scheme: dark;
+}
+
+body.driver-mobile-screen {
+    --driver-safe-top: env(safe-area-inset-top, 0px);
+    --driver-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --driver-header-h: 54px;
+    --driver-header-content-h: var(--driver-header-h);
+    --driver-header-total-h: calc(var(--driver-safe-top) + var(--driver-header-content-h));
+    --driver-nav-content-h: var(--mobile-shift-role-nav-h, 78px);
+    --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
+    --driver-work-gap: clamp(12px, 1.8dvh, 20px);
+    margin: 0;
+    width: 100vw;
+    min-width: 0;
+    height: var(--driver-viewport-h, 100dvh);
+    min-height: 0;
+    max-height: var(--driver-viewport-h, 100dvh);
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 66% 4%, rgba(45, 214, 125, 0.16), transparent 23%),
+        radial-gradient(circle at 18% 22%, rgba(16, 79, 92, 0.16), transparent 28%),
+        linear-gradient(180deg, #061015 0%, #02080b 100%);
+    color: #eff7dd;
+    font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+    letter-spacing: 0;
+    -webkit-font-smoothing: antialiased;
+    touch-action: manipulation;
+}
+
+body.driver-mobile-screen,
+body.driver-mobile-screen * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    user-select: none;
+}
+
+body.driver-mobile-screen input,
+body.driver-mobile-screen textarea,
+body.driver-mobile-screen select {
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+body.driver-mobile-screen button,
+body.driver-mobile-screen input,
+body.driver-mobile-screen textarea,
+body.driver-mobile-screen select {
+    font: inherit;
+}
+
+body.driver-mobile-screen img,
+body.driver-mobile-screen svg {
+    -webkit-user-drag: none;
+    user-select: none;
+}
+
+body.driver-mobile-screen .driver-shell {
+    --driver-green: #8cff2e;
+    --driver-green-soft: #c9f1ad;
+    --driver-cyan: #20d9e6;
+    --driver-ink: #f2ffe8;
+    --driver-muted: #8ca0a8;
+    --driver-yellow: #ffd12a;
+    --driver-line: rgba(144, 173, 184, 0.24);
+    --driver-edge: clamp(16px, 5vw, 34px);
+    --driver-header-h: 54px;
+    --driver-safe-top: env(safe-area-inset-top, 0px);
+    --driver-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --driver-header-total-h: calc(var(--driver-safe-top) + var(--driver-header-h));
+    --driver-nav-content-h: var(--mobile-shift-role-nav-h, 78px);
+    --driver-nav-total-h: calc(var(--driver-nav-content-h) + var(--driver-safe-bottom));
+    --driver-work-gap: clamp(12px, 1.8dvh, 20px);
+    --driver-work-column: min(100%, 720px);
+    /* Единая пропорция экрана «Работа»: круг считается от высоты, что остаётся после шапки,
+       карточки назначения, барабана (0.42 круга) и меню; барабан — от круга. Так композиция
+       одинакова на любом экране, а не зависит от того, что первым упрётся — ширина или высота. */
+    --driver-dial-fit: calc((100dvh - var(--driver-header-total-h) - var(--driver-nav-total-h) - clamp(66px, 8dvh, 100px) - 4 * var(--driver-work-gap) - 58px) / 1.42);
+    --driver-dial-size: clamp(200px, min(92vw, var(--driver-dial-fit)), 520px);
+    width: 100%;
+    max-width: none;
+    min-width: 320px;
+    height: var(--driver-viewport-h, 100dvh);
+    min-height: 0;
+    max-height: var(--driver-viewport-h, 100dvh);
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    padding: calc(var(--driver-header-total-h) + var(--driver-work-gap)) var(--driver-edge) calc(var(--driver-nav-total-h) + var(--driver-work-gap));
+    overflow: hidden;
+    position: relative;
+    background:
+        radial-gradient(circle at 78% 7%, rgba(58, 227, 127, 0.15), transparent 18%),
+        radial-gradient(circle at 58% 40%, rgba(112, 255, 48, 0.08), transparent 33%),
+        linear-gradient(180deg, #061016 0%, #07151b 52%, #030c10 100%);
+}
+
+body.driver-mobile-screen .driver-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(90deg, rgba(0,0,0,0.42), transparent 13%, transparent 87%, rgba(0,0,0,0.42));
+}
+
+body.driver-mobile-screen .driver-header,
+body.driver-mobile-screen .driver-panel,
+body.driver-mobile-screen .driver-messages {
+    position: relative;
+    z-index: 1;
+}
+
+body.driver-mobile-screen .driver-messages {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-messages .message {
+    min-height: 44px;
+    border-radius: 12px;
+    padding: 11px 14px;
+    background: rgba(221, 255, 244, 0.95);
+    color: #0a3b35;
+    font-size: 17px;
+    line-height: 1.2;
+}
+
+body.driver-mobile-screen .driver-toast[hidden] {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-toast {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    z-index: 180;
+    width: min(360px, calc(100vw - 40px));
+    min-height: 52px;
+    border: 1px solid rgba(255, 91, 80, 0.42);
+    border-radius: 14px;
+    padding: 13px 16px;
+    display: grid;
+    align-items: center;
+    transform: translate(-50%, -50%);
+    color: #ffe7e4;
+    background: linear-gradient(145deg, rgba(73, 19, 22, 0.97), rgba(22, 12, 15, 0.97));
+    box-shadow: 0 18px 54px rgba(0,0,0,0.45), 0 0 22px rgba(255, 91, 80, 0.18);
+    text-align: center;
+    font-size: 15px;
+    line-height: 1.25;
+    font-weight: 700;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending[hidden] {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-shell[data-active-tab="shift"] [data-driver-tab-panel="shift"].is-active .mobile-shift-host.is-sync-pending > .mobile-shift {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending {
+    height: 100%;
+    padding: 26px;
+    display: grid;
+    place-content: center;
+    gap: 12px;
+    text-align: center;
+    color: #f7fbfa;
+    background: radial-gradient(circle at 50% 42%, rgba(255, 196, 61, 0.1), transparent 56%);
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending i {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 4px;
+    justify-self: center;
+    border: 3px solid rgba(255, 196, 61, 0.25);
+    border-top-color: #ffc43d;
+    border-radius: 50%;
+    animation: driver-pending-shift-spin 1.15s linear infinite;
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending strong {
+    font-size: clamp(22px, 7vw, 30px);
+    line-height: 1.05;
+}
+
+body.driver-mobile-screen .driver-shift-sync-pending span {
+    max-width: 330px;
+    color: #b8c7c9;
+    font-size: 15px;
+    line-height: 1.35;
+}
+
+@keyframes driver-pending-shift-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.driver-mobile-screen .driver-shift-sync-pending i {
+        animation: none;
+        border-color: #ffc43d;
+    }
+}
+
+body.driver-mobile-screen .driver-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 116;
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-content: center;
+    align-items: center;
+    gap: 12px;
+    height: var(--driver-header-total-h);
+    min-height: var(--driver-header-total-h);
+    padding: var(--driver-safe-top) var(--driver-edge) 0;
+    border-bottom: 1px solid var(--driver-line);
+    background: rgba(3, 16, 21, 0.96);
+    box-shadow: inset 0 -1px 0 rgba(127, 163, 177, 0.20), 0 12px 28px rgba(0, 0, 0, 0.32);
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-header-id {
+    min-width: 0;
+    width: 100%;
+    overflow: hidden;
+    color: var(--driver-green);
+    text-transform: uppercase;
+    /* Две строки внутри прежней высоты шапки: номер самосвала крупно,
+       фамилия под ним. Одной строкой всё это читалось только на 10px. */
+    display: grid;
+    align-content: center;
+    gap: 1px;
+    line-height: 1;
+    font-weight: 900;
+    white-space: nowrap;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+    text-shadow: 0 0 14px rgba(140, 255, 46, 0.55), 0 0 30px rgba(140, 255, 46, 0.20);
+}
+
+body.driver-mobile-screen .driver-header-truck {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    font-size: clamp(16px, 4.9vw, 26px);
+    font-weight: 900;
+    line-height: 1.1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-header-person {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    color: inherit;
+    opacity: .82;
+    font-size: clamp(11px, 3.2vw, 16px);
+    font-weight: 700;
+    line-height: 1.1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-header-id.is-inactive {
+    color: #ff514c;
+    text-shadow: 0 0 18px rgba(255, 81, 76, 0.28);
+}
+
+body.driver-mobile-screen .driver-header span,
+body.driver-mobile-screen .driver-section-title strong,
+body.driver-mobile-screen label > span,
+body.driver-mobile-screen .driver-online span {
+    color: var(--driver-muted);
+    text-transform: uppercase;
+    /* В шапке хватает места — мелкий текст в кабине не прочитать. */
+    font-size: clamp(12px, 3.2vw, 15px);
+    font-weight: 700;
+    line-height: 1;
+}
+
+body.driver-mobile-screen [data-driver-sync-state="pending"] .driver-online span { color: #ffe79a; }
+body.driver-mobile-screen [data-driver-sync-state="sending"] .driver-online span { color: #a7dcff; }
+body.driver-mobile-screen [data-driver-sync-state="review"] .driver-online span,
+body.driver-mobile-screen [data-driver-sync-state="storage-error"] .driver-online span { color: #ffaaa3; }
+
+body.driver-mobile-screen .driver-header h1 {
+    min-width: 0;
+    margin: 0;
+    color: var(--driver-ink);
+    text-transform: uppercase;
+    font-size: clamp(17px, 4.7vw, 23px);
+    line-height: 1;
+    font-weight: 900;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    letter-spacing: 0;
+    text-shadow: 0 0 16px rgba(236, 255, 221, 0.12);
+}
+
+body.driver-mobile-screen .driver-header p {
+    position: relative;
+    justify-self: center;
+    width: fit-content;
+    min-width: clamp(104px, 29vw, 128px);
+    max-width: clamp(104px, 32vw, 148px);
+    margin: 0;
+    padding: 4px 7px 4px 11px;
+    border: 1px solid rgba(140, 255, 46, 0.26);
+    border-radius: 8px;
+    color: var(--driver-green);
+    background: linear-gradient(100deg, rgba(140,255,46,0.12), rgba(32,217,230,0.05));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 18px rgba(140,255,46,0.08);
+    text-transform: uppercase;
+    font-size: clamp(9px, 2.35vw, 11px);
+    line-height: 1;
+    font-weight: 800;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-header p::before {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    width: 2px;
+    height: 0.82em;
+    border-radius: 4px;
+    transform: translateY(-50%);
+    background: var(--driver-green);
+    box-shadow: 0 0 12px rgba(140, 255, 46, 0.5);
+}
+
+body.driver-mobile-screen .driver-section-title span::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.05em;
+    width: 4px;
+    height: 1.05em;
+    border-radius: 4px;
+    background: var(--driver-green);
+    box-shadow: 0 0 12px rgba(140, 255, 46, 0.5);
+}
+
+body.driver-mobile-screen .driver-online {
+    position: relative;
+    top: auto;
+    right: auto;
+    width: auto;
+    display: flex;
+    align-items: center;
+    justify-items: center;
+    gap: 10px;
+    min-width: 0;
+    color: var(--driver-cyan);
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-online::before,
+body.driver-mobile-screen .driver-online::after {
+    content: "" !important;
+    display: none !important;
+}
+
+/* Лампочка показывает связь с сервером: зелёная пульсирующая — связь есть,
+   жёлтая — связь пропадает, красная — связи нет. Состояние проставляет
+   realtime-client.js в data-connection-state на body. */
+body.driver-mobile-screen .driver-online-dot {
+    display: block;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--driver-green);
+    box-shadow: 0 0 16px rgba(140, 255, 46, 0.90);
+    animation: driver-online-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes driver-online-pulse {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 12px rgba(140, 255, 46, 0.62);
+    }
+    50% {
+        transform: scale(1.18);
+        box-shadow: 0 0 22px rgba(140, 255, 46, 1);
+    }
+}
+
+body[data-connection-state="weak"].driver-mobile-screen .driver-online-dot {
+    background: #ffd45b;
+    box-shadow: 0 0 16px rgba(255, 212, 91, 0.90);
+    animation-duration: 0.9s;
+    animation-name: driver-online-pulse-weak;
+}
+
+@keyframes driver-online-pulse-weak {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 12px rgba(255, 212, 91, 0.62);
+    }
+    50% {
+        transform: scale(1.18);
+        box-shadow: 0 0 22px rgba(255, 212, 91, 1);
+    }
+}
+
+body[data-connection-state="lost"].driver-mobile-screen .driver-online-dot {
+    background: #ff5a50;
+    box-shadow: 0 0 16px rgba(255, 90, 80, 0.95);
+    animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.driver-mobile-screen .driver-online-dot,
+    body[data-connection-state="weak"].driver-mobile-screen .driver-online-dot,
+    body[data-connection-state="lost"].driver-mobile-screen .driver-online-dot {
+        animation: none;
+    }
+}
+
+body.driver-mobile-screen .driver-online strong {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-panel {
+    display: none;
+    min-height: 0;
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-panel.is-active {
+    display: grid;
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
+    overflow: hidden;
+    overscroll-behavior: contain;
+    padding: 0 0 max(10px, var(--driver-safe-bottom, 0px));
+}
+
+body.driver-mobile-screen .driver-panel[data-driver-tab-panel="shift"].is-active,
+body.driver-mobile-screen .driver-panel[data-driver-tab-panel="manifest"].is-active {
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: clamp(12px, 2dvh, 18px);
+}
+
+body.driver-mobile-screen .driver-panel[data-driver-tab-panel="downtimes"].is-active {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: clamp(12px, 2dvh, 18px);
+}
+
+body.driver-mobile-screen .driver-work-screen.is-active {
+    display: grid;
+    grid-template-areas:
+        "context"
+        "dial"
+        "drum"
+        "assign";
+    /* Круг во всю ширину колонки задаёт свою строку сам; всё, что остаётся по высоте,
+       отдаётся барабану простоев (строка drum = 1fr). */
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    gap: var(--driver-work-gap);
+    justify-items: center;
+    align-content: stretch;
+    padding: 0;
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-free-bucket-chip {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    z-index: 2;
+}
+
+body.driver-mobile-screen .driver-work-context-card {
+    grid-area: context;
+    position: relative;
+    justify-self: center;
+    width: var(--driver-work-column);
+    min-height: clamp(66px, 8dvh, 100px);
+    overflow: hidden;
+    border: 1px solid var(--driver-line);
+    border-radius: 10px;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    background:
+        linear-gradient(90deg, rgba(140,255,46,0.035), transparent 34%),
+        linear-gradient(145deg, rgba(12,31,40,0.94), rgba(4,13,18,0.88));
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.05),
+        inset 4px 0 0 rgba(140,255,46,0.18),
+        0 16px 34px rgba(0,0,0,0.22);
+}
+
+body.driver-mobile-screen .driver-work-context-card[role="button"] {
+    cursor: pointer;
+}
+
+body.driver-mobile-screen .driver-work-context-card[role="button"]:focus-visible {
+    outline: 2px solid var(--driver-green);
+    outline-offset: 3px;
+}
+
+body.driver-mobile-screen .driver-work-context-heading {
+    min-height: 28px;
+    padding: 8px clamp(13px, 3.5vw, 20px) 7px;
+    border-bottom: 1px solid rgba(135,169,180,0.16);
+    color: var(--driver-muted);
+    text-transform: uppercase;
+    font-size: clamp(9px, 2.3vw, 11px);
+    line-height: 1;
+    font-weight: 600;
+    letter-spacing: 0;
+}
+
+body.driver-mobile-screen .driver-work-context-body {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(116px, 0.44fr) minmax(0, 1fr);
+    align-items: center;
+    padding: 10px clamp(13px, 3.5vw, 20px) 12px;
+}
+
+body.driver-mobile-screen .driver-work-context-machine,
+body.driver-mobile-screen .driver-work-context-geology {
+    min-width: 0;
+    display: grid;
+    align-content: center;
+    /* Длинное имя экскаватора раньше вылезало из своей колонки и ложилось
+       поверх места погрузки. Размер подбирается на лету, а это — страховка:
+       если подобрать не вышло, текст обрежется, но на соседа не полезет. */
+    overflow: hidden;
+}
+
+/* Строка с неразрывным текстом по умолчанию раздвигает свою ячейку шире
+   колонки — из-за этого подбор размера считал, что всё помещается, и не
+   срабатывал. Разрешаем ячейке сжиматься до ширины колонки. */
+body.driver-mobile-screen .driver-work-context-machine > *,
+body.driver-mobile-screen .driver-work-context-geology > *,
+body.driver-mobile-screen .driver-work-context-geology-values > * {
+    min-width: 0;
+    max-width: 100%;
+}
+
+body.driver-mobile-screen .driver-work-context-machine {
+    padding-right: clamp(12px, 3vw, 20px);
+    border-right: 1px solid rgba(132,165,176,0.24);
+    gap: 3px;
+}
+
+body.driver-mobile-screen .driver-work-context-geology {
+    padding-left: clamp(12px, 3vw, 20px);
+    gap: 7px;
+}
+
+body.driver-mobile-screen .driver-work-context-machine > span,
+body.driver-mobile-screen .driver-work-context-geology > span {
+    color: var(--driver-muted);
+    text-transform: uppercase;
+    font-size: clamp(9px, 2.3vw, 11px);
+    line-height: 1;
+    font-weight: 600;
+}
+
+body.driver-mobile-screen .driver-work-context-machine strong {
+    color: var(--driver-green);
+    text-transform: uppercase;
+    font-size: clamp(22px, 5.8vw, 31px);
+    line-height: 1;
+    font-weight: 900;
+    white-space: nowrap;
+    text-shadow: 0 0 16px rgba(140,255,46,0.34);
+}
+
+body.driver-mobile-screen .driver-work-context-machine small {
+    color: rgba(204,220,217,0.70);
+    text-transform: uppercase;
+    font-size: clamp(10px, 2.6vw, 13px);
+    line-height: 1;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-work-context-geology-values {
+    min-width: 0;
+    display: grid;
+    gap: 5px;
+    color: var(--driver-ink);
+    text-transform: uppercase;
+    font-size: clamp(14px, 3.5vw, 20px);
+    line-height: 1.08;
+    font-weight: 900;
+    text-align: left;
+}
+
+body.driver-mobile-screen .driver-work-context-location {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-work-context-location span {
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-work-context-location span + span::before {
+    content: "·";
+    margin: 0 0.42em;
+    color: rgba(140,255,46,0.62);
+}
+
+body.driver-mobile-screen .driver-work-context-rock {
+    min-width: 0;
+    color: #f4ffe9;
+    font-size: clamp(11px, 2.9vw, 18px);
+    line-height: 1.08;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-work-dial-zone {
+    grid-area: dial;
+    min-height: 0;
+    width: 100%;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    overflow: visible;
+}
+
+body.driver-mobile-screen .driver-work-dial {
+    --driver-progress: 0;
+    --driver-progress-capped: 0;
+    --driver-over-progress: 0;
+    --driver-plan-over-color: var(--driver-cyan);
+    --driver-plan-over-glow: rgba(32,217,230,0.52);
+    position: relative;
+    width: min(var(--driver-dial-size), 100%);
+    max-width: 520px;
+    aspect-ratio: 1 / 1;
+    display: grid;
+    place-items: center;
+    isolation: isolate;
+}
+
+body.driver-mobile-screen .driver-work-dial::before,
+body.driver-mobile-screen .driver-work-dial::after {
+    content: "";
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-dial::before {
+    display: block;
+    inset: 1.5%;
+    z-index: 0;
+    background:
+        conic-gradient(from 215deg, transparent 0 10%, rgba(235,249,247,0.10) 19%, transparent 31% 68%, rgba(0,0,0,0.24) 84%, transparent 96%),
+        radial-gradient(circle, transparent 0 72%, rgba(28,43,48,0.94) 72.5% 78%, rgba(111,135,143,0.58) 78.5% 80%, rgba(15,26,30,0.98) 80.5% 88%, rgba(2,8,11,0.98) 89% 100%);
+    box-shadow:
+        inset 0 2px 2px rgba(240,251,251,0.09),
+        inset 0 -10px 22px rgba(0,0,0,0.48),
+        0 16px 34px rgba(0,0,0,0.38),
+        0 0 22px rgba(153,180,187,0.08);
+}
+
+/* Тонкое декоративное кольцо у сердцевины убрано: с секциями удержания оно
+   читалось как вторая полоска. */
+body.driver-mobile-screen .driver-work-dial::after {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-work-dial-form {
+    display: contents;
+}
+
+body.driver-mobile-screen .driver-work-ticks {
+    position: absolute;
+    inset: 3%;
+    z-index: 1;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-ticks::before,
+body.driver-mobile-screen .driver-work-ticks::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-ticks::before {
+    background: repeating-conic-gradient(from -0.35deg, rgba(163,184,191,0.38) 0 0.7deg, transparent 0.7deg 6deg);
+    -webkit-mask: radial-gradient(circle, transparent 0 76%, #000 76.5% 87.5%, transparent 88%);
+    mask: radial-gradient(circle, transparent 0 76%, #000 76.5% 87.5%, transparent 88%);
+}
+
+body.driver-mobile-screen .driver-work-ticks::after {
+    background: repeating-conic-gradient(from -0.9deg, rgba(205,225,227,0.70) 0 1.8deg, transparent 1.8deg 30deg);
+    -webkit-mask: radial-gradient(circle, transparent 0 66%, #000 66.5% 90%, transparent 90.5%);
+    mask: radial-gradient(circle, transparent 0 66%, #000 66.5% 90%, transparent 90.5%);
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.70));
+}
+
+body.driver-mobile-screen .driver-work-dial-svg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+    overflow: visible;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+}
+
+/* The familiar dial stays visually intact while it is held.  The former
+   conic-gradient was repainted from JavaScript every frame; the hold now uses
+   only the existing pressed state and one completion timer. */
+/* Кольцо удержания. Никаких перерисовок за кадр: две половины кольца — обычные
+   рамки-полукруги, каждая в своём «окне» (половина круга с overflow: hidden) —
+   поворачиваются трансформацией, и композитор рисует это сам. На бою кольца
+   набирались conic-gradient'ом с маской и drop-shadow, который скрипт перекрашивал
+   каждый кадр: на телефоне водителя это 19 кадров в секунду и кадры по 280 мс.
+   Длительности анимаций (500 + 500 мс) равны holdMs: 1000 в скрипте удержания. */
+body.driver-mobile-screen .driver-work-hold-ring {
+    position: absolute;
+    /* Внешний край секций — внешний край больших делений (кольцо делений: inset 3%,
+       большие штрихи до 90% его радиуса). */
+    inset: 7.7%;
+    z-index: 5;
+    border-radius: 50%;
+    /* Не visibility: hidden — иначе секции рисуются впервые в момент нажатия, и первое
+       за сеанс удержание стоило одного кадра в 99 мс. Прозрачный слой готовится заранее. */
+    opacity: 0;
+    will-change: opacity;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-hold-half {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 50%;
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-work-hold-half.is-right { right: 0; }
+body.driver-mobile-screen .driver-work-hold-half.is-left { left: 0; }
+
+/* Полукруг из шести секций между большими делениями (по 27°, зазор 3° на штрих),
+   нарисован один раз; в окне поворачивается рывками по 30° — секции загораются по одной,
+   и на каждом шаге зазоры совпадают с делениями. */
+body.driver-mobile-screen .driver-work-hold-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 200%;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, transparent 0deg 1.5deg, currentColor 1.5deg 28.5deg, transparent 28.5deg 31.5deg, currentColor 31.5deg 58.5deg, transparent 58.5deg 61.5deg, currentColor 61.5deg 88.5deg, transparent 88.5deg 91.5deg, currentColor 91.5deg 118.5deg, transparent 118.5deg 121.5deg, currentColor 121.5deg 148.5deg, transparent 148.5deg 151.5deg, currentColor 151.5deg 178.5deg, transparent 178.5deg 360deg);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px), #000 calc(100% - 1px), transparent 100%);
+    mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px), #000 calc(100% - 1px), transparent 100%);
+    transform: rotate(-180deg);
+    will-change: transform;
+}
+
+body.driver-mobile-screen .driver-work-hold-half.is-right .driver-work-hold-fill { left: -100%; }
+body.driver-mobile-screen .driver-work-hold-half.is-left .driver-work-hold-fill { left: 0; transform: rotate(0deg); }
+
+/* Пока кольцо набирается, дорожка плана спрятана: две окружности на одном круге
+   читались как лишние полоски. Слой у <svg> свой, прозрачность меняет композитор. */
+body.driver-mobile-screen .driver-work-dial-svg {
+    will-change: opacity;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-svg,
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-dial-svg {
+    opacity: 0;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-ring,
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-ring {
+    opacity: 1;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-half.is-right .driver-work-hold-fill {
+    animation: driver-hold-right 500ms steps(6, end) forwards;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-half.is-left .driver-work-hold-fill {
+    animation: driver-hold-left 500ms steps(6, end) 500ms forwards;
+}
+
+/* Удержание завершено — все двенадцать секций горят до ответа. */
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-right .driver-work-hold-fill { transform: rotate(0deg); }
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-left .driver-work-hold-fill { transform: rotate(180deg); }
+
+@keyframes driver-hold-right {
+    from { transform: rotate(-180deg); }
+    to { transform: rotate(0deg); }
+}
+
+@keyframes driver-hold-left {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(180deg); }
+}
+
+body.driver-mobile-screen .driver-work-track,
+body.driver-mobile-screen .driver-work-progress,
+body.driver-mobile-screen .driver-work-over-progress {
+    fill: none;
+    vector-effect: non-scaling-stroke;
+    stroke-linecap: round;
+}
+
+/* Полный круг: по нему набираются секции удержания и по нему же идёт дуга плана. */
+body.driver-mobile-screen .driver-work-track {
+    stroke: rgba(101, 125, 133, 0.48);
+    stroke-width: 3;
+}
+
+/* Дуга выполнения плана. Длина задаётся самой штриховкой: «столько-то единиц линии,
+   дальше разрыв на весь круг». Прежняя запись (штрих во весь круг + сдвиг) при нулевом
+   плане рисовала два обрывка дуги — пользователь видел их как лишние полукольца. */
+body.driver-mobile-screen .driver-work-progress {
+    stroke: rgba(206, 226, 231, 0.62);
+    stroke-width: 4.5;
+    stroke-dasharray: var(--driver-progress-capped) 100;
+    stroke-dashoffset: 0;
+    transition: stroke-dasharray 240ms ease;
+}
+
+/* Плана нет — показывать нечего, остаётся чистый круг. */
+body.driver-mobile-screen .driver-work-dial[data-driver-has-plan="0"] .driver-work-progress,
+body.driver-mobile-screen .driver-work-dial.is-plan-missing .driver-work-progress {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-work-over-progress {
+    opacity: 0;
+    stroke: var(--driver-plan-over-color);
+    stroke-width: 2.5;
+    stroke-dasharray: var(--driver-over-progress) 100;
+    stroke-dashoffset: 0;
+    transition: opacity 180ms ease, stroke-dasharray 240ms ease;
+}
+
+body.driver-mobile-screen .driver-work-dial.is-over-plan .driver-work-over-progress {
+    opacity: 0.88;
+}
+
+body.driver-mobile-screen .driver-work-dial[data-plan-progress-phase="amber"] {
+    --driver-plan-over-color: #facc15;
+    --driver-plan-over-glow: rgba(250,204,21,0.58);
+}
+
+body.driver-mobile-screen .driver-work-dial[data-plan-progress-phase="cyan"] {
+    --driver-plan-over-color: var(--driver-cyan);
+    --driver-plan-over-glow: rgba(32,217,230,0.52);
+}
+
+body.driver-mobile-screen .driver-work-dial[data-plan-progress-phase="orange"] {
+    --driver-plan-over-color: #fb923c;
+    --driver-plan-over-glow: rgba(251,146,60,0.56);
+}
+
+body.driver-mobile-screen .driver-work-dial-button {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 50%;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    color: var(--driver-green);
+    background: transparent;
+    cursor: default;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    isolation: isolate;
+}
+
+body.driver-mobile-screen .driver-work-dial-button::before,
+body.driver-mobile-screen .driver-work-dial-button::after {
+    content: "";
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-dial-button::before {
+    display: none;
+    inset: 12%;
+    z-index: 1;
+    background:
+        conic-gradient(from 210deg, rgba(140,255,46,0.00), rgba(140,255,46,0.18), rgba(32,217,230,0.10), rgba(140,255,46,0.00)),
+        radial-gradient(circle at 50% 42%, rgba(140,255,46,0.12), transparent 58%);
+    opacity: 0.42;
+    filter: blur(0.2px);
+}
+
+body.driver-mobile-screen .driver-work-dial-button::after {
+    display: none;
+    inset: 22%;
+    z-index: 1;
+    border: 1px solid rgba(210, 237, 232, 0.18);
+    box-shadow: inset 0 0 20px rgba(255,255,255,0.04);
+}
+
+body.driver-mobile-screen .driver-work-dial-core {
+    position: absolute;
+    z-index: 2;
+    isolation: isolate;
+    overflow: hidden;
+    width: 74%;
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 12px;
+    background:
+        radial-gradient(circle at 50% 24%, rgba(188,215,211,0.20), transparent 38%),
+        radial-gradient(circle at 50% 46%, rgba(91,124,124,0.38), rgba(31,56,61,0.80) 62%, rgba(7,19,23,0.98));
+    border: 1px solid rgba(210,229,232,0.36);
+    box-shadow:
+        inset 0 12px 22px rgba(255,255,255,0.08),
+        inset 0 -26px 36px rgba(0,0,0,0.52),
+        inset 0 0 46px rgba(255,255,255,0.05),
+        0 10px 26px rgba(0,0,0,0.42),
+        0 0 38px rgba(190,210,220,0.10);
+    text-align: center;
+    transition: transform 120ms ease;
+}
+
+body.driver-mobile-screen .driver-work-dial-core::before {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    z-index: 0;
+    border-radius: 50%;
+    pointer-events: none;
+    background:
+        radial-gradient(ellipse at 50% 5%, rgba(238,255,250,0.16), transparent 48%),
+        linear-gradient(180deg, rgba(255,255,255,0.05), transparent 38%, rgba(0,0,0,0.08) 68%, rgba(0,0,0,0.26));
+    box-shadow:
+        inset 0 2px 0 rgba(245,255,250,0.12),
+        inset 0 -3px 6px rgba(0,0,0,0.24);
+    transition: opacity 120ms ease, transform 120ms ease;
+}
+
+body.driver-mobile-screen .driver-work-dial-core > * {
+    position: relative;
+    z-index: 1;
+}
+
+body.driver-mobile-screen .driver-work-dial-core.has-multiline-label {
+    gap: 10px;
+}
+
+body.driver-mobile-screen .driver-work-percent {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 8px;
+    min-width: 44%;
+    color: rgba(205, 224, 217, 0.56);
+    font-size: 22px;
+    line-height: 1;
+    font-weight: 700;
+}
+
+body.driver-mobile-screen .driver-work-percent::before,
+body.driver-mobile-screen .driver-work-percent::after {
+    content: "";
+    height: 1px;
+    background: rgba(207, 226, 226, 0.16);
+}
+
+/* Отсутствие плана больше не перекрашивает круг: вся кнопка — кольцо,
+   сердцевина и проценты — держит один цвет состояния самосвала. */
+
+body.driver-mobile-screen .driver-work-progress-loop {
+    position: absolute;
+    top: 18%;
+    right: 17%;
+    z-index: 3;
+    min-width: 34px;
+    padding: 4px 8px;
+    border: 1px solid var(--driver-plan-over-color);
+    border-radius: 999px;
+    background: rgba(4, 13, 18, .9);
+    box-shadow: 0 0 14px var(--driver-plan-over-glow), 0 4px 10px rgba(0,0,0,.38);
+    color: var(--driver-plan-over-color);
+    font-size: clamp(14px, 3vw, 20px);
+    font-style: normal;
+    font-weight: 900;
+    letter-spacing: 0;
+    line-height: 1;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-label {
+    display: grid;
+    justify-items: center;
+    justify-self: center;
+    min-width: 0;
+    width: 92%;
+    max-width: 92%;
+    padding: 6px 4px 7px;
+    color: currentColor;
+    text-transform: uppercase;
+    font-size: 56px;
+    line-height: 1;
+    font-weight: 900;
+    white-space: normal;
+    overflow: hidden;
+    text-align: center;
+    border-top: 1px solid rgba(140,255,46,0.16);
+    border-bottom: 1px solid rgba(0,0,0,0.34);
+    background:
+        linear-gradient(180deg, rgba(153,255,104,0.08), rgba(16,48,32,0.20) 48%, rgba(3,20,15,0.34)),
+        linear-gradient(90deg, transparent, rgba(20,54,35,0.34) 18%, rgba(20,54,35,0.34) 82%, transparent);
+    box-shadow:
+        inset 0 1px 0 rgba(218,255,197,0.12),
+        inset 0 -2px 3px rgba(0,0,0,0.32),
+        0 5px 12px rgba(0,0,0,0.20);
+    text-shadow: 0 0 18px rgba(140,255,46,0.30);
+    transition: transform 120ms ease;
+}
+
+body.driver-mobile-screen .driver-work-label-line {
+    display: inline-block;
+    width: max-content;
+    min-width: 0;
+    max-width: none;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-work-label.is-single-medium {
+    font-size: 46px;
+}
+
+body.driver-mobile-screen .driver-work-label.is-two-line {
+    font-size: 40px;
+    row-gap: 6px;
+    line-height: 1.04;
+    font-weight: 900;
+    text-shadow: 0 0 16px rgba(140,255,46,0.28);
+}
+
+body.driver-mobile-screen .driver-work-label.is-three-line {
+    font-size: 34px;
+    row-gap: 4px;
+    line-height: 1.02;
+    font-weight: 900;
+    text-shadow: 0 0 16px rgba(140,255,46,0.28);
+}
+
+body.driver-mobile-screen .driver-work-note {
+    color: rgba(156,173,178,0.58);
+    text-transform: uppercase;
+    font-size: 15px;
+    line-height: 1;
+    font-style: normal;
+    font-weight: 500;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-loaded {
+    color: var(--driver-green);
+    cursor: pointer;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-loaded::before {
+    opacity: 0.82;
+    box-shadow:
+        0 0 34px rgba(140,255,46,0.24),
+        inset 0 0 34px rgba(140,255,46,0.13);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-loaded::after {
+    border-color: rgba(140,255,46,0.34);
+    box-shadow:
+        inset 0 0 28px rgba(140,255,46,0.08),
+        0 0 28px rgba(140,255,46,0.14);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-progress {
+    stroke: var(--driver-green);
+}
+/* Зелень загруженного круга — готовые слои (ореол снаружи, тон внутри), включаются
+   прозрачностью. Раньше переход «загружен → пустой» менял border/box-shadow сердцевины,
+   градиент по тексту и фильтры — после разгрузки телефон замирал на 0,4 с. */
+body.driver-mobile-screen .driver-work-loaded-halo {
+    position: absolute;
+    inset: 13%;
+    z-index: 1;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(140,255,46,0.78), 0 0 48px rgba(140,255,46,0.34);
+    opacity: 0;
+    will-change: opacity;
+    pointer-events: none;
+}
+body.driver-mobile-screen .driver-work-dial-core .driver-work-loaded-tint {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(140,255,46,0.78);
+    box-shadow: inset 0 12px 22px rgba(238,255,230,0.10), inset 0 0 44px rgba(140,255,46,0.16);
+    opacity: 0;
+    will-change: opacity;
+    pointer-events: none;
+}
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-loaded-halo,
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-loaded-tint {
+    opacity: 1;
+}
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label {
+    color: var(--driver-green);
+    text-shadow: 0 0 18px rgba(140,255,46,0.36);
+}
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label-line {
+    text-shadow:
+        0 -1px 0 rgba(247,255,239,0.48),
+        0 2px 0 rgba(39,102,7,0.78);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-percent {
+    color: rgba(205, 230, 216, 0.58);
+    text-shadow:
+        0 -1px 0 rgba(240,255,247,0.12),
+        0 1px 0 rgba(0,0,0,0.78);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-empty {
+    color: rgba(198, 213, 217, 0.76);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-empty::before {
+    opacity: 0.22;
+    background:
+        conic-gradient(from 210deg, rgba(180,198,204,0.00), rgba(180,198,204,0.12), rgba(180,198,204,0.00)),
+        radial-gradient(circle at 50% 42%, rgba(160,176,182,0.10), transparent 58%);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-empty::after {
+    border-color: rgba(176,194,199,0.15);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-progress {
+    stroke: rgba(142, 158, 164, 0.46);
+}
+
+body.driver-mobile-screen .driver-work-dial.is-waiting-operation,
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation {
+    --driver-green: #facc15;
+}
+
+/* Ожидание: подсветка сердцевины — готовые слои (ореол снаружи, тон внутри), которые
+   включаются и пульсируют только прозрачностью. Раньше состояние меняло border и
+   box-shadow сердцевины и гоняло пульс через filter на кольце и сердцевине: на телефоне
+   каждая такая перерисовка стоила до 1,5 с, и старт/стоп простоя замораживал экран. */
+body.driver-mobile-screen .driver-work-wait-halo {
+    position: absolute;
+    inset: 13%;
+    z-index: 1;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(250, 204, 21, .82), 0 0 48px rgba(250, 204, 21, .42);
+    opacity: 0;
+    will-change: opacity;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-dial-core .driver-work-wait-tint {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(250, 204, 21, .82);
+    box-shadow: inset 0 12px 22px rgba(254, 249, 195, .1), inset 0 0 44px rgba(250, 204, 21, .18);
+    opacity: 0;
+    will-change: opacity;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-wait-halo {
+    opacity: 1;
+    animation: driver-waiting-operation-pulse 1.05s ease-in-out infinite;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-wait-tint {
+    opacity: 1;
+}
+
+/* Подписи в сердцевине живут на своих слоях: смена текста не перерисовывает градиенты круга. */
+body.driver-mobile-screen .driver-work-label,
+body.driver-mobile-screen .driver-work-note {
+    will-change: transform;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-note {
+    color: #fde68a;
+    font-weight: 800;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-progress {
+    stroke: #facc15;
+}
+
+/* Цвет подписи даёт --driver-green (жёлтый в ожидании); градиент по тексту и два
+   drop-shadow убраны — они заставляли перерисовывать слой подписи целиком. */
+body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-label-line {
+    text-shadow:
+        0 -1px 0 rgba(255, 251, 235, .5),
+        0 2px 0 rgba(113, 63, 18, .78);
+}
+
+@keyframes driver-waiting-operation-pulse {
+    0%, 100% { opacity: .35; }
+    50% { opacity: 1; }
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-pending {
+    color: var(--driver-cyan);
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-dial-core {
+    gap: clamp(8px, 1.1vw, 12px);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-percent {
+    min-width: 0;
+    font-size: clamp(20px, 3.4vw, 32px);
+    opacity: 0.62;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-label {
+    width: 88%;
+    max-width: 88%;
+    justify-self: center;
+    line-height: 1;
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-progress {
+    stroke: var(--driver-cyan);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-error {
+    color: #ff5a50;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-error .driver-work-progress {
+    stroke: #ff5a50;
+}
+
+/* Отсутствие плана показывает только внешнее кольцо. Сердцевина остаётся за
+   состоянием самосвала: серая — не загружен, зелёная — загружен и можно
+   разгружаться. Раньше это правило шло ниже по файлу при равной силе селектора
+   и красило сердцевину красным всегда, полностью скрывая оба состояния. */
+
+body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-dial-core {
+    transform: scale(0.985);
+}
+
+/* Сердцевина держится на своём слое: иначе на старте и конце удержания браузер
+   создавал и разбирал слой с её градиентами (по 150–200 мс на телефоне). */
+body.driver-mobile-screen .driver-work-dial-core {
+    will-change: transform;
+}
+
+body.driver-mobile-screen .driver-work-assignment {
+    grid-area: assign;
+    justify-self: center;
+    width: var(--driver-work-column);
+    height: clamp(58px, 8.4dvh, 76px);
+    border: 1px solid rgba(255,209,42,0.72);
+    border-radius: 12px;
+    padding: 0 clamp(14px, 4vw, 24px);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 18px;
+    color: var(--driver-yellow);
+    background: linear-gradient(90deg, rgba(93,73,0,0.62), rgba(42,35,0,0.46));
+    box-shadow: 0 0 28px rgba(255,209,42,0.26);
+    text-transform: uppercase;
+    font-size: clamp(24px, 6.2vw, 42px);
+    line-height: 1;
+    font-weight: 900;
+}
+
+body.driver-mobile-screen .driver-work-assignment small {
+    min-width: 0;
+    overflow: visible;
+    color: var(--driver-yellow);
+    font: inherit;
+    white-space: normal;
+    text-align: center;
+    text-overflow: clip;
+}
+
+body.driver-mobile-screen .driver-work-assignment-copy {
+    display: grid;
+    justify-items: center;
+    gap: 5px;
+}
+
+body.driver-mobile-screen .driver-work-assignment-main {
+    font-size: clamp(14px, 3.8vw, 22px);
+    line-height: 1.05;
+}
+
+body.driver-mobile-screen .driver-work-assignment-meta {
+    color: rgba(255, 238, 164, 0.92);
+    font-size: clamp(12px, 3.2vw, 18px);
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-work-assignment > span {
+    font-size: 28px;
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-work-caption {
+    grid-area: caption;
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(24px, 1fr) auto minmax(24px, 1fr);
+    align-items: center;
+    gap: 18px;
+    color: var(--driver-green);
+    text-transform: uppercase;
+    font-size: clamp(18px, 4.8vw, 25px);
+    line-height: 1;
+    font-weight: 700;
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-work-caption::before,
+body.driver-mobile-screen .driver-work-caption::after {
+    content: "";
+    height: 1px;
+    background: rgba(141, 255, 46, 0.18);
+}
+
+body.driver-mobile-screen .driver-section-title {
+    position: relative;
+    display: grid;
+    gap: 10px;
+    margin: 20px 0 14px;
+    padding-left: 14px;
+}
+
+body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active .driver-section-title,
+body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active .driver-section-title {
+    margin: 0;
+}
+
+body.driver-mobile-screen .driver-section-title span {
+    position: relative;
+    color: var(--driver-green);
+    text-transform: uppercase;
+    font-size: clamp(22px, 6vw, 28px);
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-form-card,
+body.driver-mobile-screen .driver-trip-row,
+body.driver-mobile-screen .driver-downtime-card {
+    border: 1px solid rgba(127, 163, 177, 0.25);
+    border-radius: 8px;
+    background: linear-gradient(145deg, rgba(13, 38, 48, 0.90), rgba(7, 21, 27, 0.88));
+}
+
+body.driver-mobile-screen .driver-form-card {
+    display: grid;
+    gap: 18px;
+    padding: 16px;
+}
+
+body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active .driver-form-card,
+body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active .driver-trip-list {
+    min-height: 0;
+    overflow: hidden;
+    overscroll-behavior: contain;
+    padding-bottom: 18px;
+}
+
+body.driver-mobile-screen .driver-form-card label {
+    display: grid;
+    gap: 8px;
+}
+
+body.driver-mobile-screen .driver-form-card input,
+body.driver-mobile-screen .driver-form-card select,
+body.driver-mobile-screen .driver-form-card textarea {
+    width: 100%;
+    min-height: 64px;
+    border: 1px solid rgba(137, 169, 180, 0.26);
+    border-radius: 8px;
+    padding: 12px;
+    color: var(--driver-ink);
+    background: rgba(2, 12, 17, 0.74);
+    outline: none;
+}
+
+body.driver-mobile-screen .driver-primary-action {
+    width: 100%;
+    min-height: 68px;
+    border: 1px solid rgba(140,255,46,0.30);
+    border-radius: 8px;
+    color: #061016;
+    background: linear-gradient(180deg, #a9ff46 0%, #72d729 100%);
+    text-transform: uppercase;
+    font-size: clamp(21px, 6vw, 28px);
+    font-weight: 900;
+    letter-spacing: 0;
+    box-shadow: 0 0 22px rgba(140,255,46,0.24);
+}
+
+body.driver-mobile-screen .driver-primary-action.is-disabled,
+body.driver-mobile-screen .driver-primary-action:disabled {
+    color: rgba(215, 224, 221, 0.28);
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.10);
+    box-shadow: none;
+}
+
+body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active {
+    grid-template-rows: minmax(0, 1fr) !important;
+    gap: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+body.driver-mobile-screen [data-driver-shift-close-form] {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+body.driver-mobile-screen .driver-shift-scroll {
+    min-height: 0;
+    display: grid;
+    align-content: start;
+    gap: clamp(8px, 1.15dvh, 12px);
+    overflow: hidden;
+    overscroll-behavior: contain;
+    padding: 2px 0 10px;
+}
+
+body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-section {
+    flex: none;
+    overflow: visible;
+}
+
+body.driver-mobile-screen .driver-shift-section {
+    min-height: 0;
+    /* Когда снизу выезжает клавиатура, места остаётся мало и блок показаний
+       не помещается целиком. Раньше лишнее просто обрезалось, и до полей
+       "Одометр" и "Моточасы" было не добраться — теперь их можно прокрутить. */
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    border: 1px solid rgba(74, 222, 128, .34);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    padding: clamp(14px, 2.1dvh, 20px) clamp(14px, 3.8vw, 18px);
+    background: linear-gradient(180deg, rgba(13, 22, 24, .94), rgba(8, 14, 17, .98));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+/* О том, что поле выбрано, раньше говорил только мигающий курсор — на тёмном
+   фоне в кабине его попросту не видно. Подсвечиваем всю строку и делаем
+   курсор заметным. */
+
+/* Фокус на вкладке нужен только чтобы убрать клавиатуру — рамку не рисуем. */
+body.driver-mobile-screen [data-driver-tab-panel]:focus {
+    outline: none;
+}
+
+body.driver-mobile-screen .driver-shift-result-cell {
+    min-width: 0;
+    display: grid;
+    align-content: center;
+    gap: 3px;
+    justify-content: center;
+    padding: clamp(10px, 1.45dvh, 14px) clamp(13px, 3.5vw, 17px);
+    border: 1px solid rgba(127, 163, 177, .18);
+    border-radius: 6px;
+    background: rgba(4, 15, 19, .72);
+}
+
+body.driver-mobile-screen .driver-shift-result-cell span {
+    color: #84989e;
+    font-size: clamp(14px, 3.55vw, 15px);
+    font-weight: 500;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-shift-result-cell strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #f6fbfd;
+    font-size: clamp(23px, 6vw, 26px);
+    font-weight: 600;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-shift-submit,
+body.driver-mobile-screen .driver-shift-open,
+body.driver-mobile-screen .driver-shift-logout {
+    position: relative;
+    isolation: isolate;
+    width: 100%;
+    min-height: clamp(52px, 6.8dvh, 62px);
+    overflow: hidden;
+    border: 1px solid rgba(248, 113, 113, .82);
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    color: #ff7d7d;
+    background: rgba(45, 12, 15, .76);
+    font-size: clamp(18px, 4.8vw, 22px);
+    font-weight: 600;
+    text-decoration: none;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-shift-logout {
+    border-color: rgba(127, 163, 177, .34);
+    color: #b9c8cd;
+    background: rgba(7, 18, 23, .88);
+}
+
+body.driver-mobile-screen .driver-shift-opening-form {
+    display: contents;
+}
+
+body.driver-mobile-screen .driver-shift-open {
+    border-color: rgba(140, 255, 46, .72);
+    color: #071006;
+    background: linear-gradient(180deg, #a2ff43, #74df1d);
+    box-shadow: 0 0 20px rgba(140, 255, 46, .18);
+}
+
+body.driver-mobile-screen .driver-shift-open:disabled {
+    border-color: rgba(127, 163, 177, .28);
+    color: rgba(185, 200, 205, .46);
+    background: rgba(7, 18, 23, .72);
+    box-shadow: none;
+}
+
+@media (max-height: 780px) {
+    body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-section {
+        padding: 10px 12px;
+    }
+
+    }
+
+body.driver-mobile-screen .driver-shift-submit::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    width: var(--driver-shift-hold, 0%);
+    background: rgba(248, 113, 113, .28);
+}
+
+body.driver-mobile-screen .driver-shift-open::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    width: var(--driver-shift-open-hold, 0%);
+    background: rgba(140, 255, 46, .30);
+}
+
+body.driver-mobile-screen .driver-shift-logout::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    width: var(--driver-logout-hold, 0%);
+    background: rgba(127, 163, 177, .2);
+}
+
+@media (max-width: 640px) {
+    
+    body.driver-mobile-screen [data-driver-shift-close-form] {
+        grid-template-rows: auto minmax(0, 1fr) auto;
+    }
+
+    body.driver-mobile-screen .driver-shift-section {
+        padding: 10px 12px;
+    }
+
+    
+}
+
+/* Shift cards keep the same left-aligned two-line hierarchy as the operator screen. */
+body.driver-mobile-screen .driver-shift-result-cell {
+    justify-content: stretch;
+    justify-items: start;
+}
+
+body.driver-mobile-screen .driver-shift-result-cell span,
+body.driver-mobile-screen .driver-shift-result-cell strong {
+    width: 100%;
+    letter-spacing: 0;
+    line-height: 1;
+    text-align: left;
+}
+
+body.driver-mobile-screen .driver-downtime-card {
+    min-height: 104px;
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
+    margin: 0;
+    padding: 12px 16px;
+    border-color: rgba(255, 207, 29, 0.95);
+    background: linear-gradient(90deg, rgba(74, 63, 8, 0.82), rgba(26, 31, 19, 0.82));
+    box-shadow: 0 0 24px rgba(255, 207, 29, 0.16);
+}
+
+body.driver-mobile-screen .driver-downtime-state-dot {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 5px solid #ffd11d;
+    box-shadow: 0 0 0 12px rgba(255,209,29,0.12), 0 0 26px rgba(255,209,29,0.55);
+}
+
+body.driver-mobile-screen .driver-downtime-card strong,
+body.driver-mobile-screen .driver-downtime-card b,
+body.driver-mobile-screen .driver-downtime-card em {
+    display: block;
+    text-transform: uppercase;
+    font-style: normal;
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-downtime-card strong {
+    color: #ffd11d;
+    font-size: clamp(19px, 5vw, 25px);
+    font-weight: 900;
+}
+
+body.driver-mobile-screen .driver-downtime-card b {
+    margin-top: 2px;
+    color: #ffd11d;
+    font-size: clamp(30px, 8vw, 42px);
+    font-weight: 900;
+}
+
+body.driver-mobile-screen .driver-downtime-card em {
+    margin-top: 3px;
+    color: var(--driver-ink);
+    font-size: clamp(15px, 4vw, 18px);
+    text-transform: none;
+}
+
+body.driver-mobile-screen .driver-downtime-list {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-content: start;
+    gap: 10px;
+    max-height: none;
+    overflow: hidden;
+    padding-bottom: 8px;
+    overscroll-behavior: contain;
+}
+
+body.driver-mobile-screen .driver-downtime-list form {
+    min-width: 0;
+    position: relative;
+}
+
+body.driver-mobile-screen .driver-downtime-list button {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    min-height: 0;
+    border: 1px solid rgba(137, 169, 180, 0.28);
+    border-radius: 8px;
+    padding: 8px;
+    display: grid;
+    place-items: center;
+    color: var(--driver-ink);
+    background: rgba(10, 28, 36, 0.92);
+    text-transform: uppercase;
+    font-size: clamp(16px, 4.6vw, 21px);
+    line-height: 0.88;
+    font-weight: 900;
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-downtime-list button strong {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-yellow,
+body.driver-mobile-screen .driver-downtime-list button.status-warning {
+    color: #ffd11d;
+    border-color: #ffd11d;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-red,
+body.driver-mobile-screen .driver-downtime-list button.status-danger {
+    color: #ff5a50;
+    border-color: #ff5a50;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-orange {
+    color: #ff9b2e;
+    border-color: #ff9b2e;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-green,
+body.driver-mobile-screen .driver-downtime-list button.status-success {
+    color: var(--driver-green);
+    border-color: var(--driver-green);
+}
+
+body.driver-mobile-screen .driver-downtime-close {
+    margin-top: 0;
+    align-self: end;
+}
+
+/* Downtime workspace mirrors the excavator operator screen. */
+body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active {
+    width: calc(100% + (var(--driver-edge) * 2) - 22px);
+    margin-left: calc((var(--driver-edge) * -1) + 11px);
+    grid-template-rows: clamp(36px, 4.45dvh, 40px) clamp(68px, 8.25dvh, 80px) minmax(0, 1fr) clamp(50px, 6.2dvh, 58px) !important;
+    gap: clamp(8px, 1.05dvh, 10px) !important;
+    padding-top: clamp(8px, 1.2dvh, 10px);
+    padding-bottom: clamp(4px, .6dvh, 8px);
+}
+
+body.driver-mobile-screen .driver-downtime-title-row {
+    grid-row: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 10px;
+}
+
+body.driver-mobile-screen .driver-downtime-title-row h2 {
+    margin: 0;
+    color: #f6fbfd;
+    font-size: clamp(31px, 8.45vw, 34px);
+    font-weight: 780;
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-downtime-refresh {
+    width: 42px;
+    height: 42px;
+    border: 1px solid rgba(139, 159, 170, .44);
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    color: #cbd6dc;
+    background: rgba(18, 27, 33, .7);
+    font-size: 25px;
+    line-height: 1;
+}
+
+@media (max-width: 767px) {
+    body.driver-mobile-screen .driver-downtime-refresh {
+        display: none;
+    }
+}
+
+body.driver-mobile-screen .driver-downtime-card {
+    grid-row: 2 !important;
+    --driver-downtime-accent: #94a3b8;
+    --driver-downtime-glow: rgba(148, 163, 184, .24);
+    min-height: clamp(68px, 8.25dvh, 80px);
+    grid-template-columns: clamp(44px, 11vw, 58px) minmax(0, 1fr);
+    padding: clamp(8px, 1.1dvh, 11px) clamp(10px, 2.7vw, 14px);
+    border: 1px solid rgba(126, 145, 154, .42);
+    border-radius: 8px;
+    background: linear-gradient(180deg, rgba(14, 25, 30, .94), rgba(7, 14, 18, .98));
+    box-shadow: inset 0 0 18px var(--driver-downtime-glow);
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active {
+    --driver-downtime-accent: #facc15;
+    --driver-downtime-glow: rgba(250, 204, 21, .48);
+    border-color: var(--driver-downtime-accent);
+    box-shadow: inset 0 0 24px var(--driver-downtime-glow), 0 0 20px var(--driver-downtime-glow);
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active.status-red {
+    --driver-downtime-accent: #ff5a47;
+    --driver-downtime-glow: rgba(255, 90, 71, .5);
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active.status-orange {
+    --driver-downtime-accent: #fb923c;
+    --driver-downtime-glow: rgba(251, 146, 60, .48);
+}
+
+body.driver-mobile-screen .driver-downtime-state-dot {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+body.driver-mobile-screen .driver-downtime-state-icon {
+    display: block;
+    width: 28px;
+    height: 28px;
+    fill: currentColor;
+}
+
+body.driver-mobile-screen .driver-downtime-state-icon-play {
+    color: #51df61;
+    filter: drop-shadow(0 0 3px rgba(81, 223, 97, .38));
+}
+
+body.driver-mobile-screen .driver-downtime-state-icon-pause {
+    display: none;
+    color: var(--driver-downtime-accent);
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active .driver-downtime-state-icon-play {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active .driver-downtime-state-icon-pause {
+    display: block;
+    filter: drop-shadow(0 0 8px var(--driver-downtime-glow));
+}
+
+body.driver-mobile-screen .driver-downtime-card b[data-driver-active-duration] {
+    margin: 0;
+    color: #f4f8f9;
+    font-size: clamp(34px, 8.5vw, 54px);
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active b[data-driver-active-duration] {
+    color: var(--driver-downtime-accent);
+    filter: drop-shadow(0 0 8px var(--driver-downtime-glow));
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active,
+body.driver-mobile-screen .driver-downtime-list button.is-selected {
+    animation: driver-downtime-active-pulse 1.15s ease-in-out infinite;
+}
+
+body.driver-mobile-screen .driver-downtime-card.is-active .driver-downtime-state-icon-pause,
+body.driver-mobile-screen .driver-downtime-card.is-active b[data-driver-active-duration] {
+    transform-origin: center;
+    animation: driver-downtime-content-pulse 1.15s ease-in-out infinite;
+}
+
+@keyframes driver-downtime-active-pulse {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.2); }
+}
+
+@keyframes driver-downtime-content-pulse {
+    0%, 100% { transform: scale(1); opacity: .88; }
+    50% { transform: scale(1.035); opacity: 1; }
+}
+
+body.driver-mobile-screen .driver-downtime-list {
+    grid-row: 3 !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: clamp(72px, 9.2dvh, 80px);
+    align-content: stretch;
+    gap: clamp(7px, 1.85vw, 9px);
+    padding-bottom: 0;
+}
+
+body.driver-mobile-screen .driver-downtime-list form {
+    min-height: 0;
+}
+
+body.driver-mobile-screen .driver-downtime-list button {
+    --driver-reason-accent: #a8b5bd;
+    --driver-reason-fill: rgba(148, 163, 184, .09);
+    --driver-reason-glow: rgba(148, 163, 184, .28);
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: clamp(72px, 9.2dvh, 80px);
+    aspect-ratio: auto;
+    overflow: hidden;
+    border-color: var(--driver-reason-accent);
+    padding: 10px 12px;
+    color: var(--driver-reason-accent);
+    background: linear-gradient(180deg, var(--driver-reason-fill), rgba(8, 14, 17, .98));
+    font-size: clamp(18px, 4.6vw, 21px);
+    font-weight: 700;
+    line-height: 1.12;
+    white-space: normal;
+    text-align: center;
+    text-wrap: balance;
+    overflow-wrap: normal;
+}
+
+body.driver-mobile-screen .driver-downtime-list button::before,
+body.driver-mobile-screen .driver-downtime-close::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    width: var(--driver-action-hold, 0%);
+    background: color-mix(in srgb, currentColor 26%, transparent);
+}
+
+body.driver-mobile-screen .driver-downtime-list button.status-yellow { --driver-reason-accent: #facc15; --driver-reason-fill: rgba(250, 204, 21, .1); --driver-reason-glow: rgba(250, 204, 21, .42); }
+body.driver-mobile-screen .driver-downtime-list button.status-green { --driver-reason-accent: #4ade80; --driver-reason-fill: rgba(74, 222, 128, .1); --driver-reason-glow: rgba(74, 222, 128, .4); }
+body.driver-mobile-screen .driver-downtime-list button.status-blue { --driver-reason-accent: #38bdf8; --driver-reason-fill: rgba(56, 189, 248, .1); --driver-reason-glow: rgba(56, 189, 248, .42); }
+body.driver-mobile-screen .driver-downtime-list button.status-orange { --driver-reason-accent: #fb923c; --driver-reason-fill: rgba(251, 146, 60, .11); --driver-reason-glow: rgba(251, 146, 60, .42); }
+body.driver-mobile-screen .driver-downtime-list button.status-red { --driver-reason-accent: #ff5a47; --driver-reason-fill: rgba(255, 90, 71, .11); --driver-reason-glow: rgba(255, 90, 71, .44); }
+
+body.driver-mobile-screen .driver-downtime-list button.is-selected {
+    color: #f8fbfc;
+    background: radial-gradient(circle at 50% 48%, var(--driver-reason-glow), transparent 68%), linear-gradient(180deg, var(--driver-reason-fill), rgba(8, 14, 17, .96));
+    box-shadow: inset 0 0 26px var(--driver-reason-glow), 0 0 0 2px var(--driver-reason-accent), 0 0 22px var(--driver-reason-glow);
+    text-shadow: 0 0 9px var(--driver-reason-accent);
+}
+
+body.driver-mobile-screen .driver-downtime-list button.is-unavailable,
+body.driver-mobile-screen .driver-downtime-list button[aria-disabled="true"] {
+    --driver-reason-accent: rgba(148, 163, 184, .48);
+    --driver-reason-fill: rgba(71, 85, 105, .08);
+    --driver-reason-glow: transparent;
+    color: rgba(203, 213, 225, .48);
+    border-color: rgba(148, 163, 184, .28);
+    background: linear-gradient(180deg, rgba(71, 85, 105, .08), rgba(8, 14, 17, .98));
+    box-shadow: none;
+    text-shadow: none;
+    opacity: .58;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.driver-mobile-screen .driver-work-dial.is-waiting-operation::before,
+    body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-work-dial-core,
+    body.driver-mobile-screen .driver-downtime-card.is-active,
+    body.driver-mobile-screen .driver-downtime-card.is-active .driver-downtime-state-icon-pause,
+    body.driver-mobile-screen .driver-downtime-card.is-active b[data-driver-active-duration] {
+        animation: none;
+    }
+}
+
+body.driver-mobile-screen .driver-downtime-close {
+    grid-row: 4 !important;
+    position: relative;
+    isolation: isolate;
+    min-height: clamp(50px, 6.2dvh, 58px);
+    overflow: hidden;
+    border-radius: 8px;
+    font-size: clamp(15px, 3.95vw, 18px);
+}
+
+/* Match the excavator downtime controls and override the legacy circular badge/action fill. */
+body.driver-mobile-screen .driver-downtime-state-dot,
+body.driver-mobile-screen .driver-downtime-card.is-active .driver-downtime-state-dot {
+    display: grid !important;
+    place-items: center !important;
+    width: 44px !important;
+    height: 44px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+body.driver-mobile-screen .driver-downtime-state-dot::before,
+body.driver-mobile-screen .driver-downtime-state-dot::after {
+    content: none !important;
+    display: none !important;
+    border: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+}
+
+body.driver-mobile-screen .driver-downtime-close:not(:disabled) {
+    border: 1px solid #58df52 !important;
+    color: #58df52 !important;
+    background: linear-gradient(180deg, rgba(18, 55, 29, .38), rgba(7, 24, 17, .82)) !important;
+    font-weight: 600 !important;
+    box-shadow: inset 0 0 14px rgba(88, 223, 82, .06) !important;
+}
+
+body.driver-mobile-screen .driver-downtime-close:disabled,
+body.driver-mobile-screen .driver-downtime-close.is-disabled {
+    color: rgba(138, 154, 163, .5) !important;
+    border-color: rgba(138, 154, 163, .28) !important;
+    background: rgba(8, 19, 27, .72) !important;
+    box-shadow: none !important;
+}
+
+@media (min-width: 768px) {
+    body.driver-mobile-screen .driver-downtime-list {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+body.driver-mobile-screen .driver-trip-list,
+body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active,
+body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active,
+body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active {
+    min-height: 0;
+}
+
+body.driver-mobile-screen .driver-trip-list {
+    display: grid;
+    gap: 8px;
+}
+
+body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active {
+    grid-template-rows: auto minmax(0, 1fr) !important;
+    gap: 10px !important;
+    padding-bottom: 0;
+}
+
+body.driver-mobile-screen .driver-manifest-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+}
+
+body.driver-mobile-screen .driver-manifest-head h2 {
+    margin: 0;
+    font-size: clamp(28px, 7vw, 33px);
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-manifest-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: min(210px, 54vw);
+    padding: 3px;
+    border: 1px solid rgba(127, 163, 177, .3);
+    border-radius: 7px;
+    background: #07141a;
+}
+
+body.driver-mobile-screen .driver-manifest-tabs button {
+    min-height: 34px;
+    border: 0;
+    border-radius: 5px;
+    color: #8a9aa3;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+body.driver-mobile-screen .driver-manifest-tabs button.is-active {
+    color: #58df52;
+    background: rgba(88, 223, 82, .1);
+}
+
+body.driver-mobile-screen .driver-manifest-view {
+    display: none;
+    min-height: 0;
+    overflow: hidden;
+    overscroll-behavior: contain;
+    padding-bottom: 12px;
+}
+
+body.driver-mobile-screen .driver-manifest-view.is-active {
+    display: block;
+}
+
+body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="report"].is-active {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 8px;
+    overflow: hidden;
+    padding-bottom: 0;
+}
+
+body.driver-mobile-screen .driver-report-scroll {
+    min-height: 0;
+    overflow: hidden;
+    overscroll-behavior: contain;
+    padding-bottom: 4px;
+}
+
+body.driver-mobile-screen .driver-report-card,
+body.driver-mobile-screen .driver-report-section {
+    border: 1px solid rgba(88, 223, 82, .3);
+    border-radius: 8px;
+    background: rgba(7, 18, 22, .92);
+}
+
+body.driver-mobile-screen .driver-report-card {
+    padding: 14px;
+}
+
+body.driver-mobile-screen .driver-report-card h3 {
+    margin: 0 0 5px;
+    color: #f4f8f9;
+    font-size: 18px;
+}
+
+body.driver-mobile-screen .driver-report-card p {
+    margin: 3px 0;
+    color: #a8b5bd;
+    font-size: 13px;
+}
+
+body.driver-mobile-screen .driver-report-grid {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+body.driver-mobile-screen .driver-report-section {
+    padding: 12px 14px;
+}
+
+body.driver-mobile-screen .driver-report-section h4 {
+    margin: 0 0 8px;
+    color: #dbe7e9;
+    font-size: 13px;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-report-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 7px 0;
+    border-top: 1px solid rgba(127, 163, 177, .14);
+    color: #f4f8f9;
+    font-size: 14px;
+}
+
+body.driver-mobile-screen .driver-report-row:first-of-type {
+    border-top: 0;
+}
+
+body.driver-mobile-screen .driver-report-row strong {
+    color: #58df52;
+    font-variant-numeric: tabular-nums;
+}
+
+body.driver-mobile-screen .driver-report-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding-top: 0;
+    background: #030b0e;
+}
+
+body.driver-mobile-screen .driver-report-actions button {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    place-items: center;
+    width: 100%;
+    min-height: 48px;
+    border: 1px solid #58df52;
+    border-radius: 7px;
+    color: #58df52;
+    background: rgba(12, 38, 22, .84);
+    transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+body.driver-mobile-screen .driver-report-action-copy {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-report-action-title {
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1.05;
+}
+
+body.driver-mobile-screen .driver-report-action-hint {
+    color: #9eb0b8;
+    font-size: 10px;
+    font-weight: 650;
+    line-height: 1.05;
+}
+
+body.driver-mobile-screen .driver-report-max-mark {
+    display: none;
+    min-width: 44px;
+    min-height: 28px;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, .58);
+    border-radius: 9px;
+    color: #471aff;
+    background: #fff;
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: -.02em;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    padding-inline: 12px;
+    border-color: #6e1aff;
+    color: #fff;
+    background: linear-gradient(110deg, #471aff 0%, #6e1aff 50%, #9500ff 100%);
+    box-shadow: 0 0 0 1px rgba(0, 191, 255, .2), 0 8px 22px rgba(71, 26, 255, .28);
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready .driver-report-max-mark {
+    display: grid;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready .driver-report-action-copy {
+    justify-self: start;
+    text-align: left;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready .driver-report-action-hint {
+    color: rgba(255, 255, 255, .82);
+}
+
+body.driver-mobile-screen .driver-timeline {
+    display: grid;
+    gap: 8px;
+}
+
+body.driver-mobile-screen .driver-timeline-row {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    min-height: 58px;
+    padding: 9px 11px;
+    border: 1px solid rgba(127, 163, 177, .24);
+    border-radius: 7px;
+    background: rgba(7, 18, 22, .9);
+}
+
+body.driver-mobile-screen .driver-timeline-row time {
+    color: #58df52;
+    font-weight: 700;
+}
+
+body.driver-mobile-screen .driver-timeline-row strong {
+    min-width: 0;
+    color: #f4f8f9;
+    font-size: 14px;
+    line-height: 1.15;
+}
+
+body.driver-mobile-screen .driver-timeline-row span {
+    color: #8a9aa3;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-trip-row {
+    padding: 0;
+}
+
+body.driver-mobile-screen .driver-trip-row summary {
+    min-height: 54px;
+    display: grid;
+    grid-template-columns: 2.4em minmax(0, 1.15fr) minmax(0, 0.75fr) minmax(5.7em, auto) minmax(3.3em, auto);
+    align-items: center;
+    gap: 8px;
+    padding: 9px 10px;
+    list-style: none;
+}
+
+body.driver-mobile-screen .driver-trip-row summary::-webkit-details-marker {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-trip-row summary span {
+    color: var(--driver-green);
+    font-size: 20px;
+    font-weight: 900;
+}
+
+body.driver-mobile-screen .driver-trip-row summary strong,
+body.driver-mobile-screen .driver-trip-row summary em,
+body.driver-mobile-screen .driver-trip-row summary b,
+body.driver-mobile-screen .driver-trip-row summary small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-style: normal;
+    font-size: 16px;
+    line-height: 1;
+    font-weight: 800;
+}
+
+body.driver-mobile-screen .driver-trip-row summary > * + * {
+    min-width: 0;
+    border-left: 1px solid rgba(140,255,46,0.18);
+    padding-left: 8px;
+}
+
+body.driver-mobile-screen .driver-trip-row summary b {
+    color: var(--driver-green);
+}
+
+body.driver-mobile-screen .driver-trip-row summary small {
+    color: rgba(224, 238, 231, 0.76);
+}
+
+body.driver-mobile-screen .driver-trip-row dl {
+    margin: 0;
+    padding: 0 12px 12px;
+    border-top: 1px solid rgba(127, 163, 177, 0.16);
+    display: grid;
+    gap: 7px;
+}
+
+body.driver-mobile-screen .driver-trip-row dl div {
+    display: grid;
+    grid-template-columns: minmax(92px, auto) minmax(0, 1fr);
+    gap: 10px;
+}
+
+body.driver-mobile-screen .driver-trip-row dt,
+body.driver-mobile-screen .driver-trip-row dd {
+    margin: 0;
+    color: var(--driver-muted);
+    font-size: 15px;
+    line-height: 1.15;
+}
+
+body.driver-mobile-screen .driver-trip-row dd {
+    color: var(--driver-ink);
+}
+
+body.driver-mobile-screen .driver-empty-state,
+body.driver-mobile-screen .driver-inline-note {
+    color: var(--driver-muted);
+    font-size: 16px;
+    line-height: 1.25;
+}
+
+body.driver-mobile-screen .driver-unload-sheet {
+    position: absolute;
+    left: var(--driver-edge);
+    right: var(--driver-edge);
+    bottom: calc(var(--driver-nav-total-h) + 10px);
+    z-index: 4;
+    max-height: min(58dvh, 430px);
+    overflow-y: auto;
+    border: 1px solid rgba(127, 163, 177, 0.32);
+    border-radius: 10px;
+    padding: 14px;
+    background: rgba(5, 17, 22, 0.97);
+    box-shadow: 0 -22px 60px rgba(0,0,0,0.45);
+}
+
+body.driver-mobile-screen .driver-unload-head {
+    display: grid;
+    gap: 5px;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-unload-head span {
+    color: var(--driver-green);
+    font-size: 22px;
+}
+
+body.driver-mobile-screen .driver-unload-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+body.driver-mobile-screen .driver-unload-tile {
+    width: 100%;
+    min-height: 80px;
+    border: 1px solid rgba(137,169,180,0.28);
+    border-radius: 8px;
+    background: rgba(10, 30, 38, 0.88);
+    color: var(--driver-ink);
+    text-transform: uppercase;
+    font-weight: 900;
+}
+
+body.driver-mobile-screen .driver-unload-tile.is-current {
+    border-color: var(--driver-green);
+    color: var(--driver-green);
+}
+
+body.driver-mobile-screen .driver-unload-cancel {
+    width: 100%;
+    min-height: 48px;
+    margin-top: 12px;
+    border: 1px solid rgba(137,169,180,0.28);
+    border-radius: 8px;
+    background: rgba(255,255,255,0.06);
+    color: var(--driver-muted);
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-bottom-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+    width: 100%;
+    height: var(--driver-nav-total-h, 78px);
+    padding-bottom: var(--driver-safe-bottom, 0px);
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-top: 1px solid rgba(138,174,184,0.26);
+    background:
+        linear-gradient(180deg, rgba(8,28,34,0.98), rgba(2,12,16,0.99));
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.025),
+        0 -14px 30px rgba(0,0,0,0.34);
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item {
+    position: relative;
+    min-width: 0;
+    height: var(--driver-nav-content-h, 78px);
+    border: 0;
+    padding: 7px 4px 6px;
+    border-right: 1px solid rgba(127,163,177,0.10);
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: 6px;
+    color: rgba(141,164,173,0.76);
+    background: transparent;
+    text-transform: uppercase;
+    font-size: clamp(11px, 2.8vw, 13px);
+    line-height: 1;
+    font-weight: 600;
+    transition: color 140ms ease, background-color 140ms ease;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item:last-child {
+    border-right: 0;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item > * {
+    position: relative;
+    z-index: 1;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 14%;
+    right: 14%;
+    height: 3px;
+    border-radius: 0 0 4px 4px;
+    background: transparent;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    opacity: 0;
+    background: linear-gradient(180deg, rgba(140,255,46,0.11), rgba(140,255,46,0.025) 58%, transparent);
+    transition: opacity 140ms ease;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active {
+    color: var(--driver-green);
+    font-weight: 800;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::before {
+    background: var(--driver-green);
+    box-shadow: 0 0 12px rgba(140,255,46,0.65);
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::after {
+    opacity: 1;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item:focus-visible {
+    outline: 2px solid var(--driver-cyan);
+    outline-offset: -3px;
+}
+
+body.driver-mobile-screen .driver-nav-icon {
+    width: 28px;
+    height: 28px;
+    display: block;
+    opacity: 0.64;
+    transition: opacity 140ms ease, filter 140ms ease, transform 140ms ease;
+}
+
+body.driver-mobile-screen .mm-mobile-nav-item.is-active .driver-nav-icon {
+    opacity: 1;
+    transform: translateY(-1px);
+    filter: drop-shadow(0 0 8px rgba(140,255,46,0.36));
+}
+
+body.driver-mobile-screen .driver-nav-truck {
+    object-fit: contain;
+    filter: grayscale(1) brightness(1.35);
+}
+
+body.driver-mobile-screen .mm-mobile-nav-item.is-active .driver-nav-truck {
+    filter: saturate(1.15) drop-shadow(0 0 8px rgba(140,255,46,0.42));
+}
+
+body.driver-mobile-screen .driver-nav-clock,
+body.driver-mobile-screen .driver-nav-alert,
+body.driver-mobile-screen .driver-nav-doc {
+    position: relative;
+    border: 2px solid currentColor;
+    border-radius: 50%;
+}
+
+body.driver-mobile-screen .driver-nav-clock::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 20%;
+    width: 2px;
+    height: 32%;
+    background: currentColor;
+    transform-origin: bottom;
+    transform: translateX(-50%) rotate(0deg);
+}
+
+body.driver-mobile-screen .driver-nav-clock::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 30%;
+    height: 2px;
+    background: currentColor;
+    transform-origin: left;
+    transform: rotate(215deg);
+}
+
+body.driver-mobile-screen .driver-nav-alert {
+    border: 0;
+}
+
+body.driver-mobile-screen .driver-nav-alert::before {
+    content: "!";
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    font-size: 27px;
+    line-height: 1;
+    font-weight: 900;
+}
+
+body.driver-mobile-screen .driver-nav-doc {
+    border-radius: 5px;
+}
+
+body.driver-mobile-screen .driver-nav-doc::before,
+body.driver-mobile-screen .driver-nav-doc::after {
+    content: "";
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    height: 2px;
+    background: currentColor;
+}
+
+body.driver-mobile-screen .driver-nav-doc::before { top: 8px; }
+body.driver-mobile-screen .driver-nav-doc::after { top: 16px; }
+
+body.driver-mobile-screen .driver-mobile-update-badge {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #ff4b43;
+    box-shadow: 0 0 12px rgba(255,75,67,0.75);
+}
+
+/* Driver navigation uses the excavator operator navigation language. */
+body.driver-mobile-screen .driver-bottom-nav {
+    border-top-color: #263943;
+    background: #08131b;
+    box-shadow: none;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 7px 2px 6px;
+    border: 0;
+    color: #8a9aa3;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 16px;
+    letter-spacing: 0;
+    text-transform: none;
+    box-shadow: none;
+    transform: none;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active {
+    color: #58df52;
+    background: rgba(88, 223, 82, .055);
+    font-weight: 600;
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item.is-active::before {
+    top: 0;
+    left: 50%;
+    right: auto;
+    width: 40px;
+    height: 2px;
+    border-radius: 0 0 2px 2px;
+    background: currentColor;
+    box-shadow: 0 0 6px rgba(88, 223, 82, .28);
+    transform: translateX(-50%);
+}
+
+body.driver-mobile-screen .driver-bottom-nav .mm-mobile-nav-item::after {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-nav-icon {
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex: 0 0 26px;
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    opacity: 1;
+    overflow: visible;
+    transform: none;
+    filter: none;
+}
+
+body.driver-mobile-screen .driver-nav-icon svg {
+    display: block;
+    width: 26px;
+    height: 26px;
+    stroke: currentColor;
+}
+
+body.driver-mobile-screen .mm-mobile-nav-item.is-active .driver-nav-icon {
+    opacity: 1;
+    transform: none;
+    filter: none;
+}
+
+body.driver-mobile-screen .driver-nav-label {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-mobile-update-modal[hidden] {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-mobile-update-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: max(12px, env(safe-area-inset-top, 0px)) clamp(10px, 4vw, 24px) max(12px, env(safe-area-inset-bottom, 0px));
+    background: rgba(2, 8, 12, 0.78);
+    backdrop-filter: blur(8px);
+}
+
+body.driver-mobile-screen .driver-mobile-update-dialog {
+    width: min(100%, 390px);
+    max-height: calc(var(--driver-viewport-h, 100dvh) - max(24px, env(safe-area-inset-top, 0px)) - max(24px, env(safe-area-inset-bottom, 0px)));
+    display: grid;
+    gap: clamp(8px, 1.4dvh, 14px);
+    overflow: hidden;
+    border: 1px solid rgba(140,255,46,0.28);
+    border-radius: 12px;
+    padding: clamp(12px, min(4vw, 2.2dvh), 18px);
+    background: linear-gradient(145deg, rgba(9, 31, 39, 0.98), rgba(4, 15, 20, 0.98));
+    color: var(--driver-ink);
+    box-shadow: 0 24px 70px rgba(0,0,0,0.55);
+}
+
+body.driver-mobile-screen .driver-mobile-update-dialog strong {
+    color: var(--driver-green);
+    text-transform: uppercase;
+    font-size: clamp(18px, min(6vw, 3.2dvh), 24px);
+    line-height: 1.05;
+    overflow-wrap: anywhere;
+}
+
+body.driver-mobile-screen .driver-mobile-update-dialog p,
+body.driver-mobile-screen .driver-mobile-update-versions {
+    color: var(--driver-muted);
+    font-size: clamp(13px, min(4vw, 2.2dvh), 16px);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+body.driver-mobile-screen .driver-mobile-update-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr));
+    gap: 10px;
+    margin-top: clamp(4px, 1dvh, 10px);
+}
+
+body.driver-mobile-screen .driver-mobile-update-actions button {
+    min-width: 0;
+    min-height: clamp(44px, 6.5dvh, 52px);
+    border: 1px solid rgba(137,169,180,0.28);
+    border-radius: 8px;
+    color: var(--driver-ink);
+    background: rgba(255,255,255,0.06);
+    text-transform: uppercase;
+    font-weight: 900;
+    font-size: clamp(13px, min(4vw, 2.2dvh), 16px);
+    white-space: normal;
+}
+
+/* Driver confirmations remain only for destructive actions and fit the visual viewport. */
+body.driver-mobile-screen .app-confirm-modal {
+    padding: max(12px, env(safe-area-inset-top, 0px)) clamp(10px, 4vw, 24px) max(12px, env(safe-area-inset-bottom, 0px));
+}
+
+body.driver-mobile-screen .app-confirm-dialog {
+    width: min(100%, 480px);
+    max-height: calc(var(--driver-viewport-h, 100dvh) - max(24px, env(safe-area-inset-top, 0px)) - max(24px, env(safe-area-inset-bottom, 0px)));
+    grid-template-columns: clamp(38px, 11vw, 54px) minmax(0, 1fr);
+    gap: clamp(9px, 3vw, 16px);
+    padding: clamp(12px, min(4.8vw, 2.8dvh), 24px);
+    border-radius: clamp(10px, 4vw, 18px);
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .app-confirm-icon {
+    width: clamp(36px, 10vw, 46px);
+    height: clamp(36px, 10vw, 46px);
+    border-radius: clamp(8px, 3vw, 14px);
+    font-size: clamp(18px, 5vw, 24px);
+}
+
+body.driver-mobile-screen .app-confirm-content {
+    min-width: 0;
+    align-self: center;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation {
+    z-index: 1240;
+    background: rgba(0, 7, 10, .82);
+    backdrop-filter: blur(8px);
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__dialog {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    border-color: rgba(255, 196, 61, .42);
+    color: var(--driver-ink);
+    background: linear-gradient(155deg, rgba(20, 32, 37, .99), rgba(3, 13, 17, .99));
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .7), 0 0 28px rgba(255, 196, 61, .12);
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__dialog .app-confirm-icon {
+    color: #201400;
+    background: #ffc43d;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__content {
+    max-height: min(58dvh, 480px);
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__content p {
+    color: #c6d2d4;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__warnings {
+    max-height: min(42dvh, 350px);
+    margin: 12px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    list-style: none;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__warnings li {
+    min-width: 0;
+    padding: 10px 11px;
+    display: grid;
+    gap: 4px;
+    border: 1px solid rgba(255, 196, 61, .28);
+    border-radius: 10px;
+    background: rgba(255, 196, 61, .07);
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__warnings strong {
+    color: #ffd66f;
+    font-size: clamp(13px, 3.5vw, 15px);
+    line-height: 1.15;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__warnings span {
+    color: #f1f5f4;
+    font-size: clamp(12px, 3.25vw, 14px);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 9px;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__actions button {
+    width: 100%;
+    min-height: 50px;
+    margin: 0;
+    border: 1px solid rgba(137, 169, 180, .38);
+    border-radius: 10px;
+    padding: 9px 12px;
+    font-size: clamp(13px, 3.65vw, 16px);
+    line-height: 1.15;
+    font-weight: 900;
+    text-transform: uppercase;
+    white-space: normal;
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__actions .secondary {
+    color: #d9e5e6;
+    background: rgba(111, 139, 148, .16);
+}
+
+body.driver-mobile-screen .driver-reading-confirmation__actions .danger {
+    border-color: rgba(255, 196, 61, .72);
+    color: #1a1200;
+    background: #ffc43d;
+}
+
+@media (max-width: 420px), (max-height: 700px) {
+    body.driver-mobile-screen .driver-reading-confirmation__dialog {
+        grid-template-columns: 38px minmax(0, 1fr);
+        gap: 8px 10px;
+        padding: 12px;
+    }
+
+    body.driver-mobile-screen .driver-reading-confirmation__content {
+        max-height: min(57dvh, 410px);
+    }
+
+    body.driver-mobile-screen .driver-reading-confirmation__warnings {
+        max-height: min(40dvh, 290px);
+        gap: 6px;
+    }
+
+    body.driver-mobile-screen .driver-reading-confirmation__warnings li {
+        padding: 8px 9px;
+    }
+
+    body.driver-mobile-screen .driver-reading-confirmation__actions button {
+        min-height: 48px;
+    }
+}
+
+body.driver-mobile-screen .app-confirm-content h2 {
+    margin: 0 0 clamp(4px, .8dvh, 8px);
+    font-size: clamp(18px, min(5.5vw, 3dvh), 24px);
+    line-height: 1.05;
+    overflow-wrap: anywhere;
+}
+
+body.driver-mobile-screen .app-confirm-content p {
+    font-size: clamp(13px, min(4vw, 2.15dvh), 16px);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+body.driver-mobile-screen .app-confirm-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr));
+    gap: clamp(6px, 2vw, 10px);
+    margin-top: clamp(4px, 1dvh, 8px);
+}
+
+body.driver-mobile-screen .app-confirm-actions button {
+    width: 100%;
+    min-width: 0;
+    min-height: clamp(42px, 6.2dvh, 52px);
+    padding: clamp(8px, 1.5dvh, 12px) clamp(8px, 2.5vw, 16px);
+    border-radius: clamp(8px, 2.5vw, 12px);
+    font-size: clamp(13px, min(4vw, 2.15dvh), 16px);
+    white-space: normal;
+}
+
+body.driver-mobile-screen .app-confirm-shift-summary {
+    grid-column: 1 / -1;
+    min-width: 0;
+    padding: clamp(8px, min(3vw, 1.8dvh), 14px);
+    border-radius: clamp(8px, 2.5vw, 12px);
+}
+
+body.driver-mobile-screen .app-confirm-shift-summary h3 {
+    margin: 0 0 clamp(5px, .8dvh, 8px);
+    font-size: clamp(14px, min(4.2vw, 2.3dvh), 18px);
+}
+
+body.driver-mobile-screen .app-confirm-shift-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100px, 100%), 1fr));
+}
+
+body.driver-mobile-screen .app-confirm-shift-grid div {
+    min-width: 0;
+    padding: clamp(6px, 1dvh, 10px);
+}
+
+body.driver-mobile-screen .app-confirm-shift-grid span,
+body.driver-mobile-screen .app-confirm-shift-grid strong {
+    min-width: 0;
+    font-size: clamp(11px, min(3.4vw, 1.8dvh), 14px);
+    overflow-wrap: anywhere;
+}
+
+body.driver-mobile-screen .driver-mobile-update-actions [data-driver-pwa-update-apply] {
+    color: #061016;
+    background: linear-gradient(180deg, #a9ff46 0%, #72d729 100%);
+}
+
+/* Fit every driver tab to the real visual viewport, including Android text scaling. */
+body.driver-mobile-screen .driver-panel.is-active {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 0;
+}
+
+body.driver-mobile-screen .driver-panel[data-driver-tab-panel="work"].driver-work-screen.is-active {
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    align-content: stretch;
+}
+
+body.driver-mobile-screen .driver-work-dial-zone {
+    overflow: visible;
+    width: var(--driver-work-column);
+    justify-self: center;
+    padding-top: 6px;   /* воздух между карточкой назначения и угловыми кнопками */
+}
+
+/* Модуль круга с угловыми кнопками — строго во всю ширину колонки, как карточка назначения
+   над ним. Третий член min() — аварийный: он вступает в силу только на экранах, где после
+   круга барабану не осталось бы даже 86 px; на обычных телефонах круг всегда полной ширины. */
+body.driver-mobile-screen .driver-work-dial {
+    width: min(100%, 520px, calc(100dvh - var(--driver-header-total-h) - var(--driver-nav-total-h) - clamp(66px, 8dvh, 100px) - 4 * var(--driver-work-gap) - 86px));
+    height: auto;
+    max-width: 100%;
+    max-height: none;
+}
+
+body.driver-mobile-screen .driver-push-invite {
+    display: grid;
+    gap: 8px;
+    margin-bottom: clamp(5px, .75dvh, 8px);
+    padding: clamp(9px, 1.3dvh, 13px);
+    border: 1px solid rgba(140, 255, 46, .34);
+    border-radius: 10px;
+    background: rgba(140, 255, 46, .08);
+}
+
+body.driver-mobile-screen .driver-push-invite[hidden] {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-push-invite strong {
+    color: var(--driver-green);
+    font-size: clamp(14px, 3.9vw, 17px);
+    font-weight: 800;
+    line-height: 1.15;
+}
+
+body.driver-mobile-screen .driver-push-invite span {
+    color: #c6d5d9;
+    font-size: clamp(12px, 3.3vw, 15px);
+    font-weight: 500;
+    line-height: 1.3;
+}
+
+body.driver-mobile-screen .driver-push-invite-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    gap: 8px;
+}
+
+body.driver-mobile-screen .driver-push-enable,
+body.driver-mobile-screen .driver-push-later {
+    min-height: 44px;
+    border-radius: 8px;
+    font-size: clamp(13px, 3.6vw, 16px);
+    font-weight: 800;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+
+body.driver-mobile-screen .driver-push-enable {
+    border: 1px solid rgba(140, 255, 46, .7);
+    background: rgba(140, 255, 46, .82);
+    color: #06210a;
+}
+
+body.driver-mobile-screen .driver-push-later {
+    border: 1px solid rgba(127, 163, 177, .34);
+    background: rgba(7, 18, 23, .88);
+    color: #b9c8cd;
+}
+
+/* Приглашение включить уведомления живёт рядом с экраном первичной настройки
+   и закрывает то, что тот не умеет: настройку отложили на сутки или
+   разрешение отозвали позже, уже после установки. Экран настройки в этих
+   случаях не вернётся, а приглашение смотрит на фактическое разрешение и
+   появляется само. Поэтому его не убираем — но и место занимать оно должно
+   как строка, а не как блок в треть экрана. */
+body.driver-mobile-screen .driver-push-invite {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "title actions" "text actions";
+    align-items: center;
+    gap: 1px 10px;
+    padding: 7px 11px;
+}
+
+body.driver-mobile-screen .driver-push-invite strong {
+    grid-area: title;
+    font-size: clamp(13px, 3.4vw, 15px);
+}
+
+body.driver-mobile-screen .driver-push-invite span {
+    grid-area: text;
+    font-size: clamp(11px, 2.9vw, 13px);
+    line-height: 1.25;
+}
+
+body.driver-mobile-screen .driver-push-invite-actions {
+    grid-area: actions;
+    display: flex;
+    gap: 6px;
+}
+
+body.driver-mobile-screen .driver-push-enable,
+body.driver-mobile-screen .driver-push-later {
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: clamp(12px, 3.1vw, 14px);
+}
+
+body.driver-mobile-screen [data-driver-shift-close-form] {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+body.driver-mobile-screen .driver-shift-scroll {
+    grid-template-rows: minmax(0, 1.15fr) minmax(0, .85fr);
+    align-content: stretch;
+    overflow: hidden;
+    padding: 0;
+}
+
+body.driver-mobile-screen [data-driver-shift-close-form] .driver-shift-section {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-shift-section {
+    padding: clamp(8px, 1.25dvh, 12px) clamp(10px, 3vw, 16px);
+}
+
+body.driver-mobile-screen .driver-shift-submit,
+body.driver-mobile-screen .driver-shift-open,
+body.driver-mobile-screen .driver-shift-logout {
+    height: 100%;
+    min-height: 0;
+    /* The row height is capped above, so a two-line label only fits with
+       tight leading and slim vertical padding. */
+    padding: 6px 12px;
+    line-height: 1.15;
+}
+
+body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active {
+    width: 100%;
+    margin: 0;
+    grid-template-rows: clamp(34px, 4.5dvh, 40px) clamp(62px, 8.2dvh, 76px) minmax(0, 1fr) clamp(48px, 6.4dvh, 56px) !important;
+    gap: clamp(6px, .9dvh, 9px) !important;
+    padding: clamp(5px, .7dvh, 8px) 0 0;
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-downtime-card {
+    min-height: 0;
+    height: 100%;
+}
+
+body.driver-mobile-screen .driver-downtime-list {
+    height: 100%;
+    min-height: 0;
+    grid-auto-rows: minmax(0, 1fr);
+    align-content: stretch;
+    gap: clamp(5px, .72dvh, 8px);
+    overflow: hidden;
+    padding: 0;
+    scrollbar-width: none;
+}
+
+body.driver-mobile-screen .driver-downtime-list form,
+body.driver-mobile-screen .driver-downtime-list button {
+    height: 100%;
+    min-height: 0;
+}
+
+body.driver-mobile-screen .driver-downtime-list form:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+}
+
+body.driver-mobile-screen .driver-downtime-list button {
+    padding: clamp(4px, .7dvh, 8px) clamp(5px, 1.8vw, 10px);
+    font-size: clamp(13px, min(4.2vw, 2.2dvh), 20px);
+    line-height: 1.05;
+}
+
+body.driver-mobile-screen .driver-downtime-close {
+    height: 100%;
+    min-height: 0;
+    margin: 0;
+    font-size: clamp(16px, min(4.6vw, 2.35dvh), 22px);
+}
+
+body.driver-mobile-screen .driver-manifest-view,
+body.driver-mobile-screen .driver-report-scroll {
+    overflow: hidden;
+    padding-bottom: 0;
+}
+
+body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="report"].is-active {
+    grid-template-rows: minmax(0, 1fr) clamp(52px, 6.8dvh, 60px);
+}
+
+body.driver-mobile-screen .driver-report-scroll {
+    display: grid;
+    grid-template-rows: clamp(44px, 7dvh, 64px) minmax(0, 1fr);
+    gap: clamp(5px, .7dvh, 8px);
+}
+
+body.driver-mobile-screen .driver-report-card,
+body.driver-mobile-screen .driver-report-section {
+    min-height: 0;
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-report-card {
+    display: grid;
+    align-items: center;
+    padding: clamp(6px, .85dvh, 10px) clamp(9px, 2.7vw, 13px);
+}
+
+body.driver-mobile-screen .driver-report-card h3 {
+    margin: 0;
+    font-size: clamp(15px, min(4.5vw, 2.25dvh), 19px);
+    line-height: 1.05;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: clip;
+}
+
+body.driver-mobile-screen .driver-report-grid {
+    min-height: 0;
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    gap: clamp(5px, .7dvh, 8px);
+    margin-top: 0;
+}
+
+body.driver-mobile-screen .driver-report-section {
+    display: flex;
+    flex-direction: column;
+    padding: clamp(5px, .72dvh, 9px) clamp(8px, 2.4vw, 12px);
+}
+
+body.driver-mobile-screen .driver-report-section h4 {
+    flex: 0 0 auto;
+    margin-bottom: clamp(2px, .35dvh, 4px);
+    font-size: clamp(12px, min(3.65vw, 1.85dvh), 14px);
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-report-row {
+    flex: 1 1 0;
+    min-height: 0;
+    align-items: center;
+    padding: clamp(2px, .35dvh, 5px) 0;
+    font-size: clamp(12px, min(4vw, 2dvh), 16px);
+    line-height: 1.05;
+}
+
+body.driver-mobile-screen .driver-report-actions button {
+    min-height: 0;
+    height: 100%;
+    font-size: clamp(12px, min(3.8vw, 1.9dvh), 15px);
+}
+
+body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="timeline"].is-active,
+body.driver-mobile-screen .driver-timeline {
+    min-height: 0;
+}
+
+body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="timeline"].is-active {
+    display: block;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 12px;
+}
+
+body.driver-mobile-screen .driver-timeline {
+    display: grid;
+    width: 100%;
+    height: auto;
+    grid-auto-rows: minmax(64px, auto);
+    align-content: start;
+    overflow: visible;
+}
+
+body.driver-mobile-screen .driver-timeline-row {
+    width: 100%;
+    min-height: 64px;
+    height: auto;
+    box-sizing: border-box;
+}
+
+body.driver-mobile-screen .driver-shell-version {
+    color: #9fb3bb;
+    font-size: clamp(13px, 3.4vw, 16px);
+    font-weight: 800;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active {
+    grid-template-rows: clamp(38px, 5.5dvh, 52px) minmax(0, 1fr) !important;
+    gap: clamp(5px, .8dvh, 9px) !important;
+}
+
+body.driver-mobile-screen .driver-manifest-head,
+body.driver-mobile-screen .driver-manifest-tabs,
+body.driver-mobile-screen .driver-manifest-tabs button {
+    min-height: 0;
+    height: 100%;
+}
+
+body.driver-mobile-screen .driver-manifest-head h2 {
+    font-size: clamp(23px, min(7.2vw, 4.6dvh), 33px);
+}
+
+body.driver-mobile-screen .driver-manifest-tabs button {
+    font-size: clamp(10px, min(3.2vw, 1.65dvh), 12px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] {
+    --driver-work-gap: clamp(5px, .8dvh, 8px);
+    --driver-edge: clamp(9px, 3vw, 16px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] [data-driver-tab-panel="downtimes"].is-active,
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] [data-driver-tab-panel="manifest"].is-active {
+    gap: clamp(4px, .65dvh, 6px) !important;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-shift-section {
+    padding: clamp(6px, .85dvh, 8px) clamp(8px, 2.4vw, 11px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-shift-result-cell {
+    padding: clamp(4px, .55dvh, 6px) clamp(7px, 2vw, 10px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-downtime-list {
+    gap: clamp(4px, .55dvh, 6px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-downtime-list button {
+    padding: 4px 6px;
+    font-size: clamp(12px, min(3.8vw, 2dvh), 18px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-manifest-head,
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-report-scroll,
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-report-grid {
+    gap: 4px;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-report-card,
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-report-section {
+    padding-block: 4px;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="compact"] .driver-report-row {
+    padding-block: 1px;
+    font-size: clamp(11.5px, min(3.6vw, 1.8dvh), 14px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] {
+    --driver-work-gap: 4px;
+    --driver-edge: clamp(7px, 2.5vw, 12px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] [data-driver-tab-panel="downtimes"].is-active,
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] [data-driver-tab-panel="manifest"].is-active {
+    gap: 3px !important;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-section {
+    padding: 4px 6px;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-result-cell {
+    padding: 3px 5px;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-result-cell span {
+    font-size: clamp(10px, min(3.1vw, 1.65dvh), 12px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-shift-result-cell strong {
+    font-size: clamp(15px, min(4.5vw, 2.35dvh), 20px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-downtime-list {
+    gap: 3px;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-downtime-list button {
+    padding: 3px 4px;
+    font-size: clamp(11px, min(3.45vw, 1.8dvh), 16px);
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-manifest-head,
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-report-scroll,
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-report-grid {
+    gap: 3px;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-report-card,
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-report-section {
+    padding-block: 3px;
+}
+
+body.driver-mobile-screen .driver-shell[data-driver-density="tight"] .driver-report-row {
+    padding-block: 0;
+    font-size: clamp(11px, min(3.4vw, 1.7dvh), 13px);
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+    body.driver-mobile-screen .driver-shell {
+        --driver-edge: clamp(8px, 2vw, 18px);
+        --driver-work-gap: 4px;
+        --driver-dial-size: clamp(142px, min(38vw, 58dvh), 250px);
+    }
+
+    body.driver-mobile-screen .driver-work-context-card {
+        min-height: clamp(42px, 16dvh, 62px);
+    }
+
+    body.driver-mobile-screen .driver-work-context-card > header {
+        display: none;
+    }
+
+    body.driver-mobile-screen .driver-work-context-body {
+        grid-template-columns: minmax(104px, .36fr) minmax(0, 1fr);
+        padding-block: 3px;
+    }
+
+    body.driver-mobile-screen [data-driver-shift-close-form] {
+        grid-template-columns: clamp(88px, 15vw, 122px) minmax(0, 1fr) clamp(112px, 19vw, 168px);
+        grid-template-rows: minmax(0, 1fr);
+        gap: 5px;
+    }
+
+    
+    
+    
+    body.driver-mobile-screen .driver-shift-scroll,
+    body.driver-mobile-screen .driver-shift-opening-form {
+        grid-column: 2;
+        grid-row: 1;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: minmax(0, 1fr);
+        gap: 5px;
+    }
+
+    
+    body.driver-mobile-screen .driver-shift-opening-form {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) clamp(112px, 19vw, 168px);
+    }
+
+    
+    body.driver-mobile-screen .driver-shift-section {
+        padding: 5px 7px;
+    }
+
+    
+    body.driver-mobile-screen .driver-shift-result-cell span {
+        font-size: clamp(9px, 1.55vw, 11px);
+    }
+
+    
+    body.driver-mobile-screen .driver-shift-result-cell {
+        padding: 3px 5px;
+    }
+
+    body.driver-mobile-screen .driver-shift-result-cell strong {
+        font-size: clamp(14px, 2.4vw, 19px);
+    }
+
+    body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active {
+        grid-template-areas: "title reasons action" "timer reasons action";
+        grid-template-columns: clamp(112px, 18vw, 160px) minmax(0, 1fr) clamp(112px, 19vw, 168px);
+        grid-template-rows: 30px minmax(0, 1fr) !important;
+        gap: 5px !important;
+        padding-top: 0;
+    }
+
+    body.driver-mobile-screen .driver-downtime-title-row { grid-area: title; }
+    body.driver-mobile-screen .driver-downtime-card { grid-area: timer; }
+    body.driver-mobile-screen .driver-downtime-list {
+        grid-area: reasons;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 3px;
+    }
+    body.driver-mobile-screen .driver-downtime-close {
+        grid-column: 3 !important;
+        grid-row: 1 / 3 !important;
+        font-size: clamp(13px, 2vw, 17px);
+    }
+    body.driver-mobile-screen .driver-downtime-list button {
+        padding: 2px 3px;
+        font-size: clamp(9px, 1.6vw, 12px);
+    }
+
+    body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active {
+        grid-template-columns: clamp(132px, 22vw, 190px) minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr) !important;
+        gap: 5px !important;
+    }
+
+    body.driver-mobile-screen .driver-manifest-head {
+        grid-column: 1;
+        grid-row: 1;
+        grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(38px, 1fr);
+        align-content: start;
+    }
+
+    body.driver-mobile-screen .driver-manifest-tabs {
+        width: 100%;
+    }
+
+    body.driver-mobile-screen .driver-manifest-view.is-active {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="report"].is-active {
+        grid-template-rows: minmax(0, 1fr) 38px;
+        gap: 4px;
+    }
+
+    body.driver-mobile-screen .driver-report-scroll {
+        grid-template-rows: 34px minmax(0, 1fr);
+        gap: 4px;
+    }
+
+    body.driver-mobile-screen .driver-report-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-rows: minmax(0, 1fr);
+        gap: 4px;
+    }
+
+    body.driver-mobile-screen .driver-report-card,
+    body.driver-mobile-screen .driver-report-section {
+        padding: 3px 5px;
+    }
+
+    body.driver-mobile-screen .driver-report-card h3,
+    body.driver-mobile-screen .driver-report-row,
+    body.driver-mobile-screen .driver-report-actions button {
+        font-size: clamp(10px, 1.6vw, 13px);
+    }
+
+    body.driver-mobile-screen .driver-report-section h4 {
+        font-size: clamp(9px, 1.45vw, 12px);
+    }
+}
+
+@media (max-height: 760px) {
+    body.driver-mobile-screen .driver-manifest-head h2,
+body.driver-mobile-screen .driver-downtime-title-row h2 {
+        font-size: clamp(25px, 6.5vw, 29px);
+    }
+
+    
+    
+    body.driver-mobile-screen .driver-shift-result-cell strong {
+        font-size: clamp(18px, 5vw, 22px);
+    }
+}
+
+@media (max-height: 780px) {
+    body.driver-mobile-screen .driver-header h1 {
+        font-size: clamp(17px, 4.7vw, 23px);
+    }
+
+    body.driver-mobile-screen .driver-header p {
+        margin: 0;
+    }
+
+    
+    body.driver-mobile-screen .driver-downtime-list {
+        max-height: none;
+    }
+}
+
+@media (max-width: 370px) {
+    body.driver-mobile-screen .driver-online span,
+    body.driver-mobile-screen .driver-online strong {
+        display: none;
+    }
+
+    body.driver-mobile-screen .driver-work-context-body {
+        grid-template-columns: minmax(110px, 0.44fr) minmax(0, 1fr);
+        padding-inline: 11px;
+    }
+
+}
+
+@media (max-width: 520px) {
+    body.driver-mobile-screen .driver-online > span {
+        display: none;
+    }
+
+    body.driver-mobile-screen .driver-online-dot {
+        display: block;
+        flex-basis: 12px;
+        width: 12px;
+        height: 12px;
+    }
+
+    body.driver-mobile-screen .driver-work-context-machine {
+        padding-right: 11px;
+    }
+
+    body.driver-mobile-screen .driver-work-context-geology {
+        padding-left: 11px;
+    }
+}
+
+@media (min-width: 900px) {
+    body.driver-mobile-screen .driver-work-screen.is-active {
+        --driver-dial-size: clamp(320px, min(42vw, 58dvh), 520px);
+    }
+
+    body.driver-mobile-screen .driver-work-dial {
+        max-width: 520px;
+    }
+}
+
+/* One structural contract for the bottom action on Shift, Downtimes and
+   Waybill. Semantic colours stay role-specific, while geometry and type no
+   longer jump when the driver switches tabs. */
+body.driver-mobile-screen {
+    --driver-footer-action-h: clamp(48px, 6.4dvh, 56px);
+    --driver-footer-action-gap: clamp(6px, .9dvh, 8px);
+    --driver-footer-action-radius: 10px;
+    --driver-footer-action-font-size: clamp(16px, min(4.4vw, 2.15dvh), 19px);
+}
+
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] {
+    /* The shared Shift component is absolutely positioned by its generic
+       stylesheet.  Use the same content rails as the other Driver tabs so
+       its action row cannot sit closer to the navigation or jump sideways
+       when switching between Shift, Downtimes and Waybill. */
+    inset: calc(var(--driver-safe-top) + var(--driver-header-h) + var(--driver-work-gap))
+        var(--driver-edge)
+        calc(var(--driver-safe-bottom) + var(--driver-nav-content-h)) !important;
+    --ms-screen-rows: minmax(38px, .12fr) minmax(0, 1fr) var(--driver-footer-action-h);
+    --ms-screen-rows-landscape: minmax(30px, .12fr) minmax(0, 1fr) var(--driver-footer-action-h);
+    row-gap: var(--driver-footer-action-gap) !important;
+    padding: 0 0 var(--driver-footer-action-gap) !important;
+}
+
+/* The Driver shell keeps a general work gap above the fixed navigation.  The
+   three footer-action tabs already own an equal gap above and below their
+   action row, so let them use that reserved strip instead of stacking two
+   different gaps.  Their flexible content row absorbs the recovered height;
+   the action height itself remains unchanged. */
+body.driver-mobile-screen [data-driver-tab-panel="shift"].is-active,
+body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active,
+body.driver-mobile-screen [data-driver-tab-panel="manifest"].is-active {
+    height: calc(100% + var(--driver-work-gap));
+    max-height: calc(100% + var(--driver-work-gap));
+}
+
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__actions,
+body.driver-mobile-screen .driver-downtime-close,
+body.driver-mobile-screen .driver-report-actions {
+    min-height: var(--driver-footer-action-h);
+    height: var(--driver-footer-action-h);
+    max-height: var(--driver-footer-action-h);
+}
+
+body.driver-mobile-screen [data-driver-tab-panel="downtimes"].is-active,
+body.driver-mobile-screen .driver-shell[data-driver-density] [data-driver-tab-panel="downtimes"].is-active {
+    grid-template-rows: clamp(34px, 4.5dvh, 40px) clamp(62px, 8.2dvh, 76px) minmax(0, 1fr) var(--driver-footer-action-h) !important;
+    gap: var(--driver-footer-action-gap) !important;
+    padding-bottom: var(--driver-footer-action-gap);
+}
+
+body.driver-mobile-screen .driver-manifest-view[data-driver-manifest-view="report"].is-active,
+body.driver-mobile-screen .driver-shell[data-driver-density] .driver-manifest-view[data-driver-manifest-view="report"].is-active {
+    grid-template-rows: minmax(0, 1fr) var(--driver-footer-action-h);
+    gap: var(--driver-footer-action-gap);
+    padding-bottom: var(--driver-footer-action-gap);
+}
+
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__action,
+body.driver-mobile-screen .driver-downtime-close,
+body.driver-mobile-screen .driver-report-actions button {
+    box-sizing: border-box;
+    min-height: var(--driver-footer-action-h);
+    height: var(--driver-footer-action-h);
+    max-height: var(--driver-footer-action-h);
+    margin: 0;
+    border-width: 1px;
+    border-style: solid;
+    border-radius: var(--driver-footer-action-radius);
+    padding: 6px clamp(10px, 3vw, 16px);
+    font-family: inherit;
+    font-size: var(--driver-footer-action-font-size) !important;
+    font-weight: 700 !important;
+    line-height: 1.15 !important;
+    letter-spacing: 0;
+    box-shadow: inset 0 0 14px rgba(255, 255, 255, .035);
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Every bottom action uses one label contract.  Keep it on the visible text
+   node as well as on the button: the shared Shift component and the MAX
+   delivery state both wrap their captions in child elements. */
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__action > [data-mobile-shift-label],
+body.driver-mobile-screen .driver-downtime-close,
+body.driver-mobile-screen .driver-report-action-title {
+    font-family: inherit !important;
+    font-size: var(--driver-footer-action-font-size) !important;
+    font-weight: 700 !important;
+    line-height: 1.15 !important;
+    letter-spacing: 0 !important;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .mobile-shift[data-mobile-shift-role="driver"] .mobile-shift__action > [data-mobile-shift-label],
+body.driver-mobile-screen [data-driver-footer-action-label],
+body.driver-mobile-screen .driver-report-action-title {
+    display: block;
+    max-width: 100%;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-report-action-copy {
+    gap: 0;
+    place-items: center;
+}
+
+body.driver-mobile-screen .driver-report-action-hint {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready {
+    grid-template-columns: auto auto;
+    justify-content: center;
+}
+
+body.driver-mobile-screen .driver-report-actions button.is-max-ready .driver-report-action-copy {
+    justify-self: auto;
+    text-align: center;
+}
+
+body.driver-mobile-screen .driver-downtime-close:not(:disabled),
+body.driver-mobile-screen .driver-downtime-close:disabled,
+body.driver-mobile-screen .driver-downtime-close.is-disabled {
+    font-weight: 700 !important;
+}
+
+/* Report lists keep a readable row height. Extra trips and downtimes scroll
+   inside their own cards instead of shrinking every line to fit the screen. */
+body.driver-mobile-screen .driver-report-section--scrollable {
+    overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-report-section-scroll {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(88, 223, 82, .58) rgba(8, 20, 25, .7);
+    -webkit-overflow-scrolling: touch;
+}
+
+body.driver-mobile-screen .driver-report-section-scroll::-webkit-scrollbar {
+    width: 4px;
+}
+
+body.driver-mobile-screen .driver-report-section-scroll::-webkit-scrollbar-track {
+    background: rgba(8, 20, 25, .7);
+}
+
+body.driver-mobile-screen .driver-report-section-scroll::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(88, 223, 82, .58);
+}
+
+body.driver-mobile-screen .driver-report-section-scroll .driver-report-row {
+    min-height: clamp(34px, 4.8dvh, 42px);
+    padding: 7px 2px;
+    align-items: center;
+    font-size: clamp(13px, min(3.85vw, 1.9dvh), 16px);
+    line-height: 1.16;
+}
+
+body.driver-mobile-screen .driver-report-section-scroll .driver-report-row > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+/* Driver downtime buttons use the same history cue as the Excavator screen:
+   the active reason pulses, while every used reason keeps its shift timer. */
+body.driver-mobile-screen .driver-downtime-list button {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    place-items: center;
+    align-content: center;
+    gap: clamp(1px, .35dvh, 3px);
+    -webkit-text-size-adjust: none;
+    text-size-adjust: none;
+}
+
+body.driver-mobile-screen .driver-downtime-reason-label {
+    display: -webkit-box;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-align: center;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    font-size: inherit !important;
+    line-height: 1.05 !important;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+body.driver-mobile-screen .driver-downtime-reason-duration {
+    min-width: max-content;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 1px clamp(4px, 1.2vw, 7px);
+    border: 1px solid rgba(255, 102, 88, .58);
+    border-radius: 999px;
+    background: rgba(54, 10, 10, .88);
+    color: #ff6658;
+    box-shadow: inset 0 0 8px rgba(255, 102, 88, .14), 0 0 9px rgba(255, 102, 88, .18);
+    font-size: clamp(10px, min(3vw, 1.45dvh), 13px) !important;
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.08 !important;
+    letter-spacing: .045em;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-downtime-reason-duration[hidden] {
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected) {
+    filter: brightness(1.08) saturate(1.04);
+    box-shadow:
+        inset 0 -3px 0 rgba(255, 102, 88, .82),
+        inset 0 0 0 1px color-mix(in srgb, var(--driver-reason-accent) 18%, transparent),
+        0 0 12px rgba(255, 102, 88, .1);
+}
+
+/* A second line with the per-reason timer must never be squeezed into the
+   legacy short-landscape equal fractions. Keep real touch rows and let only
+   the reasons area scroll vertically when the screen is short. */
+@media (orientation: landscape) and (max-height: 520px) {
+    body.driver-mobile-screen .driver-downtime-list {
+        grid-auto-rows: 52px !important;
+        align-content: start;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+        touch-action: pan-y;
+        padding-right: 3px;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(74, 222, 128, .5) rgba(148, 163, 184, .12);
+    }
+
+    body.driver-mobile-screen .driver-downtime-list form,
+    body.driver-mobile-screen .driver-downtime-list button {
+        height: 52px;
+        min-height: 52px;
+    }
+
+    body.driver-mobile-screen .driver-downtime-list button {
+        gap: 1px;
+        padding: 3px 4px;
+        font-size: clamp(9px, 1.45vw, 12px);
+        line-height: 1.02;
+    }
+
+    body.driver-mobile-screen .driver-downtime-reason-duration {
+        padding-block: 0;
+        font-size: clamp(8px, 1.25vw, 10px);
+        line-height: 1;
+    }
+}
