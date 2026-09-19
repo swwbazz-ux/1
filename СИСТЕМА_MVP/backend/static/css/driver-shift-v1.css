@@ -3907,3 +3907,46 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
         line-height: 1;
     }
 }
+
+/* Уровень виброотклика (вкладка «Смена»). Сила на вебе — это длительность импульса,
+   поэтому три уровня масштабируют длительности круга и барабана. */
+body.driver-mobile-screen .driver-haptic-level {
+    margin: 14px 0 6px;
+    padding: 12px 14px;
+    border: 1px solid rgba(140, 255, 46, 0.18);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.03);
+    display: grid;
+    gap: 8px;
+}
+body.driver-mobile-screen .driver-haptic-level__title {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.62);
+}
+body.driver-mobile-screen .driver-haptic-level__options {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+}
+body.driver-mobile-screen .driver-haptic-level__options button {
+    min-height: 42px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.78);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+}
+body.driver-mobile-screen .driver-haptic-level__options button.is-active {
+    border-color: var(--driver-green);
+    background: rgba(140, 255, 46, 0.14);
+    color: var(--driver-green);
+}
+body.driver-mobile-screen .driver-haptic-level__hint {
+    font-size: 11px;
+    line-height: 1.35;
+    color: rgba(255, 255, 255, 0.45);
+}

@@ -173,6 +173,8 @@
         } catch (e) {}
     }
     function haptic(pattern) {
+        // Общий уровень виброотклика водителя (driver-haptics-v1.js) масштабирует длительности.
+        if (typeof root.driverHaptic === "function") { root.driverHaptic(pattern); return; }
         if (root.navigator && typeof root.navigator.vibrate === "function") {
             try { root.navigator.vibrate(pattern); } catch (e) {}
         }
