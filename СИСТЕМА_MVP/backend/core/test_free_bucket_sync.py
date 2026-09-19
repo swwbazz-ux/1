@@ -504,6 +504,55 @@ class FreeBucketServerIntegrationTests(TestCase):
         acceptance.refresh_from_db()
         self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.REQUESTED)
 
+    def test_request_expires_ten_minutes_after_switching_on(self):
+        """Включённый свободный ковш живёт 10 минут с момента включения.
+
+        Решение пользователя 20.09.2026: режим действует с момента включения и до
+        первой погрузки или отмены, но не дольше десяти минут. Приём машинистом
+        окно не продлевает. Правило живёт в общем фильтре, поэтому по истечении
+        срока самосвал одновременно уходит из-под ковша у водителя, на пульте и
+        у экскаваторщика, а сама запись остаётся как есть.
+        """
+        from datetime import timedelta
+        from trips.free_bucket import (
+            FREE_BUCKET_REQUEST_TTL,
+            active_free_bucket_acceptance_filter,
+            active_free_bucket_acceptance_for_truck,
+        )
+
+        selected = self.select_event(event_id='driver-free-bucket-ttl')
+        self.assertEqual(self.sync_driver([selected]).json()['results'][0]['status'], 'accepted')
+        acceptance = FreeBucketAcceptance.objects.get()
+        self.assertEqual(FREE_BUCKET_REQUEST_TTL, timedelta(minutes=10))
+
+        switched_on = acceptance.occurred_at
+
+        def active_at(moment):
+            return FreeBucketAcceptance.objects.filter(
+                active_free_bucket_acceptance_filter(now=moment)
+            ).filter(pk=acceptance.pk).exists()
+
+        self.assertTrue(active_at(switched_on + timedelta(minutes=9, seconds=59)))
+        self.assertFalse(active_at(switched_on + timedelta(minutes=10, seconds=1)))
+
+        # Приём машинистом на девятой минуте срок не продлевает.
+        FreeBucketAcceptance.objects.filter(pk=acceptance.pk).update(
+            status=FreeBucketAcceptanceStatus.ACCEPTED,
+            operator=self.operator,
+            loading_shift=self.shift,
+            accepted_at=switched_on + timedelta(minutes=9),
+        )
+        self.assertTrue(active_at(switched_on + timedelta(minutes=9, seconds=30)))
+        self.assertFalse(active_at(switched_on + timedelta(minutes=10, seconds=1)))
+
+        # Истёкшее право не держит самосвал и для погрузки.
+        FreeBucketAcceptance.objects.filter(pk=acceptance.pk).update(
+            occurred_at=timezone.now() - timedelta(minutes=11),
+        )
+        self.assertIsNone(active_free_bucket_acceptance_for_truck(self.truck))
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.ACCEPTED)
+
     def test_driver_shift_close_keeps_used_acceptance_and_loaded_trip(self):
         selected = self.select_event(event_id='driver-free-before-used-shift-close')
         self.assertEqual(self.sync_driver([selected]).json()['results'][0]['status'], 'accepted')
