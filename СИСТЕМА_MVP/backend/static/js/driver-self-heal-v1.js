@@ -240,7 +240,8 @@
             return String(item.event_type || "?") + "/" + String(item.state || "?")
                 + "/try" + String(item.attempt_count || 0)
                 + "/" + String(item.last_error && item.last_error.code || "-")
-                + "/" + String(age) + "s";
+                + "/" + String(age) + "s"
+                + (item.last_error && item.last_error.message ? " {" + String(item.last_error.message).slice(0, 160) + "}" : "");
         });
         window.console.info("driver-outbox pending=" + String(detail.pendingCount) + " review=" + String(detail.reviewCount) + " [" + summary.join(" ") + "]");
     });
