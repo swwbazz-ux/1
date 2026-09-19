@@ -28,7 +28,7 @@ function functionSource(source, name) {
 test("driver v226 shell precaches the durable runtime and exact authenticated dependencies", () => {
     assert.match(template, /driver-offline-outbox-v2\.js/);
     assert.doesNotMatch(template, /createDriverUnloadOutbox/);
-    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v292'/);
+    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v293'/);
     assert.match(views, /driver-offline-outbox-v2\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /async function isValidatedDriverShell/);
     assert.match(views, /html\.includes\("data-driver-shell"\)/);
@@ -41,7 +41,7 @@ test("driver v226 shell precaches the durable runtime and exact authenticated de
     assert.match(views, /hasValidatedCurrentShell/);
     const coreAssets = views.match(/const CORE_ASSETS = \[([\s\S]*?)\];/)[1];
     assert.doesNotMatch(coreAssets, /APP_SHELL_URL|LEGACY_SHELL_URL/);
-    assert.match(roleApps, /shell_version='driver-mobile-shell-v292'/);
+    assert.match(roleApps, /shell_version='driver-mobile-shell-v293'/);
 });
 
 test("a legacy loaded shell reloads before adopting a fragment that requires newer assets", () => {
@@ -56,7 +56,7 @@ test("a legacy loaded shell reloads before adopting a fragment that requires new
         let reloads = 0;
         let removals = 0;
         const node = {
-            dataset: {driverFragmentShell: "driver-mobile-shell-v292"},
+            dataset: {driverFragmentShell: "driver-mobile-shell-v293"},
             remove() { removals += 1; },
         };
         vm.runInNewContext(`(function(){${handler}}).call(node)`, {
@@ -70,7 +70,7 @@ test("a legacy loaded shell reloads before adopting a fragment that requires new
         return {reloads, removals};
     }
     assert.deepEqual(execute("driver-mobile-shell-v218"), {reloads: 1, removals: 0});
-    assert.deepEqual(execute("driver-mobile-shell-v292"), {reloads: 0, removals: 1});
+    assert.deepEqual(execute("driver-mobile-shell-v293"), {reloads: 0, removals: 1});
 });
 
 test("expired session update migrates a valid shell without touching a nonempty event queue", () => {
@@ -274,6 +274,19 @@ test("review-only queue does not block a safe fragment refresh", () => {
         querySelector() { return null; },
     };
     assert.equal(sandbox.isDriverOperationalRefreshUnsafe(shell), false);
+    /* Застрявшая запись (уже была неудачная попытка или ей больше 15 с) экран
+       не держит: 20.09.2026 одна такая запись замораживала экран навсегда. */
     sandbox.window.driverOfflinePendingCount = 1;
+    sandbox.window.driverOfflineBlockingCount = 0;
+    assert.equal(sandbox.isDriverOperationalRefreshUnsafe(shell), false);
+    /* Свежее действие в первой доставке — держит, пока не уйдёт. */
+    sandbox.window.driverOfflineBlockingCount = 1;
     assert.equal(sandbox.isDriverOperationalRefreshUnsafe(shell), true);
+});
+
+test("blocking count covers only fresh first-attempt pending events", () => {
+    const source = functionSource(template, "renderDriverOfflineState");
+    assert.match(source, /window\.driverOfflineBlockingCount = driverOfflineEvents\.filter/);
+    assert.match(source, /attempt_count \|\| 0\) > 0\) return false/);
+    assert.match(source, /< 15000/);
 });

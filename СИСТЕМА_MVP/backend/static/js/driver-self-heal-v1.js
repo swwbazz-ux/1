@@ -134,6 +134,7 @@
     }
 
     function tick() {
+        traceFragmentRequests();
         var shell = document.querySelector("[data-driver-shell]");
         if (!shell) return;
         /* Скрытую вкладку обновление откладывает намеренно, и время в фоне
@@ -195,7 +196,10 @@
     /* Замер запроса фрагмента: в нативном приложении консоль попадает в logcat,
        и по USB видно, сколько шёл каждый запрос и чем кончился (таймаут 15 с,
        несовпадение версии, HTTP-ошибка). Поведение запроса не меняется. */
-    (function traceFragmentRequests() {
+    /* AppOperationalFragment объявляется в base.html ПОСЛЕ скриптов экрана, поэтому
+       при загрузке этого файла его ещё нет: обёртка ставится при готовности
+       realtime-клиента и повторяется из тика, пока не встанет. */
+    function traceFragmentRequests() {
         var fragment = window.AppOperationalFragment;
         if (!fragment || typeof fragment.request !== "function" || fragment.__driverTraced) return;
         var original = fragment.request;
@@ -215,7 +219,26 @@
                 throw error;
             });
         };
-    })();
+    }
+    traceFragmentRequests();
+    window.addEventListener("app-realtime-ready", traceFragmentRequests);
+
+    /* Состав очереди неотправленных действий — в журнал при каждом изменении:
+       тип, состояние, число попыток, код последней ошибки, возраст. */
+    window.addEventListener("operational-outbox-state", function (event) {
+        var detail = event && event.detail ? event.detail : {};
+        if (detail.role && detail.role !== "driver") return;
+        if (!window.console || typeof window.console.info !== "function") return;
+        var events = Array.isArray(window.driverOfflineEvents) ? window.driverOfflineEvents : [];
+        var summary = events.slice(0, 6).map(function (item) {
+            var age = Date.parse(item.occurred_at || "") ? Math.round((Date.now() - Date.parse(item.occurred_at)) / 1000) : -1;
+            return String(item.event_type || "?") + "/" + String(item.state || "?")
+                + "/try" + String(item.attempt_count || 0)
+                + "/" + String(item.last_error && item.last_error.code || "-")
+                + "/" + String(age) + "s";
+        });
+        window.console.info("driver-outbox pending=" + String(detail.pendingCount) + " review=" + String(detail.reviewCount) + " [" + summary.join(" ") + "]");
+    });
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", start);

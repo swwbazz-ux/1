@@ -52,8 +52,8 @@ function isDriverOperationalRefreshUnsafe(shell) {
     ) return false;
     if (
         typeof window !== "undefined" &&
-        Number(window.driverOfflinePendingCount || 0) > 0
-    ) return busy("outbox:" + String(window.driverOfflinePendingCount));
+        Number(window.driverOfflineBlockingCount || 0) > 0
+    ) return busy("outbox:" + String(window.driverOfflineBlockingCount) + "/" + String(window.driverOfflinePendingCount || 0));
     var gestureNode = shell.querySelector(".is-touch-armed, .is-holding, .is-pending, .is-dragging, .is-lifting, .is-dropping, .is-snapping, .driver-drum-ghost, [data-driver-point-sheet]:not([hidden]), [data-driver-free-bucket-sheet]:not([hidden])")
         || document.querySelector("[data-driver-pwa-update-modal]:not([hidden]), .app-confirm-modal:not([hidden])");
     if (!gestureNode) {
