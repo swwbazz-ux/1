@@ -464,6 +464,46 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertIsNone(other_shift_state['selection'])
         self.assertFalse(other_shift_state['can_cancel'])
 
+    def test_orphaned_request_stops_holding_the_truck_for_dispatcher_and_excavator(self):
+        """Осиротевшая заявка не держит самосвал «под свободным ковшом» нигде.
+
+        Продолжение боевого случая 20.09.2026: после починки экрана водителя
+        пульт диспетчера и приложение экскаваторщика всё ещё показывали самосвал
+        под свободным ковшом — они читают ту же запись своим общим фильтром
+        active_free_bucket_acceptance_filter(). Право живёт внутри своей смены,
+        поэтому запись от закрытой смены не должна считаться активной ни для
+        одного экрана.
+        """
+        from trips.free_bucket import (
+            active_free_bucket_acceptance_filter,
+            active_free_bucket_acceptance_for_truck,
+        )
+
+        selected = self.select_event(event_id='driver-free-bucket-orphan-scope')
+        self.assertEqual(self.sync_driver([selected]).json()['results'][0]['status'], 'accepted')
+        acceptance = FreeBucketAcceptance.objects.get()
+
+        active_ids = list(
+            FreeBucketAcceptance.objects
+            .filter(active_free_bucket_acceptance_filter(now=timezone.now()))
+            .values_list('id', flat=True)
+        )
+        self.assertIn(acceptance.id, active_ids)
+        self.assertIsNotNone(active_free_bucket_acceptance_for_truck(self.truck))
+
+        # Смена заявки закончилась, а саму заявку погасить не успели.
+        EmployeeShift.objects.filter(pk=self.truck_shift.pk).update(closed_at=timezone.now())
+
+        active_ids_after = list(
+            FreeBucketAcceptance.objects
+            .filter(active_free_bucket_acceptance_filter(now=timezone.now()))
+            .values_list('id', flat=True)
+        )
+        self.assertNotIn(acceptance.id, active_ids_after)
+        self.assertIsNone(active_free_bucket_acceptance_for_truck(self.truck))
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.REQUESTED)
+
     def test_driver_shift_close_keeps_used_acceptance_and_loaded_trip(self):
         selected = self.select_event(event_id='driver-free-before-used-shift-close')
         self.assertEqual(self.sync_driver([selected]).json()['results'][0]['status'], 'accepted')

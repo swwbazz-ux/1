@@ -35,6 +35,15 @@ def active_free_bucket_acceptance_filter(*, now=None):
 
     The five-minute window never cancels a pending driver request or an accepted
     one-load right.  It only retires the already-consumed Excavator card.
+
+    An unspent right also dies with its own shift.  Normally
+    ``cancel_free_bucket_acceptances_for_shift`` does that at shift close, but a
+    row whose shift ended without that cleanup (crash, lost request, a shift
+    closed by another path) used to stay "active" forever: the truck kept
+    showing as taken under a free bucket on the dispatcher board and in the
+    Excavator app, and neither side could clear it.  The right belongs to the
+    shift it was requested in, so an ended or missing shift means it is spent.
+    ``USED`` rows are deliberately left alone here — they belong to a real Trip.
     """
     from .models import FreeBucketAcceptanceStatus
 
@@ -47,10 +56,21 @@ def active_free_bucket_acceptance_filter(*, now=None):
         used_at__isnull=True,
         used_trip__created_at__gt=cutoff,
     )
-    return Q(status__in=(
-        FreeBucketAcceptanceStatus.REQUESTED,
-        FreeBucketAcceptanceStatus.ACCEPTED,
-    )) | (
+    # Заявку может завести и водитель (requesting_shift), и машинист
+    # экскаватора (loading_shift). Право живо, пока жива хотя бы одна из своих
+    # смен; без единой привязки к смене не трогаем — такие записи заводят
+    # другие пути, и гадать за них здесь нельзя.
+    shift_is_alive = (
+        Q(requesting_shift__isnull=False, requesting_shift__closed_at__isnull=True)
+        | Q(loading_shift__isnull=False, loading_shift__closed_at__isnull=True)
+        | Q(requesting_shift__isnull=True, loading_shift__isnull=True)
+    )
+    return (
+        Q(status__in=(
+            FreeBucketAcceptanceStatus.REQUESTED,
+            FreeBucketAcceptanceStatus.ACCEPTED,
+        )) & shift_is_alive
+    ) | (
         Q(status=FreeBucketAcceptanceStatus.USED)
         & used_time_is_recent
     )
