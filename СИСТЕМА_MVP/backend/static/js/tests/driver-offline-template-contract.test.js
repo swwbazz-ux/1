@@ -27,7 +27,7 @@ function functionSource(source, name) {
 test("driver v226 shell precaches the durable runtime and exact authenticated dependencies", () => {
     assert.match(template, /driver-offline-outbox-v2\.js/);
     assert.doesNotMatch(template, /createDriverUnloadOutbox/);
-    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v276'/);
+    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v280'/);
     assert.match(views, /driver-offline-outbox-v2\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /async function isValidatedDriverShell/);
     assert.match(views, /html\.includes\("data-driver-shell"\)/);
@@ -40,7 +40,7 @@ test("driver v226 shell precaches the durable runtime and exact authenticated de
     assert.match(views, /hasValidatedCurrentShell/);
     const coreAssets = views.match(/const CORE_ASSETS = \[([\s\S]*?)\];/)[1];
     assert.doesNotMatch(coreAssets, /APP_SHELL_URL|LEGACY_SHELL_URL/);
-    assert.match(roleApps, /shell_version='driver-mobile-shell-v276'/);
+    assert.match(roleApps, /shell_version='driver-mobile-shell-v280'/);
 });
 
 test("a legacy loaded shell reloads before adopting a fragment that requires newer assets", () => {
@@ -55,7 +55,7 @@ test("a legacy loaded shell reloads before adopting a fragment that requires new
         let reloads = 0;
         let removals = 0;
         const node = {
-            dataset: {driverFragmentShell: "driver-mobile-shell-v276"},
+            dataset: {driverFragmentShell: "driver-mobile-shell-v280"},
             remove() { removals += 1; },
         };
         vm.runInNewContext(`(function(){${handler}}).call(node)`, {
@@ -69,7 +69,7 @@ test("a legacy loaded shell reloads before adopting a fragment that requires new
         return {reloads, removals};
     }
     assert.deepEqual(execute("driver-mobile-shell-v218"), {reloads: 1, removals: 0});
-    assert.deepEqual(execute("driver-mobile-shell-v276"), {reloads: 0, removals: 1});
+    assert.deepEqual(execute("driver-mobile-shell-v280"), {reloads: 0, removals: 1});
 });
 
 test("expired session update migrates a valid shell without touching a nonempty event queue", () => {
@@ -205,6 +205,35 @@ test("unload hold keeps the existing dial and avoids per-frame style writes", ()
         /A completed normal hold is an application action,[\s\S]*?event\.preventDefault\(\);[\s\S]*?holdGuard\.start\(\);/
     );
     assert.doesNotMatch(template, /DriverCosmicDial|DriverOrbitalDial|driver-orbital-v1/);
+});
+
+test("экран обновляется послойно, а результат сверяется снимком", () => {
+    // Живые узлы остаются на месте — значит и обработчики нажатий остаются, и заново
+    // привязывать их не надо. Полная подмена остаётся запасным путём.
+    assert.match(template, /window\.driverMorphShell = function \(live, fresh\)/);
+    assert.match(
+        template,
+        /morphed = window\.driverMorphShell\(oldShell, freshShell\)\s*&&\s*window\.driverFragmentSnapshot\(oldShell\)\.full === freshSnapshot\.full/,
+        "Результат послойного обновления обязан сверяться снимком с серверным экраном."
+    );
+    assert.match(
+        template,
+        /if \(!morphed\) oldShell\.replaceWith\(freshShell\);/,
+        "Не сошлось — возвращаемся к полной подмене экрана."
+    );
+    // Любое расхождение структуры — отказ: иначе вставленный узел остался бы без обработчика.
+    const morphSource = template.slice(template.indexOf("window.driverMorphShell = function"));
+    assert.match(morphSource.slice(0, morphSource.indexOf("/* DRIVER_FRAGMENT_SNAPSHOT_END */")), /return !an && !bn;/);
+    // Области, которые рисует клиент, послойное обновление не трогает и снимок не сравнивает.
+    assert.match(template, /window\.DRIVER_CLIENT_OWNED = "\[data-driver-downtime-drum\]/);
+    assert.match(template, /all\(window\.DRIVER_CLIENT_OWNED\)\.forEach/);
+});
+
+test("круг устроен одинаково с рейсом и без него", () => {
+    // Пока состояния различались разметкой, разгрузка меняла структуру экрана и
+    // послойное обновление было невозможно.
+    assert.doesNotMatch(template, /<div class="driver-work-dial-button is-empty/);
+    assert.match(template, /data-driver-hold-button data-driver-pending-label="ОТПРАВКА"\{% if not active_trip %\} disabled/);
 });
 
 test("timer-only unload hold never starts a requestAnimationFrame loop", () => {

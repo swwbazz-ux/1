@@ -3996,11 +3996,14 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
         <div class="driver-work-dial-zone">
             <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_loading_wait_active %} is-waiting-loading{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}{% if shift_plan_visual.is_overrun %} is-over-plan{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-progress-capped: {% if shift_plan_visual.is_overrun %}100{% else %}{{ shift_plan_visual.loop_progress }}{% endif %}; --driver-over-progress: {% if shift_plan_visual.is_overrun %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %};" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-driver-loop-progress="{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}" data-driver-completed-loops="{{ shift_plan_visual.completed_loops|default:0 }}" data-driver-has-plan="{% if shift_plan_has_plan %}1{% else %}0{% endif %}" data-plan-progress-phase="{% if shift_plan_has_plan %}{{ shift_plan_visual.phase }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
                 {% include "includes/mobile_dial_actions.html" with mobile_dial_dump_point_enabled=active_trip mobile_dial_free_bucket_enabled=driver_free_bucket_can_open mobile_dial_has_active_trip=active_trip mobile_dial_has_open_shift=open_shift mobile_dial_has_current_truck=current_truck %}
-                {% if active_trip %}
-                    <form method="post" action="{% url 'driver_complete_trip' active_trip.id %}" class="driver-work-dial-form" data-driver-hold-form data-driver-trip-id="{{ active_trip.id }}" data-driver-unload-one-tap="{% if driver_unloading_wait_active %}true{% else %}false{% endif %}">
-                        {% csrf_token %}
-                        <input type="hidden" name="client_action_id" value="" data-driver-client-action>
-                        <button class="driver-work-dial-button is-loaded{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}" type="submit" data-driver-work-dial-control data-driver-hold-button data-driver-pending-label="ОТПРАВКА" aria-label="Подтвердить разгрузку. {% if driver_unloading_wait_active %}Нажмите один раз.{% else %}Удерживайте 1 секунду.{% endif %}">
+                <form method="post"{% if active_trip %} action="{% url 'driver_complete_trip' active_trip.id %}"{% endif %} class="driver-work-dial-form" data-driver-hold-form{% if active_trip %} data-driver-trip-id="{{ active_trip.id }}"{% endif %} data-driver-unload-one-tap="{% if active_trip and driver_unloading_wait_active %}true{% else %}false{% endif %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="client_action_id" value="" data-driver-client-action>
+                    {% comment %} Круг устроен одинаково в обоих состояниях: без рейса та же кнопка просто
+                       выключена. Пока состояния различались разметкой (форма против блока), разгрузка
+                       меняла структуру экрана, и обновить его послойно было нельзя — приходилось
+                       пересобирать весь экран, а это 0,7 с замирания на телефоне. {% endcomment %}
+                    <button class="driver-work-dial-button {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if active_trip and driver_unloading_wait_active %} is-waiting-unload{% endif %}{% if not active_trip and driver_loading_wait_active %} is-waiting-loading{% endif %}" type="{% if active_trip %}submit{% else %}button{% endif %}" data-driver-work-dial-control data-driver-hold-button data-driver-pending-label="ОТПРАВКА"{% if not active_trip %} disabled aria-disabled="true"{% endif %} aria-label="{% if active_trip %}Подтвердить разгрузку. {% if driver_unloading_wait_active %}Нажмите один раз.{% else %}Удерживайте 1 секунду.{% endif %}{% else %}Разгрузка недоступна: нет загруженного рейса{% endif %}">
                             <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
                                 <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                                 <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
@@ -4014,25 +4017,8 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
                                 <strong class="driver-work-label" data-driver-dial-label>{{ driver_dial_label }}</strong>
                                 <em class="driver-work-note">{{ driver_dial_note }}</em>
                             </span>
-                        </button>
-                    </form>
-                {% else %}
-                    <div class="driver-work-dial-button is-empty{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_loading_wait_active %} is-waiting-loading{% endif %}" data-driver-work-dial-control aria-disabled="true">
-                        <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
-                            <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
-                            <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
-                            <circle class="driver-work-over-progress" cx="50" cy="50" r="41" pathLength="100"></circle>
-                        </svg>
-                        <span class="driver-work-ticks" aria-hidden="true"></span>
-                        <span class="driver-work-hold-ring" aria-hidden="true"><span class="driver-work-hold-half is-right"><i class="driver-work-hold-fill"></i></span><span class="driver-work-hold-half is-left"><i class="driver-work-hold-fill"></i></span></span>
-                        <span class="driver-work-wait-halo" aria-hidden="true"></span><span class="driver-work-loaded-halo" aria-hidden="true"></span><span class="driver-work-dial-core"><span class="driver-work-wait-tint" aria-hidden="true"></span><span class="driver-work-loaded-tint" aria-hidden="true"></span>
-                            <span class="driver-work-percent">{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}%{% else %}{{ shift_plan_short_label|default:"нет плана" }}{% endif %}</span>
-                            {% if shift_plan_visual.has_completed_loops %}<b class="driver-work-progress-loop" aria-label="Завершено циклов: {{ shift_plan_visual.completed_loops }}">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
-                            <strong class="driver-work-label" data-driver-dial-label>{{ driver_dial_label }}</strong>
-                            <em class="driver-work-note">{{ driver_dial_note }}</em>
-                        </span>
-                    </div>
-                {% endif %}
+                    </button>
+                </form>
             </div>
         </div>
 
@@ -4315,6 +4301,20 @@ body.driver-mobile-screen .driver-downtime-list button.is-used:not(.is-selected)
    подменять нечего. «full» — всё, что рисует сервер, кроме CSRF, номера действия,
    секундомеров и активной вкладки; «core» — то же без состояния простоя (его уже
    показала местная проекция) и без скрытых вкладок «Простои» и «Журнал». */
+/* Области экрана, которые рисует клиент, и атрибуты, которые он же проставляет.
+   Один список на два механизма: снимок их не сравнивает, послойное обновление не трогает. */
+window.DRIVER_CLIENT_OWNED = "[data-driver-downtime-drum], [data-driver-drum-link], [data-driver-drum-link-active], [data-driver-free-bucket-current], [data-driver-free-bucket-grid], [data-driver-point-tile-status]";
+window.DRIVER_CLIENT_ATTRS = [
+    "data-driver-shell-bound", "data-driver-density", "data-driver-viewport-density",
+    "data-driver-dial-fit-key", "data-driver-dial-raw", "data-driver-unload-submitting",
+    "data-hold-complete", "data-driver-shift-dirty", "data-driver-shift-opening-dirty",
+    "data-driver-shift-opening-pending", "data-driver-free-bucket-active"
+];
+window.driverAttributeIsClientOwned = function (name) {
+    return window.DRIVER_CLIENT_ATTRS.indexOf(name) >= 0
+        || name.indexOf("data-driver-free-bucket-baseline") === 0
+        || name.indexOf("data-driver-drum") === 0;
+};
 window.driverFragmentSnapshot = function (shell) {
     if (!shell || typeof shell.cloneNode !== "function") return null;
     var copy = shell.cloneNode(true);
@@ -4334,6 +4334,32 @@ window.driverFragmentSnapshot = function (shell) {
     all("[data-driver-reason-seconds]").forEach(function (node) { node.removeAttribute("data-driver-reason-seconds"); });
     all("[data-driver-downtime-reason-button]").forEach(function (node) { node.removeAttribute("aria-label"); });
     all("[data-driver-report-downtime-total]").forEach(function (node) { node.removeAttribute("data-driver-report-downtime-total"); });
+    /* Области, которые рисует клиент, из сравнения исключаем: серверная разметка с живой
+       там не совпадёт никогда. Барабан ведёт свой скрипт (копии граней, углы, подсветка);
+       свободный ковш рисует свои плитки из отдельных данных ответа; отметка «Текущая»
+       на плитке точки ставится сразу при выборе. Состав причин при этом остаётся под
+       наблюдением: он виден на вкладке «Простои», а она в снимок входит. */
+    all(window.DRIVER_CLIENT_OWNED).forEach(function (node) { node.parentNode.removeChild(node); });
+    /* Атрибуты, которые ставит клиент: в серверной разметке их нет. */
+    [copy].concat(all("*")).forEach(function (node) {
+        Array.prototype.slice.call(node.attributes).forEach(function (attr) {
+            if (window.driverAttributeIsClientOwned(attr.name)) node.removeAttribute(attr.name);
+        });
+    });
+    copy.removeAttribute("style");
+    /* Подпись круга: сервер отдаёт её одной строкой, а подгонка разбивает на строки-спаны
+       и проставляет кегль. Сравниваем исходный текст. */
+    all("[data-driver-dial-label]").forEach(function (node) {
+        var raw = node.dataset.driverDialRaw || node.textContent || "";
+        node.textContent = String(raw).trim().replace(/\s+/g, " ");
+        ["data-driver-dial-raw", "data-driver-dial-fit-key", "style"].forEach(function (name) {
+            node.removeAttribute(name);
+        });
+        ["is-single-medium", "is-two-line", "is-three-line"].forEach(function (name) {
+            node.classList.remove(name);
+        });
+    });
+    all(".driver-work-dial-core").forEach(function (node) { node.classList.remove("has-multiline-label"); });
     /* Длительности в путёвке считаются на сервере в минутах и растут, пока идёт простой:
        сами строки (состав журнала) сравниваем, их секундомеры — нет. */
     all("[data-driver-tab-panel='manifest'] .driver-report-row").forEach(function (row) {
@@ -4362,6 +4388,126 @@ window.driverForceFragmentApply = false;
    сохраняются, а скрипт барабана видит тот же элемент и не пересобирает геометрию.
    Своих обработчиков на барабане нет (он слушает document), поэтому перенос безопасен;
    во время жеста обновление и так отложено — см. isDriverOperationalRefreshUnsafe. */
+/* Послойное обновление экрана. Подменять весь экран дорого: на телефоне водителя это
+   0,6–0,9 с замирания, из них около 0,25 с только на барабан простоев. Здесь вместо
+   подмены живые узлы остаются на месте, а с сервера переносятся лишь изменившиеся
+   атрибуты и тексты. Это же снимает главную опасность частичного обновления: узлы не
+   пересоздаются, значит обработчики нажатий никуда не деваются и заново их вешать не надо.
+
+   Правила:
+   — структура должна совпадать; любое добавление или удаление узла — отказ, дальше
+     работает обычная полная подмена с полной перепривязкой (иначе новый узел остался бы
+     без обработчика);
+   — барабан непрозрачен: его содержимое ведёт свой скрипт. Если сервер изменил состав
+     причин, барабан заменяется целиком и пересобирается;
+   — клиентские атрибуты и классы (подгонка подписи, плотность, состояние жеста) не
+     стираются серверными.
+   Результат проверяется снимком: если после обновления экран не совпал с серверным,
+   вызывающий код откатывается на полную подмену. */
+window.driverDrumComposition = function (root) {
+    var drum = root && root.querySelector ? root.querySelector("[data-driver-downtime-drum]") : null;
+    if (!drum) return "";
+    var parts = [String(drum.dataset.driverQuickMin || "")];
+    Array.prototype.forEach.call(
+        drum.querySelectorAll("[data-driver-drum-card]:not([data-driver-drum-clone])"),
+        function (card) {
+            var label = card.querySelector(".driver-drum-card-label");
+            parts.push([
+                card.dataset.driverDrumReasonId || "",
+                card.dataset.driverDrumQuick || "",
+                card.classList.contains("is-unavailable") ? "1" : "0",
+                label ? label.textContent.trim() : ""
+            ].join(":"));
+        }
+    );
+    return parts.join("|");
+};
+
+window.driverMorphShell = function (live, fresh) {
+    /* Классы, которые ставит клиент и которых нет в серверной разметке. */
+    var CLIENT_CLASSES = [
+        "has-multiline-label", "is-single-medium", "is-two-line", "is-three-line",
+        "is-touch-armed", "is-holding", "is-pending", "is-dragging"
+    ];
+    var OPAQUE = window.DRIVER_CLIENT_OWNED;
+    /* Узлы, чей style ведёт клиент: высота окна, подогнанный кегль подписи. */
+    var KEEP_STYLE = "[data-driver-shell], [data-driver-dial-label]";
+
+    function preserved(name) {
+        return window.driverAttributeIsClientOwned(name);
+    }
+
+    function syncAttributes(a, b) {
+        var keepStyle = !!(a.matches && a.matches(KEEP_STYLE));
+        var i, attr;
+        for (i = b.attributes.length - 1; i >= 0; i -= 1) {
+            attr = b.attributes[i];
+            if (attr.name === "class" || preserved(attr.name)) continue;
+            if (attr.name === "style" && keepStyle) continue;
+            if (a.getAttribute(attr.name) !== attr.value) a.setAttribute(attr.name, attr.value);
+        }
+        for (i = a.attributes.length - 1; i >= 0; i -= 1) {
+            attr = a.attributes[i];
+            if (attr.name === "class" || preserved(attr.name)) continue;
+            if (attr.name === "style" && keepStyle) continue;
+            if (!b.hasAttribute(attr.name)) a.removeAttribute(attr.name);
+        }
+        var mine = [];
+        CLIENT_CLASSES.forEach(function (name) { if (a.classList.contains(name)) mine.push(name); });
+        var next = b.getAttribute("class");
+        if ((a.getAttribute("class") || "") !== (next || "")) {
+            if (next === null) a.removeAttribute("class");
+            else a.setAttribute("class", next);
+        }
+        mine.forEach(function (name) { a.classList.add(name); });
+    }
+
+    function morph(a, b) {
+        if (a.nodeType !== b.nodeType) return false;
+        if (a.nodeType === 3 || a.nodeType === 8) {
+            if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
+            return true;
+        }
+        if (a.nodeType !== 1) return true;
+        if (a.tagName !== b.tagName) return false;
+        if (a.matches && a.matches(OPAQUE)) {
+            /* Барабан: сменился состав причин — обновление послойно невозможно, нужен
+               полный пересбор. Остальные клиентские области просто не трогаем. */
+            if (a.hasAttribute("data-driver-downtime-drum")) {
+                return window.driverDrumComposition(a.parentNode) === window.driverDrumComposition(b.parentNode);
+            }
+            return true;
+        }
+        if (a.matches && a.matches("[data-driver-dial-label]")) {
+            /* Подпись круга разбита подгонкой на строки-спаны, у сервера она одной строкой.
+               Содержимое не трогаем: меняем исходный текст и сбрасываем ключ подгонки,
+               дальше подпись перерисует и подгонит сама подгонка. */
+            syncAttributes(a, b);
+            var freshText = String(b.textContent || "").trim().replace(/\s+/g, " ");
+            var liveText = String(a.dataset.driverDialRaw || a.textContent || "").trim().replace(/\s+/g, " ");
+            if (freshText && freshText !== liveText) {
+                a.dataset.driverDialRaw = freshText;
+                delete a.dataset.driverDialFitKey;
+            }
+            return true;
+        }
+        syncAttributes(a, b);
+        var an = a.firstChild;
+        var bn = b.firstChild;
+        while (an && bn) {
+            if (!morph(an, bn)) return false;
+            an = an.nextSibling;
+            bn = bn.nextSibling;
+        }
+        return !an && !bn;
+    }
+
+    try {
+        return morph(live, fresh);
+    } catch (error) {
+        return false;
+    }
+};
 /* DRIVER_FRAGMENT_SNAPSHOT_END */
 /* DRIVER_ROLE_HOLD_GUARD_START */
 window.createDriverRoleHoldGuard = function (options) {
@@ -5244,6 +5390,22 @@ window.applyOperationalStateRefresh = function (context) {
             "[data-driver-shell]"
         );
         if (!freshShell) return {deferred: true, reason: "driver_fragment_invalid"};
+        /* Метка версии оболочки во фрагменте: старый экран обязан перезагрузиться, прежде чем
+           принять разметку, которой нужны свежие стили и скрипты. Раньше это делала картинка,
+           которую вставляли в страницу; проверяем прямо здесь и убираем её — иначе структура
+           свежего экрана заведомо не совпадёт с живым и послойное обновление невозможно. */
+        var freshShellMark = freshShell.querySelector("[data-driver-fragment-shell]");
+        if (freshShellMark) {
+            var loadedShellVersion = String(
+                (window.__driverPwaUpdateRuntime && window.__driverPwaUpdateRuntime.currentShellVersion) || ""
+            );
+            var freshShellVersion = String(freshShellMark.dataset.driverFragmentShell || "");
+            freshShellMark.parentNode.removeChild(freshShellMark);
+            if (loadedShellVersion && freshShellVersion && loadedShellVersion !== freshShellVersion) {
+                window.location.reload();
+                return {deferred: true, reason: "driver_shell_outdated"};
+            }
+        }
         /* Сервер прислал тот же экран (или он отличается только нашим же простоем, который
            местная проекция уже показала): DOM не трогаем, версию подтверждаем. Полная подмена
            на телефоне — это 1–3 с замирания, и по таймеру она шла каждые 20 с. */
@@ -5309,9 +5471,22 @@ window.applyOperationalStateRefresh = function (context) {
         var viewState = window.AppOperationalFragment.captureView
             ? window.AppOperationalFragment.captureView(oldShell, "[data-driver-tab-panel]", "data-driver-tab-panel")
             : null;
-        oldShell.replaceWith(freshShell);
+        /* Сначала пробуем обновить экран послойно: живые узлы остаются, значит и
+           обработчики остаются, и барабан не пересобирается. Результат проверяем тем же
+           снимком; не сошлось — обычная полная подмена. */
+        var morphed = false;
+        if (typeof window.driverMorphShell === "function" && freshSnapshot) {
+            morphed = window.driverMorphShell(oldShell, freshShell)
+                && window.driverFragmentSnapshot(oldShell).full === freshSnapshot.full;
+        }
+        var appliedShell = morphed ? oldShell : freshShell;
+        if (!morphed) oldShell.replaceWith(freshShell);
         if (typeof window.bindDriverMobileShell === "function") {
             window.bindDriverMobileShell();
+        }
+        if (morphed && typeof scheduleDriverDialLabelFit === "function") {
+            /* Текст в круге мог смениться, а подогнанный кегль остался от прежнего. */
+            scheduleDriverDialLabelFit(true);
         }
         if (typeof window.checkAchievementPrize === "function") {
             window.checkAchievementPrize(context);
@@ -5351,7 +5526,7 @@ window.applyOperationalStateRefresh = function (context) {
             }
         }
         if (window.AppOperationalFragment.restoreView) {
-            window.AppOperationalFragment.restoreView(freshShell, viewState);
+            window.AppOperationalFragment.restoreView(appliedShell, viewState);
         }
         var appliedVersion = Number(payload.version || 0);
         document.body.dataset.operationalStateVersion = String(appliedVersion);
