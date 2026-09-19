@@ -711,3 +711,24 @@ test("auth classifier recognizes status redirect to root and login HTML", () => 
     assert.equal(isDriverSyncAuthResponse({status: 200, redirected: false, url: "https://driverform.ru/offline-events/sync/", headers: headers("text/html")}, '<main data-mobile-role-login></main>', "https://driverform.ru/driver/"), true);
     assert.equal(isDriverSyncAuthResponse({status: 200, redirected: false, url: "https://driverform.ru/offline-events/sync/", headers: headers("application/json")}, '{"ok":true}', "https://driverform.ru/driver/"), false);
 });
+
+test("terminal review records older than the retention window are purged, fresh ones stay", async () => {
+    /* 20.09.2026: на боевом телефоне лежали восемь отклонённых стартов простоя
+       трёхдневной давности — подпись связи вечно показывала «Не подтверждено». */
+    const local = storage();
+    const conflictSend = async batch => ({
+        results: batch.events.map(event => ({event_id: event.event_id, status: "conflict", message: "review"})),
+    });
+    const box = createDriverOfflineOutbox({
+        repository: localRepository(local, 7), localStorage: local, accessId: 7,
+        context: {actorId: 11, accessId: 7, shiftId: 23, equipmentId: 58, deviceId: "install-uuid-1"},
+        send: conflictSend, reviewRetentionMs: 30,
+    });
+    await box.enqueue({event_id: "old-conflict", event_type: "driver.downtime.started", payload: {reason_id: 1}});
+    await box.flush();
+    assert.deepEqual((await box.pending()).map(event => event.state), ["conflict"]);
+    await new Promise(resolve => setTimeout(resolve, 60));
+    await box.enqueue({event_id: "fresh-conflict", event_type: "driver.downtime.started", payload: {reason_id: 2}});
+    await box.flush();
+    assert.deepEqual((await box.pending()).map(event => event.event_id), ["fresh-conflict"], "старая запись убрана, свежая осталась");
+});
