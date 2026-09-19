@@ -284,6 +284,7 @@ class AccessLoginTests(TestCase):
             current_truck=truck,
             current_assignment=assignment,
             version=42,
+            open_shift=shift,
         )
 
         self.assertEqual(active, acceptance)

@@ -4115,7 +4115,7 @@ def driver_prefixed_context_value(prefix, value):
     return f'{prefix} {value}'
 
 
-def driver_free_bucket_payload(*, current_truck, current_assignment, version):
+def driver_free_bucket_payload(*, current_truck, current_assignment, version, open_shift=None):
     """Build the real, cacheable driver-side free-bucket directory and state."""
     from trips.models import FreeBucketAcceptance
 
@@ -4208,11 +4208,18 @@ def driver_free_bucket_payload(*, current_truck, current_assignment, version):
         })
 
     active_acceptance = None
-    if current_truck:
+    if current_truck and open_shift:
+        # Право на свободный ковш живёт внутри смены, в которой его запросили:
+        # при закрытии смены незакрытые заявки гасит
+        # cancel_free_bucket_acceptances_for_shift(). Без привязки к смене здесь
+        # заявка из прошлой (или просто другой) смены протекала на экран новой
+        # и подменяла собой настоящее назначение — водитель видел старый
+        # экскаватор, не мог ни выбрать другой, ни отменить этот.
         active_acceptance = (
             FreeBucketAcceptance.objects
             .filter(
                 truck=current_truck,
+                requesting_shift=open_shift,
                 status__in=('requested', 'accepted', 'used'),
             )
             .select_related('excavator', 'excavator__equipment_type')
@@ -4621,6 +4628,7 @@ def driver_shift_view(request):
         current_truck=current_truck,
         current_assignment=current_assignment,
         version=operational_state_version,
+        open_shift=open_shift,
     )
     driver_free_bucket_can_open = bool(open_shift and current_truck and not active_trip)
     driver_free_bucket_primary_label = driver_excavator_short_label(
