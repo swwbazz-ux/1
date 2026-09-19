@@ -35,3 +35,14 @@ test("driver template has no multi-line {# #} comments — Django renders those 
         assert.ok(!match[1].includes("\n"), `многострочный комментарий: ${match[1].slice(0, 60)}…`);
     }
 });
+
+test("an outdated shell still applies the fragment and reloads at most once per 30 s", () => {
+    /* 20.09.2026: пока сервер перезапускался после выкладки, экран перезагружался
+       на каждый фрагмент и выбрасывал саму разметку — 14 с слепоты на погрузке. */
+    const refresh = read("static/js/driver-shift-refresh-v1.js");
+    const block = refresh.slice(refresh.indexOf("loadedShellVersion !== freshShellVersion"), refresh.indexOf("var freshSnapshot"));
+    assert.doesNotMatch(block, /return \{deferred: true, reason: "driver_shell_outdated"\}/, "фрагмент больше не выбрасывается");
+    assert.match(block, /driver-shell-outdated-reload-at/);
+    assert.match(block, /> 30000/);
+    assert.match(block, /setTimeout\(function \(\) \{ window\.location\.reload\(\); \}, 1500\)/);
+});
