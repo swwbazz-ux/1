@@ -7,6 +7,7 @@ const path = require("node:path");
 const BACKEND_ROOT = path.resolve(__dirname, "..", "..", "..");
 
 const DRIVER_SCREEN_SCRIPTS = [
+    "driver-haptics-v1.js",
     "driver-shift-fragment-v1.js",
     "driver-shift-gestures-v1.js",
     "driver-shift-voice-v1.js",

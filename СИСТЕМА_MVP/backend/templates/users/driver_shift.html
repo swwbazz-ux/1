@@ -253,6 +253,15 @@
                 {% include "includes/mobile_shift_screen.html" with mobile_shift_role="driver" mobile_shift_state="blocked" mobile_shift_previous=False %}
             </div>
         {% endif %}
+        <div class="driver-haptic-level" data-driver-haptic-level-control role="group" aria-label="Уровень виброотклика">
+            <span class="driver-haptic-level__title">Виброотклик</span>
+            <div class="driver-haptic-level__options">
+                <button type="button" data-driver-haptic-level="weak" aria-pressed="false">Слабый</button>
+                <button type="button" data-driver-haptic-level="normal" aria-pressed="false">Средний</button>
+                <button type="button" data-driver-haptic-level="strong" aria-pressed="false">Сильный</button>
+            </div>
+            <small class="driver-haptic-level__hint">Сила задаётся длительностью импульса. Если телефон не вибрирует вовсе — включите «Виброотклик при касании» в его настройках.</small>
+        </div>
     </section>
 
     <section class="driver-panel driver-tab {% if active_tab == 'downtimes' %}is-active{% endif %}" data-driver-tab-panel="downtimes" data-driver-downtime-url="{% url 'driver_downtime_action' %}">
@@ -394,6 +403,7 @@
 
 {% include "includes/achievement_prize.html" %}
 
+<script src="{% static 'js/driver-haptics-v1.js' %}?v={{ driver_shell_version }}"></script>
 <script src="{% static 'js/driver-shift-fragment-v1.js' %}?v={{ driver_shell_version }}"></script>
 <script src="{% static 'js/driver-shift-gestures-v1.js' %}?v={{ driver_shell_version }}"></script>
 <script src="{% static 'js/driver-shift-voice-v1.js' %}?v={{ driver_shell_version }}"></script>

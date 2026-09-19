@@ -1943,6 +1943,9 @@ window.bindDriverMobileShell = function () {
         var HOLD_SEGMENTS = 12;
         var holdSegmentTimer = null;
         function driverVibrate(pattern) {
+            /* Через общий уровень виброотклика (driver-haptics-v1.js): водитель
+               выбирает силу на вкладке «Смена», длительности масштабируются там. */
+            if (typeof window.driverHaptic === "function") { window.driverHaptic(pattern); return; }
             if (!window.navigator || typeof window.navigator.vibrate !== "function") return;
             try { window.navigator.vibrate(pattern); } catch (error) {}
         }
@@ -1959,7 +1962,7 @@ window.bindDriverMobileShell = function () {
                 fired += 1;
                 // Последнюю границу не отбиваем: там срабатывает длинный отклик завершения.
                 if (fired >= HOLD_SEGMENTS) { stopHoldSegmentFeedback(); return; }
-                driverVibrate(14);
+                driverVibrate(24);
             }, totalMs / HOLD_SEGMENTS);
         }
         unloadHoldGuard = window.createDriverRoleHoldGuard({
@@ -1985,7 +1988,7 @@ window.bindDriverMobileShell = function () {
             },
             onComplete: function () {
                 stopHoldSegmentFeedback();
-                driverVibrate(140);   // кольцо заполнено
+                driverVibrate(160);   // кольцо заполнено
                 if (!submitDriverUnloadOnce()) {
                     unloadHoldGuard.cancel();
                 }
