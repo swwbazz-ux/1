@@ -44,4 +44,4 @@
 СИСТЕМА_MVP/backend/static/js/driver-shift-voice-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-shift-refresh-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-shift-close-v1.js
-СИСТЕМА_MVP/backend/deploy/data_updates/cancel_stuck_free_bucket_acceptance.py
+СИСТЕМА_MVP/backend/static/js/driver-self-heal-v1.js
