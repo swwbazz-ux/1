@@ -1603,7 +1603,7 @@ def process_one_offline_event(access, normalized):
                     'result_payload', 'updated_at',
                 ])
                 return _stored_result(receipt)
-            except Exception:
+            except Exception as error:
                 logger.exception(
                     'Unexpected offline event processing failure: %s',
                     normalized['event_id'],
@@ -1611,7 +1611,13 @@ def process_one_offline_event(access, normalized):
                 receipt.status = OfflineFieldEventStatus.RETRY
                 receipt.retryable = True
                 receipt.error_code = 'temporary_server_error'
-                receipt.error_message = 'Временная ошибка сервера. Событие сохранено и будет повторено.'
+                # Класс и первые символы ошибки уходят в ответ: с недебажного телефона
+                # это единственный способ узнать, обо что споткнулся сервер
+                # (боевой случай 20.09.2026 — 60 повторов одной отмены свободного
+                # ковша без единого следа причины на стороне телефона).
+                receipt.error_message = 'Временная ошибка сервера ({}: {}). Событие сохранено и будет повторено.'.format(
+                    type(error).__name__, str(error)[:120].replace(chr(10), ' '),
+                )
                 receipt.result_payload = {'server_received_at': receipt.received_at.isoformat()}
                 receipt.save(update_fields=[
                     'status', 'retryable', 'error_code', 'error_message',
