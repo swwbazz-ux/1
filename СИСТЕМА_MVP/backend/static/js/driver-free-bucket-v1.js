@@ -136,8 +136,15 @@
     function resolveInstalledState(serverState, savedState) {
         var fresh = normalizeState(serverState);
         var saved = normalizeState(savedState);
-        var savedIsLocal = saved.sync_mode === "local" || saved.sync_mode === "review";
-        if (!fresh.active && saved.active && savedIsLocal && stateIsNewer(saved, fresh)) return saved;
+        /* "review" значит сервер уже ОТКЛОНИЛ эту попытку — она не может быть
+           достовернее свежего ответа сервера. Держать её как активную здесь
+           означало бы застревать в отклонённом состоянии навсегда: ни выбрать
+           новый экскаватор (select() не пускает, пока state.active), ни отменить
+           (отменять то, чего сервер не подтверждает, нечего). Только "local"
+           (ещё не отправлено) достаточно веская причина не доверять свежему
+           ответу — оно ещё может дойти до сервера и стать реальным. */
+        var savedIsPending = saved.sync_mode === "local";
+        if (!fresh.active && saved.active && savedIsPending && stateIsNewer(saved, fresh)) return saved;
         return fresh;
     }
 
