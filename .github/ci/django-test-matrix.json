@@ -1,0 +1,53 @@
+{
+  "sqlite": [
+    {
+      "name": "users",
+      "apps": ["users"],
+      "tests": "users"
+    },
+    {
+      "name": "field-core",
+      "apps": ["core", "trips", "downtimes"],
+      "tests": "core trips downtimes"
+    },
+    {
+      "name": "planning",
+      "apps": ["shifts", "assignments", "references"],
+      "tests": "shifts assignments references"
+    },
+    {
+      "name": "reports-and-portal",
+      "apps": ["reports", "portal"],
+      "tests": "reports portal"
+    },
+    {
+      "name": "rotations",
+      "apps": ["rotations"],
+      "tests": "rotations"
+    },
+    {
+      "name": "settlement-core",
+      "apps": ["settlement"],
+      "tests": "settlement.tests"
+    },
+    {
+      "name": "settlement-extended",
+      "apps": [],
+      "tests": "settlement.test_control settlement.test_validator settlement.test_arrival_roster_cohort_readiness settlement.test_arrival_roster_cohort_auto_integration settlement.test_arrival_roster_cohort_creation settlement.test_arrival_roster_routing_queue settlement.test_arrival_roster_cohort_preview_ui settlement.test_cohort_member_watch_profile_provenance settlement.test_arrival_roster_cohort_creation_ui settlement.test_arrival_roster_cohort_provenance settlement.test_arrival_roster_cohort_creation_view"
+    }
+  ],
+  "postgresql": [
+    {
+      "name": "field-operations",
+      "tests": "core.test_free_bucket_sync.FreeBucketPostgreSQLConcurrencyTests core.test_offline_sync.OfflineEventPostgreSQLConcurrencyTests core.test_postgresql_ready_core_post_smoke.PostgreSQLReadyCorePostSmokeTests downtimes.test_chaos_p01_005_postgresql.DowntimePostgreSQLConcurrencyRegressionTests shifts.test_chaos_p04_009_postgresql.ExcavatorConcurrentShiftStartPostgreSQLTests shifts.test_watch_period_linkage_postgresql.DriverWatchPeriodCatalogPostgreSQLTests trips.test_chaos_dispatcher_active_role.DispatcherActiveRolePostgreSQLConcurrencyTests trips.test_chaos_dispatcher_active_role.ExcavatorActiveRolePostgreSQLConcurrencyTests trips.test_chaos_trip_terminal_idempotency.TripTerminalPostgreSQLConcurrencyTests"
+    },
+    {
+      "name": "users-and-reports",
+      "tests": "users.test_employee_access_lock_order reports.test_driver_rating_materialization_postgresql reports.test_rating_period_generation_postgresql"
+    },
+    {
+      "name": "settlement",
+      "tests": "settlement.tests.SettlementMutualRelocationConcurrencyTests settlement.test_control.SettlementControlConcurrencyTests"
+    }
+  ]
+}

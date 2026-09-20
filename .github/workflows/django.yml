@@ -1,43 +1,78 @@
-name: Django MVP checks
+name: Project quality gate
 
 on:
   pull_request:
   push:
     branches:
       - main
-      - "codex/**"
+      - codex/github-production-deploy-20260916
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DJANGO_SECRET_KEY: ci-secret-key
+  DJANGO_DEBUG: "True"
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
 
 jobs:
-  test:
-    name: Django check and tests
+  test-plan:
+    name: Validate test plan
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sqlite: ${{ steps.matrix.outputs.sqlite }}
+      postgresql: ${{ steps.matrix.outputs.postgresql }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate and export Django test matrix
+        id: matrix
+        working-directory: СИСТЕМА_MVP/backend
+        run: >-
+          python tools/validate_ci_test_matrix.py
+          --manifest ../../.github/ci/django-test-matrix.json
+          --github-output "$GITHUB_OUTPUT"
+
+  structural-and-contracts:
+    name: Structure and executable contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     defaults:
       run:
         working-directory: СИСТЕМА_MVP/backend
 
-    env:
-      DJANGO_SECRET_KEY: ci-secret-key
-      DJANGO_DEBUG: "True"
-      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: СИСТЕМА_MVP/backend/requirements.txt
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/capacitor-shell/package-lock.json
 
-      - name: Install dependencies
+      - name: Install Django dependencies
         run: python -m pip install -r requirements.txt
 
       - name: Prepare media directories
@@ -46,10 +81,155 @@ jobs:
       - name: Django system check
         run: python manage.py check
 
-      - name: Protect Driver recorded voice wiring
-        run: |
-          node --test static/js/tests/operational-fragment-runtime.test.js
-          node --test ../../mobile/capacitor-shell/tests/driver-voice-wiring.test.mjs
+      - name: Reject missing migrations
+        run: python manage.py makemigrations --check
 
-      - name: Run user module tests
-        run: python manage.py test users
+      - name: Run standalone tools contract tests
+        run: python -m unittest discover -s tools -p 'test*.py'
+
+      - name: Run all backend JavaScript contracts
+        shell: bash
+        run: |
+          mapfile -d '' test_files < <(
+            find static/js/tests -type f -name '*.test.js' -print0 | sort -z
+          )
+          test "${#test_files[@]}" -gt 0
+          node --test "${test_files[@]}"
+
+      - name: Install mobile shell dependencies
+        working-directory: mobile/capacitor-shell
+        run: npm ci --ignore-scripts
+
+      - name: Run all mobile shell contracts
+        working-directory: mobile/capacitor-shell
+        run: npm test
+
+  django-sqlite:
+    name: SQLite / ${{ matrix.group.name }}
+    needs: test-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.test-plan.outputs.sqlite) }}
+
+    defaults:
+      run:
+        working-directory: СИСТЕМА_MVP/backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: СИСТЕМА_MVP/backend/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Prepare media directories
+        run: mkdir -p media/employee_photos
+
+      - name: Run isolated SQLite group
+        shell: bash
+        env:
+          DJANGO_TEST_LABELS: ${{ matrix.group.tests }}
+        run: |
+          read -r -a labels <<< "$DJANGO_TEST_LABELS"
+          python manage.py test "${labels[@]}"
+
+  django-postgresql:
+    name: PostgreSQL / ${{ matrix.group.name }}
+    needs: test-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.test-plan.outputs.postgresql) }}
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: accounting_mvp_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d accounting_mvp_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DJANGO_DB_ENGINE: postgres
+      POSTGRES_DB: accounting_mvp_ci
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_CONN_MAX_AGE: "0"
+
+    defaults:
+      run:
+        working-directory: СИСТЕМА_MVP/backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: СИСТЕМА_MVP/backend/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Prepare media directories
+        run: mkdir -p media/employee_photos
+
+      - name: Run PostgreSQL-only critical group
+        shell: bash
+        env:
+          DJANGO_TEST_LABELS: ${{ matrix.group.tests }}
+        run: |
+          read -r -a labels <<< "$DJANGO_TEST_LABELS"
+          python manage.py test "${labels[@]}"
+
+  required-quality-gate:
+    name: Required quality gate
+    if: always()
+    needs:
+      - test-plan
+      - structural-and-contracts
+      - django-sqlite
+      - django-postgresql
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Require every quality group to pass
+        env:
+          PLAN_RESULT: ${{ needs.test-plan.result }}
+          CONTRACTS_RESULT: ${{ needs.structural-and-contracts.result }}
+          SQLITE_RESULT: ${{ needs.django-sqlite.result }}
+          POSTGRESQL_RESULT: ${{ needs.django-postgresql.result }}
+        run: |
+          printf 'test-plan=%s\ncontracts=%s\nsqlite=%s\npostgresql=%s\n' \
+            "$PLAN_RESULT" "$CONTRACTS_RESULT" "$SQLITE_RESULT" "$POSTGRESQL_RESULT"
+          test "$PLAN_RESULT" = success
+          test "$CONTRACTS_RESULT" = success
+          test "$SQLITE_RESULT" = success
+          test "$POSTGRESQL_RESULT" = success
