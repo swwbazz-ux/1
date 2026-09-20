@@ -46,6 +46,9 @@ public class MainActivity extends BridgeActivity {
             registerPlugin(NativeSoundPlugin.class);
             registerPlugin(BackgroundConnectionPlugin.class);
         }
+        if ("driver".equals(BuildConfig.APP_PROFILE_ID)) {
+            registerPlugin(NativePushPlugin.class);
+        }
         CookieManager.getInstance().setAcceptCookie(true);
         bridgeBuilder.addWebViewListener(new WebViewListener() {
             @Override
