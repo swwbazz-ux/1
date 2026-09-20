@@ -39,6 +39,7 @@
 СИСТЕМА_MVP/backend/users/models.py
 СИСТЕМА_MVP/backend/users/middleware.py
 СИСТЕМА_MVP/backend/users/native_push.py
+СИСТЕМА_MVP/backend/users/webpush.py
 СИСТЕМА_MVP/backend/users/push_views.py
 СИСТЕМА_MVP/backend/users/urls.py
 СИСТЕМА_MVP/backend/static/css/driver-shift-v1.css
