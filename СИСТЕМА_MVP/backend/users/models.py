@@ -928,6 +928,70 @@ class WebPushSubscription(models.Model):
         return f'{self.employee} / {self.endpoint[:40]}'
 
 
+class NativePushDevice(models.Model):
+    """Нативный push-токен мобильного приложения сотрудника.
+
+    Провайдер хранится явно: серверный контракт не зависит от конкретного
+    доставщика и позволяет подключать FCM и RuStore Push параллельно.
+    """
+
+    class Provider(models.TextChoices):
+        FCM = 'fcm', 'Firebase Cloud Messaging'
+        RUSTORE = 'rustore', 'RuStore Push'
+
+    class Platform(models.TextChoices):
+        ANDROID = 'android', 'Android'
+
+    employee = models.ForeignKey(
+        Employee,
+        verbose_name='Сотрудник',
+        on_delete=models.CASCADE,
+        related_name='native_push_devices',
+    )
+    provider = models.CharField(
+        'Провайдер',
+        max_length=16,
+        choices=Provider.choices,
+        default=Provider.FCM,
+    )
+    token = models.CharField('Токен устройства', max_length=4096)
+    platform = models.CharField(
+        'Платформа',
+        max_length=16,
+        choices=Platform.choices,
+        default=Platform.ANDROID,
+    )
+    app_id = models.CharField('Идентификатор приложения', max_length=160)
+    is_active = models.BooleanField('Активен', default=True)
+    failure_count = models.PositiveSmallIntegerField('Неудач подряд', default=0)
+    last_success_at = models.DateTimeField('Последняя доставка', null=True, blank=True)
+    created_at = models.DateTimeField('Создан', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Нативное push-устройство'
+        verbose_name_plural = 'Нативные push-устройства'
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['provider', 'token'],
+                name='nativepush_provider_token_uniq',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['employee', 'is_active'],
+                name='nativepush_emp_active_idx',
+            ),
+            models.Index(
+                fields=['provider', 'is_active'],
+                name='nativepush_prov_active_idx',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.employee} / {self.provider} / {self.app_id}'
+
+
 class PushNotification(models.Model):
     """Текст уведомления, который телефон забирает после сигнала.
 
