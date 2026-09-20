@@ -258,6 +258,12 @@ function createConflictRecoveryRuntime({refreshResults = [true]} = {}) {
     let reloads = 0;
     const dispatcherNotice = {hidden: true};
     const dispatcherNoticeMessage = {textContent: ""};
+    class CustomEventMock {
+        constructor(type, options = {}) {
+            this.type = type;
+            this.detail = options.detail || {};
+        }
+    }
     const functionSignatures = [
         "function wakeDispatcherConflictRecovery(reason)",
         "function scheduleDispatcherConflictRefresh(delayMs)",
@@ -270,6 +276,7 @@ function createConflictRecoveryRuntime({refreshResults = [true]} = {}) {
         Math,
         Number,
         Promise,
+        CustomEvent: CustomEventMock,
         console: {warn(message) { warnings.push(message); }},
         dispatcherNotice,
         dispatcherNoticeMessage,
@@ -281,6 +288,7 @@ function createConflictRecoveryRuntime({refreshResults = [true]} = {}) {
         dispatcherConflictRefreshRetryAfterFlight: false,
         window: {
             AppRealtime: {wake(reason) { wakes.push(reason); }},
+            dispatchEvent() {},
             setTimeout(callback, delay) {
                 timers.push({callback, delay});
                 return timers.length;

@@ -4731,6 +4731,12 @@ th {
     padding: 0;
 }
 
+.dispatcher-command-utility .dispatcher-sound-button[data-sound-enabled="false"] {
+    color: #f1b55f;
+    border-color: rgba(241, 181, 95, .52);
+    background: rgba(110, 70, 28, .2);
+}
+
 .dispatcher-utility-link {
     grid-template-rows: none;
     gap: 0;
@@ -11950,7 +11956,7 @@ body.mining-master-screen .dispatcher-complex-card .complex-truck-tile {
     }
 
     .dispatcher-command-utility {
-        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
         column-gap: 6px !important;
         width: 100% !important;
         max-width: none !important;
