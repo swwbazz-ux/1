@@ -6,3 +6,4 @@ android/app/build/
 android/local.properties
 android/.idea/
 *.iml
+android/app/google-services.json
