@@ -15,7 +15,7 @@ public class CopperFirebaseMessagingService extends FirebaseMessagingService {
     @Override
     public void onMessageReceived(@NonNull RemoteMessage message) {
         super.onMessageReceived(message);
-        if (!"driver".equals(BuildConfig.APP_PROFILE_ID)) {
+        if (!NativeFieldProfile.supportsPushAndHaptics()) {
             return;
         }
         ConnectivityForegroundService.reconcileFromForeground(this);

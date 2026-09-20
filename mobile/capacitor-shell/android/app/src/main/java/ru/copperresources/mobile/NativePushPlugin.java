@@ -40,7 +40,7 @@ public class NativePushPlugin extends Plugin {
 
     @PluginMethod
     public void getToken(PluginCall call) {
-        if (!"driver".equals(BuildConfig.APP_PROFILE_ID)) {
+        if (!NativeFieldProfile.supportsPushAndHaptics()) {
             call.reject("Native push is unavailable for this application");
             return;
         }
@@ -61,7 +61,7 @@ public class NativePushPlugin extends Plugin {
     }
 
     static void publishToken(Context context, String token) {
-        if (!"driver".equals(BuildConfig.APP_PROFILE_ID) || token == null || token.trim().isEmpty()) {
+        if (!NativeFieldProfile.supportsPushAndHaptics() || token == null || token.trim().isEmpty()) {
             return;
         }
         String normalizedToken = token.trim();

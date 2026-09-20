@@ -78,12 +78,12 @@ def push_subscribe_view(request):
 
 @require_POST
 def native_push_register_view(request):
-    """Привязать нативный push-токен к текущему водителю."""
+    """Привязать нативный push-токен к текущей полевой роли."""
     access = _current_access(request)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нужно войти в приложение.'}, status=401)
-    if not access.role_id or access.role.code != 'driver':
-        return JsonResponse({'ok': False, 'error': 'Этот push-канал доступен только водителю.'}, status=403)
+    if not access.role_id or access.role.code not in {'driver', 'excavator_operator'}:
+        return JsonResponse({'ok': False, 'error': 'Этот push-канал недоступен текущей роли.'}, status=403)
 
     payload = _payload(request)
     if not hasattr(payload, 'get'):
