@@ -142,8 +142,28 @@ def notify_employee(employee, *, title, body, url='', tag='', kind='') -> int:
         tag=tag or kind,
         kind=kind,
     )
+    native_delivered = 0
+    try:
+        from core.models import OperationalStateVersion
+        from .native_push import notify_employee_devices
+
+        state_version = (
+            OperationalStateVersion.objects
+            .filter(key='production')
+            .values_list('version', flat=True)
+            .first()
+        )
+        native_delivered = notify_employee_devices(
+            employee,
+            kind=kind,
+            state_version=str(state_version or ''),
+        )
+    except Exception:
+        # Push — вспомогательный канал. Его сбой никогда не должен
+        # откатывать погрузку, назначение или другое рабочее действие.
+        logger.exception('Native push не отправлен для сотрудника %s.', employee.pk)
     if not push_is_configured():
-        return 0
+        return native_delivered
 
     delivered = 0
     subscriptions = list(
@@ -173,4 +193,4 @@ def notify_employee(employee, *, title, body, url='', tag='', kind='') -> int:
         delivered,
         len(subscriptions),
     )
-    return delivered
+    return delivered + native_delivered
