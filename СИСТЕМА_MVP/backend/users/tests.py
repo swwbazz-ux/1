@@ -39,7 +39,15 @@ from shifts.models import AchievementPrize, DriverShiftReadingConfirmation, Empl
 from trips.models import DispatcherActionLog, DispatcherActionType, FreeBucketAcceptance, FreeBucketAcceptanceStatus, Trip, TripClientAction, TripStatus
 
 from .forms import AdminEmployeeEditForm
-from .models import AdminActionLog, AdminConflict, DriverPrimaryRegistration, Employee, EmployeeAccess, Role
+from .models import (
+    AdminActionLog,
+    AdminConflict,
+    ContractorOrganization,
+    DriverPrimaryRegistration,
+    Employee,
+    EmployeeAccess,
+    Role,
+)
 
 
 
@@ -1541,6 +1549,10 @@ class AccessLoginTests(TestCase):
             status=EmployeeAccess.Status.ACTIVATED,
         )
         excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        contractor = ContractorOrganization.objects.create(
+            name='ООО «Подрядный экскаватор»',
+            short_name='Подрядный экскаватор',
+        )
 
         self.client.post('/', {'access_code': '1000'}, follow=True, HTTP_HOST='localhost')
         model_page = self.client.get('/system-admin/references/equipment-models/', HTTP_HOST='localhost')
@@ -1573,17 +1585,19 @@ class AccessLoginTests(TestCase):
                 'model': str(equipment_model.id),
                 'garage_number': 'ПОДР-SANY-01',
                 'vin': '',
+                'contractor_organization': str(contractor.id),
                 'is_active': 'on',
             },
             HTTP_HOST='localhost',
         )
+        self.assertEqual(equipment_response.status_code, 302)
         equipment = Equipment.objects.get(garage_number='ПОДР-SANY-01')
 
         self.assertEqual(model_response.status_code, 302)
         self.assertEqual(equipment_model.body_volume_m3, Decimal('4.50'))
-        self.assertEqual(equipment_response.status_code, 302)
         self.assertEqual(equipment.model, equipment_model)
         self.assertFalse(equipment.is_own)
+        self.assertEqual(equipment.contractor_organization, contractor)
 
     def test_admin_saves_active_achievement_prize_image_from_reference_screen(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
@@ -2016,21 +2030,28 @@ class AccessLoginTests(TestCase):
         expected_order = [
             'name="full_name"',
             'name="birth_date"',
+            'name="personnel_number"',
+            'name="sex"',
+            'name="personnel_department"',
             'name="phone"',
             'name="personnel_position"',
-            'name="personnel_department"',
+            'name="employment_type"',
+            'name="contractor_organization"',
+            'name="contractor_access_from"',
+            'name="contractor_access_until"',
             'name="base_specialization"',
             'id="employee-status-readonly"',
             'name="hired_at"',
             'name="dismissed_at"',
             'name="work_schedule"',
             'name="brigade_number"',
+            'name="watch_composition"',
             'name="residence_text"',
             'name="role"',
-            'name="assignment_shift_type"',
-            'name="assignment_equipment"',
             'name="comment"',
             'name="hr_data"',
+            'name="assignment_shift_type"',
+            'name="assignment_equipment"',
         ]
         positions = [html.index(marker) for marker in expected_order]
         self.assertEqual(positions, sorted(positions))
@@ -5162,49 +5183,82 @@ class AccessLoginTests(TestCase):
         placement = ExcavatorPlacement.objects.get(excavator=excavator)
         self.assertEqual(placement.zone, ExcavatorPlacement.Zone.INACTIVE)
 
-    def test_dispatcher_shift_metrics_start_from_open_shift(self):
-        truck_type = EquipmentType.objects.create(name='Самосвал')
-        excavator_type = EquipmentType.objects.create(name='Экскаватор')
-        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
-        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
-        rock = RockType.objects.create(name='Скальная порода', density='2.6000', loosening_factor='1.5000')
-        dump_point = DumpPoint.objects.create(name='ККД')
-        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
-        dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
-        access = EmployeeAccess.objects.create(employee=dispatcher, role=dispatcher_role, access_code='5000')
-        old_trip = Trip.objects.create(
-            excavator=excavator,
-            truck=truck,
-            rock_type=rock,
-            dump_point=dump_point,
-            status=TripStatus.ACTIVE,
-            volume_m3=Decimal('57.00'),
+    def test_dispatcher_shift_metrics_follow_loading_shift_attribution(self):
+        fixed_now = datetime(
+            2026, 9, 21, 10, 0,
+            tzinfo=ZoneInfo('Asia/Vladivostok'),
         )
-        old_trip.created_at = timezone.now() - timedelta(hours=2)
-        old_trip.save(update_fields=['created_at'])
-        EmployeeShift.objects.create(
-            employee=dispatcher,
-            shift_type='day',
-            workplace_code='dispatcher',
-            opened_at=timezone.now() - timedelta(hours=1),
-            opened_by=dispatcher,
-        )
-        Trip.objects.create(
-            excavator=excavator,
-            truck=truck,
-            rock_type=rock,
-            dump_point=dump_point,
-            status=TripStatus.ACTIVE,
-            volume_m3=Decimal('22.00'),
-        )
-        session = self.client.session
-        session['employee_access_id'] = access.id
-        session.save()
 
-        response = self.client.get('/dispatcher/control/', HTTP_HOST='localhost')
+        with patch('django.utils.timezone.now', return_value=fixed_now):
+            truck_type = EquipmentType.objects.create(name='Самосвал')
+            excavator_type = EquipmentType.objects.create(name='Экскаватор')
+            old_truck = Equipment.objects.create(equipment_type=truck_type, garage_number='09')
+            current_truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+            excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='1')
+            rock = RockType.objects.create(
+                name='Скальная порода',
+                density='2.6000',
+                loosening_factor='1.5000',
+            )
+            dump_point = DumpPoint.objects.create(name='ККД')
+            dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
+            dispatcher = Employee.objects.create(full_name='Тестовый диспетчер')
+            access = EmployeeAccess.objects.create(
+                employee=dispatcher,
+                role=dispatcher_role,
+                access_code='5000',
+            )
+            old_operator = Employee.objects.create(full_name='Машинист прошлой смены')
+            current_operator = Employee.objects.create(full_name='Машинист текущей смены')
+            old_loading_shift = EmployeeShift.objects.create(
+                employee=old_operator,
+                shift_type='night',
+                equipment=excavator,
+                opened_at=fixed_now.replace(hour=19) - timedelta(days=1),
+                closed_at=fixed_now.replace(hour=7),
+            )
+            current_loading_shift = EmployeeShift.objects.create(
+                employee=current_operator,
+                shift_type='day',
+                equipment=excavator,
+                opened_at=fixed_now.replace(hour=7),
+            )
+            EmployeeShift.objects.create(
+                employee=dispatcher,
+                shift_type='day',
+                workplace_code='dispatcher',
+                opened_at=fixed_now.replace(hour=7),
+                opened_by=dispatcher,
+            )
+            Trip.objects.create(
+                excavator=excavator,
+                truck=old_truck,
+                loading_shift=old_loading_shift,
+                rock_type=rock,
+                dump_point=dump_point,
+                status=TripStatus.LOADED_WAITING_UNLOAD,
+                volume_m3=Decimal('57.00'),
+            )
+            Trip.objects.create(
+                excavator=excavator,
+                truck=current_truck,
+                loading_shift=current_loading_shift,
+                rock_type=rock,
+                dump_point=dump_point,
+                status=TripStatus.LOADED_WAITING_UNLOAD,
+                volume_m3=Decimal('22.00'),
+            )
+            session = self.client.session
+            session['employee_access_id'] = access.id
+            session.save()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context['dispatcher_dashboard']['dispatcher_kpis']['fact_tons'], '22')
+            response = self.client.get('/dispatcher/control/', HTTP_HOST='localhost')
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                response.context['dispatcher_dashboard']['dispatcher_kpis']['fact_tons'],
+                '22',
+            )
 
     def test_dispatcher_service_action_preserves_current_filters(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
