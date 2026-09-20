@@ -22,7 +22,7 @@ public class NativeHapticsPlugin extends Plugin {
 
     @PluginMethod
     public void vibrate(PluginCall call) {
-        if (!"driver".equals(BuildConfig.APP_PROFILE_ID)) {
+        if (!NativeFieldProfile.supportsPushAndHaptics()) {
             call.reject("Native haptics are unavailable for this application");
             return;
         }

@@ -32,13 +32,26 @@ test("Driver build wires Firebase Messaging without tracking its private config"
   assert.match(ignore, /android\/app\/google-services\.json/);
 });
 
-test("Driver alone exposes native push and haptics to the WebView", () => {
+test("Driver and Excavator expose native push and haptics to the WebView", () => {
   const activity = source(javaRoot, "MainActivity.java");
+  const profiles = source(javaRoot, "NativeFieldProfile.java");
 
   assert.match(
     activity,
-    /if \("driver"\.equals\(BuildConfig\.APP_PROFILE_ID\)\) \{[\s\S]*?registerPlugin\(NativePushPlugin\.class\);[\s\S]*?registerPlugin\(NativeHapticsPlugin\.class\);[\s\S]*?\}/
+    /if \(NativeFieldProfile\.supportsPushAndHaptics\(\)\) \{[\s\S]*?registerPlugin\(NativePushPlugin\.class\);[\s\S]*?registerPlugin\(NativeHapticsPlugin\.class\);[\s\S]*?\}/
   );
+  assert.match(profiles, /"driver"\.equals\(profileId\) \|\| "excavator"\.equals\(profileId\)/);
+  assert.doesNotMatch(profiles, /dispatcher|mining_master/);
+});
+
+test("release workflow injects the matching Firebase config for each field APK", () => {
+  const workflow = source(root, "..", "..", ".github", "workflows", "production-deploy.yml");
+
+  assert.match(workflow, /DRIVER_GOOGLE_SERVICES_JSON:.*secrets\.DRIVER_GOOGLE_SERVICES_JSON/);
+  assert.match(workflow, /EXCAVATOR_GOOGLE_SERVICES_JSON:.*secrets\.EXCAVATOR_GOOGLE_SERVICES_JSON/);
+  assert.match(workflow, /APK_PROFILE" == "driver"[\s\S]*?DRIVER_GOOGLE_SERVICES_JSON/);
+  assert.match(workflow, /APK_PROFILE" == "excavator"[\s\S]*?EXCAVATOR_GOOGLE_SERVICES_JSON/);
+  assert.match(workflow, /trap 'rm -f android\/app\/google-services\.json' EXIT/);
 });
 
 test("FCM wakes the existing reconciliation path without duplicating domain actions", () => {
@@ -52,7 +65,7 @@ test("FCM wakes the existing reconciliation path without duplicating domain acti
   assert.doesNotMatch(service, /NotificationManager|MediaPlayer|TextToSpeech/);
 });
 
-test("Native push keeps a durable token and reports only the Driver identity envelope", () => {
+test("Native push keeps a durable token and reports only the field-app identity envelope", () => {
   const plugin = source(javaRoot, "NativePushPlugin.java");
 
   assert.match(plugin, /@CapacitorPlugin\(name = "NativePush"\)/);
@@ -61,6 +74,7 @@ test("Native push keeps a durable token and reports only the Driver identity env
   assert.match(plugin, /\.put\("provider", "fcm"\)/);
   assert.match(plugin, /\.put\("platform", "android"\)/);
   assert.match(plugin, /\.put\("appId", BuildConfig\.APPLICATION_ID\)/);
+  assert.match(plugin, /NativeFieldProfile\.supportsPushAndHaptics\(\)/);
 });
 
 test("Native haptics are bounded and use the media vibration channel", () => {
@@ -73,4 +87,5 @@ test("Native haptics are bounded and use the media vibration channel", () => {
   assert.match(plugin, /VibrationEffect\.createWaveform\(timings, amplitudes, -1\)/);
   assert.match(plugin, /VibrationAttributes\.USAGE_MEDIA/);
   assert.match(plugin, /AudioAttributes\.USAGE_MEDIA/);
+  assert.match(plugin, /NativeFieldProfile\.supportsPushAndHaptics\(\)/);
 });

@@ -46,7 +46,7 @@ public class MainActivity extends BridgeActivity {
             registerPlugin(NativeSoundPlugin.class);
             registerPlugin(BackgroundConnectionPlugin.class);
         }
-        if ("driver".equals(BuildConfig.APP_PROFILE_ID)) {
+        if (NativeFieldProfile.supportsPushAndHaptics()) {
             registerPlugin(NativePushPlugin.class);
             registerPlugin(NativeHapticsPlugin.class);
         }

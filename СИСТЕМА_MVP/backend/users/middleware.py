@@ -211,6 +211,7 @@ class ActiveRoleSessionMiddleware:
         '/push/shown/',
         '/push/test/',
         '/driver/push/native/',
+        '/excavator/push/native/',
         '/logout/',
         '/clerk/login/',
         '/settlement/login/',

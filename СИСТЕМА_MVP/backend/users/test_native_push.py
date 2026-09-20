@@ -23,6 +23,7 @@ from .webpush import notify_employee
 class NativePushRegistrationTests(TestCase):
     def setUp(self):
         self.driver_role = Role.objects.create(code='driver', name='Водитель')
+        self.excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
         self.dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         self.employee = Employee.objects.create(
             full_name='Тестовый водитель',
@@ -94,7 +95,21 @@ class NativePushRegistrationTests(TestCase):
         self.assertEqual(device.employee, other)
         self.assertEqual(device.app_id, 'ru.copperresources.driver.qa')
 
-    def test_non_driver_cannot_register_driver_push_token(self):
+    def test_excavator_registers_native_token_through_role_endpoint(self):
+        self.access.role = self.excavator_role
+        self.access.save(update_fields=['role'])
+        self.url = reverse('excavator_native_push_register')
+
+        response = self.post(app_id='ru.copperresources.excavator')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('token', response.json())
+        device = NativePushDevice.objects.get()
+        self.assertEqual(device.employee, self.employee)
+        self.assertEqual(device.app_id, 'ru.copperresources.excavator')
+        self.assertTrue(device.is_active)
+
+    def test_unrelated_role_cannot_register_native_push_token(self):
         self.access.role = self.dispatcher_role
         self.access.save(update_fields=['role'])
 

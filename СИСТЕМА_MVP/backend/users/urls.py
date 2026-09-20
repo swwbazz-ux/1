@@ -93,6 +93,7 @@ urlpatterns = [
     path('push/shown/', push_mark_shown_view, name='push_mark_shown'),
     path('push/test/', push_test_view, name='push_test'),
     path('driver/push/native/', native_push_register_view, name='driver_native_push_register'),
+    path('excavator/push/native/', native_push_register_view, name='excavator_native_push_register'),
     path('client-error/', client_error_report_view, name='client_error_report'),
     path('', login_view, name='login'),
     path('activate-access/', activate_access_view, name='activate_access'),
