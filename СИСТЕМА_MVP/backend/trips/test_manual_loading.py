@@ -7,6 +7,7 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from . import manual_loading as manual_loading_module
 from . import tests as fixtures
 from .manual_loading import truck_driver_participation
 from .models import OPEN_TRIP_STATUSES, Trip, TripStatus
@@ -357,3 +358,80 @@ class ManualLoadingTests(TestCase):
         self.assertFalse(event_is_relevant(event(None), self.driver_access))
         self.assertFalse(event_is_relevant(event(self.shift.pk), self.driver_access))
         self.assertTrue(event_is_relevant(event(self.truck_shift.pk), self.driver_access))
+
+
+@override_settings(EXCAVATOR_MANUAL_LOADING_ENABLED=True)
+class ManualTripAutoReconcileTests(TestCase):
+    """Боевой случай 20.09.2026: пульт диспетчера показывал самосвал «на
+    разгрузку», а экран водителя — «на загрузку»; и пульт, и экскаваторщик
+    держали устаревшую картинку сколько угодно долго, пока кто-то вручную не
+    перезагружал страницу целиком. Обычный фоновый опрос (тот же запрос,
+    который телефон и браузер каждой роли шлют каждые несколько секунд) её не
+    гасил — reconcile_expired_manual_trips() вызывался только из полной
+    перезагрузки dispatcher_control_view / excavator_work_view."""
+
+    create_registered_driver_shift = fixtures.ExcavatorWorkServerIntegrationTests.create_registered_driver_shift
+    send = ManualLoadingTests.send
+
+    def setUp(self):
+        fixtures.ExcavatorWorkServerIntegrationTests.setUp(self)
+        self.shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
+        manual_loading_module._manual_trip_reconcile_next_check = 0.0
+        manual_loading_module._manual_trip_reconcile_running = False
+        try:
+            manual_loading_module._MANUAL_TRIP_RECONCILE_LOCK_PATH.unlink()
+        except FileNotFoundError:
+            pass
+
+    def make_expired_passive_trip(self, **send_kwargs):
+        self.truck_shift.closed_at = timezone.now()
+        self.truck_shift.save(update_fields=['closed_at'])
+        response = self.send(**send_kwargs)
+        self.assertEqual(response.status_code, 200, response.content)
+        trip = Trip.objects.get(pk=response.json()['trip_id'])
+        self.assertIsNone(trip.driver_control_shift_id)
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        stale = timezone.now() - timedelta(seconds=400)
+        Trip.objects.filter(pk=trip.pk).update(created_at=stale, loaded_at=stale)
+        # Смена должна снова быть открытой, чтобы следующая погрузка на этот
+        # самосвал не упала на «нет смены на технике» в других тестах ниже.
+        self.truck_shift.closed_at = None
+        self.truck_shift.save(update_fields=['closed_at'])
+        return trip
+
+    def test_ordinary_poll_expires_a_stale_passive_trip_for_every_role(self):
+        trip = self.make_expired_passive_trip()
+
+        # Не полная перезагрузка страницы — тот самый realtime-опрос,
+        # который каждая роль шлёт каждые несколько секунд.
+        response = self.client.get(
+            reverse('operational_state_version'), {'include_events': '0'},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.UNCONTROLLED)
+
+    def test_reconcile_is_throttled_across_consecutive_polls(self):
+        first = self.make_expired_passive_trip(action='throttle-first')
+        self.assertEqual(
+            manual_loading_module.reconcile_expired_manual_trips_throttled(),
+            [first.pk],
+        )
+
+        second = self.make_expired_passive_trip(action='throttle-second')
+        # В пределах окна троттлинга второй вызов подряд ничего не делает —
+        # иначе каждый опрос долбил бы базу проверкой раз в несколько секунд.
+        self.assertEqual(
+            manual_loading_module.reconcile_expired_manual_trips_throttled(),
+            [],
+        )
+        second.refresh_from_db()
+        self.assertEqual(second.status, TripStatus.LOADED_WAITING_UNLOAD)
+
+    @override_settings(EXCAVATOR_MANUAL_LOADING_ENABLED=False)
+    def test_throttled_reconcile_is_a_noop_when_manual_loading_is_disabled(self):
+        self.assertEqual(
+            manual_loading_module.reconcile_expired_manual_trips_throttled(),
+            [],
+        )

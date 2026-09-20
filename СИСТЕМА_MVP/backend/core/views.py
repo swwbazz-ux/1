@@ -196,6 +196,13 @@ def operational_state_version_view(request):
 
         reconcile_due_haul_assignments_throttled()
 
+        # Боевой случай 20.09.2026: без этого пассивный ручной рейс гас только
+        # при ПОЛНОЙ перезагрузке страницы пульта/экскаваторщика — сотрудники
+        # были бы обязаны перезагружаться вручную. Опрос идёт со всех ролей.
+        from trips.manual_loading import reconcile_expired_manual_trips_throttled
+
+        reconcile_expired_manual_trips_throttled()
+
     state = OperationalStateVersion.objects.filter(key='production').first()
     after = parse_positive_int(request.GET.get('after'), 0)
     limit = parse_positive_int(request.GET.get('limit'), 50, maximum=200)
