@@ -17,25 +17,28 @@
 
     var patterns = Object.freeze({
         enabled: [
-            {at: 0, frequency: 660, duration: 0.07, gain: 0.045},
-            {at: 0.08, frequency: 880, duration: 0.10, gain: 0.055}
+            {at: 0, frequency: 698, duration: 0.13, gain: 0.100, type: "triangle"},
+            {at: 0.16, frequency: 1047, duration: 0.18, gain: 0.120, type: "triangle"}
         ],
         attention: [
-            {at: 0, frequency: 740, duration: 0.08, gain: 0.050},
-            {at: 0.11, frequency: 980, duration: 0.12, gain: 0.060}
+            {at: 0, frequency: 880, duration: 0.20, gain: 0.180, type: "triangle"},
+            {at: 0.27, frequency: 1175, duration: 0.22, gain: 0.220, type: "triangle"},
+            {at: 0.56, frequency: 880, duration: 0.26, gain: 0.200, type: "triangle"}
         ],
         error: [
-            {at: 0, frequency: 260, duration: 0.13, gain: 0.055},
-            {at: 0.15, frequency: 190, duration: 0.18, gain: 0.060}
+            {at: 0, frequency: 440, duration: 0.24, gain: 0.150, type: "square"},
+            {at: 0.32, frequency: 330, duration: 0.25, gain: 0.165, type: "square"},
+            {at: 0.66, frequency: 220, duration: 0.30, gain: 0.180, type: "square"}
         ],
         connection_lost: [
-            {at: 0, frequency: 330, duration: 0.11, gain: 0.048},
-            {at: 0.14, frequency: 220, duration: 0.17, gain: 0.060}
+            {at: 0, frequency: 523, duration: 0.25, gain: 0.160, type: "triangle"},
+            {at: 0.34, frequency: 349, duration: 0.27, gain: 0.180, type: "triangle"},
+            {at: 0.71, frequency: 220, duration: 0.32, gain: 0.200, type: "triangle"}
         ],
         connection_restored: [
-            {at: 0, frequency: 480, duration: 0.08, gain: 0.040},
-            {at: 0.09, frequency: 660, duration: 0.09, gain: 0.048},
-            {at: 0.19, frequency: 880, duration: 0.12, gain: 0.055}
+            {at: 0, frequency: 523, duration: 0.15, gain: 0.110, type: "triangle"},
+            {at: 0.19, frequency: 659, duration: 0.17, gain: 0.125, type: "triangle"},
+            {at: 0.41, frequency: 784, duration: 0.22, gain: 0.145, type: "triangle"}
         ]
     });
 
@@ -87,7 +90,9 @@
         var gainValue = Math.max(0.001, Number(tone.gain || 0.04));
         var oscillator = context.createOscillator();
         var gain = context.createGain();
-        oscillator.type = "sine";
+        oscillator.type = ["sine", "triangle", "square"].indexOf(tone.type) >= 0
+            ? tone.type
+            : "triangle";
         oscillator.frequency.setValueAtTime(Number(tone.frequency || 660), start);
         gain.gain.setValueAtTime(0.0001, start);
         gain.gain.exponentialRampToValueAtTime(gainValue, start + 0.012);
