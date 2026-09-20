@@ -277,7 +277,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v298'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v299'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -333,6 +333,8 @@ const CORE_ASSETS = [
     PRIVACY_POLICY_URL,
     "/static/portal/css/portal-shell-v5.css?v=7",
     "/static/js/driver-offline-outbox-v2.js?v={DRIVER_SHELL_VERSION}",
+    "/static/js/driver-haptics-v1.js?v={DRIVER_SHELL_VERSION}",
+    "/static/js/driver-native-push-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/css/mobile-dial-actions-v1.css?v={DRIVER_SHELL_VERSION}",
     "/static/js/mobile-dial-actions-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/css/driver-free-bucket-v1.css?v={DRIVER_SHELL_VERSION}",
