@@ -182,7 +182,6 @@ def operational_state_version_view(request):
         background_role and role_is_active_for_app and has_active_shift
     )
 
-    manual_trip_reconcile_debug = None
     if role_is_active_for_app:
         native_app, native_version = parse_native_app_marker(request)
         if native_app and role_app:
@@ -197,54 +196,13 @@ def operational_state_version_view(request):
 
         reconcile_due_haul_assignments_throttled()
 
+        # Боевой случай 20.09.2026: без этого пассивный/осиротевший ручной
+        # рейс гас только при ПОЛНОЙ перезагрузке страницы пульта и
+        # экскаваторщика — сотрудники были бы обязаны перезагружаться
+        # вручную. Опрос идёт со всех ролей, поэтому гасит сам, в фоне.
         from trips.manual_loading import reconcile_expired_manual_trips_throttled
 
-        cleared_manual_trip_ids = reconcile_expired_manual_trips_throttled()
-    else:
-        cleared_manual_trip_ids = None
-
-    # ВРЕМЕННАЯ диагностика боевого случая 20.09.2026 (снять после разбора):
-    # правка выложена, но запись «на разгрузку» не гаснет ни на пульте, ни у
-    # экскаваторщика даже после нескольких минут наблюдения. Со стороны сервера
-    # логов нет (SSH запрещён), поэтому факты возвращаются в ответе того самого
-    # опроса, который телефон и так получает каждые секунды — видно в консоли
-    # WebView через logcat. Вынесено ЗА ПРЕДЕЛЫ role_is_active_for_app намеренно:
-    # если сама эта проверка ложна для всех сессий, это и есть причина, и её
-    # тоже нужно увидеть, а не спрятать вместе с диагностикой.
-    try:
-        from trips.manual_loading import manual_loading_enabled as _manual_loading_enabled
-        from trips.models import OPEN_TRIP_STATUSES, Trip
-        manual_trip_reconcile_debug = {
-            'role_is_active_for_app': role_is_active_for_app,
-            'enabled': _manual_loading_enabled(),
-            'cleared_now': cleared_manual_trip_ids,
-            # Расширено 20.09.2026: узкий фильтр (participation=True, control_shift пуст)
-            # не находит ничего, а самосвал у экскаваторщика/пульта висит — значит дело
-            # не в «пассивном» рейсе (пустой control_shift), а в чём-то другом. Показываем
-            # ЛЮБОЙ незакрытый рейс как есть, с состоянием его привязанной смены.
-            'any_open_trips': [
-                {
-                    'id': t.id,
-                    'truck_id': t.truck_id,
-                    'status': t.status,
-                    'driver_participation_recorded': t.driver_participation_recorded,
-                    'driver_control_shift_id': t.driver_control_shift_id,
-                    'driver_control_shift_closed_at': (
-                        t.driver_control_shift.closed_at.isoformat()
-                        if t.driver_control_shift_id and t.driver_control_shift.closed_at else
-                        ('open' if t.driver_control_shift_id else None)
-                    ),
-                    'driver_id': t.driver_id,
-                    'created_at': t.created_at.isoformat() if t.created_at else None,
-                    'loaded_at': t.loaded_at.isoformat() if t.loaded_at else None,
-                }
-                for t in Trip.objects.filter(status__in=OPEN_TRIP_STATUSES)
-                    .select_related('driver_control_shift')
-                    .order_by('-created_at')[:5]
-            ],
-        }
-    except Exception as debug_error:
-        manual_trip_reconcile_debug = {'debug_error': str(debug_error)[:300]}
+        reconcile_expired_manual_trips_throttled()
 
     state = OperationalStateVersion.objects.filter(key='production').first()
     after = parse_positive_int(request.GET.get('after'), 0)
@@ -291,7 +249,6 @@ def operational_state_version_view(request):
         'key': 'production',
         'version': state_version,
         'events': events,
-        'debug_manual_trip_reconcile': manual_trip_reconcile_debug,
         'events_truncated': events_truncated,
         'relevant': relevant if include_events else None,
     }
