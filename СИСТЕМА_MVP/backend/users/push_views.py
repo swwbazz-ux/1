@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 
+from django.db import transaction
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 from .active_role import role_session_state
-from .models import PushNotification, WebPushSubscription
+from .models import NativePushDevice, PushNotification, WebPushSubscription
 from .webpush import notify_employee, public_key_for_browser, push_is_configured
 
 
@@ -73,6 +74,57 @@ def push_subscribe_view(request):
         },
     )
     return JsonResponse({'ok': True})
+
+
+@require_POST
+def native_push_register_view(request):
+    """Привязать нативный push-токен к текущему водителю."""
+    access = _current_access(request)
+    if not access:
+        return JsonResponse({'ok': False, 'error': 'Нужно войти в приложение.'}, status=401)
+    if not access.role_id or access.role.code != 'driver':
+        return JsonResponse({'ok': False, 'error': 'Этот push-канал доступен только водителю.'}, status=403)
+
+    payload = _payload(request)
+    if not hasattr(payload, 'get'):
+        return JsonResponse({'ok': False, 'error': 'Некорректные данные push-устройства.'}, status=400)
+
+    token = str(payload.get('token') or '').strip()
+    provider = str(payload.get('provider') or NativePushDevice.Provider.FCM).strip().lower()
+    platform = str(payload.get('platform') or NativePushDevice.Platform.ANDROID).strip().lower()
+    app_id = str(payload.get('app_id') or '').strip()
+
+    if not token or len(token) > NativePushDevice._meta.get_field('token').max_length:
+        return JsonResponse({'ok': False, 'error': 'Некорректный push-токен.'}, status=400)
+    if provider not in NativePushDevice.Provider.values:
+        return JsonResponse({'ok': False, 'error': 'Неподдерживаемый push-провайдер.'}, status=400)
+    if platform not in NativePushDevice.Platform.values:
+        return JsonResponse({'ok': False, 'error': 'Неподдерживаемая платформа.'}, status=400)
+    if not app_id or len(app_id) > NativePushDevice._meta.get_field('app_id').max_length:
+        return JsonResponse({'ok': False, 'error': 'Некорректный идентификатор приложения.'}, status=400)
+
+    # Токен уникален у провайдера: при повторном входе на том же
+    # телефоне безопасно переназначаем его текущему сотруднику.
+    with transaction.atomic():
+        device, created = NativePushDevice.objects.update_or_create(
+            provider=provider,
+            token=token,
+            defaults={
+                'employee': access.employee,
+                'platform': platform,
+                'app_id': app_id,
+                'is_active': True,
+                'failure_count': 0,
+                'last_success_at': None,
+            },
+        )
+
+    return JsonResponse({
+        'ok': True,
+        'registered': True,
+        'created': created,
+        'provider': device.provider,
+    })
 
 
 @require_POST

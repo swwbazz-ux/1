@@ -210,6 +210,7 @@ class ActiveRoleSessionMiddleware:
         '/push/unsubscribe/',
         '/push/shown/',
         '/push/test/',
+        '/driver/push/native/',
         '/logout/',
         '/clerk/login/',
         '/settlement/login/',
