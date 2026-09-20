@@ -182,6 +182,7 @@ def operational_state_version_view(request):
         background_role and role_is_active_for_app and has_active_shift
     )
 
+    manual_trip_reconcile_debug = None
     if role_is_active_for_app:
         native_app, native_version = parse_native_app_marker(request)
         if native_app and role_app:
@@ -199,9 +200,40 @@ def operational_state_version_view(request):
         # Боевой случай 20.09.2026: без этого пассивный ручной рейс гас только
         # при ПОЛНОЙ перезагрузке страницы пульта/экскаваторщика — сотрудники
         # были бы обязаны перезагружаться вручную. Опрос идёт со всех ролей.
-        from trips.manual_loading import reconcile_expired_manual_trips_throttled
+        from trips.manual_loading import (
+            manual_loading_enabled as _manual_loading_enabled,
+            reconcile_expired_manual_trips_throttled,
+        )
 
-        reconcile_expired_manual_trips_throttled()
+        cleared_manual_trip_ids = reconcile_expired_manual_trips_throttled()
+        # ВРЕМЕННАЯ диагностика боевого случая 20.09.2026 (снять после разбора):
+        # правка выложена, но запись «на разгрузку» не гаснет ни на пульте, ни у
+        # экскаваторщика даже после нескольких минут наблюдения. Со стороны
+        # сервера логов нет (SSH запрещён), поэтому факты возвращаются в ответе
+        # того самого опроса, который телефон и так получает каждые секунды —
+        # видно в консоли WebView через logcat.
+        try:
+            from trips.models import Trip, TripStatus
+            manual_trip_reconcile_debug = {
+                'enabled': _manual_loading_enabled(),
+                'cleared_now': cleared_manual_trip_ids,
+                'candidates': [
+                    {
+                        'id': row['id'],
+                        'truck_id': row['truck_id'],
+                        'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                        'loaded_at': row['loaded_at'].isoformat() if row['loaded_at'] else None,
+                        'load_time_source': row['load_time_source'],
+                    }
+                    for row in Trip.objects.filter(
+                        status=TripStatus.LOADED_WAITING_UNLOAD,
+                        driver_participation_recorded=True,
+                        driver_control_shift_id__isnull=True,
+                    ).values('id', 'truck_id', 'created_at', 'loaded_at', 'load_time_source')[:5]
+                ],
+            }
+        except Exception as debug_error:
+            manual_trip_reconcile_debug = {'debug_error': str(debug_error)[:200]}
 
     state = OperationalStateVersion.objects.filter(key='production').first()
     after = parse_positive_int(request.GET.get('after'), 0)
@@ -248,6 +280,7 @@ def operational_state_version_view(request):
         'key': 'production',
         'version': state_version,
         'events': events,
+        'debug_manual_trip_reconcile': manual_trip_reconcile_debug if role_is_active_for_app else None,
         'events_truncated': events_truncated,
         'relevant': relevant if include_events else None,
     }
