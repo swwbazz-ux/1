@@ -20,7 +20,7 @@ const TEMPLATE = fs.readFileSync(
 const CSS = fs.readFileSync(
     path.join(BACKEND, "static", "css", "dispatcher-control-v1.css"),
     "utf8"
-);
+).replace(/\r\n/g, "\n");
 
 test("точка стоит на гараже экскаваторов, гараже самосвалов, самосвалах комплекса и имени комплекса", () => {
     assert.match(
