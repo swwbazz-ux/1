@@ -249,6 +249,85 @@ function dragEvent() {
 }
 
 
+function createConflictRecoveryRuntime({refreshResults = [true]} = {}) {
+    const timers = [];
+    const refreshCalls = [];
+    const wakes = [];
+    const warnings = [];
+    let unsafe = false;
+    let reloads = 0;
+    const dispatcherNotice = {hidden: true};
+    const dispatcherNoticeMessage = {textContent: ""};
+    const functionSignatures = [
+        "function wakeDispatcherConflictRecovery(reason)",
+        "function scheduleDispatcherConflictRefresh(delayMs)",
+        "function flushDispatcherConflictRefresh()",
+        "function closeDispatcherNotice()",
+        "function showDispatcherNotice(message)",
+        "function showDispatcherDnDError(error)",
+    ];
+    const context = {
+        Math,
+        Number,
+        Promise,
+        console: {warn(message) { warnings.push(message); }},
+        dispatcherNotice,
+        dispatcherNoticeMessage,
+        dispatcherNoticeClose: null,
+        dispatcherConflictRefreshPending: false,
+        dispatcherConflictRefreshInFlight: null,
+        dispatcherConflictRefreshTimer: null,
+        dispatcherConflictRefreshApplyFailures: 0,
+        dispatcherConflictRefreshRetryAfterFlight: false,
+        window: {
+            AppRealtime: {wake(reason) { wakes.push(reason); }},
+            setTimeout(callback, delay) {
+                timers.push({callback, delay});
+                return timers.length;
+            },
+        },
+        isDispatcherOperationalRefreshUnsafe() { return unsafe; },
+        isMiningMasterMobilePage() { return false; },
+        refreshMobileBoardFromServer() { throw new Error("mobile refresh is not expected"); },
+        refreshDispatcherDesktopBoardFromServer(options) {
+            refreshCalls.push(options);
+            return Promise.resolve(refreshResults.shift());
+        },
+        reloadDispatcherBoardAsFallback() { reloads += 1; },
+    };
+    vm.runInNewContext(
+        functionSignatures.map((signature) => extractBraceBlock(
+            RUNTIME_SOURCE,
+            signature,
+            signature
+        )).join("\n"),
+        context,
+        {filename: "dispatcher-control-v1.js#assignment-conflict-recovery"}
+    );
+    async function runNextTimer() {
+        const timer = timers.shift();
+        assert.ok(timer, "Expected a scheduled conflict recovery timer.");
+        context.dispatcherConflictRefreshTimer = null;
+        timer.callback();
+        await new Promise((resolve) => setImmediate(resolve));
+        await Promise.resolve();
+        return timer.delay;
+    }
+    return {
+        context,
+        dispatcherNotice,
+        dispatcherNoticeMessage,
+        refreshCalls,
+        wakes,
+        warnings,
+        timers,
+        runNextTimer,
+        setUnsafe(value) { unsafe = value; },
+        reloadCount() { return reloads; },
+    };
+}
+
+
 test("closed to open fragment enables dispatcher drag-and-drop without reload", async () => {
     const {context, tile, zone} = createRuntime(false, true);
 
@@ -272,6 +351,82 @@ test("open to closed fragment blocks dispatcher drag-and-drop with fetch count z
     assert.equal(context.dispatcherShiftOpen, false);
     assert.equal(dragStart.defaultPrevented, true);
     assert.equal(context.fetchCount, 0);
+});
+
+
+test("assignment conflict refreshes the dispatcher board once after the notice closes", async () => {
+    const runtime = createConflictRecoveryRuntime();
+
+    runtime.context.showDispatcherDnDError({
+        message: "Состояние назначения самосвала изменилось.",
+        conflict: true,
+    });
+
+    assert.equal(runtime.dispatcherNotice.hidden, false);
+    assert.equal(runtime.dispatcherNoticeMessage.textContent, "Состояние назначения самосвала изменилось.");
+    assert.equal(runtime.refreshCalls.length, 0, "The board must not mutate behind an active notice.");
+
+    runtime.context.closeDispatcherNotice();
+    assert.equal(runtime.dispatcherNotice.hidden, true);
+    assert.equal(runtime.timers.length, 1);
+    await runtime.runNextTimer();
+
+    assert.equal(runtime.refreshCalls.length, 1);
+    assert.equal(runtime.refreshCalls[0].forceFullBoard, true);
+    assert.equal(runtime.context.dispatcherConflictRefreshPending, false);
+
+    runtime.context.closeDispatcherNotice();
+    assert.equal(runtime.timers.length, 0, "Closing the notice twice must not duplicate refreshes.");
+});
+
+
+test("assignment conflict waits until other unsafe dispatcher interaction is over", async () => {
+    const runtime = createConflictRecoveryRuntime();
+    runtime.context.showDispatcherDnDError({message: "conflict", conflict: true});
+    runtime.setUnsafe(true);
+    runtime.context.closeDispatcherNotice();
+
+    await runtime.runNextTimer();
+    assert.equal(runtime.refreshCalls.length, 0);
+    assert.equal(runtime.timers.length, 1);
+    assert.equal(runtime.timers[0].delay, 500);
+
+    runtime.setUnsafe(false);
+    await runtime.runNextTimer();
+    assert.equal(runtime.refreshCalls.length, 1);
+    assert.equal(runtime.context.dispatcherConflictRefreshPending, false);
+});
+
+
+test("unapplied conflict fragment retries once and then uses the existing reload fallback", async () => {
+    const runtime = createConflictRecoveryRuntime({refreshResults: [false, false]});
+    runtime.context.showDispatcherDnDError({message: "conflict", conflict: true});
+    runtime.context.closeDispatcherNotice();
+
+    await runtime.runNextTimer();
+    assert.equal(runtime.refreshCalls.length, 1);
+    assert.equal(runtime.reloadCount(), 0);
+    assert.equal(runtime.timers.length, 1);
+
+    await runtime.runNextTimer();
+    assert.equal(runtime.refreshCalls.length, 2);
+    assert.equal(runtime.reloadCount(), 1);
+    assert.equal(runtime.context.dispatcherConflictRefreshPending, false);
+    assert.deepEqual(runtime.wakes, [
+        "dispatcher_conflict_fragment_not_applied",
+        "dispatcher_conflict_fragment_not_applied",
+    ]);
+});
+
+
+test("ordinary dispatcher error never schedules assignment reconciliation", () => {
+    const runtime = createConflictRecoveryRuntime();
+    runtime.context.showDispatcherDnDError({message: "Обычная ошибка", conflict: false});
+    runtime.context.closeDispatcherNotice();
+
+    assert.equal(runtime.dispatcherNoticeMessage.textContent, "Обычная ошибка");
+    assert.equal(runtime.timers.length, 0);
+    assert.equal(runtime.refreshCalls.length, 0);
 });
 
 

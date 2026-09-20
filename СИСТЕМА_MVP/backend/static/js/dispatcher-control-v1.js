@@ -1091,8 +1091,67 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherNotice = document.querySelector("[data-dispatcher-notice]");
     var dispatcherNoticeMessage = document.querySelector("[data-dispatcher-notice-message]");
     var dispatcherNoticeClose = document.querySelector("[data-dispatcher-notice-close]");
+    var dispatcherConflictRefreshPending = false;
+    var dispatcherConflictRefreshInFlight = null;
+    var dispatcherConflictRefreshTimer = null;
+    var dispatcherConflictRefreshApplyFailures = 0;
+    var dispatcherConflictRefreshRetryAfterFlight = false;
+    function wakeDispatcherConflictRecovery(reason) {
+        if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+            window.AppRealtime.wake(reason || "dispatcher_assignment_conflict");
+        }
+    }
+    function scheduleDispatcherConflictRefresh(delayMs) {
+        if (!dispatcherConflictRefreshPending || dispatcherConflictRefreshInFlight || dispatcherConflictRefreshTimer !== null) {
+            return;
+        }
+        dispatcherConflictRefreshTimer = window.setTimeout(function () {
+            dispatcherConflictRefreshTimer = null;
+            flushDispatcherConflictRefresh();
+        }, Math.max(0, Number(delayMs) || 0));
+    }
+    function flushDispatcherConflictRefresh() {
+        if (!dispatcherConflictRefreshPending) return Promise.resolve(false);
+        if (dispatcherNotice && !dispatcherNotice.hidden) return Promise.resolve(false);
+        if (isDispatcherOperationalRefreshUnsafe()) {
+            scheduleDispatcherConflictRefresh(500);
+            return Promise.resolve(false);
+        }
+        if (dispatcherConflictRefreshInFlight) return dispatcherConflictRefreshInFlight;
+        dispatcherConflictRefreshPending = false;
+        dispatcherConflictRefreshInFlight = Promise.resolve().then(function () {
+            return refreshDispatcherDesktopBoardFromServer({ forceFullBoard: true });
+        }).then(function (applied) {
+            if (applied) {
+                dispatcherConflictRefreshApplyFailures = 0;
+                return true;
+            }
+            dispatcherConflictRefreshPending = true;
+            dispatcherConflictRefreshApplyFailures += 1;
+            wakeDispatcherConflictRecovery("dispatcher_conflict_fragment_not_applied");
+            if (dispatcherConflictRefreshApplyFailures >= 2) {
+                dispatcherConflictRefreshPending = false;
+                reloadDispatcherBoardAsFallback();
+            } else {
+                dispatcherConflictRefreshRetryAfterFlight = true;
+            }
+            return false;
+        }).catch(function () {
+            dispatcherConflictRefreshPending = true;
+            wakeDispatcherConflictRecovery("dispatcher_conflict_fragment_error");
+            return false;
+        }).finally(function () {
+            dispatcherConflictRefreshInFlight = null;
+            if (dispatcherConflictRefreshRetryAfterFlight) {
+                dispatcherConflictRefreshRetryAfterFlight = false;
+                scheduleDispatcherConflictRefresh(500);
+            }
+        });
+        return dispatcherConflictRefreshInFlight;
+    }
     function closeDispatcherNotice() {
         if (dispatcherNotice) dispatcherNotice.hidden = true;
+        scheduleDispatcherConflictRefresh(0);
     }
     function showDispatcherNotice(message) {
         if (!dispatcherNotice || !dispatcherNoticeMessage) return false;
@@ -1114,14 +1173,31 @@ document.addEventListener("DOMContentLoaded", function () {
     });
     function showDispatcherDnDError(error) {
         var message = error && error.message ? error.message : "Действие не выполнено.";
-        if (!showDispatcherNotice(message)) {
+        if (error && error.conflict) {
+            dispatcherConflictRefreshPending = true;
+            dispatcherConflictRefreshApplyFailures = 0;
+            dispatcherConflictRefreshRetryAfterFlight = false;
+        }
+        var noticeShown = showDispatcherNotice(message);
+        if (!noticeShown) {
             console.warn(message);
         }
         if (error && error.conflict) {
-            Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
-            Promise.resolve(refreshDispatcherDesktopBoardFromServer()).catch(function () {});
+            if (isMiningMasterMobilePage()) {
+                Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
+            }
+            if (!noticeShown) scheduleDispatcherConflictRefresh(0);
         }
     }
+    window.addEventListener("online", function () {
+        scheduleDispatcherConflictRefresh(0);
+    });
+    window.addEventListener("pageshow", function () {
+        scheduleDispatcherConflictRefresh(0);
+    });
+    document.addEventListener("visibilitychange", function () {
+        if (!document.hidden) scheduleDispatcherConflictRefresh(0);
+    });
     var miningMasterUpdateModal = document.querySelector("[data-mm-pwa-update-modal]");
     var miningMasterUpdateText = document.querySelector("[data-mm-pwa-update-text]");
     var miningMasterUpdateStatus = document.querySelector("[data-mm-pwa-update-status]");
@@ -1594,6 +1670,15 @@ document.addEventListener("DOMContentLoaded", function () {
         return dispatcherEquipmentStateColor(legacyCodes[status] || status || "inactive");
     }
 
+    // Атрибуты фазы плана — это настройка заливки с доски: на них держатся
+    // правила с мягким цветом. Снимешь — копия вернётся к непрозрачной
+    // заливке, и подпись состояния на плитке перестанет читаться.
+    var DETAIL_TILE_KEEP_DATA = {
+        "data-plan-progress-phase": true,
+        "data-plan-loop-percent": true,
+        "data-plan-completed-loops": true
+    };
+
     function cleanDetailTile(tile) {
         tile.classList.remove("is-assigned", "is-placeholder", "dispatcher-dragging");
         tile.classList.add("gd-detail-slot-clone");
@@ -1602,7 +1687,7 @@ document.addEventListener("DOMContentLoaded", function () {
         tile.removeAttribute("tabindex");
         tile.removeAttribute("draggable");
         Array.from(tile.attributes).forEach(function (attr) {
-            if (attr.name.indexOf("data-") === 0) {
+            if (attr.name.indexOf("data-") === 0 && !DETAIL_TILE_KEEP_DATA[attr.name]) {
                 tile.removeAttribute(attr.name);
             }
         });
@@ -1657,6 +1742,12 @@ document.addEventListener("DOMContentLoaded", function () {
         title.className = "gd-detail-report-title";
         title.textContent = chart.title || "";
         card.appendChild(title);
+        if (chart.summary) {
+            var summary = document.createElement("div");
+            summary.className = "gd-detail-report-summary";
+            summary.textContent = chart.summary;
+            card.appendChild(summary);
+        }
         if (chart.type === "donut-list") {
             return card;
         }

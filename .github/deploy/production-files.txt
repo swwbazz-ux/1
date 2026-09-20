@@ -11,11 +11,13 @@
 СИСТЕМА_MVP/backend/static/js/client-error-report.js
 СИСТЕМА_MVP/backend/static/js/connection-indicators-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-hourly-grid-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-control-v1.js
 СИСТЕМА_MVP/backend/static/js/mobile-operational-sounds-v1.js
 СИСТЕМА_MVP/backend/static/js/native-background-connection-v1.js
 СИСТЕМА_MVP/backend/static/js/realtime-client.js
 СИСТЕМА_MVP/backend/templates/base.html
 СИСТЕМА_MVP/backend/templates/reports/dispatcher_shift_report.html
+СИСТЕМА_MVP/backend/templates/trips/dispatcher_control.html
 СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
 СИСТЕМА_MVP/backend/templates/users/driver_shift.html
 СИСТЕМА_MVP/backend/users/role_apps.py
