@@ -26,6 +26,7 @@ function fixture(manual) {
         playExcavatorTruckGrabFeedback: () => {haptics.push(70); vibrations++; pickupTones++;},
         isInactiveTruck: c => c.dataset.eoTruckInactive === '1',
         isTruckLoadBlocked: c => c.dataset.eoCanLoad === '0',
+        isFreeBucketCancelSwipe: () => false,
         selectTruck() {}, selectDump() {},
         openTruckDetailCard: () => {details++; return true;},
         createTruckDragPreview() {}, removeTruckDragPreview() {}, clearDropReady() {},
@@ -36,8 +37,12 @@ function fixture(manual) {
     vm.runInContext(template.slice(canStart, template.indexOf('    function generateClientActionId', canStart)), context);
     const finishStart = template.indexOf('    function finishTruckDrag(event)');
     vm.runInContext(template.slice(finishStart, template.indexOf('    shell.addEventListener("dragstart"', finishStart)), context);
-    const start = template.indexOf('    shell.querySelectorAll("[data-eo-truck-card]").forEach(function (card)');
-    vm.runInContext(template.slice(start, template.indexOf('    shell.querySelectorAll("[data-eo-dump-select]")', start)), context);
+    const bindStart = template.indexOf('    function bindExcavatorTruckCard(card)');
+    const bindEnd = template.indexOf('    freeBucketController =', bindStart);
+    assert.notEqual(bindStart, -1, 'bindExcavatorTruckCard fixture marker was not found');
+    assert.notEqual(bindEnd, -1, 'bindExcavatorTruckCard fixture end marker was not found');
+    vm.runInContext(template.slice(bindStart, bindEnd), context);
+    context.bindExcavatorTruckCard(card);
     function fire(name, extra = {}) {
         handlers[name]({pointerId: 1, button: 0, clientX: 10, clientY: 20, preventDefault() {}, stopPropagation() {}, ...extra});
     }
@@ -326,12 +331,15 @@ test('truck loaded outbox event carries exact assignment state and immutable con
     const start = template.indexOf('    function postTruckLoaded(card, dumpTarget)');
     const end = template.indexOf('    function clearDropReady()', start);
     const source = template.slice(start, end);
-    assert.match(source, /assignment_id:\s*card\.dataset\.assignmentId/);
-    assert.match(source, /event_type:\s*"excavator\.trip\.loaded"/);
+    assert.match(source, /assignment_id:\s*isFreeBucketLoad \? "" : \(card\.dataset\.assignmentId \|\| ""\)/);
+    assert.match(source, /event_type:\s*isFreeBucketLoad \? "excavator\.free_bucket\.loaded" : "excavator\.trip\.loaded"/);
     assert.match(source, /format_version:\s*1/);
     assert.match(source, /occurred_at:\s*new Date\(\)\.toISOString\(\)/);
     assert.match(source, /local_trip_id:\s*localTripId/);
-    assert.match(source, /depends_on:\s*previous \? \[previous\.event_id\] : \[\]/);
+    assert.match(
+        source,
+        /depends_on:\s*\[\s*isFreeBucketLoad[\s\S]*?: \(acceptanceEvent \? acceptanceEvent\.event_id : ""\),\s*previous \? previous\.event_id : ""\s*\]\.filter/
+    );
     assert.match(source, /fieldOutbox\.queue\(event\)\.then/);
     assert.match(source, /fieldOutbox\.allocateSequence\(legacyExcavatorFieldSequence/);
     assert.match(source, /rock_type_id:/);

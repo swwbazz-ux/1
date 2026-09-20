@@ -520,7 +520,7 @@ test(
     async () => {
         const runtime = createDeputyRuntime({locked: true});
         const card = runtime.employeeList.querySelector(".deputy-employee-card");
-        const slot = runtime.board.querySelector(".deputy-slot");
+        const slot = runtime.board.querySelector(".deputy-crew-position");
         const savedLabelBefore = runtime.autosaveText.textContent;
 
         assert.ok(card, "employee card was not rendered");
@@ -576,7 +576,7 @@ test("saveSlot and postJson both recheck a locked contract", async () => {
 test("unlocked deputy drag-and-drop persists exactly once", async () => {
     const runtime = createDeputyRuntime({locked: false});
     const card = runtime.employeeList.querySelector(".deputy-employee-card");
-    const slot = runtime.board.querySelector(".deputy-slot");
+    const slot = runtime.board.querySelector(".deputy-crew-position");
 
     assert.equal(card.draggable, true);
     card.dispatchEvent(dragEvent("dragstart"));
@@ -677,10 +677,16 @@ test("same release static request is fetched once and then served cache-first", 
 
 function extractDeputyWorker() {
     const match = deputyWorkerModule.match(
-        /DEPUTY_SERVICE_WORKER_JS = r"""([\s\S]*?)"""/
+        /DEPUTY_SERVICE_WORKER_JS_TEMPLATE = r"""([\s\S]*?)"""/
     );
-    assert.ok(match, "DEPUTY_SERVICE_WORKER_JS was not found");
-    return match[1];
+    assert.ok(match, "DEPUTY_SERVICE_WORKER_JS_TEMPLATE was not found");
+    return match[1]
+        .replaceAll("__APP_CONTRACT_VERSION__", JSON.stringify("test-contract"))
+        .replaceAll("__ROLE_CODE__", JSON.stringify("deputy_mining_manager"))
+        .replaceAll(
+            "__CACHE_NAME__",
+            JSON.stringify("deputy-mining-manager-desktop-shell-test")
+        );
 }
 
 test(
@@ -732,7 +738,7 @@ test(
             console,
         };
         vm.runInNewContext(workerSource, context, {
-            filename: "assignments/deputy_views.py::DEPUTY_SERVICE_WORKER_JS",
+            filename: "assignments/deputy_views.py::DEPUTY_SERVICE_WORKER_JS_TEMPLATE",
         });
 
         const oldUrl = (
