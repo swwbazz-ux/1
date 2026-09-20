@@ -19,10 +19,11 @@ from assignments.models import (
     HaulAssignment,
     HaulAssignmentAction,
 )
-from references.models import Equipment, EquipmentType
+from downtimes.models import DowntimeEvent, DowntimeReason
+from references.models import DumpPoint, Equipment, EquipmentType, RockType
 from reports.models import PilotFeedback, ReportTemplate
 from shifts.models import EmployeeShift
-from trips.models import DispatcherActionLog
+from trips.models import DispatcherActionLog, Trip, TripClientAction, TripStatus
 from users.active_role import (
     ACTIVE_ROLE_GENERATION_SESSION_KEY,
     ACTIVE_ROLE_SESSION_KEY,
@@ -529,5 +530,185 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
         self.assertFalse(
             DispatcherActionLog.objects.filter(
                 haul_assignment=self.assignment,
+            ).exists(),
+        )
+
+
+@skipUnless(connection.vendor == 'postgresql', 'PostgreSQL row locks are required.')
+class ExcavatorActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        super().setUp()
+        self.role = Role.objects.create(
+            code='excavator_operator',
+            name='Машинист экскаватора',
+        )
+        self.operator = Employee.objects.create(
+            full_name='Машинист конкурентной повторной авторизации',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.access = EmployeeAccess.objects.create(
+            employee=self.operator,
+            role=self.role,
+            access_code='PG-EXCAVATOR-ROLE-GENERATION',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+            last_login_at=timezone.now(),
+        )
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        self.excavator = Equipment.objects.create(
+            equipment_type=excavator_type,
+            garage_number='PG-ROLE-EXCAVATOR-MUTATION',
+        )
+        self.shift = EmployeeShift.objects.create(
+            employee=self.operator,
+            shift_type='day',
+            workplace_code='excavator_operator',
+            equipment=self.excavator,
+            opened_at=timezone.now(),
+            opened_by=self.operator,
+        )
+        self.reason = DowntimeReason.objects.create(
+            name='Конкурентная проверка активной роли',
+            equipment_type=excavator_type,
+            show_for_excavator_operator=True,
+        )
+        session = SessionStore()
+        session['employee_access_id'] = self.access.id
+        session[ACTIVE_ROLE_SESSION_KEY] = self.access.id
+        session[ACTIVE_ROLE_GENERATION_SESSION_KEY] = self.access.last_login_at.isoformat()
+        session.save()
+        self.session_key = session.session_key
+
+    def _race_repeat_activation_against(self, mutation):
+        access_loaded = Event()
+        activation_committed = Event()
+
+        from trips import views as trips_views
+
+        original_access_from_request = trips_views.excavator_access_from_request
+
+        def paused_access_from_request(*args, **kwargs):
+            access = original_access_from_request(*args, **kwargs)
+            access_loaded.set()
+            if not activation_committed.wait(timeout=10):
+                raise TimeoutError('Repeat activation did not finish in time.')
+            return access
+
+        def mutation_worker():
+            close_old_connections()
+            try:
+                client = Client(raise_request_exception=False)
+                client.cookies[settings.SESSION_COOKIE_NAME] = self.session_key
+                return mutation(client)
+            finally:
+                close_old_connections()
+
+        def activation_worker():
+            close_old_connections()
+            try:
+                access = (
+                    EmployeeAccess.objects
+                    .select_related('employee', 'role')
+                    .get(pk=self.access.pk)
+                )
+                request = SimpleNamespace(session={})
+                activated = activate_role_session(request, access)
+                return activated.last_login_at
+            finally:
+                close_old_connections()
+
+        with (
+            patch(
+                'trips.views.excavator_access_from_request',
+                new=paused_access_from_request,
+            ),
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
+            mutation_future = executor.submit(mutation_worker)
+            if not access_loaded.wait(timeout=10):
+                activation_committed.set()
+                self.fail('Excavator mutation did not load the original access.')
+            activation_future = executor.submit(activation_worker)
+            try:
+                activated_at = activation_future.result(timeout=30)
+            finally:
+                activation_committed.set()
+            response = mutation_future.result(timeout=30)
+
+        return response, activated_at
+
+    def test_repeat_activation_wins_before_excavator_downtime_mutation(self):
+        def mutation(client):
+            return client.post(
+                reverse('excavator_downtime_action'),
+                data=json.dumps({
+                    'action': 'start',
+                    'reason_id': self.reason.id,
+                    'client_action_id': 'pg-stale-excavator-downtime',
+                }),
+                content_type='application/json',
+                HTTP_HOST='localhost',
+            )
+
+        response, activated_at = self._race_repeat_activation_against(mutation)
+
+        self.access.refresh_from_db()
+        self.assertEqual(self.access.last_login_at, activated_at)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'inactive_role')
+        self.assertFalse(
+            DowntimeEvent.objects.filter(
+                equipment=self.excavator,
+                ended_at__isnull=True,
+            ).exists(),
+        )
+
+    def test_repeat_activation_wins_before_excavator_loaded_cancel_mutation(self):
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        truck = Equipment.objects.create(
+            equipment_type=truck_type,
+            garage_number='PG-ROLE-CANCEL-TRUCK',
+        )
+        rock = RockType.objects.create(name='PG role cancellation rock')
+        dump_point = DumpPoint.objects.create(name='PG role cancellation dump')
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=truck,
+            excavator_operator=self.operator,
+            loading_shift=self.shift,
+            rock_type=rock,
+            dump_point=dump_point,
+            assigned_dump_point=dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=timezone.now(),
+        )
+
+        def mutation(client):
+            return client.post(
+                reverse('excavator_truck_loaded_cancel'),
+                data=json.dumps({
+                    'client_action_id': 'pg-stale-excavator-loaded-cancel',
+                    'trip_id': trip.id,
+                    'truck_id': truck.id,
+                    'dump_point_id': dump_point.id,
+                }),
+                content_type='application/json',
+                HTTP_HOST='localhost',
+            )
+
+        response, activated_at = self._race_repeat_activation_against(mutation)
+
+        self.access.refresh_from_db()
+        trip.refresh_from_db()
+        self.assertEqual(self.access.last_login_at, activated_at)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'inactive_role')
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertIsNone(trip.cancelled_at)
+        self.assertFalse(
+            TripClientAction.objects.filter(
+                action_type='truck_loaded_cancel',
+                client_action_id='pg-stale-excavator-loaded-cancel',
             ).exists(),
         )

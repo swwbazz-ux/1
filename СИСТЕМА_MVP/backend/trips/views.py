@@ -4271,6 +4271,29 @@ def excavator_access_from_request(request, *, require_active_role=True):
     return access
 
 
+def lock_excavator_mutation_access(request, access):
+    """Serialize role activation and re-check a fresh access generation."""
+    Employee.objects.select_for_update().get(pk=access.employee_id)
+    locked_access = (
+        EmployeeAccess.objects
+        .select_for_update(of=('self',))
+        .select_related('employee', 'employee__contractor_organization', 'role')
+        .filter(
+            id=access.id,
+            employee_id=access.employee_id,
+            is_active=True,
+        )
+        .first()
+    )
+    if (
+        not locked_access
+        or locked_access.role.code != 'excavator_operator'
+        or not role_session_state(request, locked_access)['is_active']
+    ):
+        return None
+    return locked_access
+
+
 def get_excavator_open_shift(employee):
     return (
         EmployeeShift.objects
@@ -5127,7 +5150,7 @@ def notify_driver_truck_loaded(trip):
 
 @require_POST
 def excavator_truck_loaded_view(request):
-    access = excavator_access_from_request(request)
+    access = excavator_access_from_request(request, require_active_role=False)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
     payload = excavator_json_payload(request)
@@ -5150,8 +5173,8 @@ def excavator_truck_loaded_view(request):
             response_payload['deduplicated'] = True
             return JsonResponse(response_payload)
 
-        Employee.objects.select_for_update().get(pk=access.employee_id)
-        if not role_session_state(request, access)['is_active']:
+        access = lock_excavator_mutation_access(request, access)
+        if not access:
             return JsonResponse(
                 {'ok': False, 'error': 'Роль неактивна — доступен только просмотр', 'code': 'inactive_role'},
                 status=409,
@@ -5357,7 +5380,7 @@ def excavator_truck_loaded_view(request):
 
 @require_POST
 def excavator_truck_loaded_cancel_view(request):
-    access = excavator_access_from_request(request)
+    access = excavator_access_from_request(request, require_active_role=False)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
     payload = excavator_json_payload(request)
@@ -5387,8 +5410,8 @@ def excavator_truck_loaded_cancel_view(request):
                 'version': get_operational_state_version(),
             })
 
-        Employee.objects.select_for_update().get(pk=access.employee_id)
-        if not role_session_state(request, access)['is_active']:
+        access = lock_excavator_mutation_access(request, access)
+        if not access:
             return JsonResponse(
                 {'ok': False, 'error': 'Роль неактивна — доступен только просмотр', 'code': 'inactive_role'},
                 status=409,
@@ -5486,11 +5509,11 @@ def excavator_truck_loaded_cancel_view(request):
 @require_POST
 @transaction.atomic
 def excavator_work_settings_view(request):
-    access = excavator_access_from_request(request)
+    access = excavator_access_from_request(request, require_active_role=False)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_excavator_mutation_access(request, access)
+    if not access:
         return JsonResponse(
             {
                 'ok': False,
@@ -5699,7 +5722,7 @@ def get_previous_closed_equipment_shift(equipment):
 @require_POST
 @transaction.atomic
 def excavator_shift_action_view(request):
-    access = excavator_access_from_request(request)
+    access = excavator_access_from_request(request, require_active_role=False)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
 
@@ -5729,8 +5752,8 @@ def excavator_shift_action_view(request):
             response_payload['deduplicated'] = True
             return JsonResponse(response_payload)
 
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_excavator_mutation_access(request, access)
+    if not access:
         return JsonResponse(
             {'ok': False, 'error': 'Роль неактивна — доступен только просмотр', 'code': 'inactive_role'},
             status=409,
@@ -5902,6 +5925,11 @@ def excavator_work_view(request):
             shift_action_block_message = work_assignment_error_message(assignment_state)
         elif equipment_open_shift:
             shift_action_block_message = 'Техника занята в другой смене.'
+        elif shift_fuel_limit <= 0:
+            shift_action_block_message = (
+                'Для этого экскаватора не настроена вместимость топливного бака. '
+                'Обратитесь к администратору.'
+            )
         else:
             other_role_shift = find_other_role_open_shift(
                 access.employee,
@@ -7119,7 +7147,7 @@ def excavator_work_view(request):
 @require_http_methods(["GET", "POST"])
 @transaction.atomic
 def excavator_downtime_action_view(request):
-    access = excavator_access_from_request(request)
+    access = excavator_access_from_request(request, require_active_role=False)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
     open_shift = get_excavator_open_shift(access.employee)
@@ -7130,8 +7158,8 @@ def excavator_downtime_action_view(request):
     if request.method == 'GET':
         return JsonResponse(excavator_downtime_status_payload(current_excavator, open_shift))
 
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_excavator_mutation_access(request, access)
+    if not access:
         return JsonResponse(
             {
                 'ok': False,
