@@ -855,8 +855,16 @@
                     applyActiveRoleState(payload);
                     // ВРЕМЕННАЯ диагностика боевого случая 20.09.2026 (снять после разбора):
                     // видно с любой роли через logcat/консоль — сервер не логируется без SSH.
-                    if (payload.debug_manual_trip_reconcile && window.console && typeof window.console.info === "function") {
-                        window.console.info("manual-trip-debug " + JSON.stringify(payload.debug_manual_trip_reconcile));
+                    // Без условия на debug-поле: если оно не приходит вовсе, это тоже нужно увидеть.
+                    if (window.console && typeof window.console.info === "function") {
+                        window.console.info("manual-trip-debug2 " + JSON.stringify({
+                            role_active: payload.role_active,
+                            active_role_code: payload.active_role_code,
+                            session_role_code: payload.session_role_code,
+                            role_app_code: payload.role_app_code,
+                            has_debug: 'debug_manual_trip_reconcile' in payload,
+                            debug: payload.debug_manual_trip_reconcile
+                        }));
                     }
                     if (window.AppPwaContractGuard && typeof window.AppPwaContractGuard.acceptServerContract === "function") {
                         window.AppPwaContractGuard.acceptServerContract(payload);
