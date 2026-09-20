@@ -66,6 +66,14 @@ GitHub Actions подключается к production отдельным клю�
 - `publish_apk` / `PUBLISH_APK` атомарно публикует сначала версионный APK, потом `*-update.json`, и после публикации повторно скачивает и сверяет их.
 - Release keystore и его реквизиты хранятся только в GitHub Environment `production` как encrypted secrets. В репозиторий они не попадают.
 
+### Firebase Cloud Messaging
+
+- Сервисный JSON хранится только в GitHub Secret `FCM_SERVICE_ACCOUNT_JSON`; в Git и Actions log он не выводится.
+- `verify_fcm` / `VERIFY_FCM` проверяет строгий состав сервисного аккаунта, совпадение `project_id`, контрольные суммы и ограниченный путь пакета, не изменяя production.
+- `configure_fcm` / `CONFIGURE_FCM` доступен только из канонической control-ветки. Receiver сохраняет резервные копии действующего `.env` и прежнего ключа, атомарно устанавливает ключ как `/etc/accounting-mvp/firebase-service-account.json` с правами `0640`, меняет только `DJANGO_FCM_SERVICE_ACCOUNT_FILE` и `DJANGO_FCM_PROJECT_ID`, затем перезапускает и проверяет сервис.
+- При любой ошибке receiver восстанавливает прежние `.env` и ключ до повторного запуска сервиса. Секретный payload удаляется вместе с временным release package.
+- Перед первым `verify_fcm` необходимо тем же SHA выполнить `verify_receiver` и `update_receiver`, чтобы установленный production receiver знал новый строгий контракт.
+
 ### Контролируемое изменение данных
 
 - Операция хранится в `backend/deploy/data_updates/*.py`, поддерживает обязательные ключи `--dry-run` и `--apply`; в release file list допустимы только несекретные входные файлы.
