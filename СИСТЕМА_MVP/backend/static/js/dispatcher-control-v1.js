@@ -1173,6 +1173,13 @@ document.addEventListener("DOMContentLoaded", function () {
     });
     function showDispatcherDnDError(error) {
         var message = error && error.message ? error.message : "Действие не выполнено.";
+        window.dispatchEvent(new CustomEvent("dispatcher-action-error", {
+            detail: {
+                message: message,
+                code: error && error.code ? String(error.code) : "",
+                conflict: Boolean(error && error.conflict)
+            }
+        }));
         if (error && error.conflict) {
             dispatcherConflictRefreshPending = true;
             dispatcherConflictRefreshApplyFailures = 0;

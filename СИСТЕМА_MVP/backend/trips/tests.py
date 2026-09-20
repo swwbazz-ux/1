@@ -216,6 +216,8 @@ class DispatcherSharedShiftStartTests(TestCase):
         dispatcher_script = dispatcher_script_path.read_text(encoding='utf-8')
 
         self.assertContains(response, 'js/dispatcher-control-v1.js')
+        self.assertContains(response, 'js/dispatcher-sounds-v1.js')
+        self.assertContains(response, 'data-dispatcher-sound-toggle')
         for marker in (
             'function applyDesktopTruckAction',
             'function sortDesktopEquipmentList',
@@ -261,6 +263,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
+        self.assertContains(response, 'dispatcher-desktop-shell-v129')
         self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
         self.assertIn('registration.update()', dispatcher_script)
         self.assertIn('SKIP_WAITING', dispatcher_script)
