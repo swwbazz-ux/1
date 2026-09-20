@@ -1053,8 +1053,9 @@ class ChaosExcavatorLoadingDowntimeRegressionTests(TestCase):
             garage_number='CHAOS-TRUCK-004',
         )
         self.rock = RockType.objects.create(
-            name='Руда CHAOS P01 погрузка',
+            name='Скальная порода',
             density=Decimal('2.6000'),
+            loosening_factor=Decimal('1.5000'),
         )
         self.dump_point = DumpPoint.objects.create(name='ККД CHAOS P01 погрузка')
         self.waiting_reason, _ = DowntimeReason.objects.get_or_create(

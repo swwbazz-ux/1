@@ -31,6 +31,11 @@ from reports.driver_watch_observation import (
     build_driver_watch_linkage_audit,
     build_driver_watch_observation,
 )
+from rotations.employee_watch_profile_changes import (
+    apply_employee_watch_profile_change,
+    create_employee_watch_profile_change_draft,
+)
+from rotations.models import EmployeeWatchProfileChange
 from users.models import (
     Employee,
     EmployeeAccess,
@@ -503,7 +508,25 @@ class DriverWatchPeriodLinkageTests(TestCase):
         self.assertEqual(repeated_shift.pk, first_shift.pk)
         self.assertEqual(repeated_shift.watch_period_id, watch_period.pk)
 
-    def test_employee_membership_change_does_not_rewrite_open_shift_snapshot(self):
+    def test_applied_future_membership_change_does_not_rewrite_open_shift_snapshot(self):
+        old_schedule = WorkSchedule.objects.create(
+            code='test-watch-schedule-before-transfer',
+            name='ТЕСТ_ВАХТА_Исходный график',
+            brigade_count=2,
+            is_active=True,
+        )
+        new_schedule = WorkSchedule.objects.create(
+            code='test-watch-schedule-after-transfer',
+            name='ТЕСТ_ВАХТА_Новый график',
+            brigade_count=2,
+            is_active=True,
+        )
+        self._use_driver_with_initial_watch_profile_for_test(
+            suffix='MEMBERSHIP_SNAPSHOT',
+            work_schedule=old_schedule,
+            brigade_number=1,
+            watch_composition=self.watch_composition,
+        )
         watch_period = self.create_current_watch_period()
         self.publish_current_deputy_plan()
         shift = self.open_shift(action='membership-snapshot')
@@ -511,11 +534,44 @@ class DriverWatchPeriodLinkageTests(TestCase):
             code='test-watch-composition-transfer',
             name='ТЕСТ_ВАХТА_Новый утверждённый состав',
         )
-
-        self.driver.watch_composition = new_composition
-        self.driver.save(update_fields=['watch_composition'])
+        future_period = WatchPeriod.objects.create(
+            name='ТЕСТ_ВАХТА_Будущий период',
+            watch_composition=new_composition,
+            starts_on=timezone.localdate() + timedelta(days=30),
+            ends_on=timezone.localdate() + timedelta(days=59),
+            is_active=True,
+        )
+        timekeeper_role, _created = Role.objects.update_or_create(
+            code='timekeeper',
+            defaults={'name': 'Табельщик', 'is_active': True},
+        )
+        timekeeper_access = EmployeeAccess.objects.create(
+            employee=self.deputy,
+            role=timekeeper_role,
+            access_code='290099',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        change = create_employee_watch_profile_change_draft(
+            employee_id=self.driver.pk,
+            effective_watch_period_id=future_period.pk,
+            new_work_schedule_id=new_schedule.pk,
+            new_brigade_number=2,
+            new_watch_composition_id=new_composition.pk,
+            basis_kind=EmployeeWatchProfileChange.BasisKind.EMPLOYEE_APPLICATION,
+            basis_number='Заявление № 1',
+            basis_date=timezone.localdate(),
+            basis='Изменение состава со следующей вахты.',
+            actor_access_id=timekeeper_access.pk,
+        )
+        apply_employee_watch_profile_change(
+            change_id=change.pk,
+            actor_access_id=timekeeper_access.pk,
+        )
         shift.refresh_from_db()
+        change.refresh_from_db()
 
+        self.assertEqual(change.status, EmployeeWatchProfileChange.Status.APPLIED)
         self.assertEqual(shift.watch_period_id, watch_period.pk)
 
     def test_publisher_without_deputy_access_does_not_prove_placement(self):

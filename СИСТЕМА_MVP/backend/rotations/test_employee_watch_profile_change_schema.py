@@ -394,7 +394,22 @@ class EmployeeWatchProfileChangeSchemaTests(TestCase):
 
 
 class EmployeeWatchProfileChangeMigrationCycleTests(TransactionTestCase):
-    serialized_rollback = True
+    def _migrate(self, target):
+        executor = MigrationExecutor(connection)
+        targets = [
+            node
+            for node in executor.loader.graph.leaf_nodes()
+            if node[0] not in {'rotations', 'settlement'}
+        ] + [
+            ('settlement', '0017_m9_preview_corrections'),
+            ('rotations', target),
+        ]
+        executor.migrate(targets)
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+        super().tearDown()
 
     def test_forward_reverse_forward_cycle(self):
         table_name = EmployeeWatchProfileChange._meta.db_table
@@ -406,8 +421,7 @@ class EmployeeWatchProfileChangeMigrationCycleTests(TransactionTestCase):
         )
         expected_presence = (False, True, False, True)
         for target, should_exist in zip(targets, expected_presence, strict=True):
-            executor = MigrationExecutor(connection)
-            executor.migrate([target])
+            self._migrate(target[1])
             self.assertEqual(
                 table_name in connection.introspection.table_names(),
                 should_exist,

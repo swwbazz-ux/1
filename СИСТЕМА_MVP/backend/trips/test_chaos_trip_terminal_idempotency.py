@@ -26,7 +26,10 @@ from references.models import (
     RockType,
 )
 from shifts.models import EmployeeShift, ShiftClientAction
-from shifts.services import close_driver_shift
+from shifts.services import (
+    close_driver_shift,
+    DriverShiftCloseIdempotencyConflict,
+)
 from trips.models import (
     DispatcherActionLog,
     DispatcherActionType,
@@ -225,6 +228,7 @@ class TripTerminalFixtureMixin:
 class TripTerminalSequentialRegressionTests(TripTerminalFixtureMixin, TestCase):
     def test_dispatcher_terminal_actions_reject_missing_blank_and_whitespace_reason(self):
         dispatcher_client = self.client_for_access(self.dispatcher_access)
+        trip = self.create_trip()
         invalid_payloads = (
             ('missing', {}),
             ('blank', {'reason': ''}),
@@ -246,7 +250,6 @@ class TripTerminalSequentialRegressionTests(TripTerminalFixtureMixin, TestCase):
         for action_name, route_name, expected_error in endpoints:
             for payload_name, payload in invalid_payloads:
                 with self.subTest(action=action_name, payload=payload_name):
-                    trip = self.create_trip()
                     audit_count_before = DispatcherActionLog.objects.count()
                     state_count_before = OperationalStateEvent.objects.filter(
                         object_type='Trip',
@@ -690,12 +693,12 @@ class TripTerminalSequentialRegressionTests(TripTerminalFixtureMixin, TestCase):
         )
         self.assertEqual(action.trip, trip)
 
-    def test_trip_action_same_id_different_object_returns_original_result(self):
+    def test_trip_action_same_id_different_object_rejects_reused_identifier(self):
         first_trip = self.create_trip()
-        second_trip = self.create_trip()
         driver_client = self.client_for_access(self.driver_one_access)
 
         first = self.post_driver_unload(driver_client, first_trip, 'stale-tab-trip-action')
+        second_trip = self.create_trip()
         second = self.post_driver_unload(driver_client, second_trip, 'stale-tab-trip-action')
 
         self.assertEqual(first.status_code, 302)
@@ -735,24 +738,23 @@ class TripTerminalSequentialRegressionTests(TripTerminalFixtureMixin, TestCase):
             1,
         )
 
-    def test_shift_action_same_id_different_object_returns_original_result(self):
+    def test_shift_action_same_id_different_object_rejects_reused_identifier(self):
         first_shift, first_created = close_driver_shift(
             shift=self.driver_one_shift,
             employee=self.driver_one,
             readings=self.close_readings(),
             client_action_id='stale-tab-shift-action',
         )
-        second_shift, second_created = close_driver_shift(
-            shift=self.driver_two_shift,
-            employee=self.driver_two,
-            readings=self.close_readings(),
-            client_action_id='stale-tab-shift-action',
-        )
+        with self.assertRaises(DriverShiftCloseIdempotencyConflict):
+            close_driver_shift(
+                shift=self.driver_two_shift,
+                employee=self.driver_two,
+                readings=self.close_readings(),
+                client_action_id='stale-tab-shift-action',
+            )
 
         self.driver_two_shift.refresh_from_db()
         self.assertTrue(first_created)
-        self.assertFalse(second_created)
-        self.assertEqual(first_shift.pk, second_shift.pk)
         self.assertIsNone(self.driver_two_shift.closed_at)
         action = ShiftClientAction.objects.get(
             action_type='driver_shift_closed',

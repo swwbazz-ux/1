@@ -1977,9 +1977,12 @@ class ArrivalRosterT14aApprovalTests(TestCase):
             employee=cls.employee, resident_type=SettlementResident.ResidentType.EMPLOYEE,
             status=SettlementResident.Status.ACTIVE,
         )
+        today = timezone.localdate()
         cls.period = WatchPeriod.objects.create(
             name='Период T1.4a', watch_composition=composition,
-            starts_on=date(2026, 8, 14), ends_on=date(2026, 9, 13), is_active=True,
+            starts_on=today - timedelta(days=7),
+            ends_on=today + timedelta(days=21),
+            is_active=True,
         )
         cls.other_role = Role.objects.create(code='t14a-other', name='Другая роль T1.4a')
         cls.other_access = EmployeeAccess.objects.create(
@@ -2680,7 +2683,8 @@ class ArrivalRosterT14aApprovalTests(TestCase):
         self.assertNotIn(version.confirmation_sha256, html)
         self.assertNotIn('confirmation_snapshot', html)
         self.assertNotIn('employee_access_id', html)
-        self.assertNotIn('PIN', html)
+        self.assertNotIn('name="access_code"', html)
+        self.assertNotIn('data-pin-input', html)
 
     def test_t14b_index_uses_russian_states_and_current_confirmed_marker(self):
         first = self._confirm(self._ready_version())
@@ -2934,16 +2938,33 @@ class ArrivalRosterT14aApprovalTests(TestCase):
         })
 
 
+def _migration_targets_with_rotations(executor, target):
+    return [
+        node
+        for node in executor.loader.graph.leaf_nodes()
+        if node[0] not in {'rotations', 'settlement'}
+    ] + [
+        ('settlement', '0017_m9_preview_corrections'),
+        ('rotations', target),
+    ]
+
+
+def _restore_latest_migration_state():
+    executor = MigrationExecutor(connection)
+    executor.migrate(executor.loader.graph.leaf_nodes())
+
+
 class ArrivalRosterT14aMigrationTests(TransactionTestCase):
     reset_sequences = True
 
     def _migrate(self, target):
         executor = MigrationExecutor(connection)
-        executor.migrate([('rotations', target)])
-        return executor.loader.project_state([('rotations', target)]).apps
+        targets = _migration_targets_with_rotations(executor, target)
+        executor.migrate(targets)
+        return executor.loader.project_state(targets).apps
 
     def tearDown(self):
-        self._migrate('0006_arrival_roster_excel_revision')
+        _restore_latest_migration_state()
         super().tearDown()
 
     def _historical_version(self, apps, *, confirmed=False):
@@ -2957,7 +2978,8 @@ class ArrivalRosterT14aMigrationTests(TransactionTestCase):
             code='timekeeper', defaults={'name': 'Табельщик', 'is_active': True},
         )
         employee = EmployeeModel.objects.create(
-            full_name='Migration T1.4a', status='active', is_active=True,
+            full_name='Migration T1.4a', employment_type='staff',
+            status='active', is_active=True,
         )
         access = AccessModel.objects.create(
             employee_id=employee.pk, role_id=role.pk, access_code='migration-t14a',
@@ -3015,11 +3037,12 @@ class ArrivalRosterT14cMigrationTests(TransactionTestCase):
 
     def _migrate(self, target):
         executor = MigrationExecutor(connection)
-        executor.migrate([('rotations', target)])
-        return executor.loader.project_state([('rotations', target)]).apps
+        targets = _migration_targets_with_rotations(executor, target)
+        executor.migrate(targets)
+        return executor.loader.project_state(targets).apps
 
     def tearDown(self):
-        self._migrate('0006_arrival_roster_excel_revision')
+        _restore_latest_migration_state()
         super().tearDown()
 
     def _excel_version(self, apps, *, version_number=1, based_on_version_id=None):
@@ -3033,7 +3056,12 @@ class ArrivalRosterT14cMigrationTests(TransactionTestCase):
         VersionModel = apps.get_model('rotations', 'ArrivalRosterVersion')
         role, _ = RoleModel.objects.get_or_create(code='timekeeper', defaults={'name': 'Табельщик'})
         employee, _ = EmployeeModel.objects.get_or_create(
-            full_name='Migration T1.4c', defaults={'status': 'active', 'is_active': True},
+            full_name='Migration T1.4c',
+            defaults={
+                'employment_type': 'staff',
+                'status': 'active',
+                'is_active': True,
+            },
         )
         access, _ = AccessModel.objects.get_or_create(
             employee_id=employee.pk, role_id=role.pk, access_code='migration-t14c',
@@ -3132,11 +3160,12 @@ class ArrivalRosterT13bTests(TestCase):
         cls.other_composition = WatchComposition.objects.create(
             code='watch-other-t13b', name='Другая вахта T1.3b', is_active=True,
         )
+        today = timezone.localdate()
         cls.period = WatchPeriod.objects.create(
             name='Период T1.3b',
             watch_composition=cls.composition,
-            starts_on=date(2026, 8, 14),
-            ends_on=date(2026, 9, 13),
+            starts_on=today - timedelta(days=7),
+            ends_on=today + timedelta(days=21),
             is_active=True,
         )
         cls.employee = Employee.objects.create(

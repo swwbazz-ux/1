@@ -576,7 +576,11 @@ class CohortMemberWatchProfileProvenanceMigrationTests(TransactionTestCase):
     @staticmethod
     def _migrate(target):
         executor = MigrationExecutor(connection)
-        targets = [target, ('rotations', '0008_employee_watch_profile_change')]
+        targets = [
+            target,
+            ('rotations', '0008_employee_watch_profile_change'),
+            *executor.loader.graph.leaf_nodes('users'),
+        ]
         executor.migrate(targets)
         return executor.loader.project_state(targets).apps
 
