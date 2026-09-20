@@ -6,7 +6,7 @@
     {% if mining_master_mobile_enabled %}
         {{ block.super }}
     {% else %}
-        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v={{ static_asset_release }}">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v=dispatcher-desktop-shell-v130">
         <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v={{ static_asset_release }}">
     {% endif %}
 {% endblock %}
@@ -1158,6 +1158,26 @@
     </div>
 </main>
 </div>
+{% if not mining_master_mobile_enabled %}
+<aside
+    class="dispatcher-push-invite"
+    data-push-invite
+    data-shift-key="dispatcher-{{ dispatcher_header.shift_id|default:'control' }}"
+    data-app-name="Диспетчер"
+    hidden
+    aria-live="polite"
+>
+    <div class="dispatcher-push-invite__icon" aria-hidden="true">!</div>
+    <div class="dispatcher-push-invite__copy">
+        <strong data-push-title>Включите системные уведомления</strong>
+        <span data-push-text>Windows сообщит о важном событии, даже если Пульт закрыт.</span>
+    </div>
+    <div class="dispatcher-push-invite__actions" data-push-actions>
+        <button type="button" data-push-enable>Включить</button>
+        <button type="button" data-push-later>Позже</button>
+    </div>
+</aside>
+{% endif %}
 {% endspaceless %}
 {% if not mining_master_mobile_enabled %}
 <script>
@@ -7474,7 +7494,7 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v129" defer></script>
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v129" defer></script>
+<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v130" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v130" defer></script>
 {% endif %}
 {% endblock %}
