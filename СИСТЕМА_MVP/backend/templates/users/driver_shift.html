@@ -12,6 +12,8 @@
 <script src="{% static 'js/mobile-dial-actions-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/driver-downtime-drum-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/driver-free-bucket-v1.js' %}?v={{ driver_shell_version }}" defer></script>
+<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v={{ driver_shell_version }}"></script>
+<script src="{% static 'js/driver-manual-excavator-workspace-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <meta name="theme-color" content="#031015">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Самосвал">
@@ -22,6 +24,11 @@
 <link rel="stylesheet" href="{% static 'css/mobile-dial-actions-v1.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/driver-downtime-drum-v1.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/driver-free-bucket-v1.css' %}?v={{ driver_shell_version }}">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v={{ driver_shell_version }}">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v={{ driver_shell_version }}">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v={{ driver_shell_version }}">
+<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v={{ driver_shell_version }}">
+<link rel="stylesheet" href="{% static 'css/driver-manual-excavator-workspace-v1.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v={{ driver_shell_version }}">
 <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v={{ driver_shell_version }}" data-mobile-sound-profile="driver" data-mobile-sound-base="{% static 'audio/driver/' %}" defer></script>
@@ -95,7 +102,7 @@
 
         <div class="driver-work-dial-zone">
             <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_loading_wait_active %} is-waiting-loading{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}{% if shift_plan_visual.is_overrun %} is-over-plan{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-progress-capped: {% if shift_plan_visual.is_overrun %}100{% else %}{{ shift_plan_visual.loop_progress }}{% endif %}; --driver-over-progress: {% if shift_plan_visual.is_overrun %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %};" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-driver-loop-progress="{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}" data-driver-completed-loops="{{ shift_plan_visual.completed_loops|default:0 }}" data-driver-has-plan="{% if shift_plan_has_plan %}1{% else %}0{% endif %}" data-plan-progress-phase="{% if shift_plan_has_plan %}{{ shift_plan_visual.phase }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
-                {% include "includes/mobile_dial_actions.html" with mobile_dial_dump_point_enabled=active_trip mobile_dial_free_bucket_enabled=driver_free_bucket_can_open mobile_dial_has_active_trip=active_trip mobile_dial_has_open_shift=open_shift mobile_dial_has_current_truck=current_truck %}
+                {% include "includes/mobile_dial_actions.html" with mobile_dial_manual_enabled=driver_manual_workspace.can_open mobile_dial_manual_blocked_reason=driver_manual_workspace.blocked_reason mobile_dial_dump_point_enabled=active_trip mobile_dial_free_bucket_enabled=driver_free_bucket_can_open mobile_dial_has_active_trip=active_trip mobile_dial_has_open_shift=open_shift mobile_dial_has_current_truck=current_truck %}
                 <form method="post"{% if active_trip %} action="{% url 'driver_complete_trip' active_trip.id %}"{% endif %} class="driver-work-dial-form" data-driver-hold-form{% if active_trip %} data-driver-trip-id="{{ active_trip.id }}"{% endif %} data-driver-unload-one-tap="{% if active_trip and driver_unloading_wait_active %}true{% else %}false{% endif %}">
                     {% csrf_token %}
                     <input type="hidden" name="client_action_id" value="" data-driver-client-action>
@@ -359,6 +366,8 @@
             </div>
         </div>
     </section>
+
+    {% include "includes/driver_manual_excavator_workspace.html" %}
 
 </main>
 

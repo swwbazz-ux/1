@@ -14,11 +14,13 @@ test("shared dial component provides three independent accessible slots", () => 
     assert.match(include, /data-mobile-dial-action="manual"/);
     assert.match(include, /data-mobile-dial-action="dump-point"/);
     assert.match(include, /data-mobile-dial-action="free-bucket"/);
-    assert.match(include, /aria-label="Ручной режим — пока недоступен"/);
+    assert.match(include, /data-driver-manual-open aria-label="Открыть ручной режим"/);
+    assert.match(include, /mobile_dial_manual_blocked_reason/);
     assert.match(include, /aria-label="Изменить точку разгрузки"/);
     assert.match(include, /aria-label="Свободный ковш"/);
     assert.doesNotMatch(include, /mobile_dial_show_(?:manual|dump_point|free_bucket)/);
     assert.match(template, /mobile_dial_dump_point_enabled=active_trip/);
+    assert.match(template, /mobile_dial_manual_enabled=driver_manual_workspace\.can_open/);
     assert.match(template, /mobile_dial_free_bucket_enabled=driver_free_bucket_can_open/);
     assert.match(template, /mobile_dial_has_active_trip=active_trip/);
     assert.match(template, /mobile_dial_has_open_shift=open_shift/);
@@ -26,7 +28,8 @@ test("shared dial component provides three independent accessible slots", () => 
 });
 
 test("all three slots stay rendered while unavailable actions are explicitly disabled", () => {
-    assert.match(include, /data-mobile-dial-action="manual" disabled aria-disabled="true"/);
+    assert.match(include, /data-mobile-dial-action="manual"\{% if mobile_dial_manual_enabled %\}/);
+    assert.match(include, /\{% else %\} disabled aria-disabled="true" aria-label="\{\{ mobile_dial_manual_blocked_reason/);
     assert.match(include, /data-mobile-dial-action="dump-point"\{% if mobile_dial_dump_point_enabled %\} data-driver-point-open/);
     assert.match(include, /\{% else %\} disabled aria-disabled="true" aria-label="Изменить точку разгрузки — доступно только в активном рейсе"/);
     assert.match(include, /data-mobile-dial-action="free-bucket"\{% if mobile_dial_free_bucket_enabled %\}/);

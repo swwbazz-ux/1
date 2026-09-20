@@ -1,0 +1,103 @@
+{% load static %}
+<section class="eo-screen eo-dashboard-screen{% if not open_shift %} is-shift-inactive{% endif %}" data-eo-screen="trucks" data-eo-work-available="{% if open_shift %}true{% else %}false{% endif %}"{% if driver_manual_dashboard %} data-driver-manual-dashboard{% elif not open_shift %} aria-disabled="true"{% endif %}>
+    <div class="eo-dashboard-main-zone">
+        <div class="eo-dashboard-head">
+            <div class="eo-dashboard-driver-card">
+                <span>{% if driver_manual_dashboard %}Водитель самосвала{% else %}Машинист экскаватора{% endif %}</span>
+                <strong>{{ dashboard_operator_name|default:access.employee.full_name|default:"-" }}</strong>
+            </div>
+            <div class="eo-dashboard-plan-widget">
+                <button class="eo-free-bucket-button" type="button"{% if driver_manual_dashboard %} data-driver-manual-free-bucket-open aria-controls="driver-free-bucket-dialog"{% else %} data-eo-free-bucket-open{% endif %} aria-haspopup="dialog" aria-label="Свободный ковш" title="Свободный ковш"{% if driver_manual_dashboard %}{% if not driver_manual_free_bucket_enabled %} disabled aria-disabled="true"{% endif %}{% elif not open_shift %} disabled aria-disabled="true"{% endif %}>
+                    <svg viewBox="0 0 28 28" aria-hidden="true" focusable="false">
+                        <path d="M3.5 7.5h7.8l2.6 8.2H7.2L3.5 7.5Z"></path>
+                        <path d="M7.2 15.7c1.7 3.2 4.7 5.1 8.4 5.1 2.5 0 4.7-.8 6.6-2.3"></path>
+                        <path d="M17.9 5.5v8M13.9 9.5h8"></path>
+                    </svg>
+                </button>
+                <div class="eo-dashboard-plan-ring {{ shift_plan_visual.text_class }}{% if shift_plan_visual.is_overrun %} is-progress-overrun{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}" style="--eo-dashboard-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}%; --eo-dashboard-loop-progress: {{ shift_plan_visual.loop_progress }}%;"{% if not driver_manual_dashboard %} role="button" tabindex="0" aria-label="Открыть почасовой отчёт. {% if shift_plan_has_plan %}Выполнение нормы: текущий цикл {{ shift_plan_visual.loop_progress }}%, завершено циклов {{ shift_plan_visual.completed_loops }}{% else %}{{ shift_plan_status_label }}{% endif %}" data-eo-hourly-report-open{% else %} aria-label="Демонстрационный ручной режим"{% endif %} data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}" data-progress-percent="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-progress-loops="{{ shift_plan_visual.completed_loops }}" data-progress-phase="{{ shift_plan_visual.phase }}">
+                    <span>{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}%</span>
+                    {% if shift_plan_visual.has_completed_loops %}<b class="eo-dashboard-progress-loop">×{{ shift_plan_visual.completed_loops }}</b>{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="eo-truck-grid eo-dashboard-truck-grid{% if driver_manual_dashboard %} driver-manual-workspace__source-layout{% endif %}{% if not truck_cards %} is-empty{% elif truck_cards|length > 9 %} is-many is-rows-4{% else %} is-rows-3{% endif %}" aria-label="{% if driver_manual_dashboard %}Назначенный экскаватор и действия режима{% else %}Самосвалы{% endif %}">
+            {% if driver_manual_dashboard %}
+                <div class="driver-manual-workspace__action-row" data-driver-manual-action-row role="group" aria-label="Управление ручным режимом">
+                    <button class="eo-truck-card eo-dashboard-truck-card driver-manual-workspace__action driver-manual-workspace__action--return" type="button" data-driver-manual-close aria-label="Вернуться в обычный режим с круглой кнопкой">
+                        <i aria-hidden="true">
+                            <svg viewBox="0 0 48 48" focusable="false">
+                                <circle cx="24" cy="24" r="17"></circle>
+                                <circle cx="24" cy="24" r="7"></circle>
+                                <path d="M10 14H4v-6M4 14A24 24 0 0 1 38 7"></path>
+                            </svg>
+                        </i>
+                        <span class="driver-manual-workspace__action-copy">
+                            <strong>ОБЫЧНЫЙ РЕЖИМ</strong>
+                            <em>Вернуться к круглой кнопке</em>
+                        </span>
+                    </button>
+                    <button class="eo-truck-card eo-dashboard-truck-card driver-manual-workspace__action driver-manual-workspace__action--point" type="button" data-driver-manual-point-open aria-haspopup="dialog" aria-controls="driver-unload-dialog" aria-expanded="false" aria-label="Выбрать точку разгрузки для следующего рейса">
+                        <i aria-hidden="true">
+                            <svg viewBox="0 0 48 48" focusable="false">
+                                <path fill-rule="evenodd" d="M23 3a11 11 0 0 0-11 11c0 8 11 20 11 20s11-12 11-20A11 11 0 0 0 23 3Zm0 15a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"></path>
+                                <path d="M24 45v-8q0-4 4-4h14m-6-6 6 6-6 6"></path>
+                            </svg>
+                        </i>
+                        <span class="driver-manual-workspace__action-copy">
+                            <strong data-driver-manual-point-label>ТОЧКА РАЗГРУЗКИ</strong>
+                            <em data-driver-manual-point-hint>Для следующего рейса</em>
+                        </span>
+                    </button>
+                </div>
+                <div class="driver-manual-workspace__trip-timer" data-driver-manual-trip-timer role="timer" aria-label="Время с момента отправки в точку разгрузки">
+                    <span data-driver-manual-trip-timer-label>ОЖИДАЕТ ОТПРАВКИ</span>
+                    <strong data-driver-manual-trip-timer-value>00:00:00</strong>
+                </div>
+                <div class="driver-manual-workspace__source-row" data-driver-manual-source-row aria-label="Назначенный экскаватор">
+                    {% for card in truck_cards %}
+                        {% include "includes/excavator_dashboard_source_card.html" with driver_manual_dashboard=True %}
+                    {% empty %}
+                        <div class="eo-empty-state eo-dashboard-empty">
+                            <img src="{% static empty_source_icon|default:'img/equipment/excavator-yellow.png' %}" alt="">
+                            <strong>Нет назначения</strong>
+                            <span>Экскаватор не назначен</span>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                {% for card in truck_cards %}
+                    {% include "includes/excavator_dashboard_source_card.html" with driver_manual_dashboard=driver_manual_dashboard %}
+                {% empty %}
+                    <div class="eo-empty-state eo-dashboard-empty">
+                        <img src="{% static empty_source_icon|default:'img/equipment/truck-gray.png' %}" alt="">
+                        <strong>Нет погрузки</strong>
+                        <span>Назначает горный мастер</span>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        </div>
+        {% if not driver_manual_dashboard %}
+            <div data-eo-assignment-snapshot hidden>
+                {% for card in assignment_snapshot_cards %}
+                    <i data-assignment-id="{{ card.assignment_id }}" data-truck-id="{{ card.truck_id }}" data-truck-number="{{ card.number }}"></i>
+                {% endfor %}
+            </div>
+            {{ free_bucket_truck_directory|json_script:"eo-free-bucket-directory-data" }}
+            {{ free_bucket_cards|json_script:"eo-free-bucket-cards-data" }}
+        {% endif %}
+    </div>
+
+    <div class="eo-dashboard-dump-zone">
+        <div class="eo-unload-grid eo-unload-grid-work eo-dashboard-unload-grid is-count-{{ dump_cards|length }}{% if dump_cards|length == 1 %} is-single{% endif %}" aria-label="Точки разгрузки">
+            {% for card in dump_cards %}
+                {% include "includes/excavator_dashboard_dump_card.html" with driver_manual_dashboard=driver_manual_dashboard %}
+            {% empty %}
+                <div class="eo-empty-state eo-empty-state-compact">
+                    <strong>Нет точек</strong>
+                    <span>{% if driver_manual_dashboard %}Нет настроенных точек разгрузки{% else %}Настройте забой{% endif %}</span>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>

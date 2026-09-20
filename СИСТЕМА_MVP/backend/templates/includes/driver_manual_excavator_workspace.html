@@ -1,0 +1,26 @@
+{% load static %}
+<section class="driver-manual-workspace" id="driver-manual-workspace" data-driver-manual-workspace hidden aria-label="Ручное управление погрузкой">
+    <div class="eo-shell" data-eo-active-tab="trucks" data-driver-manual-eo-shell>
+        <header class="eo-topbar" aria-label="Ручное управление погрузкой">
+            <button type="button" class="eo-topbar-cell driver-manual-workspace__back" data-driver-manual-close aria-label="Вернуться к стандартному экрану">
+                <img src="{% static 'img/equipment/excavator-yellow.png' %}" alt="">
+                <strong>{{ driver_manual_workspace.excavator_label|default:"Ручной режим" }}</strong>
+            </button>
+            <div class="eo-topbar-cell eo-shift-kind-cell" aria-label="Действующая смена">
+                <span class="eo-shift-status-text">{% if open_shift.shift_type == 'day' %}Смена 1{% elif open_shift %}Смена 2{% else %}Нет смены{% endif %}</span>
+            </div>
+            <div class="eo-topbar-cell eo-face-cell eo-face-cell-full">
+                <strong class="eo-face-summary" title="Горизонт {{ driver_manual_workspace.horizon|default:'—' }} / Блок {{ driver_manual_workspace.block|default:'—' }}{% if driver_manual_workspace.rock_label %} / Порода: {{ driver_manual_workspace.rock_label }}{% endif %}">
+                    <span class="eo-face-coordinates">
+                        <span>Гор. {{ driver_manual_workspace.horizon|default:"—" }}</span>
+                        <span>Бл. {{ driver_manual_workspace.block|default:"—" }}</span>
+                    </span>
+                    {% if driver_manual_workspace.rock_label %}<span class="eo-face-rock">{{ driver_manual_workspace.rock_label }}</span>{% endif %}
+                </strong>
+            </div>
+        </header>
+        <span class="driver-manual-workspace__demo" aria-label="Демонстрационный режим. Рейс не создаётся">ДЕМО</span>
+        {% include "includes/excavator_dashboard_workspace.html" with driver_manual_dashboard=True driver_manual_free_bucket_enabled=driver_free_bucket_can_open dashboard_operator_name=access.employee.full_name truck_cards=driver_manual_workspace.cards dump_cards=driver_manual_workspace.dump_cards empty_source_icon='img/equipment/excavator-yellow.png' %}
+        <div class="mobile-shift-toast" data-driver-manual-result hidden role="status" aria-live="assertive" aria-atomic="true">Демонстрация: рейс не создан</div>
+    </div>
+</section>

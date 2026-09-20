@@ -5,7 +5,10 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const backend = path.resolve(__dirname, '..', '..', '..');
-const template = fs.readFileSync(path.join(backend, 'templates', 'trips', 'excavator_work.html'), 'utf8');
+const template = [
+    'templates/trips/excavator_work.html',
+    'templates/includes/excavator_dashboard_source_card.html',
+].map(file => fs.readFileSync(path.join(backend, file), 'utf8')).join('\n');
 const controllerSource = fs.readFileSync(path.join(backend, 'static', 'js', 'excavator-free-bucket-v1.js'), 'utf8');
 
 function gestureFixture({freeBucket = true, target = null} = {}) {
