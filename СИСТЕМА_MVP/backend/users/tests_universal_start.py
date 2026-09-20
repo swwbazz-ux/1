@@ -11,6 +11,8 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
+from PIL import Image
+from django.conf import settings
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -114,6 +116,35 @@ class UniversalStartTests(TestCase):
             f'<meta name="theme-color" content="{ENTRY_SCREEN_BROWSER_BAR}">',
             count=1,
         )
+
+    def test_start_has_canonical_social_metadata_and_new_og_image(self):
+        response = self.client.get(reverse('universal_start'))
+        html = response.content.decode('utf-8')
+        image_url = 'https://driverform.ru/static/img/share/og-start-v4.jpg'
+
+        expected_tags = (
+            '<meta property="og:image" content="https://driverform.ru/static/img/share/og-start-v4.jpg">',
+            '<meta property="og:image:type" content="image/jpeg">',
+            '<meta property="og:image:width" content="1200">',
+            '<meta property="og:image:height" content="630">',
+            f'<meta name="twitter:image" content="{image_url}">',
+        )
+        for tag in expected_tags:
+            with self.subTest(tag=tag):
+                self.assertIn(tag, html)
+
+        image_path = (
+            Path(settings.BASE_DIR)
+            / 'static'
+            / 'img'
+            / 'share'
+            / 'og-start-v4.jpg'
+        )
+        with Image.open(image_path) as image:
+            self.assertEqual(image.format, 'JPEG')
+            self.assertEqual(image.mode, 'RGB')
+            self.assertEqual(image.size, (1200, 630))
+        self.assertLess(image_path.stat().st_size, 600 * 1024)
 
     def test_start_form_keeps_same_origin_csrf_evidence(self):
         client = Client(enforce_csrf_checks=True)
@@ -252,7 +283,7 @@ class UniversalStartTests(TestCase):
         self.assertTrue(response.context['has_working_code'])
         self.assertNotContains(response, 'Пинкод придумаете при первом входе')
 
-    def test_person_without_a_code_is_told_to_invent_one(self):
+    def test_person_without_a_code_sees_the_same_launch_choice(self):
         self.add_access(
             'driver', 'Водитель самосвала',
             status=EmployeeAccess.Status.NOT_ACTIVATED,
@@ -260,7 +291,8 @@ class UniversalStartTests(TestCase):
         )
         response = self.post()
         self.assertFalse(response.context['has_working_code'])
-        self.assertContains(response, 'Пинкод придумаете при первом входе')
+        self.assertContains(response, 'Выберите способ запуска приложения')
+        self.assertNotContains(response, 'Пинкод придумаете при первом входе')
 
     def test_apps_are_shown_as_icon_tiles(self):
         self.add_access('driver', 'Водитель самосвала')
@@ -303,13 +335,14 @@ class UniversalStartTests(TestCase):
         self.assertContains(response, 'data-start-install-option="native"', count=2)
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=2)
-        self.assertContains(response, '<b>Приложение <i>стабильное</i></b>', count=2)
-        self.assertContains(response, '<b>Браузер <i>нестабильно</i></b>', count=2)
-        self.assertContains(response, 'APK · версия 0.1.18 · скачать и установить', count=1)
-        self.assertContains(response, 'APK · версия 0.1.10 · скачать и установить', count=1)
+        self.assertContains(response, '<span>Установить приложение</span> <i>Рекомендуется</i>', count=2)
+        self.assertContains(response, '<span>Открыть в браузере</span> <i>ВЕБ-ВЕРСИЯ</i>', count=2)
+        self.assertContains(response, '<span>APK · версия 0.1.18</span>', count=1)
+        self.assertContains(response, '<span>APK · версия 0.1.10</span>', count=1)
+        self.assertContains(response, '<span>Скачать и установить</span>', count=2)
         self.assertNotContains(response, '2. Открыть приложение')
         self.assertNotContains(response, '/native-handoff/')
-        self.assertContains(response, 'PWA · ярлык на экран · открыть', count=2)
+        self.assertContains(response, '<span>PWA · без установки</span>', count=2)
         self.assertContains(response, 'install=1', count=2)
         self.assertNotContains(response, 'class="start-screen__app-main" href=')
         # Атрибут download заставлял Chrome ругаться «файл может быть опасным».
@@ -325,7 +358,8 @@ class UniversalStartTests(TestCase):
         response = self.post(user_agent=ANDROID_USER_AGENT)
 
         self.assertContains(response, '/media/apk/excavator-0.2.0.apk')
-        self.assertContains(response, 'APK · версия 0.2.0 · скачать и установить')
+        self.assertContains(response, '<span>APK · версия 0.2.0</span>')
+        self.assertContains(response, '<span>Скачать и установить</span>')
         self.assertNotContains(response, '/media/apk/excavator-29.apk')
 
     def test_driver_public_filename_follows_the_manifest_version_name(self):
@@ -335,7 +369,8 @@ class UniversalStartTests(TestCase):
         response = self.post(user_agent=ANDROID_USER_AGENT)
 
         self.assertContains(response, '/media/apk/driver-0.2.4.apk')
-        self.assertContains(response, 'APK · версия 0.2.4 · скачать и установить')
+        self.assertContains(response, '<span>APK · версия 0.2.4</span>')
+        self.assertContains(response, '<span>Скачать и установить</span>')
         self.assertNotContains(response, '/media/apk/driver-17.apk')
 
     def test_native_phone_handoff_routes_are_removed(self):
@@ -404,9 +439,13 @@ class UniversalStartTests(TestCase):
         self.assertNotContains(response, 'data-start-install-option="native"')
         self.assertNotContains(response, 'data-start-native-open')
         self.assertContains(response, 'data-start-install-option="browser"', count=1)
-        self.assertContains(response, '<b>Браузер <i>нестабильно</i></b>')
+        self.assertContains(response, '<span>Открыть в браузере</span> <i>ВЕБ-ВЕРСИЯ</i>')
+        self.assertContains(response, '<span>PWA · без установки</span>')
         self.assertContains(response, 'install=1', count=1)
         self.assertContains(response, 'После перехода добавьте значок на экран')
+        self.assertContains(response, 'start-screen__opt-badge--safari', count=1)
+        self.assertNotContains(response, 'start-screen__opt-badge--chrome')
+        self.assertContains(response, 'start-screen__opt-note--ios', count=1)
 
     def test_iphone_shows_only_pwa_action_without_android_block(self):
         self.add_driver_release()
@@ -460,9 +499,42 @@ class UniversalStartTests(TestCase):
 
     def test_start_support_hides_only_for_a_real_visual_keyboard(self):
         response = self.client.get(reverse('universal_start'))
+        backend_root = Path(settings.BASE_DIR)
+        script = (
+            backend_root / 'static' / 'js' / 'start-page-v1.js'
+        ).read_text(encoding='utf-8')
+        stylesheet = (
+            backend_root / 'static' / 'css' / 'start-page-v1.css'
+        ).read_text(encoding='utf-8')
 
-        self.assertContains(response, 'viewport.height < window.innerHeight - 120')
-        self.assertContains(response, 'is-start-keyboard-active')
+        self.assertContains(response, 'start-page-v1.js?v=20260904-8')
+        self.assertContains(response, 'start-page-v1.css?v=20260904-16')
+        self.assertIn('window.visualViewport || null', script)
+        self.assertIn('Math.max(120, baselineHeight * 0.22)', script)
+        self.assertIn('window.addEventListener("orientationchange"', script)
+        self.assertIn('form.addEventListener("focusin"', script)
+        self.assertIn('form.addEventListener("focusout"', script)
+        self.assertIn('body.classList.toggle("is-keyboard-open"', script)
+        self.assertIn(
+            'body.start-page.is-keyboard-open .start-screen__inner > .max-support-link',
+            stylesheet,
+        )
+        self.assertNotIn(
+            'body.start-page.is-input-mode .start-screen__inner > .max-support-link',
+            stylesheet,
+        )
+
+    def test_start_phone_runtime_formats_input_and_guards_double_submit(self):
+        script = (
+            Path(settings.BASE_DIR) / 'static' / 'js' / 'start-page-v1.js'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('if (digits.charAt(0) === "8")', script)
+        self.assertIn('if (digits.charAt(0) === "7")', script)
+        self.assertIn('digits.slice(0, 10)', script)
+        self.assertIn('form.addEventListener("submit"', script)
+        self.assertIn('if (submitting)', script)
+        self.assertIn('submitLabel.textContent = "Проверяем…"', script)
 
     def test_desktop_does_not_see_apk_button(self):
         self.add_excavator_release()
