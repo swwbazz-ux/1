@@ -20,6 +20,7 @@ from openpyxl import load_workbook
 from PIL import Image
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorDumpPointSetting, ExcavatorPlacement, HaulAssignment, WorkShiftType
+from assignments.services import apply_pending_haul_assignment
 from core.models import OperationalStateEvent
 from core.production_time import production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
@@ -1065,7 +1066,9 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, '2468')
         self.assertContains(response, 'ожидает первого входа')
         self.assertContains(response, 'employee-login-share')
-        self.assertContains(response, 'https://driverform.ru')
+        expected_start_url = f'http://localhost{reverse("universal_start")}'
+        self.assertEqual(response.context['employee_start_url'], expected_start_url)
+        self.assertContains(response, f'data-login-url="{expected_start_url}"', html=False)
         self.assertContains(response, 'Телефон: +79990000000')
         self.assertContains(response, 'Пин код: 246824')
         self.assertContains(response, 'Скопировать')
@@ -3167,6 +3170,14 @@ class AccessLoginTests(TestCase):
         )
         assignment.refresh_from_db()
         self.assertEqual(accept_response.status_code, 302)
+        self.assertEqual(assignment.status, AssignmentStatus.PENDING)
+        self.assertIsNotNone(assignment.accepted_at)
+
+        assignment.effective_at = timezone.now() - timedelta(seconds=1)
+        assignment.save(update_fields=['effective_at'])
+        applied_assignment = apply_pending_haul_assignment(assignment.id)
+        assignment.refresh_from_db()
+        self.assertEqual(applied_assignment.id, assignment.id)
         self.assertEqual(assignment.status, AssignmentStatus.ACCEPTED)
 
         excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
@@ -3210,7 +3221,8 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(settings_response.status_code, 200)
         self.assertContains(context_driver_response, 'ЭКС-1')
-        self.assertContains(context_driver_response, 'Комплекс К-1')
+        self.assertContains(context_driver_response, 'data-driver-context-complex')
+        self.assertEqual(context_driver_response.context['driver_complex_label'], 'К-1')
         self.assertContains(context_driver_response, 'Горизонт 75')
         self.assertContains(context_driver_response, 'Блок 52')
         self.assertContains(context_driver_response, 'Скальная порода')
@@ -3243,7 +3255,8 @@ class AccessLoginTests(TestCase):
         self.assertContains(loaded_driver_response, 'ТОЧКА РАЗГРУЗКИ')
         self.assertContains(loaded_driver_response, 'driver-work-dial-button is-loaded')
         self.assertContains(loaded_driver_response, 'ЭКС-1')
-        self.assertContains(loaded_driver_response, 'Комплекс К-1')
+        self.assertContains(loaded_driver_response, 'data-driver-context-complex')
+        self.assertEqual(loaded_driver_response.context['driver_complex_label'], 'К-1')
         self.assertContains(loaded_driver_response, 'Горизонт 75')
         self.assertContains(loaded_driver_response, 'Блок 52')
         self.assertContains(loaded_driver_response, 'Скальная порода')
@@ -3264,7 +3277,8 @@ class AccessLoginTests(TestCase):
         self.assertContains(empty_driver_response, 'НА ЗАГРУЗКУ')
         self.assertContains(empty_driver_response, 'driver-work-dial-button is-empty')
         self.assertContains(empty_driver_response, 'ЭКС-1')
-        self.assertContains(empty_driver_response, 'Комплекс К-1')
+        self.assertContains(empty_driver_response, 'data-driver-context-complex')
+        self.assertEqual(empty_driver_response.context['driver_complex_label'], 'К-1')
         self.assertContains(empty_driver_response, 'Горизонт 75')
         self.assertContains(empty_driver_response, 'Блок 52')
         self.assertContains(empty_driver_response, 'Скальная порода')
