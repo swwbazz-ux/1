@@ -1,5 +1,6 @@
 # Paths are relative to the repository root. Only these files enter a release.
 СИСТЕМА_MVP/backend/core/offline_sync.py
+СИСТЕМА_MVP/backend/config/settings.py
 СИСТЕМА_MVP/backend/deploy/data_updates/channel_probe.py
 СИСТЕМА_MVP/backend/reports/hourly_grid.py
 СИСТЕМА_MVP/backend/reports/urls.py
@@ -37,6 +38,7 @@
 СИСТЕМА_MVP/backend/static/js/driver-downtime-drum-v1.js
 СИСТЕМА_MVP/backend/users/models.py
 СИСТЕМА_MVP/backend/users/middleware.py
+СИСТЕМА_MVP/backend/users/native_push.py
 СИСТЕМА_MVP/backend/users/push_views.py
 СИСТЕМА_MVP/backend/users/urls.py
 СИСТЕМА_MVP/backend/static/css/driver-shift-v1.css
