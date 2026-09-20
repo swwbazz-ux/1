@@ -80,8 +80,9 @@ class ChaosP06P08LoadingParityRegressionTests(TestCase):
             for index in (1, 2)
         ]
         self.rock = RockType.objects.create(
-            name='Руда P06/P08',
+            name='Скальная порода',
             density=Decimal('2.0000'),
+            loosening_factor=Decimal('1.5000'),
         )
         self.dump_point = DumpPoint.objects.create(name='ККД P06/P08')
         self.capacity_rule = TruckCapacityRule.objects.create(
@@ -284,7 +285,7 @@ class ChaosP06P08LoadingParityRegressionTests(TestCase):
         self.assertEqual(analytics['totals']['loaded_trip_count'], 2)
         self.assertEqual(analytics['totals']['open_trip_count'], 2)
 
-    def test_both_routes_apply_current_references_at_unload_and_then_freeze_fact(self):
+    def test_both_routes_freeze_loading_facts_before_reference_changes(self):
         _json_payload, json_trip = self._post_json_load()
         _html_payload, html_trip = self._post_html_load()
 
@@ -308,8 +309,8 @@ class ChaosP06P08LoadingParityRegressionTests(TestCase):
             trip.refresh_from_db()
             with self.subTest(trip=trip.pk):
                 self.assertEqual(trip.status, TripStatus.COMPLETED)
-                self.assertEqual(trip.volume_m3, Decimal('60.00'))
-                self.assertEqual(trip.tonnage, Decimal('180.00'))
+                self.assertEqual(trip.volume_m3, Decimal('40.00'))
+                self.assertEqual(trip.tonnage, Decimal('80.00'))
 
         self.capacity_rule.volume_m3 = Decimal('70.00')
         self.capacity_rule.save(update_fields=['volume_m3'])
@@ -320,12 +321,12 @@ class ChaosP06P08LoadingParityRegressionTests(TestCase):
             production_work_date(self.operator_shift.opened_at),
             'day',
         )
-        self.assertEqual(analytics['totals']['volume_m3'], Decimal('120.00'))
-        self.assertEqual(analytics['totals']['tonnage'], Decimal('360.00'))
+        self.assertEqual(analytics['totals']['volume_m3'], Decimal('80.00'))
+        self.assertEqual(analytics['totals']['tonnage'], Decimal('160.00'))
         for trip in (json_trip, html_trip):
             trip.refresh_from_db()
-            self.assertEqual(trip.volume_m3, Decimal('60.00'))
-            self.assertEqual(trip.tonnage, Decimal('180.00'))
+            self.assertEqual(trip.volume_m3, Decimal('40.00'))
+            self.assertEqual(trip.tonnage, Decimal('80.00'))
 
     def test_same_client_action_id_is_idempotent_for_both_routes(self):
         first_json, json_trip = self._post_json_load(action_id='same-json-load')

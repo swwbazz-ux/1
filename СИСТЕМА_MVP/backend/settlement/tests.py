@@ -126,6 +126,10 @@ from .services import (
 from .views import _occupancy_response
 
 
+def _migration_targets_with_latest_users(executor, *targets):
+    return [*targets, *executor.loader.graph.leaf_nodes('users')]
+
+
 def _resident_for_employee(employee):
     resident, _created = get_or_create_employee_resident(employee_id=employee.pk)
     return resident
@@ -7681,13 +7685,17 @@ class EmployeeSearchEffectiveOccupancyTests(TestCase):
         payload = response.json()
         self.assertEqual(set(payload), {'ok', 'results'})
         self.assertIs(payload['ok'], True)
-        result_ids = [item['id'] for item in payload['results']]
-        self.assertEqual(result_ids, [employee.pk] if present else [])
+        employee_ids = [item['employee_id'] for item in payload['results']]
+        self.assertEqual(employee_ids, [employee.pk] if present else [])
         if present:
+            result = payload['results'][0]
+            self.assertEqual(result['id'], result['resident_id'])
             self.assertEqual(
-                set(payload['results'][0]),
+                set(result),
                 {
                     'id',
+                    'resident_id',
+                    'employee_id',
                     'full_name',
                     'personnel_number',
                     'shift_label',
@@ -9899,8 +9907,9 @@ class ResidentSubjectTransitionMigrationTests(TransactionTestCase):
         super().setUp()
         self.addCleanup(self._restore_latest_migrations)
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_from])
-        self.old_apps = executor.loader.project_state([self.migrate_from]).apps
+        targets = _migration_targets_with_latest_users(executor, self.migrate_from)
+        executor.migrate(targets)
+        self.old_apps = executor.loader.project_state(targets).apps
 
     def _restore_latest_migrations(self):
         executor = MigrationExecutor(connection)
@@ -9908,8 +9917,9 @@ class ResidentSubjectTransitionMigrationTests(TransactionTestCase):
 
     def _migrate_to_target(self):
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_to])
-        return executor.loader.project_state([self.migrate_to]).apps
+        targets = _migration_targets_with_latest_users(executor, self.migrate_to)
+        executor.migrate(targets)
+        return executor.loader.project_state(targets).apps
 
     def _create_old_subject_rows(self, *, create_wrapper=False):
         EmployeeModel = self.old_apps.get_model('users', 'Employee')
@@ -10138,6 +10148,12 @@ class ResidentSubjectTransitionMigrationTests(TransactionTestCase):
             revision=1,
             created_by_access=access,
         )
+
+        def remove_external_reverse_guard():
+            MemberModel.objects.filter(resident_id=external.pk).delete()
+            ResidentModel.objects.filter(pk=external.pk).delete()
+
+        self.addCleanup(remove_external_reverse_guard)
         original = MemberModel.objects.get(pk=rows.member.pk)
         MemberModel.objects.create(
             cohort_id=original.cohort_id,
@@ -13437,8 +13453,9 @@ class M8SettlementApplyMigrationTests(TransactionTestCase):
     def setUp(self):
         self.addCleanup(self._restore_latest_migrations)
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_from])
-        self.old_apps = executor.loader.project_state([self.migrate_from]).apps
+        targets = _migration_targets_with_latest_users(executor, self.migrate_from)
+        executor.migrate(targets)
+        self.old_apps = executor.loader.project_state(targets).apps
 
     def _restore_latest_migrations(self):
         executor = MigrationExecutor(connection)
@@ -13446,8 +13463,9 @@ class M8SettlementApplyMigrationTests(TransactionTestCase):
 
     def _migrate_to_target(self):
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_to])
-        return executor.loader.project_state([self.migrate_to]).apps
+        targets = _migration_targets_with_latest_users(executor, self.migrate_to)
+        executor.migrate(targets)
+        return executor.loader.project_state(targets).apps
 
     def test_clean_schema_cycles_0013_0014_0013_0014(self):
         m8_tables = {
@@ -13619,14 +13637,13 @@ class M5ShiftSourceMigrationTests(TransactionTestCase):
     def setUp(self):
         self.addCleanup(self._restore_latest_migrations)
         executor = MigrationExecutor(connection)
-        executor.migrate([
+        targets = _migration_targets_with_latest_users(
+            executor,
             self.migrate_from,
             ('assignments', '0007_equipment_assignment_provenance'),
-        ])
-        self.old_apps = executor.loader.project_state([
-            self.migrate_from,
-            ('assignments', '0007_equipment_assignment_provenance'),
-        ]).apps
+        )
+        executor.migrate(targets)
+        self.old_apps = executor.loader.project_state(targets).apps
 
     def _restore_latest_migrations(self):
         executor = MigrationExecutor(connection)
@@ -13823,8 +13840,9 @@ class ResidentOccupancySubjectMigrationTests(TransactionTestCase):
     def setUp(self):
         self.addCleanup(self._restore_latest_migrations)
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_from])
-        self.old_apps = executor.loader.project_state([self.migrate_from]).apps
+        targets = _migration_targets_with_latest_users(executor, self.migrate_from)
+        executor.migrate(targets)
+        self.old_apps = executor.loader.project_state(targets).apps
 
     def _restore_latest_migrations(self):
         executor = MigrationExecutor(connection)
@@ -13832,8 +13850,9 @@ class ResidentOccupancySubjectMigrationTests(TransactionTestCase):
 
     def _migrate_to_target(self):
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_to])
-        return executor.loader.project_state([self.migrate_to]).apps
+        targets = _migration_targets_with_latest_users(executor, self.migrate_to)
+        executor.migrate(targets)
+        return executor.loader.project_state(targets).apps
 
     @staticmethod
     def _actor_and_access(apps, suffix):
@@ -13989,8 +14008,9 @@ class ShiftScopedApplyMigrationTests(TransactionTestCase):
     def setUp(self):
         self.addCleanup(self._restore_latest_migrations)
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_from])
-        self.old_apps = executor.loader.project_state([self.migrate_from]).apps
+        targets = _migration_targets_with_latest_users(executor, self.migrate_from)
+        executor.migrate(targets)
+        self.old_apps = executor.loader.project_state(targets).apps
 
     def _restore_latest_migrations(self):
         executor = MigrationExecutor(connection)
@@ -13998,8 +14018,9 @@ class ShiftScopedApplyMigrationTests(TransactionTestCase):
 
     def _migrate_to_target(self):
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_to])
-        return executor.loader.project_state([self.migrate_to]).apps
+        targets = _migration_targets_with_latest_users(executor, self.migrate_to)
+        executor.migrate(targets)
+        return executor.loader.project_state(targets).apps
 
     @staticmethod
     def _context(apps, suffix):
@@ -14220,7 +14241,9 @@ class PreviewCorrectionMigrationTests(TransactionTestCase):
     def setUp(self):
         self.addCleanup(self._restore_latest_migrations)
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_from])
+        executor.migrate(
+            _migration_targets_with_latest_users(executor, self.migrate_from),
+        )
 
     def _restore_latest_migrations(self):
         executor = MigrationExecutor(connection)
@@ -14228,8 +14251,9 @@ class PreviewCorrectionMigrationTests(TransactionTestCase):
 
     def _migrate_to_target(self):
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_to])
-        return executor.loader.project_state([self.migrate_to]).apps
+        targets = _migration_targets_with_latest_users(executor, self.migrate_to)
+        executor.migrate(targets)
+        return executor.loader.project_state(targets).apps
 
     def test_forward_reverse_forward_without_corrections(self):
         apps = self._migrate_to_target()

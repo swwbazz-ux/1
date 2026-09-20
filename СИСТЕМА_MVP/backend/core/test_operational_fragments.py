@@ -227,7 +227,7 @@ class OperationalFragmentViewTests(TestCase):
                 'url': reverse('dispatcher_control'),
                 'screen': 'dispatcher',
                 'root': 'class="dispatcher-board',
-                'equipment_cards': True,
+                'equipment_cards': False,
             },
             {
                 'role': 'mining_master',

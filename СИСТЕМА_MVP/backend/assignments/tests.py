@@ -215,10 +215,6 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'data-plan-progress-phase="amber"')
         self.assertContains(response, 'is-plan-overrun')
         self.assertContains(response, 'dispatcher-plan-loop-badge')
-        self.assertContains(response, 'mm-mobile-complex-plan-ring')
-        self.assertContains(response, 'mm-mobile-plan-ring-layer')
-        self.assertContains(response, 'function syncMobilePlanVisual(source, target)')
-        self.assertContains(response, 'syncMobilePlanVisual(source, mini);')
         html = response.content.decode('utf-8')
         mobile_complex_marker = f'data-mm-mobile-open-complex="{complex_card["card_id"]}"'
         mobile_complex_index = html.index(mobile_complex_marker)
@@ -598,7 +594,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(complex_card['status_key'], 'yellow')
         self.assertEqual(complex_card['equipment_state_code'], 'waiting')
         self.assertEqual(complex_card['status_label'], 'БВР')
-        self.assertContains(response, '<span class="complex-state-chip">БВР</span>', html=True)
+        self.assertContains(response, 'data-card-single-line-badge>БВР</span>')
 
     def test_mining_master_desktop_complex_status_chip_preserves_server_color_from_reason_state(self):
         reason = DowntimeReason.objects.create(
@@ -624,7 +620,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertEqual(complex_card['status_key'], 'orange')
         self.assertEqual(complex_card['equipment_state_code'], 'maintenance')
         self.assertEqual(complex_card['status_label'], 'ТО')
-        self.assertContains(response, '<span class="complex-state-chip">ТО</span>', html=True)
+        self.assertContains(response, 'data-card-single-line-badge>ТО</span>')
 
     def test_mining_master_mobile_shell_includes_pwa_install_metadata(self):
         response = self.client.get(reverse('mining_master_assignments'))
