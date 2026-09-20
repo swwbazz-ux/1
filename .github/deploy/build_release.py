@@ -23,6 +23,8 @@ MODES = {
     "apply_data",
     "verify_receiver",
     "update_receiver",
+    "verify_fcm",
+    "configure_fcm",
     "diagnose",
     "rollback",
 }
@@ -48,6 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--apk-profile", choices=("driver", "excavator"))
     parser.add_argument("--operation")
     parser.add_argument("--receiver-source", type=Path)
+    parser.add_argument("--fcm-service-account", type=Path)
     parser.add_argument("--rollback-id")
     parser.add_argument("--event-file", type=Path)
     return parser.parse_args()
@@ -198,6 +201,26 @@ def main() -> None:
         paths = [
             (
                 PurePosixPath("deploy/receiver/accounting_github_deploy_receiver.py"),
+                source,
+            )
+        ]
+    elif args.mode in {"verify_fcm", "configure_fcm"}:
+        if not args.fcm_service_account:
+            raise SystemExit("FCM mode requires --fcm-service-account")
+        source = args.fcm_service_account.resolve()
+        if not source.is_file():
+            raise SystemExit(f"FCM service account is missing: {source}")
+        try:
+            credentials = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise SystemExit("FCM service account is invalid") from exc
+        required = {"type", "project_id", "private_key_id", "private_key", "client_email", "token_uri"}
+        if credentials.get("type") != "service_account" or not all(credentials.get(key) for key in required):
+            raise SystemExit("FCM service account is incomplete")
+        metadata["project_id"] = str(credentials["project_id"])
+        paths = [
+            (
+                PurePosixPath("deploy/secrets/firebase-service-account.json"),
                 source,
             )
         ]

@@ -36,11 +36,15 @@ MIGRATION_MODES = {"verify_migrations", "deploy_migrations"}
 APK_MODES = {"verify_apk", "publish_apk"}
 DATA_MODES = {"verify_data", "apply_data"}
 RECEIVER_MODES = {"verify_receiver", "update_receiver"}
+FCM_MODES = {"verify_fcm", "configure_fcm"}
 DIAGNOSTIC_MODES = {"diagnose"}
-ALL_MODES = CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | DIAGNOSTIC_MODES | {"rollback"}
-VERIFY_MODES = {"verify", "verify_migrations", "verify_apk", "verify_data", "verify_receiver"}
+ALL_MODES = CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | FCM_MODES | DIAGNOSTIC_MODES | {"rollback"}
+VERIFY_MODES = {"verify", "verify_migrations", "verify_apk", "verify_data", "verify_receiver", "verify_fcm"}
 RECEIVER_PAYLOAD = "deploy/receiver/accounting_github_deploy_receiver.py"
 RECEIVER_PATH = Path("/usr/local/sbin/accounting-github-deploy-receiver")
+FCM_PAYLOAD = "deploy/secrets/firebase-service-account.json"
+FCM_CONFIG_PATH = Path("/etc/accounting-mvp/firebase-service-account.json")
+APP_ENV_PATH = APP / ".env"
 DIAGNOSTIC_OPERATIONS = {"trip_accounting_incident_v1"}
 DIAGNOSTIC_METADATA_KEYS = {"operation", "equipment", "from_utc", "to_utc", "max_rows"}
 DIAGNOSTIC_EQUIPMENT_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё ._-]{1,64}\Z")
@@ -880,6 +884,10 @@ def validate_target(value: str, mode: str) -> PurePosixPath:
         if path.as_posix() != RECEIVER_PAYLOAD:
             raise ReleaseError(f"receiver update target is not allowed: {value}")
         return path
+    if mode in FCM_MODES:
+        if path.as_posix() != FCM_PAYLOAD:
+            raise ReleaseError(f"FCM configuration target is not allowed: {value}")
+        return path
     if mode in APK_MODES:
         if path.parts[:2] != ("media", "apk") or len(path.parts) != 3:
             raise ReleaseError(f"APK release target is not allowed: {value}")
@@ -1001,6 +1009,8 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
             compile(payload[RECEIVER_PAYLOAD], RECEIVER_PAYLOAD, "exec")
         except SyntaxError as exc:
             raise ReleaseError("receiver source is not valid Python") from exc
+    elif mode in FCM_MODES:
+        validate_fcm_payload(manifest, payload)
     elif mode in DIAGNOSTIC_MODES:
         if payload:
             raise ReleaseError("diagnostic package cannot contain payload files")
@@ -1035,10 +1045,58 @@ def validate_apk_payload(profile: str, apk_target: str, payload: dict[str, bytes
     return update
 
 
-def write_atomic(target: Path, data: bytes, uid: int, gid: int, mode: int = 0o664) -> None:
+def validate_fcm_payload(manifest: dict[str, Any], payload: dict[str, bytes]) -> dict[str, Any]:
+    if set(payload) != {FCM_PAYLOAD}:
+        raise ReleaseError("FCM release must contain exactly one service account file")
+    try:
+        credentials = json.loads(payload[FCM_PAYLOAD].decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReleaseError("FCM service account is invalid") from exc
+    required = {"type", "project_id", "private_key_id", "private_key", "client_email", "token_uri"}
+    if credentials.get("type") != "service_account" or not all(credentials.get(key) for key in required):
+        raise ReleaseError("FCM service account is incomplete")
+    project_id = credentials["project_id"]
+    if manifest["metadata"].get("project_id") != project_id:
+        raise ReleaseError("FCM project id does not match release metadata")
+    return credentials
+
+
+def render_fcm_env(current: bytes, project_id: str) -> bytes:
+    try:
+        lines = current.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ReleaseError("production environment file is not UTF-8") from exc
+    replacements = {
+        "DJANGO_FCM_SERVICE_ACCOUNT_FILE": str(FCM_CONFIG_PATH),
+        "DJANGO_FCM_PROJECT_ID": project_id,
+    }
+    rendered: list[str] = []
+    seen: set[str] = set()
+    for line in lines:
+        key = line.split("=", 1)[0].strip() if "=" in line and not line.lstrip().startswith("#") else ""
+        if key in replacements:
+            if key not in seen:
+                rendered.append(f"{key}={replacements[key]}")
+                seen.add(key)
+            continue
+        rendered.append(line)
+    for key, value in replacements.items():
+        if key not in seen:
+            rendered.append(f"{key}={value}")
+    return ("\n".join(rendered).rstrip("\n") + "\n").encode("utf-8")
+
+
+def write_atomic(
+    target: Path,
+    data: bytes,
+    uid: int,
+    gid: int,
+    mode: int = 0o664,
+    parent_mode: int = 0o755,
+) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     os.chown(target.parent, uid, gid)
-    os.chmod(target.parent, 0o755)
+    os.chmod(target.parent, parent_mode)
     temporary = target.with_name(f".{target.name}.github-deploy-{os.getpid()}")
     temporary.write_bytes(data)
     os.chown(temporary, uid, gid)
@@ -1311,6 +1369,69 @@ def update_receiver(manifest: dict[str, Any], payload: dict[str, bytes]) -> Path
     return backup
 
 
+def configure_fcm(manifest: dict[str, Any], payload: dict[str, bytes]) -> Path:
+    credentials = validate_fcm_payload(manifest, payload)
+    if not APP_ENV_PATH.is_file():
+        raise ReleaseError("production environment file does not exist")
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    backup = BACKUPS / f"github-{stamp}-{manifest['commit'][:12]}-configure_fcm-before"
+    backup.mkdir(parents=True, mode=0o750)
+    env_before = APP_ENV_PATH.read_bytes()
+    (backup / "environment.before").write_bytes(env_before)
+    os.chmod(backup / "environment.before", 0o600)
+    config_existed = FCM_CONFIG_PATH.is_file()
+    if config_existed:
+        (backup / "firebase-service-account.before").write_bytes(FCM_CONFIG_PATH.read_bytes())
+        os.chmod(backup / "firebase-service-account.before", 0o600)
+    (backup / "metadata.json").write_text(
+        json.dumps({"config_existed": config_existed, "project_id": credentials["project_id"]}) + "\n",
+        encoding="utf-8",
+    )
+    env_stat = APP_ENV_PATH.stat()
+    uid = 0
+    gid = grp.getgrnam("www-data").gr_gid
+    try:
+        write_atomic(
+            FCM_CONFIG_PATH,
+            payload[FCM_PAYLOAD],
+            uid,
+            gid,
+            0o640,
+            0o750,
+        )
+        write_atomic(
+            APP_ENV_PATH,
+            render_fcm_env(env_before, credentials["project_id"]),
+            env_stat.st_uid,
+            env_stat.st_gid,
+            env_stat.st_mode & 0o777,
+        )
+        run(["systemctl", "restart", "accounting-mvp"])
+        wait_for_service()
+    except Exception:
+        write_atomic(
+            APP_ENV_PATH,
+            env_before,
+            env_stat.st_uid,
+            env_stat.st_gid,
+            env_stat.st_mode & 0o777,
+        )
+        if config_existed:
+            write_atomic(
+                FCM_CONFIG_PATH,
+                (backup / "firebase-service-account.before").read_bytes(),
+                uid,
+                gid,
+                0o640,
+                0o750,
+            )
+        else:
+            FCM_CONFIG_PATH.unlink(missing_ok=True)
+        run(["systemctl", "restart", "accounting-mvp"], check=False)
+        raise
+    return backup
+
+
 def rollback(manifest: dict[str, Any]) -> Path:
     rollback_id = manifest["metadata"]["rollback_id"]
     backup = (BACKUPS / rollback_id).resolve()
@@ -1358,6 +1479,8 @@ def main() -> int:
                 backup = apply_data(manifest, payload)
             elif mode == "update_receiver":
                 backup = update_receiver(manifest, payload)
+            elif mode == "configure_fcm":
+                backup = configure_fcm(manifest, payload)
             elif mode == "rollback":
                 backup = rollback(manifest)
             else:

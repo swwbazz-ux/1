@@ -374,13 +374,68 @@ class ReleaseProtocolTests(unittest.TestCase):
 
     def test_sensitive_modes_require_control_branch_and_actions_are_sha_pinned(self):
         workflow = (ROOT / ".github" / "workflows" / "production-deploy.yml").read_text(encoding="utf-8")
-        self.assertIn('[[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" ]]', workflow)
+        self.assertIn('[[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm ]]', workflow)
         self.assertIn('test "$GITHUB_REF_NAME" = "codex/github-production-deploy-20260916"', workflow)
         uses_lines = [line.strip() for line in workflow.splitlines() if line.strip().startswith("uses:")]
         self.assertTrue(uses_lines)
         for line in uses_lines:
             reference = line.split("@", 1)[1].split()[0]
             self.assertRegex(reference, r"^[0-9a-f]{40}$")
+
+    def test_fcm_mode_accepts_only_a_complete_matching_service_account(self):
+        credentials = {
+            "type": "service_account",
+            "project_id": "copper-driver-test",
+            "private_key_id": "key-id",
+            "private_key": "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n",
+            "client_email": "push@copper-driver-test.iam.gserviceaccount.com",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+        payload = {receiver.FCM_PAYLOAD: json.dumps(credentials).encode("utf-8")}
+        manifest = {
+            "mode": "configure_fcm",
+            "metadata": {"project_id": "copper-driver-test"},
+        }
+        self.assertEqual(
+            receiver.validate_target(receiver.FCM_PAYLOAD, "configure_fcm").as_posix(),
+            receiver.FCM_PAYLOAD,
+        )
+        self.assertEqual(receiver.validate_fcm_payload(manifest, payload), credentials)
+        with self.assertRaises(receiver.ReleaseError):
+            receiver.validate_target("users/secret.json", "configure_fcm")
+        with self.assertRaises(receiver.ReleaseError):
+            receiver.validate_fcm_payload(
+                {"mode": "configure_fcm", "metadata": {"project_id": "other"}},
+                payload,
+            )
+
+    def test_fcm_environment_update_preserves_unrelated_values_and_is_idempotent(self):
+        current = (
+            b"DJANGO_SECRET_KEY=unchanged\n"
+            b"DJANGO_FCM_PROJECT_ID=old\n"
+            b"DJANGO_FCM_SERVICE_ACCOUNT_FILE=/old/key.json\n"
+            b"OTHER=value\n"
+        )
+        rendered = receiver.render_fcm_env(current, "copper-driver-test")
+        self.assertIn(b"DJANGO_SECRET_KEY=unchanged\n", rendered)
+        self.assertIn(b"OTHER=value\n", rendered)
+        self.assertIn(b"DJANGO_FCM_PROJECT_ID=copper-driver-test\n", rendered)
+        self.assertIn(
+            f"DJANGO_FCM_SERVICE_ACCOUNT_FILE={receiver.FCM_CONFIG_PATH}\n".encode(),
+            rendered,
+        )
+        self.assertEqual(rendered, receiver.render_fcm_env(rendered, "copper-driver-test"))
+
+    def test_fcm_workflow_uses_a_secret_tempfile_and_exact_confirmations(self):
+        workflow = (ROOT / ".github" / "workflows" / "production-deploy.yml").read_text(encoding="utf-8")
+        self.assertIn("verify_fcm) expected=VERIFY_FCM", workflow)
+        self.assertIn("configure_fcm) expected=CONFIGURE_FCM", workflow)
+        self.assertIn("secrets.FCM_SERVICE_ACCOUNT_JSON", workflow)
+        self.assertIn('chmod 0600 "$fcm_credentials"', workflow)
+        self.assertIn("trap 'rm -f \"$fcm_credentials\"' EXIT", workflow)
+        self.assertNotIn("firebase-service-account.json", "\n".join(
+            (ROOT / ".github" / "deploy" / "production-files.txt").read_text(encoding="utf-8").splitlines()
+        ))
 
 
 if __name__ == "__main__":
