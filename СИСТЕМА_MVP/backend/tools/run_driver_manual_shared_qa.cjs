@@ -100,7 +100,7 @@ async function center(locator) {
             });
             const excavatorPage = await excavatorContext.newPage();
             observe(excavatorPage);
-            await openAuthenticated(excavatorContext, excavatorPage, excavatorSessionKey, excavatorPhone, excavatorPin, '/excavator/');
+            await openAuthenticated(excavatorContext, excavatorPage, excavatorSessionKey, excavatorPhone, excavatorPin, '/excavator/work/');
             await excavatorPage.locator('[data-eo-truck-card]').first().waitFor({ state: 'visible' });
             await excavatorPage.locator('[data-eo-dump-target]').first().waitFor({ state: 'visible' });
             assert(await excavatorPage.locator('[data-driver-manual-action-row], [data-driver-manual-close], [data-driver-manual-point-open], [data-driver-manual-source-row]').count() === 0, 'Driver-only manual controls leaked into the Excavator workplace.');
@@ -119,6 +119,31 @@ async function center(locator) {
         });
         const driverPage = await driverContext.newPage();
         observe(driverPage);
+        let manualTripNumber = 9000;
+        const syncedManualEvents = [];
+        await driverPage.route('**/offline-events/sync/', async (route) => {
+            const request = route.request();
+            const batch = JSON.parse(request.postData() || '{}');
+            const results = (batch.events || []).map((event) => {
+                if (event.event_type === 'driver.trip.loaded') {
+                    manualTripNumber += 1;
+                    syncedManualEvents.push(event);
+                    return {
+                        event_id: event.event_id,
+                        status: 'accepted',
+                        server_received_at: new Date().toISOString(),
+                        server_ids: {trip_id: manualTripNumber, shift_id: event.shift_id},
+                        trip_origin: 'driver_manual',
+                    };
+                }
+                return {event_id: event.event_id, status: 'accepted', server_ids: {}};
+            });
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({protocol_version: 1, results}),
+            });
+        });
         await openAuthenticated(driverContext, driverPage, driverSessionKey, driverPhone, driverPin, '/driver/');
         await driverPage.locator('[data-driver-manual-open]').waitFor({ state: 'visible' });
         await driverPage.locator('[data-driver-manual-open]').click();
@@ -131,7 +156,6 @@ async function center(locator) {
 
         const layout = await driverPage.evaluate(() => {
             const nav = document.querySelector('[data-driver-bottom-nav]').getBoundingClientRect();
-            const demo = document.querySelector('.driver-manual-workspace__demo').getBoundingClientRect();
             const topbar = document.querySelector('[data-driver-manual-workspace] .eo-topbar').getBoundingClientRect();
             const heading = document.querySelector('[data-driver-manual-workspace] .eo-dashboard-head').getBoundingClientRect();
             const back = document.querySelector('.driver-manual-workspace__action--return').getBoundingClientRect();
@@ -152,7 +176,6 @@ async function center(locator) {
                 scrollWidth: document.documentElement.scrollWidth,
                 clientWidth: document.documentElement.clientWidth,
                 nav: { top: nav.top, bottom: nav.bottom, height: nav.height },
-                demo: { left: demo.left, right: demo.right, width: demo.width },
                 topbar: {top: topbar.top, bottom: topbar.bottom},
                 heading: {top: heading.top, bottom: heading.bottom},
                 actionRow: [back, point].map((rect) => ({left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height})),
@@ -195,7 +218,6 @@ async function center(locator) {
         assert(layout.open, 'Manual workplace did not enter open state.');
         assert(layout.scrollWidth <= layout.clientWidth, 'Manual workplace has horizontal overflow at 412px.');
         assert(layout.nav.top < 915 && layout.nav.bottom <= 915.5, 'Driver bottom navigation is not visible.');
-        assert(layout.demo.width < 72 && layout.demo.right <= 412, 'Demo marker is not compact.');
         assert(layout.topbar.top >= 0 && layout.topbar.bottom <= 90, 'Manual top bar opened outside the viewport.');
         assert(layout.heading.top >= layout.topbar.bottom, 'Manual heading is hidden behind or above the top bar.');
         assert(Math.abs(layout.actionRow[0].top - layout.actionRow[1].top) < 2 && Math.abs(layout.actionRow[0].bottom - layout.actionRow[1].bottom) < 2, 'Manual action buttons are not aligned in one top row.');
@@ -337,16 +359,22 @@ async function center(locator) {
         await driverPage.screenshot({ path: dragShot });
         report.screenshots.push({ id: 'C', file: path.basename(dragShot), url: driverPage.url() });
         await dispatchTouch(cdp, 'touchEnd');
-        await driverPage.waitForTimeout(120);
+        await driverPage.waitForTimeout(1600);
         driverPage.off('request', recordRequest);
         report.gestureRequests = gestureRequests;
         assert(await driverPage.locator('.truck-drag-preview').count() === 0, 'Drag preview remained after drop.');
         assert(await driverPage.locator('.eo-truck-comet').count() === 0, 'Comet remained after drop.');
         const resultText = await driverPage.locator('[data-driver-manual-result]').textContent();
-        assert(/Демонстрация/.test(resultText) && /Рейс не создан/.test(resultText), 'Drop result is not explicitly demonstrational.');
+        const manualError = await driverPage.locator('[data-driver-manual-workspace]').getAttribute('data-driver-manual-last-error');
+        assert(
+            /Рейс №9001/.test(resultText) && /в пути/i.test(resultText),
+            `Durably queued gesture did not receive the isolated manual-trip acknowledgement: ${JSON.stringify(resultText)}; synced=${syncedManualEvents.length}; error=${manualError}.`
+        );
         const mutationRequests = gestureRequests.filter((entry) => !entry.startsWith('GET '));
-        assert(mutationRequests.length === 0, `Demo gesture made mutation requests: ${mutationRequests.join(', ')}`);
-        assert(!gestureRequests.some((entry) => /\/trip|\/offline-events\/sync/.test(entry)), `Demo gesture touched a trip or outbox endpoint: ${gestureRequests.join(', ')}`);
+        assert(mutationRequests.filter((entry) => /\/offline-events\/sync\//.test(entry)).length === 1, `Gesture did not use exactly one common offline-sync request: ${mutationRequests.join(', ')}`);
+        assert(!mutationRequests.some((entry) => /\/excavator\/.*(?:load|trip)/.test(entry)), `Driver gesture called an Excavator mutation endpoint: ${mutationRequests.join(', ')}`);
+        assert(syncedManualEvents.length === 1 && syncedManualEvents[0].event_type === 'driver.trip.loaded', 'Gesture did not send one Driver-only manual-load event.');
+        assert(syncedManualEvents[0].local_trip_id === syncedManualEvents[0].event_id, 'Manual trip lost its stable local identity.');
         await driverPage.waitForTimeout(1100);
         const timerAfterDrop = await driverPage.locator('[data-driver-manual-trip-timer]').evaluate((node) => ({
             active: node.dataset.driverManualTimerActive,
@@ -361,7 +389,31 @@ async function center(locator) {
         const timerShot = path.join(outputDir, 'H-driver-trip-timer-active-412x915.png');
         await driverPage.screenshot({ path: timerShot });
         report.screenshots.push({ id: 'H', file: path.basename(timerShot), url: driverPage.url() });
-        report.checks.push('Completed Driver gesture used the shared preview, comet and highlight, then started one destination-bound local timer without trip, outbox or mutation requests.');
+        assert(!(await driverPage.locator('[data-driver-manual-source]').isDisabled()), 'Confirmed manual mark incorrectly blocked the next manual swipe.');
+        report.checks.push('Completed Driver gesture used the shared preview, comet and highlight, persisted one Driver-only event through the common outbox, kept the source reusable, and continued the destination timer.');
+
+        const secondStart = await center(driverPage.locator('[data-driver-manual-source]').first());
+        const secondFinish = await center(targets.nth(0));
+        const secondPointName = await targets.nth(0).getAttribute('data-eo-dump-name');
+        await dispatchTouch(cdp, 'touchStart', secondStart);
+        await dispatchTouch(cdp, 'touchMove', {
+            x: secondStart.x + (secondFinish.x - secondStart.x) * 0.5,
+            y: secondStart.y + (secondFinish.y - secondStart.y) * 0.5,
+        });
+        await dispatchTouch(cdp, 'touchMove', secondFinish);
+        await dispatchTouch(cdp, 'touchEnd');
+        await driverPage.waitForTimeout(1600);
+        assert(syncedManualEvents.length === 2, 'A second manual swipe was blocked or duplicated.');
+        assert(syncedManualEvents[1].depends_on.includes(syncedManualEvents[0].event_id), 'The next manual cycle is not ordered after the previous durable mark.');
+        const secondTimer = await driverPage.locator('[data-driver-manual-trip-timer]').evaluate((node) => ({
+            pointName: node.dataset.driverManualTimerPointName,
+            active: node.dataset.driverManualTimerActive,
+        }));
+        assert(secondTimer.active === 'true' && secondTimer.pointName === secondPointName, 'The second manual swipe did not start the next destination timer.');
+        assert(!(await driverPage.locator('[data-driver-manual-source]').isDisabled()), 'The second manual cycle again blocked the source card.');
+        report.checks.push('A second swipe works without a separate unload confirmation, depends on the previous durable event, and restarts the timer for its own destination.');
+
+        await driverPage.waitForTimeout(900);
 
         await driverPage.waitForTimeout(100);
         const cancelStart = await center(driverPage.locator('[data-driver-manual-source]').first());

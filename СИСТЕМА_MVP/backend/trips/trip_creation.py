@@ -91,6 +91,9 @@ def create_loaded_waiting_unload_trip(
     participation=None,
     occurred_at=None,
     resolve_assignment_transition=True,
+    driver=None,
+    driver_participation_recorded=None,
+    load_time_source=None,
 ):
     """Create the single server-side state used after an excavator loads a truck.
 
@@ -144,17 +147,26 @@ def create_loaded_waiting_unload_trip(
         from .manual_loading import truck_driver_participation
         participation = truck_driver_participation([locked_truck.pk])[locked_truck.pk]
     from .manual_loading import manual_loading_enabled
-    control_shift = participation['control_shift'] if manual_loading_enabled() else participation['shift']
+    participation_recorded = (
+        manual_loading_enabled()
+        if driver_participation_recorded is None
+        else bool(driver_participation_recorded)
+    )
+    control_shift = participation['control_shift'] if participation_recorded else participation['shift']
+    resolved_load_time_source = load_time_source or (
+        'excavator_device' if occurred_at else 'server_receipt'
+    )
     trip = Trip.objects.create(
         excavator_id=excavator_id,
         truck=locked_truck,
         excavator_operator=excavator_operator,
+        driver=driver,
         loading_shift=loading_shift,
         rock_type=rock_type,
         dump_point=dump_point,
         assigned_dump_point=dump_point,
         actual_dump_point=None if manual_loading_enabled() else dump_point,
-        driver_participation_recorded=manual_loading_enabled(),
+        driver_participation_recorded=participation_recorded,
         driver_control_shift=control_shift,
         planned_volume_m3=planned_volume_m3,
         volume_m3=volume_m3,
@@ -167,7 +179,7 @@ def create_loaded_waiting_unload_trip(
         status=TripStatus.LOADED_WAITING_UNLOAD,
         loaded_at=load_occurred_at,
         load_received_at=received_at,
-        load_time_source='excavator_device' if occurred_at else 'server_receipt',
+        load_time_source=resolved_load_time_source,
     )
     if supersede_trip:
         supersede_trip.superseded_by = trip

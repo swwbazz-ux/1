@@ -204,6 +204,7 @@ class Trip(models.Model):
     load_time_source = models.CharField(
         'Источник времени погрузки', max_length=24, default='unknown',
         choices=[('unknown', 'Неизвестно'), ('excavator_device', 'Часы устройства машиниста'),
+                 ('driver_device', 'Часы устройства водителя'),
                  ('server_receipt', 'Время получения сервером')],
     )
     completed_at = models.DateTimeField('Выполнен', null=True, blank=True)

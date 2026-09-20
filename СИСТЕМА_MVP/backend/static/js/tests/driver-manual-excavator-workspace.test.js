@@ -14,11 +14,11 @@ test("shared drag keeps the Excavator seven-pixel pickup threshold", () => {
     assert.equal(sharedDrag.gestureStarted(0, -8), true);
 });
 
-test("Driver result is explicitly demonstrational and never claims a saved trip", () => {
-    assert.equal(
-        driverRuntime.demoResultForTarget("СКЛАД 2.1"),
-        "Демонстрация: выбрана точка «СКЛАД 2.1». Рейс не создан."
-    );
+test("Driver reports durable manual-trip states without a false server confirmation", () => {
+    assert.equal(driverRuntime.resultText("saving"), "Сохраняем отметку на телефоне…");
+    assert.equal(driverRuntime.resultText("confirmed", 451), "Рейс №451 · в пути");
+    assert.equal(driverRuntime.resultText("review"), "Отметка не принята · требуется сверка");
+    assert.equal(driverRuntime.resultText("storage-error"), "Не удалось сохранить на телефоне. Повторите отправку.");
 });
 
 test("trip timer formats elapsed time and names the selected destination", () => {
@@ -66,10 +66,12 @@ test("current-trip point action delegates to the canonical Driver point control"
     assert.equal(clicks, 1);
 });
 
-test("Driver runtime has no independent storage, queue, or network transport", () => {
+test("Driver runtime reuses the common outbox without an independent transport or journal", () => {
     const source = read("static", "js", "driver-manual-excavator-workspace-v1.js");
     assert.doesNotMatch(source, /localStorage|indexedDB|fetch\s*\(|XMLHttpRequest|sendBeacon|WebSocket/);
-    assert.doesNotMatch(source, /createDriver.*Event|queue.*Event|offline.*outbox/i);
+    assert.match(source, /createDriverManualLoadEvent/);
+    assert.match(source, /outbox\.enqueue/);
+    assert.doesNotMatch(source, /new\s+(?:Map|Set)\s*\([^)]*journal|manualTripQueue|manualTripStorage/i);
 });
 
 test("manual free-bucket button delegates to the canonical Driver control", () => {
@@ -172,4 +174,17 @@ test("shared controller remains the only live card binder in both roles", () => 
     assert.match(excavator, /ExcavatorDashboardDrag\.attach\(/);
     assert.match(driverRuntimeSource, /ExcavatorDashboardDrag\.attach\(/);
     assert.match(driverRuntimeSource, /operational-state-refresh-applied/);
+});
+
+test("manual context and confirmed timer survive fragment refresh", () => {
+    const driver = read("templates", "includes", "driver_manual_excavator_workspace.html");
+    const driverRuntimeSource = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    const driverShiftSource = read("static", "js", "driver-shift-v1.js");
+    assert.match(driver, /data-driver-manual-authority-type=/);
+    assert.match(driver, /data-driver-manual-assignment-id=/);
+    assert.match(driver, /data-driver-manual-rock-type-id=/);
+    assert.match(driver, /data-driver-manual-placement-id=/);
+    assert.match(driverRuntimeSource, /workspace\.dataset\.driverManualAuthorityType/);
+    assert.match(driverRuntimeSource, /restoreProjection\(root\.driverOfflineOutbox, workspace\)/);
+    assert.match(driverShiftSource, /DriverManualExcavatorWorkspace\.restoreProjection\(/);
 });

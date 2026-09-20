@@ -1,5 +1,6 @@
 {% load static %}
-<section class="driver-manual-workspace" id="driver-manual-workspace" data-driver-manual-workspace hidden aria-label="Ручное управление погрузкой">
+{{ driver_manual_workspace.event_context|json_script:"driver-manual-workspace-context-data" }}
+<section class="driver-manual-workspace" id="driver-manual-workspace" data-driver-manual-workspace data-driver-manual-active-origin="{{ driver_manual_workspace.active_trip_origin }}" data-driver-manual-active-trip-id="{{ driver_manual_workspace.active_trip_id|default:'' }}" data-driver-manual-authority-type="{{ driver_manual_workspace.event_context.authority_type }}" data-driver-manual-truck-id="{{ driver_manual_workspace.event_context.truck_id|default:'' }}" data-driver-manual-excavator-id="{{ driver_manual_workspace.event_context.excavator_id|default:'' }}" data-driver-manual-excavator-label="{{ driver_manual_workspace.event_context.excavator_label }}" data-driver-manual-complex-label="{{ driver_manual_workspace.event_context.complex_label }}" data-driver-manual-assignment-id="{{ driver_manual_workspace.event_context.assignment_id|default:'' }}" data-driver-manual-acceptance-id="{{ driver_manual_workspace.event_context.free_bucket_acceptance_id|default:'' }}" data-driver-manual-acceptance-local-id="{{ driver_manual_workspace.event_context.free_bucket_acceptance_local_id }}" data-driver-manual-placement-id="{{ driver_manual_workspace.event_context.placement_id|default:'' }}" data-driver-manual-placement-updated-at="{{ driver_manual_workspace.event_context.placement_updated_at|default:'' }}" data-driver-manual-rock-type-id="{{ driver_manual_workspace.event_context.rock_type_id|default:'' }}" data-driver-manual-rock-type-name="{{ driver_manual_workspace.event_context.rock_type_name }}" data-driver-manual-loading-horizon="{{ driver_manual_workspace.event_context.loading_horizon }}" data-driver-manual-loading-block="{{ driver_manual_workspace.event_context.loading_block }}" hidden aria-label="Ручное управление погрузкой">
     <div class="eo-shell" data-eo-active-tab="trucks" data-driver-manual-eo-shell>
         <header class="eo-topbar" aria-label="Ручное управление погрузкой">
             <button type="button" class="eo-topbar-cell driver-manual-workspace__back" data-driver-manual-close aria-label="Вернуться к стандартному экрану">
@@ -19,8 +20,7 @@
                 </strong>
             </div>
         </header>
-        <span class="driver-manual-workspace__demo" aria-label="Демонстрационный режим. Рейс не создаётся">ДЕМО</span>
         {% include "includes/excavator_dashboard_workspace.html" with driver_manual_dashboard=True driver_manual_free_bucket_enabled=driver_free_bucket_can_open dashboard_operator_name=access.employee.full_name truck_cards=driver_manual_workspace.cards dump_cards=driver_manual_workspace.dump_cards empty_source_icon='img/equipment/excavator-yellow.png' %}
-        <div class="mobile-shift-toast" data-driver-manual-result hidden role="status" aria-live="assertive" aria-atomic="true">Демонстрация: рейс не создан</div>
+        <div class="mobile-shift-toast" data-driver-manual-result hidden role="status" aria-live="assertive" aria-atomic="true"></div>
     </div>
 </section>

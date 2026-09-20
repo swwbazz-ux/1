@@ -1213,6 +1213,15 @@ window.bindDriverMobileShell = function () {
         if (window.DriverFreeBucket && typeof window.DriverFreeBucket.renderProjection === "function") {
             window.DriverFreeBucket.renderProjection(current, ordered);
         }
+        if (
+            window.DriverManualExcavatorWorkspace
+            && typeof window.DriverManualExcavatorWorkspace.restoreProjection === "function"
+        ) {
+            window.DriverManualExcavatorWorkspace.restoreProjection(
+                window.driverOfflineOutbox,
+                current.querySelector("[data-driver-manual-workspace]")
+            ).catch(function () {});
+        }
     }
 
     function driverOfflineBindings() {
@@ -1226,6 +1235,13 @@ window.bindDriverMobileShell = function () {
                     window.driverOfflineConfirmationCueScheduled = true;
                     playDriverVoice("action_ok", "voice_trip_finished");
                     window.setTimeout(function () { window.driverOfflineConfirmationCueScheduled = false; }, 750);
+                }
+                if (
+                    event.event_type === "driver.trip.loaded"
+                    && window.DriverManualExcavatorWorkspace
+                    && typeof window.DriverManualExcavatorWorkspace.restoreProjection === "function"
+                ) {
+                    window.DriverManualExcavatorWorkspace.restoreProjection(window.driverOfflineOutbox).catch(function () {});
                 }
                 var result = args[1] || {};
                 var isDowntime = event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended";
@@ -1275,7 +1291,8 @@ window.bindDriverMobileShell = function () {
                 pending: function () { return Promise.resolve([]); },
                 publish: function () { return Promise.resolve([]); },
                 getServerMapping: function () { return Promise.resolve(null); },
-                getDowntimeProjectionReceipt: function () { return Promise.resolve(null); }
+                getDowntimeProjectionReceipt: function () { return Promise.resolve(null); },
+                getManualTripProjectionReceipt: function () { return Promise.resolve(null); }
             };
         }
         if (window.driverOfflineOutbox && window.driverOfflineOutboxAccessId === shell.dataset.driverAccessId) {
@@ -1383,6 +1400,12 @@ window.bindDriverMobileShell = function () {
         });
     }
     restoreDriverConfirmedDowntime(driverOfflineOutbox).catch(function () {});
+    if (
+        window.DriverManualExcavatorWorkspace
+        && typeof window.DriverManualExcavatorWorkspace.restoreProjection === "function"
+    ) {
+        window.DriverManualExcavatorWorkspace.restoreProjection(driverOfflineOutbox).catch(function () {});
+    }
     if (window.DriverFreeBucket && typeof window.DriverFreeBucket.bind === "function") {
         window.DriverFreeBucket.bind({shell: shell, outbox: driverOfflineOutbox});
     }

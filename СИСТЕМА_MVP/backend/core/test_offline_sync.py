@@ -9,7 +9,12 @@ from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from assignments.models import AssignmentStatus, HaulAssignment
+from assignments.models import (
+    AssignmentStatus,
+    ExcavatorDumpPointSetting,
+    ExcavatorPlacement,
+    HaulAssignment,
+)
 from core.models import OfflineFieldEvent, OfflineFieldEventConflict
 from downtimes.models import DowntimeEvent, DowntimeReason
 from trips import tests as trip_fixtures
@@ -91,6 +96,262 @@ class OfflineEventSyncTests(TestCase):
         session['employee_access_id'] = self.driver_access.id
         session.save()
         return client
+
+    def driver_manual_event(self, event_id='driver-manual-load-1', sequence=1, **changes):
+        placement, _ = ExcavatorPlacement.objects.update_or_create(
+            excavator=self.excavator,
+            defaults={
+                'zone': ExcavatorPlacement.Zone.ACTIVE,
+                'work_rock_type': self.rock,
+                'work_dump_point': self.dump_point,
+                'loading_horizon': '125',
+                'loading_block': '4',
+                'transport_distance_km': '4.20',
+                'work_context_updated_at': timezone.now() - timedelta(minutes=1),
+                'changed_by': self.operator,
+            },
+        )
+        ExcavatorDumpPointSetting.objects.update_or_create(
+            placement=placement,
+            dump_point=self.dump_point,
+            defaults={
+                'position': 1,
+                'transport_distance_km': '4.20',
+                'changed_by': self.operator,
+            },
+        )
+        occurred_at = changes.pop('occurred_at', timezone.now())
+        event = {
+            'event_id': event_id,
+            'event_type': 'driver.trip.loaded',
+            'format_version': 1,
+            'actor_id': self.driver.id,
+            'access_id': self.driver_access.id,
+            'role_code': 'driver',
+            'occurred_at': occurred_at.isoformat(),
+            'sequence': sequence,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'local_trip_id': event_id,
+            'context_snapshot': {
+                'source': 'driver_manual',
+                'authority_type': 'assignment',
+                'assignment_id': self.assignment.id,
+                'excavator_id': self.excavator.id,
+                'excavator_label': str(self.excavator),
+                'placement_id': placement.id,
+                'placement_updated_at': placement.work_context_updated_at.isoformat(),
+                'rock_type_id': self.rock.id,
+                'rock_type_name': str(self.rock),
+                'loading_horizon': '125',
+                'loading_block': '4',
+                'dump_points': [{
+                    'id': self.dump_point.id,
+                    'name': str(self.dump_point),
+                    'transport_distance_km': '4.20',
+                }],
+                'selected_dump_point_id': self.dump_point.id,
+                'selected_dump_point_name': str(self.dump_point),
+                'selected_one_off': False,
+            },
+            'payload': {
+                'manual_control': True,
+                'truck_id': self.truck.id,
+                'excavator_id': self.excavator.id,
+                'dump_point_id': self.dump_point.id,
+                'rock_type_id': self.rock.id,
+                'placement_id': placement.id,
+                'placement_updated_at': placement.work_context_updated_at.isoformat(),
+                'loading_horizon': '125',
+                'loading_block': '4',
+                'transport_distance_km': '4.20',
+                'assignment_id': self.assignment.id,
+                'free_bucket_acceptance_id': None,
+                'free_bucket_acceptance_local_id': None,
+            },
+        }
+        event.update(changes)
+        return event
+
+    def test_driver_manual_load_is_durable_deduplicated_and_truthfully_attributed(self):
+        event = self.driver_manual_event()
+        first = self.sync([event], client=self.driver_client(), role_code='driver').json()['results'][0]
+
+        self.assertEqual(first['status'], 'accepted', first)
+        self.assertEqual(first['trip_origin'], 'driver_manual')
+        trip = Trip.objects.get()
+        self.assertEqual(first['server_ids']['trip_id'], trip.id)
+        self.assertEqual(trip.driver_id, self.driver.id)
+        self.assertEqual(trip.driver_control_shift_id, self.truck_shift.id)
+        self.assertTrue(trip.driver_participation_recorded)
+        self.assertEqual(trip.load_time_source, 'driver_device')
+        self.assertEqual(trip.excavator_id, self.excavator.id)
+        self.assertEqual(trip.dump_point_id, self.dump_point.id)
+        self.assertEqual(trip.rock_type_id, self.rock.id)
+        self.assertTrue(TripClientAction.objects.filter(
+            trip=trip,
+            action_type='driver_manual_loaded',
+            client_action_id=event['event_id'],
+        ).exists())
+
+        repeated = self.sync([event], client=self.driver_client(), role_code='driver').json()['results'][0]
+        self.assertEqual(repeated['status'], 'deduplicated')
+        self.assertEqual(Trip.objects.count(), 1)
+
+    def test_driver_then_excavator_loads_are_one_physical_trip(self):
+        manual = self.driver_manual_event('driver-first', 1)
+        manual_result = self.sync(
+            [manual], client=self.driver_client(), role_code='driver', device_id='driver-device',
+        ).json()['results'][0]
+        automatic = self.load_event(
+            'excavator-after-driver',
+            1,
+            occurred_at=timezone.datetime.fromisoformat(manual['occurred_at']) + timedelta(seconds=1),
+        )
+        automatic_result = self.sync(
+            [automatic], device_id='excavator-device',
+        ).json()['results'][0]
+
+        self.assertEqual(manual_result['status'], 'accepted', manual_result)
+        self.assertEqual(automatic_result['status'], 'accepted', automatic_result)
+        self.assertEqual(Trip.objects.count(), 1)
+        trip = Trip.objects.get()
+        self.assertEqual(manual_result['server_ids']['trip_id'], trip.id)
+        self.assertEqual(automatic_result['server_ids']['trip_id'], trip.id)
+        self.assertEqual(trip.excavator_operator_id, self.operator.id)
+        self.assertEqual(trip.loading_shift_id, self.shift.id)
+        self.assertEqual(trip.load_time_source, 'excavator_device')
+        self.assertEqual(
+            set(TripClientAction.objects.filter(trip=trip).values_list('action_type', flat=True)),
+            {'driver_manual_loaded', 'truck_loaded'},
+        )
+
+    def test_excavator_then_driver_loads_are_one_physical_trip(self):
+        automatic = self.load_event('excavator-first', 1)
+        automatic_result = self.sync([automatic], device_id='excavator-device').json()['results'][0]
+        manual = self.driver_manual_event(
+            'driver-after-excavator',
+            1,
+            occurred_at=timezone.datetime.fromisoformat(automatic['occurred_at']) + timedelta(seconds=1),
+        )
+        manual_result = self.sync(
+            [manual], client=self.driver_client(), role_code='driver', device_id='driver-device',
+        ).json()['results'][0]
+
+        self.assertEqual(automatic_result['status'], 'accepted', automatic_result)
+        self.assertEqual(manual_result['status'], 'accepted', manual_result)
+        self.assertEqual(manual_result['trip_origin'], 'excavator')
+        self.assertEqual(Trip.objects.count(), 1)
+        trip = Trip.objects.get()
+        self.assertEqual(automatic_result['server_ids']['trip_id'], trip.id)
+        self.assertEqual(manual_result['server_ids']['trip_id'], trip.id)
+        self.assertEqual(
+            set(TripClientAction.objects.filter(trip=trip).values_list('action_type', flat=True)),
+            {'driver_manual_loaded', 'truck_loaded'},
+        )
+
+    def test_driver_manual_load_rejects_changed_context_without_creating_trip(self):
+        event = self.driver_manual_event()
+        event['payload']['loading_block'] = '99'
+        result = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-device',
+        ).json()['results'][0]
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(result['code'], 'manual_work_context_changed')
+        self.assertEqual(Trip.objects.count(), 0)
+
+    def test_manual_load_point_change_and_unload_share_one_local_trip_chain(self):
+        changed_point = DumpPoint.objects.create(name='ККД ручного рейса')
+        loaded = self.driver_manual_event('manual-chain-load', 1)
+        loaded_at = timezone.datetime.fromisoformat(loaded['occurred_at'])
+        point = {
+            'event_id': 'manual-chain-point',
+            'event_type': 'driver.trip.dump_point_changed',
+            'format_version': 1,
+            'occurred_at': (loaded_at + timedelta(seconds=1)).isoformat(),
+            'sequence': 2,
+            'depends_on': [loaded['event_id']],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'local_trip_id': loaded['local_trip_id'],
+            'context_snapshot': {
+                'selected_dump_point_id': changed_point.id,
+                'selected_dump_point_name': str(changed_point),
+            },
+            'payload': {
+                'dump_point_id': changed_point.id,
+                'expected_actual_dump_point_id': self.dump_point.id,
+            },
+        }
+        unloaded = {
+            'event_id': 'manual-chain-unload',
+            'event_type': 'driver.trip.unloaded',
+            'format_version': 1,
+            'occurred_at': (loaded_at + timedelta(seconds=2)).isoformat(),
+            'sequence': 3,
+            'depends_on': [point['event_id']],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'local_trip_id': loaded['local_trip_id'],
+            'context_snapshot': {},
+            'payload': {'local_trip_id': loaded['local_trip_id']},
+        }
+
+        results = self.sync(
+            [unloaded, point, loaded],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-chain-device',
+        ).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted', 'accepted'])
+        self.assertEqual(Trip.objects.count(), 1)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(trip.assigned_dump_point_id, self.dump_point.id)
+        self.assertEqual(trip.actual_dump_point_id, changed_point.id)
+        self.assertEqual(trip.dump_point_id, changed_point.id)
+        self.assertEqual({item['server_ids']['trip_id'] for item in results}, {trip.id})
+
+    def test_next_manual_swipe_finishes_previous_cycle_without_separate_unload(self):
+        first = self.driver_manual_event('manual-cycle-first', 1)
+        first_result = self.sync(
+            [first],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-cycle-device',
+        ).json()['results'][0]
+        first_trip = Trip.objects.get(pk=first_result['server_ids']['trip_id'])
+        self.assertEqual(first_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+
+        second = self.driver_manual_event(
+            'manual-cycle-second',
+            2,
+            occurred_at=timezone.datetime.fromisoformat(first['occurred_at']) + timedelta(minutes=3),
+        )
+        second['depends_on'] = [first['event_id']]
+        second_result = self.sync(
+            [second],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-cycle-device',
+        ).json()['results'][0]
+
+        self.assertEqual(second_result['status'], 'accepted', second_result)
+        self.assertEqual(Trip.objects.count(), 2)
+        first_trip.refresh_from_db()
+        second_trip = Trip.objects.get(pk=second_result['server_ids']['trip_id'])
+        self.assertEqual(first_trip.status, TripStatus.COMPLETED)
+        self.assertEqual(first_trip.completed_at, timezone.datetime.fromisoformat(second['occurred_at']))
+        self.assertIsNotNone(first_trip.volume_m3)
+        self.assertIsNotNone(first_trip.tonnage)
+        self.assertEqual(second_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertTrue(TripClientAction.objects.filter(
+            trip=first_trip,
+            action_type='driver_manual_cycle_advanced',
+            client_action_id=second['event_id'],
+        ).exists())
 
     def test_exact_retry_is_deduplicated_and_payload_reuse_is_conflict(self):
         event = self.load_event()

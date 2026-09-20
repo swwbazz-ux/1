@@ -414,6 +414,11 @@
             var remove = shell.querySelector("[data-driver-free-bucket-remove]");
             if (remove) remove.hidden = !active || state.status === "used";
             applyMainCard(active ? state.selection : null);
+            if (typeof windowObject.CustomEvent === "function" && typeof windowObject.dispatchEvent === "function") {
+                windowObject.dispatchEvent(new windowObject.CustomEvent("driver-free-bucket-state-changed", {
+                    detail: {state: clone(state), catalog: clone(catalog)}
+                }));
+            }
         }
 
         function focusWithoutScroll(target) {
@@ -641,6 +646,12 @@
                 currentController = bindBrowser({shell: requestedShell, outbox: root.driverOfflineOutbox});
             }
             return currentController ? currentController.project(events || []) : null;
+        },
+        currentState: function () {
+            return currentController ? currentController.state() : null;
+        },
+        currentCatalog: function () {
+            return currentController ? currentController.catalog() : null;
         }
     };
 

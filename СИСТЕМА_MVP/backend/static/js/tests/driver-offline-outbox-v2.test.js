@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
     createDriverOfflineOutbox,
+    createDriverManualLoadEvent,
     createDriverPointChangeEvent,
     createDriverFreeBucketSelectedEvent,
     createDriverFreeBucketCancelledEvent,
@@ -13,6 +14,97 @@ const {
     localRepository,
     backoff,
 } = require("../driver-offline-outbox-v2.js");
+
+function manualLoad(overrides = {}) {
+    return createDriverManualLoadEvent({
+        eventId: "manual-load-1",
+        occurredAt: "2026-09-21T01:02:03.000Z",
+        truckId: 58,
+        excavatorId: 9,
+        dumpPointId: 4,
+        rockTypeId: 3,
+        assignmentId: 71,
+        placementId: 22,
+        placementUpdatedAt: "2026-09-21T00:00:00Z",
+        loadingHorizon: "15",
+        loadingBlock: "55",
+        transportDistanceKm: "4.2",
+        contextSnapshot: {
+            source: "driver_manual",
+            excavator_id: 9,
+            rock_type_id: 3,
+            dump_points: [{id: 4, name: "СКЛАД 2.1"}],
+            selected_dump_point_id: 4,
+        },
+        ...overrides,
+    });
+}
+
+test("manual load uses stable local identity and an immutable Driver snapshot", async () => {
+    const spec = manualLoad();
+    assert.equal(spec.event_type, "driver.trip.loaded");
+    assert.equal(spec.local_trip_id, spec.event_id);
+    assert.equal(spec.trip_id, null);
+    assert.equal(spec.payload.manual_control, true);
+    assert.equal(spec.payload.assignment_id, 71);
+    assert.equal(spec.payload.free_bucket_acceptance_id, null);
+
+    const box = runtime({send: async () => { throw new Error("offline"); }});
+    const saved = await box.enqueue(spec);
+    spec.context_snapshot.dump_points[0].name = "ПОДМЕНА";
+    assert.equal(saved.context_snapshot.dump_points[0].name, "СКЛАД 2.1");
+    assert.equal(saved.actor_id, 11);
+    assert.equal(saved.role_code, "driver");
+    assert.equal(saved.equipment_id, 58);
+    assert.deepEqual(manualLoad({eventId: "manual-load-2", dependsOn: ["manual-load-1"]}).depends_on, ["manual-load-1"]);
+});
+
+test("manual load rejects missing or ambiguous authority and a foreign truck", async () => {
+    assert.throws(() => manualLoad({assignmentId: null}), /offline_manual_trip_authority_ambiguous/);
+    assert.throws(
+        () => manualLoad({acceptanceId: 91}),
+        /offline_manual_trip_authority_ambiguous/
+    );
+    const box = runtime();
+    await assert.rejects(box.enqueue(manualLoad({truckId: 99})), /offline_manual_trip_truck_mismatch/);
+});
+
+test("point correction can depend on a not-yet-confirmed manual trip", async () => {
+    const box = runtime({send: async () => { throw new Error("offline"); }});
+    const load = await box.enqueue(manualLoad());
+    const point = await box.enqueue(createDriverPointChangeEvent({
+        eventId: "manual-point-1",
+        occurredAt: "2026-09-21T01:03:00.000Z",
+        localTripId: load.local_trip_id,
+        loadEventId: load.event_id,
+        pointId: 5,
+        currentPointId: 4,
+        pointName: "ККД",
+    }));
+    assert.equal(point.trip_id, null);
+    assert.equal(point.local_trip_id, load.local_trip_id);
+    assert.deepEqual(point.depends_on, [load.event_id]);
+});
+
+test("manual trip confirmation survives restart with the server mapping", async () => {
+    const local = storage();
+    const send = async batch => ({results: batch.events.map(event => ({
+        event_id: event.event_id,
+        status: "accepted",
+        server_received_at: "2026-09-21T01:02:05.000Z",
+        server_ids: {trip_id: 451, shift_id: 23},
+        trip_origin: "driver_manual",
+    }))});
+    const first = runtime({local, send});
+    await first.enqueue(manualLoad());
+    await first.flush();
+    const restarted = runtime({local, send});
+    const receipt = await restarted.getManualTripProjectionReceipt(23, 58);
+    assert.equal(receipt.event_id, "manual-load-1");
+    assert.equal(receipt.server_ids.trip_id, 451);
+    assert.equal(receipt.trip_origin, "driver_manual");
+    assert.equal((await restarted.pending()).length, 0);
+});
 
 test("terminal downtime events never replace the authoritative active downtime", () => {
     const projection = selectDriverDowntimeProjection([
@@ -294,6 +386,30 @@ test("parallel gestures receive a stable monotonic order", async () => {
         box.enqueue({event_id: "two", event_type: "driver.trip.dump_point_changed", trip_id: 9, payload: {dump_point_id: 2}}),
     ]);
     assert.deepEqual((await box.pending()).map(event => event.sequence), [1, 2]);
+});
+
+test("replacing Driver access does not reuse a device sequence", async () => {
+    const local = storage();
+    const first = runtime({local, accessId: 7});
+    const firstEvent = await first.enqueue({
+        event_id: "before-access-replacement",
+        event_type: "driver.downtime.started",
+        payload: {reason_id: 1},
+    });
+    const second = runtime({local, accessId: 8, context: {
+        actorId: 11,
+        accessId: 8,
+        shiftId: 23,
+        equipmentId: 58,
+        deviceId: "install-uuid-1",
+    }});
+    const secondEvent = await second.enqueue({
+        event_id: "after-access-replacement",
+        event_type: "driver.downtime.started",
+        payload: {reason_id: 1},
+    });
+    assert.equal(firstEvent.sequence, 1);
+    assert.equal(secondEvent.sequence, 2);
 });
 
 test("legacy unload queue migrates without changing event identity or fact time", async () => {

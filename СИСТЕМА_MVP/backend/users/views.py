@@ -42,6 +42,7 @@ from assignments.services import (
     work_assignment_state,
 )
 from core.models import (
+    OfflineFieldEvent,
     OperationalStateEvent,
     OperationalStateVersion,
     bump_operational_state,
@@ -279,7 +280,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v306'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v307'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -4442,6 +4443,8 @@ def driver_shift_view(request):
     current_assignment = None
     pending_assignment_action = None
     active_trip = None
+    driver_active_trip_origin = ''
+    driver_manual_trip_event = None
     active_downtime = None
     shift_trips = []
     if current_truck:
@@ -4477,6 +4480,26 @@ def driver_shift_view(request):
             'actual_dump_point',
             'free_bucket_acceptance',
         ).order_by('-created_at').first()
+        if active_trip:
+            active_trip_action_types = set(
+                TripClientAction.objects.filter(trip=active_trip).values_list('action_type', flat=True)
+            )
+            if active_trip_action_types & {'truck_loaded', 'free_bucket_loaded'}:
+                driver_active_trip_origin = 'excavator'
+            elif 'driver_manual_loaded' in active_trip_action_types:
+                driver_active_trip_origin = 'driver_manual'
+                driver_manual_trip_event = (
+                    OfflineFieldEvent.objects
+                    .filter(
+                        trip=active_trip,
+                        event_type='driver.trip.loaded',
+                        status='accepted',
+                    )
+                    .order_by('sequence', 'id')
+                    .first()
+                )
+            else:
+                driver_active_trip_origin = 'excavator'
         active_downtime = (
             DowntimeEvent.objects
             .select_related('reason', 'reason__equipment_state')
@@ -4498,6 +4521,7 @@ def driver_shift_view(request):
             .filter(
                 Q(unloading_shift=report_shift)
                 | Q(loading_shift=report_shift)
+                | Q(driver_control_shift=report_shift)
                 | legacy_driver_trip_filter
             )
             .distinct()
@@ -4707,23 +4731,46 @@ def driver_shift_view(request):
     # машиниста экскаватора. Основное назначение не меняется: если водитель
     # выбрал свободный ковш, рабочая карточка и точки берутся из неизменяемого
     # снимка этого временного выбора только на одну будущую погрузку.
+    driver_manual_event_context = (
+        dict(driver_manual_trip_event.context_snapshot or {})
+        if driver_manual_trip_event else {}
+    )
     driver_manual_selection = (
         driver_free_bucket_state['selection']
         if driver_free_bucket_state['active'] and driver_free_bucket_state['selection']
         else None
     )
     driver_manual_excavator = (
+        active_trip.excavator
+        if driver_active_trip_origin == 'driver_manual' and active_trip else
         driver_free_bucket_acceptance.excavator
         if driver_manual_selection and driver_free_bucket_acceptance
         else current_assignment.excavator
         if current_assignment else None
     )
+    driver_manual_card_assignment = current_assignment
+    if driver_manual_trip_event:
+        manual_assignment_id = (driver_manual_trip_event.payload or {}).get('assignment_id')
+        driver_manual_card_assignment = (
+            HaulAssignment.objects.filter(pk=manual_assignment_id).first()
+            if manual_assignment_id else None
+        ) or SimpleNamespace(id='', truck=current_truck)
     driver_manual_placement = None
     driver_manual_dump_points = []
-    if driver_manual_selection:
+    if driver_manual_trip_event and isinstance(driver_manual_event_context.get('dump_points'), list):
         driver_manual_dump_points = [
             {
-                'point': {'id': point.get('id')},
+                'point': SimpleNamespace(id=point.get('id')),
+                'name': str(point.get('name') or ''),
+                'transport_distance_km': str(point.get('transport_distance_km') or ''),
+            }
+            for point in driver_manual_event_context['dump_points']
+            if isinstance(point, dict) and point.get('id') and point.get('name')
+        ]
+    elif driver_manual_selection:
+        driver_manual_dump_points = [
+            {
+                'point': SimpleNamespace(id=point.get('id')),
                 'name': str(point.get('name') or ''),
                 'transport_distance_km': str(point.get('transport_distance_km') or ''),
             }
@@ -4766,33 +4813,39 @@ def driver_shift_view(request):
         'has_completed_loops': False,
         'is_overrun': False,
     }
+    driver_manual_excavator_label = (
+        str(driver_manual_event_context.get('excavator_label') or '')
+        or (driver_manual_selection['label'] if driver_manual_selection else '')
+        or driver_excavator_short_label(driver_manual_excavator)
+    )
+    driver_manual_complex_label = (
+        str(driver_manual_event_context.get('complex_label') or '')
+        or (driver_manual_selection['complex_label'] if driver_manual_selection else '')
+        or driver_complex_label_for_excavator(driver_manual_excavator)
+    )
+    driver_manual_rock_label = (
+        str(driver_manual_event_context.get('rock_type_name') or '')
+        or (driver_manual_selection['rock_type'] if driver_manual_selection else '')
+        or (
+            str(driver_manual_placement.work_rock_type)
+            if driver_manual_placement and driver_manual_placement.work_rock_type_id else ''
+        )
+        or (str(active_trip.rock_type) if driver_active_trip_origin == 'driver_manual' and active_trip else '')
+    )
     driver_manual_cards = []
-    if current_assignment and driver_manual_excavator:
+    if driver_manual_card_assignment and driver_manual_excavator:
         driver_manual_cards.append({
-            'assignment': current_assignment,
+            'assignment': driver_manual_card_assignment,
             'equipment_id': driver_manual_excavator.id,
             'manual_available': False,
             'driver_presence_code': 'online',
             'driver_presence_label': 'Назначен водителю',
             'open_trip_id': '',
-            'number': (
-                driver_manual_selection['label']
-                if driver_manual_selection else
-                driver_excavator_short_label(driver_manual_excavator)
-            ),
+            'number': driver_manual_excavator_label,
             'equipment_state_code': '',
             'status_key': 'yellow',
-            'status_label': (
-                driver_manual_selection['complex_label']
-                if driver_manual_selection else
-                driver_complex_label_for_excavator(driver_manual_excavator)
-            ),
-            'target_label': (
-                driver_manual_selection['rock_type']
-                if driver_manual_selection else
-                str(driver_manual_placement.work_rock_type)
-                if driver_manual_placement and driver_manual_placement.work_rock_type_id else ''
-            ),
+            'status_label': driver_manual_complex_label,
+            'target_label': driver_manual_rock_label,
             'is_selected': True,
             'is_locked': False,
             'is_inactive': False,
@@ -4810,7 +4863,11 @@ def driver_shift_view(request):
             'plan_visual': driver_manual_plan_visual,
             'plan_status': 'no_plan_group',
             'plan_status_key': 'empty',
-            'plan_short_label': 'Свободный ковш' if driver_manual_selection else 'Ручной режим',
+            'plan_short_label': (
+                'Свободный ковш'
+                if driver_manual_selection or driver_manual_event_context.get('authority_type') == 'free_bucket'
+                else 'Ручной режим'
+            ),
         })
     driver_manual_trip_counts = {}
     driver_manual_last_dump_point_id = None
@@ -4852,10 +4909,72 @@ def driver_shift_view(request):
         }
         for setting in driver_manual_dump_points
     ]
-    driver_manual_can_open = bool(open_shift and current_truck and not active_trip)
+    if not driver_manual_event_context:
+        driver_manual_event_context = {
+            'source': 'driver_manual',
+            'authority_type': 'free_bucket' if driver_manual_selection else 'assignment',
+            'truck_id': current_truck.id if current_truck else None,
+            'excavator_id': driver_manual_excavator.id if driver_manual_excavator else None,
+            'excavator_label': driver_manual_excavator_label,
+            'complex_label': driver_manual_complex_label,
+            'assignment_id': current_assignment.id if current_assignment and not driver_manual_selection else None,
+            'free_bucket_acceptance_id': (
+                driver_free_bucket_acceptance.id if driver_manual_selection and driver_free_bucket_acceptance else None
+            ),
+            'free_bucket_acceptance_local_id': (
+                driver_free_bucket_state.get('acceptance_local_id') if driver_manual_selection else ''
+            ),
+            'placement_id': driver_manual_placement.id if driver_manual_placement else None,
+            'placement_updated_at': (
+                driver_manual_selection.get('placement_updated_at')
+                if driver_manual_selection else
+                driver_manual_placement.work_context_updated_at.isoformat()
+                if driver_manual_placement and driver_manual_placement.work_context_updated_at else None
+            ),
+            'rock_type_id': (
+                driver_manual_selection.get('rock_type_id')
+                if driver_manual_selection else
+                driver_manual_placement.work_rock_type_id if driver_manual_placement else None
+            ),
+            'rock_type_name': driver_manual_rock_label,
+            'loading_horizon': (
+                driver_manual_selection.get('loading_horizon')
+                if driver_manual_selection else
+                driver_manual_placement.loading_horizon if driver_manual_placement else ''
+            ),
+            'loading_block': (
+                driver_manual_selection.get('loading_block')
+                if driver_manual_selection else
+                driver_manual_placement.loading_block if driver_manual_placement else ''
+            ),
+            'dump_points': [
+                {
+                    'id': card['point'].id,
+                    'name': card['name'],
+                    'transport_distance_km': card['transport_distance_km'] or None,
+                }
+                for card in driver_manual_dump_cards
+            ],
+        }
+    if active_trip and driver_active_trip_origin == 'driver_manual':
+        driver_manual_event_context.update({
+            'event_id': driver_manual_trip_event.event_id if driver_manual_trip_event else '',
+            'local_trip_id': driver_manual_trip_event.local_trip_id if driver_manual_trip_event else '',
+            'active_trip_id': active_trip.id,
+            'active_trip_loaded_at': (
+                active_trip.loaded_at.isoformat() if active_trip.loaded_at else active_trip.created_at.isoformat()
+            ),
+            'selected_dump_point_id': active_trip.dump_point_id,
+            'selected_dump_point_name': str(active_trip.dump_point),
+        })
+    driver_manual_can_open = bool(
+        open_shift
+        and current_truck
+        and (not active_trip or driver_active_trip_origin == 'driver_manual')
+    )
     driver_manual_blocked_reason = (
         'Ручной режим недоступен во время активного рейса'
-        if active_trip else
+        if active_trip and driver_active_trip_origin != 'driver_manual' else
         'Откройте смену, чтобы использовать ручной режим'
         if not open_shift else
         'Сначала выберите самосвал для текущей смены'
@@ -4865,30 +4984,30 @@ def driver_shift_view(request):
     driver_manual_workspace = {
         'can_open': driver_manual_can_open,
         'blocked_reason': driver_manual_blocked_reason,
-        'excavator_label': (
-            driver_manual_selection['label']
-            if driver_manual_selection else
-            driver_excavator_short_label(driver_manual_excavator)
-            if driver_manual_excavator else 'Ручной режим'
-        ),
+        'excavator_label': driver_manual_excavator_label or 'Ручной режим',
         'horizon': (
+            driver_manual_event_context.get('loading_horizon')
+            if driver_manual_event_context else
             driver_manual_selection['loading_horizon']
             if driver_manual_selection else
             driver_manual_placement.loading_horizon if driver_manual_placement else ''
         ),
         'block': (
+            driver_manual_event_context.get('loading_block')
+            if driver_manual_event_context else
             driver_manual_selection['loading_block']
             if driver_manual_selection else
             driver_manual_placement.loading_block if driver_manual_placement else ''
         ),
-        'rock_label': (
-            driver_manual_selection['rock_type']
-            if driver_manual_selection else
-            str(driver_manual_placement.work_rock_type)
-            if driver_manual_placement and driver_manual_placement.work_rock_type_id else ''
-        ),
+        'rock_label': driver_manual_rock_label,
         'cards': driver_manual_cards,
         'dump_cards': driver_manual_dump_cards,
+        'event_context': driver_manual_event_context,
+        'active_trip_origin': driver_active_trip_origin,
+        'active_trip_id': active_trip.id if active_trip else None,
+        'active_trip_loaded_at': (
+            active_trip.loaded_at.isoformat() if active_trip and active_trip.loaded_at else ''
+        ),
     }
     if driver_free_bucket_acceptance and driver_free_bucket_state['selection']:
         free_bucket_selection = driver_free_bucket_state['selection']
