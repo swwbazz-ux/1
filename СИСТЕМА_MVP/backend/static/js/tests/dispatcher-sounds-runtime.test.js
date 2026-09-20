@@ -58,22 +58,29 @@ function createRuntime(storedValue = null) {
         }
 
         createOscillator() {
-            const record = {frequency: null, startedAt: null, stoppedAt: null};
+            const record = {frequency: null, startedAt: null, stoppedAt: null, type: ""};
             tones.push(record);
-            return {
-                type: "",
+            const oscillator = {
                 frequency: {setValueAtTime(value) { record.frequency = value; }},
                 connect() {},
                 start(value) { record.startedAt = value; },
                 stop(value) { record.stoppedAt = value; }
             };
+            Object.defineProperty(oscillator, "type", {
+                get() { return record.type; },
+                set(value) { record.type = value; }
+            });
+            return oscillator;
         }
 
         createGain() {
+            const record = tones[tones.length - 1];
             return {
                 gain: {
                     setValueAtTime() {},
-                    exponentialRampToValueAtTime() {}
+                    exponentialRampToValueAtTime(value) {
+                        record.peakGain = Math.max(Number(record.peakGain || 0), Number(value || 0));
+                    }
                 },
                 connect() {}
             };
@@ -131,19 +138,25 @@ test("new operational events sound once per stable event version", async () => {
         }
     }));
     await settle();
-    assert.equal(runtime.tones.length, 2);
+    assert.equal(runtime.tones.length, 3);
+    assert.ok(runtime.tones.every((tone) => tone.type === "triangle"));
+    assert.ok(runtime.tones.every((tone) => tone.peakGain >= 0.18));
+    assert.ok(
+        runtime.tones.at(-1).stoppedAt - runtime.tones[0].startedAt >= 0.8,
+        "attention cue must remain audible for roughly a second"
+    );
 
     runtime.window.dispatchEvent(new runtime.window.CustomEvent("operational-state-refresh-applied", {
         detail: {role: "dispatcher", version: 12, events: [{version: 12, type: "downtime_changed"}]}
     }));
     await settle();
-    assert.equal(runtime.tones.length, 2, "the repeated server event must stay silent");
+    assert.equal(runtime.tones.length, 3, "the repeated server event must stay silent");
 
     runtime.window.dispatchEvent(new runtime.window.CustomEvent("operational-state-refresh-applied", {
         detail: {role: "dispatcher", version: 13, events: [{version: 13, type: "assignment_changed"}]}
     }));
     await settle();
-    assert.equal(runtime.tones.length, 4);
+    assert.equal(runtime.tones.length, 6);
 });
 
 test("connection loss and recovery have distinct transition-only cues", async () => {
@@ -158,16 +171,16 @@ test("connection loss and recovery have distinct transition-only cues", async ()
     connection("weak", "unknown");
     connection("lost", "weak");
     await settle();
-    assert.equal(runtime.tones.length, 2);
+    assert.equal(runtime.tones.length, 3);
     connection("lost", "lost");
     await settle();
-    assert.equal(runtime.tones.length, 2);
+    assert.equal(runtime.tones.length, 3);
     connection("recovering", "lost");
     await settle();
-    assert.equal(runtime.tones.length, 5);
+    assert.equal(runtime.tones.length, 6);
     connection("ok", "recovering");
     await settle();
-    assert.equal(runtime.tones.length, 5);
+    assert.equal(runtime.tones.length, 6);
 });
 
 test("action errors are audible but an immediate duplicate is suppressed", async () => {
@@ -180,7 +193,7 @@ test("action errors are audible but an immediate duplicate is suppressed", async
     runtime.window.dispatchEvent(event);
     runtime.window.dispatchEvent(event);
     await settle();
-    assert.equal(runtime.tones.length, 2);
+    assert.equal(runtime.tones.length, 3);
 });
 
 test("the persistent header toggle mutes and re-enables cues", async () => {
@@ -232,9 +245,9 @@ test("dispatcher shell wires and precaches the isolated sound module", () => {
         path.join(BACKEND, "static", "css", "dispatcher-control-v1.css"),
         "utf8"
     );
-    assert.match(template, /dispatcher-sounds-v1\.js[^\n]+dispatcher-desktop-shell-v130/);
+    assert.match(template, /dispatcher-sounds-v1\.js[^\n]+dispatcher-desktop-shell-v131/);
     assert.match(header, /data-dispatcher-sound-toggle/);
-    assert.match(views, /dispatcher-desktop-shell-v130/);
+    assert.match(views, /dispatcher-desktop-shell-v131/);
     assert.match(views, /\/static\/js\/dispatcher-sounds-v1\.js/);
     assert.match(control, /new CustomEvent\("dispatcher-action-error"/);
     assert.match(css, /@media \(max-width: 1180px\)[\s\S]+?\.dispatcher-command-utility\s*\{[\s\S]+?grid-template-columns:\s*repeat\(5,/);

@@ -265,7 +265,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v130')
+        self.assertContains(response, 'dispatcher-desktop-shell-v131')
         self.assertContains(
             response,
             'css/dispatcher-control-v1.css?v=dispatcher-desktop-shell-v130',
