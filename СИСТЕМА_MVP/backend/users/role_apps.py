@@ -53,6 +53,29 @@ async function cacheFirstReleaseStatic(request) {
 # фоновый модуль забирает сам. Так содержимое не проходит через чужой
 # push-сервис и всегда показывается актуальным.
 PUSH_SERVICE_WORKER_JS = r"""
+async function markNotificationsShown(ids, csrfToken) {
+  if (!ids.length) return;
+  try {
+    await fetch("/push/shown/", {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrfToken || "",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      body: JSON.stringify({ ids: ids })
+    });
+  } catch (error) {}
+}
+
+async function hasVisibleDispatcherWindow() {
+  if (ROLE_CODE !== "dispatcher") return false;
+  const clientList = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  return clientList.some(client => client.visibilityState === "visible");
+}
+
 async function showPendingNotifications() {
   let payload = null;
   try {
@@ -79,6 +102,13 @@ async function showPendingNotifications() {
   }
 
   const csrfToken = payload.csrf_token || "";
+  const pendingIds = payload.notifications.map(item => item.id).filter(Boolean);
+  // Открытый Пульт уже показывает свежее состояние и играет штатный звук.
+  // Не дублируем его системным banner-уведомлением Windows.
+  if (await hasVisibleDispatcherWindow()) {
+    await markNotificationsShown(pendingIds, csrfToken);
+    return;
+  }
   const shownIds = [];
   for (const item of payload.notifications) {
     shownIds.push(item.id);
@@ -102,19 +132,7 @@ async function showPendingNotifications() {
     try { await self.registration.navigator.setAppBadge(payload.badge || 0); } catch (error) {}
   }
 
-  try {
-    await fetch("/push/shown/", {
-      method: "POST",
-      credentials: "include",
-      cache: "no-store",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CSRFToken": csrfToken,
-        "X-Requested-With": "XMLHttpRequest"
-      },
-      body: JSON.stringify({ ids: shownIds })
-    });
-  } catch (error) {}
+  await markNotificationsShown(shownIds, csrfToken);
 }
 
 self.addEventListener("push", event => {
@@ -290,7 +308,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v129',
+        shell_version='dispatcher-desktop-shell-v130',
     ),
     RoleApp(
         role_code='settlement_clerk',

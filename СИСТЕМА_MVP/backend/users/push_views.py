@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from django.db import transaction
+from django.db.models import Q
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.utils import timezone
@@ -19,6 +20,7 @@ from .webpush import notify_employee, public_key_for_browser, push_is_configured
 PENDING_LIMIT = 5
 # По этой пометке экран настройки отличает проверку от рабочих событий.
 TEST_NOTIFICATION_KIND = 'setup_test'
+DISPATCHER_NOTIFICATION_PREFIX = 'dispatcher_'
 
 
 def _current_access(request):
@@ -33,6 +35,21 @@ def _payload(request):
         except (ValueError, UnicodeDecodeError):
             return {}
     return request.POST
+
+
+def _pending_notifications_for_access(access):
+    """Не даёт ролевому push попасть в другое приложение того же сотрудника."""
+    queryset = PushNotification.objects.filter(
+        employee=access.employee,
+        shown_at__isnull=True,
+    )
+    role_code = access.role.code if access.role_id else ''
+    if role_code == 'dispatcher':
+        return queryset.filter(
+            Q(kind__startswith=DISPATCHER_NOTIFICATION_PREFIX)
+            | Q(kind=TEST_NOTIFICATION_KIND)
+        )
+    return queryset.exclude(kind__startswith=DISPATCHER_NOTIFICATION_PREFIX)
 
 
 @require_GET
@@ -148,14 +165,10 @@ def push_pending_view(request):
         return JsonResponse({'ok': False, 'error': 'Нужно войти в приложение.'}, status=401)
 
     pending = list(
-        PushNotification.objects
-        .filter(employee=access.employee, shown_at__isnull=True)
+        _pending_notifications_for_access(access)
         .order_by('-created_at')[:PENDING_LIMIT]
     )
-    unread_total = PushNotification.objects.filter(
-        employee=access.employee,
-        shown_at__isnull=True,
-    ).count()
+    unread_total = _pending_notifications_for_access(access).count()
     response = JsonResponse({
         'ok': True,
         'badge': unread_total,
@@ -196,18 +209,12 @@ def push_mark_shown_view(request):
         except (TypeError, ValueError):
             continue
 
-    queryset = PushNotification.objects.filter(
-        employee=access.employee,
-        shown_at__isnull=True,
-    )
+    queryset = _pending_notifications_for_access(access)
     if ids:
         queryset = queryset.filter(id__in=ids)
     queryset.update(shown_at=timezone.now())
 
-    unread_total = PushNotification.objects.filter(
-        employee=access.employee,
-        shown_at__isnull=True,
-    ).count()
+    unread_total = _pending_notifications_for_access(access).count()
     return JsonResponse({'ok': True, 'badge': unread_total})
 
 

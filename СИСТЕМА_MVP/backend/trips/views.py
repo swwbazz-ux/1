@@ -114,7 +114,11 @@ from .free_bucket import (
     reconcile_expired_free_bucket_acceptances,
 )
 from users.active_role import role_session_state
-from users.role_apps import role_app_manifest_response, role_app_service_worker_response
+from users.role_apps import (
+    PUSH_SERVICE_WORKER_JS,
+    role_app_manifest_response,
+    role_app_service_worker_response,
+)
 from users.session_device import get_session_device_kind, set_session_device_kind
 
 from .excavator_hourly_report import build_excavator_hourly_report
@@ -780,7 +784,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v129";
+const CACHE_NAME = "dispatcher-desktop-shell-v130";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -913,6 +917,16 @@ self.addEventListener("message", event => {
   }
 });
 """
+
+# Десктопный Пульт имеет свою network-first оболочку, но push-обработчик
+# берёт из общего ролевого контракта, чтобы отметка shown и click-to-focus
+# не расходились с другими PWA.
+DISPATCHER_SERVICE_WORKER_JS = (
+    DISPATCHER_SERVICE_WORKER_JS.rstrip()
+    + '\n\n'
+    + PUSH_SERVICE_WORKER_JS
+    + '\n'
+)
 
 EXCAVATOR_MANIFEST = {
     'id': '/excavator/work/',

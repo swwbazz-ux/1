@@ -187,7 +187,7 @@ def bump_operational_state(
         state.reason = reason[:128]
         state.updated_at = timezone.now()
         state.save(update_fields=['version', 'reason', 'updated_at'])
-        OperationalStateEvent.objects.create(
+        event = OperationalStateEvent.objects.create(
             key=state.key,
             version=state.version,
             event_type=event_type[:64],
@@ -197,4 +197,11 @@ def bump_operational_state(
             payload=payload or {},
             created_at=state.updated_at,
         )
+        # Только после успешного commit: push никогда не должен сообщать
+        # о событии, которое база в итоге откатила.
+        from .dispatcher_push import notification_for_event, send_dispatcher_push_for_event
+        if notification_for_event(event):
+            transaction.on_commit(
+                lambda event_id=event.pk: send_dispatcher_push_for_event(event_id)
+            )
     return state

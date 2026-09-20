@@ -13,6 +13,7 @@ import logging
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 
 import jwt
@@ -29,6 +30,9 @@ VAPID_TOKEN_TTL_SECONDS = 12 * 60 * 60
 # Сколько push-сервис хранит уведомление, если телефон офлайн.
 PUSH_TTL_SECONDS = 6 * 60 * 60
 PUSH_REQUEST_TIMEOUT_SECONDS = 10
+# Фоновое уведомление Диспетчера не должно надолго задерживать
+# боевое действие, если push-провайдер временно недоступен.
+ROLE_PUSH_REQUEST_TIMEOUT_SECONDS = 3
 # Столько неудач подряд — и подписка считается мёртвой.
 MAX_SUBSCRIPTION_FAILURES = 5
 
@@ -98,7 +102,11 @@ def _authorization_header(endpoint: str) -> str | None:
     return f'vapid t={token},k={public_key_for_browser()}'
 
 
-def _deliver(endpoint: str) -> tuple[bool, int]:
+def _deliver(
+    endpoint: str,
+    *,
+    timeout_seconds: int = PUSH_REQUEST_TIMEOUT_SECONDS,
+) -> tuple[bool, int]:
     """Возвращает (доставлено, http-код). Код 404/410 означает мёртвую подписку."""
     authorization = _authorization_header(endpoint)
     if not authorization:
@@ -116,7 +124,7 @@ def _deliver(endpoint: str) -> tuple[bool, int]:
     )
     try:
         with urllib.request.urlopen(
-            request, timeout=PUSH_REQUEST_TIMEOUT_SECONDS
+            request, timeout=timeout_seconds
         ) as response:
             return 200 <= response.status < 300, response.status
     except urllib.error.HTTPError as error:
@@ -194,3 +202,87 @@ def notify_employee(employee, *, title, body, url='', tag='', kind='') -> int:
         len(subscriptions),
     )
     return delivered + native_delivered
+
+
+def notify_role_web_subscribers(
+    role_code: str,
+    *,
+    title: str,
+    body: str,
+    url: str = '',
+    tag: str = '',
+    kind: str = '',
+) -> int:
+    """Будит только Web Push-подписки указанной роли.
+
+    Этот путь намеренно не трогает native-устройства полевых ролей.
+    Текст кладётся в защищённую очередь каждого подписанного сотрудника,
+    а внешний push-сервис получает только пустой wake-up.
+    """
+    from .models import PushNotification, WebPushSubscription
+
+    role_code = str(role_code or '').strip()
+    if not role_code:
+        return 0
+
+    subscriptions = list(
+        WebPushSubscription.objects
+        .filter(role_code=role_code, is_active=True)
+        .select_related('employee')
+        .order_by('id')
+    )
+    if not subscriptions:
+        return 0
+
+    employee_ids = {subscription.employee_id for subscription in subscriptions}
+    PushNotification.objects.bulk_create([
+        PushNotification(
+            employee_id=employee_id,
+            title=title,
+            body=body,
+            url=url,
+            tag=tag or kind,
+            kind=kind,
+        )
+        for employee_id in employee_ids
+    ])
+    if not push_is_configured():
+        return 0
+
+    def deliver(subscription):
+        ok, status = _deliver(
+            subscription.endpoint,
+            timeout_seconds=ROLE_PUSH_REQUEST_TIMEOUT_SECONDS,
+        )
+        return subscription, ok, status
+
+    worker_count = min(4, len(subscriptions))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        results = list(executor.map(deliver, subscriptions))
+
+    delivered = 0
+    now = timezone.now()
+    for subscription, ok, status in results:
+        if ok:
+            delivered += 1
+            subscription.failure_count = 0
+            subscription.last_success_at = now
+            subscription.save(update_fields=['failure_count', 'last_success_at'])
+            continue
+        if status in (404, 410):
+            subscription.is_active = False
+            subscription.save(update_fields=['is_active'])
+            continue
+        subscription.failure_count += 1
+        if subscription.failure_count >= MAX_SUBSCRIPTION_FAILURES:
+            subscription.is_active = False
+        subscription.save(update_fields=['failure_count', 'is_active'])
+
+    logger.info(
+        'Web Push %s для роли %s: доставлено %s из %s',
+        kind or 'notification',
+        role_code,
+        delivered,
+        len(subscriptions),
+    )
+    return delivered
