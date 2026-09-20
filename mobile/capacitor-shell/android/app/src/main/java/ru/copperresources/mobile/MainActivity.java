@@ -48,6 +48,7 @@ public class MainActivity extends BridgeActivity {
         }
         if ("driver".equals(BuildConfig.APP_PROFILE_ID)) {
             registerPlugin(NativePushPlugin.class);
+            registerPlugin(NativeHapticsPlugin.class);
         }
         CookieManager.getInstance().setAcceptCookie(true);
         bridgeBuilder.addWebViewListener(new WebViewListener() {
