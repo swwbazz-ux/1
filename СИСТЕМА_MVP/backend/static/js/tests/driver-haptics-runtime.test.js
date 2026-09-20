@@ -10,8 +10,9 @@ const vm = require("node:vm");
 
 const SOURCE = fs.readFileSync(path.resolve(__dirname, "../driver-haptics-v1.js"), "utf8");
 
-function boot(stored) {
+function boot(stored, options = {}) {
     const calls = [];
+    const nativeCalls = [];
     const store = new Map(stored ? [["driver-haptic-level", stored]] : []);
     const buttons = ["weak", "normal", "strong"].map((level) => ({
         level, classes: new Set(), attrs: {},
@@ -24,9 +25,14 @@ function boot(stored) {
         navigator: {vibrate(p) { calls.push(p); return true; }},
         addEventListener() {},
     };
+    if (options.native) {
+        win.Capacitor = {Plugins: {NativeHaptics: {
+            vibrate(payload) { nativeCalls.push(payload); return Promise.resolve({performed: true}); },
+        }}};
+    }
     const doc = {readyState: "complete", addEventListener() {}, querySelectorAll: () => buttons};
-    vm.runInNewContext(SOURCE, {window: win, document: doc, Array, Number, Math, String});
-    return {win, calls, buttons};
+    vm.runInNewContext(SOURCE, {window: win, document: doc, Array, Number, Math, String, Promise});
+    return {win, calls, nativeCalls, buttons};
 }
 
 test("default level is strong and scales pulses but not gaps", () => {
@@ -47,6 +53,18 @@ test("weak and normal levels keep their own factors and floors", () => {
     const normal = boot("normal");
     normal.win.driverHaptic(14);
     assert.equal(normal.calls.at(-1), 20);
+});
+
+test("native Driver haptics receive the scaled pattern and real amplitude", () => {
+    const strong = boot("strong", {native: true});
+    assert.equal(strong.win.driverHaptic([35, 45, 70]), true);
+    assert.deepEqual([...strong.nativeCalls[0].pattern], [63, 45, 126]);
+    assert.equal(strong.nativeCalls[0].amplitude, 255);
+    assert.deepEqual(strong.calls, [], "native path must not vibrate through WebView too");
+
+    const weak = boot("weak", {native: true});
+    weak.win.driverHaptic(100);
+    assert.equal(weak.nativeCalls[0].amplitude, 90);
 });
 
 test("choosing a level stores it, marks the button and plays a sample", () => {

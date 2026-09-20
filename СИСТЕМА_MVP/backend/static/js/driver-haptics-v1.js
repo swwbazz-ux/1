@@ -1,9 +1,8 @@
 /* Уровень виброотклика экрана водителя.
 
-   Веб-платформа умеет задавать вибрации только длительность: силу (амплитуду)
-   через navigator.vibrate выставить нельзя — это умеет только нативный модуль,
-   которого в оболочке нет. Поэтому «сила» здесь — это длительность импульсов и
-   рисунок из нескольких импульсов подряд. Уровень выбирает водитель на вкладке
+   В нативной оболочке Driver сила задаётся через NativeHaptics; в обычном браузере
+   сохраняется совместимый fallback через navigator.vibrate, где доступны только
+   длительность и рисунок импульсов. Уровень выбирает водитель на вкладке
    «Смена», хранится на телефоне; по умолчанию — «сильный»: на боевом Xiaomi
    (20.09.2026) короткие импульсы 14–32 мс не ощущались вовсе.
 
@@ -20,9 +19,9 @@
 
     var STORAGE_KEY = "driver-haptic-level";
     var LEVELS = {
-        weak: {factor: 0.6, floor: 16, label: "Слабый", sample: [40]},
-        normal: {factor: 1, floor: 20, label: "Средний", sample: [70]},
-        strong: {factor: 1.8, floor: 30, label: "Сильный", sample: [110, 60, 110]}
+        weak: {factor: 0.6, floor: 16, amplitude: 90, label: "Слабый", sample: [40]},
+        normal: {factor: 1, floor: 20, amplitude: 160, label: "Средний", sample: [70]},
+        strong: {factor: 1.8, floor: 30, amplitude: 255, label: "Сильный", sample: [110, 60, 110]}
     };
     var DEFAULT_LEVEL = "strong";
 
@@ -49,10 +48,32 @@
         });
     }
 
-    function vibrate(pattern) {
+    function webVibrate(scaled) {
         if (!window.navigator || typeof window.navigator.vibrate !== "function") return false;
-        var scaled = scalePattern(pattern, readLevel());
         try { return window.navigator.vibrate(scaled.length === 1 ? scaled[0] : scaled) === true; } catch (error) { return false; }
+    }
+
+    function nativeHaptics() {
+        return window.Capacitor
+            && window.Capacitor.Plugins
+            && window.Capacitor.Plugins.NativeHaptics;
+    }
+
+    function vibrate(pattern) {
+        var level = readLevel();
+        var spec = LEVELS[level] || LEVELS[DEFAULT_LEVEL];
+        var scaled = scalePattern(pattern, level);
+        var plugin = nativeHaptics();
+        if (plugin && typeof plugin.vibrate === "function") {
+            try {
+                var nativeResult = plugin.vibrate({pattern: scaled, amplitude: spec.amplitude});
+                if (nativeResult && typeof nativeResult.catch === "function") {
+                    nativeResult.catch(function () { webVibrate(scaled); });
+                }
+                return true;
+            } catch (error) {}
+        }
+        return webVibrate(scaled);
     }
 
     function setLevel(level, options) {
