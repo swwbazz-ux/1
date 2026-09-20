@@ -1,5 +1,6 @@
 # Paths are relative to the repository root. Only these files enter a release.
 СИСТЕМА_MVP/backend/core/offline_sync.py
+СИСТЕМА_MVP/backend/core/views.py
 СИСТЕМА_MVP/backend/config/settings.py
 СИСТЕМА_MVP/backend/deploy/data_updates/channel_probe.py
 СИСТЕМА_MVP/backend/reports/hourly_grid.py
@@ -29,6 +30,7 @@
 СИСТЕМА_MVP/backend/static/js/mobile-dial-actions-v1.js
 СИСТЕМА_MVP/backend/templates/includes/mobile_dial_actions.html
 СИСТЕМА_MVP/backend/trips/free_bucket.py
+СИСТЕМА_MVP/backend/trips/manual_loading.py
 СИСТЕМА_MVP/backend/trips/models.py
 СИСТЕМА_MVP/backend/trips/views.py
 СИСТЕМА_MVP/backend/users/active_role.py
