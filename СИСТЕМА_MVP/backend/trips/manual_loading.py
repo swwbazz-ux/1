@@ -1,8 +1,15 @@
 """Переходное участие водителя. Связь не является состоянием техники."""
+import hashlib
+import os
+import tempfile
+import threading
+import time
 from datetime import timedelta
+from pathlib import Path
 
 from django.conf import settings
-from django.db import transaction
+from django.core.files import locks
+from django.db import connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -112,6 +119,138 @@ def reconcile_expired_manual_trips(*, now=None):
             },
         )
         return trip_ids
+
+
+# Пассивный ручной рейс (боевой случай 20.09.2026): экскаваторщик подобрал
+# самосвал вручную, пока телефон водителя не был «активно на связи», —
+# reconcile_expired_manual_trips() выше гасит такую запись через 5 минут, но
+# сама функция вызывалась только при ПОЛНОЙ перезагрузке страницы пульта и
+# экскаваторщика (dispatcher_control_view / excavator_work_view). Пока
+# сотрудник держит вкладку открытой и живёт на фоновом обновлении раз в
+# несколько секунд, запись годами не гаснет — «на разгрузку» висит вечно, а
+# перезагружать вручную должен был каждый, кто эту технику видит. Экран
+# водителя эту запись не показывает никогда (см. trip_driver_control_filter) —
+# несовпадение видно только между пультом/экскаваторщиком и водителем.
+#
+# Лечится тем же приёмом, что и HaulAssignment (reconcile_due_haul_assignments_throttled
+# в assignments/services.py): вызывается из того же опроса, который читают
+# все роли каждые несколько секунд (operational_state_version_view), но не
+# чаще чем раз в MANUAL_TRIP_RECONCILE_INTERVAL_SECONDS — межпроцессный
+# файловый замок делает это безопасным при нескольких воркерах Gunicorn.
+MANUAL_TRIP_RECONCILE_INTERVAL_SECONDS = 30
+
+
+def _manual_trip_reconcile_lock_path():
+    database = connection.settings_dict
+    identity = '|'.join(
+        str(database.get(field) or '')
+        for field in ('ENGINE', 'HOST', 'PORT', 'NAME')
+    )
+    digest = hashlib.sha256(identity.encode('utf-8')).hexdigest()[:16]
+    return Path(tempfile.gettempdir()) / f'accounting-mvp-manual-trip-reconcile-v1-{digest}.lock'
+
+
+_MANUAL_TRIP_RECONCILE_LOCK_PATH = _manual_trip_reconcile_lock_path()
+_MANUAL_TRIP_RECONCILE_PROCESS_ONLY = object()
+_manual_trip_reconcile_gate = threading.Lock()
+_manual_trip_reconcile_next_check = 0.0
+_manual_trip_reconcile_running = False
+
+
+def _acquire_manual_trip_reconcile_process_gate():
+    global _manual_trip_reconcile_next_check, _manual_trip_reconcile_running
+
+    now = time.monotonic()
+    with _manual_trip_reconcile_gate:
+        if _manual_trip_reconcile_running or now < _manual_trip_reconcile_next_check:
+            return False
+        _manual_trip_reconcile_running = True
+        _manual_trip_reconcile_next_check = now + MANUAL_TRIP_RECONCILE_INTERVAL_SECONDS
+    return True
+
+
+def _release_manual_trip_reconcile_process_gate():
+    global _manual_trip_reconcile_running
+
+    with _manual_trip_reconcile_gate:
+        _manual_trip_reconcile_running = False
+
+
+def _acquire_manual_trip_reconcile_server_gate():
+    try:
+        _MANUAL_TRIP_RECONCILE_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        lock_file = _MANUAL_TRIP_RECONCILE_LOCK_PATH.open('a+b')
+    except OSError:
+        return _MANUAL_TRIP_RECONCILE_PROCESS_ONLY
+    locked = False
+    try:
+        if not locks.lock(lock_file, locks.LOCK_EX | locks.LOCK_NB):
+            lock_file.close()
+            return None
+        locked = True
+        lock_file.seek(0)
+        try:
+            next_check = float(lock_file.read().decode('ascii').strip() or 0)
+        except (UnicodeDecodeError, ValueError):
+            next_check = 0
+        if time.time() < next_check:
+            locks.unlock(lock_file)
+            locked = False
+            lock_file.close()
+            return None
+        return lock_file
+    except OSError:
+        if locked:
+            try:
+                locks.unlock(lock_file)
+            except OSError:
+                pass
+        try:
+            lock_file.close()
+        except OSError:
+            pass
+        return _MANUAL_TRIP_RECONCILE_PROCESS_ONLY
+
+
+def _release_manual_trip_reconcile_server_gate(lock_file):
+    try:
+        try:
+            lock_file.seek(0)
+            lock_file.truncate()
+            lock_file.write(
+                f'{time.time() + MANUAL_TRIP_RECONCILE_INTERVAL_SECONDS:.6f}'.encode('ascii')
+            )
+            lock_file.flush()
+            os.fsync(lock_file.fileno())
+        except OSError:
+            pass
+    finally:
+        try:
+            locks.unlock(lock_file)
+        except OSError:
+            pass
+        try:
+            lock_file.close()
+        except OSError:
+            pass
+
+
+def reconcile_expired_manual_trips_throttled():
+    if not manual_loading_enabled():
+        return []
+    if not _acquire_manual_trip_reconcile_process_gate():
+        return []
+    try:
+        lock_file = _acquire_manual_trip_reconcile_server_gate()
+        if lock_file is None:
+            return []
+        try:
+            return reconcile_expired_manual_trips()
+        finally:
+            if lock_file is not _MANUAL_TRIP_RECONCILE_PROCESS_ONLY:
+                _release_manual_trip_reconcile_server_gate(lock_file)
+    finally:
+        _release_manual_trip_reconcile_process_gate()
 
 
 def truck_driver_participation(truck_ids):
