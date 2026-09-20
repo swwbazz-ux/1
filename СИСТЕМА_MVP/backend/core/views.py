@@ -213,28 +213,38 @@ def operational_state_version_view(request):
     # тоже нужно увидеть, а не спрятать вместе с диагностикой.
     try:
         from trips.manual_loading import manual_loading_enabled as _manual_loading_enabled
-        from trips.models import Trip, TripStatus
+        from trips.models import OPEN_TRIP_STATUSES, Trip
         manual_trip_reconcile_debug = {
             'role_is_active_for_app': role_is_active_for_app,
             'enabled': _manual_loading_enabled(),
             'cleared_now': cleared_manual_trip_ids,
-            'candidates': [
+            # Расширено 20.09.2026: узкий фильтр (participation=True, control_shift пуст)
+            # не находит ничего, а самосвал у экскаваторщика/пульта висит — значит дело
+            # не в «пассивном» рейсе (пустой control_shift), а в чём-то другом. Показываем
+            # ЛЮБОЙ незакрытый рейс как есть, с состоянием его привязанной смены.
+            'any_open_trips': [
                 {
-                    'id': row['id'],
-                    'truck_id': row['truck_id'],
-                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                    'loaded_at': row['loaded_at'].isoformat() if row['loaded_at'] else None,
-                    'load_time_source': row['load_time_source'],
+                    'id': t.id,
+                    'truck_id': t.truck_id,
+                    'status': t.status,
+                    'driver_participation_recorded': t.driver_participation_recorded,
+                    'driver_control_shift_id': t.driver_control_shift_id,
+                    'driver_control_shift_closed_at': (
+                        t.driver_control_shift.closed_at.isoformat()
+                        if t.driver_control_shift_id and t.driver_control_shift.closed_at else
+                        ('open' if t.driver_control_shift_id else None)
+                    ),
+                    'driver_id': t.driver_id,
+                    'created_at': t.created_at.isoformat() if t.created_at else None,
+                    'loaded_at': t.loaded_at.isoformat() if t.loaded_at else None,
                 }
-                for row in Trip.objects.filter(
-                    status=TripStatus.LOADED_WAITING_UNLOAD,
-                    driver_participation_recorded=True,
-                    driver_control_shift_id__isnull=True,
-                ).values('id', 'truck_id', 'created_at', 'loaded_at', 'load_time_source')[:5]
+                for t in Trip.objects.filter(status__in=OPEN_TRIP_STATUSES)
+                    .select_related('driver_control_shift')
+                    .order_by('-created_at')[:5]
             ],
         }
     except Exception as debug_error:
-        manual_trip_reconcile_debug = {'debug_error': str(debug_error)[:200]}
+        manual_trip_reconcile_debug = {'debug_error': str(debug_error)[:300]}
 
     state = OperationalStateVersion.objects.filter(key='production').first()
     after = parse_positive_int(request.GET.get('after'), 0)
