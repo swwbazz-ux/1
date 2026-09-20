@@ -73,7 +73,20 @@ def manual_dump_card_visibility_filter(*, now):
 
 
 def reconcile_expired_manual_trips(*, now=None):
-    """Remove expired passive loads from operational control without inventing unloading."""
+    """Remove expired passive loads from operational control without inventing unloading.
+
+    Ловит два разных «осиротевших» случая, найденных на бою 20.09.2026 —
+    один и тот же рейс может выпасть из виду водителя двумя путями:
+    1) пассивный ручной рейс — driver_control_shift вообще не назначен
+       (водитель не был активен на связи в момент погрузки);
+    2) рейс БЫЛ правильно привязан к смене водителя, но та смена с тех пор
+       ЗАКРЫЛАСЬ, а рейс так и остался «на разгрузку» — закрытие смены само
+       по себе рейсы не трогает, а новая смена водителя никогда не совпадёт
+       со старым driver_control_shift (см. trip_driver_control_filter).
+       На бою такая запись провисела больше четырёх часов, потому что первая
+       версия этой функции проверяла только пустой control_shift.
+    Оба случая гасятся одинаково — в UNCONTROLLED, без выдумывания разгрузки.
+    """
     from core.models import bump_operational_state, lock_production_state
     from .models import Trip, TripStatus
 
@@ -87,15 +100,24 @@ def reconcile_expired_manual_trips(*, now=None):
     expired_by_created_time = (
         ~Q(load_time_source='excavator_device') | Q(loaded_at__isnull=True)
     ) & Q(created_at__lte=cutoff)
+    expired_by_closed_shift = Q(
+        driver_control_shift__closed_at__isnull=False,
+        driver_control_shift__closed_at__lte=cutoff,
+    )
 
     with transaction.atomic():
         lock_production_state()
+        # of=('self',) — иначе PostgreSQL отвергает FOR UPDATE поверх соединения
+        # с необязательной связью driver_control_shift (тот же класс ошибки,
+        # что и в _resolve_free_bucket_acceptance, см. core/offline_sync.py).
         trips = list(
-            Trip.objects.select_for_update().filter(
+            Trip.objects.select_for_update(of=('self',)).filter(
                 status=TripStatus.LOADED_WAITING_UNLOAD,
                 driver_participation_recorded=True,
-                driver_control_shift_id__isnull=True,
-            ).filter(expired_by_device_time | expired_by_created_time)
+            ).filter(
+                (Q(driver_control_shift_id__isnull=True) & (expired_by_device_time | expired_by_created_time))
+                | expired_by_closed_shift
+            )
         )
         if not trips:
             return []

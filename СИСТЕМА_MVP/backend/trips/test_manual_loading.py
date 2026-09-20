@@ -372,6 +372,7 @@ class ManualTripAutoReconcileTests(TestCase):
 
     create_registered_driver_shift = fixtures.ExcavatorWorkServerIntegrationTests.create_registered_driver_shift
     send = ManualLoadingTests.send
+    presence = ManualLoadingTests.presence
 
     def setUp(self):
         fixtures.ExcavatorWorkServerIntegrationTests.setUp(self)
@@ -435,3 +436,42 @@ class ManualTripAutoReconcileTests(TestCase):
             manual_loading_module.reconcile_expired_manual_trips_throttled(),
             [],
         )
+
+    def test_shift_closed_after_loading_also_expires(self):
+        """Боевой случай 20.09.2026, рейс id 1816 на бою: driver_control_shift
+        был установлен ПРАВИЛЬНО в момент погрузки, но та смена закрылась через
+        минуту, и рейс провисел «на разгрузку» больше четырёх часов — старая
+        проверка смотрела только на пустой control_shift, а этот не пуст,
+        просто указывает на мёртвую смену."""
+        self.presence('online')
+        response = self.send(action='closed-shift-orphan')
+        self.assertEqual(response.status_code, 200, response.content)
+        trip = Trip.objects.get(pk=response.json()['trip_id'])
+        self.assertEqual(trip.driver_control_shift_id, self.truck_shift.pk)
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+
+        stale = timezone.now() - timedelta(seconds=400)
+        self.truck_shift.closed_at = stale
+        self.truck_shift.save(update_fields=['closed_at'])
+
+        cleared = manual_loading_module.reconcile_expired_manual_trips_throttled()
+        self.assertEqual(cleared, [trip.pk])
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.UNCONTROLLED)
+
+    def test_recently_closed_shift_is_not_expired_yet(self):
+        """Смена, закрытая только что, не должна мгновенно гасить рейс — иначе
+        водитель, честно закрывший смену сразу после погрузки, терял бы
+        видимость своего же рейса раньше, чем успевает его выгрузить."""
+        self.presence('online')
+        response = self.send(action='fresh-closed-shift')
+        self.assertEqual(response.status_code, 200, response.content)
+        trip = Trip.objects.get(pk=response.json()['trip_id'])
+        self.assertEqual(trip.driver_control_shift_id, self.truck_shift.pk)
+
+        self.truck_shift.closed_at = timezone.now()
+        self.truck_shift.save(update_fields=['closed_at'])
+
+        self.assertEqual(manual_loading_module.reconcile_expired_manual_trips_throttled(), [])
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
