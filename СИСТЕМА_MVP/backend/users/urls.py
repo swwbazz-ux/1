@@ -34,6 +34,7 @@ from .client_errors import client_error_report_view
 from .field_test_views import system_admin_field_test_view
 from .enter_employee_views import system_admin_enter_employee_view
 from .push_views import (
+    native_push_register_view,
     push_mark_shown_view,
     push_pending_view,
     push_public_key_view,
@@ -91,6 +92,7 @@ urlpatterns = [
     path('push/pending/', push_pending_view, name='push_pending'),
     path('push/shown/', push_mark_shown_view, name='push_mark_shown'),
     path('push/test/', push_test_view, name='push_test'),
+    path('driver/push/native/', native_push_register_view, name='driver_native_push_register'),
     path('client-error/', client_error_report_view, name='client_error_report'),
     path('', login_view, name='login'),
     path('activate-access/', activate_access_view, name='activate_access'),
