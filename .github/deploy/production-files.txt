@@ -36,6 +36,8 @@
 СИСТЕМА_MVP/backend/static/css/driver-downtime-drum-v1.css
 СИСТЕМА_MVP/backend/static/js/driver-downtime-drum-v1.js
 СИСТЕМА_MVP/backend/users/models.py
+СИСТЕМА_MVP/backend/users/middleware.py
+СИСТЕМА_MVP/backend/users/push_views.py
 СИСТЕМА_MVP/backend/users/urls.py
 СИСТЕМА_MVP/backend/static/css/driver-shift-v1.css
 СИСТЕМА_MVP/backend/static/js/driver-shift-v1.js
