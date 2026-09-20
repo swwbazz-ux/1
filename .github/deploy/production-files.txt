@@ -53,3 +53,4 @@
 СИСТЕМА_MVP/backend/static/js/driver-shift-close-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-self-heal-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-haptics-v1.js
+СИСТЕМА_MVP/backend/static/js/driver-native-push-v1.js
