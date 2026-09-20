@@ -191,6 +191,7 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
           RELEASE_CERT_SHA256: ${{ secrets.ANDROID_RELEASE_CERT_SHA256 }}
+          DRIVER_GOOGLE_SERVICES_JSON: ${{ secrets.DRIVER_GOOGLE_SERVICES_JSON }}
         run: |
           set -euo pipefail
           test -n "$RELEASE_KEYSTORE_B64"
@@ -209,6 +210,12 @@ jobs:
           } > "$credentials"
           chmod 0600 "$credentials"
           export COPPER_RELEASE_KEYSTORE_PROPERTIES="$credentials"
+          if [[ "$APK_PROFILE" == "driver" ]]; then
+            test -n "$DRIVER_GOOGLE_SERVICES_JSON"
+            printf '%s' "$DRIVER_GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            chmod 0600 android/app/google-services.json
+            trap 'rm -f android/app/google-services.json' EXIT
+          fi
           npm ci
           npm test
           chmod +x android/gradlew
