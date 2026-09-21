@@ -1,0 +1,116 @@
+name: Canonical quality failure notifier
+
+on:
+  workflow_run:
+    workflows:
+      - Full nightly quality gate
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: canonical-quality-failure-notifier
+  cancel-in-progress: false
+
+jobs:
+  notify-owner:
+    name: Notify owner about canonical quality failures
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'codex/github-production-deploy-20260916'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Create, update, or close the canonical quality alert
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          ALERT_LABEL: quality-gate-alert
+          ALERT_TITLE: "[CI] Полная проверка канонической ветки не прошла"
+        run: |
+          set -euo pipefail
+
+          current_sha="$(gh api \
+            "repos/${GH_REPO}/git/ref/heads/codex%2Fgithub-production-deploy-20260916" \
+            --jq '.object.sha')"
+
+          if [[ "$RUN_HEAD_SHA" != "$current_sha" ]]; then
+            printf 'Ignoring stale run %s for %s; current canonical SHA is %s.\n' \
+              "$RUN_NUMBER" "$RUN_HEAD_SHA" "$current_sha"
+            exit 0
+          fi
+
+          if ! gh api "repos/${GH_REPO}/labels/${ALERT_LABEL}" >/dev/null 2>&1; then
+            gh api \
+              --method POST \
+              "repos/${GH_REPO}/labels" \
+              -f name="$ALERT_LABEL" \
+              -f color='B60205' \
+              -f description='Автоматическая полная проверка канонической ветки не прошла'
+          fi
+
+          issue_number="$(
+            gh issue list \
+              --repo "$GH_REPO" \
+              --state open \
+              --label "$ALERT_LABEL" \
+              --limit 20 \
+              --json number,title \
+              --jq '.[]
+                    | select(.title == "[CI] Полная проверка канонической ветки не прошла")
+                    | .number' \
+            | head -n 1
+          )"
+
+          if [[ "$RUN_CONCLUSION" == 'success' ]]; then
+            if [[ -n "$issue_number" ]]; then
+              gh issue close "$issue_number" \
+                --repo "$GH_REPO" \
+                --comment "✅ Проверка №${RUN_NUMBER} успешно прошла на \`${RUN_HEAD_SHA}\`: ${RUN_URL}"
+              printf 'Closed recovered quality alert #%s.\n' "$issue_number" \
+                >> "$GITHUB_STEP_SUMMARY"
+            else
+              printf 'Canonical quality gate passed; no open alert exists.\n' \
+                >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
+          fi
+
+          alert_body="$(cat <<EOF
+          Автоматическая полная проверка канонической ветки завершилась со статусом **${RUN_CONCLUSION}**.
+
+          - Запуск: [№${RUN_NUMBER}](${RUN_URL})
+          - Commit: \`${RUN_HEAD_SHA}\`
+          - Production автоматически не публиковался.
+
+          Нужно открыть запуск, определить точную причину и исправлять её только отдельным проверяемым изменением.
+          EOF
+          )"
+
+          if [[ -n "$issue_number" ]]; then
+            gh issue comment "$issue_number" \
+              --repo "$GH_REPO" \
+              --body "$alert_body"
+            printf 'Updated existing quality alert #%s.\n' "$issue_number" \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            issue_url="$(gh issue create \
+              --repo "$GH_REPO" \
+              --title "$ALERT_TITLE" \
+              --body "$alert_body" \
+              --label "$ALERT_LABEL" \
+              --assignee "$REPO_OWNER")"
+            printf 'Created quality alert: %s\n' "$issue_url" \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
