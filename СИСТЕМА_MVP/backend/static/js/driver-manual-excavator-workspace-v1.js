@@ -400,6 +400,15 @@
         );
     }
 
+    function manualCancelWins(cancelEvent, confirmedCancel, projection, serverTripId) {
+        if (!cancelEvent) return false;
+        var matchesCurrent = manualCancelMatches(cancelEvent, projection, serverTripId)
+            || (!!confirmedCancel && !serverTripId);
+        if (!matchesCurrent) return false;
+        return !projection
+            || Date.parse(cancelEvent.occurred_at || 0) >= Date.parse(projection.occurred_at || 0);
+    }
+
     function setResult(workspace, state, detail, sticky) {
         var result = workspace && workspace.querySelector("[data-driver-manual-result]");
         if (!result) return;
@@ -497,17 +506,7 @@
             ? receipt
             : null;
         var activeCancel = queuedCancel || confirmedCancel;
-        if (
-            activeCancel
-            && (
-                manualCancelMatches(activeCancel, projected, serverTripId)
-                || (confirmedCancel && !projected && !serverTripId)
-            )
-            && (
-                !projected
-                || Date.parse(activeCancel.occurred_at || 0) >= Date.parse(projected.occurred_at || 0)
-            )
-        ) {
+        if (manualCancelWins(activeCancel, confirmedCancel, projected, serverTripId)) {
             var cancelledPointId = positive(
                 activeCancel.context_snapshot && activeCancel.context_snapshot.selected_dump_point_id
             ) || positive(projected && projected.payload && projected.payload.dump_point_id);
@@ -1510,6 +1509,7 @@
         startTripTimer: startTripTimer,
         stopTripTimer: stopTripTimer,
         markLastDump: markLastDump,
+        manualCancelWins: manualCancelWins,
         fitSourceTitle: fitSourceTitle,
         updateManualTripCount: updateManualTripCount,
         buildManualLoadCancelEvent: buildManualLoadCancelEvent,

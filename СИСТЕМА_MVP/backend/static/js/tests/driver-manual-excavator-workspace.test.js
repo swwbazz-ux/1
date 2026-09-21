@@ -26,6 +26,15 @@ test("manual cancellation copy is explicit and does not claim a second unload", 
     assert.match(driverRuntime.resultText("cancelled"), /РЕЙС ОТМЕН/);
 });
 
+test("confirmed cancellation outranks older failed loads but never a newer load", () => {
+    const cancellation = {occurred_at: "2026-09-21T19:25:47.483Z"};
+    const olderConflict = {occurred_at: "2026-09-21T19:01:59.522Z", state: "conflict"};
+    const newerLoad = {occurred_at: "2026-09-21T19:26:00.000Z", state: "pending"};
+    assert.equal(driverRuntime.manualCancelWins(cancellation, cancellation, olderConflict, 0), true);
+    assert.equal(driverRuntime.manualCancelWins(cancellation, cancellation, newerLoad, 0), false);
+    assert.equal(driverRuntime.manualCancelWins(cancellation, cancellation, olderConflict, 11), false);
+});
+
 test("manual loading locks only while saving or while a terminal sync error needs review", () => {
     assert.equal(driverRuntime.sourceShouldBeLocked(false, null), false);
     assert.equal(driverRuntime.sourceShouldBeLocked(true, null), true);
