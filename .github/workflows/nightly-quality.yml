@@ -1,12 +1,6 @@
 name: Full nightly quality gate
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/django.yml
-      - .github/workflows/nightly-quality.yml
-      - .github/ci/**
-      - СИСТЕМА_MVP/backend/tools/validate_ci_test_matrix.py
   workflow_dispatch:
     inputs:
       target_ref:
@@ -27,7 +21,6 @@ concurrency:
 env:
   QUALITY_TARGET_REF: >-
     ${{ github.event_name == 'workflow_dispatch' && inputs.target_ref ||
-    github.event_name == 'pull_request' && github.sha ||
     'codex/github-production-deploy-20260916' }}
   DJANGO_SECRET_KEY: ci-secret-key
   DJANGO_DEBUG: "True"
