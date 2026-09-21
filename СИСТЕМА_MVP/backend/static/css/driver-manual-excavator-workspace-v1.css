@@ -205,6 +205,24 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__sou
     aspect-ratio: auto !important;
 }
 
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-row > .eo-dashboard-truck-card > strong {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-align: center !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-row > .eo-dashboard-truck-card > strong.is-driver-manual-title-wrapped {
+    max-height: 2.05em !important;
+    line-height: 1.02 !important;
+    overflow-wrap: anywhere !important;
+    white-space: normal !important;
+}
+
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-row > .eo-dashboard-empty {
     width: min(100%, 224px);
     min-height: 74px;

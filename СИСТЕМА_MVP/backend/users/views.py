@@ -280,7 +280,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v324'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v325'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -4629,22 +4629,31 @@ def driver_shift_view(request):
         .first()
         or 0
     )
+    # Ручная «точковка» ведёт собственный цикл погрузка→погрузка. Она не должна
+    # превращать обычный круг Водителя в кнопку разгрузки: круг принадлежит
+    # только фактической погрузке, пришедшей от Машиниста экскаватора.
+    driver_standard_active_trip = (
+        active_trip if driver_active_trip_origin != 'driver_manual' else None
+    )
     driver_status = 'ПУСТОЙ'
     driver_status_class = 'is-empty'
     driver_target_label = '—'
-    driver_trip_context_source = active_trip
-    if active_trip:
+    driver_trip_context_source = driver_standard_active_trip
+    if driver_standard_active_trip:
         driver_status = 'ЗАГРУЖЕН'
         driver_status_class = 'is-loaded'
-        driver_target_label = active_trip.actual_dump_point or active_trip.dump_point
+        driver_target_label = (
+            driver_standard_active_trip.actual_dump_point
+            or driver_standard_active_trip.dump_point
+        )
     elif active_downtime:
         driver_status = active_downtime.reason.button_label
         driver_status_class = 'is-downtime'
 
     driver_has_open_trip = bool(active_trip)
     driver_has_loaded_trip = bool(
-        active_trip
-        and active_trip.status == TripStatus.LOADED_WAITING_UNLOAD
+        driver_standard_active_trip
+        and driver_standard_active_trip.status == TripStatus.LOADED_WAITING_UNLOAD
     )
     active_downtime_flow = driver_downtime_flow(
         active_downtime.reason if active_downtime else None
@@ -4676,8 +4685,8 @@ def driver_shift_view(request):
         current_assignment.excavator if current_assignment else None
     )
     driver_work_excavator = (
-        active_trip.excavator
-        if active_trip
+        driver_standard_active_trip.excavator
+        if driver_standard_active_trip
         else driver_free_bucket_acceptance.excavator
         if driver_free_bucket_acceptance
         else current_assignment.excavator
@@ -5295,7 +5304,7 @@ def driver_shift_view(request):
             'work_assignment_shift_label': work_assignment.work_shift_label if work_assignment else '',
             'work_assignment_equipment': assignment_truck,
             'current_assignment': current_assignment,
-            'active_trip': active_trip,
+            'active_trip': driver_standard_active_trip,
             'form': form,
             'close_form': close_form,
             'close_review': getattr(request, '_driver_close_confirmation', None),

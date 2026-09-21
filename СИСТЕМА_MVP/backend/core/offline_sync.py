@@ -1792,6 +1792,19 @@ def _process_driver_unloaded(access, normalized):
         _conflict('trip_truck_changed', 'Рейс не принадлежит самосвалу этой смены.')
     if trip.driver_participation_recorded and trip.driver_control_shift_id != shift.id:
         _conflict('trip_driver_shift_changed', 'Рейс закреплён за другой сменой водителя.')
+    manual_load = TripClientAction.objects.select_for_update(of=('self',)).filter(
+        trip=trip,
+        action_type='driver_manual_loaded',
+    ).exists()
+    automatic_load = TripClientAction.objects.select_for_update(of=('self',)).filter(
+        trip=trip,
+        action_type__in=['truck_loaded', 'free_bucket_loaded'],
+    ).exists()
+    if manual_load and not automatic_load:
+        _conflict(
+            'driver_manual_unload_not_required',
+            'Ручной рейс завершается следующей ручной погрузкой и не требует отдельной разгрузки.',
+        )
     if trip.status not in (*OPEN_TRIP_STATUSES, TripStatus.UNCONTROLLED):
         _conflict('trip_already_terminal', 'Рейс уже завершён или отменён другим действием.')
     loaded_at = trip.loaded_at or trip.created_at

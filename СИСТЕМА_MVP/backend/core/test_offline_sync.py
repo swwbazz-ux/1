@@ -564,7 +564,7 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(result['code'], 'manual_work_context_changed')
         self.assertEqual(Trip.objects.count(), 0)
 
-    def test_manual_load_point_change_and_unload_share_one_local_trip_chain(self):
+    def test_manual_load_rejects_separate_unload_after_point_change(self):
         changed_point = DumpPoint.objects.create(name='ККД ручного рейса')
         loaded = self.driver_manual_event('manual-chain-load', 1)
         loaded_at = timezone.datetime.fromisoformat(loaded['occurred_at'])
@@ -608,14 +608,15 @@ class OfflineEventSyncTests(TestCase):
             device_id='driver-chain-device',
         ).json()['results']
 
-        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted', 'accepted'])
+        self.assertEqual([item['status'] for item in results], ['conflict', 'accepted', 'accepted'])
+        self.assertEqual(results[0]['code'], 'driver_manual_unload_not_required')
         self.assertEqual(Trip.objects.count(), 1)
         trip = Trip.objects.get()
-        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
         self.assertEqual(trip.assigned_dump_point_id, self.dump_point.id)
         self.assertEqual(trip.actual_dump_point_id, changed_point.id)
         self.assertEqual(trip.dump_point_id, changed_point.id)
-        self.assertEqual({item['server_ids']['trip_id'] for item in results}, {trip.id})
+        self.assertEqual({item['server_ids']['trip_id'] for item in results[1:]}, {trip.id})
 
     def test_next_manual_swipe_finishes_previous_cycle_without_separate_unload(self):
         first = self.driver_manual_event('manual-cycle-first', 1)

@@ -507,19 +507,19 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v324')
+        self.assertContains(response, 'driver-mobile-shell-v325')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(
             response,
-            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v324',
+            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v325',
         )
         self.assertContains(
             response,
-            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v324',
+            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v325',
         )
         self.assertContains(
             response,
-            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v324',
+            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v325',
         )
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertIn('playDriverSound("truck_assigned")', driver_script())
@@ -746,7 +746,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v324', script)
+        self.assertIn('driver-mobile-shell-v325', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3215,12 +3215,12 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Бл. 55')
         self.assertContains(response, 'data-driver-manual-result')
         self.assertNotContains(response, 'рейс не создан')
-        self.assertContains(response, '/static/js/excavator-dashboard-drag-v1.js?v=driver-mobile-shell-v324')
-        self.assertContains(response, '/static/js/excavator-dump-return-swipe-v1.js?v=driver-mobile-shell-v324')
-        self.assertContains(response, '/static/js/driver-manual-excavator-workspace-v1.js?v=driver-mobile-shell-v324')
-        self.assertContains(response, '/static/css/excavator-work-v55-shift.css?v=driver-mobile-shell-v324')
-        self.assertContains(response, '/static/css/excavator-manual-loading-v1.css?v=driver-mobile-shell-v324')
-        self.assertContains(response, '/static/css/excavator-free-bucket-v1.css?v=driver-mobile-shell-v324')
+        self.assertContains(response, '/static/js/excavator-dashboard-drag-v1.js?v=driver-mobile-shell-v325')
+        self.assertContains(response, '/static/js/excavator-dump-return-swipe-v1.js?v=driver-mobile-shell-v325')
+        self.assertContains(response, '/static/js/driver-manual-excavator-workspace-v1.js?v=driver-mobile-shell-v325')
+        self.assertContains(response, '/static/css/excavator-work-v55-shift.css?v=driver-mobile-shell-v325')
+        self.assertContains(response, '/static/css/excavator-manual-loading-v1.css?v=driver-mobile-shell-v325')
+        self.assertContains(response, '/static/css/excavator-free-bucket-v1.css?v=driver-mobile-shell-v325')
 
         active_trip = Trip.objects.create(
             truck=truck,
@@ -3246,6 +3246,42 @@ class AccessLoginTests(TestCase):
         self.assertContains(restored_manual, 'data-driver-manual-open')
         self.assertContains(restored_manual, 'data-driver-active-trip-origin="driver_manual"')
         self.assertContains(restored_manual, f'data-driver-active-trip-id="{active_trip.id}"')
+        self.assertContains(restored_manual, 'data-driver-has-loaded-trip="false"')
+        self.assertRegex(
+            restored_manual.content.decode(),
+            r'<div class="driver-work-dial is-empty[^>]*>',
+        )
+        self.assertNotContains(restored_manual, f'data-driver-trip-id="{active_trip.id}"')
+        self.assertRegex(
+            restored_manual.content.decode(),
+            r'data-driver-hold-button[^>]*disabled aria-disabled="true"',
+        )
+
+        restored_context_match = re.search(
+            r'<script id="driver-manual-workspace-base-context-data" type="application/json">(.*?)</script>',
+            restored_manual.content.decode(),
+        )
+        self.assertIsNotNone(restored_context_match)
+        restored_context = json.loads(restored_context_match.group(1))
+        self.assertEqual(
+            [point['completed_count'] for point in restored_context['dump_points']],
+            [3, 1],
+        )
+
+        active_trip.status = TripStatus.CANCELLED
+        active_trip.cancelled_at = timezone.now()
+        active_trip.save(update_fields=['status', 'cancelled_at'])
+        after_cancel = self.client.get('/driver/', HTTP_HOST='localhost')
+        cancelled_context_match = re.search(
+            r'<script id="driver-manual-workspace-base-context-data" type="application/json">(.*?)</script>',
+            after_cancel.content.decode(),
+        )
+        self.assertIsNotNone(cancelled_context_match)
+        cancelled_context = json.loads(cancelled_context_match.group(1))
+        self.assertEqual(
+            [point['completed_count'] for point in cancelled_context['dump_points']],
+            [2, 1],
+        )
 
     def test_driver_manual_workspace_shows_honest_empty_assignment(self):
         self.create_registered_driver_shift()
@@ -3826,7 +3862,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v324')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v325')
 
     def test_driver_quick_reasons_render_stars_and_drum_subset(self):
         self.create_registered_driver_shift()

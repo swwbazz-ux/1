@@ -204,6 +204,49 @@ test("manual controls keep three columns and stack actions timer and source with
     assert.doesNotMatch(driverCss, /\.eo-dashboard-truck-card\s*\{[^}]*grid-template-columns/s);
 });
 
+test("long excavator title is fitted to the real source card width", () => {
+    const classes = new Set();
+    const properties = new Map();
+    const title = {
+        clientWidth: 100,
+        scrollWidth: 200,
+        classList: {
+            remove(name) { classes.delete(name); },
+            toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }
+        },
+        style: {
+            removeProperty(name) { properties.delete(name); },
+            setProperty(name, value) { properties.set(name, value); }
+        }
+    };
+    const fitted = driverRuntime.fitSourceTitle({querySelector() { return title; }});
+    assert.equal(fitted, 15);
+    assert.equal(properties.get("font-size"), "15.00px");
+    assert.equal(classes.has("is-driver-manual-title-wrapped"), true);
+});
+
+test("manual point counter applies each optimistic load or cancel exactly once", () => {
+    const count = {textContent: "2", setAttribute() {}};
+    const target = {
+        dataset: {eoDumpTarget: "7", eoDumpName: "Warehouse", driverManualCompletedCount: "2"},
+        classList: {contains() { return false; }},
+        querySelector() { return count; },
+        setAttribute() {}
+    };
+    const workspace = {
+        __driverManualBaseContext: {dump_points: [{id: 7, completed_count: 2}]},
+        __driverManualTargetCache: {},
+        querySelector(selector) { return selector.includes('"7"') ? target : null; },
+        querySelectorAll() { return []; }
+    };
+    assert.equal(driverRuntime.updateManualTripCount(workspace, 7, 1, "load:1"), 3);
+    assert.equal(driverRuntime.updateManualTripCount(workspace, 7, 1, "load:1"), null);
+    assert.equal(driverRuntime.updateManualTripCount(workspace, 7, -1, "cancel:1"), 2);
+    assert.equal(target.dataset.driverManualCompletedCount, "2");
+    assert.equal(count.textContent, "2");
+    assert.equal(workspace.__driverManualBaseContext.dump_points[0].completed_count, 2);
+});
+
 test("Driver binds the common gesture to the real Excavator shell and preserves its active motion", () => {
     const driverShell = read("templates", "users", "driver_shift.html");
     const source = read("static", "js", "driver-manual-excavator-workspace-v1.js");

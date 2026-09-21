@@ -11,6 +11,7 @@
     var workspaceRequestedOpen = false;
     var workspacePreferenceKnown = false;
     var automaticTripRefreshKey = "";
+    var manualCancelRefreshKey = "";
 
     function clone(value) {
         return JSON.parse(JSON.stringify(value));
@@ -261,6 +262,71 @@
         return renderTripTimer(workspace || currentWorkspace);
     }
 
+    function fitSourceTitle(source) {
+        var title = source && source.querySelector ? source.querySelector("strong") : null;
+        if (!title) return null;
+        title.classList.remove("is-driver-manual-title-wrapped");
+        title.style.removeProperty("font-size");
+        var computed = root.getComputedStyle ? root.getComputedStyle(title) : null;
+        var maxSize = Math.max(10, parseFloat(computed && computed.fontSize || "30") || 30);
+        var available = Number(title.clientWidth || 0);
+        if (!available) return maxSize;
+        title.style.setProperty("font-size", maxSize + "px", "important");
+        var natural = Math.max(1, Number(title.scrollWidth || available));
+        var fitted = Math.max(10, Math.min(maxSize, maxSize * available / natural));
+        title.style.setProperty("font-size", fitted.toFixed(2) + "px", "important");
+        title.classList.toggle(
+            "is-driver-manual-title-wrapped",
+            Number(title.scrollWidth || 0) > Number(title.clientWidth || 0) + 1
+        );
+        return fitted;
+    }
+
+    function updateManualTripCount(workspace, pointId, delta, adjustmentId) {
+        if (!workspace || !positive(pointId) || !delta) return null;
+        var key = String(adjustmentId || "");
+        if (!workspace.__driverManualCountAdjustments) {
+            workspace.__driverManualCountAdjustments = Object.create(null);
+        }
+        if (key && workspace.__driverManualCountAdjustments[key]) return null;
+        var selector = '[data-driver-manual-dump-target][data-eo-dump-target="' + String(pointId) + '"]';
+        var target = workspace.querySelector(selector);
+        if (!target) return null;
+        var next = Math.max(0, Number(target.dataset.driverManualCompletedCount || 0) + Number(delta));
+        function applyCount(node) {
+            if (!node) return;
+            node.dataset.driverManualCompletedCount = String(next);
+            var count = node.querySelector && node.querySelector(".eo-dashboard-unload-top small");
+            if (count) {
+                count.textContent = String(next);
+                count.setAttribute("aria-label", "Рейсов: " + String(next));
+            }
+            node.setAttribute(
+                "aria-label",
+                String(node.dataset.eoDumpName || "") + ": рейсов " + String(next)
+                    + (node.classList.contains("is-last-dump") ? "; последняя точка отправки" : "")
+            );
+        }
+        applyCount(target);
+        workspace.querySelectorAll('[data-driver-manual-primary-point-id="' + String(pointId) + '"]').forEach(function (point) {
+            point.dataset.driverManualPrimaryPointCount = String(next);
+        });
+        if (workspace.__driverManualBaseContext && Array.isArray(workspace.__driverManualBaseContext.dump_points)) {
+            workspace.__driverManualBaseContext.dump_points.forEach(function (point) {
+                if (positive(point && point.id) === positive(pointId)) point.completed_count = next;
+            });
+        }
+        Object.keys(workspace.__driverManualTargetCache || {}).forEach(function (cacheKey) {
+            (workspace.__driverManualTargetCache[cacheKey] || []).forEach(function (cached) {
+                if (positive(cached && cached.dataset && cached.dataset.eoDumpTarget) === positive(pointId)) {
+                    applyCount(cached);
+                }
+            });
+        });
+        if (key) workspace.__driverManualCountAdjustments[key] = true;
+        return next;
+    }
+
     function markLastDump(workspace, pointId) {
         if (!workspace) return null;
         var selectedId = String(pointId || "");
@@ -405,6 +471,19 @@
         return true;
     }
 
+    function requestManualCancellationRefresh(receipt) {
+        var refreshKey = String(receipt && receipt.event_id || "");
+        if (!refreshKey || refreshKey === manualCancelRefreshKey) return false;
+        if (!root.AppRealtime || typeof root.AppRealtime.requestReconcile !== "function") return false;
+        var requested = root.AppRealtime.requestReconcile(
+            "driver_manual_trip_cancelled",
+            Number(receipt && receipt.version || 0)
+        );
+        if (requested === false) return false;
+        manualCancelRefreshKey = refreshKey;
+        return true;
+    }
+
     function renderProjection(workspace, events, receipt) {
         workspace = workspace || currentWorkspace || root.document.querySelector("[data-driver-manual-workspace]");
         if (!workspace) return null;
@@ -429,15 +508,25 @@
                 || Date.parse(activeCancel.occurred_at || 0) >= Date.parse(projected.occurred_at || 0)
             )
         ) {
+            var cancelledPointId = positive(
+                activeCancel.context_snapshot && activeCancel.context_snapshot.selected_dump_point_id
+            ) || positive(projected && projected.payload && projected.payload.dump_point_id);
+            updateManualTripCount(
+                workspace,
+                cancelledPointId,
+                -1,
+                "cancel:" + String(activeCancel.event_id || "")
+            );
             currentTripProjection = null;
             stopTripTimer(workspace);
             markLastDump(workspace, null);
             setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, null));
             setResult(workspace, queuedCancel ? "cancel-pending" : "cancelled", null, !!queuedCancel);
+            if (confirmedCancel) requestManualCancellationRefresh(confirmedCancel);
             updatePointAction(workspace);
             return {state: queuedCancel ? "cancelling" : "cancelled"};
         }
-        var unload = (Array.isArray(events) ? events : []).find(function (event) {
+        var unload = serverOrigin === "driver_manual" ? null : (Array.isArray(events) ? events : []).find(function (event) {
             return event.event_type === "driver.trip.unloaded" && (
                 (serverTripId && positive(event.trip_id) === serverTripId)
                 || (projected && String(event.local_trip_id || "") === String(projected.local_trip_id || ""))
@@ -543,6 +632,14 @@
             return projected;
         }
         syncWorkspaceContext(workspace);
+        if (projected.state !== "confirmed" && !serverTripId) {
+            updateManualTripCount(
+                workspace,
+                projected.payload && projected.payload.dump_point_id,
+                1,
+                "load:" + String(projected.event_id || projected.local_trip_id || "")
+            );
+        }
         markLastDump(workspace, projected.payload && projected.payload.dump_point_id);
         startTripTimer(workspace, pointName, Date.parse(projected.occurred_at));
         setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, projected));
@@ -740,6 +837,7 @@
         var context = activeContext();
         var points = Array.isArray(context.dump_points) ? context.dump_points : [];
         if (!shouldRebuildWorkspaceContext(workspace, context)) {
+            fitSourceTitle(workspace.querySelector("[data-driver-manual-source]"));
             ensureCurrentProjectionTarget(workspace);
             if (currentReturnController) currentReturnController.bindAll();
             return context;
@@ -758,6 +856,7 @@
             if (title) title.textContent = String(context.excavator_label || "ЭКСКАВАТОР");
             if (status) status.textContent = String(context.complex_label || "");
             if (rock) rock.textContent = String(context.rock_type_name || "");
+            fitSourceTitle(source);
         }
         var topTitle = workspace.querySelector(".driver-manual-workspace__back strong");
         if (topTitle) topTitle.textContent = String(context.excavator_label || "Ручной режим");
@@ -913,6 +1012,12 @@
             return outbox.enqueue(event);
         }).then(function (saved) {
             savingLocal = false;
+            updateManualTripCount(
+                workspace,
+                positive(projection.payload && projection.payload.dump_point_id),
+                -1,
+                "cancel:" + String(saved.event_id || "")
+            );
             currentTripProjection = null;
             stopTripTimer(workspace);
             markLastDump(workspace, null);
@@ -1135,6 +1240,12 @@
                     savingLocal = false;
                     delete workspace.dataset.driverManualLastError;
                     currentTripProjection = saved;
+                    updateManualTripCount(
+                        workspace,
+                        target.dataset.eoDumpTarget,
+                        1,
+                        "load:" + String(saved.event_id || "")
+                    );
                     startTripTimer(workspace, target.dataset.eoDumpName, Date.parse(saved.occurred_at));
                     markLastDump(workspace, target.dataset.eoDumpTarget);
                     syncWorkspaceContext(workspace);
@@ -1351,6 +1462,9 @@
                 if (currentController) currentController.cancel();
                 if (currentReturnController) currentReturnController.cancel();
             });
+            root.addEventListener("resize", function () {
+                fitSourceTitle(currentWorkspace && currentWorkspace.querySelector("[data-driver-manual-source]"));
+            });
             if (root.document && root.document.addEventListener) {
                 root.document.addEventListener("visibilitychange", function () {
                     if (!root.document.hidden && currentWorkspace) renderTripTimer(currentWorkspace);
@@ -1387,6 +1501,7 @@
         cachedWorkspaceTargets: cachedWorkspaceTargets,
         serverTripProjectionContext: serverTripProjectionContext,
         requestAutomaticTripRefresh: requestAutomaticTripRefresh,
+        requestManualCancellationRefresh: requestManualCancellationRefresh,
         sourceShouldBeLocked: sourceShouldBeLocked,
         dumpNameSizeClass: dumpNameSizeClass,
         formatElapsedTime: formatElapsedTime,
@@ -1395,6 +1510,8 @@
         startTripTimer: startTripTimer,
         stopTripTimer: stopTripTimer,
         markLastDump: markLastDump,
+        fitSourceTitle: fitSourceTitle,
+        updateManualTripCount: updateManualTripCount,
         buildManualLoadCancelEvent: buildManualLoadCancelEvent,
         cancelManualLoad: cancelManualLoad,
         renderProjection: renderProjection,

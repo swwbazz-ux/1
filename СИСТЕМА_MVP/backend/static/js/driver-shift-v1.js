@@ -1132,13 +1132,17 @@ window.bindDriverMobileShell = function () {
         if (!current) return;
         var ordered = (events || []).slice().sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
         var activeTripId = String(current.dataset.driverActiveTripId || "");
-        var unload = ordered.find(function (event) {
+        var manualTrip = String(current.dataset.driverActiveTripOrigin || "") === "driver_manual";
+        var unload = manualTrip ? null : ordered.find(function (event) {
             return event.event_type === "driver.trip.unloaded" && String(event.trip_id || "") === activeTripId;
         });
         if (unload) {
             var unloadNeedsReview = ["conflict", "auth_required", "invalid"].includes(unload.state);
             current.dataset.driverHasOpenTrip = "false";
             current.dataset.driverHasLoadedTrip = "false";
+            current.dataset.driverActiveTripId = "";
+            current.dataset.driverActiveTripOrigin = "";
+            current.dataset.driverActiveTripLoadedAt = "";
             var dial = current.querySelector(".driver-work-dial");
             var button = current.querySelector("[data-driver-hold-button]");
             var dialLabel = current.querySelector("[data-driver-dial-label]");
