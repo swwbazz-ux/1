@@ -490,6 +490,15 @@ class DispatcherSharedShiftStartTests(TestCase):
 
 
 class DispatcherGarageCurrentStateTests(TestCase):
+    FIXED_DAY_SHIFT_OPENED_AT = datetime(
+        2026,
+        9,
+        21,
+        10,
+        0,
+        tzinfo=ZoneInfo('Asia/Vladivostok'),
+    )
+
     def setUp(self):
         self.dispatcher = Employee.objects.create(full_name='Диспетчер смены')
         self.shift = EmployeeShift.objects.create(
@@ -648,6 +657,7 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertNotIn('13', complex_names)
 
     def test_carryover_trip_is_visible_but_not_counted_in_new_shift_kpi(self):
+        self.shift.opened_at = self.FIXED_DAY_SHIFT_OPENED_AT
         old_operator = Employee.objects.create(full_name='Машинист старой смены')
         old_loading_shift = EmployeeShift.objects.create(
             employee=old_operator,
@@ -693,6 +703,7 @@ class DispatcherGarageCurrentStateTests(TestCase):
         )
 
     def test_trip_loaded_after_boundary_counts_for_actual_loading_shift(self):
+        self.shift.opened_at = self.FIXED_DAY_SHIFT_OPENED_AT
         new_operator = Employee.objects.create(full_name='Машинист новой смены')
         new_loading_shift = EmployeeShift.objects.create(
             employee=new_operator,
