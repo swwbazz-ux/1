@@ -1,6 +1,15 @@
 name: Full nightly quality gate
 
 on:
+  push:
+    branches:
+      - codex/github-production-deploy-20260916
+    paths:
+      - .github/workflows/**
+      - .github/ci/**
+      - tools/**
+      - СИСТЕМА_MVP/backend/**
+      - mobile/**
   pull_request:
     paths:
       - .github/workflows/django.yml
