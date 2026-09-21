@@ -251,6 +251,15 @@ test("manual controls keep three columns and stack actions timer and source with
     assert.doesNotMatch(driverCss, /\.eo-dashboard-truck-card\s*\{[^}]*grid-template-columns/s);
 });
 
+test("Driver manual heading keeps name and two rectangular status controls on one row", () => {
+    const driverCss = read("static", "css", "driver-manual-excavator-workspace-v1.css");
+    assert.match(driverCss, /driver-manual-workspace[^\{]*\.eo-dashboard-head\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) clamp\(68px, 18vw, 74px\) clamp\(62px, 16vw, 68px\)/s);
+    assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-widget\s*\{[^}]*display:\s*contents/s);
+    assert.match(driverCss, /driver-manual-workspace \.eo-free-bucket-button\s*\{[^}]*height:\s*46px[^}]*border-radius:\s*12px/s);
+    assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-ring\s*\{[^}]*height:\s*46px[^}]*border-radius:\s*12px/s);
+    assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-ring::after\s*\{[^}]*display:\s*none/s);
+});
+
 test("manual mode survives lower tabs and blocks ordinary mode during an active trip", () => {
     const source = read("static", "js", "driver-manual-excavator-workspace-v1.js");
     const shift = read("static", "js", "driver-shift-v1.js");
