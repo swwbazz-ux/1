@@ -13,6 +13,11 @@
             && Math.abs(deltaY) >= Math.max(RETURN_DISTANCE, Math.abs(deltaX) * RETURN_DOMINANCE);
     }
 
+    function isDumpCompleteSwipe(deltaX, deltaY) {
+        return deltaY >= RETURN_DISTANCE
+            && Math.abs(deltaY) >= Math.max(RETURN_DISTANCE, Math.abs(deltaX) * RETURN_DOMINANCE);
+    }
+
     function rubberBandDumpReturnOffset(value, limit, directRatio, overflowRatio) {
         var direction = value < 0 ? -1 : 1;
         var distance = Math.abs(Number(value) || 0);
@@ -123,7 +128,7 @@
 
             function clearDumpSwipe() {
                 clearQueueHold();
-                target.classList.remove("is-return-swiping", "is-return-armed");
+                target.classList.remove("is-return-swiping", "is-return-armed", "is-complete-armed");
                 [
                     "--eo-return-swipe-progress", "--eo-return-drag-x", "--eo-return-drag-y",
                     "--eo-return-tilt", "--eo-return-stretch-x", "--eo-return-stretch-y",
@@ -184,17 +189,22 @@
                 }
                 var distance = Math.hypot(dumpSwipe.deltaX, dumpSwipe.deltaY);
                 if (distance < MOVE_DISTANCE) {
-                    target.classList.remove("is-return-swiping", "is-return-armed");
+                    target.classList.remove("is-return-swiping", "is-return-armed", "is-complete-armed");
                     target.style.removeProperty("--eo-return-swipe-progress");
                     return;
                 }
                 event.preventDefault();
                 dumpSwipe.moved = true;
-                var progress = Math.min(1, Math.max(0, -dumpSwipe.deltaY) / 56);
+                var progress = Math.min(1, Math.abs(dumpSwipe.deltaY) / 56);
                 target.style.setProperty("--eo-return-swipe-progress", String(progress));
                 updateDumpReturnElastic(target, dumpSwipe);
                 target.classList.add("is-return-swiping");
                 target.classList.toggle("is-return-armed", isDumpReturnSwipe(dumpSwipe.deltaX, dumpSwipe.deltaY));
+                target.classList.toggle(
+                    "is-complete-armed",
+                    typeof options.onComplete === "function"
+                        && isDumpCompleteSwipe(dumpSwipe.deltaX, dumpSwipe.deltaY)
+                );
             }
 
             function onPointerUp(event) {
@@ -204,7 +214,9 @@
                     dumpSwipe.deltaY = event.clientY - dumpSwipe.startY;
                 }
                 var shouldReturn = isDumpReturnSwipe(dumpSwipe.deltaX, dumpSwipe.deltaY);
-                if (shouldReturn) {
+                var shouldComplete = typeof options.onComplete === "function"
+                    && isDumpCompleteSwipe(dumpSwipe.deltaX, dumpSwipe.deltaY);
+                if (shouldReturn || shouldComplete) {
                     event.preventDefault();
                     target.dataset.eoSuppressClick = "1";
                 }
@@ -217,6 +229,7 @@
                     playDumpReturnRebound(target, releasedSwipe, root);
                 }
                 if (shouldReturn && typeof options.onReturn === "function") options.onReturn(target, releasedSwipe, event);
+                if (shouldComplete) options.onComplete(target, releasedSwipe, event);
             }
 
             function onPointerCancel() {
@@ -284,6 +297,7 @@
     var api = {
         attach: attach,
         isDumpReturnSwipe: isDumpReturnSwipe,
+        isDumpCompleteSwipe: isDumpCompleteSwipe,
         rubberBandDumpReturnOffset: rubberBandDumpReturnOffset,
         updateDumpReturnElastic: updateDumpReturnElastic,
         setDumpReturnReleaseVector: setDumpReturnReleaseVector,

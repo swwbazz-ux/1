@@ -12,6 +12,7 @@
     var workspacePreferenceKnown = false;
     var automaticTripRefreshKey = "";
     var manualCancelRefreshKey = "";
+    var manualCompletionPendingKey = "";
 
     function clone(value) {
         return JSON.parse(JSON.stringify(value));
@@ -175,9 +176,71 @@
             ? "ОТМЕНА СОХРАНЕНА · БЕЗ СЕТИ"
             : "ОТМЕНА СОХРАНЕНА · ОТПРАВЛЯЕМ";
         if (state === "cancelled") return "ПОСЛЕДНИЙ РЕЙС ОТМЕНЁН";
+        if (state === "complete-pending") return root.navigator && root.navigator.onLine === false
+            ? "РЕЙС ЗАВЕРШЁН НА ТЕЛЕФОНЕ · БЕЗ СЕТИ"
+            : "РЕЙС ЗАВЕРШЁН · ОТПРАВЛЯЕМ";
+        if (state === "completed") return "РЕЙС ЗАВЕРШЁН";
         if (state === "review") return String(detail || "Не принято · нужна сверка");
         if (state === "storage-error") return "Не сохранено · повторите отправку";
         return "";
+    }
+
+    function playManualTone(context, startAt, startFrequency, endFrequency, duration) {
+        if (!context) return false;
+        try {
+            var oscillator = context.createOscillator();
+            var gain = context.createGain();
+            oscillator.type = "sine";
+            oscillator.frequency.setValueAtTime(startFrequency, startAt);
+            oscillator.frequency.exponentialRampToValueAtTime(endFrequency, startAt + duration);
+            gain.gain.setValueAtTime(.0001, startAt);
+            gain.gain.exponentialRampToValueAtTime(.16, startAt + .018);
+            gain.gain.exponentialRampToValueAtTime(.0001, startAt + duration);
+            oscillator.connect(gain);
+            gain.connect(context.destination);
+            oscillator.start(startAt);
+            oscillator.stop(startAt + duration);
+            oscillator.addEventListener("ended", function () {
+                oscillator.disconnect();
+                gain.disconnect();
+            }, {once: true});
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function playManualFeedback(kind) {
+        var patterns = {
+            created: [38, 34, 78],
+            completed: [52, 42, 105],
+            cancelled: [30, 42, 62]
+        };
+        if (typeof root.driverHaptic === "function") {
+            root.driverHaptic(patterns[kind] || patterns.created, kind === "completed" ? 210 : 180);
+        } else if (root.navigator && typeof root.navigator.vibrate === "function") {
+            try { root.navigator.vibrate(patterns[kind] || patterns.created); } catch (error) {}
+        }
+        var context = root.ExcavatorDashboardDrag
+            && typeof root.ExcavatorDashboardDrag.preparePickupAudio === "function"
+            ? root.ExcavatorDashboardDrag.preparePickupAudio()
+            : null;
+        if (!context) {
+            if (typeof root.playDriverSound === "function") {
+                root.playDriverSound(kind === "cancelled" ? "action_error" : "action_ok");
+            }
+            return false;
+        }
+        var now = context.currentTime;
+        if (kind === "completed") {
+            playManualTone(context, now, 610, 860, .12);
+            playManualTone(context, now + .15, 760, 1180, .2);
+        } else if (kind === "cancelled") {
+            playManualTone(context, now, 720, 390, .2);
+        } else {
+            playManualTone(context, now, 520, 980, .2);
+        }
+        return true;
     }
 
     function formatElapsedTime(totalSeconds) {
@@ -334,6 +397,7 @@
         workspace.querySelectorAll("[data-driver-manual-dump-target]").forEach(function (target) {
             var isLast = !!selectedId && String(target.dataset.eoDumpTarget || "") === selectedId;
             target.classList.toggle("is-last-dump", isLast);
+            target.classList.toggle("is-active-manual-trip", isLast && !!currentTripProjection);
             target.dataset.driverManualLastSent = isLast ? "true" : "false";
             if (isLast && currentTripProjection) {
                 target.dataset.eoHasPendingTrucks = "true";
@@ -363,7 +427,26 @@
     }
 
     function sourceShouldBeLocked(isSaving, projection) {
-        return Boolean(isSaving || (projection && isTerminalState(projection.state)));
+        return Boolean(isSaving || projection);
+    }
+
+    function setManualExitAvailability(workspace) {
+        if (!workspace) return true;
+        var blocked = Boolean(savingLocal || currentTripProjection);
+        workspace.querySelectorAll("[data-driver-manual-close]").forEach(function (control) {
+            control.disabled = blocked;
+            control.setAttribute("aria-disabled", blocked ? "true" : "false");
+            var hint = control.querySelector("em");
+            if (hint) {
+                if (!hint.dataset.driverManualDefaultText) {
+                    hint.dataset.driverManualDefaultText = hint.textContent;
+                }
+                hint.textContent = blocked
+                    ? "Сначала завершите рейс свайпом вниз"
+                    : hint.dataset.driverManualDefaultText;
+            }
+        });
+        return !blocked;
     }
 
     function manualLoadFromEvents(events) {
@@ -431,12 +514,14 @@
 
     function setSourceLocked(workspace, locked) {
         var source = workspace && workspace.querySelector("[data-driver-manual-source]");
-        if (!source) return;
-        source.disabled = !!locked;
-        source.setAttribute("aria-disabled", locked ? "true" : "false");
-        source.classList.toggle("is-load-blocked", !!locked);
-        source.dataset.eoCanLoad = locked ? "0" : "1";
-        source.draggable = !locked;
+        if (source) {
+            source.disabled = !!locked;
+            source.setAttribute("aria-disabled", locked ? "true" : "false");
+            source.classList.toggle("is-load-blocked", !!locked);
+            source.dataset.eoCanLoad = locked ? "0" : "1";
+            source.draggable = !locked;
+        }
+        setManualExitAvailability(workspace);
     }
 
     function projectionPointName(projection) {
@@ -493,6 +578,14 @@
         return true;
     }
 
+    function latestManualCompletion(events) {
+        return (Array.isArray(events) ? events : []).filter(function (event) {
+            return event && event.event_type === "driver.trip.manual_completed";
+        }).slice().sort(function (left, right) {
+            return Number(left.sequence || 0) - Number(right.sequence || 0);
+        }).pop() || null;
+    }
+
     function renderProjection(workspace, events, receipt) {
         workspace = workspace || currentWorkspace || root.document.querySelector("[data-driver-manual-workspace]");
         if (!workspace) return null;
@@ -501,11 +594,35 @@
         var serverTripId = shell && positive(shell.dataset.driverActiveTripId);
         var serverLoadedAt = shell && String(shell.dataset.driverActiveTripLoadedAt || "");
         var projected = manualLoadFromEvents(events);
+        var completion = latestManualCompletion(events);
         var queuedCancel = latestManualCancel(events);
         var confirmedCancel = receipt && receipt.event_type === "driver.trip.loaded.cancelled"
             ? receipt
             : null;
         var activeCancel = queuedCancel || confirmedCancel;
+        var completionWins = completion
+            && ["conflict", "auth_required", "invalid"].indexOf(String(completion.state || "pending")) < 0
+            && (!projected || Number(completion.sequence || 0) > Number(projected.sequence || 0));
+        if (completionWins) {
+            manualCompletionPendingKey = String(completion.event_id || manualCompletionPendingKey || "pending");
+            currentTripProjection = null;
+            stopTripTimer(workspace);
+            markLastDump(workspace, positive(completion.payload && completion.payload.dump_point_id));
+            setSourceLocked(workspace, savingLocal);
+            setManualExitAvailability(workspace);
+            setResult(workspace, "complete-pending", null, true);
+            updatePointAction(workspace);
+            return {state: "completing"};
+        }
+        if (serverOrigin !== "driver_manual") manualCompletionPendingKey = "";
+        if (manualCompletionPendingKey && serverOrigin === "driver_manual" && !projected) {
+            currentTripProjection = null;
+            stopTripTimer(workspace);
+            setSourceLocked(workspace, savingLocal);
+            setManualExitAvailability(workspace);
+            setResult(workspace, "complete-pending", null, true);
+            return {state: "completing"};
+        }
         if (manualCancelWins(activeCancel, confirmedCancel, projected, serverTripId)) {
             var cancelledPointId = positive(
                 activeCancel.context_snapshot && activeCancel.context_snapshot.selected_dump_point_id
@@ -785,9 +902,11 @@
         if (!prototype) {
             target.type = "button";
             target.className = "eo-unload-card eo-dashboard-unload-card driver-manual-workspace__dump-card status-yellow";
-            target.innerHTML = '<span class="eo-dashboard-unload-top"><strong></strong><small aria-label="Рейсов: 0">0</small></span>';
+            target.innerHTML = '<span class="eo-dashboard-unload-top"><strong></strong><small aria-label="Рейсов: 0">0</small></span>'
+                + '<span class="driver-manual-workspace__swipe-cue driver-manual-workspace__swipe-cue--cancel" aria-hidden="true"><b>▲</b> ОТМЕНИТЬ</span>'
+                + '<span class="driver-manual-workspace__swipe-cue driver-manual-workspace__swipe-cue--complete" aria-hidden="true">ЗАВЕРШИТЬ <b>▼</b></span>';
         }
-        target.classList.remove("is-last-dump", "status-green", "status-red");
+        target.classList.remove("is-last-dump", "is-active-manual-trip", "status-green", "status-red");
         target.classList.add("status-yellow");
         applyDumpNameSize(target, pointName);
         target.removeAttribute("aria-current");
@@ -949,6 +1068,15 @@
             : (currentTripProjection && currentTripProjection.can_depend_on_prior && currentTripProjection.event_id
                 ? [currentTripProjection.event_id]
                 : []);
+        var pendingCompletion = latestManualCompletion(events);
+        if (
+            !currentTripProjection
+            && pendingCompletion
+            && !isTerminalState(pendingCompletion.state)
+            && dependsOn.indexOf(String(pendingCompletion.event_id || "")) < 0
+        ) {
+            dependsOn.push(String(pendingCompletion.event_id));
+        }
         return root.createDriverManualLoadEvent({
             truckId: positive(shell && shell.dataset.driverCurrentTruckId) || positive(context.truck_id),
             excavatorId: positive(context.excavator_id),
@@ -992,6 +1120,71 @@
         });
     }
 
+    function buildManualCompletedEvent(workspace, target, events) {
+        if (!currentTripProjection || typeof root.createDriverManualCompletedEvent !== "function") {
+            throw new Error("offline_runtime_unavailable");
+        }
+        var shell = workspace.closest("[data-driver-shell]");
+        var projection = currentTripProjection;
+        var context = clone(projection.context_snapshot || {});
+        return root.createDriverManualCompletedEvent({
+            tripId: positive(projection.trip_id),
+            localTripId: positive(projection.trip_id) ? "" : String(projection.local_trip_id || ""),
+            loadEventId: String(projection.event_id || projection.local_trip_id || ""),
+            truckId: positive(shell && shell.dataset.driverCurrentTruckId) || positive(context.truck_id),
+            excavatorId: positive(context.excavator_id) || positive(workspace.dataset.driverManualExcavatorId),
+            dumpPointId: positive(target && target.dataset.eoDumpTarget)
+                || positive(projection.payload && projection.payload.dump_point_id),
+            events: events,
+            contextSnapshot: {
+                source: "driver_manual",
+                action: "manual_completed",
+                selected_dump_point_id: positive(projection.payload && projection.payload.dump_point_id),
+                selected_dump_point_name: projectionPointName(projection)
+            }
+        });
+    }
+
+    function completeManualLoad(workspace, target) {
+        var outbox = root.driverOfflineOutbox;
+        var projection = currentTripProjection;
+        if (
+            savingLocal
+            || !projection
+            || !outbox
+            || !target
+            || target.dataset.eoReturnEnabled !== "true"
+        ) return Promise.resolve(false);
+        savingLocal = true;
+        target.classList.add("is-complete-pending");
+        setSourceLocked(workspace, true);
+        return outbox.pending().then(function (events) {
+            return buildManualCompletedEvent(workspace, target, events);
+        }).then(function (event) {
+            return outbox.enqueue(event);
+        }).then(function (saved) {
+            savingLocal = false;
+            manualCompletionPendingKey = String(saved.event_id || "pending");
+            currentTripProjection = null;
+            stopTripTimer(workspace);
+            markLastDump(workspace, positive(projection.payload && projection.payload.dump_point_id));
+            syncWorkspaceContext(workspace);
+            setSourceLocked(workspace, false);
+            setResult(workspace, "complete-pending", null, true);
+            updatePointAction(workspace);
+            playManualFeedback("completed");
+            return saved;
+        }).catch(function (error) {
+            savingLocal = false;
+            currentTripProjection = projection;
+            setSourceLocked(workspace, sourceShouldBeLocked(false, projection));
+            setResult(workspace, "storage-error", null, true);
+            throw error;
+        }).finally(function () {
+            target.classList.remove("is-complete-pending");
+        });
+    }
+
     function cancelManualLoad(workspace, target) {
         var projection = currentTripProjection;
         var outbox = root.driverOfflineOutbox;
@@ -1024,7 +1217,7 @@
             setSourceLocked(workspace, false);
             setResult(workspace, "cancel-pending", null, true);
             updatePointAction(workspace);
-            if (typeof root.driverHaptic === "function") root.driverHaptic([35, 45, 70], 170);
+            playManualFeedback("cancelled");
             return saved;
         }).catch(function (error) {
             savingLocal = false;
@@ -1237,6 +1430,7 @@
                     return outbox.enqueue(event);
                 }).then(function (saved) {
                     savingLocal = false;
+                    manualCompletionPendingKey = "";
                     delete workspace.dataset.driverManualLastError;
                     currentTripProjection = saved;
                     updateManualTripCount(
@@ -1251,6 +1445,7 @@
                     setSourceLocked(workspace, sourceShouldBeLocked(false, saved));
                     setResult(workspace, "pending", null, true);
                     updatePointAction(workspace);
+                    playManualFeedback("created");
                 }).catch(function (error) {
                     savingLocal = false;
                     workspace.dataset.driverManualLastError = String(error && error.message || "manual_load_failed");
@@ -1280,6 +1475,9 @@
                 },
                 onReturn: function (target) {
                     cancelManualLoad(workspace, target).catch(function () {});
+                },
+                onComplete: function (target) {
+                    completeManualLoad(workspace, target).catch(function () {});
                 }
             });
         }
@@ -1299,14 +1497,26 @@
         workspacePreferenceKnown = true;
         workspace.hidden = false;
         var shell = workspace.closest("[data-driver-shell]");
+        if (shell && String(shell.dataset.activeTab || "work") !== "work") return;
         if (shell) shell.classList.add("is-driver-manual-workspace-open");
         root.document.body.classList.add("excavator-operator-screen");
         if (control) control.setAttribute("aria-expanded", "true");
         updatePointAction(workspace);
         renderTripTimer(workspace);
+        setManualExitAvailability(workspace);
         var source = workspace.querySelector("[data-driver-manual-source]");
         var back = workspace.querySelector("[data-driver-manual-close]");
         if (source || back) (source || back).focus({preventScroll: true});
+    }
+
+    function onTabChange(tab) {
+        var workspace = currentWorkspace || (root.document && root.document.querySelector("[data-driver-manual-workspace]"));
+        if (!workspace) return;
+        if (String(tab || "work") === "work") {
+            if (workspaceRequestedOpen) openWorkspace(null);
+            return;
+        }
+        closeWorkspace(workspace, {preserveRequest: true});
     }
 
     function openFreeBucket(workspace) {
@@ -1359,7 +1569,12 @@
             );
             workspacePreferenceKnown = true;
         }
-        if (workspaceRequestedOpen && shell && shell.dataset.driverActiveTripOrigin !== "excavator") {
+        if (
+            workspaceRequestedOpen
+            && shell
+            && String(shell.dataset.activeTab || "work") === "work"
+            && shell.dataset.driverActiveTripOrigin !== "excavator"
+        ) {
             workspace.hidden = false;
             shell.classList.add("is-driver-manual-workspace-open");
             root.document.body.classList.add("excavator-operator-screen");
@@ -1429,14 +1644,15 @@
                 : null;
             if (close) {
                 event.preventDefault();
-                closeWorkspace(close.closest("[data-driver-manual-workspace]"));
+                var closeRoot = close.closest("[data-driver-manual-workspace]");
+                if (!savingLocal && !currentTripProjection && !close.disabled) closeWorkspace(closeRoot);
                 return;
             }
             var tab = event.target && event.target.closest
                 ? event.target.closest("[data-driver-tab-open]")
                 : null;
             if (tab) {
-                closeWorkspace();
+                onTabChange(tab.dataset.driverTabOpen);
                 return;
             }
             var open = event.target && event.target.closest
@@ -1486,6 +1702,9 @@
         readWorkspaceTripContext: readWorkspaceTripContext,
         open: openWorkspace,
         close: closeWorkspace,
+        onTabChange: onTabChange,
+        buildManualCompletedEvent: buildManualCompletedEvent,
+        completeManualLoad: completeManualLoad,
         openFreeBucket: openFreeBucket,
         openPointChooser: openPointChooser,
         closePointChooser: closePointChooser,
@@ -1502,6 +1721,7 @@
         requestAutomaticTripRefresh: requestAutomaticTripRefresh,
         requestManualCancellationRefresh: requestManualCancellationRefresh,
         sourceShouldBeLocked: sourceShouldBeLocked,
+        playManualFeedback: playManualFeedback,
         dumpNameSizeClass: dumpNameSizeClass,
         formatElapsedTime: formatElapsedTime,
         tripTimerLabel: tripTimerLabel,

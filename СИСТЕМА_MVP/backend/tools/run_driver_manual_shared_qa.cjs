@@ -202,6 +202,7 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
         let manualTripNumber = 9000;
         const syncedManualEvents = [];
         const syncedManualCancelEvents = [];
+        const syncedManualCompleteEvents = [];
         await driverPage.route('**/offline-events/sync/', async (route) => {
             const request = route.request();
             const batch = JSON.parse(request.postData() || '{}');
@@ -225,6 +226,16 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
                         server_received_at: new Date().toISOString(),
                         server_ids: {trip_id: event.trip_id, shift_id: event.shift_id},
                         trip_origin: 'driver_manual',
+                    };
+                }
+                if (event.event_type === 'driver.trip.manual_completed') {
+                    syncedManualCompleteEvents.push(event);
+                    return {
+                        event_id: event.event_id,
+                        status: 'accepted',
+                        server_received_at: new Date().toISOString(),
+                        server_ids: {trip_id: event.trip_id, shift_id: event.shift_id},
+                        trip_origin: 'driver_manual_completed',
                     };
                 }
                 return {event_id: event.event_id, status: 'accepted', server_ids: {}};
@@ -308,8 +319,8 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
                     fits: button.scrollWidth <= button.clientWidth && button.scrollHeight <= button.clientHeight,
                 })),
                 leanDumpCards: Array.from(document.querySelectorAll('[data-driver-manual-dump-target]')).every((card) =>
-                    card.children.length === 1 &&
-                    card.firstElementChild?.classList.contains('eo-dashboard-unload-top') &&
+                    card.querySelectorAll(':scope > .eo-dashboard-unload-top').length === 1 &&
+                    card.querySelectorAll(':scope > .driver-manual-workspace__swipe-cue').length === 2 &&
                     card.querySelectorAll('strong').length === 1 &&
                     card.querySelectorAll('small').length === 1 &&
                     !/РАЗГРУЖЕНО/i.test(card.textContent)
@@ -394,12 +405,13 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
                 width: rect.width,
                 titleFits: !!titleRect && titleRect.left >= rect.left && titleRect.right <= rect.right && titleRect.top >= rect.top && titleRect.bottom <= rect.bottom,
                 childCount: node.children.length,
+                cuesHidden: Array.from(node.querySelectorAll('.driver-manual-workspace__swipe-cue')).every((cue) => getComputedStyle(cue).display === 'none'),
             };
         }));
         assert(fourPointLayout.length === 4, 'The selected one-off point did not produce the four-card layout.');
         assert(Math.max(...fourPointLayout.slice(0, 3).map((item) => item.top)) - Math.min(...fourPointLayout.slice(0, 3).map((item) => item.top)) < 2, 'Four dump points do not keep three columns in the first row at 412px.');
         assert(fourPointLayout[3].top > fourPointLayout[0].top + 4, 'The fourth dump point did not move to the second row.');
-        assert(fourPointLayout.every((item) => item.childCount === 1 && item.titleFits), `A four-card dump point contains extra content or clipped title: ${JSON.stringify(fourPointLayout)}`);
+        assert(fourPointLayout.every((item) => item.childCount === 3 && item.titleFits && item.cuesHidden), `A non-active four-card dump point exposes gesture cues or clips its title: ${JSON.stringify(fourPointLayout)}`);
         const responsiveType = await driverPage.evaluate(() => {
             const grid = document.querySelector('.driver-manual-workspace .eo-dashboard-unload-grid');
             const title = grid?.querySelector('[data-driver-manual-dump-target] strong');
@@ -490,9 +502,16 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
         assert(await driverPage.locator('.eo-truck-comet').count() === 0, 'Comet remained after drop.');
         const resultText = await driverPage.locator('[data-driver-manual-result]').textContent();
         const manualError = await driverPage.locator('[data-driver-manual-workspace]').getAttribute('data-driver-manual-last-error');
+        const manualReceipt = await driverPage.evaluate(async () => {
+            const shell = document.querySelector('[data-driver-shell]');
+            return window.driverOfflineOutbox?.getManualTripProjectionReceipt(
+                shell?.dataset.driverShiftId,
+                shell?.dataset.driverCurrentTruckId,
+            );
+        });
         assert(
             /Подтверждено/.test(resultText) && /рейс №9001/i.test(resultText),
-            `Durably queued gesture did not receive the isolated manual-trip acknowledgement: ${JSON.stringify(resultText)}; synced=${syncedManualEvents.length}; error=${manualError}.`
+            `Durably queued gesture did not receive the isolated manual-trip acknowledgement: ${JSON.stringify(resultText)}; synced=${syncedManualEvents.length}; receipt=${JSON.stringify(manualReceipt)}; error=${manualError}.`
         );
         const mutationRequests = gestureRequests.filter((entry) => !entry.startsWith('GET '));
         assert(mutationRequests.filter((entry) => /\/offline-events\/sync\//.test(entry)).length === 1, `Gesture did not use exactly one common offline-sync request: ${mutationRequests.join(', ')}`);
@@ -522,8 +541,54 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
         const timerShot = path.join(outputDir, 'H-driver-trip-timer-active-412x915.png');
         await driverPage.screenshot({ path: timerShot });
         report.screenshots.push({ id: 'H', file: path.basename(timerShot), url: driverPage.url() });
-        assert(!(await driverPage.locator('[data-driver-manual-source]').isDisabled()), 'Confirmed manual mark incorrectly blocked the next manual swipe.');
-        report.checks.push('Completed Driver gesture used the shared preview, comet and highlight, persisted one Driver-only event through the common outbox, kept the source reusable, and continued the destination timer.');
+        assert(await driverPage.locator('[data-driver-manual-source]').isDisabled(), 'Active manual trip did not block a second source swipe.');
+        assert(await driverPage.locator('.driver-manual-workspace__action--return').isDisabled(), 'Ordinary mode remained available during an active manual trip.');
+        const activeTarget = driverPage.locator('[data-driver-manual-dump-target].is-active-manual-trip');
+        assert(await activeTarget.count() === 1, 'Exactly one active destination was not marked.');
+        const activeCueState = await activeTarget.evaluate((node) => ({
+            animation: getComputedStyle(node).animationName,
+            cancel: getComputedStyle(node.querySelector('.driver-manual-workspace__swipe-cue--cancel')).display,
+            complete: getComputedStyle(node.querySelector('.driver-manual-workspace__swipe-cue--complete')).display,
+            legacyArrow: getComputedStyle(node, '::after').content,
+        }));
+        assert(activeCueState.animation.includes('driver-manual-active-dump-pulse'), `Active destination does not pulse yellow: ${JSON.stringify(activeCueState)}`);
+        assert(activeCueState.cancel === 'flex' && activeCueState.complete === 'flex', 'Active destination does not show both swipe cues.');
+        assert(activeCueState.legacyArrow === 'none', `Legacy single swipe arrow overlaps the explicit cancel/complete cues: ${JSON.stringify(activeCueState)}`);
+        await driverPage.locator('[data-driver-tab-open="shift"]').click();
+        assert(await driverPage.locator('[data-driver-manual-workspace]').isHidden(), 'Shift tab did not temporarily hide manual mode.');
+        await driverPage.locator('[data-driver-tab-open="work"]').click();
+        await driverPage.locator('[data-driver-manual-workspace]').waitFor({state: 'visible'});
+        assert(await driverPage.locator('[data-driver-manual-dump-target].is-active-manual-trip').count() === 1, 'Returning to Work did not restore the active manual trip.');
+        report.checks.push('An active manual trip blocks the source and Ordinary mode, shows yellow pulse with cancel/complete cues, and survives a temporary lower-tab visit.');
+
+        const completeTarget = driverPage.locator('[data-driver-manual-dump-target].is-active-manual-trip').first();
+        const completeStart = await center(completeTarget);
+        await dispatchTouch(cdp, 'touchStart', completeStart);
+        await dispatchTouch(cdp, 'touchMove', {x: completeStart.x, y: completeStart.y + 30});
+        await driverPage.waitForTimeout(40);
+        assert(await completeTarget.evaluate((node) => node.classList.contains('is-return-swiping')), 'Short downward pull did not start the shared elastic state.');
+        assert(!(await completeTarget.evaluate((node) => node.classList.contains('is-complete-armed'))), 'Short downward pull armed completion too early.');
+        await dispatchTouch(cdp, 'touchEnd');
+        await driverPage.waitForTimeout(900);
+        assert(syncedManualCompleteEvents.length === 0, 'Sub-threshold downward pull created a completion event.');
+
+        await dispatchTouch(cdp, 'touchStart', completeStart);
+        await dispatchTouch(cdp, 'touchMove', {x: completeStart.x + 2, y: completeStart.y + 62});
+        await driverPage.waitForTimeout(60);
+        assert(await completeTarget.evaluate((node) => node.classList.contains('is-complete-armed')), 'Downward swipe did not arm completion at the shared threshold.');
+        const completeArmedShot = path.join(outputDir, 'J-driver-dump-complete-armed-412x915.png');
+        await driverPage.screenshot({path: completeArmedShot});
+        report.screenshots.push({id: 'J', file: path.basename(completeArmedShot), url: driverPage.url()});
+        await dispatchTouch(cdp, 'touchEnd');
+        await driverPage.waitForTimeout(1300);
+        assert(syncedManualCompleteEvents.length === 1, `Downward swipe did not enqueue exactly one completion: ${syncedManualCompleteEvents.length}`);
+        assert(Number(syncedManualCompleteEvents[0].trip_id) === 9001, 'Completion did not reference the exact active manual trip.');
+        assert(await driverPage.locator('[data-driver-manual-trip-timer]').getAttribute('data-driver-manual-timer-active') === 'false', 'Timer kept running after durable completion.');
+        assert(!(await driverPage.locator('[data-driver-manual-source]').isDisabled()), 'Source did not unlock after completion.');
+        assert(!(await driverPage.locator('.driver-manual-workspace__action--return').isDisabled()), 'Ordinary mode did not unlock after completion.');
+        assert(await driverPage.locator('[data-driver-manual-dump-target].is-last-dump').count() === 1, 'Completed destination lost the last-route highlight.');
+        assert(await driverPage.locator('[data-driver-manual-dump-target].is-active-manual-trip').count() === 0, 'Completed destination remained active.');
+        report.checks.push('A short downward pull cancels nothing; a full downward swipe durably completes the exact trip, stops the timer, retains last destination and unlocks the next cycle.');
 
         const secondStart = await center(driverPage.locator('[data-driver-manual-source]').first());
         const secondFinish = await center(targets.nth(0));
@@ -535,16 +600,19 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
         });
         await dispatchTouch(cdp, 'touchMove', secondFinish);
         await dispatchTouch(cdp, 'touchEnd');
-        await driverPage.waitForTimeout(1600);
+        await driverPage.waitForFunction(() => {
+            const value = document.querySelector('[data-driver-manual-result]')?.textContent || '';
+            return /Подтверждено/.test(value);
+        }, null, {timeout: 5000}).catch(() => {});
         assert(syncedManualEvents.length === 2, 'A second manual swipe was blocked or duplicated.');
-        assert(syncedManualEvents[1].depends_on.includes(syncedManualEvents[0].event_id), 'The next manual cycle is not ordered after the previous durable mark.');
+        assert(syncedManualCompleteEvents.length === 1, 'The first manual cycle was not durably completed before the next one.');
         const secondTimer = await driverPage.locator('[data-driver-manual-trip-timer]').evaluate((node) => ({
             pointName: node.dataset.driverManualTimerPointName,
             active: node.dataset.driverManualTimerActive,
         }));
         assert(secondTimer.active === 'true' && secondTimer.pointName === secondPointName, 'The second manual swipe did not start the next destination timer.');
-        assert(!(await driverPage.locator('[data-driver-manual-source]').isDisabled()), 'The second manual cycle again blocked the source card.');
-        report.checks.push('A second swipe works without a separate unload confirmation, depends on the previous durable event, and restarts the timer for its own destination.');
+        assert(await driverPage.locator('[data-driver-manual-source]').isDisabled(), 'The active second manual cycle did not block another source swipe.');
+        report.checks.push('After completion, a second swipe starts a new timed trip and is ordered after the durable completion event.');
 
         const returnTarget = driverPage.locator('[data-driver-manual-dump-target].is-last-dump').first();
         assert(await returnTarget.count() === 1, 'The latest manual destination is unavailable for the return gesture.');

@@ -26,6 +26,44 @@ test("manual cancellation copy is explicit and does not claim a second unload", 
     assert.match(driverRuntime.resultText("cancelled"), /РЕЙС ОТМЕН/);
 });
 
+test("manual trip creation completion and cancellation have distinct durable feedback", () => {
+    const haptics = [];
+    const tones = [];
+    const context = {
+        currentTime: 10,
+        destination: {},
+        createOscillator() {
+            const frequency = {
+                setValueAtTime(value, at) { tones.push({kind: "start", value, at}); },
+                exponentialRampToValueAtTime(value, at) { tones.push({kind: "end", value, at}); }
+            };
+            return {
+                type: "",
+                frequency,
+                connect() {}, start() {}, stop() {}, disconnect() {},
+                addEventListener(name, callback) { if (name === "ended") callback(); }
+            };
+        },
+        createGain() {
+            return {
+                gain: {setValueAtTime() {}, exponentialRampToValueAtTime() {}},
+                connect() {}, disconnect() {}
+            };
+        }
+    };
+    global.driverHaptic = (pattern, amplitude) => haptics.push({pattern, amplitude});
+    global.ExcavatorDashboardDrag = {preparePickupAudio() { return context; }};
+    assert.equal(driverRuntime.playManualFeedback("created"), true);
+    assert.equal(driverRuntime.playManualFeedback("completed"), true);
+    assert.equal(driverRuntime.playManualFeedback("cancelled"), true);
+    assert.deepEqual(haptics.map((item) => item.pattern), [
+        [38, 34, 78], [52, 42, 105], [30, 42, 62]
+    ]);
+    assert.equal(tones.filter((tone) => tone.kind === "start").length, 4);
+    delete global.driverHaptic;
+    delete global.ExcavatorDashboardDrag;
+});
+
 test("confirmed cancellation outranks older failed loads but never a newer load", () => {
     const cancellation = {occurred_at: "2026-09-21T19:25:47.483Z"};
     const olderConflict = {occurred_at: "2026-09-21T19:01:59.522Z", state: "conflict"};
@@ -35,11 +73,11 @@ test("confirmed cancellation outranks older failed loads but never a newer load"
     assert.equal(driverRuntime.manualCancelWins(cancellation, cancellation, olderConflict, 11), false);
 });
 
-test("manual loading locks only while saving or while a terminal sync error needs review", () => {
+test("an active manual trip locks the source until it is completed or cancelled", () => {
     assert.equal(driverRuntime.sourceShouldBeLocked(false, null), false);
     assert.equal(driverRuntime.sourceShouldBeLocked(true, null), true);
-    assert.equal(driverRuntime.sourceShouldBeLocked(false, {state: "pending"}), false);
-    assert.equal(driverRuntime.sourceShouldBeLocked(false, {state: "confirmed"}), false);
+    assert.equal(driverRuntime.sourceShouldBeLocked(false, {state: "pending"}), true);
+    assert.equal(driverRuntime.sourceShouldBeLocked(false, {state: "confirmed"}), true);
     assert.equal(driverRuntime.sourceShouldBeLocked(false, {state: "conflict"}), true);
 });
 
@@ -211,6 +249,38 @@ test("manual controls keep three columns and stack actions timer and source with
     assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*3;/s);
     assert.doesNotMatch(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*aspect-ratio:\s*1\s*\/\s*1/s);
     assert.doesNotMatch(driverCss, /\.eo-dashboard-truck-card\s*\{[^}]*grid-template-columns/s);
+});
+
+test("manual mode survives lower tabs and blocks ordinary mode during an active trip", () => {
+    const source = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    const shift = read("static", "js", "driver-shift-v1.js");
+    const workspace = read("templates", "includes", "driver_manual_excavator_workspace.html");
+
+    assert.match(source, /function onTabChange\(tab\)/);
+    assert.match(source, /closeWorkspace\(workspace, \{preserveRequest: true\}\)/);
+    assert.match(source, /if \(workspaceRequestedOpen\) openWorkspace\(null\)/);
+    assert.match(shift, /DriverManualExcavatorWorkspace\.onTabChange\(tab\)/);
+    assert.doesNotMatch(workspace, /data-driver-manual-exit-confirm|Завершить рейс и выйти/);
+    assert.match(source, /function setManualExitAvailability\(workspace\)/);
+    assert.match(source, /Сначала завершите рейс свайпом вниз/);
+    assert.match(source, /createDriverManualCompletedEvent/);
+    assert.match(source, /onComplete:\s*function \(target\)/);
+    assert.match(source, /var pendingCompletion = latestManualCompletion\(events\)/);
+    assert.match(source, /dependsOn\.push\(String\(pendingCompletion\.event_id\)\)/);
+    assert.doesNotMatch(source, /localStorage|indexedDB|fetch\s*\(/);
+});
+
+test("only the active dump point exposes cancel and complete swipe cues", () => {
+    const card = read("templates", "includes", "excavator_dashboard_dump_card.html");
+    const css = read("static", "css", "driver-manual-excavator-workspace-v1.css");
+    const source = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    assert.match(card, /driver-manual-workspace__swipe-cue--cancel[\s\S]*▲[\s\S]*ОТМЕНИТЬ/);
+    assert.match(card, /driver-manual-workspace__swipe-cue--complete[\s\S]*ЗАВЕРШИТЬ[\s\S]*▼/);
+    assert.match(css, /is-active-manual-trip \.driver-manual-workspace__swipe-cue\s*\{[^}]*display:\s*flex/s);
+    assert.match(css, /driver-manual-active-dump-pulse/);
+    assert.match(css, /driver-manual-workspace__swipe-cue--cancel b\s*\{[^}]*top:\s*-4px/s);
+    assert.match(css, /driver-manual-workspace__swipe-cue--complete b\s*\{[^}]*bottom:\s*-4px/s);
+    assert.match(source, /is-active-manual-trip", isLast && !!currentTripProjection/);
 });
 
 test("long excavator title is fitted to the real source card width", () => {

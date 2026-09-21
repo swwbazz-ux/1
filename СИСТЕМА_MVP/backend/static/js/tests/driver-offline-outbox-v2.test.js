@@ -6,6 +6,7 @@ const {
     createDriverOfflineOutbox,
     createDriverManualLoadEvent,
     createDriverManualLoadCancelledEvent,
+    createDriverManualCompletedEvent,
     createDriverPointChangeEvent,
     createDriverFreeBucketSelectedEvent,
     createDriverFreeBucketCancelledEvent,
@@ -57,6 +58,47 @@ test("manual-load cancellation keeps an exact trip reference and the latest depe
     assert.throws(
         () => createDriverManualLoadCancelledEvent({tripId: 81, localTripId: "manual-load-local"}),
         /offline_manual_cancel_identity_invalid/
+    );
+});
+
+test("downward swipe completes the exact local or confirmed manual trip through the existing queue", () => {
+    const confirmed = createDriverManualCompletedEvent({
+        eventId: "manual-end-confirmed",
+        tripId: 81,
+        truckId: 58,
+        excavatorId: 9,
+        dumpPointId: 4,
+        events: [{
+            event_id: "point-change-confirmed",
+            event_type: "driver.trip.dump_point_changed",
+            trip_id: 81,
+            sequence: 7,
+            state: "pending",
+        }],
+        contextSnapshot: {source: "driver_manual", action: "manual_completed"},
+    });
+    assert.equal(confirmed.event_type, "driver.trip.manual_completed");
+    assert.equal(confirmed.trip_id, 81);
+    assert.equal(confirmed.local_trip_id, null);
+    assert.deepEqual(confirmed.depends_on, ["point-change-confirmed"]);
+    assert.equal(confirmed.payload.manual_control, true);
+
+    const local = createDriverManualCompletedEvent({
+        eventId: "manual-end-local",
+        localTripId: "manual-load-local",
+        loadEventId: "manual-load-local",
+        truckId: 58,
+        excavatorId: 9,
+        dumpPointId: 4,
+        events: [],
+        contextSnapshot: {source: "driver_manual", action: "manual_completed"},
+    });
+    assert.equal(local.trip_id, null);
+    assert.equal(local.local_trip_id, "manual-load-local");
+    assert.deepEqual(local.depends_on, ["manual-load-local"]);
+    assert.throws(
+        () => createDriverManualCompletedEvent({tripId: 81, localTripId: "manual-load-local"}),
+        /offline_manual_complete_identity_invalid/
     );
 });
 

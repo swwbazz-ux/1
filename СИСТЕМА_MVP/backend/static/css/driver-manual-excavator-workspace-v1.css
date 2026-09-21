@@ -608,6 +608,7 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .
 }
 
 body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card {
+    position: relative !important;
     display: grid !important;
     grid-template-rows: minmax(0, 1fr) !important;
     place-items: center !important;
@@ -615,6 +616,65 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .
     min-height: 0 !important;
     padding: clamp(7px, 1.2dvh, 11px) clamp(6px, 1.8vw, 10px) !important;
     overflow: hidden !important;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__swipe-cue {
+    position: absolute;
+    z-index: 4;
+    left: 6px;
+    right: 6px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    color: #ffe76b;
+    font-size: clamp(8px, 2.35vw, 11px);
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: .025em;
+    text-align: center;
+    text-shadow: 0 0 8px rgba(255, 218, 33, .52);
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__swipe-cue--cancel {
+    top: 0;
+    padding-top: 8px;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__swipe-cue--complete {
+    bottom: 0;
+    padding-bottom: 8px;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__swipe-cue b {
+    position: absolute;
+    left: 50%;
+    color: #fff17a;
+    font-size: clamp(11px, 3vw, 15px);
+    line-height: 1;
+    transform: translateX(-50%);
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__swipe-cue--cancel b {
+    top: -4px;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__swipe-cue--complete b {
+    bottom: -4px;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__dump-card.is-active-manual-trip .driver-manual-workspace__swipe-cue {
+    display: flex;
+}
+
+/* В ручном режиме две точные подписи заменяют общий одиночный указатель возврата. */
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace .driver-manual-workspace__dump-card::after {
+    content: none !important;
+    display: none !important;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__dump-card.is-active-manual-trip > .eo-dashboard-unload-top {
+    padding-block: clamp(14px, 2.5dvh, 21px) !important;
 }
 
 body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell]:not(.is-truck-drag-active) .driver-manual-workspace__dump-card {
@@ -681,6 +741,21 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .
     box-shadow: inset 0 0 0 2px rgba(255, 220, 62, .76), 0 0 24px rgba(255, 216, 33, .36) !important;
 }
 
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card.is-active-manual-trip:not(.is-drop-ready):not(.is-return-armed):not(.is-complete-armed) {
+    animation: driver-manual-active-dump-pulse 1.15s ease-in-out infinite !important;
+}
+
+@keyframes driver-manual-active-dump-pulse {
+    0%, 100% {
+        border-color: #e8bd00;
+        box-shadow: inset 0 0 0 1px rgba(255, 220, 62, .48), 0 0 10px rgba(255, 216, 33, .18);
+    }
+    50% {
+        border-color: #fff17a;
+        box-shadow: inset 0 0 0 3px rgba(255, 239, 113, .92), 0 0 30px rgba(255, 216, 33, .66);
+    }
+}
+
 body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card.is-last-dump:not(.is-drop-ready) > .eo-dashboard-unload-top > strong {
     color: #ffe56b !important;
     text-shadow: 0 0 12px rgba(255, 216, 33, .24) !important;
@@ -720,4 +795,30 @@ body.driver-mobile-screen .driver-manual-workspace__demo {
    the embedded workplace instead of letting the workplace cover it. */
 body.driver-mobile-screen.excavator-operator-screen .mm-mobile-bottom-nav.driver-bottom-nav {
     z-index: 120 !important;
+}
+
+body.driver-mobile-screen .driver-manual-workspace [data-driver-manual-close][aria-disabled="true"] {
+    opacity: .44 !important;
+    filter: saturate(.35) !important;
+    cursor: not-allowed !important;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__dump-card.is-complete-armed {
+    border-color: #51ff72 !important;
+    background: radial-gradient(circle at 50% 66%, rgba(81, 255, 114, .28), transparent 66%), rgba(10, 34, 20, .96) !important;
+    box-shadow: inset 0 0 0 2px rgba(81, 255, 114, .72), 0 0 28px rgba(81, 255, 114, .38) !important;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__dump-card.is-return-armed {
+    border-color: #ff6268 !important;
+    background: radial-gradient(circle at 50% 28%, rgba(255, 82, 88, .3), transparent 66%), rgba(42, 10, 14, .96) !important;
+    box-shadow: inset 0 0 0 2px rgba(255, 98, 104, .76), 0 0 28px rgba(255, 82, 88, .4) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card.is-active-manual-trip {
+        animation: none !important;
+        border-color: #ffe34f !important;
+        box-shadow: inset 0 0 0 2px rgba(255, 227, 79, .78), 0 0 18px rgba(255, 216, 33, .38) !important;
+    }
 }

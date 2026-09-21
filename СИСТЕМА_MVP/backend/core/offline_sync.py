@@ -42,6 +42,7 @@ SUPPORTED_EVENT_ROLES = {
     'driver.trip.dump_point_changed': 'driver',
     'driver.trip.loaded': 'driver',
     'driver.trip.loaded.cancelled': 'driver',
+    'driver.trip.manual_completed': 'driver',
     'driver.free_bucket.selected': 'driver',
     'driver.free_bucket.cancelled': 'driver',
     'driver.downtime.started': 'driver',
@@ -1781,6 +1782,118 @@ def _process_driver_loaded_cancelled(access, normalized):
     }, {'trip': trip, 'shift': shift, 'equipment': truck}
 
 
+def _process_driver_manual_completed(access, normalized):
+    """Complete the current Driver-only manual cycle by its downward swipe."""
+    from trips.models import OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
+    from trips.trip_creation import lock_trip_participant_equipment
+    from trips.views import finalize_trip_unloaded
+
+    payload = normalized['payload']
+    truck_id = _positive_int(payload.get('truck_id'), field='truck_id')
+    excavator_id = _positive_int(payload.get('excavator_id'), field='excavator_id')
+    if payload.get('manual_control') is not True:
+        _invalid(
+            'driver_manual_flag_required',
+            'Событие не помечено как завершение ручного рейса.',
+        )
+
+    lock_idempotency_key('trip_load_pair', f'{excavator_id}:{truck_id}')
+    shift = _locked_shift(access, normalized, role_code='driver')
+    if truck_id != shift.equipment_id:
+        _conflict(
+            'driver_manual_truck_changed',
+            'Самосвал не принадлежит текущей смене водителя.',
+        )
+    lock_production_state()
+    excavator, truck = lock_trip_participant_equipment(
+        excavator_id=excavator_id,
+        truck_id=truck_id,
+    )
+    trip = _resolve_trip_reference(access, normalized)
+    if trip.truck_id != truck.id or trip.excavator_id != excavator.id:
+        _conflict(
+            'driver_manual_trip_changed',
+            'Текущий ручной рейс уже относится к другой технике.',
+        )
+    if (
+        trip.driver_id != access.employee_id
+        or trip.driver_control_shift_id != shift.id
+        or not trip.driver_participation_recorded
+    ):
+        _conflict(
+            'trip_owner_changed',
+            'Ручной рейс не принадлежит текущей смене водителя.',
+        )
+    if normalized['occurred_at'] < (trip.loaded_at or trip.created_at):
+        _conflict(
+            'manual_complete_before_load',
+            'Время завершения ручного рейса раньше времени погрузки.',
+        )
+    if trip.status != TripStatus.LOADED_WAITING_UNLOAD:
+        _conflict(
+            'manual_trip_not_open',
+            'Ручной рейс уже завершён, отменён или заменён.',
+        )
+    current_open_trip = Trip.objects.select_for_update(of=('self',)).filter(
+        truck=truck,
+        status__in=OPEN_TRIP_STATUSES,
+    ).first()
+    if not current_open_trip or current_open_trip.id != trip.id:
+        _conflict(
+            'driver_manual_trip_changed',
+            'Состояние самосвала уже изменилось.',
+        )
+    if not TripClientAction.objects.select_for_update(of=('self',)).filter(
+        trip=trip,
+        action_type='driver_manual_loaded',
+        actor=access.employee,
+    ).exists():
+        _conflict(
+            'driver_manual_trip_required',
+            'Свайпом вниз можно завершить только ручной рейс этого водителя.',
+        )
+    if TripClientAction.objects.select_for_update(of=('self',)).filter(
+        trip=trip,
+        action_type__in=['truck_loaded', 'free_bucket_loaded'],
+    ).exists():
+        _conflict(
+            'automatic_load_cannot_end_manual_mode',
+            'Фактическая погрузка машиниста завершается только обычным контуром.',
+        )
+
+    if not finalize_trip_unloaded(
+        trip,
+        driver=access.employee,
+        unloading_shift=shift,
+        occurred_at=normalized['occurred_at'],
+    ):
+        _conflict('manual_trip_not_open', 'Ручной рейс уже изменился.')
+    TripClientAction.objects.create(
+        action_type='driver_manual_completed',
+        client_action_id=normalized['event_id'],
+        trip=trip,
+        actor=access.employee,
+    )
+    state = bump_operational_state(
+        'OfflineFieldEvent:driver_manual_completed',
+        event_type='trip_changed',
+        object_type='Trip',
+        object_id=trip.id,
+        payload={
+            'action': 'driver_manual_completed',
+            'trip_id': trip.id,
+            'truck_id': trip.truck_id,
+            'excavator_id': trip.excavator_id,
+            'status': trip.status,
+        },
+    )
+    return {
+        'server_ids': {'trip_id': trip.id, 'shift_id': shift.id},
+        'trip_origin': 'driver_manual_completed',
+        'version': state.version,
+    }, {'trip': trip, 'shift': shift, 'equipment': truck}
+
+
 def _process_driver_unloaded(access, normalized):
     from trips.models import OPEN_TRIP_STATUSES, TripClientAction, TripStatus
     from trips.views import finalize_trip_unloaded
@@ -1803,7 +1916,7 @@ def _process_driver_unloaded(access, normalized):
     if manual_load and not automatic_load:
         _conflict(
             'driver_manual_unload_not_required',
-            'Ручной рейс завершается следующей ручной погрузкой и не требует отдельной разгрузки.',
+            'Ручной рейс завершается свайпом вниз по активной точке и не требует отдельной разгрузки.',
         )
     if trip.status not in (*OPEN_TRIP_STATUSES, TripStatus.UNCONTROLLED):
         _conflict('trip_already_terminal', 'Рейс уже завершён или отменён другим действием.')
@@ -2128,6 +2241,7 @@ PROCESSORS = {
     'driver.trip.dump_point_changed': _process_driver_dump_point_changed,
     'driver.trip.loaded': _process_driver_loaded,
     'driver.trip.loaded.cancelled': _process_driver_loaded_cancelled,
+    'driver.trip.manual_completed': _process_driver_manual_completed,
     'driver.free_bucket.selected': _process_driver_free_bucket_selected,
     'driver.free_bucket.cancelled': _process_driver_free_bucket_cancelled,
     'excavator.downtime.started': lambda access, event: _process_downtime(access, event, role_code='excavator_operator', close=False),

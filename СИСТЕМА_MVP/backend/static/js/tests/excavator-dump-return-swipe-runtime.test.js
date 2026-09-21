@@ -53,6 +53,14 @@ test("direct dump return requires a confident upward swipe", () => {
     assert.equal(sharedReturn.isDumpReturnSwipe(0, 80), false);
 });
 
+test("Driver completion requires the same confident gesture downward", () => {
+    assert.equal(sharedReturn.isDumpCompleteSwipe(0, 47), false);
+    assert.equal(sharedReturn.isDumpCompleteSwipe(0, 48), true);
+    assert.equal(sharedReturn.isDumpCompleteSwipe(20, 56), true);
+    assert.equal(sharedReturn.isDumpCompleteSwipe(50, 56), false);
+    assert.equal(sharedReturn.isDumpCompleteSwipe(0, -80), false);
+});
+
 test("direct return resolves the explicitly marked newest truck and submits once", async () => {
     const latestSource = extractBraceBlock(
         templateSource,

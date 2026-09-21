@@ -214,6 +214,40 @@ class OfflineEventSyncTests(TestCase):
             },
         }
 
+    def driver_manual_complete_event(
+        self,
+        loaded,
+        event_id='driver-manual-complete-1',
+        sequence=2,
+        *,
+        trip_id=None,
+        occurred_at=None,
+    ):
+        loaded_at = timezone.datetime.fromisoformat(loaded['occurred_at'])
+        return {
+            'event_id': event_id,
+            'event_type': 'driver.trip.manual_completed',
+            'format_version': 1,
+            'occurred_at': (occurred_at or loaded_at + timedelta(minutes=1)).isoformat(),
+            'sequence': sequence,
+            'depends_on': [] if trip_id else [loaded['event_id']],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip_id,
+            'local_trip_id': '' if trip_id else loaded['local_trip_id'],
+            'context_snapshot': {
+                'source': 'driver_manual',
+                'action': 'manual_completed',
+                'selected_dump_point_id': loaded['payload']['dump_point_id'],
+            },
+            'payload': {
+                'manual_control': True,
+                'truck_id': self.truck.id,
+                'excavator_id': loaded['payload']['excavator_id'],
+                'dump_point_id': loaded['payload']['dump_point_id'],
+            },
+        }
+
     def driver_free_bucket_manual_event(
         self,
         event_id='driver-free-bucket-manual-load-1',
@@ -656,6 +690,39 @@ class OfflineEventSyncTests(TestCase):
             action_type='driver_manual_cycle_advanced',
             client_action_id=second['event_id'],
         ).exists())
+
+    def test_leaving_manual_mode_completes_exact_current_cycle_once(self):
+        loaded = self.driver_manual_event('manual-cycle-to-exit', 1)
+        ended = self.driver_manual_complete_event(loaded)
+
+        results = self.sync(
+            [ended, loaded],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-manual-exit-device',
+        ).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'])
+        trip = Trip.objects.get()
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(trip.completed_at, timezone.datetime.fromisoformat(ended['occurred_at']))
+        self.assertEqual(trip.unloading_shift_id, self.truck_shift.id)
+        self.assertIsNotNone(trip.volume_m3)
+        self.assertIsNotNone(trip.tonnage)
+        self.assertTrue(TripClientAction.objects.filter(
+            trip=trip,
+            action_type='driver_manual_completed',
+            client_action_id=ended['event_id'],
+        ).exists())
+
+        repeated = self.sync(
+            [ended],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-manual-exit-device',
+        ).json()['results'][0]
+        self.assertEqual(repeated['status'], 'deduplicated')
+        self.assertEqual(Trip.objects.count(), 1)
 
     def test_driver_manual_load_can_be_cancelled_by_exact_upward_swipe_event(self):
         loaded = self.driver_manual_event('driver-load-to-cancel', 1)

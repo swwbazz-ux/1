@@ -778,6 +778,10 @@ window.bindDriverMobileShell = function () {
             || shell.dataset.driverDensity
             || "normal";
         syncDriverTabMarkup(shell, tab);
+        if (
+            window.DriverManualExcavatorWorkspace
+            && typeof window.DriverManualExcavatorWorkspace.onTabChange === "function"
+        ) window.DriverManualExcavatorWorkspace.onTabChange(tab);
         if (tab !== "work" && window.driverDomBehindBaseline === true
             && window.AppRealtime && typeof window.AppRealtime.requestReconcile === "function") {
             window.driverForceFragmentApply = true;

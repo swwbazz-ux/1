@@ -3,6 +3,10 @@
         <strong>{{ card.name }}</strong>
         <small aria-label="Рейсов: {{ card.completed_count|default:0 }}">{{ card.completed_count|default:0 }}</small>
     </span>
+    {% if driver_manual_dashboard %}
+    <span class="driver-manual-workspace__swipe-cue driver-manual-workspace__swipe-cue--cancel" aria-hidden="true"><b>▲</b> ОТМЕНИТЬ</span>
+    <span class="driver-manual-workspace__swipe-cue driver-manual-workspace__swipe-cue--complete" aria-hidden="true">ЗАВЕРШИТЬ <b>▼</b></span>
+    {% endif %}
     {% if not driver_manual_dashboard %}
     <span class="eo-dashboard-unload-label">Разгружено</span>
     <span class="eo-dashboard-unload-badges" aria-label="Назначены, не разгружены">

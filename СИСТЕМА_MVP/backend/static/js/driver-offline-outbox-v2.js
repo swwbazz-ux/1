@@ -11,6 +11,7 @@
         "driver.trip.dump_point_changed",
         "driver.trip.loaded",
         "driver.trip.loaded.cancelled",
+        "driver.trip.manual_completed",
         "driver.free_bucket.selected",
         "driver.free_bucket.cancelled",
         "driver.downtime.started",
@@ -103,6 +104,22 @@
             }
             if (event.local_trip_id && event.depends_on.indexOf(String(event.local_trip_id)) < 0) {
                 throw new Error("offline_manual_cancel_dependency_required");
+            }
+        }
+        if (event.event_type === "driver.trip.manual_completed") {
+            if ((event.trip_id ? 1 : 0) + (event.local_trip_id ? 1 : 0) !== 1) {
+                throw new Error("offline_manual_complete_identity_invalid");
+            }
+            if (
+                !number(event.payload.truck_id)
+                || !number(event.payload.excavator_id)
+                || event.payload.manual_control !== true
+            ) throw new Error("offline_manual_complete_context_incomplete");
+            if (number(event.payload.truck_id) !== number(event.equipment_id)) {
+                throw new Error("offline_manual_complete_truck_mismatch");
+            }
+            if (event.local_trip_id && event.depends_on.indexOf(String(event.local_trip_id)) < 0) {
+                throw new Error("offline_manual_complete_dependency_required");
             }
         }
         if (event.event_type === "driver.trip.dump_point_changed" && !number(event.payload.dump_point_id)) {
@@ -209,6 +226,46 @@
         return {
             event_id: String(options.eventId || randomId("driver-manual-load-cancel")),
             event_type: "driver.trip.loaded.cancelled",
+            occurred_at: String(options.occurredAt || nowIso()),
+            trip_id: tripId,
+            local_trip_id: localTripId || null,
+            depends_on: dependsOn,
+            payload: {
+                manual_control: true,
+                truck_id: number(options.truckId),
+                excavator_id: number(options.excavatorId),
+                dump_point_id: number(options.dumpPointId)
+            },
+            context_snapshot: clone(options.contextSnapshot || {})
+        };
+    }
+
+    function createDriverManualCompletedEvent(options) {
+        options = options || {};
+        var tripId = number(options.tripId);
+        var localTripId = String(options.localTripId || "");
+        if ((tripId ? 1 : 0) + (localTripId ? 1 : 0) !== 1) {
+            throw new Error("offline_manual_complete_identity_invalid");
+        }
+        var events = Array.isArray(options.events) ? options.events : [];
+        var latestPoint = events.filter(function (event) {
+            return event
+                && event.event_type === "driver.trip.dump_point_changed"
+                && !TERMINAL_STATES.has(String(event.state || "pending"))
+                && (
+                    (tripId && number(event.trip_id) === tripId)
+                    || (localTripId && String(event.local_trip_id || "") === localTripId)
+                );
+        }).sort(function (left, right) {
+            return Number(left.sequence || 0) - Number(right.sequence || 0);
+        }).pop();
+        var dependsOn = latestPoint
+            ? [String(latestPoint.event_id)]
+            : (localTripId ? [String(options.loadEventId || localTripId)] : []);
+        if (localTripId && dependsOn.indexOf(localTripId) < 0) dependsOn.push(localTripId);
+        return {
+            event_id: String(options.eventId || randomId("driver-manual-complete")),
+            event_type: "driver.trip.manual_completed",
             occurred_at: String(options.occurredAt || nowIso()),
             trip_id: tripId,
             local_trip_id: localTripId || null,
@@ -688,7 +745,10 @@
                             version: number(result.server_version || result.version)
                         });
                     }
-                    if (manualReceiptKey && event.event_type === "driver.trip.unloaded") {
+                    if (manualReceiptKey && (
+                        event.event_type === "driver.trip.unloaded"
+                        || event.event_type === "driver.trip.manual_completed"
+                    )) {
                         var activeManualReceipt = await repo.getMeta(manualReceiptKey);
                         var activeManualTripId = number(
                             activeManualReceipt
@@ -877,6 +937,7 @@
     root.createDriverOfflineOutbox = createDriverOfflineOutbox;
     root.createDriverManualLoadEvent = createDriverManualLoadEvent;
     root.createDriverManualLoadCancelledEvent = createDriverManualLoadCancelledEvent;
+    root.createDriverManualCompletedEvent = createDriverManualCompletedEvent;
     root.createDriverPointChangeEvent = createDriverPointChangeEvent;
     root.createDriverFreeBucketSelectedEvent = createDriverFreeBucketSelectedEvent;
     root.createDriverFreeBucketCancelledEvent = createDriverFreeBucketCancelledEvent;
@@ -891,6 +952,7 @@
             createDriverPointChangeEvent: createDriverPointChangeEvent,
             createDriverManualLoadEvent: createDriverManualLoadEvent,
             createDriverManualLoadCancelledEvent: createDriverManualLoadCancelledEvent,
+            createDriverManualCompletedEvent: createDriverManualCompletedEvent,
             createDriverFreeBucketSelectedEvent: createDriverFreeBucketSelectedEvent,
             createDriverFreeBucketCancelledEvent: createDriverFreeBucketCancelledEvent,
             isDriverSyncAuthResponse: isDriverSyncAuthResponse,
