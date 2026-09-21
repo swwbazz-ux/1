@@ -11,7 +11,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, HaulAssignment
-from core.production_time import production_work_date
+from core.production_time import production_work_date_for_shift
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import upsert_default_equipment_states
 from references.models import (
@@ -280,7 +280,10 @@ class ChaosP06P08LoadingParityRegressionTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.context['active_trip'].pk, expected_trip.pk)
 
-        work_date = production_work_date(self.operator_shift.opened_at)
+        work_date = production_work_date_for_shift(
+            self.operator_shift.opened_at,
+            self.operator_shift.shift_type,
+        )
         analytics = build_shift_analytics(work_date, 'day')
         self.assertEqual(analytics['totals']['loaded_trip_count'], 2)
         self.assertEqual(analytics['totals']['open_trip_count'], 2)
@@ -318,7 +321,10 @@ class ChaosP06P08LoadingParityRegressionTests(TestCase):
         self.rock.save(update_fields=['density'])
 
         analytics = build_shift_analytics(
-            production_work_date(self.operator_shift.opened_at),
+            production_work_date_for_shift(
+                self.operator_shift.opened_at,
+                self.operator_shift.shift_type,
+            ),
             'day',
         )
         self.assertEqual(analytics['totals']['volume_m3'], Decimal('80.00'))
@@ -395,7 +401,10 @@ class ChaosP06P08LoadingParityRegressionTests(TestCase):
             1,
         )
         analytics = build_shift_analytics(
-            production_work_date(self.operator_shift.opened_at),
+            production_work_date_for_shift(
+                self.operator_shift.opened_at,
+                self.operator_shift.shift_type,
+            ),
             'day',
         )
         self.assertEqual(analytics['totals']['loaded_trip_count'], 1)
