@@ -3,6 +3,7 @@
 
     var currentWorkspace = null;
     var currentController = null;
+    var currentReturnController = null;
     var currentTripTimer = null;
     var tripTimerInterval = null;
     var currentTripProjection = null;
@@ -24,13 +25,8 @@
         var workspace = currentWorkspace || (
             root.document && root.document.querySelector("[data-driver-manual-workspace]")
         );
-        var useTripContext = !!(
-            workspace && workspace.dataset.driverManualActiveOrigin === "driver_manual"
-        );
         var node = root.document && root.document.getElementById(
-            useTripContext
-                ? "driver-manual-workspace-context-data"
-                : "driver-manual-workspace-base-context-data"
+            "driver-manual-workspace-base-context-data"
         );
         if (!node && root.document) {
             node = root.document.getElementById("driver-manual-workspace-context-data");
@@ -46,10 +42,7 @@
         }
         if (!workspace) return {};
         if (workspace.__driverManualBaseContext) return clone(workspace.__driverManualBaseContext);
-        if (
-            workspace.dataset.driverManualActiveOrigin !== "driver_manual"
-            && positive(workspace.dataset.driverManualPrimaryExcavatorId)
-        ) {
+        if (positive(workspace.dataset.driverManualPrimaryExcavatorId)) {
             var primaryPoints = Array.prototype.slice.call(
                 workspace.querySelectorAll("[data-driver-manual-primary-point]")
             ).map(function (point) {
@@ -131,6 +124,19 @@
         return context;
     }
 
+    function readWorkspaceTripContext() {
+        var node = root.document && root.document.getElementById(
+            "driver-manual-workspace-context-data"
+        );
+        if (node) {
+            try {
+                var parsed = JSON.parse(node.textContent || "{}");
+                if (parsed && Object.keys(parsed).length) return parsed;
+            } catch (error) {}
+        }
+        return readWorkspaceContext();
+    }
+
     function activeContext() {
         var base = readWorkspaceContext();
         var freeBucketState = root.DriverFreeBucket && typeof root.DriverFreeBucket.currentState === "function"
@@ -164,6 +170,10 @@
             ? "Без сети · сохранено на телефоне"
             : "Сохранено на телефоне · отправляем";
         if (state === "confirmed") return "Подтверждено · рейс №" + String(detail || "");
+        if (state === "cancel-pending") return root.navigator && root.navigator.onLine === false
+            ? "ОТМЕНА СОХРАНЕНА · БЕЗ СЕТИ"
+            : "ОТМЕНА СОХРАНЕНА · ОТПРАВЛЯЕМ";
+        if (state === "cancelled") return "ПОСЛЕДНИЙ РЕЙС ОТМЕНЁН";
         if (state === "review") return String(detail || "Не принято · нужна сверка");
         if (state === "storage-error") return "Не сохранено · повторите отправку";
         return "";
@@ -180,7 +190,7 @@
     }
 
     function tripTimerLabel(pointName) {
-        return "В ПУТИ · " + String(pointName || "ТОЧКА НЕ УКАЗАНА").trim();
+        return "С ПОГРУЗКИ · " + String(pointName || "ТОЧКА НЕ УКАЗАНА").trim();
     }
 
     function renderTripTimer(workspace, nowValue) {
@@ -213,7 +223,7 @@
         timer.dataset.driverManualTimerActive = "true";
         timer.dataset.driverManualTimerStartedAt = String(currentTripTimer.startedAt);
         timer.dataset.driverManualTimerPointName = currentTripTimer.pointName;
-        if (state) state.textContent = "В ПУТИ";
+        if (state) state.textContent = "С ПОГРУЗКИ";
         if (destination) destination.textContent = currentTripTimer.pointName || "ТОЧКА НЕ УКАЗАНА";
         if (label && !state && !destination) label.textContent = copy;
         if (value) value.textContent = formatted;
@@ -259,6 +269,13 @@
             var isLast = !!selectedId && String(target.dataset.eoDumpTarget || "") === selectedId;
             target.classList.toggle("is-last-dump", isLast);
             target.dataset.driverManualLastSent = isLast ? "true" : "false";
+            if (isLast && currentTripProjection) {
+                target.dataset.eoHasPendingTrucks = "true";
+                target.dataset.eoReturnEnabled = "true";
+            } else {
+                delete target.dataset.eoHasPendingTrucks;
+                delete target.dataset.eoReturnEnabled;
+            }
             if (isLast) {
                 target.setAttribute("aria-current", "true");
                 selected = target;
@@ -279,12 +296,42 @@
         return ["conflict", "auth_required", "invalid"].indexOf(String(state || "")) >= 0;
     }
 
+    function sourceShouldBeLocked(isSaving, projection) {
+        return Boolean(isSaving || (projection && isTerminalState(projection.state)));
+    }
+
     function manualLoadFromEvents(events) {
         return (Array.isArray(events) ? events : [])
             .filter(function (event) { return event && event.event_type === "driver.trip.loaded"; })
             .slice()
             .sort(function (left, right) { return Number(left.sequence || 0) - Number(right.sequence || 0); })
             .pop() || null;
+    }
+
+    function latestManualCancel(events) {
+        return (Array.isArray(events) ? events : [])
+            .filter(function (event) {
+                return event
+                    && event.event_type === "driver.trip.loaded.cancelled"
+                    && !isTerminalState(event.state);
+            })
+            .slice()
+            .sort(function (left, right) { return Number(left.sequence || 0) - Number(right.sequence || 0); })
+            .pop() || null;
+    }
+
+    function manualCancelMatches(cancelEvent, projection, serverTripId) {
+        if (!cancelEvent) return false;
+        var cancelTripId = positive(cancelEvent.trip_id)
+            || positive(cancelEvent.server_ids && cancelEvent.server_ids.trip_id);
+        var cancelLocalId = String(cancelEvent.local_trip_id || "");
+        if (serverTripId && cancelTripId === positive(serverTripId)) return true;
+        if (projection && cancelTripId && cancelTripId === positive(projection.trip_id)) return true;
+        return !!(
+            projection
+            && cancelLocalId
+            && cancelLocalId === String(projection.local_trip_id || "")
+        );
     }
 
     function setResult(workspace, state, detail, sticky) {
@@ -366,6 +413,30 @@
         var serverTripId = shell && positive(shell.dataset.driverActiveTripId);
         var serverLoadedAt = shell && String(shell.dataset.driverActiveTripLoadedAt || "");
         var projected = manualLoadFromEvents(events);
+        var queuedCancel = latestManualCancel(events);
+        var confirmedCancel = receipt && receipt.event_type === "driver.trip.loaded.cancelled"
+            ? receipt
+            : null;
+        var activeCancel = queuedCancel || confirmedCancel;
+        if (
+            activeCancel
+            && (
+                manualCancelMatches(activeCancel, projected, serverTripId)
+                || (confirmedCancel && !projected && !serverTripId)
+            )
+            && (
+                !projected
+                || Date.parse(activeCancel.occurred_at || 0) >= Date.parse(projected.occurred_at || 0)
+            )
+        ) {
+            currentTripProjection = null;
+            stopTripTimer(workspace);
+            markLastDump(workspace, null);
+            setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, null));
+            setResult(workspace, queuedCancel ? "cancel-pending" : "cancelled", null, !!queuedCancel);
+            updatePointAction(workspace);
+            return {state: queuedCancel ? "cancelling" : "cancelled"};
+        }
         var unload = (Array.isArray(events) ? events : []).find(function (event) {
             return event.event_type === "driver.trip.unloaded" && (
                 (serverTripId && positive(event.trip_id) === serverTripId)
@@ -387,7 +458,7 @@
             return {state: "automatic", tripId: serverTripId};
         }
         if (serverOrigin === "driver_manual" && serverTripId) {
-            var serverContext = readWorkspaceContext();
+            var serverContext = readWorkspaceTripContext();
             var serverProjectionContext = serverTripProjectionContext(shell, serverContext);
             currentTripProjection = {
                 state: "confirmed",
@@ -399,9 +470,10 @@
                 payload: serverProjectionContext.payload,
                 context_snapshot: serverProjectionContext.context_snapshot
             };
+            syncWorkspaceContext(workspace);
             startTripTimer(workspace, projectionPointName(currentTripProjection), Date.parse(currentTripProjection.occurred_at));
             markLastDump(workspace, currentTripProjection.payload.dump_point_id);
-            setSourceLocked(workspace, false);
+            setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, currentTripProjection));
             setResult(workspace, "confirmed", serverTripId, false);
             return currentTripProjection;
         }
@@ -413,7 +485,12 @@
             requestAutomaticTripRefresh(receipt);
             return {state: "automatic", tripId: positive(receipt.server_ids && receipt.server_ids.trip_id)};
         }
-        if (!projected && receipt && receipt.trip_origin === "driver_manual") {
+        if (
+            !projected
+            && receipt
+            && receipt.event_type === "driver.trip.loaded"
+            && receipt.trip_origin === "driver_manual"
+        ) {
             projected = {
                 state: "confirmed",
                 event_id: receipt.event_id,
@@ -428,7 +505,7 @@
         currentTripProjection = projected;
         if (!projected) {
             stopTripTimer(workspace);
-            setSourceLocked(workspace, savingLocal);
+            setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, null));
             return null;
         }
         var latestPoint = (Array.isArray(events) ? events : [])
@@ -465,9 +542,10 @@
             setResult(workspace, "review", projected.last_error && projected.last_error.message, true);
             return projected;
         }
+        syncWorkspaceContext(workspace);
         markLastDump(workspace, projected.payload && projected.payload.dump_point_id);
         startTripTimer(workspace, pointName, Date.parse(projected.occurred_at));
-        setSourceLocked(workspace, false);
+        setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, projected));
         setResult(
             workspace,
             projected.state === "confirmed" ? "confirmed" : "pending",
@@ -633,11 +711,39 @@
         return target;
     }
 
+    function ensureCurrentProjectionTarget(workspace) {
+        var grid = workspace && workspace.querySelector(".eo-dashboard-unload-grid");
+        if (!grid) return null;
+        var currentPointId = positive(
+            currentTripProjection
+            && currentTripProjection.payload
+            && currentTripProjection.payload.dump_point_id
+        );
+        grid.querySelectorAll('[data-driver-manual-current-only="true"]').forEach(function (target) {
+            if (!currentPointId || positive(target.dataset.eoDumpTarget) !== currentPointId) target.remove();
+        });
+        if (!currentPointId) return null;
+        var selector = '[data-driver-manual-dump-target][data-eo-dump-target="' + String(currentPointId) + '"]';
+        var target = grid.querySelector(selector);
+        if (target) return target;
+        var pointName = projectionPointName(currentTripProjection) || "ТЕКУЩАЯ ТОЧКА";
+        var prototype = grid.querySelector("[data-driver-manual-dump-target]");
+        target = createManualDumpTarget(workspace.ownerDocument || root.document, currentPointId, pointName, prototype, false);
+        target.dataset.driverManualCurrentOnly = "true";
+        target.setAttribute("aria-label", pointName + ": текущая точка последнего ручного рейса");
+        grid.appendChild(target);
+        return target;
+    }
+
     function syncWorkspaceContext(workspace) {
-        if (!workspace || currentTripProjection) return activeContext();
+        if (!workspace) return activeContext();
         var context = activeContext();
         var points = Array.isArray(context.dump_points) ? context.dump_points : [];
-        if (!shouldRebuildWorkspaceContext(workspace, context)) return context;
+        if (!shouldRebuildWorkspaceContext(workspace, context)) {
+            ensureCurrentProjectionTarget(workspace);
+            if (currentReturnController) currentReturnController.bindAll();
+            return context;
+        }
         var previousKey = workspace.__driverManualContextKey;
         var nextKey = manualContextKey(context);
         rememberWorkspaceTargets(workspace, previousKey);
@@ -699,6 +805,8 @@
             });
             grid.classList.add("is-count-" + points.length);
         }
+        ensureCurrentProjectionTarget(workspace);
+        if (currentReturnController) currentReturnController.bindAll();
         return context;
     }
 
@@ -758,6 +866,71 @@
             acceptanceLocalId: context.free_bucket_acceptance_local_id,
             dependsOn: dependsOn,
             contextSnapshot: context
+        });
+    }
+
+    function buildManualLoadCancelEvent(workspace, target, events) {
+        if (!currentTripProjection || typeof root.createDriverManualLoadCancelledEvent !== "function") {
+            throw new Error("offline_runtime_unavailable");
+        }
+        var shell = workspace.closest("[data-driver-shell]");
+        var projection = currentTripProjection;
+        var context = clone(projection.context_snapshot || {});
+        var pointId = positive(target && target.dataset.eoDumpTarget)
+            || positive(projection.payload && projection.payload.dump_point_id);
+        return root.createDriverManualLoadCancelledEvent({
+            tripId: positive(projection.trip_id),
+            localTripId: positive(projection.trip_id) ? "" : String(projection.local_trip_id || ""),
+            loadEventId: String(projection.event_id || projection.local_trip_id || ""),
+            truckId: positive(shell && shell.dataset.driverCurrentTruckId) || positive(context.truck_id),
+            excavatorId: positive(context.excavator_id) || positive(workspace.dataset.driverManualExcavatorId),
+            dumpPointId: pointId,
+            events: events,
+            contextSnapshot: {
+                source: "driver_manual",
+                selected_dump_point_id: pointId,
+                selected_dump_point_name: String(target && target.dataset.eoDumpName || projectionPointName(projection))
+            }
+        });
+    }
+
+    function cancelManualLoad(workspace, target) {
+        var projection = currentTripProjection;
+        var outbox = root.driverOfflineOutbox;
+        if (
+            savingLocal
+            || !projection
+            || !outbox
+            || !target
+            || target.dataset.eoReturnEnabled !== "true"
+        ) return Promise.resolve(false);
+        savingLocal = true;
+        target.classList.add("is-return-pending");
+        setSourceLocked(workspace, true);
+        return outbox.pending().then(function (events) {
+            return buildManualLoadCancelEvent(workspace, target, events);
+        }).then(function (event) {
+            return outbox.enqueue(event);
+        }).then(function (saved) {
+            savingLocal = false;
+            currentTripProjection = null;
+            stopTripTimer(workspace);
+            markLastDump(workspace, null);
+            syncWorkspaceContext(workspace);
+            setSourceLocked(workspace, false);
+            setResult(workspace, "cancel-pending", null, true);
+            updatePointAction(workspace);
+            if (typeof root.driverHaptic === "function") root.driverHaptic([35, 45, 70], 170);
+            return saved;
+        }).catch(function (error) {
+            savingLocal = false;
+            currentTripProjection = projection;
+            target.classList.remove("is-return-pending");
+            setSourceLocked(workspace, sourceShouldBeLocked(false, projection));
+            setResult(workspace, "storage-error", null, true);
+            throw error;
+        }).finally(function () {
+            target.classList.remove("is-return-pending");
         });
     }
 
@@ -898,6 +1071,7 @@
         workspace = workspace || currentWorkspace || root.document.querySelector("[data-driver-manual-workspace]");
         if (!workspace) return;
         if (currentController) currentController.cancel();
+        if (currentReturnController) currentReturnController.cancel();
         closePointChooser(workspace);
         var result = workspace.querySelector("[data-driver-manual-result]");
         if (result) {
@@ -917,6 +1091,7 @@
         if (!workspace || !root.ExcavatorDashboardDrag) return null;
         if (currentWorkspace === workspace && currentController) {
             currentController.bindAll();
+            if (currentReturnController) currentReturnController.bindAll();
             syncWorkspaceContext(workspace);
             restoreProjection(root.driverOfflineOutbox, workspace).catch(function () {
                 renderProjection(workspace, root.driverOfflineEvents || []);
@@ -924,6 +1099,8 @@
             return currentController;
         }
         if (currentController) currentController.destroy();
+        if (currentReturnController) currentReturnController.destroy();
+        currentReturnController = null;
         currentWorkspace = workspace;
         var excavatorShell = workspace.querySelector("[data-driver-manual-eo-shell]");
         if (!excavatorShell) return null;
@@ -931,18 +1108,16 @@
         currentController = root.ExcavatorDashboardDrag.attach({
             shell: excavatorShell,
             sourceSelector: "[data-driver-manual-source]",
-            targetSelector: "[data-driver-manual-dump-target]",
+            targetSelector: '[data-driver-manual-dump-target]:not([data-driver-manual-current-only="true"])',
             gradientId: "driver-manual-drag-comet-light",
             canDrag: function () {
-                return !savingLocal && !(
-                    currentTripProjection && isTerminalState(currentTripProjection.state)
-                );
+                return !sourceShouldBeLocked(savingLocal, currentTripProjection);
             },
             isManual: function () { return false; },
             isInactive: function () { return false; },
             isBlocked: function () { return false; },
             onDrop: function (card, target) {
-                if (savingLocal || (currentTripProjection && isTerminalState(currentTripProjection.state))) return;
+                if (sourceShouldBeLocked(savingLocal, currentTripProjection)) return;
                 var outbox = root.driverOfflineOutbox;
                 if (!outbox) {
                     setResult(workspace, "storage-error", null, true);
@@ -963,7 +1138,7 @@
                     startTripTimer(workspace, target.dataset.eoDumpName, Date.parse(saved.occurred_at));
                     markLastDump(workspace, target.dataset.eoDumpTarget);
                     syncWorkspaceContext(workspace);
-                    setSourceLocked(workspace, false);
+                    setSourceLocked(workspace, sourceShouldBeLocked(false, saved));
                     setResult(workspace, "pending", null, true);
                     updatePointAction(workspace);
                 }).catch(function (error) {
@@ -971,9 +1146,7 @@
                     workspace.dataset.driverManualLastError = String(error && error.message || "manual_load_failed");
                     currentTripProjection = previousProjection;
                     if (!previousProjection) stopTripTimer(workspace);
-                    setSourceLocked(workspace, !!(
-                        previousProjection && isTerminalState(previousProjection.state)
-                    ));
+                    setSourceLocked(workspace, sourceShouldBeLocked(false, previousProjection));
                     setResult(workspace, "storage-error", null, true);
                 });
             },
@@ -985,6 +1158,21 @@
                 }
             }
         });
+        if (root.ExcavatorDumpReturnSwipe) {
+            currentReturnController = root.ExcavatorDumpReturnSwipe.attach({
+                shell: excavatorShell,
+                targetSelector: "[data-driver-manual-dump-target]",
+                canStart: function (target) {
+                    return !savingLocal
+                        && !!currentTripProjection
+                        && !isTerminalState(currentTripProjection.state)
+                        && target.dataset.eoReturnEnabled === "true";
+                },
+                onReturn: function (target) {
+                    cancelManualLoad(workspace, target).catch(function () {});
+                }
+            });
+        }
         syncWorkspaceContext(workspace);
         restoreProjection(root.driverOfflineOutbox, workspace).catch(function () {
             renderProjection(workspace, root.driverOfflineEvents || []);
@@ -1161,6 +1349,7 @@
             });
             root.addEventListener("blur", function () {
                 if (currentController) currentController.cancel();
+                if (currentReturnController) currentReturnController.cancel();
             });
             if (root.document && root.document.addEventListener) {
                 root.document.addEventListener("visibilitychange", function () {
@@ -1181,6 +1370,7 @@
     root.DriverManualExcavatorWorkspace = {
         bindAll: bindAll,
         readWorkspaceContext: readWorkspaceContext,
+        readWorkspaceTripContext: readWorkspaceTripContext,
         open: openWorkspace,
         close: closeWorkspace,
         openFreeBucket: openFreeBucket,
@@ -1188,6 +1378,7 @@
         closePointChooser: closePointChooser,
         selectManualPoint: selectManualPoint,
         createManualDumpTarget: createManualDumpTarget,
+        ensureCurrentProjectionTarget: ensureCurrentProjectionTarget,
         setManualTargetOneOff: setManualTargetOneOff,
         manualContextKey: manualContextKey,
         renderedContextKey: renderedContextKey,
@@ -1196,6 +1387,7 @@
         cachedWorkspaceTargets: cachedWorkspaceTargets,
         serverTripProjectionContext: serverTripProjectionContext,
         requestAutomaticTripRefresh: requestAutomaticTripRefresh,
+        sourceShouldBeLocked: sourceShouldBeLocked,
         dumpNameSizeClass: dumpNameSizeClass,
         formatElapsedTime: formatElapsedTime,
         tripTimerLabel: tripTimerLabel,
@@ -1203,6 +1395,8 @@
         startTripTimer: startTripTimer,
         stopTripTimer: stopTripTimer,
         markLastDump: markLastDump,
+        buildManualLoadCancelEvent: buildManualLoadCancelEvent,
+        cancelManualLoad: cancelManualLoad,
         renderProjection: renderProjection,
         restoreProjection: restoreProjection,
         buildManualLoadEvent: buildManualLoadEvent,

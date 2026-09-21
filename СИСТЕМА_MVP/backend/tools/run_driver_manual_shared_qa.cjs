@@ -201,6 +201,7 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
         observe(driverPage);
         let manualTripNumber = 9000;
         const syncedManualEvents = [];
+        const syncedManualCancelEvents = [];
         await driverPage.route('**/offline-events/sync/', async (route) => {
             const request = route.request();
             const batch = JSON.parse(request.postData() || '{}');
@@ -216,6 +217,16 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
                         trip_origin: 'driver_manual',
                     };
                 }
+                if (event.event_type === 'driver.trip.loaded.cancelled') {
+                    syncedManualCancelEvents.push(event);
+                    return {
+                        event_id: event.event_id,
+                        status: 'accepted',
+                        server_received_at: new Date().toISOString(),
+                        server_ids: {trip_id: event.trip_id, shift_id: event.shift_id},
+                        trip_origin: 'driver_manual',
+                    };
+                }
                 return {event_id: event.event_id, status: 'accepted', server_ids: {}};
             });
             await route.fulfill({
@@ -225,8 +236,16 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
             });
         });
         await openAuthenticated(driverContext, driverPage, driverSessionKey, driverPhone, driverPin, '/driver/');
-        await driverPage.locator('[data-driver-manual-open]').waitFor({ state: 'visible' });
-        await driverPage.locator('[data-driver-manual-open]').click();
+        const manualOpen = driverPage.locator('[data-driver-manual-open]');
+        await manualOpen.waitFor({state: 'attached'});
+        if (await manualOpen.isVisible()) {
+            await manualOpen.click();
+        } else {
+            await driverPage.evaluate(() => {
+                const control = document.querySelector('[data-driver-manual-open]');
+                window.DriverManualExcavatorWorkspace.open(control);
+            });
+        }
         await driverPage.locator('[data-driver-manual-workspace]').waitFor({ state: 'visible' });
         const source = driverPage.locator('[data-driver-manual-source]').first();
         const targets = driverPage.locator('[data-driver-manual-dump-target]');
@@ -493,7 +512,7 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
         }));
         assert(timerAfterDrop.active === 'true', 'Trip timer did not start after the completed dispatch gesture.');
         assert(timerAfterDrop.pointName === timerTargetName && timerAfterDrop.destination === timerTargetName, 'Trip timer is not tied to the selected destination.');
-        assert(timerAfterDrop.state === 'В ПУТИ' && timerAfterDrop.destinationFontSize >= 16, `Trip destination is not readable: ${JSON.stringify(timerAfterDrop)}.`);
+        assert(timerAfterDrop.state === 'С ПОГРУЗКИ' && timerAfterDrop.destinationFontSize >= 16, `Trip destination is not readable: ${JSON.stringify(timerAfterDrop)}.`);
         assert(timerAfterDrop.resultInside, 'Save status is still rendered as a floating banner instead of inside the timer.');
         assert(timerAfterDrop.value !== '00:00:00', 'Trip timer did not advance after one second.');
         const lastTargets = driverPage.locator('[data-driver-manual-dump-target].is-last-dump');
@@ -526,6 +545,47 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
         assert(secondTimer.active === 'true' && secondTimer.pointName === secondPointName, 'The second manual swipe did not start the next destination timer.');
         assert(!(await driverPage.locator('[data-driver-manual-source]').isDisabled()), 'The second manual cycle again blocked the source card.');
         report.checks.push('A second swipe works without a separate unload confirmation, depends on the previous durable event, and restarts the timer for its own destination.');
+
+        const returnTarget = driverPage.locator('[data-driver-manual-dump-target].is-last-dump').first();
+        assert(await returnTarget.count() === 1, 'The latest manual destination is unavailable for the return gesture.');
+        const returnStart = await center(returnTarget);
+
+        await dispatchTouch(cdp, 'touchStart', returnStart);
+        await dispatchTouch(cdp, 'touchMove', {x: returnStart.x, y: returnStart.y - 30});
+        await driverPage.waitForTimeout(40);
+        assert(await returnTarget.evaluate((node) => node.classList.contains('is-return-swiping')), 'The shared elastic return state did not start.');
+        assert(!(await returnTarget.evaluate((node) => node.classList.contains('is-return-armed'))), 'A short upward pull armed cancellation too early.');
+        await dispatchTouch(cdp, 'touchEnd');
+        await driverPage.waitForTimeout(60);
+        assert(await returnTarget.evaluate((node) => node.classList.contains('is-return-rebounding')), 'A released short pull did not enter the shared spring rebound.');
+        assert(syncedManualCancelEvents.length === 0, 'A sub-threshold spring gesture created a cancellation event.');
+        await driverPage.waitForTimeout(900);
+
+        await dispatchTouch(cdp, 'touchStart', returnStart);
+        await dispatchTouch(cdp, 'touchMove', {x: returnStart.x + 2, y: returnStart.y - 62});
+        await driverPage.waitForTimeout(60);
+        const armedReturn = await returnTarget.evaluate((node) => ({
+            swiping: node.classList.contains('is-return-swiping'),
+            armed: node.classList.contains('is-return-armed'),
+            offset: getComputedStyle(node).getPropertyValue('--eo-return-drag-y').trim(),
+            progress: getComputedStyle(node).getPropertyValue('--eo-return-swipe-progress').trim(),
+        }));
+        assert(armedReturn.swiping && armedReturn.armed, `The shared return gesture did not arm at the Excavator threshold: ${JSON.stringify(armedReturn)}`);
+        assert(armedReturn.offset && armedReturn.progress, 'The rubber-band offset/progress was not applied to the dump card.');
+        const returnArmedShot = path.join(outputDir, 'I-driver-dump-return-armed-412x915.png');
+        await driverPage.screenshot({path: returnArmedShot});
+        report.screenshots.push({id: 'I', file: path.basename(returnArmedShot), url: driverPage.url()});
+        await dispatchTouch(cdp, 'touchEnd');
+        await driverPage.waitForTimeout(60);
+        assert(await returnTarget.evaluate((node) => node.classList.contains('is-return-rebounding')), 'Successful return did not reuse the shared spring rebound.');
+        await driverPage.waitForTimeout(1300);
+        assert(syncedManualCancelEvents.length === 1, `Upward return did not enqueue exactly one Driver cancellation: ${syncedManualCancelEvents.length}`);
+        assert(syncedManualCancelEvents[0].event_type === 'driver.trip.loaded.cancelled', 'Return gesture used the wrong event type.');
+        assert(Number(syncedManualCancelEvents[0].trip_id) === 9002, 'Return gesture did not reference the exact latest confirmed manual trip.');
+        assert(await driverPage.locator('[data-driver-manual-trip-timer]').getAttribute('data-driver-manual-timer-active') === 'false', 'Trip timer kept running after the durable cancellation mark.');
+        assert(await driverPage.locator('[data-driver-manual-dump-target].is-last-dump').count() === 0, 'Cancelled destination remained highlighted as the current trip.');
+        assert(!(await driverPage.locator('[data-driver-manual-source]').isDisabled()), 'Source did not become available after cancellation.');
+        report.checks.push('The latest destination reuses the Excavator rubber-band pull, threshold and four-step spring rebound; a short pull cancels nothing, while a full upward swipe durably cancels exactly the latest pure Driver-manual trip.');
 
         await driverPage.waitForTimeout(900);
 

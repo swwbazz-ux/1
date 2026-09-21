@@ -21,12 +21,25 @@ test("Driver reports durable manual-trip states without a false server confirmat
     assert.equal(driverRuntime.resultText("storage-error"), "Не сохранено · повторите отправку");
 });
 
+test("manual cancellation copy is explicit and does not claim a second unload", () => {
+    assert.match(driverRuntime.resultText("cancel-pending"), /ОТМЕН/);
+    assert.match(driverRuntime.resultText("cancelled"), /РЕЙС ОТМЕН/);
+});
+
+test("manual loading locks only while saving or while a terminal sync error needs review", () => {
+    assert.equal(driverRuntime.sourceShouldBeLocked(false, null), false);
+    assert.equal(driverRuntime.sourceShouldBeLocked(true, null), true);
+    assert.equal(driverRuntime.sourceShouldBeLocked(false, {state: "pending"}), false);
+    assert.equal(driverRuntime.sourceShouldBeLocked(false, {state: "confirmed"}), false);
+    assert.equal(driverRuntime.sourceShouldBeLocked(false, {state: "conflict"}), true);
+});
+
 test("trip timer formats elapsed time and names the selected destination", () => {
     assert.equal(driverRuntime.formatElapsedTime(0), "00:00:00");
     assert.equal(driverRuntime.formatElapsedTime(65), "00:01:05");
     assert.equal(driverRuntime.formatElapsedTime(3661), "01:01:01");
     assert.equal(driverRuntime.formatElapsedTime(-12), "00:00:00");
-    assert.equal(driverRuntime.tripTimerLabel("СКЛАД 2.1"), "В ПУТИ · СКЛАД 2.1");
+    assert.equal(driverRuntime.tripTimerLabel("СКЛАД 2.1"), "С ПОГРУЗКИ · СКЛАД 2.1");
 });
 
 test("confirmed manual trip takes its current destination from the fresh server fragment", () => {
@@ -192,10 +205,17 @@ test("manual controls keep three columns and stack actions timer and source with
 });
 
 test("Driver binds the common gesture to the real Excavator shell and preserves its active motion", () => {
+    const driverShell = read("templates", "users", "driver_shift.html");
     const source = read("static", "js", "driver-manual-excavator-workspace-v1.js");
     const css = read("static", "css", "driver-manual-excavator-workspace-v1.css");
+    assert.match(driverShell, /excavator-dump-return-swipe-v1\.js/);
     assert.match(source, /var excavatorShell = workspace\.querySelector\("\[data-driver-manual-eo-shell\]"\)/);
     assert.match(source, /ExcavatorDashboardDrag\.attach\(\{\s*shell: excavatorShell,/s);
+    assert.match(source, /ExcavatorDumpReturnSwipe\.attach\(\{\s*shell: excavatorShell,/s);
+    assert.match(source, /target\.dataset\.eoReturnEnabled === "true"/);
+    assert.match(source, /createDriverManualLoadCancelledEvent/);
+    assert.match(source, /data-driver-manual-current-only/);
+    assert.match(source, /targetSelector: '\[data-driver-manual-dump-target\]:not\(\[data-driver-manual-current-only="true"\]\)'/);
     assert.match(css, /:not\(\.is-truck-drag-active\) \.driver-manual-workspace__dump-card\s*\{\s*height:\s*100% !important;/s);
     assert.doesNotMatch(css, /\[data-driver-manual-eo-shell\] \.driver-manual-workspace__dump-card\s*\{[^}]*height:\s*100% !important;/s);
     assert.match(css, /\.is-driver-manual-one-off:not\(\.is-last-dump\):not\(\.is-drop-ready\)/);
@@ -397,7 +417,7 @@ test("a server free-bucket fragment keeps the primary assignment as the cancella
     const previousFreeBucket = global.DriverFreeBucket;
     const workspace = {
         dataset: {
-            driverManualActiveOrigin: "",
+            driverManualActiveOrigin: "driver_manual",
             driverManualPrimaryTruckId: "43",
             driverManualPrimaryExcavatorId: "2",
             driverManualPrimaryExcavatorLabel: "EXC-1",
@@ -449,6 +469,50 @@ test("a server free-bucket fragment keeps the primary assignment as the cancella
         else global.document = previousDocument;
         if (previousFreeBucket === undefined) delete global.DriverFreeBucket;
         else global.DriverFreeBucket = previousFreeBucket;
+    }
+});
+
+test("an active free-bucket trip stays separate from the primary context of the next loading", () => {
+    const previousDocument = global.document;
+    const workspace = {
+        dataset: {driverManualActiveOrigin: "driver_manual"},
+        querySelector() { return null; },
+        querySelectorAll() { return []; }
+    };
+    const scripts = {
+        "driver-manual-workspace-base-context-data": {
+            textContent: JSON.stringify({
+                authority_type: "assignment",
+                assignment_id: 71,
+                excavator_id: 2,
+                excavator_label: "ЭКС-1",
+                dump_points: [{id: 2, name: "СКЛАД 2.1"}]
+            })
+        },
+        "driver-manual-workspace-context-data": {
+            textContent: JSON.stringify({
+                authority_type: "free_bucket",
+                free_bucket_acceptance_id: 81,
+                excavator_id: 3,
+                excavator_label: "ЭКС-99",
+                dump_points: [{id: 3, name: "ККД"}]
+            })
+        }
+    };
+    global.document = {
+        getElementById(id) { return scripts[id] || null; },
+        querySelector() { return workspace; }
+    };
+    try {
+        const nextLoading = driverRuntime.readWorkspaceContext();
+        const currentTrip = driverRuntime.readWorkspaceTripContext();
+        assert.equal(nextLoading.authority_type, "assignment");
+        assert.equal(nextLoading.excavator_id, 2);
+        assert.equal(currentTrip.authority_type, "free_bucket");
+        assert.equal(currentTrip.excavator_id, 3);
+    } finally {
+        if (previousDocument === undefined) delete global.document;
+        else global.document = previousDocument;
     }
 });
 

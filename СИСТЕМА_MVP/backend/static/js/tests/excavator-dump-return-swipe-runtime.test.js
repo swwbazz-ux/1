@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const sharedReturn = require(path.join(__dirname, "..", "excavator-dump-return-swipe-v1.js"));
 
 const backendRoot = path.resolve(__dirname, "..", "..", "..");
 const templateSource = fs.readFileSync(
@@ -45,15 +46,11 @@ function extractBraceBlock(source, signature, label) {
 }
 
 test("direct dump return requires a confident upward swipe", () => {
-    const source = extractBraceBlock(templateSource, "function isDumpReturnSwipe", "swipe classifier");
-    const context = {};
-    vm.runInNewContext(`${source}; this.classify = isDumpReturnSwipe;`, context);
-
-    assert.equal(context.classify(0, -47), false);
-    assert.equal(context.classify(0, -48), true);
-    assert.equal(context.classify(20, -56), true);
-    assert.equal(context.classify(50, -56), false);
-    assert.equal(context.classify(0, 80), false);
+    assert.equal(sharedReturn.isDumpReturnSwipe(0, -47), false);
+    assert.equal(sharedReturn.isDumpReturnSwipe(0, -48), true);
+    assert.equal(sharedReturn.isDumpReturnSwipe(20, -56), true);
+    assert.equal(sharedReturn.isDumpReturnSwipe(50, -56), false);
+    assert.equal(sharedReturn.isDumpReturnSwipe(0, 80), false);
 });
 
 test("direct return resolves the explicitly marked newest truck and submits once", async () => {
@@ -107,21 +104,6 @@ test("direct return resolves the explicitly marked newest truck and submits once
 });
 
 test("successful swipe restarts and clears the dump-card rebound", () => {
-    const releaseSource = extractBraceBlock(
-        templateSource,
-        "function setDumpReturnReleaseVector",
-        "dump return release vector"
-    );
-    const clearReleaseSource = extractBraceBlock(
-        templateSource,
-        "function clearDumpReturnReleaseVector",
-        "dump return release cleanup"
-    );
-    const reboundSource = extractBraceBlock(
-        templateSource,
-        "function playDumpReturnRebound",
-        "dump return rebound"
-    );
     const classes = new Set(["is-return-rebounding"]);
     const timers = [];
     let layoutReads = 0;
@@ -139,25 +121,18 @@ test("successful swipe restarts and clears the dump-card rebound", () => {
             return 120;
         },
     };
-    const context = {
-        window: {
-            setTimeout(callback, delay) {
-                timers.push({callback, delay});
-            },
+    const timerRoot = {
+        setTimeout(callback, delay) {
+            timers.push({callback, delay});
         },
     };
-    vm.runInNewContext(
-        `${releaseSource}\n${clearReleaseSource}\n${reboundSource}; this.run = playDumpReturnRebound;`,
-        context
-    );
-
-    context.run(target, {
+    sharedReturn.playDumpReturnRebound(target, {
         elasticX: 12,
         elasticY: -64,
         elasticTilt: 2,
         elasticStretchX: 1.02,
         elasticStretchY: 1.04,
-    });
+    }, timerRoot);
     assert.equal(layoutReads, 1);
     assert.equal(classes.has("is-return-rebounding"), true);
     assert.equal(timers.length, 1);
@@ -168,15 +143,16 @@ test("successful swipe restarts and clears the dump-card rebound", () => {
 });
 
 test("gesture, fallback queue and realtime safety contracts stay wired", () => {
-    assert.match(templateSource, /target\.addEventListener\("pointerup"[\s\S]*returnLastTruckFromDump\(target\)/);
-    assert.match(templateSource, /target\.addEventListener\("pointerup"[\s\S]*playDumpReturnRebound\(target, releasedSwipe\)[\s\S]*returnLastTruckFromDump\(target\)/);
-    assert.match(templateSource, /window\.setTimeout\(function \(\) \{[\s\S]*openDumpQueueModal\(target\)[\s\S]*\}, 560\)/);
+    assert.match(templateSource, /excavator-dump-return-swipe-v1\.js/);
+    assert.match(templateSource, /ExcavatorDumpReturnSwipe\.attach\(\{[\s\S]*holdMs: 560/);
+    assert.match(templateSource, /onHold: openDumpQueueModal/);
+    assert.match(templateSource, /onReturn: returnLastTruckFromDump/);
+    assert.doesNotMatch(templateSource, /function isDumpReturnSwipe/);
     assert.match(templateSource, /\.eo-dashboard-unload-card\.is-return-swiping/);
     assert.match(shiftCss, /\.eo-dashboard-unload-card\.is-return-swiping[\s\S]*translate3d\(var\(--eo-return-drag-x\), var\(--eo-return-drag-y\), 0\)/);
-    assert.match(templateSource, /setProperty\("--eo-return-swipe-progress", String\(progress\)\)/);
     assert.match(shiftCss, /\.eo-dashboard-unload-card\.is-return-rebounding[\s\S]*animation: eo-dump-return-rebound \.82s/);
     assert.match(shiftCss, /@keyframes eo-dump-return-rebound[\s\S]*--eo-return-bounce-1-y[\s\S]*--eo-return-bounce-2-y[\s\S]*--eo-return-bounce-3-y[\s\S]*--eo-return-bounce-4-y/);
-    assert.match(templateSource, /\.eo-dashboard-unload-card\.is-return-pending/);
+    assert.match(templateSource, /is-return-pending/);
     assert.match(shiftCss, /touch-action: pan-x !important;/);
     assert.match(shiftCss, /\[data-eo-last-sent-truck="true"\]/);
     assert.match(shiftCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.is-return-rebounding[\s\S]*animation: none !important/);

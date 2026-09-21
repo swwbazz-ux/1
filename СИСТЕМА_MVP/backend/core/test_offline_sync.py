@@ -181,6 +181,39 @@ class OfflineEventSyncTests(TestCase):
         event.update(changes)
         return event
 
+    def driver_manual_cancel_event(
+        self,
+        loaded,
+        event_id='driver-manual-load-cancel-1',
+        sequence=2,
+        *,
+        trip_id=None,
+        occurred_at=None,
+    ):
+        loaded_at = timezone.datetime.fromisoformat(loaded['occurred_at'])
+        return {
+            'event_id': event_id,
+            'event_type': 'driver.trip.loaded.cancelled',
+            'format_version': 1,
+            'occurred_at': (occurred_at or loaded_at + timedelta(seconds=1)).isoformat(),
+            'sequence': sequence,
+            'depends_on': [] if trip_id else [loaded['event_id']],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip_id,
+            'local_trip_id': '' if trip_id else loaded['local_trip_id'],
+            'context_snapshot': {
+                'source': 'driver_manual',
+                'selected_dump_point_id': loaded['payload']['dump_point_id'],
+            },
+            'payload': {
+                'manual_control': True,
+                'truck_id': self.truck.id,
+                'excavator_id': loaded['payload']['excavator_id'],
+                'dump_point_id': loaded['payload']['dump_point_id'],
+            },
+        }
+
     def driver_free_bucket_manual_event(
         self,
         event_id='driver-free-bucket-manual-load-1',
@@ -622,6 +655,111 @@ class OfflineEventSyncTests(TestCase):
             action_type='driver_manual_cycle_advanced',
             client_action_id=second['event_id'],
         ).exists())
+
+    def test_driver_manual_load_can_be_cancelled_by_exact_upward_swipe_event(self):
+        loaded = self.driver_manual_event('driver-load-to-cancel', 1)
+        cancelled = self.driver_manual_cancel_event(loaded)
+
+        results = self.sync(
+            [cancelled, loaded],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-cancel-device',
+        ).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'])
+        trip = Trip.objects.get()
+        self.assertEqual(trip.status, TripStatus.CANCELLED)
+        self.assertEqual({item['server_ids']['trip_id'] for item in results}, {trip.id})
+        self.assertTrue(TripClientAction.objects.filter(
+            trip=trip,
+            action_type='driver_manual_loaded_cancel',
+            client_action_id=cancelled['event_id'],
+        ).exists())
+
+        repeated = self.sync(
+            [cancelled],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-cancel-device',
+        ).json()['results'][0]
+        self.assertEqual(repeated['status'], 'deduplicated')
+        self.assertEqual(Trip.objects.count(), 1)
+
+    def test_driver_manual_cancel_by_server_trip_rejects_second_distinct_event(self):
+        loaded = self.driver_manual_event('driver-confirmed-load-to-cancel', 1)
+        loaded_result = self.sync(
+            [loaded],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-confirmed-cancel-device',
+        ).json()['results'][0]
+        trip = Trip.objects.get(pk=loaded_result['server_ids']['trip_id'])
+        cancelled = self.driver_manual_cancel_event(
+            loaded,
+            'driver-confirmed-cancel',
+            2,
+            trip_id=trip.id,
+        )
+        accepted = self.sync(
+            [cancelled],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-confirmed-cancel-device',
+        ).json()['results'][0]
+        self.assertEqual(accepted['status'], 'accepted', accepted)
+
+        second = self.driver_manual_cancel_event(
+            loaded,
+            'driver-confirmed-cancel-again',
+            3,
+            trip_id=trip.id,
+            occurred_at=timezone.datetime.fromisoformat(cancelled['occurred_at']) + timedelta(seconds=1),
+        )
+        rejected = self.sync(
+            [second],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-confirmed-cancel-device',
+        ).json()['results'][0]
+        self.assertEqual(rejected['status'], 'conflict', rejected)
+        self.assertEqual(rejected['code'], 'trip_not_cancellable')
+        self.assertEqual(Trip.objects.count(), 1)
+
+    def test_driver_cannot_cancel_trip_claimed_by_actual_excavator_load(self):
+        loaded = self.driver_manual_event('driver-load-claimed-by-excavator', 1)
+        driver_result = self.sync(
+            [loaded],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-claimed-device',
+        ).json()['results'][0]
+        automatic = self.load_event(
+            'excavator-claims-driver-load',
+            1,
+            occurred_at=timezone.datetime.fromisoformat(loaded['occurred_at']) + timedelta(milliseconds=500),
+        )
+        automatic_result = self.sync(
+            [automatic],
+            device_id='excavator-claims-device',
+        ).json()['results'][0]
+        self.assertEqual(automatic_result['server_ids']['trip_id'], driver_result['server_ids']['trip_id'])
+
+        cancelled = self.driver_manual_cancel_event(
+            loaded,
+            'driver-cancel-after-actual-load',
+            2,
+            trip_id=driver_result['server_ids']['trip_id'],
+        )
+        result = self.sync(
+            [cancelled],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-claimed-device',
+        ).json()['results'][0]
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(result['code'], 'automatic_load_cannot_be_cancelled_by_driver')
+        self.assertEqual(Trip.objects.get().status, TripStatus.LOADED_WAITING_UNLOAD)
 
     def test_exact_retry_is_deduplicated_and_payload_reuse_is_conflict(self):
         event = self.load_event()
@@ -1654,6 +1792,15 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
     def driver_event(self, event_id, sequence):
         return OfflineEventSyncTests.driver_manual_event(self, event_id, sequence)
 
+    def driver_cancel_event(self, loaded, event_id, sequence, trip_id):
+        return OfflineEventSyncTests.driver_manual_cancel_event(
+            self,
+            loaded,
+            event_id,
+            sequence,
+            trip_id=trip_id,
+        )
+
     def post_from_thread(
         self,
         event,
@@ -1780,6 +1927,58 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
         self.assertEqual(trip.driver_id, self.driver.id)
         self.assertEqual(trip.driver_control_shift_id, self.truck_shift.id)
         self.assertTrue(trip.driver_participation_recorded)
+
+    def test_driver_cancel_racing_actual_excavator_load_keeps_one_open_trip(self):
+        driver_event = self.driver_event('parallel-driver-before-cancel', 1)
+        _, driver_result = self.post_from_thread(
+            driver_event,
+            'parallel-driver-cancel-device',
+            role_code='driver',
+            session_cookie=self.driver_session_cookie,
+        )
+        self.assertEqual(driver_result['status'], 'accepted', driver_result)
+        first_trip_id = driver_result['server_ids']['trip_id']
+        cancel_event = self.driver_cancel_event(
+            driver_event,
+            'parallel-driver-cancel',
+            2,
+            first_trip_id,
+        )
+        excavator_event = self.event('parallel-excavator-actual-after-cancel', 1)
+        excavator_event['occurred_at'] = (
+            timezone.datetime.fromisoformat(driver_event['occurred_at']) + timedelta(milliseconds=500)
+        ).isoformat()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(
+                    self.post_from_thread,
+                    cancel_event,
+                    'parallel-driver-cancel-device',
+                    role_code='driver',
+                    session_cookie=self.driver_session_cookie,
+                ),
+                pool.submit(
+                    self.post_from_thread,
+                    excavator_event,
+                    'parallel-excavator-after-cancel-device',
+                ),
+            ]
+            results = [future.result() for future in futures]
+
+        self.assertEqual([item[0] for item in results], [200, 200], results)
+        self.assertEqual(results[1][1]['status'], 'accepted', results)
+        self.assertIn(results[0][1]['status'], {'accepted', 'conflict'}, results)
+        self.assertEqual(
+            Trip.objects.filter(status=TripStatus.LOADED_WAITING_UNLOAD).count(),
+            1,
+            results,
+        )
+        self.assertEqual(
+            TripClientAction.objects.filter(action_type='truck_loaded').count(),
+            1,
+            results,
+        )
 
     def test_two_devices_racing_for_truck_do_not_create_two_open_trips(self):
         events = [

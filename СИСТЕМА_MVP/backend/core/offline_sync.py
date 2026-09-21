@@ -41,6 +41,7 @@ SUPPORTED_EVENT_ROLES = {
     'driver.trip.unloaded': 'driver',
     'driver.trip.dump_point_changed': 'driver',
     'driver.trip.loaded': 'driver',
+    'driver.trip.loaded.cancelled': 'driver',
     'driver.free_bucket.selected': 'driver',
     'driver.free_bucket.cancelled': 'driver',
     'driver.downtime.started': 'driver',
@@ -1662,6 +1663,124 @@ def _process_excavator_loaded_cancelled(access, normalized):
     }
 
 
+def _process_driver_loaded_cancelled(access, normalized):
+    """Cancel only the Driver's latest open manual-load mark."""
+    from trips.free_bucket import close_free_bucket_acceptance_for_trip
+    from trips.models import OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
+    from trips.trip_creation import lock_trip_participant_equipment
+    from trips.views import reconcile_excavator_waiting_for_trucks
+
+    payload = normalized['payload']
+    truck_id = _positive_int(payload.get('truck_id'), field='truck_id')
+    excavator_id = _positive_int(payload.get('excavator_id'), field='excavator_id')
+    dump_point_id = _positive_int(payload.get('dump_point_id'), field='dump_point_id')
+    if payload.get('manual_control') is not True:
+        _invalid(
+            'driver_manual_flag_required',
+            'Событие не помечено как отмена ручной отправки водителя.',
+        )
+
+    lock_idempotency_key('trip_load_pair', f'{excavator_id}:{truck_id}')
+    shift = _locked_shift(access, normalized, role_code='driver')
+    if truck_id != shift.equipment_id:
+        _conflict(
+            'driver_manual_truck_changed',
+            'Самосвал не принадлежит текущей смене водителя.',
+        )
+    lock_production_state()
+    excavator, truck = lock_trip_participant_equipment(
+        excavator_id=excavator_id,
+        truck_id=truck_id,
+    )
+    trip = _resolve_trip_reference(access, normalized)
+    if trip.truck_id != truck.id or trip.excavator_id != excavator.id:
+        _conflict(
+            'driver_manual_trip_changed',
+            'Последний ручной рейс относится к другой технике.',
+        )
+    if (
+        trip.driver_id != access.employee_id
+        or trip.driver_control_shift_id != shift.id
+        or not trip.driver_participation_recorded
+    ):
+        _conflict(
+            'trip_owner_changed',
+            'Ручной рейс не принадлежит текущей смене водителя.',
+        )
+    if normalized['occurred_at'] < (trip.loaded_at or trip.created_at):
+        _conflict(
+            'cancel_before_load',
+            'Время отмены раньше времени ручной погрузки.',
+        )
+    if trip.status != TripStatus.LOADED_WAITING_UNLOAD:
+        _conflict(
+            'trip_not_cancellable',
+            'Последний ручной рейс уже завершён, отменён или заменён следующим.',
+        )
+    current_open_trip = Trip.objects.select_for_update(of=('self',)).filter(
+        truck=truck,
+        status__in=OPEN_TRIP_STATUSES,
+    ).first()
+    if not current_open_trip or current_open_trip.id != trip.id:
+        _conflict(
+            'driver_manual_trip_changed',
+            'После этого ручного рейса состояние самосвала уже изменилось.',
+        )
+    actual_dump_point_id = trip.actual_dump_point_id or trip.dump_point_id
+    if actual_dump_point_id != dump_point_id:
+        _conflict(
+            'driver_manual_dump_point_changed',
+            'Точка последнего ручного рейса уже изменилась.',
+        )
+    if not TripClientAction.objects.select_for_update(of=('self',)).filter(
+        trip=trip,
+        action_type='driver_manual_loaded',
+        actor=access.employee,
+    ).exists():
+        _conflict(
+            'driver_manual_trip_required',
+            'Отменять свайпом можно только ручной рейс этого водителя.',
+        )
+    if TripClientAction.objects.select_for_update(of=('self',)).filter(
+        trip=trip,
+        action_type__in=['truck_loaded', 'free_bucket_loaded'],
+    ).exists():
+        _conflict(
+            'automatic_load_cannot_be_cancelled_by_driver',
+            'Фактическую погрузку машиниста нельзя отменить из ручного режима водителя.',
+        )
+
+    trip.status = TripStatus.CANCELLED
+    trip.cancelled_at = normalized['occurred_at']
+    trip.save(update_fields=['status', 'cancelled_at'])
+    close_free_bucket_acceptance_for_trip(trip, closed_at=trip.cancelled_at)
+    TripClientAction.objects.create(
+        action_type='driver_manual_loaded_cancel',
+        client_action_id=normalized['event_id'],
+        trip=trip,
+        actor=access.employee,
+    )
+    reconcile_excavator_waiting_for_trucks(excavator)
+    state = bump_operational_state(
+        'OfflineFieldEvent:driver_manual_loaded_cancelled',
+        event_type='trip_changed',
+        object_type='Trip',
+        object_id=trip.id,
+        payload={
+            'action': 'driver_manual_loaded_cancel',
+            'trip_id': trip.id,
+            'truck_id': trip.truck_id,
+            'excavator_id': trip.excavator_id,
+            'status': trip.status,
+        },
+    )
+    return {
+        'server_ids': {'trip_id': trip.id, 'shift_id': shift.id},
+        'trip_origin': 'driver_manual',
+        'version': state.version,
+    }, {'trip': trip, 'shift': shift, 'equipment': truck}
+
+
 def _process_driver_unloaded(access, normalized):
     from trips.models import OPEN_TRIP_STATUSES, TripClientAction, TripStatus
     from trips.views import finalize_trip_unloaded
@@ -1995,6 +2114,7 @@ PROCESSORS = {
     'driver.trip.unloaded': _process_driver_unloaded,
     'driver.trip.dump_point_changed': _process_driver_dump_point_changed,
     'driver.trip.loaded': _process_driver_loaded,
+    'driver.trip.loaded.cancelled': _process_driver_loaded_cancelled,
     'driver.free_bucket.selected': _process_driver_free_bucket_selected,
     'driver.free_bucket.cancelled': _process_driver_free_bucket_cancelled,
     'excavator.downtime.started': lambda access, event: _process_downtime(access, event, role_code='excavator_operator', close=False),

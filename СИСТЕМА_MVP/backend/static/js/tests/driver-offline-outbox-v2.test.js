@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const {
     createDriverOfflineOutbox,
     createDriverManualLoadEvent,
+    createDriverManualLoadCancelledEvent,
     createDriverPointChangeEvent,
     createDriverFreeBucketSelectedEvent,
     createDriverFreeBucketCancelledEvent,
@@ -14,6 +15,50 @@ const {
     localRepository,
     backoff,
 } = require("../driver-offline-outbox-v2.js");
+
+test("manual-load cancellation keeps an exact trip reference and the latest dependency", () => {
+    const serverCancel = createDriverManualLoadCancelledEvent({
+        eventId: "manual-cancel-server",
+        tripId: 81,
+        truckId: 58,
+        excavatorId: 9,
+        dumpPointId: 4,
+        events: [{
+            event_id: "point-change-1",
+            event_type: "driver.trip.dump_point_changed",
+            trip_id: 81,
+            sequence: 7,
+            state: "pending",
+        }],
+    });
+    assert.equal(serverCancel.event_type, "driver.trip.loaded.cancelled");
+    assert.equal(serverCancel.trip_id, 81);
+    assert.equal(serverCancel.local_trip_id, null);
+    assert.deepEqual(serverCancel.depends_on, ["point-change-1"]);
+
+    const localCancel = createDriverManualLoadCancelledEvent({
+        eventId: "manual-cancel-local",
+        localTripId: "manual-load-local",
+        loadEventId: "manual-load-local",
+        truckId: 58,
+        excavatorId: 9,
+        dumpPointId: 4,
+        events: [{
+            event_id: "point-change-local",
+            event_type: "driver.trip.dump_point_changed",
+            local_trip_id: "manual-load-local",
+            sequence: 8,
+            state: "pending",
+        }],
+    });
+    assert.equal(localCancel.trip_id, null);
+    assert.equal(localCancel.local_trip_id, "manual-load-local");
+    assert.deepEqual(localCancel.depends_on, ["point-change-local", "manual-load-local"]);
+    assert.throws(
+        () => createDriverManualLoadCancelledEvent({tripId: 81, localTripId: "manual-load-local"}),
+        /offline_manual_cancel_identity_invalid/
+    );
+});
 
 function manualLoad(overrides = {}) {
     return createDriverManualLoadEvent({
