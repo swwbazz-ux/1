@@ -21,19 +21,23 @@
     }
 
     function readWorkspaceContext() {
+        var workspace = currentWorkspace || (
+            root.document && root.document.querySelector("[data-driver-manual-workspace]")
+        );
         var node = root.document && root.document.getElementById("driver-manual-workspace-context-data");
         if (node) {
             try {
                 var parsed = JSON.parse(node.textContent || "{}");
-                if (parsed && Object.keys(parsed).length) return parsed;
+                if (parsed && Object.keys(parsed).length) {
+                    if (workspace) workspace.__driverManualBaseContext = clone(parsed);
+                    return parsed;
+                }
             } catch (error) {}
         }
-        var workspace = currentWorkspace || (
-            root.document && root.document.querySelector("[data-driver-manual-workspace]")
-        );
         if (!workspace) return {};
+        if (workspace.__driverManualBaseContext) return clone(workspace.__driverManualBaseContext);
         var source = workspace.querySelector("[data-driver-manual-source]");
-        return {
+        var context = {
             source: "driver_manual",
             authority_type: String(workspace.dataset.driverManualAuthorityType || ""),
             truck_id: positive(workspace.dataset.driverManualTruckId),
@@ -58,6 +62,8 @@
                 };
             }).filter(function (point) { return !!point.id; })
         };
+        workspace.__driverManualBaseContext = clone(context);
+        return context;
     }
 
     function activeContext() {
@@ -505,9 +511,34 @@
                context instead of cloning it into zeroed client-only cards. */
             workspace.__driverManualContextKey = renderedContextKey(workspace);
         }
-        if (workspace.__driverManualContextKey === key) return false;
-        workspace.__driverManualContextKey = key;
-        return true;
+        return workspace.__driverManualContextKey !== key;
+    }
+
+    function rememberWorkspaceTargets(workspace, key) {
+        if (!workspace || !key) return [];
+        var targets = Array.from(workspace.querySelectorAll("[data-driver-manual-dump-target]"));
+        if (!workspace.__driverManualTargetCache) {
+            workspace.__driverManualTargetCache = Object.create(null);
+        }
+        workspace.__driverManualTargetCache[key] = targets.map(function (target) {
+            return target.cloneNode(true);
+        });
+        return targets;
+    }
+
+    function cachedWorkspaceTargets(workspace, key, points) {
+        var cached = workspace && workspace.__driverManualTargetCache
+            ? workspace.__driverManualTargetCache[key]
+            : null;
+        if (!Array.isArray(cached)) return null;
+        var expectedIds = (Array.isArray(points) ? points : []).map(function (point) {
+            return String(positive(point && point.id) || "");
+        });
+        var cachedIds = cached.map(function (target) {
+            return String(positive(target && target.dataset && target.dataset.eoDumpTarget) || "");
+        });
+        if (expectedIds.join(",") !== cachedIds.join(",")) return null;
+        return cached.map(function (target) { return target.cloneNode(true); });
     }
 
     function createManualDumpTarget(doc, pointId, pointName, prototype, isOneOff) {
@@ -542,6 +573,10 @@
         var context = activeContext();
         var points = Array.isArray(context.dump_points) ? context.dump_points : [];
         if (!shouldRebuildWorkspaceContext(workspace, context)) return context;
+        var previousKey = workspace.__driverManualContextKey;
+        var nextKey = manualContextKey(context);
+        rememberWorkspaceTargets(workspace, previousKey);
+        workspace.__driverManualContextKey = nextKey;
         var source = workspace.querySelector("[data-driver-manual-source]");
         if (source) {
             source.dataset.driverManualExcavatorId = String(context.excavator_id || "");
@@ -563,18 +598,22 @@
         var grid = workspace.querySelector(".eo-dashboard-unload-grid");
         if (grid && points.length) {
             var prototype = grid.querySelector("[data-driver-manual-dump-target]");
+            var targets = cachedWorkspaceTargets(workspace, nextKey, points);
+            if (!targets) {
+                targets = points.map(function (point) {
+                    var target = createManualDumpTarget(
+                        workspace.ownerDocument || root.document,
+                        point.id,
+                        point.name,
+                        prototype,
+                        point.one_off === true
+                    );
+                    target.dataset.eoDumpDistance = String(point.transport_distance_km || "");
+                    return target;
+                });
+            }
             grid.querySelectorAll("[data-driver-manual-dump-target]").forEach(function (target) { target.remove(); });
-            points.forEach(function (point) {
-                var target = createManualDumpTarget(
-                    workspace.ownerDocument || root.document,
-                    point.id,
-                    point.name,
-                    prototype,
-                    point.one_off === true
-                );
-                target.dataset.eoDumpDistance = String(point.transport_distance_km || "");
-                grid.appendChild(target);
-            });
+            targets.forEach(function (target) { grid.appendChild(target); });
             Array.from(grid.classList).forEach(function (name) {
                 if (/^is-count-\d+$/.test(name)) grid.classList.remove(name);
             });
@@ -1061,6 +1100,7 @@
     root.bindDriverManualExcavatorWorkspace = bindAll;
     root.DriverManualExcavatorWorkspace = {
         bindAll: bindAll,
+        readWorkspaceContext: readWorkspaceContext,
         open: openWorkspace,
         close: closeWorkspace,
         openFreeBucket: openFreeBucket,
@@ -1072,6 +1112,8 @@
         manualContextKey: manualContextKey,
         renderedContextKey: renderedContextKey,
         shouldRebuildWorkspaceContext: shouldRebuildWorkspaceContext,
+        rememberWorkspaceTargets: rememberWorkspaceTargets,
+        cachedWorkspaceTargets: cachedWorkspaceTargets,
         serverTripProjectionContext: serverTripProjectionContext,
         requestAutomaticTripRefresh: requestAutomaticTripRefresh,
         dumpNameSizeClass: dumpNameSizeClass,

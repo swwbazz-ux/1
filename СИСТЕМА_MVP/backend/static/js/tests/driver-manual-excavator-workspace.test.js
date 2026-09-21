@@ -312,6 +312,84 @@ test("initial binding preserves server counters and the last destination", () =>
         excavator_id: 92,
         dump_points: [{id: 11}, {id: 12}]
     }), true);
+    assert.equal(workspace.__driverManualContextKey, driverRuntime.manualContextKey(context));
+});
+
+test("returning from free bucket restores the cached primary counters and last destination", () => {
+    function target(id, count, last) {
+        return {
+            dataset: {
+                eoDumpTarget: String(id),
+                driverManualCompletedCount: String(count),
+                driverManualLastSent: last ? "true" : "false"
+            },
+            cloneNode() { return target(id, count, last); }
+        };
+    }
+    let rendered = [target(2, 0, false), target(3, 2, true), target(4, 0, false)];
+    const workspace = {
+        __driverManualContextKey: "assignment:2:2,3,4",
+        querySelectorAll(selector) {
+            assert.equal(selector, "[data-driver-manual-dump-target]");
+            return rendered;
+        }
+    };
+
+    driverRuntime.rememberWorkspaceTargets(workspace, workspace.__driverManualContextKey);
+    rendered = [target(4, 0, false)];
+    const restored = driverRuntime.cachedWorkspaceTargets(
+        workspace,
+        "assignment:2:2,3,4",
+        [{id: 2}, {id: 3}, {id: 4}]
+    );
+
+    assert.equal(restored.length, 3);
+    assert.equal(restored[1].dataset.driverManualCompletedCount, "2");
+    assert.equal(restored[1].dataset.driverManualLastSent, "true");
+    assert.equal(driverRuntime.cachedWorkspaceTargets(workspace, "assignment:2:2,3,4", [{id: 4}]), null);
+});
+
+test("the primary context survives a temporary DOM replacement when fragment JSON is absent", () => {
+    const previousDocument = global.document;
+    let rendered = [
+        {dataset: {eoDumpTarget: "2", eoDumpName: "Warehouse", eoDumpDistance: "1"}},
+        {dataset: {eoDumpTarget: "3", eoDumpName: "Crusher", eoDumpDistance: "2"}}
+    ];
+    const workspace = {
+        dataset: {
+            driverManualAuthorityType: "assignment",
+            driverManualTruckId: "43",
+            driverManualExcavatorId: "2",
+            driverManualExcavatorLabel: "EXC-1",
+            driverManualAssignmentId: "71"
+        },
+        querySelector(selector) {
+            if (selector === "[data-driver-manual-source]") return {dataset: {assignmentId: "71"}};
+            return null;
+        },
+        querySelectorAll(selector) {
+            assert.equal(selector, "[data-driver-manual-dump-target]");
+            return rendered;
+        }
+    };
+    global.document = {
+        getElementById() { return null; },
+        querySelector(selector) {
+            assert.equal(selector, "[data-driver-manual-workspace]");
+            return workspace;
+        }
+    };
+    try {
+        const baseline = driverRuntime.readWorkspaceContext();
+        rendered = [{dataset: {eoDumpTarget: "4", eoDumpName: "Temporary", eoDumpDistance: "3"}}];
+        const restored = driverRuntime.readWorkspaceContext();
+        assert.deepEqual(baseline.dump_points.map(point => point.id), [2, 3]);
+        assert.deepEqual(restored.dump_points.map(point => point.id), [2, 3]);
+        assert.equal(restored.assignment_id, 71);
+    } finally {
+        if (previousDocument === undefined) delete global.document;
+        else global.document = previousDocument;
+    }
 });
 
 test("Driver opens from the existing manual corner and preserves bottom navigation", () => {
