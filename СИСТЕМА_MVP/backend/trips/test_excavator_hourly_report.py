@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
@@ -167,26 +168,39 @@ class ExcavatorHourlyReportTests(TestCase):
         self.assertEqual(previous['totals']['trip_count'], 1)
 
     def test_endpoint_uses_only_excavator_from_open_shift(self):
-        now = timezone.now()
+        captured_at = timezone.make_aware(datetime(2026, 9, 14, 11, 24))
         EmployeeShift.objects.create(
             employee=self.operator,
             equipment=self.excavator,
             workplace_code='excavator_operator',
             shift_type='day',
-            opened_at=now - timedelta(hours=2),
+            opened_at=captured_at - timedelta(hours=2),
         )
-        self.trip(self.belaz, now - timedelta(minutes=10))
-        self.trip(self.nhl, now - timedelta(minutes=9), excavator=self.other_excavator)
+        self.trip(self.belaz, captured_at - timedelta(minutes=10))
+        self.trip(
+            self.nhl,
+            captured_at - timedelta(minutes=9),
+            excavator=self.other_excavator,
+        )
         session = self.client.session
         session['employee_access_id'] = self.access.pk
         session.save()
 
-        response = self.client.get(reverse('excavator_hourly_report'))
+        with patch(
+            'trips.excavator_hourly_report.timezone.now',
+            return_value=captured_at,
+        ):
+            response = self.client.get(reverse('excavator_hourly_report'))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Cache-Control'], 'no-store')
         self.assertEqual(response.json()['excavator']['id'], self.excavator.pk)
         self.assertEqual(response.json()['hours'][0]['totals']['trip_count'], 1)
+        self.assertEqual(response.json()['hours'][1]['totals']['trip_count'], 0)
+        self.assertEqual(
+            sum(hour['totals']['trip_count'] for hour in response.json()['hours']),
+            1,
+        )
 
     def test_endpoint_requires_open_shift_and_work_screen_exposes_entry(self):
         session = self.client.session
