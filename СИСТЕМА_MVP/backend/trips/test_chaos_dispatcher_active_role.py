@@ -24,6 +24,7 @@ from references.models import DumpPoint, Equipment, EquipmentType, RockType
 from reports.models import PilotFeedback, ReportTemplate
 from shifts.models import EmployeeShift
 from trips.models import DispatcherActionLog, Trip, TripClientAction, TripStatus
+from trips.views import get_operational_state_version
 from users.active_role import (
     ACTIVE_ROLE_GENERATION_SESSION_KEY,
     ACTIVE_ROLE_SESSION_KEY,
@@ -288,7 +289,7 @@ class DispatcherActiveRoleBarrierRegressionTests(TestCase):
 
 @skipUnless(
     connection.vendor == 'postgresql',
-    'Гонка переключения роли и действия Диспетчера проверяется только на PostgreSQL.',
+    'Гонка повторной активации роли и действия Диспетчера проверяется только на PostgreSQL.',
 )
 class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
     def setUp(self):
@@ -296,10 +297,6 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
         self.dispatcher_role = Role.objects.create(
             code='dispatcher',
             name='Диспетчер',
-        )
-        self.admin_role = Role.objects.create(
-            code='admin',
-            name='Администратор',
         )
         self.driver_role = Role.objects.create(
             code='driver',
@@ -318,14 +315,6 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
             status=EmployeeAccess.Status.ACTIVATED,
             is_active=True,
             last_login_at=now,
-        )
-        self.admin_access = EmployeeAccess.objects.create(
-            employee=self.dispatcher,
-            role=self.admin_role,
-            access_code='PG-ADMIN-ROLE',
-            status=EmployeeAccess.Status.ACTIVATED,
-            is_active=True,
-            last_login_at=now - timedelta(minutes=1),
         )
         self.dispatcher_shift = EmployeeShift.objects.create(
             employee=self.dispatcher,
@@ -369,6 +358,19 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
             assigned_by=self.dispatcher,
             status=AssignmentStatus.PENDING,
         )
+        self.placement = ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+            changed_by=self.dispatcher,
+        )
+        self.rock = RockType.objects.create(
+            name='Скальная порода',
+            density='2.6000',
+            loosening_factor='1.5000',
+        )
+        self.dump_point = DumpPoint.objects.create(
+            name='PG-ROLE-DUMP-POINT',
+        )
         self.dispatcher_session_key = self.session_key_for_access(
             self.dispatcher_access,
         )
@@ -390,41 +392,38 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
         client.cookies[settings.SESSION_COOKIE_NAME] = session_key
         return client
 
-    def run_switch_wins(self, action_callable):
-        switch_locked = Event()
-        release_switch = Event()
-        action_entered = Event()
+    def run_repeat_activation_wins(
+        self,
+        action_callable,
+        *,
+        pause_function='get_dispatcher_control_url',
+        expected_status=302,
+    ):
+        access_loaded = Event()
+        activation_committed = Event()
 
         from trips import views as trips_views
-        from users import active_role as active_role_module
 
-        original_blockers = active_role_module._role_switch_blockers
-        original_control_url = trips_views.get_dispatcher_control_url
+        original_boundary = getattr(trips_views, pause_function)
 
-        def paused_role_switch(*args, **kwargs):
-            switch_locked.set()
-            if not release_switch.wait(timeout=10):
-                raise TimeoutError('Действие Диспетчера не вошло в гонку.')
-            return original_blockers(*args, **kwargs)
-
-        def marked_control_url(request):
-            result = original_control_url(request)
-            action_entered.set()
+        def paused_after_access(*args, **kwargs):
+            result = original_boundary(*args, **kwargs)
+            access_loaded.set()
+            if not activation_committed.wait(timeout=10):
+                raise TimeoutError('Повторная активация роли не завершилась вовремя.')
             return result
 
-        def switch_worker():
+        def activation_worker():
             close_old_connections()
             try:
                 access = (
                     EmployeeAccess.objects
                     .select_related('employee', 'role')
-                    .get(pk=self.admin_access.pk)
+                    .get(pk=self.dispatcher_access.pk)
                 )
                 request = SimpleNamespace(session={})
-                activate_role_session(request, access)
-                return ''
-            except Exception as error:
-                return f'{type(error).__name__}: {error}'
+                activated = activate_role_session(request, access)
+                return activated.last_login_at
             finally:
                 close_old_connections()
 
@@ -437,27 +436,14 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
 
         with (
             patch(
-                'users.active_role._role_switch_blockers',
-                new=paused_role_switch,
-            ),
-            patch(
-                'trips.views.get_dispatcher_control_url',
-                new=marked_control_url,
+                f'trips.views.{pause_function}',
+                new=paused_after_access,
             ),
             ThreadPoolExecutor(max_workers=2) as executor,
         ):
-            switch_future = executor.submit(switch_worker)
-            if not switch_locked.wait(timeout=10):
-                release_switch.set()
-                if switch_future.done():
-                    self.fail(
-                        'Переключение роли завершилось до блокировки Employee: '
-                        f'{switch_future.result()!r}'
-                    )
-                self.fail('Переключение роли не получило блокировку Employee.')
             action_future = executor.submit(action_worker)
-            if not action_entered.wait(timeout=10):
-                release_switch.set()
+            if not access_loaded.wait(timeout=10):
+                activation_committed.set()
                 if action_future.done():
                     response = action_future.result()
                     exc_info = getattr(response, 'exc_info', None)
@@ -467,15 +453,17 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
                         else 'без response.exc_info'
                     )
                     self.fail(
-                        'Действие завершилось до транзакционного барьера: '
+                        'Действие завершилось до загрузки исходного доступа: '
                         f'HTTP {response.status_code}; {error}'
                     )
-                self.fail('Действие Диспетчера не дошло до транзакционного барьера.')
-            release_switch.set()
-            switch_error = switch_future.result(timeout=30)
+                self.fail('Действие Диспетчера не загрузило исходный доступ.')
+            activation_future = executor.submit(activation_worker)
+            try:
+                activated_at = activation_future.result(timeout=30)
+            finally:
+                activation_committed.set()
             action_response = action_future.result(timeout=30)
 
-        self.assertEqual(switch_error, '', switch_error)
         action_exc_info = getattr(action_response, 'exc_info', None)
         self.assertIsNone(
             action_exc_info,
@@ -486,10 +474,12 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
             ),
         )
         self.assertLess(action_response.status_code, 500)
-        self.assertEqual(action_response.status_code, 302)
+        self.assertEqual(action_response.status_code, expected_status)
+        self.dispatcher_access.refresh_from_db()
+        self.assertEqual(self.dispatcher_access.last_login_at, activated_at)
         return action_response
 
-    def test_role_switch_wins_against_dispatcher_service_close(self):
+    def test_repeat_activation_wins_against_dispatcher_service_close(self):
         def action():
             client = self.client_for_session(self.dispatcher_session_key)
             return client.post(
@@ -501,7 +491,7 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
                 HTTP_HOST='localhost',
             )
 
-        self.run_switch_wins(action)
+        self.run_repeat_activation_wins(action)
 
         self.target_shift.refresh_from_db()
         self.assertIsNone(self.target_shift.closed_at)
@@ -510,7 +500,7 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
             DispatcherActionLog.objects.filter(shift=self.target_shift).exists(),
         )
 
-    def test_role_switch_wins_against_dispatcher_assignment_cancel(self):
+    def test_repeat_activation_wins_against_dispatcher_assignment_cancel(self):
         def action():
             client = self.client_for_session(self.dispatcher_session_key)
             return client.post(
@@ -522,7 +512,7 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
                 HTTP_HOST='localhost',
             )
 
-        self.run_switch_wins(action)
+        self.run_repeat_activation_wins(action)
 
         self.assignment.refresh_from_db()
         self.assertEqual(self.assignment.status, AssignmentStatus.PENDING)
@@ -532,6 +522,41 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
                 haul_assignment=self.assignment,
             ).exists(),
         )
+
+    def test_repeat_activation_wins_against_dispatcher_equipment_settings(self):
+        def action():
+            client = self.client_for_session(self.dispatcher_session_key)
+            return client.post(
+                reverse(
+                    'dispatcher_equipment_detail',
+                    kwargs={
+                        'category': 'complex',
+                        'equipment_id': self.excavator.id,
+                    },
+                ),
+                data=json.dumps({
+                    'state_version': get_operational_state_version(),
+                    'rock_type_id': self.rock.id,
+                    'dump_point_ids': [self.dump_point.id],
+                    'loading_horizon': '75',
+                    'loading_block': '52',
+                }),
+                content_type='application/json',
+                HTTP_ACCEPT='application/json',
+                HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                HTTP_HOST='localhost',
+            )
+
+        response = self.run_repeat_activation_wins(
+            action,
+            pause_function='excavator_json_payload',
+            expected_status=409,
+        )
+
+        self.assertEqual(response.json()['error'], 'inactive_role')
+        self.placement.refresh_from_db()
+        self.assertIsNone(self.placement.work_rock_type_id)
+        self.assertIsNone(self.placement.work_dump_point_id)
 
 
 @skipUnless(connection.vendor == 'postgresql', 'PostgreSQL row locks are required.')

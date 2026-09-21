@@ -43,8 +43,8 @@ class DowntimePostgreSQLConcurrencyRegressionTests(TransactionTestCase):
             name='Машинист экскаватора',
         )
 
-        self.excavator_type = EquipmentType.objects.create(name='Экскаватор CHAOS PG 005')
-        self.truck_type = EquipmentType.objects.create(name='Самосвал CHAOS PG 005')
+        self.excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        self.truck_type = EquipmentType.objects.create(name='Самосвал')
         self.truck_model = EquipmentModel.objects.create(
             equipment_type=self.truck_type,
             name='Самосвал CHAOS PG 005',
@@ -65,8 +65,9 @@ class DowntimePostgreSQLConcurrencyRegressionTests(TransactionTestCase):
             garage_number='CHAOS-PG-005-LOAD-TRUCK',
         )
         self.rock = RockType.objects.create(
-            name='Руда CHAOS PG 005',
+            name='Скальная порода',
             density='2.6000',
+            loosening_factor='1.5000',
         )
         self.dump_point = DumpPoint.objects.create(name='ККД CHAOS PG 005')
 

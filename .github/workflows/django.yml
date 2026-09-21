@@ -17,7 +17,7 @@ concurrency:
 env:
   DJANGO_SECRET_KEY: ci-secret-key
   DJANGO_DEBUG: "True"
-  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,.localhost
 
 jobs:
   test-plan:
