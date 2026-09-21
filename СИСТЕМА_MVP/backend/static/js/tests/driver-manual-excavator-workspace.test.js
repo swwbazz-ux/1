@@ -257,7 +257,10 @@ test("Driver manual heading keeps name and two rectangular status controls on on
     assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-widget\s*\{[^}]*display:\s*contents/s);
     assert.match(driverCss, /driver-manual-workspace \.eo-free-bucket-button\s*\{[^}]*height:\s*46px[^}]*border-radius:\s*12px/s);
     assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-ring\s*\{[^}]*height:\s*46px[^}]*border-radius:\s*12px/s);
-    assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-ring::after\s*\{[^}]*display:\s*none/s);
+    assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-ring\s*\{[^}]*--eo-dashboard-loop-progress[^}]*--eo-dashboard-progress/s);
+    assert.match(driverCss, /background:\s*conic-gradient\(from -90deg,[^;]*--eo-dashboard-loop-progress/s);
+    assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-ring::after\s*\{[^}]*display:\s*block/s);
+    assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-ring\.is-plan-missing::after\s*\{[^}]*display:\s*none/s);
 });
 
 test("manual mode survives lower tabs and blocks ordinary mode during an active trip", () => {
