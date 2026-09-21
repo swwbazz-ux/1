@@ -58,11 +58,12 @@ body.driver-mobile-screen .driver-manual-workspace__back:focus-visible {
 
 body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell][data-eo-active-tab="trucks"] .eo-dashboard-main-zone > .eo-dashboard-truck-grid.driver-manual-workspace__source-layout {
     --driver-manual-workspace-gap: clamp(8px, 2.2vw, 12px);
+    --driver-manual-timer-height: clamp(54px, 7.4dvh, 68px);
     display: grid !important;
     flex: 1 1 auto !important;
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-    grid-template-rows: auto auto auto !important;
-    align-content: start !important;
+    grid-template-rows: repeat(3, minmax(0, 1fr)) !important;
+    align-content: stretch !important;
     width: 100% !important;
     height: 100% !important;
     max-height: none !important;
@@ -79,7 +80,7 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__act
     grid-row: 1;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
-    height: auto;
+    height: 100%;
     min-width: 0;
     min-height: 0;
     gap: var(--driver-manual-workspace-gap);
@@ -94,7 +95,7 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__tri
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     width: 100%;
-    height: clamp(54px, 7.4dvh, 68px);
+    height: var(--driver-manual-timer-height);
     min-width: 0;
     padding: 8px clamp(14px, 4vw, 22px);
     border: 2px solid rgba(158, 173, 181, .72);
@@ -148,7 +149,7 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__sou
     height: auto;
     min-width: 0;
     min-height: 0;
-    aspect-ratio: 1 / 1;
+    transform: translateY(calc(-100% + var(--driver-manual-timer-height)));
 }
 
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-row > .eo-dashboard-truck-card {
@@ -308,6 +309,7 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__act
 
 @media (max-width: 370px), (max-height: 700px) {
     body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-layout {
+        --driver-manual-timer-height: clamp(48px, 8.2dvh, 56px);
         height: 100% !important;
     }
 
@@ -317,7 +319,7 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__act
     }
 
     body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer {
-        height: clamp(48px, 8.2dvh, 56px);
+        height: var(--driver-manual-timer-height);
         padding-inline: 11px;
         column-gap: 8px;
     }
@@ -484,38 +486,57 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .
     }
 }
 
-body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell]:not(.is-truck-drag-active) .eo-dashboard-unload-grid {
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .eo-dashboard-unload-grid {
     --driver-manual-dump-name-size: clamp(15px, 4.35vw, 19px);
     --driver-manual-dump-count-size: clamp(12px, 3.5vw, 16px);
+}
+
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell]:not(.is-truck-drag-active) .eo-dashboard-unload-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
     grid-auto-rows: minmax(0, 1fr) !important;
     gap: clamp(6px, 1.2dvh, 9px) clamp(6px, 1.8vw, 9px) !important;
 }
 
-body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell]:not(.is-truck-drag-active) .eo-dashboard-unload-grid.is-count-1 {
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .eo-dashboard-unload-grid.is-count-1 {
     --driver-manual-dump-name-size: clamp(28px, 7.8vw, 36px);
     --driver-manual-dump-count-size: clamp(18px, 5vw, 23px);
+}
+
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell]:not(.is-truck-drag-active) .eo-dashboard-unload-grid.is-count-1 {
     grid-template-columns: minmax(0, 1fr) !important;
 }
 
-body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell]:not(.is-truck-drag-active) .eo-dashboard-unload-grid.is-count-2 {
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .eo-dashboard-unload-grid.is-count-2 {
     --driver-manual-dump-name-size: clamp(21px, 6vw, 27px);
     --driver-manual-dump-count-size: clamp(16px, 4.4vw, 20px);
+}
+
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell]:not(.is-truck-drag-active) .eo-dashboard-unload-grid.is-count-2 {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 }
 
-body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell]:not(.is-truck-drag-active) .eo-dashboard-unload-grid.is-count-3 {
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .eo-dashboard-unload-grid.is-count-3 {
     --driver-manual-dump-name-size: clamp(17px, 5vw, 22px);
 }
 
-body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell]:not(.is-truck-drag-active) .eo-dashboard-unload-grid:is(.is-count-4, .is-count-5, .is-count-6) {
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .eo-dashboard-unload-grid:is(.is-count-4, .is-count-5, .is-count-6) {
     --driver-manual-dump-name-size: clamp(13px, 3.8vw, 17px);
     --driver-manual-dump-count-size: clamp(11px, 3.1vw, 14px);
 }
 
-body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell]:not(.is-truck-drag-active) .eo-dashboard-unload-grid:is(.is-count-7, .is-count-8, .is-count-9) {
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .eo-dashboard-unload-grid:is(.is-count-7, .is-count-8, .is-count-9) {
     --driver-manual-dump-name-size: clamp(11px, 3.15vw, 14px);
     --driver-manual-dump-count-size: clamp(10px, 2.8vw, 13px);
+}
+
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell].is-truck-drag-active .driver-manual-workspace__dump-card {
+    --driver-manual-dump-name-size: clamp(9px, 2.65vw, 12px);
+    --driver-manual-dump-count-size: clamp(9px, 2.4vw, 11px);
+}
+
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell].is-truck-drag-active .driver-manual-workspace__dump-card.is-drop-ready {
+    --driver-manual-dump-name-size: clamp(14px, 4vw, 18px);
+    --driver-manual-dump-count-size: clamp(11px, 3vw, 14px);
 }
 
 body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card {
@@ -524,9 +545,12 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .
     place-items: center !important;
     min-width: 0 !important;
     min-height: 0 !important;
-    height: 100% !important;
     padding: clamp(7px, 1.2dvh, 11px) clamp(6px, 1.8vw, 10px) !important;
     overflow: hidden !important;
+}
+
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell]:not(.is-truck-drag-active) .driver-manual-workspace__dump-card {
+    height: 100% !important;
 }
 
 body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card > .eo-dashboard-unload-top {
@@ -578,7 +602,7 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .
     line-height: 1 !important;
 }
 
-body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card.is-driver-manual-one-off:not(.is-last-dump) {
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card.is-driver-manual-one-off:not(.is-last-dump):not(.is-drop-ready) {
     border-color: rgba(104, 205, 242, .92) !important;
     box-shadow: inset 0 0 0 1px rgba(104, 205, 242, .24), 0 0 14px rgba(104, 205, 242, .1) !important;
 }

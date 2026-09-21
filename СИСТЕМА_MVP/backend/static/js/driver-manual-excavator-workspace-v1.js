@@ -744,9 +744,11 @@
         }
         if (currentController) currentController.destroy();
         currentWorkspace = workspace;
+        var excavatorShell = workspace.querySelector("[data-driver-manual-eo-shell]");
+        if (!excavatorShell) return null;
         var result = workspace.querySelector("[data-driver-manual-result]");
         currentController = root.ExcavatorDashboardDrag.attach({
-            shell: workspace,
+            shell: excavatorShell,
             sourceSelector: "[data-driver-manual-source]",
             targetSelector: "[data-driver-manual-dump-target]",
             gradientId: "driver-manual-drag-comet-light",

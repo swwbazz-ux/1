@@ -280,7 +280,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v310'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v311'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -345,6 +345,7 @@ const CORE_ASSETS = [
     "/static/css/excavator-work-v55.css?v={DRIVER_SHELL_VERSION}",
     "/static/css/excavator-work-v55-final.css?v={DRIVER_SHELL_VERSION}",
     "/static/css/excavator-work-v55-shift.css?v={DRIVER_SHELL_VERSION}",
+    "/static/css/excavator-manual-loading-v1.css?v={DRIVER_SHELL_VERSION}",
     "/static/css/excavator-free-bucket-v1.css?v={DRIVER_SHELL_VERSION}",
     "/static/css/driver-manual-excavator-workspace-v1.css?v={DRIVER_SHELL_VERSION}",
     "/static/js/excavator-dashboard-drag-v1.js?v={DRIVER_SHELL_VERSION}",

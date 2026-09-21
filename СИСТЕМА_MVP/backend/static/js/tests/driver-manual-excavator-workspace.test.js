@@ -134,9 +134,12 @@ test("manual free-bucket button delegates to the canonical Driver control", () =
 
 test("both roles render the same dashboard and card includes", () => {
     const excavator = read("templates", "trips", "excavator_work.html");
+    const driverShell = read("templates", "users", "driver_shift.html");
     const driver = read("templates", "includes", "driver_manual_excavator_workspace.html");
     const workspace = read("templates", "includes", "excavator_dashboard_workspace.html");
     assert.match(excavator, /include "includes\/excavator_dashboard_workspace\.html"/);
+    assert.match(excavator, /css\/excavator-manual-loading-v1\.css/);
+    assert.match(driverShell, /css\/excavator-manual-loading-v1\.css/);
     assert.match(driver, /include "includes\/excavator_dashboard_workspace\.html"/);
     assert.match(workspace, /include "includes\/excavator_dashboard_source_card\.html"/);
     assert.match(workspace, /include "includes\/excavator_dashboard_dump_card\.html"/);
@@ -174,13 +177,24 @@ test("manual controls keep three columns and stack actions timer and source with
     assert.match(driverCss, /driver-manual-workspace__source-row/);
     assert.match(driverCss, /grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
     assert.match(driverCss, /--driver-manual-workspace-gap:\s*clamp\(/);
-    assert.match(driverCss, /grid-template-rows:\s*auto auto auto/);
-    assert.match(driverCss, /align-content:\s*start/);
+    assert.match(driverCss, /grid-template-rows:\s*repeat\(3, minmax\(0, 1fr\)\)/);
+    assert.match(driverCss, /align-content:\s*stretch/);
     assert.match(driverCss, /gap:\s*var\(--driver-manual-workspace-gap\)/);
     assert.match(driverCss, /driver-manual-workspace__action-row\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-row:\s*1;/s);
     assert.match(driverCss, /driver-manual-workspace__trip-timer\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-row:\s*2;/s);
     assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*3;/s);
+    assert.doesNotMatch(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*aspect-ratio:\s*1\s*\/\s*1/s);
     assert.doesNotMatch(driverCss, /\.eo-dashboard-truck-card\s*\{[^}]*grid-template-columns/s);
+});
+
+test("Driver binds the common gesture to the real Excavator shell and preserves its active motion", () => {
+    const source = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    const css = read("static", "css", "driver-manual-excavator-workspace-v1.css");
+    assert.match(source, /var excavatorShell = workspace\.querySelector\("\[data-driver-manual-eo-shell\]"\)/);
+    assert.match(source, /ExcavatorDashboardDrag\.attach\(\{\s*shell: excavatorShell,/s);
+    assert.match(css, /:not\(\.is-truck-drag-active\) \.driver-manual-workspace__dump-card\s*\{\s*height:\s*100% !important;/s);
+    assert.doesNotMatch(css, /\[data-driver-manual-eo-shell\] \.driver-manual-workspace__dump-card\s*\{[^}]*height:\s*100% !important;/s);
+    assert.match(css, /\.is-driver-manual-one-off:not\(\.is-last-dump\):not\(\.is-drop-ready\)/);
 });
 
 test("Driver dump cards keep a three-column matrix and only show name plus trip count", () => {

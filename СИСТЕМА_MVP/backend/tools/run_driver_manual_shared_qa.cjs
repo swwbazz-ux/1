@@ -63,6 +63,55 @@ async function center(locator) {
     return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
 }
 
+async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
+    return page.evaluate(({sourceSelector, targetSelector}) => {
+        const source = document.querySelector(sourceSelector);
+        const preview = document.querySelector('.truck-drag-preview');
+        const comet = document.querySelector('.eo-truck-comet');
+        const target = document.querySelector(targetSelector);
+        const shell = target?.closest('.eo-shell');
+        const sibling = Array.from(shell?.querySelectorAll('[data-eo-dump-target]') || [])
+            .find((node) => node !== target && !node.classList.contains('is-drop-ready'));
+        const sourceRect = source?.getBoundingClientRect();
+        const previewRect = preview?.getBoundingClientRect();
+        const cometRect = comet?.getBoundingClientRect();
+        const targetRect = target?.getBoundingClientRect();
+        const siblingRect = sibling?.getBoundingClientRect();
+        const previewStyle = preview ? getComputedStyle(preview) : null;
+        const cometStyle = comet ? getComputedStyle(comet) : null;
+        const targetStyle = target ? getComputedStyle(target) : null;
+        const sourceImageRect = source?.querySelector('i img')?.getBoundingClientRect();
+        const allTargetTextFits = Array.from(shell?.querySelectorAll('[data-eo-dump-target]') || []).every((node) => {
+            const cardRect = node.getBoundingClientRect();
+            const textRect = node.querySelector('strong')?.getBoundingClientRect();
+            return !!textRect && textRect.left >= cardRect.left && textRect.right <= cardRect.right && textRect.top >= cardRect.top && textRect.bottom <= cardRect.bottom;
+        });
+        return {
+            sourceAspect: sourceRect ? sourceRect.width / sourceRect.height : 0,
+            previewAspect: previewRect ? previewRect.width / previewRect.height : 0,
+            sourceImageAspect: sourceImageRect ? sourceImageRect.width / sourceImageRect.height : 0,
+            previewBorderWidth: previewStyle?.borderTopWidth || '',
+            previewBorderColor: previewStyle?.borderTopColor || '',
+            previewBoxShadow: previewStyle?.boxShadow || '',
+            previewHasGlint: !!preview?.querySelector('.eo-truck-pickup-glint'),
+            cometPosition: cometStyle?.position || '',
+            cometDisplay: cometStyle?.display || '',
+            cometOpacity: Number.parseFloat(cometStyle?.opacity || '0'),
+            cometWidth: cometRect?.width || 0,
+            cometHeight: cometRect?.height || 0,
+            cometPath: comet?.querySelector('path[d]')?.getAttribute('d') || '',
+            innerShellActive: !!shell?.classList.contains('is-truck-drag-active'),
+            targetReady: !!target?.classList.contains('is-drop-ready'),
+            targetHeight: targetRect?.height || 0,
+            siblingHeight: siblingRect?.height || 0,
+            targetToSiblingHeight: targetRect && siblingRect ? targetRect.height / siblingRect.height : 0,
+            targetBorderColor: targetStyle?.borderTopColor || '',
+            targetBoxShadow: targetStyle?.boxShadow || '',
+            allTargetTextFits,
+        };
+    }, {sourceSelector, targetSelector});
+}
+
 (async () => {
     const browser = await chromium.launch({ headless: true, executablePath });
     const report = {
@@ -75,6 +124,7 @@ async function center(locator) {
         pageErrors: [],
         failedRequests: [],
         gestureRequests: [],
+        dragVisuals: {},
     };
 
     function observe(page) {
@@ -91,6 +141,7 @@ async function center(locator) {
     }
 
     try {
+        let excavatorDragVisual = null;
         if (!skipExcavator) {
             const excavatorContext = await browser.newContext({
                 viewport: report.viewport,
@@ -108,7 +159,36 @@ async function center(locator) {
             const excavatorShot = path.join(outputDir, 'A-current-excavator-412x915.png');
             await excavatorPage.screenshot({ path: excavatorShot });
             report.screenshots.push({ id: 'A', file: path.basename(excavatorShot), url: excavatorPage.url() });
-            report.checks.push('A: current Excavator workplace rendered from the live template with source and dump cards and no Driver-only action controls.');
+            const excavatorSource = excavatorPage.locator('[data-eo-truck-card][data-eo-can-load="1"]').first();
+            const excavatorTargets = excavatorPage.locator('[data-eo-dump-target]');
+            assert(await excavatorSource.count() === 1, 'Excavator fixture has no active draggable truck card.');
+            const excavatorStart = await center(excavatorSource);
+            const excavatorFinish = await center(excavatorTargets.first());
+            const excavatorTargetId = await excavatorTargets.first().getAttribute('data-eo-dump-target');
+            const excavatorCdp = await excavatorContext.newCDPSession(excavatorPage);
+            await dispatchTouch(excavatorCdp, 'touchStart', excavatorStart);
+            await dispatchTouch(excavatorCdp, 'touchMove', {
+                x: excavatorStart.x + (excavatorFinish.x - excavatorStart.x) * 0.45,
+                y: excavatorStart.y + (excavatorFinish.y - excavatorStart.y) * 0.45,
+            });
+            await excavatorPage.waitForTimeout(70);
+            await dispatchTouch(excavatorCdp, 'touchMove', excavatorFinish);
+            await excavatorPage.waitForTimeout(90);
+            excavatorDragVisual = await dragVisualSnapshot(
+                excavatorPage,
+                '[data-eo-truck-card][data-eo-can-load="1"]',
+                `[data-eo-dump-target="${excavatorTargetId}"]`,
+            );
+            report.dragVisuals.excavator = excavatorDragVisual;
+            assert(excavatorDragVisual.innerShellActive && excavatorDragVisual.targetReady, 'Excavator reference drag did not enter the canonical active target state.');
+            assert(excavatorDragVisual.cometPosition === 'fixed' && excavatorDragVisual.cometWidth >= 411 && excavatorDragVisual.cometHeight >= 914 && excavatorDragVisual.cometPath.length > 8, 'Excavator reference comet is not visibly full-screen.');
+            const excavatorDragShot = path.join(outputDir, 'A2-current-excavator-drag-412x915.png');
+            await excavatorPage.screenshot({ path: excavatorDragShot });
+            report.screenshots.push({ id: 'A2', file: path.basename(excavatorDragShot), url: excavatorPage.url() });
+            await dispatchTouch(excavatorCdp, 'touchCancel');
+            await excavatorPage.waitForTimeout(80);
+            assert(await excavatorPage.locator('.truck-drag-preview, .eo-truck-comet').count() === 0, 'Excavator reference drag did not clean up after cancellation.');
+            report.checks.push('A/A2: current Excavator workplace and its real cancelled drag provide the visual/mechanical parity reference without a mutation request.');
         }
 
         const driverContext = await browser.newContext({
@@ -227,7 +307,7 @@ async function center(locator) {
         assert(layout.workGrid.rows.length === 3 && Math.abs(layout.workGrid.rows[0] - layout.workGrid.rows[2]) < 2, 'Action and Excavator rows do not keep the same grid-cell height.');
         assert(Math.abs(layout.actionRow[0].top - layout.workGrid.top) < 2, 'Manual actions do not start at the top of the work grid.');
         assert(Math.abs(layout.timer.top - layout.actionRow[0].bottom - layout.actionGap) < 2, 'Trip timer is not directly below the action buttons with the shared gap.');
-        assert(Math.abs(layout.source.top - layout.timer.bottom - layout.actionGap) < 2, 'Excavator card is not directly below the timer with the shared gap.');
+        assert(Math.abs(layout.source.top - layout.timer.bottom - layout.actionGap) < 2, `Excavator card is not directly below the timer with the shared gap: ${JSON.stringify(layout)}`);
         assert(layout.timer.height >= 48 && Math.abs(layout.timer.left - layout.workGrid.left) < 2 && Math.abs(layout.timer.right - layout.workGrid.right) < 2, 'Trip timer does not span the usable second row.');
         assert(layout.timer.active === 'false' && layout.timer.value === '00:00:00', 'Trip timer must be idle before the first completed dispatch gesture.');
         assert(layout.actionGap >= 8, 'Manual action buttons do not have a safe gap.');
@@ -339,8 +419,10 @@ async function center(locator) {
         report.checks.push('The Ordinary mode action and three repeated entries work without a stale controller or preview.');
 
         const start = await center(driverPage.locator('[data-driver-manual-source]').first());
-        const finish = await center(targets.nth(1));
-        const timerTargetName = await targets.nth(1).getAttribute('data-eo-dump-name');
+        const finishTarget = targets.nth(1);
+        const finish = await center(finishTarget);
+        const timerTargetName = await finishTarget.getAttribute('data-eo-dump-name');
+        const finishTargetId = await finishTarget.getAttribute('data-eo-dump-target');
         const gestureRequests = [];
         const recordRequest = (request) => gestureRequests.push(`${request.method()} ${request.url()}`);
         driverPage.on('request', recordRequest);
@@ -354,7 +436,25 @@ async function center(locator) {
         await driverPage.waitForTimeout(90);
         assert(await driverPage.locator('.truck-drag-preview').count() === 1, 'Shared drag preview was not created.');
         assert(await driverPage.locator('.eo-truck-comet').count() === 1, 'Shared comet trail was not created.');
-        assert(await targets.nth(1).evaluate((node) => node.classList.contains('is-drop-ready')), 'Target highlight did not follow the gesture.');
+        assert(await finishTarget.evaluate((node) => node.classList.contains('is-drop-ready')), 'Target highlight did not follow the gesture.');
+        const driverDragVisual = await dragVisualSnapshot(
+            driverPage,
+            '[data-driver-manual-source]',
+            `[data-driver-manual-dump-target][data-eo-dump-target="${finishTargetId}"]`,
+        );
+        report.dragVisuals.driver = driverDragVisual;
+        assert(driverDragVisual.innerShellActive, 'Driver gesture did not activate the inner shared Excavator shell.');
+        assert(driverDragVisual.previewBorderWidth === '2px' && driverDragVisual.previewHasGlint && driverDragVisual.previewBoxShadow !== 'none', `Driver preview is missing the canonical bright held-card effect: ${JSON.stringify(driverDragVisual)}`);
+        assert(driverDragVisual.cometPosition === 'fixed' && driverDragVisual.cometDisplay !== 'none' && driverDragVisual.cometOpacity > 0 && driverDragVisual.cometWidth >= 411 && driverDragVisual.cometHeight >= 914 && driverDragVisual.cometPath.length > 8, `Driver comet is not visibly full-screen: ${JSON.stringify(driverDragVisual)}`);
+        assert(driverDragVisual.targetToSiblingHeight >= 1.35, `Driver unload targets do not perform the canonical counter-motion: ${JSON.stringify(driverDragVisual)}`);
+        assert(driverDragVisual.allTargetTextFits, `Driver dump-point labels are clipped during counter-motion: ${JSON.stringify(driverDragVisual)}`);
+        assert(driverDragVisual.sourceImageAspect >= 1.3, `Driver Excavator image was distorted into a square: ${JSON.stringify(driverDragVisual)}`);
+        assert(/rgba?\(255,\s*21[0-9],\s*[0-7]?\d/.test(driverDragVisual.targetBorderColor), `Ready target did not inherit the canonical gold highlight: ${driverDragVisual.targetBorderColor}`);
+        if (excavatorDragVisual) {
+            assert(Math.abs(driverDragVisual.sourceAspect - excavatorDragVisual.sourceAspect) <= 0.06, `Driver source-card proportions differ from Excavator: driver=${driverDragVisual.sourceAspect}, excavator=${excavatorDragVisual.sourceAspect}`);
+            assert(driverDragVisual.previewBorderWidth === excavatorDragVisual.previewBorderWidth, 'Driver held-card border thickness differs from Excavator.');
+            assert(Math.abs(driverDragVisual.targetToSiblingHeight - excavatorDragVisual.targetToSiblingHeight) <= 0.12, `Driver target counter-motion differs from Excavator: driver=${driverDragVisual.targetToSiblingHeight}, excavator=${excavatorDragVisual.targetToSiblingHeight}`);
+        }
         const dragShot = path.join(outputDir, 'C-driver-shared-drag-412x915.png');
         await driverPage.screenshot({ path: dragShot });
         report.screenshots.push({ id: 'C', file: path.basename(dragShot), url: driverPage.url() });
