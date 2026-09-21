@@ -90,7 +90,7 @@ class ArrivalRosterCohortAutoIntegrationTests(TestCase):
         self.beds = [
             PhysicalBed.objects.create(
                 room=self.room,
-                stable_id=f'RI-{self._testMethodName}-{number}',
+                stable_id=f'RI-{method_suffix}-{number}',
                 block=PhysicalBed.Block.A,
                 position=number,
             )
