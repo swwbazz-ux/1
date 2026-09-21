@@ -3894,6 +3894,29 @@ def dispatcher_access_from_request(request):
     )
 
 
+def lock_dispatcher_mutation_access(request, access):
+    """Serialize role activation and re-check a fresh dispatcher generation."""
+    Employee.objects.select_for_update().get(pk=access.employee_id)
+    locked_access = (
+        EmployeeAccess.objects
+        .select_for_update(of=('self',))
+        .select_related('employee', 'employee__contractor_organization', 'role')
+        .filter(
+            id=access.id,
+            employee_id=access.employee_id,
+            is_active=True,
+        )
+        .first()
+    )
+    if (
+        not locked_access
+        or locked_access.role.code not in {'dispatcher', 'admin', 'manager'}
+        or not role_session_state(request, locked_access)['is_active']
+    ):
+        return None
+    return locked_access
+
+
 def dispatcher_shift_required_response(access):
     if get_active_dispatcher_shift(access):
         return None
@@ -3958,8 +3981,8 @@ def dispatcher_move_excavator_view(request):
     access = dispatcher_access_from_request(request)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к диспетчерскому пульту.'}, status=403)
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         return JsonResponse(
             {
                 'ok': False,
@@ -4080,8 +4103,8 @@ def dispatcher_assign_truck_view(request):
     access = dispatcher_access_from_request(request)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к диспетчерскому пульту.'}, status=403)
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         return JsonResponse(
             {
                 'ok': False,
@@ -5986,8 +6009,8 @@ def excavator_work_view(request):
                     if existing_action:
                         trip = existing_action.trip
                     elif form.is_valid():
-                        Employee.objects.select_for_update().get(pk=access.employee_id)
-                        if not role_session_state(request, access)['is_active']:
+                        access = lock_excavator_mutation_access(request, access)
+                        if not access:
                             raise ValidationError('Роль неактивна — доступен только просмотр')
                         locked_shift = (
                             EmployeeShift.objects
@@ -7312,8 +7335,8 @@ def dispatcher_close_downtime_view(request, event_id):
             {'ok': False, 'error': 'forbidden'},
             status=403,
         )
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         return dispatcher_downtime_close_response(
             {'ok': False, 'error': 'inactive_role'},
             status=409,
@@ -7483,6 +7506,11 @@ def dispatcher_equipment_detail_view(request, category, equipment_id):
         loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
 
         with transaction.atomic():
+            access = lock_dispatcher_mutation_access(request, access)
+            if not access:
+                return dispatcher_equipment_detail_error('inactive_role', status=409)
+            if not get_active_dispatcher_shift(access):
+                return dispatcher_equipment_detail_error('dispatcher_shift_required', status=409)
             state = lock_production_state()
             if state.version != requested_version:
                 return dispatcher_equipment_detail_error('stale_board', status=409)
@@ -7908,8 +7936,8 @@ def dispatcher_toggle_shift_view(request):
             if not access:
                 messages.error(request, 'Активированный доступ Горного диспетчера не найден.')
                 return redirect(redirect_url)
-        Employee.objects.select_for_update().get(pk=access.employee_id)
-        if not role_session_state(request, session_access)['is_active']:
+        session_access = lock_dispatcher_mutation_access(request, session_access)
+        if not session_access:
             messages.error(request, 'Роль неактивна — доступен только просмотр.')
             return redirect(redirect_url)
         if get_active_dispatcher_shift(access):
@@ -7933,8 +7961,8 @@ def dispatcher_toggle_shift_view(request):
         dispatcher_access = active_access_for_employee_role(access.employee, 'dispatcher')
         if dispatcher_access:
             access = dispatcher_access
-        Employee.objects.select_for_update().get(pk=access.employee_id)
-        if not role_session_state(request, session_access)['is_active']:
+        session_access = lock_dispatcher_mutation_access(request, session_access)
+        if not session_access:
             messages.error(request, 'Роль неактивна — доступен только просмотр.')
             return redirect(redirect_url)
         shift = close_dispatcher_shift(access)
@@ -7984,7 +8012,8 @@ def dispatcher_service_close_shift_view(request, shift_id):
         .order_by('pk')
         .values_list('pk', flat=True)
     )
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         messages.error(request, 'Роль неактивна — доступен только просмотр.')
         return redirect(redirect_url)
     shift = (
@@ -8105,8 +8134,8 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
 
     if request.method != 'POST':
         return redirect(redirect_url)
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         messages.error(request, 'Роль неактивна — доступен только просмотр.')
         return redirect(redirect_url)
     shift_error = dispatcher_shift_required_redirect(request, access, redirect_url)
@@ -8177,10 +8206,13 @@ def dispatcher_cancel_trip_view(request, trip_id):
         messages.error(request, 'Укажите причину отмены рейса.')
         return redirect(redirect_url)
 
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         messages.error(request, 'Роль неактивна — доступен только просмотр.')
         return redirect(redirect_url)
+    # Driver unload locks the production state before the trip. Keep the same
+    # order here so concurrent terminal actions cannot deadlock each other.
+    lock_production_state()
     trip = (
         Trip.objects
         .select_for_update(of=('self',))
@@ -8519,8 +8551,8 @@ def dispatcher_manual_trip_view(request, equipment_id):
     except (TypeError, ValueError):
         excavator_id = 0
 
-    list(Employee.objects.select_for_update().filter(pk=access.employee_id).values_list('pk', flat=True))
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         messages.error(request, 'Роль неактивна — доступен только просмотр.')
         return redirect(redirect_url)
 
@@ -8708,7 +8740,8 @@ def dispatcher_complete_trip_view(request, trip_id):
         .order_by('pk')
         .values_list('pk', flat=True)
     )
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         messages.error(request, 'Роль неактивна — доступен только просмотр.')
         return redirect(redirect_url)
 
@@ -8726,6 +8759,9 @@ def dispatcher_complete_trip_view(request, trip_id):
         messages.error(request, 'Смена по самосвалу изменилась. Повторите служебное завершение.')
         return redirect(redirect_url)
 
+    # Driver unload uses production state -> equipment/shift -> trip. Acquire
+    # the shared state before the trip here as well to preserve lock order.
+    lock_production_state()
     trip = (
         Trip.objects
         .select_for_update(of=('self',))

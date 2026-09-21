@@ -48,7 +48,7 @@ class DriverWatchPeriodCatalogPostgreSQLTests(TransactionTestCase):
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
-        EmployeeAccess.objects.create(
+        deputy_access = EmployeeAccess.objects.create(
             employee=self.deputy,
             role=deputy_role,
             access_code='291000',
@@ -98,6 +98,9 @@ class DriverWatchPeriodCatalogPostgreSQLTests(TransactionTestCase):
             accepted_at=datetime(2026, 8, 1, 10, 0, tzinfo=BUSINESS_TIME_ZONE),
         )
         self.opened_at = datetime(2026, 8, 10, 10, 0, tzinfo=BUSINESS_TIME_ZONE)
+        EmployeeAccess.objects.filter(pk=deputy_access.pk).update(
+            created_at=self.opened_at - timedelta(minutes=2),
+        )
         work_date = production_work_date(self.opened_at)
         self.watch_period = WatchPeriod.objects.create(
             name='ТЕСТ_ВАХТА_PG_Основная',

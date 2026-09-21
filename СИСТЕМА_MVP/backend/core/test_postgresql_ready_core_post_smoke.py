@@ -7,6 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
+from core.production_time import production_shift_type
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import (
     Dormitory,
@@ -117,10 +118,10 @@ class PostgreSQLReadyCorePostSmokeTests(TestCase):
 
     def equipment_pair(self, suffix):
         excavator_type = EquipmentType.objects.create(
-            name=f'Экскаватор PG smoke {suffix}',
+            name='Экскаватор',
         )
         truck_type = EquipmentType.objects.create(
-            name=f'Самосвал PG smoke {suffix}',
+            name='Самосвал',
         )
         excavator_model = EquipmentModel.objects.create(
             equipment_type=excavator_type,
@@ -146,8 +147,9 @@ class PostgreSQLReadyCorePostSmokeTests(TestCase):
 
     def references(self, suffix):
         rock = RockType.objects.create(
-            name=f'Руда PG smoke {suffix}',
+            name='Скальная порода',
             density='2.5000',
+            loosening_factor='1.5000',
         )
         dump_point = DumpPoint.objects.create(
             name=f'Точка PG smoke {suffix}',
@@ -163,7 +165,7 @@ class PostgreSQLReadyCorePostSmokeTests(TestCase):
         )
         shift = EmployeeShift.objects.create(
             employee=operator,
-            shift_type='day',
+            shift_type=production_shift_type(),
             workplace_code='excavator_operator',
             equipment=excavator,
             start_fuel='900.00',
@@ -285,10 +287,10 @@ class PostgreSQLReadyCorePostSmokeTests(TestCase):
         )
 
         self.assert_domain_response(response, 302)
-        self.assertEqual(response.url, reverse('role_home'))
+        self.assertEqual(response.url, reverse('app_choose'))
         shift.refresh_from_db()
         admin_access.refresh_from_db()
-        self.assertIsNotNone(shift.closed_at)
+        self.assertIsNone(shift.closed_at)
         self.assertEqual(client.session['employee_access_id'], admin_access.id)
         self.assertEqual(client.session[ACTIVE_ROLE_SESSION_KEY], admin_access.id)
         self.assertEqual(
@@ -345,12 +347,12 @@ class PostgreSQLReadyCorePostSmokeTests(TestCase):
         )
 
         self.assert_domain_response(response, 302)
-        self.assertEqual(response.url, reverse('role_home'))
+        self.assertEqual(response.url, reverse('system_admin_dashboard'))
         target_access.refresh_from_db()
         shift.refresh_from_db()
         self.assertEqual(target_access.status, EmployeeAccess.Status.ACTIVATED)
         self.assertEqual(target_access.access_code, '864286')
-        self.assertIsNotNone(shift.closed_at)
+        self.assertIsNone(shift.closed_at)
         self.assertEqual(client.session['employee_access_id'], target_access.id)
         self.assertEqual(client.session[ACTIVE_ROLE_SESSION_KEY], target_access.id)
         self.assertEqual(client.session[ACTIVE_ROLE_CODE_SESSION_KEY], 'admin')
@@ -597,8 +599,9 @@ class PostgreSQLReadyCorePostSmokeTests(TestCase):
             data=json.dumps(
                 {
                     'action': 'close',
+                    'shift_id': shift.id,
                     'client_action_id': 'pg-smoke-exc-shift-close',
-                    'fuel': '850',
+                    'fuel_percent': '45',
                     'engine_hours': '108',
                 }
             ),
@@ -612,7 +615,7 @@ class PostgreSQLReadyCorePostSmokeTests(TestCase):
         self.assertEqual(payload['action'], 'excavator_shift_closed')
         shift.refresh_from_db()
         self.assertIsNotNone(shift.closed_at)
-        self.assertEqual(str(shift.end_fuel), '850.00')
+        self.assertEqual(str(shift.end_fuel), '900.00')
         self.assertEqual(str(shift.end_engine_hours), '108.00')
 
     def test_driver_accept_assignment_post_has_domain_success(self):

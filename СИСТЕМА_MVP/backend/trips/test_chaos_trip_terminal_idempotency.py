@@ -1148,7 +1148,7 @@ class TripTerminalPostgreSQLConcurrencyTests(TripTerminalFixtureMixin, Transacti
             1,
         )
 
-    def test_same_shift_action_id_different_objects_returns_original_result(self):
+    def test_same_shift_action_id_different_objects_rejects_reused_identifier(self):
         action_save_barrier = Barrier(2)
         original_save = ShiftClientAction.save
 
@@ -1178,9 +1178,12 @@ class TripTerminalPostgreSQLConcurrencyTests(TripTerminalFixtureMixin, Transacti
             action_type='driver_shift_closed',
             client_action_id='pg-different-shift-objects',
         )
-        for result in results:
-            self.assertIsNone(result['error'], result['error'])
-            self.assertEqual(result['shift_id'], action.shift_id)
+        successful = [result for result in results if result['error'] is None]
+        rejected = [result for result in results if result['error'] is not None]
+        self.assertEqual(len(successful), 1, results)
+        self.assertEqual(successful[0]['shift_id'], action.shift_id)
+        self.assertEqual(len(rejected), 1, results)
+        self.assertIn('DriverShiftCloseIdempotencyConflict', rejected[0]['error'])
         self.driver_one_shift.refresh_from_db()
         self.driver_two_shift.refresh_from_db()
         closed = [
