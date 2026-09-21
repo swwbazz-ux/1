@@ -58,7 +58,7 @@ body.driver-mobile-screen .driver-manual-workspace__back:focus-visible {
 
 body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell][data-eo-active-tab="trucks"] .eo-dashboard-main-zone > .eo-dashboard-truck-grid.driver-manual-workspace__source-layout {
     --driver-manual-workspace-gap: clamp(8px, 2.2vw, 12px);
-    --driver-manual-timer-height: clamp(54px, 7.4dvh, 68px);
+    --driver-manual-timer-height: clamp(68px, 8.8dvh, 80px);
     display: grid !important;
     flex: 1 1 auto !important;
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
@@ -107,15 +107,51 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__tri
     overflow: hidden;
 }
 
-body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer > span {
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer-copy {
+    display: grid;
+    align-content: center;
+    gap: 2px;
+    min-width: 0;
+    overflow: visible;
+    line-height: 1;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer-copy > small {
+    color: rgba(216, 229, 235, .66);
+    font-size: clamp(9px, 2.45vw, 11px);
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: .055em;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer-copy > b {
     min-width: 0;
     overflow: hidden;
-    font-size: clamp(10px, 2.65vw, 12px);
+    color: rgba(239, 246, 248, .94);
+    font-size: clamp(16px, 4.6vw, 21px);
     font-weight: 900;
-    line-height: 1.05;
-    letter-spacing: .04em;
+    line-height: 1.02;
+    letter-spacing: .01em;
+    overflow-wrap: break-word;
+    text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-manual-workspace [data-driver-manual-result] {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    color: #8fe8a0;
+    font-size: clamp(9px, 2.35vw, 11px);
+    font-style: normal;
+    font-weight: 800;
+    line-height: 1;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+body.driver-mobile-screen .driver-manual-workspace [data-driver-manual-result][hidden] {
+    display: none !important;
 }
 
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer > strong {
@@ -150,6 +186,15 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__sou
     min-width: 0;
     min-height: 0;
     transform: translateY(calc(-100% + var(--driver-manual-timer-height)));
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer.is-active .driver-manual-workspace__trip-timer-copy > small {
+    color: rgba(255, 230, 116, .82);
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer.is-active .driver-manual-workspace__trip-timer-copy > b {
+    color: #ffe469;
+    text-shadow: 0 0 10px rgba(255, 216, 0, .18);
 }
 
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-row > .eo-dashboard-truck-card {
@@ -309,7 +354,7 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__act
 
 @media (max-width: 370px), (max-height: 700px) {
     body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-layout {
-        --driver-manual-timer-height: clamp(48px, 8.2dvh, 56px);
+        --driver-manual-timer-height: clamp(62px, 9.7dvh, 70px);
         height: 100% !important;
     }
 
@@ -324,8 +369,13 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__act
         column-gap: 8px;
     }
 
-    body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer > span {
-        font-size: 9px;
+    body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer-copy > small,
+    body.driver-mobile-screen .driver-manual-workspace [data-driver-manual-result] {
+        font-size: clamp(8px, 2.25vw, 10px);
+    }
+
+    body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer-copy > b {
+        font-size: clamp(14px, 4.2vw, 18px);
     }
 
     body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer > strong {
@@ -607,6 +657,23 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .
     box-shadow: inset 0 0 0 1px rgba(104, 205, 242, .24), 0 0 14px rgba(104, 205, 242, .1) !important;
 }
 
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card.is-last-dump:not(.is-drop-ready) {
+    border-color: #ffda21 !important;
+    background: radial-gradient(circle at 50% 34%, rgba(255, 216, 33, .3), transparent 64%), rgba(46, 38, 9, .94) !important;
+    box-shadow: inset 0 0 0 2px rgba(255, 220, 62, .76), 0 0 24px rgba(255, 216, 33, .36) !important;
+}
+
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card.is-last-dump:not(.is-drop-ready) > .eo-dashboard-unload-top > strong {
+    color: #ffe56b !important;
+    text-shadow: 0 0 12px rgba(255, 216, 33, .24) !important;
+}
+
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card.is-last-dump:not(.is-drop-ready) > .eo-dashboard-unload-top > small {
+    background: #ffda21 !important;
+    color: #151204 !important;
+    box-shadow: 0 0 12px rgba(255, 216, 33, .3) !important;
+}
+
 body.driver-mobile-screen .driver-manual-workspace__demo {
     position: fixed;
     top: calc(env(safe-area-inset-top, 0px) + 4px);
@@ -635,9 +702,4 @@ body.driver-mobile-screen .driver-manual-workspace__demo {
    the embedded workplace instead of letting the workplace cover it. */
 body.driver-mobile-screen.excavator-operator-screen .mm-mobile-bottom-nav.driver-bottom-nav {
     z-index: 120 !important;
-}
-
-body.driver-mobile-screen .driver-manual-workspace .mobile-shift-toast {
-    bottom: calc(var(--driver-nav-total-h, 78px) + 10px);
-    z-index: 10100;
 }

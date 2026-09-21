@@ -51,7 +51,11 @@
                     </button>
                 </div>
                 <div class="driver-manual-workspace__trip-timer" data-driver-manual-trip-timer role="timer" aria-label="Время с момента отправки в точку разгрузки">
-                    <span data-driver-manual-trip-timer-label>ОЖИДАЕТ ОТПРАВКИ</span>
+                    <span class="driver-manual-workspace__trip-timer-copy" data-driver-manual-trip-timer-label>
+                        <small data-driver-manual-trip-timer-state>ОЖИДАЕТ ОТПРАВКИ</small>
+                        <b data-driver-manual-trip-timer-destination>ТОЧКА НЕ ВЫБРАНА</b>
+                        <em data-driver-manual-result hidden role="status" aria-live="assertive" aria-atomic="true"></em>
+                    </span>
                     <strong data-driver-manual-trip-timer-value>00:00:00</strong>
                 </div>
                 <div class="driver-manual-workspace__source-row" data-driver-manual-source-row aria-label="Назначенный экскаватор">

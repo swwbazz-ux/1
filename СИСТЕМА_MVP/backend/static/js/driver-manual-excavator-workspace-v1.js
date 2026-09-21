@@ -88,13 +88,13 @@
     }
 
     function resultText(state, detail) {
-        if (state === "saving") return "Сохраняем отметку на телефоне…";
+        if (state === "saving") return "Сохраняем на телефоне…";
         if (state === "pending") return root.navigator && root.navigator.onLine === false
-            ? "Без сети · отметка сохранена на телефоне"
-            : "Отметка сохранена · отправляется на сервер";
-        if (state === "confirmed") return "Рейс №" + String(detail || "") + " · в пути";
-        if (state === "review") return String(detail || "Отметка не принята · требуется сверка");
-        if (state === "storage-error") return "Не удалось сохранить на телефоне. Повторите отправку.";
+            ? "Без сети · сохранено на телефоне"
+            : "Сохранено на телефоне · отправляем";
+        if (state === "confirmed") return "Подтверждено · рейс №" + String(detail || "");
+        if (state === "review") return String(detail || "Не принято · нужна сверка");
+        if (state === "storage-error") return "Не сохранено · повторите отправку";
         return "";
     }
 
@@ -117,13 +117,17 @@
         var timer = workspace.querySelector("[data-driver-manual-trip-timer]");
         if (!timer) return null;
         var label = timer.querySelector("[data-driver-manual-trip-timer-label]");
+        var state = timer.querySelector("[data-driver-manual-trip-timer-state]");
+        var destination = timer.querySelector("[data-driver-manual-trip-timer-destination]");
         var value = timer.querySelector("[data-driver-manual-trip-timer-value]");
         if (!currentTripTimer) {
             timer.classList.remove("is-active");
             timer.dataset.driverManualTimerActive = "false";
             delete timer.dataset.driverManualTimerStartedAt;
             delete timer.dataset.driverManualTimerPointName;
-            if (label) label.textContent = "ОЖИДАЕТ ОТПРАВКИ";
+            if (state) state.textContent = "ОЖИДАЕТ ОТПРАВКИ";
+            if (destination) destination.textContent = "ТОЧКА НЕ ВЫБРАНА";
+            if (label && !state && !destination) label.textContent = "ОЖИДАЕТ ОТПРАВКИ";
             if (value) value.textContent = "00:00:00";
             timer.setAttribute("aria-label", "Таймер ожидает отправки в точку разгрузки");
             return {active: false, elapsedSeconds: 0, formatted: "00:00:00"};
@@ -138,7 +142,9 @@
         timer.dataset.driverManualTimerActive = "true";
         timer.dataset.driverManualTimerStartedAt = String(currentTripTimer.startedAt);
         timer.dataset.driverManualTimerPointName = currentTripTimer.pointName;
-        if (label) label.textContent = copy;
+        if (state) state.textContent = "В ПУТИ";
+        if (destination) destination.textContent = currentTripTimer.pointName || "ТОЧКА НЕ УКАЗАНА";
+        if (label && !state && !destination) label.textContent = copy;
         if (value) value.textContent = formatted;
         timer.setAttribute("aria-label", copy + ", прошло " + formatted);
         return {active: true, elapsedSeconds: elapsedSeconds, formatted: formatted, pointName: currentTripTimer.pointName};
@@ -174,6 +180,30 @@
         return renderTripTimer(workspace || currentWorkspace);
     }
 
+    function markLastDump(workspace, pointId) {
+        if (!workspace) return null;
+        var selectedId = String(pointId || "");
+        var selected = null;
+        workspace.querySelectorAll("[data-driver-manual-dump-target]").forEach(function (target) {
+            var isLast = !!selectedId && String(target.dataset.eoDumpTarget || "") === selectedId;
+            target.classList.toggle("is-last-dump", isLast);
+            target.dataset.driverManualLastSent = isLast ? "true" : "false";
+            if (isLast) {
+                target.setAttribute("aria-current", "true");
+                selected = target;
+            } else {
+                target.removeAttribute("aria-current");
+            }
+            var pointName = String(target.dataset.eoDumpName || "");
+            var count = String(target.dataset.driverManualCompletedCount || "0");
+            target.setAttribute(
+                "aria-label",
+                pointName + ": рейсов " + count + (isLast ? "; последняя точка отправки" : "")
+            );
+        });
+        return selected;
+    }
+
     function isTerminalState(state) {
         return ["conflict", "auth_required", "invalid"].indexOf(String(state || "")) >= 0;
     }
@@ -194,7 +224,9 @@
         if (state === "confirmed" && result.dataset.driverManualResultKey === nextKey) return;
         root.clearTimeout(result.__driverManualHideTimer);
         result.dataset.driverManualResultKey = nextKey;
+        result.dataset.driverManualResultState = String(state || "");
         result.textContent = nextText;
+        result.title = nextText;
         result.hidden = !result.textContent;
         if (!sticky && !result.hidden) {
             result.__driverManualHideTimer = root.setTimeout(
@@ -297,6 +329,7 @@
                 context_snapshot: serverProjectionContext.context_snapshot
             };
             startTripTimer(workspace, projectionPointName(currentTripProjection), Date.parse(currentTripProjection.occurred_at));
+            markLastDump(workspace, currentTripProjection.payload.dump_point_id);
             setSourceLocked(workspace, false);
             setResult(workspace, "confirmed", serverTripId, false);
             return currentTripProjection;
@@ -361,6 +394,7 @@
             setResult(workspace, "review", projected.last_error && projected.last_error.message, true);
             return projected;
         }
+        markLastDump(workspace, projected.payload && projected.payload.dump_point_id);
         startTripTimer(workspace, pointName, Date.parse(projected.occurred_at));
         setSourceLocked(workspace, false);
         setResult(
@@ -780,6 +814,7 @@
                     delete workspace.dataset.driverManualLastError;
                     currentTripProjection = saved;
                     startTripTimer(workspace, target.dataset.eoDumpName, Date.parse(saved.occurred_at));
+                    markLastDump(workspace, target.dataset.eoDumpTarget);
                     syncWorkspaceContext(workspace);
                     setSourceLocked(workspace, false);
                     setResult(workspace, "pending", null, true);
@@ -860,6 +895,7 @@
                     selected_dump_point_name: String(pointName || "")
                 });
                 if (currentTripTimer) currentTripTimer.pointName = String(pointName || "");
+                markLastDump(workspace, pointId);
                 renderTripTimer(workspace);
                 setResult(workspace, "pending", null, true);
                 return saved;
@@ -1013,6 +1049,7 @@
         renderTripTimer: renderTripTimer,
         startTripTimer: startTripTimer,
         stopTripTimer: stopTripTimer,
+        markLastDump: markLastDump,
         renderProjection: renderProjection,
         restoreProjection: restoreProjection,
         buildManualLoadEvent: buildManualLoadEvent,

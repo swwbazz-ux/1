@@ -15,10 +15,10 @@ test("shared drag keeps the Excavator seven-pixel pickup threshold", () => {
 });
 
 test("Driver reports durable manual-trip states without a false server confirmation", () => {
-    assert.equal(driverRuntime.resultText("saving"), "Сохраняем отметку на телефоне…");
-    assert.equal(driverRuntime.resultText("confirmed", 451), "Рейс №451 · в пути");
-    assert.equal(driverRuntime.resultText("review"), "Отметка не принята · требуется сверка");
-    assert.equal(driverRuntime.resultText("storage-error"), "Не удалось сохранить на телефоне. Повторите отправку.");
+    assert.equal(driverRuntime.resultText("saving"), "Сохраняем на телефоне…");
+    assert.equal(driverRuntime.resultText("confirmed", 451), "Подтверждено · рейс №451");
+    assert.equal(driverRuntime.resultText("review"), "Не принято · нужна сверка");
+    assert.equal(driverRuntime.resultText("storage-error"), "Не сохранено · повторите отправку");
 });
 
 test("trip timer formats elapsed time and names the selected destination", () => {
@@ -149,6 +149,10 @@ test("both roles render the same dashboard and card includes", () => {
     assert.match(workspace, /data-driver-manual-close/);
     assert.match(workspace, /data-driver-manual-point-open/);
     assert.match(workspace, /data-driver-manual-point-label/);
+    assert.match(workspace, /data-driver-manual-trip-timer-state/);
+    assert.match(workspace, /data-driver-manual-trip-timer-destination/);
+    assert.match(workspace, /data-driver-manual-result/);
+    assert.doesNotMatch(driver, /mobile-shift-toast/);
     assert.match(workspace, />ОБЫЧНЫЙ РЕЖИМ</);
     assert.match(workspace, />ТОЧКА РАЗГРУЗКИ</);
 });
@@ -209,8 +213,49 @@ test("Driver dump cards keep a three-column matrix and only show name plus trip 
     assert.match(driverCss, /\.eo-dashboard-unload-grid\.is-count-2\s*\{[^}]*grid-template-columns:\s*repeat\(2,/s);
     assert.match(driverCss, /--driver-manual-dump-name-size/);
     assert.match(driverCss, /\.is-name-long/);
+    assert.match(driverCss, /\.driver-manual-workspace__dump-card\.is-last-dump:not\(\.is-drop-ready\)/);
     assert.equal(driverRuntime.dumpNameSizeClass("ККД"), "is-name-short");
     assert.equal(driverRuntime.dumpNameSizeClass("СКЛАД 2.1 основной север"), "is-name-long");
+});
+
+test("the latest destination is the only highlighted Driver dump card", () => {
+    function target(id, name, count) {
+        const classes = new Set();
+        const attributes = {};
+        return {
+            dataset: {
+                eoDumpTarget: String(id),
+                eoDumpName: name,
+                driverManualCompletedCount: String(count)
+            },
+            classList: {
+                toggle(className, enabled) {
+                    if (enabled) classes.add(className);
+                    else classes.delete(className);
+                },
+                contains(className) { return classes.has(className); }
+            },
+            setAttribute(name, value) { attributes[name] = String(value); },
+            removeAttribute(name) { delete attributes[name]; },
+            attributes
+        };
+    }
+    const first = target(11, "СКЛАД 2.1", 3);
+    const second = target(12, "ККД", 4);
+    const workspace = {
+        querySelectorAll(selector) {
+            assert.equal(selector, "[data-driver-manual-dump-target]");
+            return [first, second];
+        }
+    };
+    assert.equal(driverRuntime.markLastDump(workspace, 12), second);
+    assert.equal(first.classList.contains("is-last-dump"), false);
+    assert.equal(second.classList.contains("is-last-dump"), true);
+    assert.equal(first.dataset.driverManualLastSent, "false");
+    assert.equal(second.dataset.driverManualLastSent, "true");
+    assert.equal(first.attributes["aria-current"], undefined);
+    assert.equal(second.attributes["aria-current"], "true");
+    assert.match(second.attributes["aria-label"], /последняя точка отправки/);
 });
 
 test("server-assigned dump points never inherit the one-off marker", () => {

@@ -277,6 +277,9 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
                     height: timer.height,
                     active: timerNode.dataset.driverManualTimerActive,
                     value: timerNode.querySelector('[data-driver-manual-trip-timer-value]')?.textContent.trim(),
+                    destination: timerNode.querySelector('[data-driver-manual-trip-timer-destination]')?.textContent.trim(),
+                    destinationFontSize: Number.parseFloat(getComputedStyle(timerNode.querySelector('[data-driver-manual-trip-timer-destination]')).fontSize),
+                    resultInside: timerNode.contains(document.querySelector('[data-driver-manual-result]')),
                 },
                 firstTargetTop: firstTarget.top,
                 sourceTopHit: !!(sourceHit && sourceHit.closest('[data-driver-manual-source]')),
@@ -308,8 +311,10 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
         assert(Math.abs(layout.actionRow[0].top - layout.workGrid.top) < 2, 'Manual actions do not start at the top of the work grid.');
         assert(Math.abs(layout.timer.top - layout.actionRow[0].bottom - layout.actionGap) < 2, 'Trip timer is not directly below the action buttons with the shared gap.');
         assert(Math.abs(layout.source.top - layout.timer.bottom - layout.actionGap) < 2, `Excavator card is not directly below the timer with the shared gap: ${JSON.stringify(layout)}`);
-        assert(layout.timer.height >= 48 && Math.abs(layout.timer.left - layout.workGrid.left) < 2 && Math.abs(layout.timer.right - layout.workGrid.right) < 2, 'Trip timer does not span the usable second row.');
+        assert(layout.timer.height >= 62 && Math.abs(layout.timer.left - layout.workGrid.left) < 2 && Math.abs(layout.timer.right - layout.workGrid.right) < 2, 'Trip timer does not span the usable second row.');
         assert(layout.timer.active === 'false' && layout.timer.value === '00:00:00', 'Trip timer must be idle before the first completed dispatch gesture.');
+        assert(layout.timer.destination === 'ТОЧКА НЕ ВЫБРАНА' && layout.timer.destinationFontSize >= 16, `Idle timer destination is not readable: ${JSON.stringify(layout.timer)}.`);
+        assert(layout.timer.resultInside, 'Save status is not embedded inside the timer.');
         assert(layout.actionGap >= 8, 'Manual action buttons do not have a safe gap.');
         assert(Math.abs((layout.source.left + layout.source.right) / 2 - 206) < 3, 'Excavator card is not centered below the buttons.');
         assert(layout.source.bottom <= layout.firstTargetTop, 'Excavator card overlaps the unload targets.');
@@ -467,7 +472,7 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
         const resultText = await driverPage.locator('[data-driver-manual-result]').textContent();
         const manualError = await driverPage.locator('[data-driver-manual-workspace]').getAttribute('data-driver-manual-last-error');
         assert(
-            /Рейс №9001/.test(resultText) && /в пути/i.test(resultText),
+            /Подтверждено/.test(resultText) && /рейс №9001/i.test(resultText),
             `Durably queued gesture did not receive the isolated manual-trip acknowledgement: ${JSON.stringify(resultText)}; synced=${syncedManualEvents.length}; error=${manualError}.`
         );
         const mutationRequests = gestureRequests.filter((entry) => !entry.startsWith('GET '));
@@ -480,11 +485,20 @@ async function dragVisualSnapshot(page, sourceSelector, targetSelector) {
             active: node.dataset.driverManualTimerActive,
             pointName: node.dataset.driverManualTimerPointName,
             label: node.querySelector('[data-driver-manual-trip-timer-label]')?.textContent.trim(),
+            state: node.querySelector('[data-driver-manual-trip-timer-state]')?.textContent.trim(),
+            destination: node.querySelector('[data-driver-manual-trip-timer-destination]')?.textContent.trim(),
+            destinationFontSize: Number.parseFloat(getComputedStyle(node.querySelector('[data-driver-manual-trip-timer-destination]')).fontSize),
             value: node.querySelector('[data-driver-manual-trip-timer-value]')?.textContent.trim(),
+            resultInside: node.contains(document.querySelector('[data-driver-manual-result]')),
         }));
         assert(timerAfterDrop.active === 'true', 'Trip timer did not start after the completed dispatch gesture.');
-        assert(timerAfterDrop.pointName === timerTargetName && timerAfterDrop.label.includes(timerTargetName), 'Trip timer is not tied to the selected destination.');
+        assert(timerAfterDrop.pointName === timerTargetName && timerAfterDrop.destination === timerTargetName, 'Trip timer is not tied to the selected destination.');
+        assert(timerAfterDrop.state === 'В ПУТИ' && timerAfterDrop.destinationFontSize >= 16, `Trip destination is not readable: ${JSON.stringify(timerAfterDrop)}.`);
+        assert(timerAfterDrop.resultInside, 'Save status is still rendered as a floating banner instead of inside the timer.');
         assert(timerAfterDrop.value !== '00:00:00', 'Trip timer did not advance after one second.');
+        const lastTargets = driverPage.locator('[data-driver-manual-dump-target].is-last-dump');
+        assert(await lastTargets.count() === 1, 'Exactly one latest destination is not highlighted.');
+        assert(await lastTargets.first().getAttribute('data-eo-dump-name') === timerTargetName, 'Highlighted latest destination differs from the timer destination.');
         await driverPage.waitForTimeout(1600);
         const timerShot = path.join(outputDir, 'H-driver-trip-timer-active-412x915.png');
         await driverPage.screenshot({ path: timerShot });
