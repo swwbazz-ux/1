@@ -280,6 +280,40 @@ test("server-assigned dump points never inherit the one-off marker", () => {
     assert.match(source, /createManualDumpTarget\([\s\S]*?prototype,\s*point\.one_off === true\s*\)/);
 });
 
+test("initial binding preserves server counters and the last destination", () => {
+    const targets = [
+        {dataset: {eoDumpTarget: "11", driverManualCompletedCount: "3", driverManualLastSent: "false"}},
+        {dataset: {eoDumpTarget: "12", driverManualCompletedCount: "4", driverManualLastSent: "true"}}
+    ];
+    const workspace = {
+        dataset: {
+            driverManualAuthorityType: "assignment",
+            driverManualExcavatorId: "91"
+        },
+        querySelectorAll(selector) {
+            assert.equal(selector, "[data-driver-manual-dump-target]");
+            return targets;
+        }
+    };
+    const context = {
+        authority_type: "assignment",
+        excavator_id: 91,
+        dump_points: [{id: 11}, {id: 12}]
+    };
+
+    assert.equal(driverRuntime.renderedContextKey(workspace), driverRuntime.manualContextKey(context));
+    assert.equal(driverRuntime.shouldRebuildWorkspaceContext(workspace, context), false);
+    assert.equal(targets[0].dataset.driverManualCompletedCount, "3");
+    assert.equal(targets[1].dataset.driverManualCompletedCount, "4");
+    assert.equal(targets[1].dataset.driverManualLastSent, "true");
+
+    assert.equal(driverRuntime.shouldRebuildWorkspaceContext(workspace, {
+        authority_type: "free_bucket",
+        excavator_id: 92,
+        dump_points: [{id: 11}, {id: 12}]
+    }), true);
+});
+
 test("Driver opens from the existing manual corner and preserves bottom navigation", () => {
     const driver = read("templates", "users", "driver_shift.html");
     const actions = read("templates", "includes", "mobile_dial_actions.html");

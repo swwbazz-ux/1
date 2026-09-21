@@ -476,6 +476,40 @@
         return target;
     }
 
+    function manualContextKey(context) {
+        context = context || {};
+        var points = Array.isArray(context.dump_points) ? context.dump_points : [];
+        return [
+            String(context.authority_type || ""),
+            String(positive(context.excavator_id) || ""),
+            points.map(function (point) { return String(positive(point && point.id) || ""); }).join(",")
+        ].join(":");
+    }
+
+    function renderedContextKey(workspace) {
+        if (!workspace) return "::";
+        return [
+            String(workspace.dataset.driverManualAuthorityType || ""),
+            String(positive(workspace.dataset.driverManualExcavatorId) || ""),
+            Array.from(workspace.querySelectorAll("[data-driver-manual-dump-target]"))
+                .map(function (target) { return String(positive(target.dataset.eoDumpTarget) || ""); })
+                .join(",")
+        ].join(":");
+    }
+
+    function shouldRebuildWorkspaceContext(workspace, context) {
+        var key = manualContextKey(context);
+        if (!workspace.__driverManualContextKey) {
+            /* The server-rendered cards carry authoritative per-shift counters
+               and the last destination.  Treat that DOM as the first rendered
+               context instead of cloning it into zeroed client-only cards. */
+            workspace.__driverManualContextKey = renderedContextKey(workspace);
+        }
+        if (workspace.__driverManualContextKey === key) return false;
+        workspace.__driverManualContextKey = key;
+        return true;
+    }
+
     function createManualDumpTarget(doc, pointId, pointName, prototype, isOneOff) {
         var target = prototype ? prototype.cloneNode(true) : doc.createElement("button");
         if (!prototype) {
@@ -507,13 +541,7 @@
         if (!workspace || currentTripProjection) return activeContext();
         var context = activeContext();
         var points = Array.isArray(context.dump_points) ? context.dump_points : [];
-        var key = [
-            context.authority_type,
-            context.excavator_id,
-            points.map(function (point) { return point.id; }).join(",")
-        ].join(":");
-        if (workspace.__driverManualContextKey === key) return context;
-        workspace.__driverManualContextKey = key;
+        if (!shouldRebuildWorkspaceContext(workspace, context)) return context;
         var source = workspace.querySelector("[data-driver-manual-source]");
         if (source) {
             source.dataset.driverManualExcavatorId = String(context.excavator_id || "");
@@ -1041,6 +1069,9 @@
         selectManualPoint: selectManualPoint,
         createManualDumpTarget: createManualDumpTarget,
         setManualTargetOneOff: setManualTargetOneOff,
+        manualContextKey: manualContextKey,
+        renderedContextKey: renderedContextKey,
+        shouldRebuildWorkspaceContext: shouldRebuildWorkspaceContext,
         serverTripProjectionContext: serverTripProjectionContext,
         requestAutomaticTripRefresh: requestAutomaticTripRefresh,
         dumpNameSizeClass: dumpNameSizeClass,
