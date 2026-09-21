@@ -321,8 +321,8 @@ class AccessLoginTests(TestCase):
         self.assertNotIn('Current placement rock', main_card)
         self.assertNotIn('Current horizon', main_card)
         self.assertNotIn('Current block', main_card)
-        manual_workspace = html.split('data-driver-manual-workspace', 1)[1].split(
-            'data-driver-manual-result', 1,
+        manual_workspace = html.split('<section class="driver-manual-workspace"', 1)[1].split(
+            '<nav class="mm-mobile-bottom-nav driver-bottom-nav"', 1,
         )[0]
         self.assertIn('data-driver-manual-free-bucket-open', manual_workspace)
         self.assertIn('Immutable rock', manual_workspace)
@@ -506,19 +506,19 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v315')
+        self.assertContains(response, 'driver-mobile-shell-v319')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(
             response,
-            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v315',
+            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v319',
         )
         self.assertContains(
             response,
-            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v315',
+            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v319',
         )
         self.assertContains(
             response,
-            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v315',
+            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v319',
         )
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertIn('playDriverSound("truck_assigned")', driver_script())
@@ -745,7 +745,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v315', script)
+        self.assertIn('driver-mobile-shell-v319', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3168,6 +3168,33 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'data-driver-manual-trip-timer-value', count=1)
         self.assertContains(response, 'ОЖИДАЕТ ОТПРАВКИ')
         self.assertContains(response, 'data-driver-manual-source-row', count=1)
+        response_html = response.content.decode()
+        base_context_match = re.search(
+            r'<script id="driver-manual-workspace-base-context-data" type="application/json">(.*?)</script>',
+            response_html,
+        )
+        self.assertIsNotNone(base_context_match)
+        base_context = json.loads(base_context_match.group(1))
+        self.assertEqual(base_context['authority_type'], 'assignment')
+        self.assertEqual(base_context['assignment_id'], assignment.id)
+        self.assertEqual(base_context['excavator_id'], excavator.id)
+        self.assertEqual(
+            [point['id'] for point in base_context['dump_points']],
+            [first.id, second.id],
+        )
+        self.assertEqual(
+            [point['completed_count'] for point in base_context['dump_points']],
+            [2, 1],
+        )
+        self.assertEqual(
+            [point['is_last_sent'] for point in base_context['dump_points']],
+            [False, True],
+        )
+        self.assertContains(response, '<i data-driver-manual-primary-point ', count=2)
+        self.assertRegex(
+            response.content.decode(),
+            rf'data-driver-manual-primary-point-id="{second.id}"[^>]*data-driver-manual-primary-point-count="1"[^>]*data-driver-manual-primary-point-last="true"',
+        )
         self.assertContains(response, 'ОБЫЧНЫЙ РЕЖИМ')
         self.assertContains(response, 'ТОЧКА РАЗГРУЗКИ')
         self.assertContains(response, 'data-driver-manual-excavator-id="%s"' % excavator.id)
@@ -3187,11 +3214,11 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Бл. 55')
         self.assertContains(response, 'data-driver-manual-result')
         self.assertNotContains(response, 'рейс не создан')
-        self.assertContains(response, '/static/js/excavator-dashboard-drag-v1.js?v=driver-mobile-shell-v315')
-        self.assertContains(response, '/static/js/driver-manual-excavator-workspace-v1.js?v=driver-mobile-shell-v315')
-        self.assertContains(response, '/static/css/excavator-work-v55-shift.css?v=driver-mobile-shell-v315')
-        self.assertContains(response, '/static/css/excavator-manual-loading-v1.css?v=driver-mobile-shell-v315')
-        self.assertContains(response, '/static/css/excavator-free-bucket-v1.css?v=driver-mobile-shell-v315')
+        self.assertContains(response, '/static/js/excavator-dashboard-drag-v1.js?v=driver-mobile-shell-v319')
+        self.assertContains(response, '/static/js/driver-manual-excavator-workspace-v1.js?v=driver-mobile-shell-v319')
+        self.assertContains(response, '/static/css/excavator-work-v55-shift.css?v=driver-mobile-shell-v319')
+        self.assertContains(response, '/static/css/excavator-manual-loading-v1.css?v=driver-mobile-shell-v319')
+        self.assertContains(response, '/static/css/excavator-free-bucket-v1.css?v=driver-mobile-shell-v319')
 
         active_trip = Trip.objects.create(
             truck=truck,
@@ -3797,7 +3824,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v315')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v319')
 
     def test_driver_quick_reasons_render_stars_and_drum_subset(self):
         self.create_registered_driver_shift()

@@ -24,7 +24,17 @@
         var workspace = currentWorkspace || (
             root.document && root.document.querySelector("[data-driver-manual-workspace]")
         );
-        var node = root.document && root.document.getElementById("driver-manual-workspace-context-data");
+        var useTripContext = !!(
+            workspace && workspace.dataset.driverManualActiveOrigin === "driver_manual"
+        );
+        var node = root.document && root.document.getElementById(
+            useTripContext
+                ? "driver-manual-workspace-context-data"
+                : "driver-manual-workspace-base-context-data"
+        );
+        if (!node && root.document) {
+            node = root.document.getElementById("driver-manual-workspace-context-data");
+        }
         if (node) {
             try {
                 var parsed = JSON.parse(node.textContent || "{}");
@@ -36,6 +46,61 @@
         }
         if (!workspace) return {};
         if (workspace.__driverManualBaseContext) return clone(workspace.__driverManualBaseContext);
+        if (
+            workspace.dataset.driverManualActiveOrigin !== "driver_manual"
+            && positive(workspace.dataset.driverManualPrimaryExcavatorId)
+        ) {
+            var primaryPoints = Array.prototype.slice.call(
+                workspace.querySelectorAll("[data-driver-manual-primary-point]")
+            ).map(function (point) {
+                return {
+                    id: positive(point.dataset.driverManualPrimaryPointId),
+                    name: String(point.dataset.driverManualPrimaryPointName || ""),
+                    transport_distance_km: String(point.dataset.driverManualPrimaryPointDistance || ""),
+                    completed_count: Math.max(0, Number(point.dataset.driverManualPrimaryPointCount) || 0),
+                    is_last_sent: point.dataset.driverManualPrimaryPointLast === "true",
+                    one_off: false
+                };
+            }).filter(function (point) {
+                return point.id && point.name;
+            });
+            var catalog = root.DriverFreeBucket
+                && typeof root.DriverFreeBucket.currentCatalog === "function"
+                ? root.DriverFreeBucket.currentCatalog()
+                : null;
+            var primaryItem = catalog && Array.isArray(catalog.excavators)
+                ? catalog.excavators.find(function (item) {
+                    return item && (
+                        item.is_primary === true
+                        || positive(item.id) === positive(workspace.dataset.driverManualPrimaryExcavatorId)
+                    );
+                })
+                : null;
+            var primaryContext = {
+                source: "driver_manual",
+                authority_type: "assignment",
+                truck_id: positive(workspace.dataset.driverManualPrimaryTruckId),
+                excavator_id: positive(workspace.dataset.driverManualPrimaryExcavatorId),
+                excavator_label: String(workspace.dataset.driverManualPrimaryExcavatorLabel || ""),
+                complex_label: String(workspace.dataset.driverManualPrimaryComplexLabel || ""),
+                assignment_id: positive(workspace.dataset.driverManualPrimaryAssignmentId),
+                free_bucket_acceptance_id: null,
+                free_bucket_acceptance_local_id: "",
+                placement_id: positive(workspace.dataset.driverManualPrimaryPlacementId),
+                placement_updated_at: String(workspace.dataset.driverManualPrimaryPlacementUpdatedAt || ""),
+                rock_type_id: positive(workspace.dataset.driverManualPrimaryRockTypeId),
+                rock_type_name: String(workspace.dataset.driverManualPrimaryRockTypeName || ""),
+                loading_horizon: String(workspace.dataset.driverManualPrimaryLoadingHorizon || ""),
+                loading_block: String(workspace.dataset.driverManualPrimaryLoadingBlock || ""),
+                dump_points: clone(
+                    primaryPoints.length
+                        ? primaryPoints
+                        : primaryItem && primaryItem.dump_points || []
+                )
+            };
+            workspace.__driverManualBaseContext = clone(primaryContext);
+            return primaryContext;
+        }
         var source = workspace.querySelector("[data-driver-manual-source]");
         var context = {
             source: "driver_manual",
@@ -609,6 +674,21 @@
                         point.one_off === true
                     );
                     target.dataset.eoDumpDistance = String(point.transport_distance_km || "");
+                    var completedCount = Math.max(0, Number(point.completed_count) || 0);
+                    var isLastSent = point.is_last_sent === true;
+                    target.dataset.driverManualCompletedCount = String(completedCount);
+                    target.dataset.driverManualLastSent = isLastSent ? "true" : "false";
+                    target.classList.toggle("is-last-dump", isLastSent);
+                    var count = target.querySelector(".eo-dashboard-unload-top small");
+                    if (count) {
+                        count.textContent = String(completedCount);
+                        count.setAttribute("aria-label", "Рейсов: " + String(completedCount));
+                    }
+                    target.setAttribute(
+                        "aria-label",
+                        String(point.name || "") + ": рейсов " + String(completedCount)
+                            + (isLastSent ? "; последняя использованная точка" : "")
+                    );
                     return target;
                 });
             }

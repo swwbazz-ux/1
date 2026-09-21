@@ -392,6 +392,66 @@ test("the primary context survives a temporary DOM replacement when fragment JSO
     }
 });
 
+test("a server free-bucket fragment keeps the primary assignment as the cancellation fallback", () => {
+    const previousDocument = global.document;
+    const previousFreeBucket = global.DriverFreeBucket;
+    const workspace = {
+        dataset: {
+            driverManualActiveOrigin: "",
+            driverManualPrimaryTruckId: "43",
+            driverManualPrimaryExcavatorId: "2",
+            driverManualPrimaryExcavatorLabel: "EXC-1",
+            driverManualPrimaryComplexLabel: "K-1",
+            driverManualPrimaryAssignmentId: "71",
+            driverManualPrimaryPlacementId: "61",
+            driverManualPrimaryPlacementUpdatedAt: "2026-09-22T01:00:00Z",
+            driverManualPrimaryRockTypeId: "51",
+            driverManualPrimaryRockTypeName: "Primary ore",
+            driverManualPrimaryLoadingHorizon: "15",
+            driverManualPrimaryLoadingBlock: "55"
+        },
+        querySelector() { return null; },
+        querySelectorAll(selector) {
+            if (selector !== "[data-driver-manual-primary-point]") return [];
+            return [
+                {dataset: {driverManualPrimaryPointId: "2", driverManualPrimaryPointName: "Warehouse", driverManualPrimaryPointDistance: "1.00", driverManualPrimaryPointCount: "2", driverManualPrimaryPointLast: "false"}},
+                {dataset: {driverManualPrimaryPointId: "3", driverManualPrimaryPointName: "Crusher", driverManualPrimaryPointDistance: "2.00", driverManualPrimaryPointCount: "1", driverManualPrimaryPointLast: "true"}}
+            ];
+        }
+    };
+    global.DriverFreeBucket = {
+        currentCatalog() {
+            return {
+                excavators: [{
+                    id: 2,
+                    is_primary: true,
+                    dump_points: [{id: 2, name: "Stale Warehouse"}, {id: 3, name: "Stale Crusher"}]
+                }]
+            };
+        }
+    };
+    global.document = {
+        getElementById() { return null; },
+        querySelector() { return workspace; }
+    };
+    try {
+        const restored = driverRuntime.readWorkspaceContext();
+        assert.equal(restored.authority_type, "assignment");
+        assert.equal(restored.assignment_id, 71);
+        assert.equal(restored.excavator_id, 2);
+        assert.deepEqual(restored.dump_points.map(point => point.id), [2, 3]);
+        assert.deepEqual(
+            restored.dump_points.map(point => [point.completed_count, point.is_last_sent]),
+            [[2, false], [1, true]]
+        );
+    } finally {
+        if (previousDocument === undefined) delete global.document;
+        else global.document = previousDocument;
+        if (previousFreeBucket === undefined) delete global.DriverFreeBucket;
+        else global.DriverFreeBucket = previousFreeBucket;
+    }
+});
+
 test("Driver opens from the existing manual corner and preserves bottom navigation", () => {
     const driver = read("templates", "users", "driver_shift.html");
     const actions = read("templates", "includes", "mobile_dial_actions.html");
@@ -414,6 +474,7 @@ test("manual context and confirmed timer survive fragment refresh", () => {
     const driverRuntimeSource = read("static", "js", "driver-manual-excavator-workspace-v1.js");
     const driverShiftSource = read("static", "js", "driver-shift-v1.js");
     assert.match(driver, /data-driver-manual-authority-type=/);
+    assert.match(driver, /driver-manual-workspace-base-context-data/);
     assert.match(driver, /data-driver-manual-assignment-id=/);
     assert.match(driver, /data-driver-manual-rock-type-id=/);
     assert.match(driver, /data-driver-manual-placement-id=/);
